@@ -1498,6 +1498,74 @@ describe("PublicAgentChat", () => {
     expect(screen.queryByText(downloadUrl)).toBeNull()
   })
 
+  test("edits and resends only the latest user message", async () => {
+    let regenerateBody: unknown
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (url.endsWith("/profile")) return jsonResponse(PROFILE)
+      if (url.includes("/conversations")) {
+        return jsonResponse({ items: [conversation("conv-1", "First question")] })
+      }
+      if (url.includes("/runs/run-edited/stream")) {
+        return ndjsonResponse([
+          {
+            type: "complete",
+            sequence: 1,
+            run: run({
+              id: "run-edited",
+              question: "Edited second question",
+              result: "Edited answer",
+            }),
+          },
+        ])
+      }
+      if (method === "POST" && url.endsWith("/runs/run-2/regenerate")) {
+        regenerateBody = JSON.parse(String(init?.body))
+        return jsonResponse(
+          run({
+            id: "run-edited",
+            question: "Edited second question",
+            result: "Edited answer",
+          })
+        )
+      }
+      if (url.includes("/runs")) {
+        return jsonResponse({
+          items: [
+            run({
+              id: "run-2",
+              question: "Second question",
+              result: "Second answer",
+            }),
+            run({
+              id: "run-1",
+              question: "First question",
+              result: "First answer",
+            }),
+          ],
+          total: 2,
+          offset: 0,
+          limit: 200,
+        })
+      }
+      return jsonResponse({})
+    }
+
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+
+    await screen.findByText("Second answer")
+    expect(screen.getAllByRole("button", { name: "编辑消息" })).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "编辑消息" }))
+    fireEvent.change(screen.getByLabelText("编辑消息"), {
+      target: { value: "Edited second question" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
+
+    await screen.findByText("Edited answer")
+    expect(regenerateBody).toEqual({ goal: "Edited second question" })
+    expect(screen.getAllByText("First question").length).toBeGreaterThan(0)
+  })
+
   test("renders history runs, selects conversations, and starts fresh", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
@@ -2367,6 +2435,14 @@ describe("PublicAgentChat", () => {
                 conversation_id: "conv-1",
                 status: "succeeded",
                 result: "已处理附件",
+                attachments: [
+                  {
+                    filename: "notes.md",
+                    content_type: "text/markdown",
+                    size_bytes: 9,
+                    category: "document",
+                  },
+                ],
               }),
             ],
             total: 1,
@@ -2383,8 +2459,38 @@ describe("PublicAgentChat", () => {
         streamResponses: [
           () =>
             ndjsonResponse([
-              { type: "run", sequence: 0, run: run({ status: "running", result: "" }) },
-              { type: "complete", sequence: 1, run: run({ status: "succeeded", result: "已处理附件" }) },
+              {
+                type: "run",
+                sequence: 0,
+                run: run({
+                  status: "running",
+                  result: "",
+                  attachments: [
+                    {
+                      filename: "notes.md",
+                      content_type: "text/markdown",
+                      size_bytes: 9,
+                      category: "document",
+                    },
+                  ],
+                }),
+              },
+              {
+                type: "complete",
+                sequence: 1,
+                run: run({
+                  status: "succeeded",
+                  result: "已处理附件",
+                  attachments: [
+                    {
+                      filename: "notes.md",
+                      content_type: "text/markdown",
+                      size_bytes: 9,
+                      category: "document",
+                    },
+                  ],
+                }),
+              },
             ]),
         ],
         uploads: [
@@ -2414,9 +2520,56 @@ describe("PublicAgentChat", () => {
     sendMessage("带上附件")
 
     expect(await screen.findByText("已处理附件")).toBeTruthy()
-    await waitFor(() => expect(screen.queryByText("notes.md")).toBeNull())
+    await waitFor(() =>
+      expect(screen.getAllByText("notes.md")).toHaveLength(1)
+    )
+    expect(screen.getByText("notes.md").closest("li")?.className).toContain(
+      "max-w-[min(22rem,78vw)]"
+    )
     expect(requests.some((request) => request.startsWith("POST") && request.includes("/uploads"))).toBe(true)
     expect(createBodies[0]?.file_ids).toEqual(["f1"])
+  })
+
+  test("appends pasted, dropped, and separately selected public attachments", async () => {
+    fetchHandler = agentFetchHandler({ conversations: { items: [] } })
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("开始新对话")
+
+    const textarea = screen.getByLabelText("请输入问题")
+    const pasted = new File(["png"], "pasted.png", { type: "image/png" })
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "file", getAsFile: () => pasted }],
+      },
+    })
+    expect(screen.getByText("pasted.png")).toBeTruthy()
+
+    const dropped = new File(["webp"], "dropped.webp", {
+      type: "image/webp",
+    })
+    const form = textarea.closest("form")!
+    fireEvent.dragOver(form, {
+      dataTransfer: { files: [dropped], types: ["Files"] },
+    })
+    fireEvent.drop(form, { dataTransfer: { files: [dropped] } })
+    expect(screen.getByText("dropped.webp")).toBeTruthy()
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["jpg"], "selected.jpg", { type: "image/jpeg" })],
+      },
+    })
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["pdf"], "selected.pdf", { type: "application/pdf" })],
+      },
+    })
+    expect(screen.getByText("selected.jpg")).toBeTruthy()
+    expect(screen.getByText("selected.pdf")).toBeTruthy()
   })
 
   test("removes an attachment before sending", async () => {

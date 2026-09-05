@@ -25,6 +25,7 @@ import { TopLoadingBar } from "@/components/app/top-progress"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
+import { runAttachmentFromFile } from "@/components/agents/agent-attachment-list"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
 import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
@@ -191,6 +192,10 @@ export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   )
   return {
     ...liveRun,
+    attachments:
+      liveRun.attachments?.length
+        ? liveRun.attachments
+        : pendingRun.attachments,
     events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
     result:
       keepLiveAnswer && !liveRun.result ? pendingRun.result : liveRun.result,
@@ -1520,6 +1525,7 @@ export function AgentsPage({
       requested_by_user_id: me?.user.id ?? "",
       conversation_id: conversationId,
       goal: nextQuestion,
+      attachments: agentFiles.map(runAttachmentFromFile),
       model_id: selectedAgent.model_id,
       model_name:
         models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
@@ -1658,7 +1664,7 @@ export function AgentsPage({
     }
   }
 
-  async function handleRegenerateRun(runId: string) {
+  async function handleRegenerateRun(runId: string, goal?: string) {
     if (
       !token ||
       !selectedWorkspaceId ||
@@ -1676,7 +1682,8 @@ export function AgentsPage({
         token,
         selectedWorkspaceId,
         selectedAgent.id,
-        runId
+        runId,
+        goal
       )
       if (
         !isCurrentAgentConversation(
@@ -1976,7 +1983,9 @@ export function AgentsPage({
             notify={notify}
             onAsk={handleAsk}
             onCancelAsk={handleCancelAsk}
-            onRegenerateRun={(runId) => void handleRegenerateRun(runId)}
+            onRegenerateRun={(runId, goal) =>
+              void handleRegenerateRun(runId, goal)
+            }
             onRunFeedback={(runId, value) =>
               void handleRunFeedback(runId, value)
             }

@@ -197,6 +197,24 @@ describe("mergeInitialAgentRun", () => {
     expect(merged.result).toBe("Live answer")
   })
 
+  test("keeps pending attachments when the first live snapshot omits them", () => {
+    const attachments = [
+      {
+        filename: "policy.docx",
+        content_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 128,
+        category: "document" as const,
+      },
+    ]
+    const merged = mergeInitialAgentRun(
+      { ...pending, attachments },
+      makeRun({ id: "run-1", status: "running", attachments: undefined })
+    )
+
+    expect(merged.attachments).toEqual(attachments)
+  })
+
   test("drops live cursors for terminal statuses", () => {
     for (const status of ["succeeded", "failed", "cancelled"]) {
       const merged = mergeInitialAgentRun(

@@ -392,6 +392,10 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
     	ExternalAgentRunResponse: The external run response, including status, result, progress, timestamps, feedback, and regeneration information.
     """
     value = run if isinstance(run, dict) else vars(run)
+    snapshot = value.get("application_snapshot")
+    attachments = value.get("attachments")
+    if attachments is None and isinstance(snapshot, dict):
+        attachments = snapshot.get("attachments")
     run_status = agent_run_display_status(str(value.get("status") or ""))
     generic_error = None
     if run_status == "failed":
@@ -407,6 +411,7 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
             else None
         ),
         question=str(value.get("goal") or value.get("question") or ""),
+        attachments=attachments or [],
         status=run_status,
         result=clean_model_text(str(value.get("result") or "")),
         error=generic_error,
@@ -910,13 +915,14 @@ async def create_external_agent_run(
     if context.publication is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
     attachment_context = ""
+    attachments: list[dict[str, Any]] = []
     if file_ids:
         if access_source != "public":
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Agent API runs do not accept public upload ids.",
             )
-        attachment_context = await resolve_public_agent_files(
+        attachment_context, attachments = await resolve_public_agent_files(
             db,
             context,
             consumer_id,
@@ -936,6 +942,7 @@ async def create_external_agent_run(
         publication=context.publication,
         publication_version=context.publication_version,
         attachment_context=attachment_context,
+        attachments=attachments,
     )
     await enqueue_prepared_agent_run(
         run.id,
@@ -1012,6 +1019,7 @@ async def regenerate_external_agent_run(
     access_source: ExternalAccessSource,
     consumer_id: str,
     settings: Settings,
+    goal: str | None = None,
 ) -> ExternalAgentRunResponse:
     """
     Regenerate a publicly accessible agent run from its source run.
@@ -1040,6 +1048,7 @@ async def regenerate_external_agent_run(
         source,
         context.publisher,
         settings,
+        goal=goal,
     )
     return external_run_to_response(regenerated)
 

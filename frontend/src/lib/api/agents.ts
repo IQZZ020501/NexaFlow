@@ -78,6 +78,10 @@ export type AgentUpload = {
   category: "document" | "image" | "audio"
 }
 
+export type AgentRunAttachment = Omit<AgentUpload, "id" | "category"> & {
+  category: "document" | "image"
+}
+
 export type AgentPlanStep = {
   number: number
   title: string
@@ -120,6 +124,7 @@ export type AgentRun = {
   conversation_id: string
   regenerated_from_run_id?: string | null
   goal: string
+  attachments?: AgentRunAttachment[]
   model_id: string
   model_name: string
   knowledge_query_mode: KnowledgeQueryMode
@@ -594,11 +599,16 @@ export function regenerateAgentRun(
   token: string,
   workspaceId: string,
   agentId: string,
-  runId: string
+  runId: string,
+  goal?: string
 ) {
   return request<AgentRun>(
     agentsPath(workspaceId, `/${agentId}/runs/${runId}/regenerate`),
-    { method: "POST", token }
+    {
+      method: "POST",
+      token,
+      body: goal === undefined ? undefined : JSON.stringify({ goal }),
+    }
   )
 }
 

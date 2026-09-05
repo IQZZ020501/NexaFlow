@@ -69,6 +69,8 @@ export const en = {
     "At least 6 characters and one uppercase letter",
   保存: "Save",
   取消: "Cancel",
+  编辑消息: "Edit message",
+  重新发送: "Resend",
   确认: "Confirm",
   确认操作: "Confirm action",
   放弃更改: "Discard changes",

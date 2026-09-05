@@ -20,6 +20,7 @@ import {
   LayoutDashboardIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
+  PencilIcon,
   RocketIcon,
   SaveIcon,
   ScrollTextIcon,
@@ -54,7 +55,12 @@ import {
 } from "@/lib/tool-display"
 
 import { AgentConfigFields } from "./agent-config-fields"
-import { AgentAttachmentList } from "./agent-attachment-list"
+import {
+  appendAttachmentFiles,
+  AgentAttachmentList,
+  RunAttachmentCards,
+  transferredFiles,
+} from "./agent-attachment-list"
 import { MessageTimestamp } from "./message-timestamp"
 import {
   AgentConversationUsersPanel,
@@ -102,7 +108,7 @@ type AgentDetailWorkspaceProps = {
     callId: string,
     decision: "approve" | "reject"
   ) => void
-  onRegenerateRun?: (runId: string) => void
+  onRegenerateRun?: (runId: string, goal?: string) => void
   onRunFeedback?: (runId: string, value: "positive" | "negative" | null) => void
   regeneratingRunId?: string | null
   feedbackPendingRunId?: string | null
@@ -514,6 +520,7 @@ function RunExchange({
   regeneratingRunId,
   feedbackPendingRunId,
   regenerateDisabled,
+  editable,
   t,
 }: {
   run: AgentRun
@@ -524,11 +531,12 @@ function RunExchange({
     callId: string,
     decision: "approve" | "reject"
   ) => void
-  onRegenerateRun?: (runId: string) => void
+  onRegenerateRun?: (runId: string, goal?: string) => void
   onRunFeedback?: (runId: string, value: "positive" | "negative" | null) => void
   regeneratingRunId?: string | null
   feedbackPendingRunId?: string | null
   regenerateDisabled?: boolean
+  editable?: boolean
   t: TFunction
 }) {
   const timeline = processTimeline(run)
@@ -556,6 +564,7 @@ function RunExchange({
         ({ event }) => event.type === "tool" && event.status === "running"
       ))
   const [isProcessOpen, setIsProcessOpen] = React.useState(true)
+  const [editDraft, setEditDraft] = React.useState<string | null>(null)
   const collapsedProcessStatus = collapsedProcessStatusKey(
     run.status,
     hasActiveToolCall,
@@ -568,12 +577,76 @@ function RunExchange({
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
-        <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
-          {run.goal}
-        </div>
+        <RunAttachmentCards attachments={run.attachments} t={t} />
+        {editDraft === null ? (
+          <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
+            {run.goal}
+          </div>
+        ) : (
+          <form
+            className="w-[min(32rem,80vw)] rounded-2xl rounded-br-md border bg-background p-2 shadow-sm"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const goal = editDraft.trim()
+              if (!goal || regenerateDisabled || regeneratingRunId === run.id) {
+                return
+              }
+              onRegenerateRun?.(run.id, goal)
+            }}
+          >
+            <textarea
+              autoFocus
+              aria-label={t("编辑消息")}
+              className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none"
+              maxLength={4000}
+              value={editDraft}
+              onChange={(event) => setEditDraft(event.target.value)}
+            />
+            <div className="flex justify-end gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={regeneratingRunId === run.id}
+                onClick={() => setEditDraft(null)}
+              >
+                {t("取消")}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={
+                  !editDraft.trim() ||
+                  regenerateDisabled ||
+                  regeneratingRunId === run.id
+                }
+              >
+                {regeneratingRunId === run.id ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <SendIcon />
+                )}
+                {t("重新发送")}
+              </Button>
+            </div>
+          </form>
+        )}
         <div className="flex items-start gap-1">
-          <MessageTimestamp value={run.created_at} />
           <CopyMessageButton value={run.goal} t={t} />
+          {editable && editDraft === null ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              aria-label={t("编辑消息")}
+              title={t("编辑消息")}
+              disabled={regenerateDisabled}
+              onClick={() => setEditDraft(run.goal)}
+            >
+              <PencilIcon />
+            </Button>
+          ) : null}
         </div>
       </div>
       <div className="flex items-start gap-3">
@@ -1149,7 +1222,7 @@ export function AgentDetailWorkspace({
                         </div>
                       ) : (
                         <div className="space-y-8">
-                          {visibleRuns.map((run) => (
+                          {visibleRuns.map((run, index) => (
                             <RunExchange
                               key={run.id}
                               run={run}
@@ -1159,6 +1232,10 @@ export function AgentDetailWorkspace({
                               onRegenerateRun={onRegenerateRun}
                               onRunFeedback={onRunFeedback}
                               regenerateDisabled={isAsking || isRunsLoading}
+                              editable={
+                                index === visibleRuns.length - 1 &&
+                                run.status === "succeeded"
+                              }
                               regeneratingRunId={regeneratingRunId}
                               feedbackPendingRunId={feedbackPendingRunId}
                               t={t}
@@ -1175,6 +1252,27 @@ export function AgentDetailWorkspace({
                       onSubmit={(event) => {
                         shouldFollowPreviewRef.current = true
                         onAsk(event)
+                      }}
+                      onDragOver={(event) => {
+                        if (event.dataTransfer.types.includes("Files")) {
+                          event.preventDefault()
+                        }
+                      }}
+                      onDrop={(event) => {
+                        const dropped = transferredFiles(event.dataTransfer)
+                        if (!dropped.length) return
+                        event.preventDefault()
+                        if (
+                          isDirty ||
+                          isAsking ||
+                          isRunsLoading ||
+                          agent.status !== "active"
+                        ) {
+                          return
+                        }
+                        setFiles((current) =>
+                          appendAttachmentFiles(current, dropped)
+                        )
                       }}
                     >
                       <input
@@ -1193,12 +1291,22 @@ export function AgentDetailWorkspace({
                         }
                         onChange={(event) => {
                           const selected = Array.from(event.target.files ?? [])
-                          setFiles(selected)
+                          setFiles((current) =>
+                            appendAttachmentFiles(current, selected)
+                          )
                         }}
                       />
                       <textarea
                         value={question}
                         onChange={(event) => setQuestion(event.target.value)}
+                        onPaste={(event) => {
+                          const pasted = transferredFiles(event.clipboardData)
+                          if (!pasted.length) return
+                          event.preventDefault()
+                          setFiles((current) =>
+                            appendAttachmentFiles(current, pasted)
+                          )
+                        }}
                         onKeyDown={(event) => {
                           if (
                             event.key === "Enter" &&

@@ -155,6 +155,10 @@ class AgentRunCreateRequest(BaseModel):
     )
 
 
+class AgentRunRegenerateRequest(BaseModel):
+    goal: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
 class RunFeedbackRequest(BaseModel):
     value: Literal["positive", "negative"] | None = None
 
@@ -202,6 +206,13 @@ class AgentRunEventResponse(BaseModel):
     )
 
 
+class AgentRunAttachmentResponse(BaseModel):
+    filename: str
+    content_type: str
+    size_bytes: int
+    category: Literal["document", "image"]
+
+
 class AgentRunResponse(BaseModel):
     id: str
     workspace_id: str
@@ -210,6 +221,7 @@ class AgentRunResponse(BaseModel):
     conversation_id: str
     regenerated_from_run_id: str | None = None
     goal: str
+    attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
     model_id: str
     model_name: str
     knowledge_query_mode: KnowledgeQueryMode
@@ -337,6 +349,7 @@ class ExternalAgentRunResponse(BaseModel):
     conversation_id: str
     regenerated_from_run_id: str | None = None
     question: str
+    attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
     status: str
     result: str
     error: str | None

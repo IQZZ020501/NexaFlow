@@ -383,7 +383,11 @@ async def validate_regeneration_source(
                 status.HTTP_409_CONFLICT,
                 "The source publication is no longer valid.",
             ) from exc
-        if source.application_snapshot != {
+        if {
+            key: value
+            for key, value in source.application_snapshot.items()
+            if key != "attachments"
+        } != {
             "schema_version": version.schema_version,
             "configuration": version.configuration_snapshot,
             "resources": version.resource_snapshot,
@@ -421,7 +425,11 @@ async def validate_regeneration_source(
             )
 
 
-def build_regenerated_agent_run(source: AgentRun, actor: User) -> AgentRun:
+def build_regenerated_agent_run(
+    source: AgentRun,
+    actor: User,
+    goal: str | None = None,
+) -> AgentRun:
     """
     Create a queued root run from an immutable source run snapshot.
     
@@ -442,7 +450,7 @@ def build_regenerated_agent_run(source: AgentRun, actor: User) -> AgentRun:
         access_source=source.access_source,
         consumer_id=source.consumer_id,
         conversation_id=source.conversation_id,
-        goal=source.goal,
+        goal=source.goal if goal is None else goal,
         attachment_context=source.attachment_context,
         instructions=source.instructions,
         knowledge_base_ids=deepcopy(source.knowledge_base_ids),
@@ -470,6 +478,7 @@ async def regenerate_agent_run_from_source(
     settings: Settings,
     *,
     origin: str = "agent",
+    goal: str | None = None,
 ) -> AgentRun:
     """
     Create and enqueue a new agent run from a completed source run.
@@ -485,7 +494,28 @@ async def regenerate_agent_run_from_source(
     	HTTPException: If the conversation already has an active run or the source fails regeneration validation.
     """
     await validate_regeneration_source(db, source, origin=origin)
-    regenerated = build_regenerated_agent_run(source, actor)
+    if goal is not None:
+        goal = goal.strip()
+        if not goal:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Edited message cannot be empty.",
+            )
+        latest = await agent_repository.list_agent_runs(
+            db,
+            source.agent_id,
+            source.access_source,
+            source.consumer_id,
+            limit=1,
+            conversation_id=source.conversation_id,
+            latest_versions_only=True,
+        )
+        if not latest or latest[0].id != source.id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Only the latest message can be edited.",
+            )
+    regenerated = build_regenerated_agent_run(source, actor, goal)
     try:
         regenerated = await agent_repository.create_agent_run(db, regenerated)
         await db.commit()
@@ -549,6 +579,7 @@ async def regenerate_agent_run(
     actor: User,
     workspace_role: str | None,
     settings: Settings,
+    goal: str | None = None,
 ) -> AgentRunResponse:
     """
     Regenerate an agent run from a completed source run.
@@ -578,6 +609,7 @@ async def regenerate_agent_run(
         source,
         actor,
         settings,
+        goal=goal,
     )
     return run_to_response(regenerated, trace_id=regenerated.trace_id)
 
@@ -955,6 +987,7 @@ async def prepare_agent_run(
     publication: AgentPublication | None = None,
     publication_version: AgentPublicationVersion | None = None,
     attachment_context: str = "",
+    attachments: list[dict[str, Any]] | None = None,
     allow_pinned_publication: bool = False,
     authorized_by_parent: bool = False,
 ) -> tuple[AgentRun, Any]:
@@ -969,7 +1002,8 @@ async def prepare_agent_run(
     	consumer_id (str | None): External consumer identifier for non-console runs.
     	publication (AgentPublication | None): Publication configuration to use.
     	publication_version (AgentPublicationVersion | None): Specific publication version to use.
-    	attachment_context (str): Context derived from attached files.
+        attachment_context (str): Context derived from attached files.
+        attachments (list[dict[str, Any]] | None): Display metadata for attached files.
     	allow_pinned_publication (bool): Whether external access may use a publication version that is not currently published.
     	authorized_by_parent (bool): Whether console access was authorized by a parent operation.
     
@@ -1123,6 +1157,7 @@ async def prepare_agent_run(
             "schema_version": AGENT_PUBLICATION_SCHEMA_VERSION,
             "configuration": configuration_snapshot,
             "resources": resource_snapshot,
+            "attachments": attachments or [],
         },
         application_snapshot_hash=snapshot_hash,
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
@@ -1312,10 +1347,11 @@ async def create_agent_run(
     file_ids: list[str] | None = None,
 ) -> Any:
     attachment_context = ""
+    attachments: list[dict[str, Any]] = []
     if file_ids:
         from app.application.workflow_uploads import resolve_workspace_agent_files
 
-        attachment_context = await resolve_workspace_agent_files(
+        attachment_context, attachments = await resolve_workspace_agent_files(
             db,
             workspace_id,
             agent_id,
@@ -1333,6 +1369,7 @@ async def create_agent_run(
         workspace_role,
         conversation_id=conversation_id,
         attachment_context=attachment_context,
+        attachments=attachments,
     )
     await enqueue_prepared_agent_run(
         run.id,

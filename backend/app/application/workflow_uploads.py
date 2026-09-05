@@ -456,7 +456,7 @@ async def resolve_public_agent_files(
     user_id: str,
     file_ids: list[str],
     settings: Settings,
-) -> str:
+) -> tuple[str, list[dict[str, object]]]:
     return await _resolve_agent_file_text(
         db,
         context.agent,
@@ -474,7 +474,7 @@ async def resolve_workspace_agent_files(
     workspace_role: str | None,
     file_ids: list[str],
     settings: Settings,
-) -> str:
+) -> tuple[str, list[dict[str, object]]]:
     agent = await get_agent(db, workspace_id, agent_id)
     await require_agent_view(db, agent, actor, workspace_role)
     return await _resolve_agent_file_text(
@@ -492,9 +492,9 @@ async def _resolve_agent_file_text(
     user_id: str,
     file_ids: list[str],
     settings: Settings,
-) -> str:
+) -> tuple[str, list[dict[str, object]]]:
     if not file_ids:
-        return ""
+        return "", []
     config = AGENT_ATTACHMENT_CONFIG
     if len(file_ids) != len(set(file_ids)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid agent files.")
@@ -535,5 +535,14 @@ async def _resolve_agent_file_text(
             "Agent attachment text could not be extracted.",
         ) from exc
     result = "\n\n".join(sections)
+    attachments = [
+        {
+            "filename": item.filename,
+            "content_type": item.content_type,
+            "size_bytes": item.size_bytes,
+            "category": item.category,
+        }
+        for item in ordered
+    ]
     await _consume_uploads(db, ordered)
-    return result
+    return result, attachments

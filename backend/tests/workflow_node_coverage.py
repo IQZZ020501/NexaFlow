@@ -2526,14 +2526,27 @@ def test_workflow_uploads_workspace_wrappers() -> None:
             new=AsyncMock(),
         ), patch(
             "app.application.workflow_uploads._resolve_agent_file_text",
-            new=AsyncMock(return_value="--- notes.txt ---\nhello"),
+            new=AsyncMock(
+                return_value=(
+                    "--- notes.txt ---\nhello",
+                    [
+                        {
+                            "filename": "notes.txt",
+                            "content_type": "text/plain",
+                            "size_bytes": 5,
+                            "category": "document",
+                        }
+                    ],
+                )
+            ),
         ):
-            text = await resolve_workspace_agent_files(
+            text, attachments = await resolve_workspace_agent_files(
                 db, "ws-1", "agent-1", actor, "member",  # type: ignore[arg-type]
                 ["u1"],
                 SimpleNamespace(),
             )
         assert text == "--- notes.txt ---\nhello"
+        assert attachments[0]["filename"] == "notes.txt"
 
     asyncio.run(run())
 

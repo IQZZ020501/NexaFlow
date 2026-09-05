@@ -2517,11 +2517,25 @@ describe("AgentsPage run flows", () => {
 
   test("uploads attachments and streams reasoning deltas", async () => {
     const agent = makeAgent()
-    const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
+    const attachments = [
+      {
+        filename: "report.pdf",
+        content_type: "application/pdf",
+        size_bytes: 10,
+        category: "document" as const,
+      },
+    ]
+    const queuedRun = makeRun({
+      id: "run-1",
+      status: "queued",
+      result: "",
+      attachments,
+    })
     const finishedRun = makeRun({
       id: "run-1",
       status: "succeeded",
       result: "Final answer",
+      attachments,
     })
     let runBody = ""
     await renderDetail({
@@ -2603,6 +2617,50 @@ describe("AgentsPage run flows", () => {
 
     await waitFor(() => expect(screen.getByText("Final answer")).toBeTruthy())
     await waitFor(() => expect(JSON.parse(runBody).file_ids).toEqual(["up-1"]))
+    expect(screen.getByText("report.pdf").closest("li")?.className).toContain(
+      "max-w-[min(22rem,78vw)]"
+    )
+  })
+
+  test("appends pasted, dropped, and separately selected preview attachments", async () => {
+    await renderDetail({ agent: makeAgent(), initialView: "settings" })
+    await screen.findByText("开始和 Agent 对话")
+
+    const textarea = screen.getByLabelText("向 Agent 提问")
+    const pasted = new File(["png"], "pasted.png", { type: "image/png" })
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "file", getAsFile: () => pasted }],
+      },
+    })
+    expect(screen.getByText("pasted.png")).toBeTruthy()
+
+    const dropped = new File(["webp"], "dropped.webp", {
+      type: "image/webp",
+    })
+    const form = textarea.closest("form")!
+    fireEvent.dragOver(form, {
+      dataTransfer: { files: [dropped], types: ["Files"] },
+    })
+    fireEvent.drop(form, { dataTransfer: { files: [dropped] } })
+    expect(screen.getByText("dropped.webp")).toBeTruthy()
+
+    const fileInput = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["jpg"], "selected.jpg", { type: "image/jpeg" })],
+      },
+    })
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(["pdf"], "selected.pdf", { type: "application/pdf" })],
+      },
+    })
+    expect(screen.getByText("selected.jpg")).toBeTruthy()
+    expect(screen.getByText("selected.pdf")).toBeTruthy()
   })
 
   test("cancels an in-flight ask and restores the question", async () => {
@@ -2930,6 +2988,79 @@ describe("AgentsPage run flows", () => {
     fireEvent.submit(form!)
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(runPosts).toBe(0)
+  })
+
+  test("edits and resends only the latest user message", async () => {
+    const agent = makeAgent()
+    const first = makeRun({
+      id: "run-1",
+      goal: "First question",
+      result: "First answer",
+    })
+    const second = makeRun({
+      id: "run-2",
+      goal: "Second question",
+      result: "Second answer",
+    })
+    let regenerateBody: unknown
+    await renderDetail({
+      agent,
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([second, first]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-2/regenerate`,
+          exact: true,
+          respond: (init) => {
+            regenerateBody = JSON.parse(String(init?.body))
+            return jsonResponse(
+              makeRun({
+                id: "run-edited",
+                regenerated_from_run_id: "run-2",
+                goal: "Edited second question",
+                result: "Edited answer",
+              })
+            )
+          },
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-edited/stream`,
+          exact: false,
+          respond: () =>
+            ndjson([
+              {
+                type: "complete",
+                sequence: 1,
+                run: makeRun({
+                  id: "run-edited",
+                  regenerated_from_run_id: "run-2",
+                  goal: "Edited second question",
+                  result: "Edited answer",
+                }),
+              },
+            ]),
+        },
+      ],
+    })
+
+    await screen.findByText("Second answer")
+    expect(screen.getAllByRole("button", { name: "编辑消息" })).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "编辑消息" }))
+    const editor = screen.getByLabelText("编辑消息") as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: "Edited second question" } })
+    fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
+
+    await screen.findByText("Edited answer")
+    expect(regenerateBody).toEqual({ goal: "Edited second question" })
+    expect(screen.getByText("First question")).toBeTruthy()
   })
 
   test("notifies when the run stream reports an error", async () => {

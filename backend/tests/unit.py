@@ -5904,6 +5904,16 @@ def test_run_to_response_maps_run_fields() -> None:
         status="succeeded",
         result="answer",
         model_usage={"model_calls": 1, "total_tokens": 12},
+        application_snapshot={
+            "attachments": [
+                {
+                    "filename": "report.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 12,
+                    "category": "document",
+                }
+            ]
+        },
     )
     response = run_to_response(run, trace_id="trace-1")
     child = AgentRun(id="child-1", parent_run_id="parent-1", root_run_id="")
@@ -5918,6 +5928,7 @@ def test_run_to_response_maps_run_fields() -> None:
     assert response.plan == []
     assert response.events == []
     assert response.model_usage["total_tokens"] == 12
+    assert response.attachments[0].filename == "report.pdf"
     assert response.trace_id == "trace-1"
 
 
@@ -5952,12 +5963,13 @@ def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
     regenerated = build_regenerated_agent_run(
         source,
         User(id="user-1", username="owner"),
+        "Edited release notes",
     )
 
     assert regenerated.id != source.id
     assert regenerated.regenerated_from_run_id == source.id
     assert regenerated.conversation_id == source.conversation_id
-    assert regenerated.goal == source.goal
+    assert regenerated.goal == "Edited release notes"
     assert regenerated.attachment_context == source.attachment_context
     assert regenerated.status == "queued_v2"
     assert regenerated.checkpoint == {}
@@ -5965,6 +5977,44 @@ def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
     assert regenerated.result == ""
     assert regenerated.events == []
     assert regenerated.feedback is None
+
+
+def test_edit_regeneration_rejects_a_non_latest_run() -> None:
+    from app.application.agent_runs import regenerate_agent_run_from_source
+    from app.entities.agents import AgentRun
+
+    source = AgentRun(
+        id="run-source",
+        agent_id="agent-1",
+        access_source="console",
+        consumer_id="user-1",
+        conversation_id="conversation-1",
+        status="succeeded",
+    )
+    with (
+        patch(
+            "app.application.agent_runs.validate_regeneration_source",
+            new=AsyncMock(),
+        ),
+        patch(
+            "app.application.agent_runs.agent_repository.list_agent_runs",
+            new=AsyncMock(return_value=[AgentRun(id="run-latest")]),
+        ),
+    ):
+        try:
+            asyncio.run(
+                regenerate_agent_run_from_source(
+                    SimpleNamespace(),
+                    source,
+                    User(id="user-1", username="owner"),
+                    SimpleNamespace(),
+                    goal="Edited question",
+                )
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("expected HTTPException")
 
 
 def test_repeated_run_feedback_write_is_idempotent() -> None:
@@ -6963,6 +7013,7 @@ def main() -> None:
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()
     test_regenerated_agent_run_starts_from_a_fresh_checkpoint()
+    test_edit_regeneration_rejects_a_non_latest_run()
     test_repeated_run_feedback_write_is_idempotent()
     test_agent_usage_normalizes_provider_metadata()
     test_agent_memory_compacts_old_turns()
