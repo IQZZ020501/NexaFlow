@@ -1,20 +1,39 @@
 # AGENTS.md
 
-Instructions for coding agents working in this repository. This file adds
-repository-specific rules to the applicable global instructions. It applies to
-the entire repository unless a more specific `AGENTS.md` exists in a
-subdirectory.
+Instructions for coding agents working in this repository. The applicable
+global instructions remain in force; this file adds narrower repository rules
+and overrides generic Skill guidance only where it explicitly describes the
+current stack or workflow. It applies to the entire repository unless a more
+specific `AGENTS.md` exists in a subdirectory.
 
-Correctness, safety, evidence, and validation take priority over speed.
+Treat each rule as scoped to the files or workflow it names. A command example
+or release procedure is not authorization to modify external state.
 
 ## 1. Required Skills
 
-- Backend work must read and follow `fastapi` before implementation.
-- Frontend work must read and follow `react-templates` before implementation.
-- If a required skill is unavailable, surface that before coding instead of
-  silently proceeding.
+- Before implementing FastAPI routes, dependencies, request/response schemas,
+  or streaming behavior, read and follow `fastapi` where it is compatible with
+  this repository.
+- Before implementing or reorganizing React/Next.js components, routes, or
+  frontend directory structure, read and follow `react-templates` where it is
+  compatible with this repository.
+- Documentation-only changes, read-only investigation, and work outside those
+  surfaces do not trigger these Skills unless their guidance is directly
+  relevant.
+- Repository rules and inspected local patterns override generic Skill
+  defaults. In particular, keep the existing Next.js deployment, SQLAlchemy
+  `AsyncSession`, async route, and project-tooling conventions; do not introduce
+  FastAPI static frontend serving, SQLModel, synchronous database paths, or new
+  tooling merely because a Skill recommends them generically.
+- If an applicable Skill is unavailable, state that before coding and proceed
+  from repository evidence when the task remains unambiguous; stop only when
+  the missing guidance leaves a material implementation or safety decision.
 
 ## 2. Project Notes
+
+These facts and constraints apply only when a change touches the named area.
+Existing exceptions in the codebase are not precedents for new code and should
+not trigger unrelated cleanup.
 
 - `backend/` is a Python project using `pyproject.toml`, Python `>=3.11`, and
   `uv.lock`. `backend/app/` contains the FastAPI backend package.
@@ -25,40 +44,47 @@ Correctness, safety, evidence, and validation take priority over speed.
   capabilities, `infrastructure/` config, DB session, data access, storage)
   cross-cut module-owned business domains under `shareddomain/` and shared
   domain entities under `shareddomain/platform/` (User, Workspace, Team, permissions).
-  Schemas stay in `app/schemas/` and Celery task entry points in
-  `app/tasks/`. New features: add a self-contained module directory under
-  `app/shareddomain/<feature>/` (entities + services), expose use cases
+  Schemas stay in `app/schemas/` and Celery task entry points in `app/tasks/`.
+  When adding a new business domain, add a self-contained module directory
+  under `app/shareddomain/<feature>/` (entities plus services), expose use cases
   through `app/application/`, and keep HTTP routers thin in `app/api/v1/`.
-- Layer boundaries are enforced by convention (dependency direction is one-way):
-  `api/` routers and dependencies import ONLY `application/` (plus `schemas/`
-  and `api/deps.py`); `application/` may import `shareddomain/`,
-  `capabilities/`, `infrastructure/`, `schemas/`, `shareddomain/platform/`; `shareddomain/`
-  may import `capabilities/`, `infrastructure/`, `schemas/`, `shareddomain/platform/` but
-  NEVER `application/`; `capabilities/` may import `infrastructure/` and its
-  own modules only — NEVER `shareddomain/`, `schemas/`, or
-  `application/`. Business rules and status constants live in
-  `shareddomain/` (repositories import them from the domain models), and
-  infrastructure is consumed through interfaces where swap-out matters
-  (e.g. `infrastructure/object_storage.py::ObjectStorage`); never import a
-  concrete implementation class into `shareddomain/`.
-- Capability contracts live in `app/ports/` (Protocols + delegate functions
-  for vector store, LLM providers, document parsing, MCP client, model
-  registry). `shareddomain/` imports capabilities ONLY through `app/ports/`;
-  `application/` does the same except for pure capability algorithms/validation
-  functions it composes directly (e.g. retrieval ranking math, credential
-  normalization). Swapping an implementation (e.g. Qdrant → Milvus) touches
-  only the capability module and its port factory.
+- Apply this dependency direction to new or changed backend code:
+  - `api/v1/` routers keep HTTP concerns thin and use `application/`,
+    `schemas/`, and `api/deps.py`. Existing direct imports from `entities/` or
+    `infrastructure/` are legacy exceptions: do not expand them, and do not
+    refactor them unless the requested change requires it.
+  - `application/` may import `entities/`, `shareddomain/`, `ports/`,
+    `infrastructure/`, and `schemas/`. It accesses capabilities through
+    `app/ports/`, except for pure capability algorithms or validation functions
+    it deliberately composes directly (for example retrieval ranking math or
+    credential normalization).
+  - Business services under `shareddomain/` may import `entities/`, `ports/`,
+    `infrastructure/`, `schemas/`, and other domain modules, but never
+    `application/` or concrete capability implementations.
+  - `capabilities/` may import `infrastructure/` and its own modules, but never
+    `shareddomain/`, `schemas/`, or `application/`.
+  Business rules and status constants live in `shareddomain/` (repositories
+  import them from the domain models). Consume infrastructure through an
+  interface where implementation swapping matters (for example
+  `infrastructure/object_storage.py::ObjectStorage`); domain services must not
+  import the concrete implementation.
+- Capability contracts live in `app/ports/` (Protocols plus delegate functions
+  for vector store, LLM providers, document parsing, MCP client, and model
+  registry). Swapping an implementation (for example Qdrant to Milvus) should
+  touch only the capability module and its port factory.
 - Data isolation: pure domain entities live in `app/entities/` (dataclasses
   mirroring the database columns); `app/shareddomain/platform/` and other
   `app/shareddomain/*/models.py` hold the SQLAlchemy database models.
   Repositories (`app/infrastructure/repositories/`) map ORM ↔ entities via
   `mapping.py` helpers and own all `db.add/delete/refresh/flush`; business
-  code (`shareddomain/`, `application/`) imports entities only, never ORM
-  models, and coordinates transactions via the `db` unit-of-work
+  services in `shareddomain/` and `application/` use entities rather than ORM
+  models and coordinate transactions via the `db` unit-of-work
   (`db.commit()`/`db.rollback()`). New models: add the entity to
   `app/entities/`, keep the ORM class in its current models module
   (`app/shareddomain/platform/` for cross-domain shared entities), and
-  expose create/save/refresh/delete wrappers on the repository.
+  expose create/save/refresh/delete wrappers on the repository. ORM model
+  modules and explicit model-registration imports are the narrow exceptions;
+  they are not a pattern for business logic.
 - Agent Run persistence separates identity/caller/lineage in `agent_runs`,
   mutable lease/checkpoint/result data in `agent_run_states`, immutable
   execution configuration in `agent_run_snapshots`, and append-only history
@@ -115,7 +141,7 @@ Correctness, safety, evidence, and validation take priority over speed.
   task runner and reuses the production retrieval path. Evaluation is mutually
   exclusive with parse/index/rebuild work for the same knowledge base; result
   and progress writes must remain in one lease-checked transaction.
-- `backend/make dev` starts and waits for the development Compose PostgreSQL,
+- `cd backend && make dev` starts and waits for the development Compose PostgreSQL,
   Redis, and Qdrant services, applies Alembic migrations, then starts Uvicorn.
   It does not start the Worker. The API process orchestration lives in
   `backend/scripts/dev.py` so the Make target does not depend on a POSIX shell.
@@ -195,16 +221,16 @@ Correctness, safety, evidence, and validation take priority over speed.
 
 ## 3. Implementation
 
-- Treat MVP tasks as production slices, not throwaway demos: identify data
-  model, backend behavior, authorization and tenant isolation, frontend
-  behavior, validation and error states, checks, and deployment impact. If
-  production foundation is missing, stop and surface the decision instead of
-  working around it.
+- Treat an end-to-end MVP feature as a production slice, not a throwaway demo:
+  evaluate the data model, backend behavior, authorization and tenant isolation,
+  frontend behavior, validation and error states, checks, and deployment impact
+  that are actually affected. Do not implement unaffected layers merely to
+  complete this checklist. If the requested slice cannot be production-safe
+  without an unrequested foundation, surface that decision instead of shipping
+  a knowingly unsafe workaround.
 - Fix the root cause at the narrowest shared boundary; check callers before
   patching.
 - Reuse existing helpers and patterns before adding new code or dependencies.
-- Keep diffs small and focused: no unrelated refactoring or reformatting;
-  remove only code made obsolete by your own change.
 - File size is a soft signal, not a hard rule: prefer focused files, and
   split when a file grows long enough that a clear module or component
   boundary exists; avoid very large source files unless they are generated or
@@ -224,39 +250,49 @@ Correctness, safety, evidence, and validation take priority over speed.
 
 ## 4. Subagents
 
-Use subagents for broad exploration that splits into independent,
-non-overlapping objectives. Work directly when the task is targeted or
-sequential. Keep exploration read-only unless implementation is explicitly
-delegated, never assign overlapping edits, and verify material findings
-against the cited files and lines before relying on them.
+Subagents are optional. Use them only when broad work splits into independent,
+non-overlapping objectives and delegation materially helps. Work directly when
+the task is targeted or sequential. Keep delegated exploration read-only unless
+implementation is explicitly assigned, never assign overlapping edits, and
+verify material findings against the cited files and lines before relying on
+them.
 
 ## 5. Planning
 
 - Use a short plan before editing for multi-step, cross-module, uncertain, or
   high-risk work. Simple, low-risk changes do not need one.
-- Plans should state goal, scope, non-goals, steps, acceptance criteria, and
-  validation; include risks and a rollback path when material.
-- If implementation materially changes user-visible scope, public behavior,
-  risk, or cost, stop and request direction.
+- State the goal, scope, non-goals, acceptance criteria, and validation at the
+  level needed for the task; include risks and a rollback path only when they
+  are material.
+- A plan is not an approval gate. Continue the authorized work after stating it
+  unless missing information materially changes the result or the next step
+  exceeds the user's authority grant.
+- If implementation would materially change user-visible scope, public
+  behavior, risk, or cost beyond the request, stop and request direction.
 
 ## 6. Workflow
 
 - `main` is protected: every change lands via a pull request; direct pushes
   are rejected.
-- Start each change from an up-to-date `main` on a short-lived feature
-  branch. Branch names are free-form; existing history uses
-  `codex/<topic>`.
+- When the user asks for a standalone branch or PR-ready delivery, start from an
+  up-to-date `main` on a short-lived branch when doing so will not disturb
+  existing work. For an in-place local task, keep the current branch and
+  preserve uncommitted changes. Do not add Codex-specific branch prefixes or
+  markers.
 - Commit messages follow Conventional Commits (`<type>(<scope>): <summary>`),
   matching the PR title style, so history stays readable.
-- Once ready: push the branch, open a PR (title and description per
-  Pull Request Guidelines), wait for CI to pass, then merge; delete the
-  branch after merging.
-- Merges use merge commits, as in existing history; sync `main` into the
-  branch and resolve conflicts before merging.
+- When the user has requested the external delivery steps, push the branch,
+  open a PR (title and description per Pull Request Guidelines), wait for CI,
+  then merge with a merge commit and delete the branch. Pushing, opening or
+  updating a PR, merging, tagging, and deleting remote branches remain external
+  writes and require the confirmation or authority specified by the applicable
+  global rules.
+- Before an authorized merge, sync `main` into the branch and resolve conflicts.
 
 ## 7. Pull Request Guidelines
 
-All changes to `main` must go through a pull request (branch protection).
+These guidelines apply when preparing or creating a PR; they do not require
+every local task to create one.
 
 ### PR Title Format
 
@@ -327,7 +363,8 @@ PRs, group the change log per commit or per module.
 
 ### Release Tag Naming
 
-Use Semantic Versioning: `v<major>.<minor>.<patch>`, with `-alpha.N` /
+For an authorized release, use Semantic Versioning:
+`v<major>.<minor>.<patch>`, with `-alpha.N` /
 `-beta.N` / `-rc.N` suffixes for prereleases. Prefer annotated tags:
 
 ```bash
@@ -337,18 +374,22 @@ git push origin v1.2.3
 
 ## 8. Validation
 
-Run the smallest relevant checks first, then broaden only when impact is
-broad. Never claim a check passed unless it completed successfully.
+For code or configuration changes, run the smallest relevant checks first and
+broaden only when the affected surface or risk is broad. Documentation-only or
+instruction-only changes normally need Markdown/diff inspection rather than
+product test suites, unless they change documented commands or executable
+examples.
 
-- `frontend/` changes: use the smallest relevant Bun script from `frontend/package.json`
-  (typecheck, lint, test, build as applicable). Full suite runs as
+- `frontend/` code or configuration changes: use the smallest relevant Bun
+  script from `frontend/package.json` (typecheck, lint, test, build as
+  applicable). The full test suite runs as
   `bun test --parallel` (per-file isolation is required: happy-dom state leaks
   between files in serial mode). DOM-level page tests use the happy-dom
   preload in `frontend/bunfig.toml` and helpers in `frontend/tests/helpers/dom.tsx`;
   new DOM test files keep the existing `/* @jsxImportSource react */` header;
   Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
-- `backend/` changes: use the project's Python tooling. Run `compileall` over the
-  touched packages, then run the affected suite from `backend/` with
+- `backend/` Python changes: use the project's Python tooling. Run `compileall`
+  over the touched packages, then run the affected suite from `backend/` with
   `uv run python -m tests.<suite>` (unit, logger, smtp, email, system_governance,
   identity, workspaces, teams, knowledge, llm, agents, workflows, mcp_transports, test_main,
   agent_access, workflow_run_coverage, workflow_node_coverage,
@@ -359,17 +400,21 @@ broad. Never claim a check passed unless it completed successfully.
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
-- `deploy/` changes: render the base, development, and pull-only server Compose
-  configurations, verify the unique image list, build the affected image, and
-  run the `sandbox-runtime` target's direct container checks plus embedded-Worker
-  hard-isolation self-check (including the public egress mode when enabled) when
-  the unified application image or sandbox wiring changes.
-- Coverage gates (do not claim a percentage unless measured):
+- `deploy/` Compose changes: render the affected base, development, and
+  pull-only server configurations and verify the image list. Build an image
+  only when its build inputs or wiring changed. When the unified application
+  image or sandbox wiring changes, also run the `sandbox-runtime` direct
+  container checks and embedded-Worker hard-isolation self-check, including
+  public egress mode when affected.
+- Run full coverage only for coverage work, release/CI validation, or changes
+  broad enough to put a repository gate at risk. Do not claim a percentage
+  unless it was measured in the current task. The configured gates and commands
+  are:
   - Backend: `make coverage` / `backend/scripts/coverage.sh` — both use the
     cross-platform `backend/scripts/coverage.py` runner to execute all suites
     in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), trace TestClient
-    threads and SQLAlchemy greenlets, and merge with coverage.py. Backend coverage
-    is at 97%+.
+    threads and SQLAlchemy greenlets, and merge with coverage.py; the gate is
+    97%.
   - Sandbox: `sandbox/run_coverage.sh` — `sandbox/tests.py` extends
     `self_check.py`; `sandbox/child.py` and the Linux-only `sandbox/launcher.py`
     are excluded from measurement because their exec/chroot boundary cannot
@@ -378,16 +423,14 @@ broad. Never claim a check passed unless it completed successfully.
     `# pragma: no cover`.
   - Frontend: `frontend/scripts/coverage.sh` — runs `bun test --isolate
     --coverage` (serial + per-file fresh globals; bun's parallel-worker lcov
-    aggregation under-reports and inflates the line denominator). Frontend
-    coverage is 99%+.
-- If a check cannot be run, say exactly why in the final response.
+    aggregation under-reports and inflates the line denominator); the gate is
+    99%.
 
 ## 9. Keeping This File Current
 
-- Update this file in the same change when repository structure, build/test
-  commands, dependencies, or conventions change.
+- Update this file in the same change only when repository structure,
+  build/test commands, dependencies, or conventions change in a way that makes
+  an instruction here stale.
 - If a top-level directory is added, removed, or repurposed, update
   `Project Notes`.
 - If scripts or tooling change, update `Validation`.
-- Before finishing a task, check whether your changes made any instruction
-  here stale.

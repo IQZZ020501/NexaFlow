@@ -559,6 +559,10 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage />)
     await screen.findByText("SSE tools")
     const sseCard = screen.getByText("SSE tools").closest("article")!
+    const sourceSection = sseCard.closest("section")!
+    expect(sourceSection.parentElement?.previousElementSibling?.tagName).toBe(
+      "ASIDE"
+    )
     expect(within(sseCard).getByText("SSE")).toBeTruthy()
     const stdioCard = screen.getByText("Local stdio").closest("article")!
     expect(
@@ -583,6 +587,38 @@ describe("ToolsPage", () => {
     })
     expect(screen.getByText("没有匹配的工具")).toBeTruthy()
     expect(screen.queryByText("Owned formatter")).toBeNull()
+  })
+
+  test("keeps MCP runtime identifiers out of cards and search", async () => {
+    const remote = tool({
+      id: "tool-mcp-tavily",
+      kind: "mcp",
+      function_name: "mcp_tavily_search_a1b2c3d4",
+      display_name: "tavily_search",
+      description: "Search the web with Tavily",
+      source: {
+        id: "source-mcp-tavily",
+        name: "Tavily",
+        kind: "mcp",
+        transport: "streamable_http",
+      },
+    })
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/tools?")) return jsonResponse([remote])
+      if (url.includes("/tool-sources?")) return jsonResponse([])
+      return jsonResponse([])
+    }) as typeof fetch
+
+    renderPage(<ToolsPage />)
+    await screen.findByText("tavily_search")
+    expect(screen.queryByText("mcp_tavily_search_a1b2c3d4")).toBeNull()
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "mcp_tavily_search_a1b2c3d4" },
+    })
+    expect(screen.getByText("没有匹配的工具")).toBeTruthy()
+    expect(screen.queryByText("tavily_search")).toBeNull()
   })
 
   test("opens a tool detail with the keyboard", async () => {

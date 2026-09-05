@@ -384,6 +384,170 @@ def load_pptx_schema_migration():
     return module
 
 
+def load_documents_formal_legal_migration():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic/versions/202609040001_builtin_documents_formal_legal.py"
+    )
+    spec = spec_from_file_location("documents_formal_legal", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine
+
+    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+
+    migration = load_documents_formal_legal_migration()
+    assert migration.down_revision == "202608300003"
+
+    workspace_id = "workspace-documents-migration"
+    desired_tool, desired_version, _desired_policy = build_skill_artifact_tool(
+        workspace_id, "documents"
+    )
+    engine = create_engine("sqlite://")
+    metadata = sa.MetaData()
+    sources = sa.Table(
+        "tool_sources",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("kind", sa.String, nullable=False),
+    )
+    tools = sa.Table(
+        "tools",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("current_version_id", sa.String),
+        sa.Column("status", sa.String, nullable=False),
+        sa.Column("availability", sa.String, nullable=False),
+        sa.Column("updated_at", sa.DateTime, nullable=False),
+    )
+    versions = sa.Table(
+        "tool_versions",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("tool_id", sa.String, nullable=False),
+        sa.Column("revision", sa.Integer, nullable=False),
+        sa.Column("display_name", sa.String, nullable=False),
+        sa.Column("description", sa.Text, nullable=False),
+        sa.Column("input_schema", sa.JSON, nullable=False),
+        sa.Column("output_schema", sa.JSON),
+        sa.Column("execution_spec", sa.JSON, nullable=False),
+        sa.Column("definition_hash", sa.String, nullable=False),
+        sa.Column("created_by_user_id", sa.String),
+        sa.Column("created_at", sa.DateTime, nullable=False),
+        sa.UniqueConstraint("tool_id", "revision"),
+        sa.UniqueConstraint("tool_id", "definition_hash"),
+    )
+    policies = sa.Table(
+        "tool_policies",
+        metadata,
+        sa.Column("id", sa.String, primary_key=True),
+        sa.Column("workspace_id", sa.String, nullable=False),
+        sa.Column("tool_id", sa.String, nullable=False),
+        sa.Column("tool_version_id", sa.String, nullable=False),
+        sa.Column("definition_hash", sa.String, nullable=False),
+        sa.Column("approval", sa.String, nullable=False),
+        sa.Column("effect", sa.String, nullable=False),
+        sa.Column("allowed_access_sources", sa.JSON, nullable=False),
+        sa.Column("workflow_callable", sa.Boolean, nullable=False),
+        sa.Column("parallel_safe", sa.Boolean, nullable=False),
+        sa.Column("updated_at", sa.DateTime, nullable=False),
+    )
+    metadata.create_all(engine)
+
+    timestamp = datetime.now(UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            sources.insert().values(
+                id="source-builtin", workspace_id=workspace_id, kind="builtin"
+            )
+        )
+        connection.execute(
+            tools.insert().values(
+                id=desired_tool.id,
+                workspace_id=workspace_id,
+                current_version_id="stale-version-id",
+                status="active",
+                availability="available",
+                updated_at=timestamp,
+            )
+        )
+        connection.execute(
+            versions.insert().values(
+                id="stale-version-id",
+                workspace_id=workspace_id,
+                tool_id=desired_tool.id,
+                revision=1,
+                display_name="Documents Skill",
+                description="legacy",
+                input_schema={"type": "object"},
+                output_schema=None,
+                execution_spec={"builtin": "skill", "skill": "documents"},
+                definition_hash="a" * 64,
+                created_by_user_id=None,
+                created_at=timestamp,
+            )
+        )
+        connection.execute(
+            policies.insert().values(
+                id="stale-policy-id",
+                workspace_id=workspace_id,
+                tool_id=desired_tool.id,
+                tool_version_id="stale-version-id",
+                definition_hash="a" * 64,
+                approval="auto",
+                effect="pure",
+                allowed_access_sources=[],
+                workflow_callable=True,
+                parallel_safe=True,
+                updated_at=timestamp,
+            )
+        )
+
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+        assert connection.scalar(
+            sa.select(tools.c.current_version_id).where(tools.c.id == desired_tool.id)
+        ) == desired_version.id
+        refreshed = connection.execute(
+            sa.select(
+                versions.c.revision,
+                versions.c.description,
+                versions.c.input_schema,
+            ).where(versions.c.id == desired_version.id)
+        ).one()
+        assert refreshed.revision == 2
+        assert "formal_legal" in refreshed.description
+        assert refreshed.input_schema["properties"]["style"]["default"] == "report"
+        assert connection.scalar(
+            sa.select(policies.c.tool_version_id).where(
+                policies.c.id == "stale-policy-id"
+            )
+        ) == desired_version.id
+        assert connection.scalar(
+            sa.select(sa.func.count()).select_from(versions)
+        ) == 2
+
+        migration.upgrade()
+        assert connection.scalar(
+            sa.select(sa.func.count()).select_from(versions)
+        ) == 2
+        migration.downgrade()
+        assert connection.scalar(
+            sa.select(tools.c.current_version_id).where(tools.c.id == desired_tool.id)
+        ) == desired_version.id
+
+
 def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
@@ -1519,7 +1683,9 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             skill_properties = skill_version.input_schema["properties"]
             assert "skills" not in skill_properties
             assert "code" not in skill_properties
-            if skill_name in {"documents", "pdf"}:
+            if skill_name == "documents":
+                assert set(skill_properties) == {"filename", "content", "style"}
+            elif skill_name == "pdf":
                 assert set(skill_properties) == {"filename", "content"}
             elif skill_name == "spreadsheets":
                 assert set(skill_properties) == {"filename", "workbook"}
@@ -6225,6 +6391,7 @@ def main() -> None:
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_generic_artifact_migration_matches_catalog()
     test_artifact_contract_downgrade_rejects_durable_references()
+    test_documents_formal_legal_migration_refreshes_stale_versions()
     test_pptx_skill_schema_migration_refreshes_stale_versions()
     test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()

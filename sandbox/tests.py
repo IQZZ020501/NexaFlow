@@ -1010,10 +1010,106 @@ def check_builtin_skill_quality_guards() -> None:
         BytesIO(base64.b64decode(document["artifact"]["content_base64"]))
     ) as archive:
         document_xml = archive.read("word/document.xml").decode()
+        report_styles_xml = archive.read("word/styles.xml").decode()
+        report_footer_xml = b"".join(
+            archive.read(name)
+            for name in archive.namelist()
+            if name.startswith("word/footer")
+        )
     if not os.environ.get("NEXAFLOW_CJK_FONT"):
         assert "Microsoft YaHei" not in document_xml
     assert '<w:tblW w:type="dxa" w:w="9071"' in document_xml
     assert '<w:tblLayout w:type="fixed"' in document_xml
+    assert "1F4E79" in report_styles_xml
+    assert b" PAGE " in report_footer_xml
+
+    formal = execute_request(
+        {
+            "skill": "documents",
+            "stdin": json.dumps(
+                {
+                    "style": "formal_legal",
+                    "content": (
+                        "# 劳动仲裁申请书\n\n"
+                        "## 一、仲裁请求\n\n"
+                        "1. 请求被申请人支付工资。\n\n"
+                        "- 证据清单保持字面项目符号。\n\n"
+                        "这是用于验证正式文书正文格式的段落。\n\n"
+                        "---\n\n"
+                        "## 附件说明\n\n"
+                        "> 申请人：张三\n"
+                        "> 2026年9月4日"
+                    ),
+                },
+                ensure_ascii=False,
+            ),
+            "artifact": {"format": "docx", "filename": "formal-legal.docx"},
+        }
+    )
+    assert formal["ok"] is True, formal
+    formal_bytes = base64.b64decode(formal["artifact"]["content_base64"])
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    formal_document = Document(BytesIO(formal_bytes))
+    paragraphs = {paragraph.text: paragraph for paragraph in formal_document.paragraphs}
+    title = paragraphs["劳动仲裁申请书"]
+    assert title.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert title.style.name == "Normal"
+    assert all(str(run.font.color.rgb) == "000000" for run in title.runs)
+    assert all(run.font.size.pt == 18 for run in title.runs)
+    section_heading = paragraphs["一、仲裁请求"]
+    assert section_heading.style.name == "Normal"
+    assert all(str(run.font.color.rgb) == "000000" for run in section_heading.runs)
+    assert all(run.font.size.pt == 14 for run in section_heading.runs)
+    normal = formal_document.styles["Normal"]
+    assert normal.font.size.pt == 12
+    assert abs(normal.paragraph_format.line_spacing - 1.4) < 0.01
+    assert abs(normal.paragraph_format.first_line_indent.pt - 24) < 0.1
+    numbered = paragraphs["1. 请求被申请人支付工资。"]
+    assert numbered.style.name == "Normal"
+    bullet = paragraphs["- 证据清单保持字面项目符号。"]
+    assert bullet.style.name == "Normal"
+    assert all(
+        paragraph.style.name == "Normal"
+        for paragraph in formal_document.paragraphs
+    )
+    assert paragraphs["申请人：张三"].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+    assert paragraphs["2026年9月4日"].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+    with ZipFile(BytesIO(formal_bytes)) as archive:
+        formal_document_xml = archive.read("word/document.xml").decode()
+        formal_styles_xml = archive.read("word/styles.xml").decode()
+        footer_xml = b"".join(
+            archive.read(name)
+            for name in archive.namelist()
+            if name.startswith("word/footer")
+        )
+    formal_cjk_font = "Noto Serif CJK SC" if sys.platform == "linux" else "STFangsong"
+    assert formal_cjk_font in formal_styles_xml
+    assert "---" not in formal_document_xml
+    assert "&gt;" not in formal_document_xml
+    assert '<w:br w:type="page"' in formal_document_xml
+    assert b" PAGE " not in footer_xml
+
+    conflicting = execute_request(
+        {
+            "skill": "documents",
+            "stdin": json.dumps(
+                {
+                    "style": "formal_legal",
+                    "content": (
+                        "# 劳动仲裁申请书\n\n"
+                        "仲裁费用及其他费用由被申请人承担。\n\n"
+                        "劳动仲裁不收费。"
+                    ),
+                },
+                ensure_ascii=False,
+            ),
+            "artifact": {"format": "docx", "filename": "conflict.docx"},
+        }
+    )
+    assert conflicting["ok"] is False
+    assert "conflicting arbitration fee statements" in conflicting["stderr"]
 
     pdf = execute_request(
         {
