@@ -556,12 +556,31 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("正在加载")).toBeTruthy()
   })
 
-  test("renders a succeeded run with its answer", () => {
+  test("renders a succeeded run and closes its editor after resubmitting", () => {
+    const regenerated: Array<[string, string | undefined]> = []
     const run = makeRun({ status: "succeeded", result: "**bold** summary" })
-    renderPage(<Harness activeView="settings" runs={[run]} />)
+    const { container } = renderPage(
+      <Harness
+        activeView="settings"
+        runs={[run]}
+        onRegenerateRun={(runId, goal) => regenerated.push([runId, goal])}
+      />
+    )
     expect(screen.getByText("Summarize the latest releases")).toBeTruthy()
     expect(screen.getByText("bold")).toBeTruthy()
     expect(screen.getByText("summary")).toBeTruthy()
+
+    fireEvent.click(container.querySelector('button[aria-label="编辑消息"]')!)
+    const editor = container.querySelector('textarea[aria-label="编辑消息"]')!
+    fireEvent.change(editor, {
+      target: { value: "Updated question" },
+    })
+    fireEvent.submit(editor.closest("form")!)
+
+    expect(regenerated).toEqual([["run-1", "Updated question"]])
+    expect(
+      container.querySelector('textarea[aria-label="编辑消息"]')
+    ).toBeNull()
   })
 
   test("shows the first-token timestamp below the answer", () => {
@@ -649,26 +668,6 @@ describe("AgentDetailWorkspace preview", () => {
     expect(message).toBeTruthy()
     expect(message!.className).toContain("whitespace-pre-wrap")
     expect(message!.className).toContain("[overflow-wrap:anywhere]")
-  })
-
-  test("closes the message editor after resubmitting", () => {
-    const regenerated: Array<[string, string | undefined]> = []
-    renderPage(
-      <Harness
-        activeView="settings"
-        runs={[makeRun()]}
-        onRegenerateRun={(runId, goal) => regenerated.push([runId, goal])}
-      />
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "编辑消息" }))
-    fireEvent.change(screen.getByLabelText("编辑消息"), {
-      target: { value: "Updated question" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
-
-    expect(regenerated).toEqual([["run-1", "Updated question"]])
-    expect(screen.queryByLabelText("编辑消息")).toBeNull()
   })
 
   test("renders unified result actions and disables regeneration while busy", () => {
