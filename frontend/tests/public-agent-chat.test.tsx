@@ -1532,6 +1532,53 @@ describe("PublicAgentChat", () => {
     expect(screen.queryByText(downloadUrl)).toBeNull()
   })
 
+  test("renders answer source chips with chunk details", async () => {
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "社保怎么补缴？")] },
+      history: {
+        items: [
+          run({
+            result:
+              "可以按规定补缴。[source](#nexaflow-source-fedcba9876543210)\n\n再次说明。[source](#nexaflow-source-fedcba9876543210)",
+            sources: [
+              {
+                source_ref: "fedcba9876543210",
+                knowledge_base: "制度库",
+                document: "社保制度.pdf",
+                parent_title: "",
+                section_path: [],
+                chunk_index: 2,
+                content: "不足十五年时可以补缴。",
+              },
+            ],
+          }),
+        ],
+        total: 1,
+        offset: 0,
+        limit: 200,
+      },
+    })
+
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+
+    const source = await screen.findByRole("button", {
+      name: "来源：社保制度.pdf · 片段 3",
+    })
+    expect(source.textContent).toBe("社保制度.pdf")
+    expect(
+      screen.getAllByRole("button", {
+        name: "来源：社保制度.pdf · 片段 3",
+      })
+    ).toHaveLength(1)
+    expect(source.closest("p")?.textContent).toContain("可以按规定补缴。")
+    fireEvent.click(source)
+    await waitFor(() =>
+      expect(screen.getByText("不足十五年时可以补缴。")).toBeTruthy()
+    )
+  })
+
   test("edits and resends only the latest user message", async () => {
     let regenerateBody: unknown
     fetchHandler = (url, init) => {
@@ -1945,7 +1992,7 @@ describe("PublicAgentChat", () => {
     )
   })
 
-  test("surfaces stream errors in the alert and the run bubble", async () => {
+  test("surfaces stream errors only in the run bubble", async () => {
     fetchHandler = agentFetchHandler({
       conversations: { items: [conversation("conv-1", "第一个会话")] },
       streamResponses: [
@@ -1962,13 +2009,12 @@ describe("PublicAgentChat", () => {
 
     sendMessage("会失败的请求")
 
-    await waitFor(() =>
-      expect(screen.getAllByText("模型超时").length).toBeGreaterThanOrEqual(2)
-    )
-    expect(screen.getByRole("alert")).toBeTruthy()
+    await waitFor(() => expect(screen.getByText("模型超时")).toBeTruthy())
+    expect(screen.getAllByText("模型超时")).toHaveLength(1)
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 
-  test("shows an error and a failed bubble when creating the run fails", async () => {
+  test("shows a failed bubble when creating the run fails", async () => {
     fetchHandler = agentFetchHandler({
       conversations: { items: [conversation("conv-1", "第一个会话")] },
       history: {
@@ -1985,10 +2031,9 @@ describe("PublicAgentChat", () => {
 
     sendMessage("无法创建")
 
-    await waitFor(() =>
-      expect(screen.getAllByText("创建失败").length).toBeGreaterThanOrEqual(2)
-    )
-    expect(screen.getByRole("alert")).toBeTruthy()
+    await screen.findByText("创建失败")
+    expect(screen.getAllByText("创建失败")).toHaveLength(1)
+    expect(screen.queryByRole("alert")).toBeNull()
     // Earlier history is untouched by the failed send.
     expect(screen.getByText("历史内容")).toBeTruthy()
     // The send button returns to its idle state after the failure.
@@ -2272,7 +2317,7 @@ describe("PublicAgentChat", () => {
     )
   })
 
-  test("surfaces stream errors emitted while observing a resumed run", async () => {
+  test("shows resumed run errors only in the run bubble", async () => {
     fetchHandler = agentFetchHandler({
       conversations: { items: [conversation("conv-1", "第一个会话")] },
       history: {
@@ -2313,12 +2358,11 @@ describe("PublicAgentChat", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("观察到的错误")
-    )
+    await screen.findByText("观察到的错误")
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 
-  test("falls back to a generic message for error events without details", async () => {
+  test("shows the generic error event fallback only in the run bubble", async () => {
     fetchHandler = agentFetchHandler({
       conversations: { items: [conversation("conv-1", "第一个会话")] },
       history: {
@@ -2354,14 +2398,11 @@ describe("PublicAgentChat", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
-        "回答失败，请稍后重试。"
-      )
-    )
+    await screen.findByText("回答失败，请稍后重试。")
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 
-  test("reports attachment upload failures without creating a run", async () => {
+  test("shows attachment upload failures in the failed bubble", async () => {
     const requests: string[] = []
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
@@ -2402,9 +2443,8 @@ describe("PublicAgentChat", () => {
     })
     sendMessage("带附件发送")
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("文件上传失败")
-    )
+    await screen.findByText("文件上传失败")
+    expect(screen.queryByRole("alert")).toBeNull()
     // The failed upload aborts the send before any run is created.
     expect(
       requests.some(

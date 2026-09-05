@@ -13,6 +13,7 @@ import { requestBlob } from "@/lib/api-client"
 type MarkdownContentProps = {
   content: string
   className?: string
+  components?: Components
 }
 
 /**
@@ -165,6 +166,35 @@ function ArtifactDownloadLink({
   )
 }
 
+export function MarkdownLink(
+  props: React.ComponentPropsWithoutRef<"a"> & { node?: unknown }
+) {
+  const { className, href, ...restProps } = omitMarkdownNode(props)
+  const isArtifact = href?.startsWith("/api/v1/artifacts/") ?? false
+  if (isArtifact && href) {
+    return (
+      <ArtifactDownloadLink href={href} className={className}>
+        {restProps.children}
+      </ArtifactDownloadLink>
+    )
+  }
+  return (
+    <a
+      className={cn(
+        isArtifact
+          ? "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300"
+          : "font-medium text-primary underline-offset-4 hover:underline",
+        className
+      )}
+      href={href}
+      download={isArtifact ? "" : undefined}
+      target={isArtifact ? undefined : "_blank"}
+      rel={isArtifact ? undefined : "noreferrer"}
+      {...restProps}
+    />
+  )
+}
+
 const markdownComponents: Components = {
   h1(props) {
     const { className, ...restProps } = omitMarkdownNode(props)
@@ -199,32 +229,7 @@ const markdownComponents: Components = {
       <p className={cn("my-2 first:mt-0 last:mb-0", className)} {...restProps} />
     )
   },
-  a(props) {
-    const { className, href, ...restProps } = omitMarkdownNode(props)
-    const isArtifact = href?.startsWith("/api/v1/artifacts/") ?? false
-    if (isArtifact && href) {
-      return (
-        <ArtifactDownloadLink href={href} className={className}>
-          {restProps.children}
-        </ArtifactDownloadLink>
-      )
-    }
-    return (
-      <a
-        className={cn(
-          isArtifact
-            ? "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300"
-            : "font-medium text-primary underline-offset-4 hover:underline",
-          className
-        )}
-        href={href}
-        download={isArtifact ? "" : undefined}
-        target={isArtifact ? undefined : "_blank"}
-        rel={isArtifact ? undefined : "noreferrer"}
-        {...restProps}
-      />
-    )
-  },
+  a: MarkdownLink,
   ul(props) {
     const { className, ...restProps } = omitMarkdownNode(props)
     return <ul className={cn("my-2 list-disc pl-5", className)} {...restProps} />
@@ -298,12 +303,20 @@ const markdownComponents: Components = {
  * @param content - The Markdown content to render
  * @param className - Optional CSS class name applied to the rendered content
  */
-export function MarkdownContent({ content, className }: MarkdownContentProps) {
+export function MarkdownContent({
+  content,
+  className,
+  components: componentOverrides,
+}: MarkdownContentProps) {
   const { t } = useLanguage()
   const value = content.trim()
   const components = React.useMemo<Components>(
-    () => ({ ...markdownComponents, img: MarkdownImage }),
-    [],
+    () => ({
+      ...markdownComponents,
+      img: MarkdownImage,
+      ...componentOverrides,
+    }),
+    [componentOverrides],
   )
 
   if (!value) {

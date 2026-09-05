@@ -1,7 +1,7 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { AgentToolCall } from "@/lib/api/agents"
-import type { AgentInteractionConfig } from "@/lib/api/agents"
+import type { AgentInteractionConfig, AgentRunSource } from "@/lib/api/agents"
 
 export type PublicAgentProfile = {
   id: string
@@ -72,6 +72,7 @@ export type ExternalAgentRun = {
   attachments?: AgentRunAttachment[]
   status: string
   result: string
+  sources?: AgentRunSource[]
   error: string | null
   progress: ExternalAgentProgressEvent[]
   created_at: string

@@ -82,6 +82,16 @@ export type AgentRunAttachment = Omit<AgentUpload, "id" | "category"> & {
   category: "document" | "image"
 }
 
+export type AgentRunSource = {
+  source_ref: string
+  knowledge_base: string
+  document: string
+  parent_title: string
+  section_path: string[]
+  chunk_index: number | null
+  content: string
+}
+
 export type AgentPlanStep = {
   number: number
   title: string
@@ -132,6 +142,7 @@ export type AgentRun = {
   plan: AgentPlanStep[]
   events: AgentRunEvent[]
   result: string
+  sources?: AgentRunSource[]
   model_usage: Record<string, unknown>
   grounding_status?:
     | "not_started"

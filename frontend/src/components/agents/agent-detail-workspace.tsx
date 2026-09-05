@@ -34,7 +34,6 @@ import {
   WrenchIcon,
 } from "lucide-react"
 
-import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
@@ -62,6 +61,10 @@ import {
   transferredFiles,
 } from "./agent-attachment-list"
 import { MessageTimestamp } from "./message-timestamp"
+import {
+  AgentAnswer,
+  stripAgentSourceLinks,
+} from "./agent-source-references"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -727,7 +730,12 @@ function RunExchange({
             ) : null}
 
             {run.result ? (
-              <MarkdownContent content={answer} className="text-sm leading-6" />
+              <AgentAnswer
+                content={answer}
+                sources={run.sources}
+                t={t}
+                className="text-sm leading-6"
+              />
             ) : run.status === "failed" ? (
               <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                 {run.last_error ?? t("Agent 未返回结果")}
@@ -757,7 +765,7 @@ function RunExchange({
               <MessageTimestamp value={answerStartedAt} />
               {run.status === "succeeded" && answer ? (
                 <RunActionBar
-                  result={answer}
+                  result={stripAgentSourceLinks(answer)}
                   feedback={run.feedback}
                   regenerateDisabled={regenerateDisabled}
                   regenerating={regeneratingRunId === run.id}

@@ -5851,7 +5851,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
 
 def test_run_to_response_maps_run_fields() -> None:
-    from app.application.agent_tools import run_to_response
+    from app.application.agent_tools import knowledge_source_ref, run_to_response
     from app.entities.agents import AgentRun
 
     run = AgentRun(
@@ -5867,6 +5867,37 @@ def test_run_to_response_maps_run_fields() -> None:
         status="succeeded",
         result="answer",
         model_usage={"model_calls": 1, "total_tokens": 12},
+        grounding_meta={"evidence_ids": ["chunk-2"]},
+        events=[
+            {
+                "type": "tool",
+                "turn": 1,
+                "tool_name": "search_knowledge",
+                "tool_kind": "knowledge",
+                "status": "succeeded",
+                "summary": "agent.knowledge_chunks_returned:2",
+                "output": {
+                    "hits": [
+                        {
+                            "knowledge_base": "制度库",
+                            "document": "社保制度.pdf",
+                            "chunk_id": "chunk-1",
+                            "chunk_index": 0,
+                            "content": "不相关片段",
+                        },
+                        {
+                            "knowledge_base": "制度库",
+                            "document": "社保制度.pdf",
+                            "chunk_id": "chunk-2",
+                            "parent_title": "补缴规则",
+                            "section_path": ["第二章", "补缴规则"],
+                            "chunk_index": 4,
+                            "content": "不足十五年时可以补缴。",
+                        },
+                    ]
+                },
+            }
+        ],
         application_snapshot={
             "attachments": [
                 {
@@ -5889,9 +5920,14 @@ def test_run_to_response_maps_run_fields() -> None:
     assert response.result == "answer"
     assert response.model_name == "deepseek-chat"
     assert response.plan == []
-    assert response.events == []
+    assert len(response.events) == 1
     assert response.model_usage["total_tokens"] == 12
     assert response.attachments[0].filename == "report.pdf"
+    assert response.sources[0].document == "社保制度.pdf"
+    assert response.sources[0].source_ref == knowledge_source_ref("chunk-2")
+    assert response.sources[0].parent_title == "补缴规则"
+    assert response.sources[0].chunk_index == 4
+    assert response.sources[0].content == "不足十五年时可以补缴。"
     assert response.trace_id == "trace-1"
 
 

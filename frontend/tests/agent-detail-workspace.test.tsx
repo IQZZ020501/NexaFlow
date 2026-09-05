@@ -15,6 +15,7 @@ import {
   processTimeline,
   unrenderedAgentToolCalls,
 } from "@/components/agents/agent-detail-workspace"
+import { stripAgentSourceLinks } from "@/components/agents/agent-source-references"
 import { LanguageProvider, useLanguage } from "@/contexts/language-provider"
 import type {
   Agent,
@@ -581,6 +582,52 @@ describe("AgentDetailWorkspace preview", () => {
     expect(
       container.querySelector('textarea[aria-label="编辑消息"]')
     ).toBeNull()
+  })
+
+  test("shows the knowledge chunks used as answer sources", async () => {
+    expect(
+      stripAgentSourceLinks(
+        "不足十五年时可以补缴。[source](#nexaflow-source-0123456789abcdef)"
+      )
+    ).toBe("不足十五年时可以补缴。")
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[
+          makeRun({
+            result:
+              "不足十五年时可以补缴。[source](#nexaflow-source-0123456789abcdef)\n\n再次说明。[source](#nexaflow-source-0123456789abcdef)",
+            sources: [
+              {
+                source_ref: "0123456789abcdef",
+                knowledge_base: "制度库",
+                document: "社保制度.pdf",
+                parent_title: "补缴规则",
+                section_path: ["第二章", "补缴规则"],
+                chunk_index: 4,
+                content: "原文规定：不足十五年时可以补缴。",
+              },
+            ],
+          }),
+        ]}
+      />
+    )
+
+    const source = screen.getByRole("button", {
+      name: "来源：社保制度.pdf · 补缴规则",
+    })
+    expect(source.textContent).toBe("社保制度.pdf")
+    expect(
+      screen.getAllByRole("button", {
+        name: "来源：社保制度.pdf · 补缴规则",
+      })
+    ).toHaveLength(1)
+    expect(source.closest("p")?.textContent).toContain("不足十五年时可以补缴。")
+    fireEvent.click(source)
+    await waitFor(() =>
+      expect(screen.getByText("原文规定：不足十五年时可以补缴。")).toBeTruthy()
+    )
+    expect(screen.getByText("制度库 · 补缴规则")).toBeTruthy()
   })
 
   test("shows the first-token timestamp below the answer", () => {

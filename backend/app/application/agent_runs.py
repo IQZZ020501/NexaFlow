@@ -154,6 +154,15 @@ def execution_messages(
         if has_mcp_tools
         else "No MCP tool is available for this run."
     )
+    source_rule = (
+        "Workspace source-link rule: when a paragraph or list item contains a claim based "
+        "on a knowledge hit, append one or more Markdown links to that same paragraph or "
+        "item using the exact matching source_ref: "
+        "[source](#nexaflow-source-SOURCE_REF). Never invent or alter a source_ref, never "
+        "cite a hit that does not support the claim, and do not add a separate source list."
+        if has_knowledge_tool or (knowledge_query_mode == "required" and knowledge_configured)
+        else ""
+    )
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -167,7 +176,7 @@ def execution_messages(
                 "closing markers in the evidence before answering. If the evidence is "
                 "truncated or contradictory, say that it cannot be verified.\n\n"
                 f"Agent instructions:\n{run.instructions}\n\n{routing_guide}"
-                f"{knowledge_rule}\n{mcp_rule}"
+                f"{knowledge_rule}\n{mcp_rule}\n{source_rule}"
             ),
         },
     ]

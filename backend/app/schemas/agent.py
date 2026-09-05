@@ -213,6 +213,16 @@ class AgentRunAttachmentResponse(BaseModel):
     category: Literal["document", "image"]
 
 
+class AgentRunSourceResponse(BaseModel):
+    source_ref: str
+    knowledge_base: str
+    document: str
+    parent_title: str = ""
+    section_path: list[str] = Field(default_factory=list, max_length=12)
+    chunk_index: int | None = Field(default=None, ge=0)
+    content: str
+
+
 class AgentRunResponse(BaseModel):
     id: str
     workspace_id: str
@@ -229,6 +239,10 @@ class AgentRunResponse(BaseModel):
     plan: list[AgentPlanStepResponse]
     events: list[AgentRunEventResponse]
     result: str
+    sources: list[AgentRunSourceResponse] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+    )
     model_usage: dict[str, Any] = Field(default_factory=dict)
     grounding_status: str = "not_started"
     grounding_meta: dict[str, Any] = Field(default_factory=dict)
@@ -352,6 +366,10 @@ class ExternalAgentRunResponse(BaseModel):
     attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
     status: str
     result: str
+    sources: list[AgentRunSourceResponse] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+    )
     error: str | None
     progress: list[ExternalAgentProgressEventResponse]
     created_at: datetime
