@@ -2,7 +2,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.registered import RegisteredModel
-from app.entities.resource_folders import ResourceFolder
+from app.entities.resource_folders.models import ResourceFolder
 from app.infra.db.mapping import save, to_entity
 from app.domain.agents.models import Agent
 from app.domain.knowledge.models import KnowledgeBase

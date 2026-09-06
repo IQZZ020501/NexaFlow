@@ -39,7 +39,7 @@ from app.entities.knowledge_graph import (
 )
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
-from app.entities.workspace_governance import WorkspaceGovernance
+from app.entities.governance.models import WorkspaceGovernance
 from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     default_graph_schema,

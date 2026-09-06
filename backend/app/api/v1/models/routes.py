@@ -13,7 +13,7 @@ from app.api.deps import (
     require_workspace_path_role,
 )
 from app.entities.identity.user import User
-from app.schemas.model import (
+from app.schemas.models.contracts import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
     ModelProviderCatalogResponse,

@@ -13,7 +13,7 @@ from tests.support import (
     settings as test_settings,
     test_client,
 )
-from app.application.governance import (
+from app.application.governance.service import (
     _check_health_component,
     _probe_qdrant,
     _probe_redis,
@@ -50,21 +50,21 @@ async def check_health_probe_functions() -> None:
     async def slow_probe() -> None:
         await asyncio.sleep(0.02)
 
-    with patch("app.application.governance.HEALTH_PROBE_TIMEOUT_SECONDS", 0.001):
+    with patch("app.application.governance.service.HEALTH_PROBE_TIMEOUT_SECONDS", 0.001):
         component = await _check_health_component(True, slow_probe)
     assert component.status == "error"
     assert component.detail == "timeout"
 
     redis = AsyncMock()
     redis.ping.return_value = True
-    with patch("app.application.governance.Redis.from_url", return_value=redis) as factory:
+    with patch("app.application.governance.service.Redis.from_url", return_value=redis) as factory:
         await _probe_redis(test_settings())
     factory.assert_called_once()
     redis.aclose.assert_awaited_once()
 
     redis = AsyncMock()
     redis.ping.return_value = False
-    with patch("app.application.governance.Redis.from_url", return_value=redis):
+    with patch("app.application.governance.service.Redis.from_url", return_value=redis):
         try:
             await _probe_redis(test_settings())
         except RuntimeError:
@@ -73,7 +73,7 @@ async def check_health_probe_functions() -> None:
             raise AssertionError("Redis health probe accepted a false PING response")
     redis.aclose.assert_awaited_once()
 
-    with patch("app.application.governance.check_vector_store_health") as qdrant:
+    with patch("app.application.governance.service.check_vector_store_health") as qdrant:
         await _probe_qdrant(test_settings())
     qdrant.assert_called_once_with(test_settings())
 
@@ -133,12 +133,12 @@ async def check_health_degradation() -> None:
     db = AsyncMock()
     healthy_probe = AsyncMock()
     with (
-        patch("app.application.governance._probe_redis", healthy_probe),
-        patch("app.application.governance._probe_qdrant", healthy_probe),
-        patch("app.application.governance._probe_storage", healthy_probe),
-        patch("app.application.governance._probe_worker", healthy_probe),
+        patch("app.application.governance.service._probe_redis", healthy_probe),
+        patch("app.application.governance.service._probe_qdrant", healthy_probe),
+        patch("app.application.governance.service._probe_storage", healthy_probe),
+        patch("app.application.governance.service._probe_worker", healthy_probe),
         patch(
-            "app.application.governance.governance_repository.health_counts",
+            "app.application.governance.service.governance_repository.health_counts",
             new=AsyncMock(return_value=(2, 3, 4, 5, 6)),
         ) as counts,
     ):
@@ -156,12 +156,12 @@ async def check_health_degradation() -> None:
     db = AsyncMock()
     db.execute.side_effect = OSError("database down")
     with (
-        patch("app.application.governance._probe_redis", healthy_probe),
-        patch("app.application.governance._probe_qdrant", healthy_probe),
-        patch("app.application.governance._probe_storage", healthy_probe),
-        patch("app.application.governance._probe_worker", healthy_probe),
+        patch("app.application.governance.service._probe_redis", healthy_probe),
+        patch("app.application.governance.service._probe_qdrant", healthy_probe),
+        patch("app.application.governance.service._probe_storage", healthy_probe),
+        patch("app.application.governance.service._probe_worker", healthy_probe),
         patch(
-            "app.application.governance.governance_repository.health_counts",
+            "app.application.governance.service.governance_repository.health_counts",
             new=AsyncMock(),
         ) as counts,
     ):
@@ -173,12 +173,12 @@ async def check_health_degradation() -> None:
 
     db = AsyncMock()
     with (
-        patch("app.application.governance._probe_redis", healthy_probe),
-        patch("app.application.governance._probe_qdrant", healthy_probe),
-        patch("app.application.governance._probe_storage", healthy_probe),
-        patch("app.application.governance._probe_worker", healthy_probe),
+        patch("app.application.governance.service._probe_redis", healthy_probe),
+        patch("app.application.governance.service._probe_qdrant", healthy_probe),
+        patch("app.application.governance.service._probe_storage", healthy_probe),
+        patch("app.application.governance.service._probe_worker", healthy_probe),
         patch(
-            "app.application.governance.governance_repository.health_counts",
+            "app.application.governance.service.governance_repository.health_counts",
             new=AsyncMock(side_effect=OSError("query failed")),
         ),
     ):
@@ -190,15 +190,15 @@ async def check_health_degradation() -> None:
         return 0, 0, 0, 0, 0
 
     with (
-        patch("app.application.governance._probe_redis", healthy_probe),
-        patch("app.application.governance._probe_qdrant", healthy_probe),
-        patch("app.application.governance._probe_storage", healthy_probe),
-        patch("app.application.governance._probe_worker", healthy_probe),
+        patch("app.application.governance.service._probe_redis", healthy_probe),
+        patch("app.application.governance.service._probe_qdrant", healthy_probe),
+        patch("app.application.governance.service._probe_storage", healthy_probe),
+        patch("app.application.governance.service._probe_worker", healthy_probe),
         patch(
-            "app.application.governance.governance_repository.health_counts",
+            "app.application.governance.service.governance_repository.health_counts",
             new=slow_counts,
         ),
-        patch("app.application.governance.HEALTH_PROBE_TIMEOUT_SECONDS", 0.001),
+        patch("app.application.governance.service.HEALTH_PROBE_TIMEOUT_SECONDS", 0.001),
     ):
         response = await get_admin_health(AsyncMock(), settings)
     assert response.components["database"].detail == "timeout"
@@ -215,10 +215,10 @@ def main() -> None:
         admin_headers = auth_headers(admin_token)
 
         with (
-            patch("app.application.governance._probe_redis", new=AsyncMock()),
-            patch("app.application.governance._probe_qdrant", new=AsyncMock()),
-            patch("app.application.governance._probe_storage", new=AsyncMock()),
-            patch("app.application.governance._probe_worker", new=AsyncMock()),
+            patch("app.application.governance.service._probe_redis", new=AsyncMock()),
+            patch("app.application.governance.service._probe_qdrant", new=AsyncMock()),
+            patch("app.application.governance.service._probe_storage", new=AsyncMock()),
+            patch("app.application.governance.service._probe_worker", new=AsyncMock()),
         ):
             health = client.get(
                 "/api/v1/admin/governance/health", headers=admin_headers

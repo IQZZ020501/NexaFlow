@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.audit import count_audit_logs, list_workspace_audit_logs
 from app.application.analytics import get_workspace_analytics
-from app.application.governance import (
+from app.application.governance.service import (
     get_workspace_governance,
     get_workspace_inventory,
     update_workspace_governance,
@@ -18,7 +18,7 @@ from app.application.identity.invitations import (
     revoke_workspace_invitation,
 )
 from app.schemas.analytics import WorkspaceAnalyticsResponse
-from app.schemas.governance import (
+from app.schemas.governance.contracts import (
     WorkspaceGovernanceResponse,
     WorkspaceGovernanceUpdateRequest,
     WorkspaceInventoryResponse,

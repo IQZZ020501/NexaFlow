@@ -36,7 +36,7 @@ from app.adapters.llm.runtime import (
 from app.domain.platform.models import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.validation import normalize_name
-from app.schemas.model import (
+from app.schemas.models.contracts import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
     ModelProviderCatalogResponse,

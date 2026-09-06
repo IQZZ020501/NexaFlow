@@ -8,7 +8,7 @@ from app.api.deps import (
     get_workspace_context_from_path,
     require_workspace_path_role,
 )
-from app.application.resource_folders import (
+from app.application.resource_folders.service import (
     create_resource_folder,
     delete_resource_folder,
     list_resource_folders,
@@ -17,7 +17,7 @@ from app.application.resource_folders import (
     update_resource_folder,
 )
 from app.infra.db.session import get_db
-from app.schemas.resource_folder import (
+from app.schemas.resource_folders.contracts import (
     ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,
     ResourceFolderMoveRequest,

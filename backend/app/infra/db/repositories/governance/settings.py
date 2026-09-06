@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm
-from app.entities.workspace_governance import WorkspaceGovernance
+from app.entities.governance.models import WorkspaceGovernance
 from app.infra.db import mapping
 
 

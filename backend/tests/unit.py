@@ -93,8 +93,8 @@ from app.application.knowledge_graph_build import (
     finalize_abandoned_graph_reservations,
 )
 from app.application.knowledge_graph_maintenance import _revision_source_versions
-from app.application.resource_folders import descendant_folder_ids
-from app.entities.resource_folders import ResourceFolder
+from app.application.resource_folders.service import descendant_folder_ids
+from app.entities.resource_folders.models import ResourceFolder
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -6878,21 +6878,21 @@ def test_mcp_server_create_request_transport_matrix() -> None:
 def test_workspace_daily_quota_uses_shanghai_day_boundary() -> None:
     from datetime import UTC, datetime
 
-    from app.application.governance import enforce_workspace_run_quota
+    from app.application.governance.service import enforce_workspace_run_quota
 
     db = object()
     count_runs = AsyncMock(return_value=0)
     with (
         patch(
-            "app.application.governance.utc_now",
+            "app.application.governance.service.utc_now",
             return_value=datetime(2026, 9, 5, 16, 30, tzinfo=UTC),
         ),
         patch(
-            "app.application.governance.workspace_governance_repository.get",
+            "app.application.governance.service.workspace_governance_repository.get",
             new=AsyncMock(return_value=SimpleNamespace(daily_run_limit=10)),
         ),
         patch(
-            "app.application.governance.governance_repository.daily_run_count",
+            "app.application.governance.service.governance_repository.daily_run_count",
             new=count_runs,
         ),
     ):

@@ -70,7 +70,7 @@ from app.infra.db.session import get_session_factory
 from app.ports import mcp as ports_mcp
 from app.ports import model_registry as ports_model_registry
 from app.schemas.mcp import McpServerCreateRequest
-from app.schemas.model import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
+from app.schemas.models.contracts import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
 from app.schemas.teams.contracts import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentMcpTool as AgentMcpToolOrm
