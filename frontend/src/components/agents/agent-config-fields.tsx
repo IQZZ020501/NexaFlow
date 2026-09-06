@@ -11,6 +11,8 @@ import {
   PlusIcon,
   SearchIcon,
   SlidersHorizontalIcon,
+  LoaderCircleIcon,
+  WandSparklesIcon,
   WorkflowIcon,
   WrenchIcon,
 } from "lucide-react"
@@ -35,7 +37,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { IconButton } from "@/components/ui/icon-button"
+import { useSession } from "@/contexts/session-context"
 import type { TFunction } from "@/i18n"
+import { generateAgentInstructions } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
@@ -82,6 +87,7 @@ export function AgentConfigFields({
   readOnly,
   t,
 }: AgentConfigFieldsProps) {
+  const { notify } = useSession()
   const [resourcePicker, setResourcePicker] = React.useState<
     "knowledge" | null
   >(null)
@@ -89,6 +95,8 @@ export function AgentConfigFields({
   const [isToolsOpen, setIsToolsOpen] = React.useState(false)
   const [isToolPickerOpen, setIsToolPickerOpen] = React.useState(false)
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
+  const [isGeneratingInstructions, setIsGeneratingInstructions] =
+    React.useState(false)
 
   const configurableModels = models.filter(
     (model) =>
@@ -129,6 +137,30 @@ export function AgentConfigFields({
           : [...current.knowledgeBaseIds, id],
       }
     })
+  }
+
+  async function handleGenerateInstructions() {
+    const content = form.instructions.trim()
+    if (!form.id || !form.modelId || !content) return
+
+    setIsGeneratingInstructions(true)
+    try {
+      const result = await generateAgentInstructions(
+        token,
+        workspaceId,
+        form.id,
+        form.modelId,
+        content
+      )
+      setForm((current) => ({
+        ...current,
+        instructions: result.instructions,
+      }))
+    } catch {
+      notify("error", t("系统提示词生成失败，请稍后重试"))
+    } finally {
+      setIsGeneratingInstructions(false)
+    }
   }
 
   return (
@@ -271,21 +303,44 @@ export function AgentConfigFields({
                 {t("系统提示词")}
               </FieldLabel>
             </div>
-            <textarea
-              id="agent-instructions"
-              value={form.instructions}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  instructions: event.target.value,
-                }))
-              }
-              className="min-h-44 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-3 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
-              placeholder={t("描述 Agent 的角色、回答方式和约束。")}
-              maxLength={8000}
-              rows={7}
-              disabled={readOnly}
-            />
+            <div className="relative">
+              <textarea
+                id="agent-instructions"
+                value={form.instructions}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    instructions: event.target.value,
+                  }))
+                }
+                className="min-h-44 w-full resize-y rounded-lg border border-input bg-muted/20 px-3 py-3 pr-14 pb-14 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:bg-background focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/20"
+                placeholder={t("描述 Agent 的角色、回答方式和约束。")}
+                maxLength={8000}
+                rows={7}
+                disabled={readOnly || isGeneratingInstructions}
+              />
+              <IconButton
+                label={t(
+                  isGeneratingInstructions
+                    ? "正在生成系统提示词"
+                    : "AI 生成系统提示词"
+                )}
+                className="absolute right-4 bottom-4 border border-border bg-background text-violet-600 shadow-xs hover:bg-violet-50 hover:text-violet-700 dark:hover:bg-violet-950/40"
+                disabled={
+                  readOnly ||
+                  isGeneratingInstructions ||
+                  !form.modelId ||
+                  !form.instructions.trim()
+                }
+                onClick={handleGenerateInstructions}
+              >
+                {isGeneratingInstructions ? (
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                ) : (
+                  <WandSparklesIcon className="size-4" />
+                )}
+              </IconButton>
+            </div>
           </section>
         ) : null}
 

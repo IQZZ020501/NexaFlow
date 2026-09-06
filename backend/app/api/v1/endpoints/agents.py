@@ -15,6 +15,7 @@ from app.application.agents import (
     create_agent_run,
     delete_agent,
     enqueue_prepared_agent_run,
+    generate_agent_instructions,
     get_agent,
     get_agent_monitoring,
     get_agent_run_entity,
@@ -49,6 +50,8 @@ from app.schemas.agent import (
     AgentApiCredentialListResponse,
     AgentConversationUserListResponse,
     AgentCreateRequest,
+    AgentInstructionsGenerateRequest,
+    AgentInstructionsGenerateResponse,
     AgentResponse,
     AgentLogListResponse,
     AgentMonitoringResponse,
@@ -258,6 +261,27 @@ async def get_workspace_agent(
         agent,
         context.user,
         context.membership_role,
+    )
+
+
+@router.post(
+    "/{agent_id}/generate-instructions",
+    response_model=AgentInstructionsGenerateResponse,
+)
+async def generate_workspace_agent_instructions(
+    agent_id: str,
+    payload: AgentInstructionsGenerateRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AgentInstructionsGenerateResponse:
+    agent = await get_agent(db, context.workspace.id, agent_id)
+    require_agent_edit(agent, context.user, context.membership_role)
+    return await generate_agent_instructions(
+        db,
+        context.workspace.id,
+        payload,
+        settings,
     )
 
 

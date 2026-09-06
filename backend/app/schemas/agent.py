@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.tool import ToolRefSchema
 from app.schemas.user import UserResponse
@@ -134,6 +134,22 @@ class AgentUpdateRequest(BaseModel):
         if self.tools is not None and self.mcp_tools is not None:
             raise ValueError("Use tools or legacy mcp_tools, not both.")
         return self
+
+
+class AgentInstructionsGenerateRequest(BaseModel):
+    model_id: str = Field(min_length=1, max_length=36)
+    content: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("System prompt content is required.")
+        return value
+
+
+class AgentInstructionsGenerateResponse(BaseModel):
+    instructions: str = Field(min_length=1, max_length=8000)
 
 
 class AgentPermissionResponse(BaseModel):

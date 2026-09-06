@@ -262,6 +262,29 @@ describe("AgentConfigFields", () => {
     expect(screen.getByText("Catalog search")).toBeTruthy()
   })
 
+  test("generates instructions from the current editor content", async () => {
+    let requestBody: Record<string, string> | undefined
+    globalThis.fetch = (async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body))
+      return jsonResponse({ instructions: "Generated from the editor." })
+    }) as typeof fetch
+
+    renderPage(<FieldsHarness form={initialForm()} />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "AI 生成系统提示词" })
+    )
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("系统提示词") as HTMLTextAreaElement).value
+      ).toBe("Generated from the editor.")
+    )
+    expect(requestBody).toEqual({
+      model_id: "model-1",
+      content: "Be concise.",
+    })
+  })
+
   test("selects and removes knowledge bases from the picker", async () => {
     renderPage(
       <FieldsHarness
@@ -375,6 +398,11 @@ describe("AgentConfigFields", () => {
     ).toBe(true)
     expect(
       (screen.getByLabelText("选择模型") as HTMLButtonElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByRole("button", {
+        name: "AI 生成系统提示词",
+      }) as HTMLButtonElement).disabled
     ).toBe(true)
   })
 

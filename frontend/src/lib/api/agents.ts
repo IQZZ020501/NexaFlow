@@ -377,6 +377,23 @@ export function updateAgent(
   })
 }
 
+export function generateAgentInstructions(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  modelId: string,
+  content: string
+) {
+  return request<{ instructions: string }>(
+    agentsPath(workspaceId, `/${agentId}/generate-instructions`),
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify({ model_id: modelId, content }),
+    }
+  )
+}
+
 export function deleteAgent(
   token: string,
   workspaceId: string,

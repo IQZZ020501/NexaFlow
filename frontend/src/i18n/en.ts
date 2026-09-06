@@ -1083,6 +1083,10 @@ export const en = {
   "Agent 名称": "Agent name",
   选择模型: "Select a model",
   系统提示词: "System prompt",
+  "AI 生成系统提示词": "Generate system prompt with AI",
+  正在生成系统提示词: "Generating system prompt",
+  "系统提示词生成失败，请稍后重试":
+    "System prompt generation failed. Please try again.",
   "描述 Agent 的角色、回答方式和约束。":
     "Describe the Agent's role, response style, and constraints.",
   "按需选择知识库，最多 {value} 个。": "Select up to {value} knowledge bases.",

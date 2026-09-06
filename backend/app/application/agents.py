@@ -28,6 +28,7 @@ from app.application.agent_tools import (
     run_to_response,
     safe_agent_error,
 )
+from app.application.agent_prompts import generate_agent_instructions
 from app.application.agent_access import (
     authenticate_agent_api_credential,
     cancel_external_agent_run,
@@ -99,6 +100,7 @@ __all__ = [
     "get_agent_model",
     "get_agent_monitoring",
     "get_agent_response",
+    "generate_agent_instructions",
     "get_agent_run_response",
     "get_agent_run_entity",
     "get_external_agent_run",
