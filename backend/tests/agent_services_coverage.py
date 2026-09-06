@@ -2085,6 +2085,35 @@ def exercise_http(client, admin_token: str, workspace_id: str, model_base_url: s
     assert fetched.status_code == 200, fetched.text
     assert fetched.json()["id"] == agent_id
 
+    generated = client.post(
+        agents_url(workspace_id, f"/{agent_id}/generate-instructions"),
+        headers=auth_headers(admin_token),
+        json={
+            "model_id": model_id,
+            "content": "Answer only from verified legal clauses.",
+        },
+    )
+    assert generated.status_code == 200, generated.text
+    assert generated.json() == {"instructions": "Completed."}
+    assert (
+        "Answer only from verified legal clauses."
+        in ModelHandler.calls[-1]["messages"][-1]["content"]
+    )
+
+    blank_generation = client.post(
+        agents_url(workspace_id, f"/{agent_id}/generate-instructions"),
+        headers=auth_headers(admin_token),
+        json={"model_id": model_id, "content": "   "},
+    )
+    assert blank_generation.status_code == 422, blank_generation.text
+
+    forbidden_generation = client.post(
+        agents_url(workspace_id, f"/{agent_id}/generate-instructions"),
+        headers=auth_headers(member_token),
+        json={"model_id": model_id, "content": "Rewrite this."},
+    )
+    assert forbidden_generation.status_code == 403, forbidden_generation.text
+
     # GET missing agent -> 404
     missing = client.get(
         agents_url(workspace_id, "/ghost-agent"),

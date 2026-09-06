@@ -1453,29 +1453,12 @@ def test_embedding_pipeline_edge_paths() -> None:
         == "a\n\nb"
     )
 
-    # extract_with_pymupdf returning a non-string result.
-    original_to_markdown = pipeline.pymupdf4llm.to_markdown
-    pipeline.pymupdf4llm.to_markdown = lambda *_args, **_kwargs: 42
-    try:
-        try:
-            pipeline.extract_with_pymupdf(
-                "x.pdf",
-                Path("/tmp/nonexistent-x.pdf"),
-                force_ocr=False,
-            )
-        except TypeError:
-            pass
-        else:
-            raise AssertionError("Non-string PyMuPDF result was accepted.")
-    finally:
-        pipeline.pymupdf4llm.to_markdown = original_to_markdown
-
     # extract_document with a missing file.
     try:
         pipeline.extract_document(
-            "x.pdf",
-            "application/pdf",
-            Path("/tmp/definitely-missing-x.pdf"),
+            "x.txt",
+            "text/plain",
+            Path("/tmp/definitely-missing-x.txt"),
         )
     except pipeline.KnowledgePipelineError:
         pass
@@ -1485,9 +1468,11 @@ def test_embedding_pipeline_edge_paths() -> None:
     # extract_document where the converter raises.
     missing_convert_path = Path("/tmp/knowledge-pipeline-convert-fail.txt")
     missing_convert_path.write_bytes(b"content")
-    original_convert_local = pipeline.MARKITDOWN.convert_local
-    pipeline.MARKITDOWN.convert_local = (
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    original_converter = pipeline.markitdown_converter
+    pipeline.markitdown_converter = lambda: SimpleNamespace(
+        convert_local=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("boom")
+        )
     )
     try:
         try:
@@ -1501,15 +1486,17 @@ def test_embedding_pipeline_edge_paths() -> None:
         else:
             raise AssertionError("Converter failure was not wrapped.")
     finally:
-        pipeline.MARKITDOWN.convert_local = original_convert_local
+        pipeline.markitdown_converter = original_converter
         missing_convert_path.unlink(missing_ok=True)
 
     # extract_document with no extractable text (converter returns whitespace).
     blank_path = Path("/tmp/knowledge-pipeline-blank.txt")
     blank_path.write_bytes(b"content")
-    original_convert_local = pipeline.MARKITDOWN.convert_local
-    pipeline.MARKITDOWN.convert_local = (
-        lambda *_args, **_kwargs: SimpleNamespace(text_content="   \n  ")
+    original_converter = pipeline.markitdown_converter
+    pipeline.markitdown_converter = lambda: SimpleNamespace(
+        convert_local=lambda *_args, **_kwargs: SimpleNamespace(
+            text_content="   \n  "
+        )
     )
     try:
         try:
@@ -1519,7 +1506,7 @@ def test_embedding_pipeline_edge_paths() -> None:
         else:
             raise AssertionError("Whitespace-only document was accepted.")
     finally:
-        pipeline.MARKITDOWN.convert_local = original_convert_local
+        pipeline.markitdown_converter = original_converter
         blank_path.unlink(missing_ok=True)
 
     # Table detection: a row followed by a non-alignment row is not a table.
@@ -1645,6 +1632,84 @@ def test_knowledge_api_flow() -> None:
         )
         assert knowledge_base.status_code == 201, knowledge_base.text
         knowledge_base_id = knowledge_base.json()["id"]
+
+        image_without_vision_model = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/attachments",
+            ),
+            headers=auth_headers(alice_token),
+            files={"file": ("diagram.png", b"image", "image/png")},
+        )
+        assert image_without_vision_model.status_code == 422
+        assert image_without_vision_model.json()["detail"] == (
+            "Vision model is not configured for this workspace."
+        )
+
+        vision_model = client.post(
+            models_url(default_workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                **model_payload(model_base_url),
+                "name": "Knowledge Vision",
+                "model_type": "VISION",
+                "model_name": "vision-test",
+            },
+        )
+        assert vision_model.status_code == 201, vision_model.text
+        image_attachment = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/attachments",
+            ),
+            headers=auth_headers(alice_token),
+            files={"file": ("diagram.png", b"image", "image/png")},
+        )
+        assert image_attachment.status_code == 201, image_attachment.text
+        image_document = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents",
+            ),
+            headers=auth_headers(alice_token),
+            json={
+                "attachment_ids": [image_attachment.json()["id"]],
+                "staged": False,
+            },
+        )
+        assert image_document.status_code == 201, image_document.text
+        image_document_id = image_document.json()[0]["id"]
+        parsed_image = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{image_document_id}/parse",
+            ),
+            headers=auth_headers(alice_token),
+            json={"auto_index": False},
+        )
+        assert parsed_image.status_code == 202, parsed_image.text
+        image_chunks = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{image_document_id}/chunks",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert image_chunks.status_code == 200, image_chunks.text
+        assert [item["content"] for item in image_chunks.json()] == [
+            "# diagram\n\nok"
+        ]
+        assert client.delete(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{image_document_id}",
+            ),
+            headers=auth_headers(alice_token),
+        ).status_code == 204
+        assert client.delete(
+            models_url(default_workspace_id, f"/{vision_model.json()['id']}"),
+            headers=auth_headers(admin_token),
+        ).status_code == 204
 
         duplicate_name = client.post(
             knowledge_url(default_workspace_id),

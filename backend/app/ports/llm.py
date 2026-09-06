@@ -18,8 +18,11 @@ from app.capabilities.llm.runtime import (
     build_registered_chat_model,
     build_registered_embeddings,
     build_registered_reranker,
+    extract_registered_image_text,
 )
 from app.infrastructure.config import Settings
+
+VISION_MODEL_REQUIRED_MESSAGE = "Vision model is not configured for this workspace."
 
 
 class EmbeddingProvider(Protocol):
@@ -59,6 +62,15 @@ def build_chat_model(
     return build_registered_chat_model(model, settings, timeout=timeout)
 
 
+def extract_image_text(
+    settings: Settings,
+    model: RegisteredModel,
+    media_type: str,
+    image_bytes: bytes,
+) -> str:
+    return extract_registered_image_text(model, settings, media_type, image_bytes)
+
+
 __all__ = [
     "ChatProvider",
     "EmbeddingProvider",
@@ -69,7 +81,9 @@ __all__ = [
     "ModelToolCall",
     "RegisteredModel",
     "RerankProvider",
+    "VISION_MODEL_REQUIRED_MESSAGE",
     "build_chat_model",
     "build_embeddings",
     "build_reranker",
+    "extract_image_text",
 ]

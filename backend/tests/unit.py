@@ -1886,6 +1886,8 @@ def test_public_tool_responses_exclude_execution_details() -> None:
             "connection": {"url": "https://private.example.com/mcp"},
         },
         "created_by_user_id": "owner-1",
+        "created_at": "2026-08-17T00:00:00+00:00",
+        "updated_at": "2026-08-18T00:00:00+00:00",
         "permission": "use",
         "can_view": True,
         "can_use": True,
@@ -1937,6 +1939,8 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
                 "kind": "builtin",
             },
             "created_by_user_id": None,
+            "created_at": "2026-08-17T00:00:00+00:00",
+            "updated_at": "2026-08-18T00:00:00+00:00",
             "permission": None,
             "can_view": True,
             "can_use": True,
@@ -1945,6 +1949,7 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
     )
 
     assert summary.created_by_user_id is None
+    assert summary.updated_at > summary.created_at
 
 
 def test_tool_ref_schema_requires_canonical_ids() -> None:
@@ -3307,10 +3312,16 @@ def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
         path = Path(directory) / "images.docx"
         path.touch()
         with (
-            patch.object(pipeline, "pre_process_docx", lambda stream: stream),
+            patch(
+                "markitdown.converters._docx_converter.pre_process_docx",
+                lambda stream: stream,
+            ),
             patch.object(pipeline.mammoth.images, "img_element", lambda callback: callback),
             patch.object(pipeline.mammoth, "convert_to_html", fake_convert_to_html),
-            patch.object(pipeline.HtmlConverter, "convert_string", fake_convert_string),
+            patch(
+                "markitdown.converters._html_converter.HtmlConverter.convert_string",
+                fake_convert_string,
+            ),
         ):
             text, assets = pipeline.extract_document(
                 path.name,
@@ -3350,12 +3361,14 @@ def test_docx_image_mime_cannot_shape_asset_paths() -> None:
         path = Path(directory) / "image.docx"
         path.touch()
         with (
-            patch.object(pipeline, "pre_process_docx", lambda stream: stream),
+            patch(
+                "markitdown.converters._docx_converter.pre_process_docx",
+                lambda stream: stream,
+            ),
             patch.object(pipeline.mammoth.images, "img_element", lambda callback: callback),
             patch.object(pipeline.mammoth, "convert_to_html", fake_convert_to_html),
-            patch.object(
-                pipeline.HtmlConverter,
-                "convert_string",
+            patch(
+                "markitdown.converters._html_converter.HtmlConverter.convert_string",
                 return_value=SimpleNamespace(text_content="Diagram"),
             ),
         ):
@@ -3383,18 +3396,11 @@ def test_archive_limits_run_before_document_conversion() -> None:
         with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
             archive.writestr("large.txt", b"x" * 9)
 
-        with (
-            patch.object(
-                pipeline,
-                "MAX_ARCHIVE_UNCOMPRESSED_BYTES",
-                8,
-                create=True,
-            ),
-            patch.object(
-                pipeline.MARKITDOWN,
-                "convert_local",
-                return_value=SimpleNamespace(text_content="converted"),
-            ),
+        with patch.object(
+            pipeline,
+            "MAX_ARCHIVE_UNCOMPRESSED_BYTES",
+            8,
+            create=True,
         ):
             try:
                 pipeline.extract_document(path.name, "application/zip", path)
@@ -3476,7 +3482,11 @@ def test_supported_document_formats_are_accepted() -> None:
         }:
             path = Path(directory) / f"document{extension}"
             path.write_bytes(b"content")
-            with patch.object(pipeline.MARKITDOWN, "convert_local", fake_convert_local):
+            with patch.object(
+                pipeline,
+                "markitdown_converter",
+                return_value=SimpleNamespace(convert_local=fake_convert_local),
+            ):
                 text, assets = pipeline.extract_document(
                     path.name,
                     "application/octet-stream",
@@ -3497,7 +3507,7 @@ def test_supported_document_formats_are_accepted() -> None:
             assert assets == []
 
 
-def test_pdf_documents_use_pymupdf_markdown_with_ocr() -> None:
+def test_pdf_documents_extract_only_the_text_layer() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
@@ -3507,111 +3517,68 @@ def test_pdf_documents_use_pymupdf_markdown_with_ocr() -> None:
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.pdf"
         path.write_bytes(b"pdf")
-        with (
-            patch.object(
-                pipeline.MARKITDOWN,
-                "convert_local",
-                side_effect=AssertionError("PDF must not use MarkItDown"),
-            ),
-            patch.object(
-                pipeline.pymupdf4llm,
-                "to_markdown",
-                return_value="提 高 思想 认识， 压 实 防 灾 责 任。",
-            ) as convert_pdf,
-        ):
+        page = SimpleNamespace(
+            extract_text=lambda: "提 高 思想 认识， 压 实 防 灾 责 任。"
+        )
+        with patch(
+            "pypdf.PdfReader",
+            return_value=SimpleNamespace(pages=[page]),
+        ) as reader:
             text, assets = pipeline.extract_document(
                 path.name,
                 "application/pdf",
                 path,
             )
 
-    assert text == "# 通知\n\n提高思想认识，压实防灾责任。"
-    assert assets == []
-    convert_pdf.assert_called_once_with(
-        path,
-        use_ocr=True,
-        force_ocr=False,
-        ocr_language="chi_sim+eng",
-        ocr_dpi=300,
-        write_images=False,
-    )
+        assert text == "# 通知\n\n提高思想认识，压实防灾责任。"
+        assert assets == []
+        reader.assert_called_once_with(path)
+
+        empty_page = SimpleNamespace(extract_text=lambda: None)
+        with patch(
+            "pypdf.PdfReader",
+            return_value=SimpleNamespace(pages=[empty_page]),
+        ):
+            try:
+                pipeline.extract_document(path.name, "application/pdf", path)
+            except pipeline.KnowledgePipelineError as exc:
+                assert "no extractable text" in str(exc)
+            else:
+                raise AssertionError("Scanned PDF without a text layer was accepted")
 
 
-def test_image_documents_use_pymupdf_ocr() -> None:
+def test_image_documents_use_the_configured_vision_extractor() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
-    from unittest.mock import patch
 
     from app.capabilities.embedding import pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.png"
         path.write_bytes(b"png")
-        with (
-            patch.object(
-                pipeline.MARKITDOWN,
-                "convert_local",
-                side_effect=AssertionError("Images must not use MarkItDown"),
-            ),
-            patch.object(
-                pipeline.pymupdf4llm,
-                "to_markdown",
-                return_value="识 别 文 本",
-            ) as convert_image,
-        ):
-            text, assets = pipeline.extract_document(
-                path.name,
-                "image/png",
-                path,
-            )
+        calls: list[tuple[str, bytes]] = []
 
-    assert text == "# 通知\n\n识别文本"
-    assert assets == []
-    convert_image.assert_called_once_with(
-        path,
-        use_ocr=True,
-        force_ocr=True,
-        ocr_language="chi_sim+eng",
-        ocr_dpi=300,
-        write_images=False,
-    )
+        def extract_image(media_type: str, content: bytes) -> str:
+            calls.append((media_type, content))
+            return "识 别 文 本"
 
+        text, assets = pipeline.extract_document(
+            path.name,
+            "image/png",
+            path,
+            image_text_extractor=extract_image,
+        )
 
-def test_webp_documents_are_normalized_for_pymupdf_ocr() -> None:
-    from pathlib import Path
-    from tempfile import TemporaryDirectory
-    from unittest.mock import patch
+        assert text == "# 通知\n\n识别文本"
+        assert assets == []
+        assert calls == [("image/png", b"png")]
 
-    import pymupdf
-    from PIL import Image
-
-    from app.capabilities.embedding import pipeline
-
-    with TemporaryDirectory() as directory:
-        path = Path(directory) / "通知.webp"
-        Image.new("RGB", (10, 10), "white").save(path, format="WEBP")
-        with patch.object(
-            pipeline.pymupdf4llm,
-            "to_markdown",
-            return_value="识 别 文 本",
-        ) as convert_image:
-            text, assets = pipeline.extract_document(
-                path.name,
-                "image/webp",
-                path,
-            )
-
-    assert text == "# 通知\n\n识别文本"
-    assert assets == []
-    source = convert_image.call_args.args[0]
-    assert isinstance(source, pymupdf.Document)
-    assert convert_image.call_args.kwargs == {
-        "use_ocr": True,
-        "force_ocr": True,
-        "ocr_language": "chi_sim+eng",
-        "ocr_dpi": 300,
-        "write_images": False,
-    }
+        try:
+            pipeline.extract_document(path.name, "image/png", path)
+        except pipeline.KnowledgePipelineError as exc:
+            assert str(exc) == "Vision model is not configured for this workspace."
+        else:
+            raise AssertionError("Image parsing without a vision model was accepted")
 
 
 # ---------------------------------------------------------------- retrieval math
@@ -4948,9 +4915,10 @@ def test_parent_context_windows_around_child_offsets() -> None:
 
 def test_model_type_normalization() -> None:
     assert normalize_model_type("llm") == "LLM"
+    assert normalize_model_type("vision") == "VISION"
     assert normalize_model_type(" embeddings ") == "EMBEDDING"
     assert normalize_model_type("rerank") == "RERANKER"
-    expect_http_error(lambda: normalize_model_type("vision"), 422)
+    expect_http_error(lambda: normalize_model_type("audio"), 422)
 
 
 def test_status_validation() -> None:
@@ -5068,7 +5036,7 @@ def test_safe_agent_error_classification() -> None:
     from app.shareddomain.agents.runtime import AgentRunnerError
 
     status_error = ModelProviderStatusError(429, "rate limited")
-    assert safe_agent_error(status_error) == str(status_error)
+    assert safe_agent_error(status_error) == "Provider returned status 429"
 
     runner_error = AgentRunnerError("planning failed")
     assert safe_agent_error(runner_error) == str(runner_error)
@@ -5888,7 +5856,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
 
 def test_run_to_response_maps_run_fields() -> None:
-    from app.application.agent_tools import run_to_response
+    from app.application.agent_tools import knowledge_source_ref, run_to_response
     from app.entities.agents import AgentRun
 
     run = AgentRun(
@@ -5904,6 +5872,37 @@ def test_run_to_response_maps_run_fields() -> None:
         status="succeeded",
         result="answer",
         model_usage={"model_calls": 1, "total_tokens": 12},
+        grounding_meta={"evidence_ids": ["chunk-2"]},
+        events=[
+            {
+                "type": "tool",
+                "turn": 1,
+                "tool_name": "search_knowledge",
+                "tool_kind": "knowledge",
+                "status": "succeeded",
+                "summary": "agent.knowledge_chunks_returned:2",
+                "output": {
+                    "hits": [
+                        {
+                            "knowledge_base": "制度库",
+                            "document": "社保制度.pdf",
+                            "chunk_id": "chunk-1",
+                            "chunk_index": 0,
+                            "content": "不相关片段",
+                        },
+                        {
+                            "knowledge_base": "制度库",
+                            "document": "社保制度.pdf",
+                            "chunk_id": "chunk-2",
+                            "parent_title": "补缴规则",
+                            "section_path": ["第二章", "补缴规则"],
+                            "chunk_index": 4,
+                            "content": "不足十五年时可以补缴。",
+                        },
+                    ]
+                },
+            }
+        ],
         application_snapshot={
             "attachments": [
                 {
@@ -5926,9 +5925,14 @@ def test_run_to_response_maps_run_fields() -> None:
     assert response.result == "answer"
     assert response.model_name == "deepseek-chat"
     assert response.plan == []
-    assert response.events == []
+    assert len(response.events) == 1
     assert response.model_usage["total_tokens"] == 12
     assert response.attachments[0].filename == "report.pdf"
+    assert response.sources[0].document == "社保制度.pdf"
+    assert response.sources[0].source_ref == knowledge_source_ref("chunk-2")
+    assert response.sources[0].parent_title == "补缴规则"
+    assert response.sources[0].chunk_index == 4
+    assert response.sources[0].content == "不足十五年时可以补缴。"
     assert response.trace_id == "trace-1"
 
 
@@ -6976,9 +6980,8 @@ def main() -> None:
     test_docx_image_mime_cannot_shape_asset_paths()
     test_archive_limits_run_before_document_conversion()
     test_supported_document_formats_are_accepted()
-    test_pdf_documents_use_pymupdf_markdown_with_ocr()
-    test_image_documents_use_pymupdf_ocr()
-    test_webp_documents_are_normalized_for_pymupdf_ocr()
+    test_pdf_documents_extract_only_the_text_layer()
+    test_image_documents_use_the_configured_vision_extractor()
     test_reciprocal_rank_fusion_merges_and_ranks()
     test_reciprocal_rank_fusion_reports_named_rankings_deterministically()
     test_keyword_repository_uses_scoped_bm25_query()

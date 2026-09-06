@@ -74,6 +74,7 @@ from app.schemas.model import RegisteredModelCreateRequest, RegisteredModelUpdat
 from app.schemas.team import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
 from app.shareddomain.agents.models import Agent as AgentOrm
 from app.shareddomain.agents.models import AgentMcpTool as AgentMcpToolOrm
+from app.shareddomain.resource_folders.models import ResourceFolder as ResourceFolderOrm
 from app.shareddomain.teams import services as teams_services
 from app.shareddomain.tools import services as tools_services
 from app.shareddomain.tools.models import McpServer as McpServerOrm
@@ -825,6 +826,8 @@ def test_registry_basics() -> None:
     assert llm_registry.normalize_model_type("LLM") == "LLM"
     assert llm_registry.normalize_model_type("chat") == "LLM"
     assert llm_registry.normalize_model_type("llm") == "LLM"
+    assert llm_registry.normalize_model_type("vision") == "VISION"
+    assert llm_registry.normalize_model_type("vlm") == "VISION"
     assert llm_registry.normalize_model_type("embedding") == "EMBEDDING"
     assert llm_registry.normalize_model_type("embeddings") == "EMBEDDING"
     assert llm_registry.normalize_model_type("rerank") == "RERANKER"
@@ -843,6 +846,10 @@ def test_registry_basics() -> None:
         {"max_tokens": 4096, "extra_body": {"enable_thinking": False}},
         "LLM",
     ) == {"max_tokens": 4096, "extra_body": {"enable_thinking": False}}
+    assert llm_registry.normalize_model_request_params(
+        {"max_tokens": 1024},
+        "VISION",
+    ) == {"max_tokens": 1024}
     expect_http_error(
         lambda: llm_registry.normalize_model_request_params(
             {"max_tokens": 0},
@@ -880,6 +887,7 @@ def test_registry_basics() -> None:
 
     expect_http_error(lambda: llm_registry.validate_provider_support(deepseek, "EMBEDDING"), 422)
     llm_registry.validate_provider_support(deepseek, "LLM")
+    llm_registry.validate_provider_support(deepseek, "VISION")
 
     fields = llm_registry.credential_fields(deepseek)
     assert [field["field"] for field in fields] == ["api_base", "api_key"]
@@ -2855,7 +2863,63 @@ def test_celery() -> None:
         exception=ValueError("oops"),
     )
 
+    with patch.object(celery_mod.gc, "collect") as collect:
+        celery_mod.collect_task_garbage(
+            sender=SimpleNamespace(name="app.knowledge.run_task")
+        )
+        celery_mod.collect_task_garbage(
+            sender=SimpleNamespace(name="app.maintenance.recover_frequent")
+        )
+        celery_mod.collect_task_garbage(sender=None)
+        collect.assert_called_once_with()
+
     app = celery_mod.create_celery_app()
+    assert app.task_cls is celery_mod.NexaFlowTask
+    display_task = celery_mod.NexaFlowTask()
+    display_task.name = "app.maintenance.recover_minutely"
+    assert display_task.shadow_name((), {}, {}) == "恢复每分钟维护任务"
+    display_task.name = "app.unregistered"
+    assert display_task.shadow_name((), {}, {}) == "app.unregistered"
+
+    log_filter = celery_mod._RoutineMaintenanceLogFilter()
+    maintenance_log = logging.LogRecord(
+        "celery.app.trace",
+        logging.INFO,
+        "",
+        0,
+        "Task %(name)s received",
+        ({"name": "恢复每分钟维护任务"},),
+        None,
+    )
+    assert log_filter.filter(maintenance_log) is False
+    maintenance_log.levelno = logging.ERROR
+    assert log_filter.filter(maintenance_log) is True
+    normal_log = logging.LogRecord(
+        "celery.app.trace",
+        logging.INFO,
+        "",
+        0,
+        "Task %(name)s received",
+        ({"name": "处理知识库任务"},),
+        None,
+    )
+    assert log_filter.filter(normal_log) is True
+    beat_log = logging.LogRecord(
+        "celery.beat",
+        logging.INFO,
+        "",
+        0,
+        "Scheduler: Sending due task %s (%s)",
+        ("recover-frequent-maintenance", "app.maintenance.recover_frequent"),
+        None,
+    )
+    assert log_filter.filter(beat_log) is False
+    handler = logging.StreamHandler()
+    celery_mod.hide_routine_maintenance_logs(logger=SimpleNamespace(handlers=[handler]))
+    assert celery_mod._routine_maintenance_log_filter in handler.filters
+    assert celery_mod._routine_maintenance_log_filter in logging.getLogger(
+        "celery.beat"
+    ).filters
     assert app.conf.broker_url == settings().celery_broker_url
     assert app.conf.worker_pool in {"solo", "threads", "prefork"}
     beat = app.conf.beat_schedule
@@ -2948,6 +3012,67 @@ def test_configure_task_worker() -> None:
         for thread in threads:
             thread.join(timeout=1)
         assert len(calls) == 1
+
+        async def current_loop_id() -> int:
+            await asyncio.sleep(0)
+            return id(asyncio.get_running_loop())
+
+        loop_ids: list[int] = []
+        threads = [
+            threading.Thread(
+                target=lambda: loop_ids.append(
+                    tasks_module.run_task_async(current_loop_id())
+                )
+            )
+            for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=1)
+        assert len(loop_ids) == 2
+        assert len(set(loop_ids)) == 1
+
+        started = threading.Event()
+        cleaned = threading.Event()
+
+        async def interrupted_work() -> None:
+            started.set()
+            try:
+                await asyncio.sleep(10)
+            finally:
+                await asyncio.sleep(0.05)
+                cleaned.set()
+
+        class WorkerInterrupted(BaseException):
+            pass
+
+        original_submit = asyncio.run_coroutine_threadsafe
+
+        def interrupted_submit(coro, loop):
+            submitted = original_submit(coro, loop)
+            assert started.wait(timeout=1)
+
+            class InterruptedFuture:
+                def result(self):
+                    raise WorkerInterrupted
+
+                def cancel(self):
+                    return submitted.cancel()
+
+            return InterruptedFuture()
+
+        asyncio.run_coroutine_threadsafe = interrupted_submit
+        try:
+            try:
+                tasks_module.run_task_async(interrupted_work())
+            except WorkerInterrupted:
+                pass
+            else:  # pragma: no cover - regression guard
+                raise AssertionError("worker interruption should propagate")
+            assert cleaned.is_set()
+        finally:
+            asyncio.run_coroutine_threadsafe = original_submit
     finally:
         tasks_module._configured_process_id = original_pid
         tasks_module.configure_database = original_configure
@@ -4326,8 +4451,18 @@ async def db_seed_tests() -> None:
 
 async def db_registry_repository_tests(workspace_id: str, created_by: str) -> None:
     async with get_session_factory()() as db:
+        folder = ResourceFolderOrm(
+            workspace_id=workspace_id,
+            resource_type="model",
+            parent_id=None,
+            name="Archived models",
+            created_by_user_id=created_by,
+        )
+        db.add(folder)
+        await db.flush()
         model_a = _make_model_entity(workspace_id, created_by, name="Alpha Model")
         model_b = _make_model_entity(workspace_id, created_by, name="Beta Model")
+        model_b.folder_id = folder.id
         db.add_all([model_a, model_b])
         await db.commit()
         await db.refresh(model_a)
@@ -4337,6 +4472,18 @@ async def db_registry_repository_tests(workspace_id: str, created_by: str) -> No
         assert {item.id for item in listed} == {model_a.id, model_b.id}
         paged = await llm_registry_repository.list_registered_models(db, workspace_id, limit=1, offset=1)
         assert len(paged) == 1
+        root_models = await llm_registry_repository.list_registered_models(
+            db, workspace_id, folder_id=""
+        )
+        assert [item.name for item in root_models] == ["Alpha Model"]
+        folder_models = await llm_registry_repository.list_registered_models(
+            db, workspace_id, folder_id=folder.id
+        )
+        assert [item.name for item in folder_models] == ["Beta Model"]
+        named = await llm_registry_repository.list_registered_models(
+            db, workspace_id, sort="name"
+        )
+        assert [item.name for item in named] == ["Alpha Model", "Beta Model"]
         assert await llm_registry_repository.get_registered_model_by_id(db, model_a.id) is not None
         assert await llm_registry_repository.get_registered_model_by_id(db, "missing") is None
         found = await llm_registry_repository.find_registered_model_id_by_name(db, workspace_id, "Alpha Model")
@@ -4401,7 +4548,10 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
     assert all("LLM" in entry.model_types for entry in llm_catalog)
 
     types = app_models.list_model_types("model_deepseek_provider")
-    assert [(item.key, item.value) for item in types] == [("LLM", "LLM")]
+    assert [(item.key, item.value) for item in types] == [
+        ("LLM", "LLM"),
+        ("Vision", "VISION"),
+    ]
     expect_http_error(lambda: app_models.list_model_types("nope"), 422)
 
     base_models = app_models.list_base_models("model_deepseek_provider", "LLM")

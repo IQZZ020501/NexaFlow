@@ -6,6 +6,8 @@ import dynamic from "next/dynamic"
 import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
+  CopyIcon,
+  ExternalLinkIcon,
   FolderInputIcon,
   LoaderCircleIcon,
   PencilIcon,
@@ -23,6 +25,7 @@ import {
 } from "@/components/knowledge/status-badges"
 import { TopLoadingBar } from "@/components/app/top-progress"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { runAttachmentFromFile } from "@/components/agents/agent-attachment-list"
@@ -35,10 +38,14 @@ import { useResourceFolders } from "@/components/resource-folders/use-resource-f
 import { Badge } from "@/components/ui/badge"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
+import { copyText } from "@/lib/clipboard"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { cn } from "@/lib/utils"
 import {
@@ -51,6 +58,7 @@ import {
 } from "@/components/ui/dialog"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
+import { languageLocales } from "@/i18n"
 import {
   cancelAgentRun,
   compareLiveStreamIds,
@@ -92,7 +100,11 @@ import { listWorkspaceMembers, type WorkspaceMember } from "@/lib/api/system"
 import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { getErrorMessage } from "@/lib/errors"
 import { latestRunVersions } from "@/lib/run-versions"
-import { formatUserIdentity, getMembershipRole } from "@/lib/display"
+import {
+  formatDateTime,
+  formatUserIdentity,
+  getMembershipRole,
+} from "@/lib/display"
 import { appViewPath, type AgentDetailView } from "@/lib/agent-views"
 import {
   defaultInteractionConfig,
@@ -140,6 +152,22 @@ type ToolCatalogState = {
   workspaceId: string | null
   tools: ToolDetail[]
   error: string | null
+}
+
+type AgentSortKey = "updated_at" | "created_at" | "name"
+
+function sortAgents(agents: Agent[], sortKey: AgentSortKey, locale: string) {
+  const collator = new Intl.Collator(locale, {
+    numeric: true,
+    sensitivity: "base",
+  })
+  return [...agents].sort((left, right) => {
+    if (sortKey === "name") return collator.compare(left.name, right.name)
+    return (
+      Date.parse(right[sortKey]) - Date.parse(left[sortKey]) ||
+      collator.compare(left.name, right.name)
+    )
+  })
 }
 
 const EMPTY_TOOL_CATALOG: ToolCatalogState = {
@@ -540,7 +568,7 @@ export function AgentsPage({
   const router = useRouter()
   const params = useParams<{ id?: string }>()
   const selectedAgentId = params.id ?? null
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const resourceFolders = useResourceFolders("application")
   const [confirmAction, confirmDialog] = useConfirmDialog()
@@ -590,6 +618,8 @@ export function AgentsPage({
     string | null
   >(null)
   const [agentSearch, setAgentSearch] = React.useState("")
+  const [agentSortKey, setAgentSortKey] =
+    React.useState<AgentSortKey>("updated_at")
   const [agentsHasMore, setAgentsHasMore] = React.useState(true)
   const [listedAgentsCount, setListedAgentsCount] = React.useState(0)
   const [isAgentsLoadingMore, setIsAgentsLoadingMore] = React.useState(false)
@@ -640,15 +670,23 @@ export function AgentsPage({
     const inFolder = agents.filter(
       (agent) => (agent.folder_id ?? null) === resourceFolders.selectedFolderId
     )
-    if (!search) return inFolder
-
-    return inFolder.filter((agent) => {
-      const model = models.find((item) => item.id === agent.model_id)
-      return [agent.name, agent.description, model?.name ?? ""].some((value) =>
-        value.toLowerCase().includes(search)
-      )
-    })
-  }, [agentSearch, agents, models, resourceFolders.selectedFolderId])
+    const matched = search
+      ? inFolder.filter((agent) => {
+          const model = models.find((item) => item.id === agent.model_id)
+          return [agent.name, agent.description, model?.name ?? ""].some(
+            (value) => value.toLowerCase().includes(search)
+          )
+        })
+      : inFolder
+    return sortAgents(matched, agentSortKey, languageLocales[language])
+  }, [
+    agentSearch,
+    agentSortKey,
+    agents,
+    language,
+    models,
+    resourceFolders.selectedFolderId,
+  ])
   const movableAgentIds = filteredAgents
     .filter((agent) => agent.can_edit)
     .map((agent) => agent.id)
@@ -657,6 +695,15 @@ export function AgentsPage({
     (error: unknown) => notify("error", getErrorMessage(error, t)),
     [notify, t]
   )
+
+  async function copyPublicLink(agentId: string) {
+    try {
+      await copyText(`${window.location.origin}/chat/${agentId}`)
+      notify("success", t("已复制"))
+    } catch {
+      notify("error", t("复制失败"))
+    }
+  }
 
   const loadToolCatalog = React.useCallback(async () => {
     const requestId = ++toolCatalogRequestRef.current
@@ -2058,13 +2105,26 @@ export function AgentsPage({
         }
       >
         <div className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative min-w-0 sm:w-[320px]">
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={agentSearch}
-              onChange={(event) => setAgentSearch(event.target.value)}
-              placeholder={t("搜索{label}...", { label: t("应用") })}
-              className="pl-9"
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+            <div className="relative min-w-0 sm:w-[320px]">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={agentSearch}
+                onChange={(event) => setAgentSearch(event.target.value)}
+                placeholder={t("搜索{label}...", { label: t("应用") })}
+                className="pl-9"
+              />
+            </div>
+            <FilterDropdown
+              ariaLabel={t("排序")}
+              value={agentSortKey}
+              options={[
+                { value: "updated_at", label: t("最近更新") },
+                { value: "created_at", label: t("创建时间") },
+                { value: "name", label: t("名称") },
+              ]}
+              className="h-9 sm:w-32"
+              onChange={(value) => setAgentSortKey(value as AgentSortKey)}
             />
           </div>
           <ResourceBulkMoveBar
@@ -2137,10 +2197,13 @@ export function AgentsPage({
                         )}
                       </span>
                       <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="truncate text-sm font-semibold">
-                            {agent.name}
-                          </h2>
+                        <h2
+                          className="truncate text-sm font-semibold"
+                          title={agent.name}
+                        >
+                          {agent.name}
+                        </h2>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
                           <Badge variant="secondary">
                             {agent.app_type === "workflow"
                               ? t("工作流")
@@ -2170,6 +2233,13 @@ export function AgentsPage({
                                     agent.created_by_user_id
                                   ),
                           })}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {t("更新时间")} ·{" "}
+                          {formatDateTime(
+                            agent.updated_at,
+                            languageLocales[language]
+                          )}
                         </p>
                       </div>
                     </div>
@@ -2218,29 +2288,56 @@ export function AgentsPage({
                         )}
                       />
                     </dl>
-                    {agent.can_edit ? (
+                    {agent.published || agent.can_edit ? (
                       <CardMoreMenu label={t("更多")}>
-                          <DropdownMenuItem
-                            onSelect={() => setMoveAgentTarget(agent)}
-                          >
-                            <FolderInputIcon />
-                            {t("移动到文件夹")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                          onSelect={() =>
-                            void handleOpenAgentPermissions(agent)
-                          }
-                          >
-                            <ShieldCheckIcon />
-                            {t("资源授权")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onSelect={() => setDeleteAgentTarget(agent)}
-                          >
-                            <Trash2Icon />
-                            {t("删除")}
-                          </DropdownMenuItem>
+                        {agent.published ? (
+                          <>
+                            <DropdownMenuItem asChild>
+                              <a
+                                href={`/chat/${agent.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <ExternalLinkIcon />
+                                {t("打开链接")}
+                              </a>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => void copyPublicLink(agent.id)}
+                            >
+                              <CopyIcon />
+                              {t("复制链接")}
+                            </DropdownMenuItem>
+                            {agent.can_edit ? (
+                              <DropdownMenuSeparator />
+                            ) : null}
+                          </>
+                        ) : null}
+                        {agent.can_edit ? (
+                          <>
+                            <DropdownMenuItem
+                              onSelect={() => setMoveAgentTarget(agent)}
+                            >
+                              <FolderInputIcon />
+                              {t("移动到文件夹")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                void handleOpenAgentPermissions(agent)
+                              }
+                            >
+                              <ShieldCheckIcon />
+                              {t("资源授权")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => setDeleteAgentTarget(agent)}
+                            >
+                              <Trash2Icon />
+                              {t("删除")}
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
                       </CardMoreMenu>
                     ) : null}
                   </div>

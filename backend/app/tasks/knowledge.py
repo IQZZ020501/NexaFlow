@@ -27,7 +27,7 @@ from app.shareddomain.workflows.uploads import (
     prepare_due_upload_cleanups,
     run_upload_storage_cleanup,
 )
-from app.tasks import configure_task_worker
+from app.tasks import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
 
@@ -53,7 +53,7 @@ def run_knowledge_task_job(self, task_id: str) -> None:
         worker_pid=os.getpid(),
     )
     try:
-        outcome = asyncio.run(
+        outcome = run_task_async(
             run_knowledge_task(
                 task_id,
                 settings,
@@ -89,7 +89,7 @@ def run_knowledge_task_job(self, task_id: str) -> None:
 def recover_knowledge_tasks_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    task_ids = asyncio.run(list_recoverable_knowledge_task_ids(settings))
+    task_ids = run_task_async(list_recoverable_knowledge_task_ids(settings))
     for task_id in task_ids:
         run_knowledge_task_job.apply_async(args=(task_id,))
 
@@ -101,7 +101,7 @@ def recover_knowledge_tasks_job() -> None:
 def reconcile_knowledge_graphs_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    task_ids = asyncio.run(reconcile_knowledge_graphs(settings))
+    task_ids = run_task_async(reconcile_knowledge_graphs(settings))
     for task_id in task_ids:
         run_knowledge_task_job.apply_async(args=(task_id,))
 
@@ -116,7 +116,7 @@ def run_knowledge_storage_cleanup_job(self, cleanup_id: str) -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     try:
-        asyncio.run(run_knowledge_storage_cleanup(cleanup_id, settings))
+        run_task_async(run_knowledge_storage_cleanup(cleanup_id, settings))
     except Exception as exc:
         log_error(
             logger,
@@ -134,7 +134,7 @@ def run_knowledge_storage_cleanup_job(self, cleanup_id: str) -> None:
 def recover_knowledge_storage_cleanups_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    cleanup_ids = asyncio.run(list_due_knowledge_storage_cleanup_ids())
+    cleanup_ids = run_task_async(list_due_knowledge_storage_cleanup_ids())
     for cleanup_id in cleanup_ids:
         run_knowledge_storage_cleanup_job.apply_async(args=(cleanup_id,))
 
@@ -149,7 +149,7 @@ def run_upload_storage_cleanup_job(self, cleanup_id: str) -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     try:
-        asyncio.run(run_upload_storage_cleanup(cleanup_id, settings))
+        run_task_async(run_upload_storage_cleanup(cleanup_id, settings))
     except Exception as exc:
         log_error(
             logger,
@@ -167,7 +167,7 @@ def run_upload_storage_cleanup_job(self, cleanup_id: str) -> None:
 def recover_upload_storage_cleanups_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    cleanup_ids = asyncio.run(prepare_due_upload_cleanups())
+    cleanup_ids = run_task_async(prepare_due_upload_cleanups())
     for cleanup_id in cleanup_ids:
         run_upload_storage_cleanup_job.apply_async(args=(cleanup_id,))
 

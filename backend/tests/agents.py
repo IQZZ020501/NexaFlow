@@ -1284,6 +1284,10 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         "chunk-base-applied",
         "chunk-base-fallback",
     ]
+    assert [item["source_ref"] for item in result.output["hits"]] == [
+        agent_tools.knowledge_source_ref("chunk-base-applied"),
+        agent_tools.knowledge_source_ref("chunk-base-fallback"),
+    ]
     assert [
         (
             item["chunk_id"],
@@ -1411,6 +1415,7 @@ def assert_tool_routing_context_is_explicit() -> None:
     assert "search_knowledge: first choice for workspace-specific" in system
     assert "MCP tools: use only for current or external data" in system
     assert "Release Docs" in system
+    assert "[source](#nexaflow-source-SOURCE_REF)" in system
     assert "answer immediately without tools" not in system
     assert [message["role"] for message in messages[1:]] == [
         "user",
@@ -1447,6 +1452,7 @@ def assert_tool_routing_context_is_explicit() -> None:
     )[0]["content"]
     assert "workspace retrieval was performed" not in no_knowledge_system
     assert "No workspace knowledge source is available" in no_knowledge_system
+    assert "#nexaflow-source-" not in no_knowledge_system
 
     tool = agent_tools.build_knowledge_search_tool(
         [knowledge_base],
@@ -3401,7 +3407,7 @@ def assert_external_agent_access() -> None:
             finally:
                 agent_executor.run_agent = original_run_agent
             assert failed_external.status_code == 201, failed_external.text
-            assert failed_external.json()["error"] == "Agent run failed."
+            assert failed_external.json()["error"] == "Agent execution failed."
             assert "sensitive external failure" not in failed_external.text
 
             async def exceed_rate_limit(*_args, **_kwargs) -> None:

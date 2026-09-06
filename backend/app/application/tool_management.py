@@ -527,6 +527,8 @@ def _summary_response(item: ToolCatalogItem) -> ToolSummaryResponse:
             "kind": item.source.kind,
         },
         created_by_user_id=item.tool.created_by_user_id,
+        created_at=item.tool.created_at,
+        updated_at=item.tool.updated_at,
         permission=item.permission,
         can_view=item.access.can_view,
         can_use=item.access.can_use,

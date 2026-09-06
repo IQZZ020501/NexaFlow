@@ -35,7 +35,7 @@ class ResourceFolder(Base):
             name="fk_resource_folders_parent_workspace_type",
         ),
         CheckConstraint(
-            "resource_type IN ('knowledge', 'application', 'tool')",
+            "resource_type IN ('knowledge', 'application', 'model', 'tool')",
             name="ck_resource_folders_resource_type",
         ),
         Index(

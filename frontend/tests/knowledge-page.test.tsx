@@ -284,6 +284,12 @@ function cardElement(kbName: string) {
   return screen.getByRole("button", { name: new RegExp(kbName) })
 }
 
+function visibleKnowledgeBaseNames() {
+  return screen
+    .getAllByRole("heading", { level: 2 })
+    .map((heading) => heading.textContent)
+}
+
 /** Filename buttons in DOM order (they carry title but no aria-label). */
 function filenameButtons() {
   return Array.from(
@@ -307,6 +313,49 @@ function sortHeaderButton(name: string) {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage list view", () => {
+  test("sorts knowledge bases and shows their update time", async () => {
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) {
+        return jsonResponse([
+          makeKnowledgeBase({
+            id: "kb-alpha",
+            name: "Alpha",
+            created_at: "2026-09-02T00:00:00Z",
+            updated_at: "2026-09-01T00:00:00Z",
+          }),
+          makeKnowledgeBase({
+            id: "kb-bravo",
+            name: "Bravo",
+            created_at: "2026-09-01T00:00:00Z",
+            updated_at: "2026-09-02T00:00:00Z",
+          }),
+          makeKnowledgeBase({
+            id: "kb-charlie",
+            name: "Charlie",
+            created_at: "2026-09-03T00:00:00Z",
+            updated_at: "2026-09-03T00:00:00Z",
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    renderPage(<KnowledgeBasePage />)
+
+    await screen.findByText("Charlie")
+    expect(visibleKnowledgeBaseNames()).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(screen.getAllByText(/更新时间 ·/)).toHaveLength(3)
+
+    const sortTrigger = screen.getByRole("button", { name: "排序" })
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "创建时间" }))
+    expect(visibleKnowledgeBaseNames()).toEqual(["Charlie", "Alpha", "Bravo"])
+
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "名称" }))
+    expect(visibleKnowledgeBaseNames()).toEqual(["Alpha", "Bravo", "Charlie"])
+  })
+
   test("batch moves selected knowledge bases into a folder", async () => {
     const moves: unknown[] = []
     fetchHandler = (url, init) => {

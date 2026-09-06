@@ -1,3 +1,4 @@
+import base64
 import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
@@ -14,7 +15,12 @@ from langchain_anthropic import ChatAnthropic
 from langchain_aws import BedrockEmbeddings, BedrockRerank, ChatBedrockConverse
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessageChunk
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessageChunk,
+    HumanMessage,
+)
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_deepseek import ChatDeepSeek
 from langchain_google_genai import (
@@ -48,6 +54,14 @@ MODEL_REQUEST_TIMEOUT_SECONDS = 60
 STREAM_USAGE_SUPPORTED_META_KEY = "stream_usage_supported"
 MODEL_REQUEST_PARAMS_META_KEY = "request_params"
 DEFAULT_MODEL_REQUEST_PARAMS = {"max_tokens": 4_096}
+VISION_EXTRACTION_PROMPT = (
+    "Extract all visible text from this image into Markdown. Preserve reading "
+    "order, headings, lists, and tables. Return only the extracted content. "
+    "Return an empty response when the image contains no visible text."
+)
+VISION_TEST_IMAGE = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 SUPPORTED_PROVIDER_TYPES = {
     "openai_compatible",
     "anthropic",
@@ -637,9 +651,10 @@ def _registered_model_credentials(
     return {**config, **secrets}
 
 
-def build_registered_chat_model(
+def _build_registered_chat_model(
     model: RegisteredModel,
     settings: Settings,
+    expected_model_type: str,
     *,
     timeout: float | None = None,
 ) -> BaseChatModel:
@@ -649,7 +664,7 @@ def build_registered_chat_model(
     )
     return build_chat_model(
         model.provider_type,
-        _registered_model_credentials(model, settings, "LLM"),
+        _registered_model_credentials(model, settings, expected_model_type),
         model.model_name,
         stream_usage=(model.meta or {}).get(STREAM_USAGE_SUPPORTED_META_KEY) is True,
         timeout=(
@@ -657,6 +672,50 @@ def build_registered_chat_model(
         ),
         request_params=request_params if isinstance(request_params, dict) else {},
     )
+
+
+def build_registered_chat_model(
+    model: RegisteredModel,
+    settings: Settings,
+    *,
+    timeout: float | None = None,
+) -> BaseChatModel:
+    return _build_registered_chat_model(model, settings, "LLM", timeout=timeout)
+
+
+def build_registered_vision_model(
+    model: RegisteredModel,
+    settings: Settings,
+) -> BaseChatModel:
+    return _build_registered_chat_model(model, settings, "VISION")
+
+
+def vision_message(prompt: str, media_type: str, image_bytes: bytes) -> HumanMessage:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return HumanMessage(
+        content=[
+            {"type": "text", "text": prompt},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+            },
+        ]
+    )
+
+
+def extract_registered_image_text(
+    model: RegisteredModel,
+    settings: Settings,
+    media_type: str,
+    image_bytes: bytes,
+) -> str:
+    response = build_registered_vision_model(model, settings).invoke(
+        [vision_message(VISION_EXTRACTION_PROMPT, media_type, image_bytes)]
+    )
+    text = response.text.strip()
+    if not text:
+        raise ModelProviderError("Vision model returned no extractable text.")
+    return text
 
 
 def build_registered_embeddings(
@@ -690,7 +749,7 @@ def test_model_connection(
     model_type: str,
     request_params: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
-    if model_type == "LLM":
+    if model_type in {"LLM", "VISION"}:
         output_limit = (
             {"num_predict": 1}
             if provider_type == "ollama"
@@ -705,6 +764,13 @@ def test_model_connection(
                 stream_usage=stream_usage,
                 request_params=request_params,
             )
+
+        if model_type == "VISION":
+            chat().invoke(
+                [vision_message("Return OK.", "image/png", VISION_TEST_IMAGE)],
+                **output_limit,
+            )
+            return {STREAM_USAGE_SUPPORTED_META_KEY: False}
 
         if provider_type == "openai_compatible":
             try:

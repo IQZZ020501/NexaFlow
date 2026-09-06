@@ -6,6 +6,7 @@ from app.entities.resource_folders import ResourceFolder
 from app.entities.user import User
 from app.infrastructure.repositories import resource_folders as repository
 from app.infrastructure.validation import normalize_name
+from app.ports import model_registry
 from app.schemas.resource_folder import (
     ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,
@@ -203,6 +204,12 @@ async def _move_resources(
         elif resource_type == "application":
             resource = await get_agent(db, workspace_id, resource_id)
             require_agent_edit(resource, actor, workspace_role)
+        elif resource_type == "model":
+            if workspace_role != "admin" and not actor.is_global_admin:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace admin required.")
+            resource = await model_registry.get_registered_model_by_id(db, resource_id)
+            if resource is None or resource.workspace_id != workspace_id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found.")
         else:
             await require_managed_tool(
                 db,

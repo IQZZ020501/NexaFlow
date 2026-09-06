@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ResourceFolderType = Literal["knowledge", "application", "tool"]
+ResourceFolderType = Literal["knowledge", "application", "model", "tool"]
 
 
 class ResourceFolderResponse(BaseModel):

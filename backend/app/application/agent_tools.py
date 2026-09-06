@@ -26,7 +26,7 @@ from app.ports.llm import (
     ModelProviderStatusError,
 )
 from app.ports.mcp import McpClientError, call_mcp_tool
-from app.schemas.agent import AgentRunResponse
+from app.schemas.agent import AgentRunResponse, AgentRunSourceResponse
 from app.schemas.knowledge import KnowledgeQueryRequest
 from app.shareddomain.agents.runtime import (
     AgentRunnerError,
@@ -50,6 +50,9 @@ MAX_KNOWLEDGE_CONTENT_CHARS = 12_000
 MAX_KNOWLEDGE_CONTEXT_CHARS = 48_000
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
 MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS = 1800
+MAX_AGENT_SOURCE_REFERENCES = 12
+AGENT_SOURCE_REF_LENGTH = 16
+_PROVIDER_STATUS_ERROR_PREFIX = "Provider returned status "
 
 _tool_idempotency_key: ContextVar[str | None] = ContextVar(
     "agent_tool_idempotency_key", default=None
@@ -192,6 +195,75 @@ def knowledge_packets_from_output(value: Any) -> list[dict[str, Any]]:
     return packets
 
 
+def knowledge_sources_from_events(
+    events: list[dict[str, Any]],
+    grounding_meta: dict[str, Any] | None = None,
+) -> list[AgentRunSourceResponse]:
+    selected_ids = {
+        item
+        for item in (grounding_meta or {}).get("evidence_ids", [])
+        if isinstance(item, str) and item
+    }
+    sources: list[AgentRunSourceResponse] = []
+    seen: set[str] = set()
+    for event in events:
+        if (
+            event.get("type") != "tool"
+            or event.get("tool_kind") != "knowledge"
+            or event.get("status") != "succeeded"
+        ):
+            continue
+        output = event.get("output")
+        if not isinstance(output, dict) or not isinstance(output.get("hits"), list):
+            continue
+        for hit in output["hits"]:
+            if not isinstance(hit, dict):
+                continue
+            chunk_id = hit.get("chunk_id")
+            if not isinstance(chunk_id, str) or not chunk_id or chunk_id in seen:
+                continue
+            contributing_ids = {
+                item
+                for item in hit.get("contributing_chunk_ids", [])
+                if isinstance(item, str) and item
+            }
+            if selected_ids and not ({chunk_id, *contributing_ids} & selected_ids):
+                continue
+            seen.add(chunk_id)
+            raw_chunk_index = hit.get("chunk_index")
+            chunk_index: int | None = (
+                raw_chunk_index
+                if isinstance(raw_chunk_index, int) and raw_chunk_index >= 0
+                else None
+            )
+            sources.append(
+                AgentRunSourceResponse(
+                    source_ref=knowledge_source_ref(chunk_id),
+                    knowledge_base=str(hit.get("knowledge_base") or "")[:120],
+                    document=str(hit.get("document") or "")[:255],
+                    parent_title=str(hit.get("parent_title") or "")[:500],
+                    section_path=[
+                        item[:500]
+                        for item in hit.get("section_path", [])
+                        if isinstance(item, str) and item
+                    ][:12],
+                    chunk_index=chunk_index,
+                    content=str(hit.get("content") or "")[
+                        :MAX_KNOWLEDGE_CONTENT_CHARS
+                    ],
+                )
+            )
+            # ponytail: keep chat source chips bounded; paginate if answers
+            # routinely need to expose more than twelve evidence packets.
+            if len(sources) == MAX_AGENT_SOURCE_REFERENCES:
+                return sources
+    return sources
+
+
+def knowledge_source_ref(chunk_id: str) -> str:
+    return hashlib.sha256(chunk_id.encode()).hexdigest()[:AGENT_SOURCE_REF_LENGTH]
+
+
 def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
     """Return bounded, data-only metadata for the model's routing context."""
     if not knowledge_bases:
@@ -239,6 +311,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         plan=run.plan,
         events=run.events,
         result=clean_model_text(str(run.result or "")),
+        sources=knowledge_sources_from_events(run.events, run.grounding_meta),
         model_usage=run.model_usage,
         grounding_status=run.grounding_status,
         grounding_meta=run.grounding_meta,
@@ -254,9 +327,18 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
     )
 
 
+def safe_agent_run_error(error: str) -> str:
+    if not error.startswith(_PROVIDER_STATUS_ERROR_PREFIX):
+        return error
+    status_code = error.removeprefix(_PROVIDER_STATUS_ERROR_PREFIX).partition(":")[0]
+    if status_code.isdigit():
+        return f"{_PROVIDER_STATUS_ERROR_PREFIX}{status_code}"
+    return "Agent model request failed."
+
+
 def safe_agent_error(exc: Exception) -> str:
     if isinstance(exc, ModelProviderStatusError):
-        return str(exc)
+        return safe_agent_run_error(str(exc))
     if isinstance(exc, AgentRunnerError):
         return str(exc)
     if isinstance(exc, ModelProviderError):
@@ -383,11 +465,13 @@ def build_knowledge_search_tool(
                     {
                         "knowledge_base": knowledge_base.name,
                         "document": hit.document_filename,
+                        "source_ref": knowledge_source_ref(hit.chunk_id),
                         "chunk_id": hit.chunk_id,
                         "document_id": hit.document_id,
                         "parent_id": hit.parent_id,
                         "parent_title": hit.parent_title,
                         "section_path": hit.section_path,
+                        "chunk_index": hit.chunk_index,
                         "content": hit.content,
                         "content_truncated": hit.content_truncated,
                         "contributing_chunk_ids": hit.contributing_chunk_ids

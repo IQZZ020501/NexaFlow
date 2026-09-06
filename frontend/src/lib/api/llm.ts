@@ -26,6 +26,7 @@ export type ModelCredentialField = {
 export type RegisteredModel = {
   id: string
   workspace_id: string
+  folder_id?: string | null
   name: string
   provider: string
   provider_type: string
@@ -132,11 +133,26 @@ export function getModelProviderForm(token: string, provider: string) {
 export function listRegisteredModels(
   token: string,
   workspaceId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: {
+    limit?: number
+    offset?: number
+    folderId?: string | null
+    sort?: "updated_at" | "created_at" | "name"
+  } = {}
 ) {
+  const params = new URLSearchParams(
+    listQuery({ limit: options.limit, offset: options.offset }).slice(1)
+  )
+  if ("folderId" in options) {
+    params.set("folder_id", options.folderId ?? "")
+  }
+  if (options.sort) {
+    params.set("sort", options.sort)
+  }
+  const query = params.toString()
   return request<RegisteredModel[]>(
-    `/api/v1/workspaces/${workspaceId}/models${listQuery(options)}`,
-    { token },
+    `/api/v1/workspaces/${workspaceId}/models${query ? `?${query}` : ""}`,
+    { token }
   )
 }
 

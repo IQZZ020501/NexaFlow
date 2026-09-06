@@ -27,7 +27,6 @@ import {
   UserIcon,
 } from "lucide-react"
 
-import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
@@ -47,6 +46,10 @@ import {
   transferredFiles,
 } from "@/components/agents/agent-attachment-list"
 import { MessageTimestamp } from "@/components/agents/message-timestamp"
+import {
+  AgentAnswer,
+  stripAgentSourceLinks,
+} from "@/components/agents/agent-source-references"
 import { ToolInputPreview } from "@/components/agents/tool-input-preview"
 import {
   Dialog,
@@ -1320,9 +1323,6 @@ export function PublicAgentChat({
             if (streamEvent.type === "approval_required") {
               void loadRunToolCalls(observedRunId, controller)
             }
-            if (streamEvent.type === "error") {
-              setSendError(streamEvent.run.error || t("回答失败，请稍后重试。"))
-            }
           },
           controller.signal
         )
@@ -1562,9 +1562,6 @@ export function PublicAgentChat({
           if (streamEvent.type === "approval_required") {
             void loadRunToolCalls(liveRunId, controller)
           }
-          if (streamEvent.type === "error") {
-            setSendError(streamEvent.run.error || t("回答失败，请稍后重试。"))
-          }
         },
         controller.signal,
         activeConversationId,
@@ -1575,7 +1572,6 @@ export function PublicAgentChat({
     } catch (error) {
       if (!controller.signal.aborted) {
         const message = getErrorMessage(error, t)
-        setSendError(message)
         setRuns((current) =>
           current.map((run) =>
             run.id === placeholderId
@@ -1842,11 +1838,13 @@ export function PublicAgentChat({
                                 />
                               ))}
                             {run.result ? (
-                              <MarkdownContent
+                              <AgentAnswer
                                 content={withArtifactDownloadLinks(
                                   run.result,
                                   run.progress
                                 )}
+                                sources={run.sources}
+                                t={t}
                                 className="text-sm leading-6"
                               />
                             ) : run.status === "failed" ? (
@@ -1865,7 +1863,7 @@ export function PublicAgentChat({
                               <MessageTimestamp value={answerStartedAt} />
                               {run.status === "succeeded" && run.result ? (
                                 <RunActionBar
-                                  result={run.result}
+                                  result={stripAgentSourceLinks(run.result)}
                                   feedback={run.feedback}
                                   regenerateDisabled={
                                     isSending ||

@@ -3,6 +3,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, timedelta
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +45,7 @@ from app.entities.knowledge import (
 )
 from app.ports.parsing import (
     EMBED_BATCH_SIZE,
+    IMAGE_DOCUMENT_EXTENSIONS,
     KnowledgePipelineError,
     SEGMENTATION_VERSION,
 )
@@ -66,9 +68,10 @@ from app.shareddomain.knowledge.orchestration import (
 )
 from app.shareddomain.knowledge.services import (
     RESOURCE_TYPE,
+    get_default_knowledge_model,
     knowledge_object_storage,
 )
-from app.ports.llm import RegisteredModel
+from app.ports.llm import RegisteredModel, VISION_MODEL_REQUIRED_MESSAGE
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
 logger = get_logger(__name__)
@@ -166,7 +169,21 @@ async def run_parse_task(
     await knowledge_base_repository.save_knowledge_document(db, document)
 
     options = parse_task_options_from_task(task)
-    chunks = await extract_document_chunk_contents(document, settings, options)
+    vision_model = None
+    if Path(document.filename).suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS:
+        vision_model = await get_default_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            "VISION",
+        )
+        if vision_model is None:
+            raise KnowledgePipelineError(VISION_MODEL_REQUIRED_MESSAGE)
+    chunks = await extract_document_chunk_contents(
+        document,
+        settings,
+        options,
+        vision_model,
+    )
     ensure_knowledge_task_lease(lease_lost)
     vector_ids, stale_object_keys, written_object_keys = await replace_document_chunks(
         db,

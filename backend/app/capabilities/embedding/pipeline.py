@@ -1,16 +1,12 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cache
 from io import BytesIO
 from pathlib import Path
 from zipfile import BadZipFile, LargeZipFile, ZipFile, is_zipfile
 
 import mammoth
-import pymupdf
-import pymupdf4llm
-from markitdown import MarkItDown, StreamInfo
-from markitdown.converters._docx_converter import pre_process_docx
-from markitdown.converters._html_converter import HtmlConverter
-from PIL import Image
 
 from app.infrastructure.model_utils import new_id
 
@@ -20,10 +16,15 @@ PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
 SEGMENTATION_VERSION = "hierarchical-v2"
 NORMALIZED_TEXT_VERSION = "normalized-markdown-v1"
 EMBED_BATCH_SIZE = 64
-PDF_OCR_LANGUAGE = "chi_sim+eng"
-MARKITDOWN = MarkItDown(enable_plugins=False)
 SPLIT_SEPARATORS = frozenset({"\n\n", "\n", "。", "."})
 IMAGE_DOCUMENT_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+IMAGE_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+ImageTextExtractor = Callable[[str, bytes], str]
 PLAIN_TEXT_DOCUMENT_EXTENSIONS = frozenset(
     {
         ".c",
@@ -83,15 +84,14 @@ PLAIN_SECTION_HEADING_PATTERN = re.compile(
     r"^\s*(?P<title>第[〇零一二三四五六七八九十百千万两\d]+"
     r"(?:编|部|篇|章|节)(?:[ \t]+.*)?)\s*$"
 )
-PDF_INLINE_FORMAT_TAG_PATTERN = re.compile(r"</?(?:sub|sup)>", re.IGNORECASE)
-PDF_CJK_SPACE_PATTERN = re.compile(
+EXTRACTED_CJK_SPACE_PATTERN = re.compile(
     r"(?<=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]) +"
     r"(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff，。！？；：、）》】」』])"
 )
-PDF_CJK_LEADING_SPACE_PATTERN = re.compile(
+EXTRACTED_CJK_LEADING_SPACE_PATTERN = re.compile(
     r"(?<=[（《【「『]) +(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
 )
-PDF_CJK_PUNCTUATION_SPACE_PATTERN = re.compile(
+EXTRACTED_CJK_PUNCTUATION_SPACE_PATTERN = re.compile(
     r"(?<=[，。！？；：、）》】」』）]) +"
     r"(?=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
 )
@@ -257,51 +257,37 @@ def validate_archive(path: Path) -> None:
     inspect(path, 1)
 
 
-def normalize_pdf_markdown(filename: str, markdown: str) -> str:
-    markdown = PDF_INLINE_FORMAT_TAG_PATTERN.sub("", markdown)
-    markdown = PDF_CJK_SPACE_PATTERN.sub("", markdown)
-    markdown = PDF_CJK_LEADING_SPACE_PATTERN.sub("", markdown)
-    markdown = PDF_CJK_PUNCTUATION_SPACE_PATTERN.sub("", markdown)
-    if not any(MARKDOWN_HEADING_PATTERN.match(line) for line in markdown.splitlines()):
-        markdown = f"# {Path(filename).stem}\n\n{markdown}"
-    return markdown
+def normalize_extracted_text(filename: str, text: str) -> str:
+    if not has_printable_text(text):
+        return text
+    text = EXTRACTED_CJK_SPACE_PATTERN.sub("", text)
+    text = EXTRACTED_CJK_LEADING_SPACE_PATTERN.sub("", text)
+    text = EXTRACTED_CJK_PUNCTUATION_SPACE_PATTERN.sub("", text)
+    if not any(MARKDOWN_HEADING_PATTERN.match(line) for line in text.splitlines()):
+        text = f"# {Path(filename).stem}\n\n{text}"
+    return text
 
 
-def extract_with_pymupdf(
-    filename: str,
-    source: Path | pymupdf.Document,
-    *,
-    force_ocr: bool,
-) -> str:
-    extracted_text = pymupdf4llm.to_markdown(
-        source,
-        use_ocr=True,
-        force_ocr=force_ocr,
-        ocr_language=PDF_OCR_LANGUAGE,
-        ocr_dpi=300,
-        write_images=False,
-    )
-    if not isinstance(extracted_text, str):
-        raise TypeError("PyMuPDF Markdown conversion returned an invalid result.")
-    return normalize_pdf_markdown(filename, extracted_text)
+def extract_pdf_text(filename: str, path: Path) -> str:
+    from pypdf import PdfReader
+
+    text = "\n\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+    return normalize_extracted_text(filename, text)
 
 
-def extract_webp_with_pymupdf(filename: str, path: Path) -> str:
-    converted = BytesIO()
-    with Image.open(path) as image:
-        image.save(converted, format="PNG")
-    document = pymupdf.open(stream=converted.getvalue(), filetype="png")
-    try:
-        return extract_with_pymupdf(filename, document, force_ocr=True)
-    finally:
-        if not document.is_closed:
-            document.close()
+@cache
+def markitdown_converter():
+    from markitdown import MarkItDown
+
+    return MarkItDown(enable_plugins=False)
 
 
 def extract_document(
     filename: str,
     content_type: str,
     path: Path,
+    *,
+    image_text_extractor: ImageTextExtractor | None = None,
 ) -> tuple[str, list[DocumentAssetDraft]]:
     if not path.exists():
         raise KnowledgePipelineError("Document file is missing.")
@@ -309,6 +295,10 @@ def extract_document(
     extension = Path(filename).suffix.lower()
     if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
         raise KnowledgePipelineError("Document format is not supported.")
+    if extension in IMAGE_DOCUMENT_EXTENSIONS and image_text_extractor is None:
+        raise KnowledgePipelineError(
+            "Vision model is not configured for this workspace."
+        )
 
     content_type = content_type.split(";", 1)[0].strip().lower()
     validate_archive(path)
@@ -317,6 +307,9 @@ def extract_document(
         if extension in PLAIN_TEXT_DOCUMENT_EXTENSIONS:
             extracted_text = path.read_text(encoding="utf-8-sig")
         elif extension == ".docx":
+            from markitdown.converters._docx_converter import pre_process_docx
+            from markitdown.converters._html_converter import HtmlConverter
+
             def convert_image(image):
                 asset_id = new_id()
                 asset_index = len(assets)
@@ -353,15 +346,19 @@ def extract_document(
                 extracted_text,
             )
         elif extension == ".pdf":
-            # Native PDF text is preferred; OCR runs only for pages without usable text.
-            extracted_text = extract_with_pymupdf(filename, path, force_ocr=False)
-        elif extension == ".webp":
-            extracted_text = extract_webp_with_pymupdf(filename, path)
+            extracted_text = extract_pdf_text(filename, path)
         elif extension in IMAGE_DOCUMENT_EXTENSIONS:
-            # Standalone images have no text layer, so OCR is always required.
-            extracted_text = extract_with_pymupdf(filename, path, force_ocr=True)
+            extracted_text = normalize_extracted_text(
+                filename,
+                image_text_extractor(
+                    IMAGE_CONTENT_TYPES[extension],
+                    path.read_bytes(),
+                ),
+            )
         else:
-            result = MARKITDOWN.convert_local(
+            from markitdown import StreamInfo
+
+            result = markitdown_converter().convert_local(
                 path,
                 stream_info=StreamInfo(
                     mimetype=content_type or None,

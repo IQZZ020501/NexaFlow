@@ -2230,7 +2230,14 @@ def test_workflow_uploads_resolve_branches() -> None:
             self.text = text
             self.error = error
 
-        def extract(self, filename, content_type, path):
+        def extract(
+            self,
+            filename,
+            content_type,
+            path,
+            *,
+            image_text_extractor=None,
+        ):
             if self.error:
                 from app.ports.parsing import KnowledgePipelineError
 

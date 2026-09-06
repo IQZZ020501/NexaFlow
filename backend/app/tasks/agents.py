@@ -13,7 +13,7 @@ from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger, log_event
-from app.tasks import configure_task_worker
+from app.tasks import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
 
@@ -28,7 +28,7 @@ def run_agent_job(self, run_id: str) -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     try:
-        outcome = asyncio.run(
+        outcome = run_task_async(
             run_durable_application_run(run_id, settings, worker_task_id=self.request.id)
         )
     except Exception as exc:
@@ -51,7 +51,7 @@ def run_unified_agent_job(self, run_id: str) -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     try:
-        outcome = asyncio.run(
+        outcome = run_task_async(
             run_durable_application_run(
                 run_id,
                 settings,
@@ -76,8 +76,8 @@ def run_unified_agent_job(self, run_id: str) -> None:
 def recover_agent_runs_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    asyncio.run(reconcile_workflow_agent_children())
-    run_ids = asyncio.run(list_recoverable_unified_agent_run_ids(settings))
+    run_task_async(reconcile_workflow_agent_children())
+    run_ids = run_task_async(list_recoverable_unified_agent_run_ids(settings))
     for run_id in run_ids:
         run_unified_agent_job.apply_async(args=(run_id,), queue="agents-v2")
 
@@ -89,7 +89,7 @@ def recover_agent_runs_job() -> None:
 def recover_legacy_agent_runs_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    run_ids = asyncio.run(list_recoverable_legacy_agent_run_ids(settings))
+    run_ids = run_task_async(list_recoverable_legacy_agent_run_ids(settings))
     for run_id in run_ids:
         run_agent_job.apply_async(args=(run_id,), queue="agents-legacy")
 

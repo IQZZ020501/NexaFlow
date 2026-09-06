@@ -1,7 +1,5 @@
 """Celery entry points for durable Tool test execution."""
 
-import asyncio
-
 from app.application.tool_runtime import (
     ToolInvocationBusy,
     execute_tool_invocation,
@@ -9,7 +7,7 @@ from app.application.tool_runtime import (
 )
 from app.infrastructure.celery import celery_app
 from app.infrastructure.config import Settings
-from app.tasks import configure_task_worker
+from app.tasks import configure_task_worker, run_task_async
 
 
 @celery_app.task(
@@ -22,7 +20,7 @@ def run_tool_invocation_job(self, invocation_id: str) -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     try:
-        asyncio.run(
+        run_task_async(
             execute_tool_invocation(
                 invocation_id,
                 settings,
@@ -43,7 +41,7 @@ def run_tool_invocation_job(self, invocation_id: str) -> None:
 def recover_tool_invocations_job() -> None:
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
-    invocation_ids = asyncio.run(list_recoverable_tool_test_invocation_ids())
+    invocation_ids = run_task_async(list_recoverable_tool_test_invocation_ids())
     for invocation_id in invocation_ids:
         run_tool_invocation_job.apply_async(args=(invocation_id,))
 

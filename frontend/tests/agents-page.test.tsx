@@ -502,6 +502,12 @@ function cardOf(name: string): HTMLElement {
   return card as HTMLElement
 }
 
+function visibleCardNames() {
+  return Array.from(document.querySelectorAll("div[role='button'] h2")).map(
+    (heading) => heading.textContent
+  )
+}
+
 function openModelDropdown() {
   const trigger = screen.getByLabelText("选择模型")
   fireEvent.pointerDown(trigger)
@@ -561,6 +567,78 @@ afterEach(() => {
 })
 
 describe("AgentsPage list view", () => {
+  test("sorts applications and shows their update time", async () => {
+    routes = baseRoutes([
+      makeAgent({
+        id: "agent-charlie",
+        name: "Charlie",
+        created_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-03T00:00:00Z",
+      }),
+      makeAgent({
+        id: "agent-alpha",
+        name: "Alpha",
+        created_at: "2026-09-03T00:00:00Z",
+        updated_at: "2026-09-01T00:00:00Z",
+      }),
+      makeAgent({
+        id: "agent-bravo",
+        name: "Bravo",
+        created_at: "2026-09-02T00:00:00Z",
+        updated_at: "2026-09-02T00:00:00Z",
+      }),
+    ])
+    renderPage(<AgentsPage />)
+
+    await screen.findByText("Charlie")
+    expect(visibleCardNames()).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(screen.getAllByText(/更新时间 ·/)).toHaveLength(3)
+
+    const sortTrigger = screen.getByRole("button", { name: "排序" })
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "创建时间" }))
+    expect(visibleCardNames()).toEqual(["Alpha", "Bravo", "Charlie"])
+
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "名称" }))
+    expect(visibleCardNames()).toEqual(["Alpha", "Bravo", "Charlie"])
+  })
+
+  test("offers public links from published application cards", async () => {
+    const originalClipboard = navigator.clipboard
+    const copied: string[] = []
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (value: string) => void copied.push(value) },
+    })
+    try {
+      routes = baseRoutes([makeWorkflow()])
+      renderPage(<AgentsPage />)
+      await screen.findByText("Weekly Digest")
+
+      fireEvent.pointerDown(within(cardOf("Weekly Digest")).getByTitle("更多"))
+      const openLink = await screen.findByRole("menuitem", {
+        name: "打开链接",
+      })
+      expect(openLink.getAttribute("href")).toBe("/chat/agent-2")
+      fireEvent.click(screen.getByRole("menuitem", { name: "复制链接" }))
+
+      await waitFor(() =>
+        expect(copied).toEqual([`${window.location.origin}/chat/agent-2`])
+      )
+      expect(
+        notifyCalls.some(
+          (call) => call.kind === "success" && call.message === "已复制"
+        )
+      ).toBe(true)
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      })
+    }
+  })
+
   test("batch moves selected applications into a folder", async () => {
     const moves: unknown[] = []
     routes = [
@@ -645,6 +723,11 @@ describe("AgentsPage list view", () => {
     expect(within(agentCard).getByText("已启用")).toBeTruthy()
     expect(within(agentCard).getByText("DeepSeek Chat")).toBeTruthy()
     expect(within(agentCard).getByText("创建者：我")).toBeTruthy()
+    const agentHeading = within(agentCard).getByRole("heading", {
+      name: "Research Assistant",
+    })
+    expect(agentHeading.nextElementSibling?.textContent).toContain("Agent")
+    expect(agentHeading.nextElementSibling?.textContent).toContain("已启用")
     expect(within(agentCard).getAllByText("1").length).toBe(2)
     expect(within(agentCard).getByText("工具")).toBeTruthy()
 
@@ -939,6 +1022,21 @@ describe("AgentsPage list view", () => {
     const card = cardOf("Research Assistant")
     expect(within(card).queryByRole("button", { name: "编辑应用" })).toBeNull()
     expect(within(card).queryByTitle("更多")).toBeNull()
+  })
+
+  test("lets view-only members open published applications", async () => {
+    session.me = memberMe
+    routes = baseRoutes([makeWorkflow({ can_edit: false })])
+    renderPage(<AgentsPage />)
+    await screen.findByText("Weekly Digest")
+
+    const card = cardOf("Weekly Digest")
+    expect(within(card).queryByRole("button", { name: "编辑应用" })).toBeNull()
+    fireEvent.pointerDown(within(card).getByTitle("更多"))
+    expect(
+      await screen.findByRole("menuitem", { name: "打开链接" })
+    ).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "删除" })).toBeNull()
   })
 
   test("opens an agent with the keyboard", async () => {

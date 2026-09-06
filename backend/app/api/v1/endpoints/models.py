@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,8 +81,20 @@ async def list_workspace_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    folder_id: Annotated[str | None, Query(max_length=36)] = None,
+    sort: Annotated[
+        Literal["updated_at", "created_at", "name"],
+        Query(),
+    ] = "created_at",
 ) -> list[RegisteredModelResponse]:
-    return await list_registered_models(db, context.workspace.id, limit, offset)
+    return await list_registered_models(
+        db,
+        context.workspace.id,
+        limit,
+        offset,
+        folder_id,
+        sort,
+    )
 
 
 @router.post(

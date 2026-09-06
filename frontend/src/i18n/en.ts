@@ -30,6 +30,8 @@ export const en = {
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
   知识库名称已存在: "Knowledge base name already exists",
+  "视觉模型尚未配置，暂时不支持图片解析":
+    "No vision model is configured, so image parsing is not available yet",
   资源不存在或无权访问: "Resource not found or access denied",
   页面不存在: "Page not found",
   请求的页面不存在或已移动: "The requested page does not exist or has moved.",
@@ -398,6 +400,7 @@ export const en = {
     "Connect providers, base models, and credentials at the model level.",
   接入模型: "Connect model",
   还没有模型: "No models yet",
+  没有匹配的模型: "No matching models",
   "接入模型后，应用可以使用它进行对话、检索增强和工具调用。":
     "Connect a model so apps can use it for chat, retrieval augmentation, and tool calling.",
   查看配置: "View configuration",
@@ -752,6 +755,7 @@ export const en = {
   启用: "Activate",
   命中测试: "Hit test",
   大语言模型: "LLM",
+  视觉模型: "Vision model",
   失败: "Failed",
   "已上传 {value} 个文件": "Uploaded {value} files",
   "已上传 {value} 个文件，{value} 个上传失败":
@@ -1080,6 +1084,10 @@ export const en = {
   "Agent 名称": "Agent name",
   选择模型: "Select a model",
   系统提示词: "System prompt",
+  "AI 生成系统提示词": "Generate system prompt with AI",
+  正在生成系统提示词: "Generating system prompt",
+  "系统提示词生成失败，请稍后重试":
+    "System prompt generation failed. Please try again.",
   "描述 Agent 的角色、回答方式和约束。":
     "Describe the Agent's role, response style, and constraints.",
   "按需选择知识库，最多 {value} 个。": "Select up to {value} knowledge bases.",
@@ -1210,6 +1218,8 @@ export const en = {
   最近访问: "Last seen",
   未提供问题: "No question provided",
   来源: "Source",
+  回答来源: "Answer sources",
+  "片段 {value}": "Segment {value}",
   "查看公开访问、API 和控制台产生的运行记录。":
     "Review runs from public access, API, and the console.",
   每日运行趋势: "Daily run trend",

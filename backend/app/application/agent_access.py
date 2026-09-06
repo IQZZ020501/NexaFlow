@@ -22,6 +22,10 @@ from app.application.agent_runs import (
     tool_call_to_response,
     update_run_feedback,
 )
+from app.application.agent_tools import (
+    knowledge_sources_from_events,
+    safe_agent_run_error,
+)
 from app.application.workspace import WorkspaceContext, build_workspace_context
 from app.entities.agents import (
     Agent,
@@ -399,7 +403,9 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
     run_status = agent_run_display_status(str(value.get("status") or ""))
     generic_error = None
     if run_status == "failed":
-        generic_error = "Agent run failed."
+        generic_error = safe_agent_run_error(
+            str(value.get("last_error") or "Agent run failed.")
+        )
     elif run_status == "cancelled":
         generic_error = "Agent run was cancelled."
     return ExternalAgentRunResponse(
@@ -414,6 +420,10 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
         attachments=attachments or [],
         status=run_status,
         result=clean_model_text(str(value.get("result") or "")),
+        sources=knowledge_sources_from_events(
+            value.get("events") or [],
+            value.get("grounding_meta"),
+        ),
         error=generic_error,
         progress=external_progress_events(value.get("events") or [], run_status),
         created_at=value["created_at"],

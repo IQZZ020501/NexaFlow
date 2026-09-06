@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.tool import ToolRefSchema
 from app.schemas.user import UserResponse
@@ -136,6 +136,22 @@ class AgentUpdateRequest(BaseModel):
         return self
 
 
+class AgentInstructionsGenerateRequest(BaseModel):
+    model_id: str = Field(min_length=1, max_length=36)
+    content: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("System prompt content is required.")
+        return value
+
+
+class AgentInstructionsGenerateResponse(BaseModel):
+    instructions: str = Field(min_length=1, max_length=8000)
+
+
 class AgentPermissionResponse(BaseModel):
     user: UserResponse
     permission: Literal["view"]
@@ -213,6 +229,16 @@ class AgentRunAttachmentResponse(BaseModel):
     category: Literal["document", "image"]
 
 
+class AgentRunSourceResponse(BaseModel):
+    source_ref: str
+    knowledge_base: str
+    document: str
+    parent_title: str = ""
+    section_path: list[str] = Field(default_factory=list, max_length=12)
+    chunk_index: int | None = Field(default=None, ge=0)
+    content: str
+
+
 class AgentRunResponse(BaseModel):
     id: str
     workspace_id: str
@@ -229,6 +255,10 @@ class AgentRunResponse(BaseModel):
     plan: list[AgentPlanStepResponse]
     events: list[AgentRunEventResponse]
     result: str
+    sources: list[AgentRunSourceResponse] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+    )
     model_usage: dict[str, Any] = Field(default_factory=dict)
     grounding_status: str = "not_started"
     grounding_meta: dict[str, Any] = Field(default_factory=dict)
@@ -352,6 +382,10 @@ class ExternalAgentRunResponse(BaseModel):
     attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
     status: str
     result: str
+    sources: list[AgentRunSourceResponse] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+    )
     error: str | None
     progress: list[ExternalAgentProgressEventResponse]
     created_at: datetime

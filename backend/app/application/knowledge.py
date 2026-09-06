@@ -8,7 +8,7 @@ Endpoints must not import ``app.shareddomain``, ``app.capabilities``, or
 
 from pathlib import Path
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.knowledge_retrieval import (
@@ -24,7 +24,9 @@ from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger
 from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.schemas.knowledge import KnowledgeDocumentResponse
+from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
+from app.ports.parsing import IMAGE_DOCUMENT_EXTENSIONS
+from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
 from app.shareddomain.knowledge.lifecycle import (
     delete_knowledge_document as delete_knowledge_document_record,
     set_knowledge_document_active as set_knowledge_document_active_record,
@@ -62,6 +64,7 @@ from app.shareddomain.knowledge.services import (
     delete_knowledge_attachment,
     delete_knowledge_base_permanently as delete_knowledge_base_record,
     document_to_response,
+    get_default_knowledge_model,
     get_knowledge_base,
     knowledge_document_path,
     knowledge_object_storage,
@@ -74,7 +77,7 @@ from app.shareddomain.knowledge.services import (
     test_knowledge_base_models,
     transfer_knowledge_base_owner,
     update_knowledge_base,
-    upload_knowledge_attachment,
+    upload_knowledge_attachment as upload_knowledge_attachment_record,
     upsert_resource_permission,
 )
 from app.tasks.knowledge import (
@@ -83,6 +86,32 @@ from app.tasks.knowledge import (
 )
 
 logger = get_logger(__name__)
+
+
+async def upload_knowledge_attachment(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    upload: UploadFile,
+    actor: User,
+    settings: Settings,
+) -> KnowledgeAttachmentResponse:
+    if Path(upload.filename or "").suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS:
+        if await get_default_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            "VISION",
+        ) is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                VISION_MODEL_REQUIRED_MESSAGE,
+            )
+    return await upload_knowledge_attachment_record(
+        db,
+        knowledge_base,
+        upload,
+        actor,
+        settings,
+    )
 
 
 async def delete_knowledge_base_permanently(

@@ -21,6 +21,7 @@ import {
 import Link from "next/link"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
@@ -52,6 +53,7 @@ import { Input } from "@/components/ui/input"
 import { Spec } from "@/components/ui/spec"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
+import { languageLocales } from "@/i18n"
 import {
   archivePythonTool,
   deleteToolSource,
@@ -67,7 +69,7 @@ import {
   type ToolSourceDetail,
   type ToolSummary,
 } from "@/lib/api/tools"
-import { getMembershipRole } from "@/lib/display"
+import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { getErrorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
@@ -82,6 +84,31 @@ const catalogTabs = [
   { kind: "mcp", label: "MCP" },
   { kind: "python", label: "Python" },
 ] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
+
+type ToolSortKey = "updated_at" | "created_at" | "name"
+
+function sortToolResources<
+  T extends { created_at?: string; updated_at?: string },
+>(
+  resources: T[],
+  sortKey: ToolSortKey,
+  locale: string,
+  getName: (resource: T) => string
+) {
+  const collator = new Intl.Collator(locale, {
+    numeric: true,
+    sensitivity: "base",
+  })
+  return [...resources].sort((left, right) => {
+    if (sortKey === "name") {
+      return collator.compare(getName(left), getName(right))
+    }
+    return (
+      Date.parse(right[sortKey] ?? "") - Date.parse(left[sortKey] ?? "") ||
+      collator.compare(getName(left), getName(right))
+    )
+  })
+}
 
 /**
  * Selects the icon associated with a tool kind.
@@ -150,7 +177,7 @@ function transportLabel(transport: ToolSourceDetail["transport"]) {
  * @returns The workspace tools management interface.
  */
 export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const resourceFolders = useResourceFolders("tool")
   const [confirmAction, confirmDialog] = useConfirmDialog()
@@ -160,6 +187,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const [tools, setTools] = React.useState<ToolSummary[]>([])
   const [sources, setSources] = React.useState<ToolSourceDetail[]>([])
   const [search, setSearch] = React.useState("")
+  const [toolSortKey, setToolSortKey] =
+    React.useState<ToolSortKey>("updated_at")
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [busyId, setBusyId] = React.useState<string | null>(null)
@@ -230,6 +259,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   if (!token || !me || !selectedWorkspaceId) return null
   const accessToken = token
   const workspaceId = selectedWorkspaceId
+  const locale = languageLocales[language]
   const displayToolName = (tool: ToolSummary) => toolDisplayName(tool, t)
   const displayToolDescription = (tool: ToolSummary) =>
     toolDisplayDescription(tool, t)
@@ -241,23 +271,33 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     : tools
   const catalogSources = initialKind && activeKind !== "mcp" ? [] : sources
   const query = search.trim().toLowerCase()
-  const filteredTools = catalogTools.filter(
-    (tool) =>
-      (tool.folder_id ?? null) === resourceFolders.selectedFolderId &&
-      (!query ||
-      `${displayToolName(tool)} ${displayToolDescription(tool)} ${displaySourceName(tool)}`
-        .toLowerCase()
-        .includes(query))
+  const filteredTools = sortToolResources(
+    catalogTools.filter(
+      (tool) =>
+        (tool.folder_id ?? null) === resourceFolders.selectedFolderId &&
+        (!query ||
+          `${displayToolName(tool)} ${displayToolDescription(tool)} ${displaySourceName(tool)}`
+            .toLowerCase()
+            .includes(query))
+    ),
+    toolSortKey,
+    locale,
+    displayToolName
   )
   const movableToolIds = filteredTools
     .filter((tool) => tool.can_manage)
     .map((tool) => tool.id)
-  const filteredSources = catalogSources.filter(
-    (source) =>
-      !query ||
-      `${source.name} ${source.url ?? ""} ${source.stdio_command ?? ""} ${source.transport ?? ""}`
-        .toLowerCase()
-        .includes(query)
+  const filteredSources = sortToolResources(
+    catalogSources.filter(
+      (source) =>
+        !query ||
+        `${source.name} ${source.url ?? ""} ${source.stdio_command ?? ""} ${source.transport ?? ""}`
+          .toLowerCase()
+          .includes(query)
+    ),
+    toolSortKey,
+    locale,
+    (source) => source.name
   )
   function upsertTool(updated: ToolSummary) {
     setTools((current) => {
@@ -516,18 +556,54 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         </DropdownMenu>
       </div>
 
+      <ResourceFolderLayout
+        sidebar={
+          <ResourceFolderTree
+            folders={resourceFolders.folders}
+            selectedFolderId={resourceFolders.selectedFolderId}
+            canManage={membershipRole === "admin"}
+            isLoading={resourceFolders.isLoading}
+            onSelect={resourceFolders.setSelectedFolderId}
+            onCreate={resourceFolders.create}
+            onRename={resourceFolders.rename}
+            onDelete={resourceFolders.remove}
+            onFolderDeleted={(folderId, parentId) =>
+              setTools((current) =>
+                current.map((tool) =>
+                  tool.folder_id === folderId
+                    ? { ...tool, folder_id: parentId }
+                    : tool
+                )
+              )
+            }
+          />
+        }
+      >
       <div
         role="search"
         className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between"
       >
-        <div className="relative min-w-0 sm:w-[320px]">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            role="searchbox"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t("搜索名称、描述或来源")}
-            className="pl-9"
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+          <div className="relative min-w-0 sm:w-[320px]">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              role="searchbox"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={t("搜索名称、描述或来源")}
+              className="pl-9"
+            />
+          </div>
+          <FilterDropdown
+            ariaLabel={t("排序")}
+            value={toolSortKey}
+            options={[
+              { value: "updated_at", label: t("最近更新") },
+              { value: "created_at", label: t("创建时间") },
+              { value: "name", label: t("名称") },
+            ]}
+            className="h-9 sm:w-32"
+            onChange={(value) => setToolSortKey(value as ToolSortKey)}
           />
         </div>
         {movableToolIds.length || initialKind ? (
@@ -571,29 +647,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         ) : null}
       </div>
 
-      <ResourceFolderLayout
-        sidebar={
-          <ResourceFolderTree
-            folders={resourceFolders.folders}
-            selectedFolderId={resourceFolders.selectedFolderId}
-            canManage={membershipRole === "admin"}
-            isLoading={resourceFolders.isLoading}
-            onSelect={resourceFolders.setSelectedFolderId}
-            onCreate={resourceFolders.create}
-            onRename={resourceFolders.rename}
-            onDelete={resourceFolders.remove}
-            onFolderDeleted={(folderId, parentId) =>
-              setTools((current) =>
-                current.map((tool) =>
-                  tool.folder_id === folderId
-                    ? { ...tool, folder_id: parentId }
-                    : tool
-                )
-              )
-            }
-          />
-        }
-      >
       {!isLoading && !error && filteredSources.length ? (
         <section aria-labelledby="tool-source-group">
           <div className="mb-3 flex items-center gap-2">
@@ -630,6 +683,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                 command: source.stdio_command ?? "-",
                               })
                             : source.url}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {t("更新时间")} ·{" "}
+                          {formatDateTime(source.updated_at, locale)}
                         </p>
                       </div>
                     </div>
@@ -944,6 +1001,12 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         <p className="mt-3 line-clamp-2 text-sm leading-5 text-muted-foreground">
                           {displayToolDescription(tool) || t("暂无描述")}
                         </p>
+                        {tool.updated_at ? (
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {t("更新时间")} ·{" "}
+                            {formatDateTime(tool.updated_at, locale)}
+                          </p>
+                        ) : null}
 
                         <dl
                           className={`mt-auto grid min-w-0 grid-cols-2 gap-3 pt-4 text-sm ${tool.can_manage ? "pr-10" : ""}`}

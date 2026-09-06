@@ -496,7 +496,7 @@ def assert_external_run_to_response() -> None:
     response = external_run_to_response(cancelled)
     assert response.error == "Agent run was cancelled."
 
-    # 339-340: failed run → generic error.
+    # Failed runs expose the persisted, already-sanitized execution error.
     failed = SimpleNamespace(
         id="r-failed",
         conversation_id="c-2",
@@ -504,13 +504,14 @@ def assert_external_run_to_response() -> None:
         goal="goal",
         result="",
         events=[],
+        last_error="Provider returned status 402: Insufficient Balance",
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
         started_at=None,
         finished_at=None,
     )
     response = external_run_to_response(failed)
-    assert response.error == "Agent run failed."
+    assert response.error == "Provider returned status 402"
 
     # dict input; "question" fallback (335-336, 346-354).
     as_dict = {
@@ -527,7 +528,24 @@ def assert_external_run_to_response() -> None:
             }
         ],
         "result": "result text",
-        "events": [],
+        "events": [
+            {
+                "type": "tool",
+                "tool_kind": "knowledge",
+                "status": "succeeded",
+                "output": {
+                    "hits": [
+                        {
+                            "knowledge_base": "制度库",
+                            "document": "制度.pdf",
+                            "chunk_id": "chunk-1",
+                            "chunk_index": 2,
+                            "content": "来源正文",
+                        }
+                    ]
+                },
+            }
+        ],
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
         "started_at": None,
@@ -538,6 +556,9 @@ def assert_external_run_to_response() -> None:
     assert response.question == "asked"
     assert response.attachments[0].filename == "photo.png"
     assert response.result == "result text"
+    assert response.sources[0].document == "制度.pdf"
+    assert response.sources[0].source_ref
+    assert response.sources[0].chunk_index == 2
     assert response.error is None
 
 
