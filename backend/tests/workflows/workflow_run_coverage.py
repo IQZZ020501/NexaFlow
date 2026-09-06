@@ -5,7 +5,7 @@ Targets:
 - app/shareddomain/workflows/engine.py      (validation + scheduler branches)
 - app/shareddomain/workflows/services.py    (definition/version boundaries)
 - app/shareddomain/workflows/uploads.py     (cleanup records)
-- app/api/v1/endpoints/workflows.py         (validate / form / stream endpoints)
+- app/api/v1/workflows/routes.py         (validate / form / stream endpoints)
 
 Run from backend/:
     uv run python -m tests.workflows.workflow_run_coverage

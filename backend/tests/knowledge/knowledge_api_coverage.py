@@ -1,9 +1,9 @@
 """Knowledge API + RAG coverage suite.
 
 Covers the baseline-missing lines of:
-- app/api/v1/endpoints/knowledge.py (CRUD + task + permission endpoints)
-- app/api/v1/endpoints/knowledge_lifecycle.py (download / asset / delete / status)
-- app/api/v1/endpoints/knowledge_retrieval.py (query endpoint)
+- app/api/v1/knowledge/routes.py (CRUD + task + permission endpoints)
+- app/api/v1/knowledge/lifecycle.py (download / asset / delete / status)
+- app/api/v1/knowledge/retrieval.py (query endpoint)
 - app/application/knowledge.py (query aggregation, chunk-count responses, assets)
 - app/capabilities/rag/retrieval.py (rerank edge paths)
 - app/capabilities/rag/vector_store.py (in-memory error paths)

@@ -1,6 +1,6 @@
 """Coverage suite for the public/API agent access domain.
 
-Covers app/application/agent_access.py, app/api/v1/endpoints/agent_access.py and
+Covers app/application/agents/access/service.py, app/api/v1/agents/access.py and
 app/infrastructure/agent_rate_limit.py.  Plain-script suite (no pytest): run with
 
     uv run coverage run --source=app.application.agents.access.service,app.api.v1.agents.access,app.infra.security.agent_rate_limit \

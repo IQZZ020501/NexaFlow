@@ -4,7 +4,7 @@ Run from ``backend/`` with ``uv run python -m tests.workflows.workflow_node_cove
 Covers the baseline-missing lines of ``app/application/workflow_executor.py``,
 ``app/application/workflow_nodes.py``, ``app/application/workflow_uploads.py``,
 ``app/application/workflow_access.py`` and
-``app/api/v1/endpoints/workflow_access.py``.
+``app/api/v1/workflows/access.py``.
 """
 
 import asyncio
