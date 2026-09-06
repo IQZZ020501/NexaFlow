@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from app.infrastructure.celery import celery_app
+from app.infrastructure.celery import celery_app, display_task_name
 from app.infrastructure.config import Settings
 from app.infrastructure.errors import log_error
 from app.infrastructure.logger import get_logger, log_event
@@ -18,6 +18,7 @@ async def enqueue_tool_invocation(invocation_id: str, settings: Settings) -> Non
             celery_app.send_task,
             "app.tools.run",
             args=(invocation_id,),
+            shadow=display_task_name("app.tools.run"),
         )
     except Exception as exc:
         log_error(

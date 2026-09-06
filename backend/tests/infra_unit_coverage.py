@@ -2862,7 +2862,63 @@ def test_celery() -> None:
         exception=ValueError("oops"),
     )
 
+    with patch.object(celery_mod.gc, "collect") as collect:
+        celery_mod.collect_task_garbage(
+            sender=SimpleNamespace(name="app.knowledge.run_task")
+        )
+        celery_mod.collect_task_garbage(
+            sender=SimpleNamespace(name="app.maintenance.recover_frequent")
+        )
+        celery_mod.collect_task_garbage(sender=None)
+        collect.assert_called_once_with()
+
     app = celery_mod.create_celery_app()
+    assert app.task_cls is celery_mod.NexaFlowTask
+    display_task = celery_mod.NexaFlowTask()
+    display_task.name = "app.maintenance.recover_minutely"
+    assert display_task.shadow_name((), {}, {}) == "恢复每分钟维护任务"
+    display_task.name = "app.unregistered"
+    assert display_task.shadow_name((), {}, {}) == "app.unregistered"
+
+    log_filter = celery_mod._RoutineMaintenanceLogFilter()
+    maintenance_log = logging.LogRecord(
+        "celery.app.trace",
+        logging.INFO,
+        "",
+        0,
+        "Task %(name)s received",
+        ({"name": "恢复每分钟维护任务"},),
+        None,
+    )
+    assert log_filter.filter(maintenance_log) is False
+    maintenance_log.levelno = logging.ERROR
+    assert log_filter.filter(maintenance_log) is True
+    normal_log = logging.LogRecord(
+        "celery.app.trace",
+        logging.INFO,
+        "",
+        0,
+        "Task %(name)s received",
+        ({"name": "处理知识库任务"},),
+        None,
+    )
+    assert log_filter.filter(normal_log) is True
+    beat_log = logging.LogRecord(
+        "celery.beat",
+        logging.INFO,
+        "",
+        0,
+        "Scheduler: Sending due task %s (%s)",
+        ("recover-frequent-maintenance", "app.maintenance.recover_frequent"),
+        None,
+    )
+    assert log_filter.filter(beat_log) is False
+    handler = logging.StreamHandler()
+    celery_mod.hide_routine_maintenance_logs(logger=SimpleNamespace(handlers=[handler]))
+    assert celery_mod._routine_maintenance_log_filter in handler.filters
+    assert celery_mod._routine_maintenance_log_filter in logging.getLogger(
+        "celery.beat"
+    ).filters
     assert app.conf.broker_url == settings().celery_broker_url
     assert app.conf.worker_pool in {"solo", "threads", "prefork"}
     beat = app.conf.beat_schedule
@@ -2955,6 +3011,26 @@ def test_configure_task_worker() -> None:
         for thread in threads:
             thread.join(timeout=1)
         assert len(calls) == 1
+
+        async def current_loop_id() -> int:
+            await asyncio.sleep(0)
+            return id(asyncio.get_running_loop())
+
+        loop_ids: list[int] = []
+        threads = [
+            threading.Thread(
+                target=lambda: loop_ids.append(
+                    tasks_module.run_task_async(current_loop_id())
+                )
+            )
+            for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=1)
+        assert len(loop_ids) == 2
+        assert len(set(loop_ids)) == 1
     finally:
         tasks_module._configured_process_id = original_pid
         tasks_module.configure_database = original_configure

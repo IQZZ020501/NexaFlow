@@ -6258,7 +6258,11 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
             tool_dispatch.enqueue_tool_invocation("invocation-5", test_settings())
         )
         assert dispatched == [
-            {"task": "app.tools.run", "args": ("invocation-5",)}
+            {
+                "task": "app.tools.run",
+                "args": ("invocation-5",),
+                "shadow": "运行工具",
+            }
         ]
         assert tool_dispatch.celery_app.conf.task_always_eager is True
         assert calls == [("invocation-1", "tool-worker-1")]

@@ -27,14 +27,12 @@ def configure_database(settings: Settings, *, worker_process: bool = False) -> N
             "application_name": "nexaflow-worker" if worker_process else "nexaflow-api"
         }
         if worker_process:
-            # Celery jobs call asyncio.run per task; pooled connections must not
-            # be reused across the event loops those calls create.
+            # Autoscaled worker processes should not retain idle connections.
             kwargs["poolclass"] = NullPool
         else:
             kwargs["pool_pre_ping"] = True
     elif worker_process:
-        # Celery jobs call asyncio.run per task; pooled connections must not
-        # be reused across the event loops those calls create.
+        # Autoscaled worker processes should not retain idle connections.
         kwargs["poolclass"] = NullPool
 
     _engine = create_async_engine(settings.database_url, **kwargs)

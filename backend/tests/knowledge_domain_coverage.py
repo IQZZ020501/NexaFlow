@@ -114,9 +114,8 @@ from app.capabilities.llm.models import RegisteredModel
 
 MEMBER_PASSWORD = "Member@12345."
 
-# Stashed ids filled by the async scenario, consumed by the sync celery-job
-# section (celery jobs call asyncio.run internally and cannot run inside an
-# event loop).
+# Stashed ids filled by the async scenario, consumed by the synchronous
+# Celery-job section.
 STASH = {}
 
 
