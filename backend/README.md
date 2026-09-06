@@ -30,7 +30,7 @@ with RAG, LLM-powered agents, and MCP tool integration — with a trilingual UI
 ## Repository layout
 
 ```text
-backend/   FastAPI application (api → application → shareddomain/capabilities → infrastructure)
+backend/   FastAPI application (api → application → domain/adapters + ports → infra)
 frontend/  Next.js application (app routes, components, i18n, lib/api)
 deploy/    Docker Compose topology, Dockerfiles, Nginx examples
 docs/      module documentation — start at docs/INDEX.md

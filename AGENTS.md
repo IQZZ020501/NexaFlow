@@ -39,49 +39,53 @@ not trigger unrelated cleanup.
   `uv.lock`. `backend/app/` contains the FastAPI backend package.
 - Backend routes are async FastAPI with SQLAlchemy `AsyncSession`; do not add
   new synchronous database access paths.
-- Backend code follows a hybrid layer + domain layout: technical layers
-  (`api/` HTTP, `application/` use cases, `capabilities/` model/rag/embedding
-  capabilities, `infrastructure/` config, DB session, data access, storage)
-  cross-cut module-owned business domains under `shareddomain/` and shared
-  domain entities under `shareddomain/platform/` (User, Workspace, Team, permissions).
-  Schemas stay in `app/schemas/` and Celery task entry points in `app/tasks/`.
+- Backend code follows a layer-first, feature-second layout: technical layers
+  (`api/` HTTP, `application/` use cases, `adapters/` concrete port
+  implementations, `infra/` config, DB session, data access, storage) cross-cut
+  module-owned business domains under `domain/`; shared cross-domain ORM
+  entities live in `domain/platform/` (User, Workspace, Team, permissions).
+  Within each layer, feature packages group the files (for example
+  `application/agents/runs/`, `domain/knowledge/graph/`), with large features
+  split further by real responsibility (`access`, `runs`, `tools`, `retrieval`,
+  `documents`, `catalog`). Schemas stay in `app/schemas/` and Celery task entry
+  points in `app/tasks/`.
   When adding a new business domain, add a self-contained module directory
-  under `app/shareddomain/<feature>/` (entities plus services), expose use cases
+  under `app/domain/<feature>/` (entities plus services), expose use cases
   through `app/application/`, and keep HTTP routers thin in `app/api/v1/`.
 - Apply this dependency direction to new or changed backend code:
   - `api/v1/` routers keep HTTP concerns thin and use `application/`,
     `schemas/`, and `api/deps.py`. Existing direct imports from `entities/` or
-    `infrastructure/` are legacy exceptions: do not expand them, and do not
+    `infra/` are legacy exceptions: do not expand them, and do not
     refactor them unless the requested change requires it.
-  - `application/` may import `entities/`, `shareddomain/`, `ports/`,
-    `infrastructure/`, and `schemas/`. It accesses capabilities through
+  - `application/` may import `entities/`, `domain/`, `ports/`,
+    `infra/`, and `schemas/`. It accesses capabilities through
     `app/ports/`, except for pure capability algorithms or validation functions
     it deliberately composes directly (for example retrieval ranking math or
     credential normalization).
-  - Business services under `shareddomain/` may import `entities/`, `ports/`,
-    `infrastructure/`, `schemas/`, and other domain modules, but never
-    `application/` or concrete capability implementations.
-  - `capabilities/` may import `infrastructure/` and its own modules, but never
-    `shareddomain/`, `schemas/`, or `application/`.
-  Business rules and status constants live in `shareddomain/` (repositories
+  - Business services under `domain/` may import `entities/`, `ports/`,
+    `infra/`, `schemas/`, and other domain modules, but never
+    `application/` or concrete adapter implementations.
+  - `adapters/` may import `infra/` and its own modules, but never
+    `domain/`, `schemas/`, or `application/`.
+  Business rules and status constants live in `domain/` (repositories
   import them from the domain models). Consume infrastructure through an
   interface where implementation swapping matters (for example
-  `infrastructure/object_storage.py::ObjectStorage`); domain services must not
+  `infra/storage/object_storage.py::ObjectStorage`); domain services must not
   import the concrete implementation.
 - Capability contracts live in `app/ports/` (Protocols plus delegate functions
   for vector store, LLM providers, document parsing, MCP client, and model
   registry). Swapping an implementation (for example Qdrant to Milvus) should
   touch only the capability module and its port factory.
 - Data isolation: pure domain entities live in `app/entities/` (dataclasses
-  mirroring the database columns); `app/shareddomain/platform/` and other
-  `app/shareddomain/*/models.py` hold the SQLAlchemy database models.
-  Repositories (`app/infrastructure/repositories/`) map ORM ↔ entities via
-  `mapping.py` helpers and own all `db.add/delete/refresh/flush`; business
-  services in `shareddomain/` and `application/` use entities rather than ORM
+  mirroring the database columns); `app/domain/platform/models.py` and other
+  `app/domain/<feature>/models.py` hold the SQLAlchemy database models.
+  Repositories (`app/infra/db/repositories/<feature>/`) map ORM ↔ entities via
+  `app/infra/db/mapping.py` helpers and own all `db.add/delete/refresh/flush`;
+  business services in `domain/` and `application/` use entities rather than ORM
   models and coordinate transactions via the `db` unit-of-work
   (`db.commit()`/`db.rollback()`). New models: add the entity to
   `app/entities/`, keep the ORM class in its current models module
-  (`app/shareddomain/platform/` for cross-domain shared entities), and
+  (`app/domain/platform/` for cross-domain shared entities), and
   expose create/save/refresh/delete wrappers on the repository. ORM model
   modules and explicit model-registration imports are the narrow exceptions;
   they are not a pattern for business logic.
@@ -91,16 +95,18 @@ not trigger unrelated cleanup.
   in `agent_run_events`. All Agent, Workflow, and test Tool executions use
   `tool_invocations`; do not recreate an `agent_tool_calls` table or dual-write
   ledger.
-- `backend/tests/unit.py` is a pure unit suite (no DB, no HTTP, no network)
-  for business rules and services with mocked ports/repositories; run it like
-  the other suites with `uv run python -m tests.unit`.
+- Pure unit suites (no DB, no HTTP, no network) for business rules and
+  services with mocked ports/repositories live per feature under
+  `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run
+  them like the other suites with `uv run python -m tests.<feature>.unit`.
 - Large domain modules are split by concern with a facade keeping the public
-  API stable: `application/agents.py` re-exports `agent_tools.py` (tool
-  construction, pure mappers) and `agent_runs.py` (run orchestration);
-  `shareddomain/knowledge/services.py` re-exports `kb.py`, `documents.py`,
-  and `permissions.py`. Keep this pattern when a domain module grows:
+  API stable: `application/agents/__init__.py` re-exports the agents use-case
+  surface while implementations live in `agents/access/`, `agents/runs/`, and
+  `agents/tools/`; `domain/knowledge/service.py` re-exports the knowledge
+  facade over `knowledge/bases/`, `knowledge/documents/`, and
+  `knowledge/tasks/`. Keep this pattern when a domain module grows:
   implementation files per concern, facade module for importers.
-- Hand-written SQL goes under `backend/app/infrastructure/sql/<feature>/` for
+- Hand-written SQL goes under `backend/app/infra/db/sql/<feature>/` for
   explicit write workflows, seed data, and complex queries; keep parameter
   binding in Python services.
 - Root `.env.example` is the only environment template; host backend commands
