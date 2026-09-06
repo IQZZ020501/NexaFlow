@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.system_log import SystemLog as SystemLogEntity
+from app.entities.audit.system_logs import SystemLog as SystemLogEntity
 from app.infra.db.mapping import to_entity
 from app.infra.observability.system_log import SystemLog
 

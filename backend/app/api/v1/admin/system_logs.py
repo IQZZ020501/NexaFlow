@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_global_admin
-from app.application.system_logs import count_system_logs, list_system_logs
+from app.application.audit.system_logs import count_system_logs, list_system_logs
 from app.entities.user import User
 from app.infra.db.session import get_db
-from app.schemas.system_log import SystemLogResponse
+from app.schemas.audit.system_logs import SystemLogResponse
 
 router = APIRouter(prefix="/system-logs", tags=["system-logs"])
 
