@@ -57,7 +57,7 @@ from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.domain.knowledge.services import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,

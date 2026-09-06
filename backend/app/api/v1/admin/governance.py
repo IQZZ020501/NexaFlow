@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_settings, require_global_admin
 from app.application.governance import get_admin_health
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
 from app.schemas.governance import AdminHealthResponse

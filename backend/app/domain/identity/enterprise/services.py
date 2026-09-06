@@ -1,6 +1,6 @@
 from fastapi import HTTPException, status
 
-from app.entities.enterprise_identity import ENTERPRISE_IDENTITY_PROVIDERS
+from app.entities.identity.enterprise import ENTERPRISE_IDENTITY_PROVIDERS
 
 
 def safe_next_path(value: str | None) -> str:

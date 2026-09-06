@@ -30,7 +30,7 @@ from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import McpToolPolicy, ToolSnapshot
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.agents.live_stream import AgentLiveStreamPublisher
 from app.infra.observability.errors import classify_error, log_error

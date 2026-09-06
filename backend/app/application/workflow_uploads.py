@@ -9,7 +9,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import Agent
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workflows import WorkflowUpload
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import new_id

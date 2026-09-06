@@ -56,7 +56,7 @@ from app.entities.knowledge import (
     TASK_RUNNING_STATUS,
     TASK_SUCCEEDED_STATUS,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workflows import WorkflowUploadStorageCleanup
 from app.infra.queue.celery import celery_app
 from app.infra.db.repositories.knowledge import repository as knowledge_repository

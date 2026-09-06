@@ -12,8 +12,8 @@ from tests.support import (
     settings as test_settings,
     test_client,
 )
-from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
-from app.entities.user import RefreshSession
+from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
+from app.entities.identity.user import RefreshSession
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.security.auth import hash_refresh_token
@@ -381,7 +381,7 @@ def main() -> None:
         assert failed_login.status_code == 401, failed_login.text
 
         with patch(
-            "app.application.identity.enforce_login_rate_limit",
+            "app.application.identity.service.enforce_login_rate_limit",
             new=AsyncMock(side_effect=LoginRateLimitExceeded(42)),
         ):
             limited_login = client.post(

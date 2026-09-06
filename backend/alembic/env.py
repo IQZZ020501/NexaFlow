@@ -71,7 +71,7 @@ from app.domain.models.registered import RegisteredModel  # noqa: F401
 from app.domain.platform.models import ResourcePermission  # noqa: F401
 from app.domain.platform.models import SmtpSettings  # noqa: F401
 from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
-from app.domain.enterprise_identity.models import (  # noqa: F401
+from app.domain.identity.enterprise.models import (  # noqa: F401
     EnterpriseIdentity,
     EnterpriseIdentityConnection,
     EnterpriseLoginState,

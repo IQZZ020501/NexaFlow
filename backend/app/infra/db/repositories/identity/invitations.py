@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.platform.models import WorkspaceInvitation as InvitationOrm
-from app.entities.workspace_invitation import WorkspaceInvitation
+from app.entities.identity.invitations import WorkspaceInvitation
 from app.infra.db import mapping
 
 

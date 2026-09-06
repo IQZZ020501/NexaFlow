@@ -25,9 +25,9 @@ from tests.support import (
     test_client,
 )
 
-from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
+from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
 from app.application import workspace as workspace_service
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workspace import Workspace
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.teams import repository as team_repo
@@ -515,7 +515,7 @@ async def exercise_direct_identity_edges() -> None:
     from fastapi import HTTPException
 
     from app.application import identity as identity_service
-    from app.application.identity import (
+    from app.application.identity.service import (
         authenticate_user,
         change_password,
         change_user_password,
@@ -535,14 +535,14 @@ async def exercise_direct_identity_edges() -> None:
         user_workspaces_by_user_id,
     )
     from app.entities.team import Team
-    from app.entities.user import RefreshSession
+    from app.entities.identity.user import RefreshSession
     from app.entities.workspace import Workspace, WorkspaceMembership
     from app.infra.security.agent_rate_limit import (
         LoginRateLimitExceeded,
         LoginRateLimitUnavailable,
     )
     from app.infra.security.auth import hash_password, verify_password
-    from app.schemas.user import UserCreateRequest, UserUpdateRequest
+    from app.schemas.identity.contracts import UserCreateRequest, UserUpdateRequest
 
     async with get_session_factory()() as db:
         # Empty user lists short-circuit the scope queries.

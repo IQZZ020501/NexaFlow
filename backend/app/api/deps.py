@@ -9,7 +9,7 @@ from app.application.workspace import WorkspaceContext, build_workspace_context
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.db.session import get_db
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.runtime.model_utils import utc_now

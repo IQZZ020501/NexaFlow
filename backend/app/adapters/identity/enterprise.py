@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 import httpx2
 
-from app.entities.enterprise_identity import EnterpriseIdentityConnection
+from app.entities.identity.enterprise import EnterpriseIdentityConnection
 
 _FEISHU_AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 _FEISHU_TOKEN_URL = "https://accounts.feishu.cn/oauth/v3/token"

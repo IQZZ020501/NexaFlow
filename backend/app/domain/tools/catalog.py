@@ -18,7 +18,7 @@ from app.entities.tools import (
     ToolSource,
     ToolVersion,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.runtime.model_utils import utc_now
 from app.domain.tools.permissions import (
     ToolAuthorization,

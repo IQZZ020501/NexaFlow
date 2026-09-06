@@ -7,13 +7,13 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.identity import issue_refresh_session
-from app.entities.enterprise_identity import (
+from app.application.identity.service import issue_refresh_session
+from app.entities.identity.enterprise import (
     EnterpriseIdentity,
     EnterpriseIdentityConnection,
     EnterpriseLoginState,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workspace import WorkspaceMembership
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import utc_now
@@ -28,7 +28,7 @@ from app.ports.enterprise_identity import (
     build_authorization_url,
     resolve_external_principal,
 )
-from app.schemas.enterprise_identity import (
+from app.schemas.identity.enterprise import (
     EnterpriseConnectionResponse,
     EnterpriseConnectionUpdateRequest,
     EnterpriseIdentityResponse,
@@ -37,7 +37,7 @@ from app.schemas.enterprise_identity import (
     PublicEnterpriseConnectionsResponse,
 )
 from app.domain.audit.services import record_audit_log
-from app.domain.enterprise_identity.services import safe_next_path, validate_connection_fields
+from app.domain.identity.enterprise.services import safe_next_path, validate_connection_fields
 
 LOGIN_STATE_TTL_SECONDS = 600
 FEISHU_QR_STATE_PREFIX = "feishu_qr."

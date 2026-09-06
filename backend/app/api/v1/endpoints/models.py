@@ -12,7 +12,7 @@ from app.api.deps import (
     require_password_changed,
     require_workspace_path_role,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,

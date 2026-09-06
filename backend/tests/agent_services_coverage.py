@@ -39,7 +39,7 @@ from app.entities.agents import (
     AgentRunEvent,
     AgentToolCall,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import repository as kb_repository

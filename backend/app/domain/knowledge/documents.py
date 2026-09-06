@@ -11,7 +11,7 @@ from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import new_id
 from app.infra.storage.object_storage import (

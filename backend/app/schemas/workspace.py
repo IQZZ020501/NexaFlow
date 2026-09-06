@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.schemas.user import UserResponse
+from app.schemas.identity.contracts import UserResponse
 
 
 class WorkspaceResponse(BaseModel):

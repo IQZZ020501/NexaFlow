@@ -14,7 +14,7 @@ from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.session import get_session_factory
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.entities.knowledge import (

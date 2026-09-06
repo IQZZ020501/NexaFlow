@@ -14,7 +14,7 @@ from app.application.agent_child_runs import preflight_workflow_agent_snapshots
 from app.application.agent_runs import cancel_run_tree, update_run_feedback
 from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.entities.agents import AgentRun
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
 from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,

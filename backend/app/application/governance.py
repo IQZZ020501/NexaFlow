@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
 from app.domain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401

@@ -18,7 +18,7 @@ from app.application.knowledge_retrieval import retrieve_knowledge_base
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolSnapshot
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
 from app.ports.llm import (

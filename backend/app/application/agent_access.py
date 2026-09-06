@@ -33,7 +33,7 @@ from app.entities.agents import (
     AgentPublicationVersion,
     AgentRun,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,

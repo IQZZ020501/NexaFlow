@@ -21,7 +21,7 @@ from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolSnapshot
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
 from app.infra.agents.live_stream import AgentLiveStreamPublisher
 from app.infra.config.settings import Settings

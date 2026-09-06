@@ -16,7 +16,7 @@ from app.ports.mcp import (
     normalize_mcp_url,
 )
 from app.entities.tools import McpServer, McpToolPolicy, ToolPolicy, ToolSource
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.workspaces import resource_permissions as permission_repository

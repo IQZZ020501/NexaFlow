@@ -51,7 +51,7 @@ from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.entities.resource_permission import ResourcePermission
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.tools import McpServer, McpToolPolicy
-from app.entities.user import RefreshSession, User
+from app.entities.identity.user import RefreshSession, User
 from app.infra.queue import celery as celery_mod
 from app.infra.sandbox import client as code_sandbox
 from app.infra.config import settings as config_mod

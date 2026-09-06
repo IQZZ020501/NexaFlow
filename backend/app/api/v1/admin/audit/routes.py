@@ -8,7 +8,7 @@ from app.application.audit import count_audit_logs, list_audit_logs
 from app.schemas.audit import AuditLogResponse
 from app.infra.db.session import get_db
 from app.api.deps import require_global_admin
-from app.entities.user import User
+from app.entities.identity.user import User
 
 router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])
 

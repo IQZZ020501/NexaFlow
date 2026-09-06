@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.audit import AuditLog
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.audit import repository as audit_repository
 from app.schemas.audit import AuditLogResponse
 

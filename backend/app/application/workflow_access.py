@@ -23,7 +23,7 @@ from app.application.workflow_uploads import (
     resolve_public_workflow_files,
 )
 from app.entities.agents import AgentRun
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,

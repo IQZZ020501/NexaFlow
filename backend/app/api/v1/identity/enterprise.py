@@ -7,8 +7,8 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_settings, require_global_admin
-from app.api.v1.endpoints.auth import get_request_ip, set_refresh_cookie
-from app.application.enterprise_identity import (
+from app.api.v1.identity.auth import get_request_ip, set_refresh_cookie
+from app.application.identity.enterprise import (
     EnterpriseLoginRejected,
     begin_login,
     bind_identity,
@@ -18,7 +18,7 @@ from app.application.enterprise_identity import (
     list_public_connections,
     upsert_connection,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
@@ -26,7 +26,7 @@ from app.infra.security.enterprise_login_rate_limit import (
     enforce_enterprise_login_rate_limit,
 )
 from app.infra.db.session import get_db
-from app.schemas.enterprise_identity import (
+from app.schemas.identity.enterprise import (
     EnterpriseConnectionResponse,
     EnterpriseConnectionUpdateRequest,
     EnterpriseIdentityBindingRequest,

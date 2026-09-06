@@ -5381,7 +5381,7 @@ async def assert_tool_service_paths(
         ToolInvocation,
         ToolSource,
     )
-    from app.entities.user import User
+    from app.entities.identity.user import User
     from app.entities.workspace import WorkspaceMembership
     from app.domain.tools import services as tool_services
     from app.domain.tools.catalog import (

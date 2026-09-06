@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
-from app.schemas.user import UserResponse
+from app.schemas.identity.contracts import UserResponse
 
 
 class KnowledgeBaseResponse(BaseModel):

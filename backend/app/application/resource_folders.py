@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.resource_folders import ResourceFolder
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.resource_folders import repository as repository
 from app.infra.runtime.validation import normalize_name
 from app.ports import model_registry

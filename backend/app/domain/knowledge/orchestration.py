@@ -13,7 +13,7 @@ from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
 from app.infra.runtime.model_utils import new_id, utc_now
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.entities.knowledge import (

@@ -38,7 +38,7 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event

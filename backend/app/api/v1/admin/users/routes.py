@@ -6,15 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_settings, require_global_admin
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
-from app.entities.user import User
-from app.schemas.user import (
+from app.entities.identity.user import User
+from app.schemas.identity.contracts import (
     ChangePasswordRequest,
     UserCreateRequest,
     UserPasswordResetResponse,
     UserResponse,
     UserUpdateRequest,
 )
-from app.application.identity import (
+from app.application.identity.service import (
     change_user_password,
     create_user,
     delete_user_permanently,
@@ -22,12 +22,12 @@ from app.application.identity import (
     list_users,
     update_user,
 )
-from app.application.sessions import (
+from app.application.identity.sessions import (
     list_user_sessions,
     revoke_all_user_sessions,
     revoke_user_session,
 )
-from app.schemas.user import RefreshSessionResponse
+from app.schemas.identity.contracts import RefreshSessionResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
 

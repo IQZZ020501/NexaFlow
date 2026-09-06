@@ -7,7 +7,7 @@ from app.domain.audit.services import record_audit_log
 from app.infra.runtime.validation import normalize_name
 from app.infra.runtime.model_utils import new_id
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.schemas.team import (
@@ -18,7 +18,7 @@ from app.schemas.team import (
     TeamResponse,
     TeamUpdateRequest,
 )
-from app.schemas.user import user_to_response
+from app.schemas.identity.contracts import user_to_response
 
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"

@@ -16,7 +16,7 @@ from app.infra.security.agent_rate_limit import (
     enforce_login_rate_limit,
 )
 from app.infra.runtime.validation import normalize_email, normalize_name, normalize_username
-from app.entities.user import RefreshSession, User
+from app.entities.identity.user import RefreshSession, User
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
@@ -25,7 +25,7 @@ from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.repositories.email import delivery as email_repository
-from app.schemas.user import (
+from app.schemas.identity.contracts import (
     MembershipResponse,
     MeResponse,
     TokenResponse,

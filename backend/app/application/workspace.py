@@ -14,10 +14,10 @@ logger = get_logger(__name__)
 from app.domain.audit.services import record_audit_log
 from app.infra.runtime.validation import normalize_name
 from app.infra.runtime.model_utils import new_id
-from app.entities.user import User
-from app.schemas.user import UserCreateRequest, UserPasswordResetResponse
-from app.application.identity import create_user
-from app.schemas.user import user_to_response
+from app.entities.identity.user import User
+from app.schemas.identity.contracts import UserCreateRequest, UserPasswordResetResponse
+from app.application.identity.service import create_user
+from app.schemas.identity.contracts import user_to_response
 from app.entities.workspace import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import mcp as mcp_repository

@@ -10,7 +10,7 @@ from app.entities.knowledge import (
     KnowledgeEvaluationExpectation,
     KnowledgeTask,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.runtime.model_utils import new_id
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import (

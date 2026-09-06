@@ -3,13 +3,13 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.enterprise_identity import (
+from app.entities.identity.enterprise import (
     EnterpriseIdentity,
     EnterpriseIdentityConnection,
     EnterpriseLoginState,
 )
 from app.infra.db import mapping
-from app.domain.enterprise_identity.models import (
+from app.domain.identity.enterprise.models import (
     EnterpriseIdentity as EnterpriseIdentityOrm,
     EnterpriseIdentityConnection as EnterpriseIdentityConnectionOrm,
     EnterpriseLoginState as EnterpriseLoginStateOrm,

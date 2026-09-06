@@ -20,7 +20,7 @@ from app.application.agent_tools import (
 )
 from app.application.tool_runtime import preflight_tool_snapshot
 from app.entities.agents import Agent, AgentPublicationVersion, AgentRun
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,
     AgentLiveStreamReader,

@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_settings
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
-from app.entities.user import User
-from app.schemas.user import (
+from app.entities.identity.user import User
+from app.schemas.identity.contracts import (
     ChangePasswordRequest,
     LoginRequest,
     MeResponse,
@@ -17,24 +17,24 @@ from app.schemas.user import (
     RefreshSessionResponse,
     UserResponse,
 )
-from app.application.identity import (
+from app.application.identity.service import (
     authenticate_user,
     change_password,
     get_me,
     refresh_access_token,
     revoke_refresh_token,
 )
-from app.application.sessions import (
+from app.application.identity.sessions import (
     list_user_sessions,
     revoke_other_user_sessions,
     revoke_user_session,
 )
-from app.application.invitations import accept_workspace_invitation
-from app.application.password_reset import (
+from app.application.identity.invitations import accept_workspace_invitation
+from app.application.identity.password_reset import (
     confirm_password_reset,
     request_password_reset,
 )
-from app.schemas.invitation import WorkspaceInvitationAcceptRequest
+from app.schemas.identity.invitations import WorkspaceInvitationAcceptRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 REFRESH_TOKEN_COOKIE = "nexaflow_refresh_token"

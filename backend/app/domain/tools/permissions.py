@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.resource_permission import ResourcePermission
 from app.entities.tools import Tool, ToolAccess, ToolGrant, effective_tool_access
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.domain.audit.services import record_audit_log
 
 ToolPermissionLabel = Literal["owner", "admin", "view", "use"]

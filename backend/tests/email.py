@@ -384,10 +384,10 @@ async def test_delivery_edge_cases() -> None:
 
 
 async def test_invitation_and_reset_validation() -> None:
-    from app.application.invitations import create_workspace_invitation
-    from app.application.password_reset import confirm_password_reset
-    from app.entities.user import User
-    from app.schemas.invitation import WorkspaceInvitationCreateRequest
+    from app.application.identity.invitations import create_workspace_invitation
+    from app.application.identity.password_reset import confirm_password_reset
+    from app.entities.identity.user import User
+    from app.schemas.identity.invitations import WorkspaceInvitationCreateRequest
 
     db = AsyncMock()
     personal_admin = WorkspaceInvitationCreateRequest(
@@ -412,7 +412,7 @@ async def test_invitation_and_reset_validation() -> None:
 
     generic = WorkspaceInvitationCreateRequest(kind="generic", role="member")
     with patch(
-        "app.application.invitations.workspace_repository.get_workspace_by_id",
+        "app.application.identity.invitations.workspace_repository.get_workspace_by_id",
         new=AsyncMock(return_value=None),
     ):
         try:
@@ -431,11 +431,11 @@ async def test_invitation_and_reset_validation() -> None:
     workspace = type("Workspace", (), {"status": "active", "name": "Workspace"})()
     with (
         patch(
-            "app.application.invitations.workspace_repository.get_workspace_by_id",
+            "app.application.identity.invitations.workspace_repository.get_workspace_by_id",
             new=AsyncMock(return_value=workspace),
         ),
         patch(
-            "app.application.invitations.invitation_repository.create",
+            "app.application.identity.invitations.invitation_repository.create",
             new=AsyncMock(
                 side_effect=IntegrityError("insert", {}, RuntimeError("duplicate"))
             ),
@@ -458,11 +458,11 @@ async def test_invitation_and_reset_validation() -> None:
     inactive = User(id="inactive-user", is_active=False)
     with (
         patch(
-            "app.application.password_reset.email_repository.get_password_reset_token_user_id",
+            "app.application.identity.password_reset.email_repository.get_password_reset_token_user_id",
             new=AsyncMock(return_value=inactive.id),
         ),
         patch(
-            "app.application.password_reset.user_repository.lock_user",
+            "app.application.identity.password_reset.user_repository.lock_user",
             new=AsyncMock(return_value=inactive),
         ),
     ):
@@ -533,7 +533,7 @@ def main() -> None:
         configure_identity_email(client, admin_headers)
 
         with patch(
-            "app.application.invitations.dispatch_email_deliveries",
+            "app.application.identity.invitations.dispatch_email_deliveries",
             new=AsyncMock(),
         ) as dispatch:
             personal = client.post(
@@ -567,7 +567,7 @@ def main() -> None:
         )
 
         with patch(
-            "app.application.invitations.dispatch_email_deliveries",
+            "app.application.identity.invitations.dispatch_email_deliveries",
             new=AsyncMock(),
         ) as deletable_dispatch:
             deletable = client.post(
@@ -602,7 +602,7 @@ def main() -> None:
         assert deleted_acceptance.status_code == 400, deleted_acceptance.text
 
         with patch(
-            "app.application.invitations.dispatch_email_deliveries",
+            "app.application.identity.invitations.dispatch_email_deliveries",
             new=AsyncMock(),
         ):
             generic = client.post(
@@ -631,7 +631,7 @@ def main() -> None:
         assert generic_payload["id"] in {item["id"] for item in invitations.json()}
 
         with patch(
-            "app.application.invitations.dispatch_email_deliveries",
+            "app.application.identity.invitations.dispatch_email_deliveries",
             new=AsyncMock(),
         ) as welcome_dispatch:
             accepted = client.post(
@@ -653,7 +653,7 @@ def main() -> None:
         assert welcome_payload["url"] == "https://nexaflow.example/login"
 
         with patch(
-            "app.application.invitations.dispatch_email_deliveries",
+            "app.application.identity.invitations.dispatch_email_deliveries",
             new=AsyncMock(),
         ) as generic_welcome_dispatch:
             generic_accepted = client.post(
@@ -711,7 +711,7 @@ def main() -> None:
 
         member_token = login(client, "mail-member", "Member@123")["access_token"]
         with patch(
-            "app.application.identity.dispatch_email_deliveries",
+            "app.application.identity.service.dispatch_email_deliveries",
             new=AsyncMock(),
         ) as password_dispatch:
             changed = client.post(
@@ -757,7 +757,7 @@ def main() -> None:
         assert unknown.content == b""
 
         with patch(
-            "app.application.password_reset.dispatch_email_deliveries",
+            "app.application.identity.password_reset.dispatch_email_deliveries",
             new=AsyncMock(),
         ) as reset_dispatch:
             requested = client.post(
@@ -803,7 +803,7 @@ def main() -> None:
         assert invalid.json()["detail"] == "Password reset link is invalid or expired."
 
         with patch(
-            "app.application.password_reset.dispatch_email_deliveries",
+            "app.application.identity.password_reset.dispatch_email_deliveries",
             new=AsyncMock(),
         ):
             confirmed = client.post(
@@ -854,7 +854,7 @@ def main() -> None:
         assert limited.json()["detail"] == "Password reset is temporarily unavailable."
 
         with patch(
-            "app.application.password_reset.queue_identity_email",
+            "app.application.identity.password_reset.queue_identity_email",
             new=AsyncMock(return_value=None),
         ):
             configuration_race = client.post(

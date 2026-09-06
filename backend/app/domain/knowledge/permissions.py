@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import KnowledgeBase
 from app.entities.resource_permission import ResourcePermission
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
 from app.schemas.knowledge import ResourcePermissionResponse
-from app.schemas.user import user_to_response
+from app.schemas.identity.contracts import user_to_response
 from app.domain.audit.services import record_audit_log
 
 RESOURCE_TYPE = "knowledge_base"

@@ -12,7 +12,7 @@ from app.application.tool_runtime import preflight_tool_snapshot
 from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentPublicationVersion, AgentRun
 from app.entities.tools import ToolSnapshot
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository

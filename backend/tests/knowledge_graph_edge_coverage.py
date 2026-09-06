@@ -21,7 +21,7 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphRevisionChange,
     KnowledgeGraphReviewItem,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository

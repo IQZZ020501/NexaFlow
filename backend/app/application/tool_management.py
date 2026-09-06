@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tool_runtime import queue_tool_invocation
 from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.repositories.tools import repository as tool_repository
@@ -25,7 +25,7 @@ from app.schemas.tool import (
     ToolSourceDetailResponse,
     ToolSummaryResponse,
 )
-from app.schemas.user import user_to_response
+from app.schemas.identity.contracts import user_to_response
 from app.domain.tools.catalog import (
     ToolCatalogDetail,
     ToolCatalogItem,

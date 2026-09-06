@@ -1,10 +1,10 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.security.auth import hash_refresh_token
-from app.schemas.user import RefreshSessionResponse
+from app.schemas.identity.contracts import RefreshSessionResponse
 
 
 async def list_user_sessions(

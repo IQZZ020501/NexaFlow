@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from app.schemas.user import UserResponse
+from app.schemas.identity.contracts import UserResponse
 
 
 ToolKind = Literal["builtin", "python", "mcp"]

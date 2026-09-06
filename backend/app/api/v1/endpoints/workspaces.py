@@ -11,7 +11,7 @@ from app.application.governance import (
     get_workspace_inventory,
     update_workspace_governance,
 )
-from app.application.invitations import (
+from app.application.identity.invitations import (
     create_workspace_invitation,
     delete_workspace_invitation,
     list_workspace_invitations,
@@ -23,7 +23,7 @@ from app.schemas.governance import (
     WorkspaceGovernanceUpdateRequest,
     WorkspaceInventoryResponse,
 )
-from app.schemas.invitation import (
+from app.schemas.identity.invitations import (
     WorkspaceInvitationCreateRequest,
     WorkspaceInvitationResponse,
 )
@@ -38,8 +38,8 @@ from app.api.deps import (
     require_password_changed,
     require_workspace_path_role,
 )
-from app.entities.user import User
-from app.schemas.user import UserPasswordResetResponse
+from app.entities.identity.user import User
+from app.schemas.identity.contracts import UserPasswordResetResponse
 from app.schemas.workspace import (
     WorkspaceMemberCreateRequest,
     WorkspaceMemberResponse,

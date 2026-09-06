@@ -6,7 +6,7 @@ from app.entities.knowledge_graph import (
     GRAPH_SCHEMA_DRAFT,
     KnowledgeGraphSchema,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,

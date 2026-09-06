@@ -11,13 +11,13 @@ from app.adapters.identity.enterprise import (
     build_authorization_url,
     resolve_external_principal,
 )
-from app.entities.enterprise_identity import EnterpriseIdentityConnection
+from app.entities.identity.enterprise import EnterpriseIdentityConnection
 from app.infra.security import enterprise_login_rate_limit as rate_limit
 from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
 )
-from app.domain.enterprise_identity.services import (
+from app.domain.identity.enterprise.services import (
     safe_next_path,
     validate_connection_fields,
 )
@@ -485,7 +485,7 @@ def main() -> None:
         assert "code_challenge" not in qr_query
         qr_resolver = AsyncMock(return_value=principal)
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=qr_resolver,
         ):
             qr_login = client.get(
@@ -499,7 +499,7 @@ def main() -> None:
         assert configured_connection["tenant_id"] == "tenant_test"
         state, _ = _start(client, connection["id"])
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(return_value=principal),
         ):
             first_login = client.get(
@@ -538,7 +538,7 @@ def main() -> None:
 
         repeat_state, _ = _start(client, connection["id"])
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(return_value=principal),
         ):
             repeated = client.get(
@@ -600,7 +600,7 @@ def main() -> None:
 
         provider_error_state, _ = _start(client, connection["id"])
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(side_effect=EnterpriseProviderError("failed")),
         ):
             provider_error = client.get(
@@ -611,7 +611,7 @@ def main() -> None:
 
         wrong_tenant_state, _ = _start(client, connection["id"])
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(
                 return_value=ExternalPrincipal(
                     subject_id="ou_external",
@@ -628,7 +628,7 @@ def main() -> None:
 
         state, _ = _start(client, connection["id"])
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(return_value=principal),
         ):
             completed = client.get(
@@ -685,7 +685,7 @@ def main() -> None:
         assert "error=invalid_state" in replay.headers["location"]
 
         with patch(
-            "app.api.v1.endpoints.enterprise_identity.enforce_enterprise_login_rate_limit",
+            "app.api.v1.identity.enterprise.enforce_enterprise_login_rate_limit",
             new=AsyncMock(side_effect=EnterpriseLoginRateLimitExceeded(7)),
         ):
             limited = client.get(
@@ -695,7 +695,7 @@ def main() -> None:
         assert limited.status_code == 429
         assert limited.headers["retry-after"] == "7"
         with patch(
-            "app.api.v1.endpoints.enterprise_identity.enforce_enterprise_login_rate_limit",
+            "app.api.v1.identity.enterprise.enforce_enterprise_login_rate_limit",
             new=AsyncMock(side_effect=EnterpriseLoginRateLimitUnavailable()),
         ):
             unavailable = client.get(
@@ -731,7 +731,7 @@ def main() -> None:
         assert reenabled.status_code == 200, reenabled.text
         disabled_identity_state, _ = _start(client, connection["id"])
         with patch(
-            "app.application.enterprise_identity.resolve_external_principal",
+            "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(return_value=principal),
         ):
             disabled_identity = client.get(
@@ -798,7 +798,7 @@ def main() -> None:
         for provider, connection_id, code_parameter, external_principal in direct_login_cases:
             state, _ = _start(client, connection_id, provider)
             with patch(
-                "app.application.enterprise_identity.resolve_external_principal",
+                "app.application.identity.enterprise.resolve_external_principal",
                 new=AsyncMock(return_value=external_principal),
             ):
                 completed = client.get(

@@ -16,7 +16,7 @@ from app.entities.tools import (
     validate_python_tool_code,
     validate_tool_json_schema,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.tools import repository as repository
 from app.infra.runtime.validation import normalize_name

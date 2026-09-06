@@ -20,7 +20,7 @@ from app.entities.tools import (
     ToolSource,
     ToolVersion,
 )
-from app.entities.user import User
+from app.entities.identity.user import User
 from app.infra.db.mapping import save, to_entity
 from app.domain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
