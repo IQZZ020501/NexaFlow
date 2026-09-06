@@ -63,6 +63,7 @@ def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
     return RegisteredModelResponse(
         id=model.id,
         workspace_id=model.workspace_id,
+        folder_id=model.folder_id,
         name=model.name,
         provider=model.provider,
         provider_type=model.provider_type,

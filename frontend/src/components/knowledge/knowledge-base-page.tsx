@@ -39,6 +39,7 @@ import type { AppNotification } from "@/lib/notifications"
 import { useSession } from "@/contexts/session-context"
 import { useLanguage } from "@/contexts/language-provider"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { Button } from "@/components/ui/button"
@@ -146,6 +147,26 @@ import type {
 
 type DocumentSortKey =
   "name" | "size_bytes" | "chunk_count" | "created_at" | "updated_at"
+
+type KnowledgeBaseSortKey = "updated_at" | "created_at" | "name"
+
+function sortKnowledgeBases(
+  knowledgeBases: KnowledgeBaseListItem[],
+  sortKey: KnowledgeBaseSortKey,
+  locale: string
+) {
+  const collator = new Intl.Collator(locale, {
+    numeric: true,
+    sensitivity: "base",
+  })
+  return [...knowledgeBases].sort((left, right) => {
+    if (sortKey === "name") return collator.compare(left.name, right.name)
+    return (
+      Date.parse(right[sortKey]) - Date.parse(left[sortKey]) ||
+      collator.compare(left.name, right.name)
+    )
+  })
+}
 
 const DOCUMENT_SORT_OPTIONS: Array<{
   key: DocumentSortKey
@@ -443,6 +464,8 @@ function KnowledgeBasePageContent({
     RegisteredModel[]
   >([])
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
+  const [knowledgeBaseSortKey, setKnowledgeBaseSortKey] =
+    React.useState<KnowledgeBaseSortKey>("updated_at")
   const [documentSearch, setDocumentSearch] = React.useState("")
   const [documentPage, setDocumentPage] = React.useState(1)
   const [documentPageSize, setDocumentPageSize] =
@@ -532,16 +555,25 @@ function KnowledgeBasePageContent({
       (knowledgeBase) =>
         (knowledgeBase.folder_id ?? null) === resourceFolders.selectedFolderId
     )
-    if (!search) {
-      return inFolder
-    }
-
-    return inFolder.filter((knowledgeBase) =>
-      [knowledgeBase.name, knowledgeBase.description].some((value) =>
-        value.toLowerCase().includes(search)
-      )
+    const matched = search
+      ? inFolder.filter((knowledgeBase) =>
+          [knowledgeBase.name, knowledgeBase.description].some((value) =>
+            value.toLowerCase().includes(search)
+          )
+        )
+      : inFolder
+    return sortKnowledgeBases(
+      matched,
+      knowledgeBaseSortKey,
+      languageLocales[language]
     )
-  }, [knowledgeBases, knowledgeSearch, resourceFolders.selectedFolderId])
+  }, [
+    knowledgeBases,
+    knowledgeBaseSortKey,
+    knowledgeSearch,
+    language,
+    resourceFolders.selectedFolderId,
+  ])
   const movableKnowledgeBaseIds = filteredKnowledgeBases
     .filter((knowledgeBase) => knowledgeBase.permission === "edit")
     .map((knowledgeBase) => knowledgeBase.id)
@@ -2960,13 +2992,28 @@ function KnowledgeBasePageContent({
           }
         >
           <div className="flex flex-col gap-3 rounded-lg border bg-background p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative min-w-0 sm:w-[320px]">
-              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={knowledgeSearch}
-                onChange={(event) => setKnowledgeSearch(event.target.value)}
-                placeholder={t("搜索{label}...", { label: t("知识库") })}
-                className="pl-9"
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+              <div className="relative min-w-0 sm:w-[320px]">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={knowledgeSearch}
+                  onChange={(event) => setKnowledgeSearch(event.target.value)}
+                  placeholder={t("搜索{label}...", { label: t("知识库") })}
+                  className="pl-9"
+                />
+              </div>
+              <FilterDropdown
+                ariaLabel={t("排序")}
+                value={knowledgeBaseSortKey}
+                options={[
+                  { value: "updated_at", label: t("最近更新") },
+                  { value: "created_at", label: t("创建时间") },
+                  { value: "name", label: t("名称") },
+                ]}
+                className="h-9 sm:w-32"
+                onChange={(value) =>
+                  setKnowledgeBaseSortKey(value as KnowledgeBaseSortKey)
+                }
               />
             </div>
             <ResourceBulkMoveBar
@@ -3026,11 +3073,7 @@ function KnowledgeBasePageContent({
                                 />
                               </div>
                               <p className="mt-1 truncate text-sm text-muted-foreground">
-                                {knowledgeBase.description ||
-                                  formatDateTime(
-                                    knowledgeBase.updated_at,
-                                    locale
-                                  )}
+                                {knowledgeBase.description || t("暂无描述")}
                               </p>
                               <p className="mt-1 truncate text-xs text-muted-foreground">
                                 {t("创建者：{creator}", {
@@ -3044,6 +3087,13 @@ function KnowledgeBasePageContent({
                                           knowledgeBase.created_by_user_id
                                         ),
                                 })}
+                              </p>
+                              <p className="mt-1 truncate text-xs text-muted-foreground">
+                                {t("更新时间")} ·{" "}
+                                {formatDateTime(
+                                  knowledgeBase.updated_at,
+                                  locale
+                                )}
                               </p>
                             </div>
                           </div>

@@ -1886,6 +1886,8 @@ def test_public_tool_responses_exclude_execution_details() -> None:
             "connection": {"url": "https://private.example.com/mcp"},
         },
         "created_by_user_id": "owner-1",
+        "created_at": "2026-08-17T00:00:00+00:00",
+        "updated_at": "2026-08-18T00:00:00+00:00",
         "permission": "use",
         "can_view": True,
         "can_use": True,
@@ -1937,6 +1939,8 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
                 "kind": "builtin",
             },
             "created_by_user_id": None,
+            "created_at": "2026-08-17T00:00:00+00:00",
+            "updated_at": "2026-08-18T00:00:00+00:00",
             "permission": None,
             "can_view": True,
             "can_use": True,
@@ -1945,6 +1949,7 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
     )
 
     assert summary.created_by_user_id is None
+    assert summary.updated_at > summary.created_at
 
 
 def test_tool_ref_schema_requires_canonical_ids() -> None:

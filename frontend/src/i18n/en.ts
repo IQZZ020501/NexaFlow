@@ -400,6 +400,7 @@ export const en = {
     "Connect providers, base models, and credentials at the model level.",
   接入模型: "Connect model",
   还没有模型: "No models yet",
+  没有匹配的模型: "No matching models",
   "接入模型后，应用可以使用它进行对话、检索增强和工具调用。":
     "Connect a model so apps can use it for chat, retrieval augmentation, and tool calling.",
   查看配置: "View configuration",

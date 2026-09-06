@@ -11,7 +11,7 @@ export type ResourceFolder = {
   updated_at: string
 }
 
-export type FolderResourceType = "knowledge" | "application" | "tool"
+export type FolderResourceType = "knowledge" | "application" | "model" | "tool"
 
 function foldersPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/resource-folders${suffix}`

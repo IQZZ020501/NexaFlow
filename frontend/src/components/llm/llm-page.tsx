@@ -21,18 +21,24 @@ import {
   BrainCircuitIcon,
   ChevronDownIcon,
   CircleCheckIcon,
+  FolderInputIcon,
   LoaderCircleIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
 } from "lucide-react"
-import { getMembershipRole } from "@/lib/display"
+import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
+import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
+import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
+import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
+import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -74,11 +80,12 @@ import type {
   ModelProviderCatalog,
   RegisteredModel,
 } from "@/lib/api/llm"
-import type { TFunction, TranslationKey } from "@/i18n"
+import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
 import {
   CARD_BATCH_SIZE,
   useInfiniteScroll,
 } from "@/lib/use-infinite-scroll"
+import { cn } from "@/lib/utils"
 
 const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   LLM: "大语言模型",
@@ -178,6 +185,26 @@ type ModelForm = {
   status: string
 }
 
+type ModelSortKey = "updated_at" | "created_at" | "name"
+
+function sortModels(
+  models: RegisteredModel[],
+  sortKey: ModelSortKey,
+  locale: string
+) {
+  const collator = new Intl.Collator(locale, {
+    numeric: true,
+    sensitivity: "base",
+  })
+  return [...models].sort((left, right) => {
+    if (sortKey === "name") return collator.compare(left.name, right.name)
+    return (
+      Date.parse(right[sortKey]) - Date.parse(left[sortKey]) ||
+      collator.compare(left.name, right.name)
+    )
+  })
+}
+
 const DEFAULT_LLM_REQUEST_PARAMS = '{\n  "max_tokens": 4096\n}'
 
 const EMPTY_MODEL_FORM: ModelForm = {
@@ -197,8 +224,9 @@ const EMPTY_MODEL_FORM: ModelForm = {
  * Manages workspace-registered language models, including browsing, searching, creating, editing, and deleting models.
  */
 export function LlmPage() {
-  const { t } = useLanguage()
+  const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
+  const resourceFolders = useResourceFolders("model")
   const [confirmAction, confirmDialog] = useConfirmDialog()
 
   const [providerCatalog, setProviderCatalog] = React.useState<
@@ -214,6 +242,13 @@ export function LlmPage() {
   >([])
   const [selectedProvider, setSelectedProvider] = React.useState("")
   const [search, setSearch] = React.useState("")
+  const [modelSortKey, setModelSortKey] =
+    React.useState<ModelSortKey>("updated_at")
+  const [moveModelTarget, setMoveModelTarget] =
+    React.useState<RegisteredModel | null>(null)
+  const [selectedModelIds, setSelectedModelIds] = React.useState<string[]>([])
+  const [isBatchManaging, setIsBatchManaging] = React.useState(false)
+  const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
   const [modelForm, setModelForm] = React.useState<ModelForm>(EMPTY_MODEL_FORM)
   const [isCatalogLoading, setIsCatalogLoading] = React.useState(false)
   const [isModelsLoading, setIsModelsLoading] = React.useState(false)
@@ -424,7 +459,10 @@ export function LlmPage() {
 
   const visibleModels = React.useMemo(() => {
     const query = search.trim().toLowerCase()
-    return models.filter((model) => {
+    const matched = models.filter((model) => {
+      if ((model.folder_id ?? null) !== resourceFolders.selectedFolderId) {
+        return false
+      }
       if (selectedProvider && model.provider !== selectedProvider) {
         return false
       }
@@ -441,7 +479,19 @@ export function LlmPage() {
         .toLowerCase()
         .includes(query)
     })
-  }, [models, providerCatalog, search, selectedProvider])
+    return sortModels(matched, modelSortKey, languageLocales[language])
+  }, [
+    language,
+    modelSortKey,
+    models,
+    providerCatalog,
+    resourceFolders.selectedFolderId,
+    search,
+    selectedProvider,
+  ])
+  const movableModelIds = canManage
+    ? visibleModels.map((model) => model.id)
+    : []
 
   if (!token || !me) {
     return null
@@ -628,6 +678,9 @@ export function LlmPage() {
     try {
       await deleteRegisteredModel(token, selectedWorkspaceId, model.id)
       setModels((current) => current.filter((item) => item.id !== model.id))
+      setSelectedModelIds((current) =>
+        current.filter((modelId) => modelId !== model.id)
+      )
       notify("success", t("模型已删除"))
     } catch (error) {
       reportError(error)
@@ -658,19 +711,41 @@ export function LlmPage() {
           description={t("选择工作空间后管理可被应用和 Agent 调用的模型。")}
         />
       ) : (
-        <>
+        <ResourceFolderLayout
+          sidebar={
+            <ResourceFolderTree
+              folders={resourceFolders.folders}
+              selectedFolderId={resourceFolders.selectedFolderId}
+              canManage={canManage}
+              isLoading={resourceFolders.isLoading}
+              onSelect={resourceFolders.setSelectedFolderId}
+              onCreate={resourceFolders.create}
+              onRename={resourceFolders.rename}
+              onDelete={resourceFolders.remove}
+              onFolderDeleted={(folderId, parentId) =>
+                setModels((current) =>
+                  current.map((model) =>
+                    model.folder_id === folderId
+                      ? { ...model, folder_id: parentId }
+                      : model
+                  )
+                )
+              }
+            />
+          }
+        >
           <section className="rounded-lg border bg-background p-3 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative min-w-0 lg:w-[320px]">
-                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  className="pl-9"
-                  placeholder={t("搜索模型、供应商或 API URL...")}
-                />
-              </div>
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                <div className="relative min-w-0 sm:w-[320px]">
+                  <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    className="pl-9"
+                    placeholder={t("搜索模型、供应商或 API URL...")}
+                  />
+                </div>
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -715,10 +790,31 @@ export function LlmPage() {
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <FilterDropdown
+                  ariaLabel={t("排序")}
+                  value={modelSortKey}
+                  options={[
+                    { value: "updated_at", label: t("最近更新") },
+                    { value: "created_at", label: t("创建时间") },
+                    { value: "name", label: t("名称") },
+                  ]}
+                  className="h-9 sm:w-32"
+                  onChange={(value) =>
+                    setModelSortKey(value as ModelSortKey)
+                  }
+                />
                 {isCatalogLoading ? (
-                  <LoaderCircleIcon className="mt-2 size-4 animate-spin text-muted-foreground" />
+                  <LoaderCircleIcon className="size-4 animate-spin self-center text-muted-foreground" />
                 ) : null}
               </div>
+              <ResourceBulkMoveBar
+                resourceIds={movableModelIds}
+                selectedIds={selectedModelIds}
+                isManaging={isBatchManaging}
+                onSelectedIdsChange={setSelectedModelIds}
+                onManagingChange={setIsBatchManaging}
+                onMove={() => setIsBatchMoveOpen(true)}
+              />
             </div>
           </section>
 
@@ -737,7 +833,11 @@ export function LlmPage() {
                   return (
                     <div
                       key={model.id}
-                      className="flex min-h-40 flex-col rounded-md border p-3"
+                      className={cn(
+                        "flex min-h-40 flex-col rounded-md border p-3",
+                        selectedModelIds.includes(model.id) &&
+                          "border-primary/50 bg-primary/[0.035]"
+                      )}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 gap-3">
@@ -778,15 +878,41 @@ export function LlmPage() {
                                 {model.model_name}
                               </span>
                             </p>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">
+                              {t("更新时间")} ·{" "}
+                              {formatDateTime(
+                                model.updated_at,
+                                languageLocales[language]
+                              )}
+                            </p>
                           </div>
                         </div>
                         {canManage ? (
-                          <IconButton
-                            label={t("编辑")}
-                            onClick={() => openEditModel(model)}
-                          >
-                            <PencilIcon className="size-4" />
-                          </IconButton>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {isBatchManaging ? (
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-primary"
+                                aria-label={t("选择 {value}", {
+                                  value: model.name,
+                                })}
+                                checked={selectedModelIds.includes(model.id)}
+                                onChange={(event) =>
+                                  setSelectedModelIds((current) =>
+                                    event.target.checked
+                                      ? [...current, model.id]
+                                      : current.filter((id) => id !== model.id)
+                                  )
+                                }
+                              />
+                            ) : null}
+                            <IconButton
+                              label={t("编辑")}
+                              onClick={() => openEditModel(model)}
+                            >
+                              <PencilIcon className="size-4" />
+                            </IconButton>
+                          </div>
                         ) : null}
                       </div>
 
@@ -811,6 +937,12 @@ export function LlmPage() {
                         {canManage ? (
                           <CardMoreMenu label={t("更多")}>
                             <DropdownMenuItem
+                              onSelect={() => setMoveModelTarget(model)}
+                            >
+                              <FolderInputIcon />
+                              {t("移动到文件夹")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               variant="destructive"
                               onSelect={() => void handleDeleteModel(model)}
                             >
@@ -823,6 +955,10 @@ export function LlmPage() {
                     </div>
                   )
                 })}
+              </div>
+            ) : models.length > 0 ? (
+              <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground shadow-sm">
+                {t("没有匹配的模型")}
               </div>
             ) : (
               <EmptyState
@@ -853,8 +989,49 @@ export function LlmPage() {
               ) : null}
             </div>
           </section>
-        </>
+        </ResourceFolderLayout>
       )}
+
+      <ResourceFolderPickerDialog
+        open={isBatchMoveOpen}
+        folders={resourceFolders.folders}
+        currentFolderId={resourceFolders.selectedFolderId}
+        onOpenChange={setIsBatchMoveOpen}
+        onMove={async (folderId) => {
+          const resourceIds = selectedModelIds.filter((id) =>
+            movableModelIds.includes(id)
+          )
+          await resourceFolders.moveMany(resourceIds, folderId)
+          setModels((current) =>
+            current.map((model) =>
+              resourceIds.includes(model.id)
+                ? { ...model, folder_id: folderId }
+                : model
+            )
+          )
+          setSelectedModelIds([])
+          setIsBatchManaging(false)
+        }}
+      />
+
+      <ResourceFolderPickerDialog
+        open={moveModelTarget !== null}
+        folders={resourceFolders.folders}
+        currentFolderId={moveModelTarget?.folder_id ?? null}
+        onOpenChange={(open) => !open && setMoveModelTarget(null)}
+        onMove={async (folderId) => {
+          if (!moveModelTarget) return
+          await resourceFolders.move(moveModelTarget.id, folderId)
+          setModels((current) =>
+            current.map((model) =>
+              model.id === moveModelTarget.id
+                ? { ...model, folder_id: folderId }
+                : model
+            )
+          )
+          setMoveModelTarget(null)
+        }}
+      />
 
       <ProviderPickerDialog
         providers={providerCatalog}

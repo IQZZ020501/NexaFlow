@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     String,
     Text,
     UniqueConstraint,
@@ -14,11 +15,17 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infrastructure.base import Base
 from app.infrastructure.model_utils import new_id, utc_now
+from app.shareddomain.resource_folders.models import ResourceFolder  # noqa: F401
 
 
 class RegisteredModel(Base):
     __tablename__ = "model"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "folder_id"],
+            ["resource_folders.workspace_id", "resource_folders.id"],
+            name="fk_model_folder_workspace",
+        ),
         UniqueConstraint("workspace_id", "name", name="uq_model_registry_model_workspace_name"),
         CheckConstraint(
             "provider_type IN ('openai_compatible', 'anthropic', 'bedrock', "
@@ -37,6 +44,7 @@ class RegisteredModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False, default="openai_compatible")

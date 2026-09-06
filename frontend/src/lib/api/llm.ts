@@ -26,6 +26,7 @@ export type ModelCredentialField = {
 export type RegisteredModel = {
   id: string
   workspace_id: string
+  folder_id?: string | null
   name: string
   provider: string
   provider_type: string

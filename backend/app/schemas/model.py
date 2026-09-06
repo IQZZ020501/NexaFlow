@@ -35,6 +35,7 @@ class ModelCredentialFieldResponse(BaseModel):
 class RegisteredModelResponse(BaseModel):
     id: str
     workspace_id: str
+    folder_id: str | None
     name: str
     provider: str
     provider_type: str

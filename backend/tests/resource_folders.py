@@ -1,4 +1,32 @@
-from tests.support import activate_admin, auth_headers, test_client
+import asyncio
+
+from app.capabilities.llm.models import RegisteredModel
+from app.infrastructure.session import get_session_factory
+from tests.support import activate_admin, activate_user, auth_headers, test_client
+
+MEMBER_PASSWORD = "FolderMember@12345."
+
+
+async def create_registered_model(workspace_id: str, user_id: str) -> str:
+    async with get_session_factory()() as db:
+        model = RegisteredModel(
+            workspace_id=workspace_id,
+            name="目录模型",
+            provider="model_custom_provider",
+            provider_type="openai_compatible",
+            api_base="https://models.example.com/v1",
+            credential_config={},
+            credential_secret_hints={},
+            model_type="LLM",
+            model_name="folder-model",
+            status="active",
+            meta={},
+            created_by_user_id=user_id,
+        )
+        db.add(model)
+        await db.commit()
+        await db.refresh(model)
+        return model.id
 
 
 def main() -> None:
@@ -235,6 +263,67 @@ def main() -> None:
             },
         )
         assert missing_tool_move.status_code == 404, missing_tool_move.text
+
+        model_id = asyncio.run(
+            create_registered_model(
+                workspace_id,
+                client.get("/api/v1/auth/me", headers=headers).json()["user"]["id"],
+            )
+        )
+        model_folder = client.post(
+            f"{base}/resource-folders",
+            headers=headers,
+            json={"name": "模型目录", "resource_type": "model", "parent_id": None},
+        )
+        assert model_folder.status_code == 201, model_folder.text
+        model_folder_id = model_folder.json()["id"]
+        member = client.post(
+            f"{base}/members/users",
+            headers=headers,
+            json={
+                "username": "folder-member",
+                "email": "folder-member@example.com",
+                "name": "Folder Member",
+            },
+        )
+        assert member.status_code == 201, member.text
+        member_token = activate_user(
+            client,
+            "folder-member",
+            member.json()["initial_password"],
+            MEMBER_PASSWORD,
+        )
+        denied_model_move = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=auth_headers(member_token),
+            json={
+                "resource_type": "model",
+                "resource_id": model_id,
+                "folder_id": model_folder_id,
+            },
+        )
+        assert denied_model_move.status_code == 403, denied_model_move.text
+        moved_model = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=headers,
+            json={
+                "resource_type": "model",
+                "resource_id": model_id,
+                "folder_id": model_folder_id,
+            },
+        )
+        assert moved_model.status_code == 204, moved_model.text
+        listed_models = client.get(f"{base}/models", headers=headers)
+        assert listed_models.status_code == 200, listed_models.text
+        assert listed_models.json()[0]["folder_id"] == model_folder_id
+
+        deleted_model_folder = client.delete(
+            f"{base}/resource-folders/{model_folder_id}",
+            headers=headers,
+        )
+        assert deleted_model_folder.status_code == 204, deleted_model_folder.text
+        listed_models = client.get(f"{base}/models", headers=headers)
+        assert listed_models.json()[0]["folder_id"] is None
 
 
 if __name__ == "__main__":

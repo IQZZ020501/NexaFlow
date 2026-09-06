@@ -1,6 +1,7 @@
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.capabilities.llm.models import RegisteredModel
 from app.entities.resource_folders import ResourceFolder
 from app.infrastructure.repositories.mapping import save, to_entity
 from app.shareddomain.agents.models import Agent
@@ -71,6 +72,7 @@ async def delete_folder(
     model = {
         "knowledge": KnowledgeBase,
         "application": Agent,
+        "model": RegisteredModel,
         "tool": Tool,
     }[resource_type]
     await db.execute(
@@ -97,6 +99,7 @@ async def set_resources_folder(
     model = {
         "knowledge": KnowledgeBase,
         "application": Agent,
+        "model": RegisteredModel,
         "tool": Tool,
     }[resource_type]
     await db.execute(

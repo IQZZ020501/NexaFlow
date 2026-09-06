@@ -62,6 +62,8 @@ export type ToolSummary = {
   availability: "available" | "unavailable"
   source: ToolSourceSummary
   created_by_user_id: string | null
+  created_at?: string
+  updated_at?: string
   permission: "owner" | "admin" | "view" | "use" | null
   can_view: boolean
   can_use: boolean

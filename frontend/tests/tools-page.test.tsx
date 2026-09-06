@@ -56,6 +56,8 @@ function tool(overrides: Partial<ToolSummary> = {}): ToolSummary {
       transport: null,
     },
     created_by_user_id: "u-1",
+    created_at: "2026-08-17T00:00:00Z",
+    updated_at: "2026-08-17T00:00:00Z",
     permission: "owner",
     can_view: true,
     can_use: true,
@@ -115,6 +117,54 @@ beforeEach(() => {
   }) as typeof fetch
 })
 describe("ToolsPage", () => {
+  test("sorts tools and shows their update time", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/tool-sources?")) return jsonResponse([])
+      if (url.includes("/tools?")) {
+        return jsonResponse([
+          tool({
+            id: "tool-alpha",
+            display_name: "Alpha",
+            created_at: "2026-09-02T00:00:00Z",
+            updated_at: "2026-09-01T00:00:00Z",
+          }),
+          tool({
+            id: "tool-bravo",
+            display_name: "Bravo",
+            created_at: "2026-09-01T00:00:00Z",
+            updated_at: "2026-09-02T00:00:00Z",
+          }),
+          tool({
+            id: "tool-charlie",
+            display_name: "Charlie",
+            created_at: "2026-09-03T00:00:00Z",
+            updated_at: "2026-09-03T00:00:00Z",
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }) as typeof fetch
+    renderPage(<ToolsPage />)
+
+    await screen.findByText("Charlie")
+    const visibleToolNames = () =>
+      screen
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent)
+    expect(visibleToolNames()).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(screen.getAllByText(/更新时间 ·/)).toHaveLength(3)
+
+    const sortTrigger = screen.getByRole("button", { name: "排序" })
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "创建时间" }))
+    expect(visibleToolNames()).toEqual(["Charlie", "Alpha", "Bravo"])
+
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "名称" }))
+    expect(visibleToolNames()).toEqual(["Alpha", "Bravo", "Charlie"])
+  })
+
   test("batch moves selected manageable tools into a folder", async () => {
     const requests: unknown[] = []
     const secondTool = tool({
