@@ -1765,6 +1765,7 @@ export const en = {
   企业微信: "WeCom",
   "每个身份源固定连接一个工作空间，权限仍由 NexaFlow 成员关系决定":
     "Each identity source is fixed to one workspace; NexaFlow memberships still control access.",
+  选择登录平台: "Select sign-in provider",
   "配置应用凭证，企业信息将在首次成功登录时自动识别":
     "Configure the app credentials; organization details are detected after the first successful sign-in.",
   配置服务商应用凭证和租户标识:

@@ -1,6 +1,6 @@
 /* @jsxImportSource react */
 import { afterEach, beforeEach, expect, test } from "bun:test"
-import { act } from "@testing-library/react"
+import { act, fireEvent, within } from "@testing-library/react"
 import { useState } from "react"
 
 import { EnterpriseIdentityPage } from "@/components/system/enterprise-identity-page"
@@ -141,4 +141,25 @@ test("omits the Feishu tenant key when saving", async () => {
   await waitFor(() => expect(savedBody).toBeDefined())
 
   expect(savedBody).not.toHaveProperty("tenant_id")
+})
+
+test("shows one provider form and switches it from the dropdown", async () => {
+  withFetch((url) => payloadFor(url, "ws-1", "Feishu A"))
+
+  renderPage(<EnterpriseIdentityPage />)
+  await waitFor(() => expect(screen.getByDisplayValue("Feishu A")).toBeTruthy())
+
+  expect(screen.getAllByText("显示名称")).toHaveLength(1)
+  expect(screen.getAllByRole("button", { name: "保存" })).toHaveLength(1)
+
+  fireEvent.pointerDown(screen.getByRole("button", { name: "选择登录平台" }))
+  fireEvent.click(
+    within(await screen.findByRole("menu")).getByRole("menuitem", {
+      name: "钉钉",
+    })
+  )
+
+  expect(screen.getByDisplayValue("钉钉")).toBeTruthy()
+  expect(screen.getByLabelText("企业 ID")).toBeTruthy()
+  expect(screen.queryByDisplayValue("Feishu A")).toBeNull()
 })

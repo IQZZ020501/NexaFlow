@@ -89,6 +89,8 @@ export function EnterpriseIdentityPage() {
   })
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState<EnterpriseProvider | null>(null)
+  const [selectedProvider, setSelectedProvider] =
+    React.useState<EnterpriseProvider>("feishu")
   const loadRequestRef = React.useRef(0)
 
   async function load() {
@@ -215,6 +217,10 @@ export function EnterpriseIdentityPage() {
     )
   }
 
+  const provider = selectedProvider
+  const form = forms[provider]
+  const current = connections.find((item) => item.provider === provider)
+
   return (
     <div className="grid gap-4 pb-6">
       <Card>
@@ -250,186 +256,201 @@ export function EnterpriseIdentityPage() {
         </CardHeader>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        {providers.map((provider) => {
-          const form = forms[provider]
-          const current = connections.find((item) => item.provider === provider)
-          return (
-            <Card key={provider} className="min-w-0">
-              <CardHeader>
-                <CardTitle>{form.name || t("企业登录")}</CardTitle>
-                <CardDescription>
-                  {t(
-                    provider === "feishu"
-                      ? "配置应用凭证，企业信息将在首次成功登录时自动识别"
-                      : "配置服务商应用凭证和租户标识"
-                  )}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid min-w-0 gap-4">
-                <Field>
-                  <FieldLabel htmlFor={`${provider}-name`}>
-                    {t("显示名称")}
-                  </FieldLabel>
-                  <Input
-                    id={`${provider}-name`}
-                    value={form.name}
-                    maxLength={120}
-                    onChange={(event) =>
-                      updateForm(provider, "name", event.target.value)
-                    }
-                  />
-                </Field>
-                {provider !== "wecom" ? (
-                  <Field>
-                    <FieldLabel htmlFor={`${provider}-client`}>
-                      {t("应用 ID")}
-                    </FieldLabel>
-                    <Input
-                      id={`${provider}-client`}
-                      value={form.clientId}
-                      maxLength={255}
-                      onChange={(event) =>
-                        updateForm(provider, "clientId", event.target.value)
-                      }
-                    />
-                  </Field>
-                ) : null}
-                <Field>
-                  <FieldLabel htmlFor={`${provider}-secret`}>
-                    {t("应用密钥")}
-                  </FieldLabel>
-                  <Input
-                    id={`${provider}-secret`}
-                    type="password"
-                    value={form.clientSecret}
-                    maxLength={4096}
-                    autoComplete="new-password"
-                    placeholder={
-                      current?.has_client_secret
-                        ? t("留空以保留当前密钥")
-                        : t("请输入应用密钥")
-                    }
-                    onChange={(event) =>
-                      updateForm(provider, "clientSecret", event.target.value)
-                    }
-                  />
-                  {current?.client_secret_hint ? (
-                    <FieldDescription>
-                      {t("当前密钥提示：{hint}", {
-                        hint: current.client_secret_hint,
-                      })}
-                    </FieldDescription>
-                  ) : null}
-                </Field>
-                {provider !== "feishu" ? (
-                  <Field>
-                    <FieldLabel htmlFor={`${provider}-tenant`}>
-                      {t("企业 ID")}
-                    </FieldLabel>
-                    <Input
-                      id={`${provider}-tenant`}
-                      value={form.tenantId}
-                      maxLength={255}
-                      onChange={(event) =>
-                        updateForm(provider, "tenantId", event.target.value)
-                      }
-                    />
-                  </Field>
-                ) : null}
-                {provider === "wecom" ? (
-                  <Field>
-                    <FieldLabel htmlFor="wecom-agent">
-                      {t("应用 Agent ID")}
-                    </FieldLabel>
-                    <Input
-                      id="wecom-agent"
-                      value={form.agentId}
-                      maxLength={255}
-                      onChange={(event) =>
-                        updateForm(provider, "agentId", event.target.value)
-                      }
-                    />
-                  </Field>
-                ) : null}
-                <Button
-                  variant="link"
-                  className="h-auto w-fit justify-start px-0 py-0"
-                  asChild
+      <Card className="min-w-0">
+        <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>{form.name || t("企业登录")}</CardTitle>
+            <CardDescription>
+              {t(
+                provider === "feishu"
+                  ? "配置应用凭证，企业信息将在首次成功登录时自动识别"
+                  : "配置服务商应用凭证和租户标识"
+              )}
+            </CardDescription>
+          </div>
+          <FilterDropdown
+            className="h-9 w-fit"
+            value={provider}
+            onChange={(value) =>
+              setSelectedProvider(value as EnterpriseProvider)
+            }
+            ariaLabel={t("选择登录平台")}
+            options={providers.map((item) => ({
+              value: item,
+              label: t(
+                item === "feishu"
+                  ? "飞书"
+                  : item === "dingtalk"
+                    ? "钉钉"
+                    : "企业微信"
+              ),
+            }))}
+          />
+        </CardHeader>
+        <CardContent className="grid min-w-0 gap-4 md:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor={`${provider}-name`}>
+              {t("显示名称")}
+            </FieldLabel>
+            <Input
+              id={`${provider}-name`}
+              value={form.name}
+              maxLength={120}
+              onChange={(event) =>
+                updateForm(provider, "name", event.target.value)
+              }
+            />
+          </Field>
+          {provider !== "wecom" ? (
+            <Field>
+              <FieldLabel htmlFor={`${provider}-client`}>
+                {t("应用 ID")}
+              </FieldLabel>
+              <Input
+                id={`${provider}-client`}
+                value={form.clientId}
+                maxLength={255}
+                onChange={(event) =>
+                  updateForm(provider, "clientId", event.target.value)
+                }
+              />
+            </Field>
+          ) : null}
+          <Field>
+            <FieldLabel htmlFor={`${provider}-secret`}>
+              {t("应用密钥")}
+            </FieldLabel>
+            <Input
+              id={`${provider}-secret`}
+              type="password"
+              value={form.clientSecret}
+              maxLength={4096}
+              autoComplete="new-password"
+              placeholder={
+                current?.has_client_secret
+                  ? t("留空以保留当前密钥")
+                  : t("请输入应用密钥")
+              }
+              onChange={(event) =>
+                updateForm(provider, "clientSecret", event.target.value)
+              }
+            />
+            {current?.client_secret_hint ? (
+              <FieldDescription>
+                {t("当前密钥提示：{hint}", {
+                  hint: current.client_secret_hint,
+                })}
+              </FieldDescription>
+            ) : null}
+          </Field>
+          {provider !== "feishu" ? (
+            <Field>
+              <FieldLabel htmlFor={`${provider}-tenant`}>
+                {t("企业 ID")}
+              </FieldLabel>
+              <Input
+                id={`${provider}-tenant`}
+                value={form.tenantId}
+                maxLength={255}
+                onChange={(event) =>
+                  updateForm(provider, "tenantId", event.target.value)
+                }
+              />
+            </Field>
+          ) : null}
+          {provider === "wecom" ? (
+            <Field>
+              <FieldLabel htmlFor="wecom-agent">
+                {t("应用 Agent ID")}
+              </FieldLabel>
+              <Input
+                id="wecom-agent"
+                value={form.agentId}
+                maxLength={255}
+                onChange={(event) =>
+                  updateForm(provider, "agentId", event.target.value)
+                }
+              />
+            </Field>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-3 md:col-span-2">
+            <Button
+              variant="link"
+              className="h-auto w-fit justify-start px-0 py-0"
+              asChild
+            >
+              <a
+                href={providerConsoleUrls[provider]}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("获取应用凭证")}
+                <ExternalLinkIcon data-icon="inline-end" />
+              </a>
+            </Button>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(event) =>
+                  updateForm(provider, "enabled", event.target.checked)
+                }
+              />
+              {t("启用企业登录")}
+            </label>
+          </div>
+          {current ? (
+            <div className="grid min-w-0 gap-2 rounded-lg border bg-muted/20 p-3 text-xs md:col-span-2">
+              <div className="font-medium">{t("回调地址")}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                <code
+                  className="min-w-0 flex-1 truncate"
+                  title={current.callback_url}
                 >
-                  <a
-                    href={providerConsoleUrls[provider]}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {t("获取应用凭证")}
-                    <ExternalLinkIcon data-icon="inline-end" />
-                  </a>
-                </Button>
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={form.enabled}
-                    onChange={(event) =>
-                      updateForm(provider, "enabled", event.target.checked)
-                    }
-                  />
-                  {t("启用企业登录")}
-                </label>
-                {current ? (
-                  <div className="grid min-w-0 gap-2 rounded-lg border bg-muted/20 p-3 text-xs">
-                    <div className="font-medium">{t("回调地址")}</div>
-                    <div className="flex min-w-0 items-center gap-2">
-                      <code
-                        className="min-w-0 flex-1 truncate"
-                        title={current.callback_url}
-                      >
-                        {current.callback_url}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => void copyText(current.callback_url)}
-                        aria-label={t("复制回调地址")}
-                      >
-                        <CopyIcon />
-                      </Button>
-                    </div>
-                    <div className="font-medium">{t("工作空间登录地址")}</div>
-                    <div className="flex min-w-0 items-center gap-2">
-                      <code
-                        className="min-w-0 flex-1 truncate"
-                        title={current.login_url}
-                      >
-                        {current.login_url}
-                      </code>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => void copyText(current.login_url)}
-                        aria-label={t("复制登录地址")}
-                      >
-                        <CopyIcon />
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
+                  {current.callback_url}
+                </code>
                 <Button
-                  onClick={() => void save(provider)}
-                  disabled={saving !== null}
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => void copyText(current.callback_url)}
+                  aria-label={t("复制回调地址")}
                 >
-                  {saving === provider ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : (
-                    <SaveIcon />
-                  )}
-                  {t("保存")}
+                  <CopyIcon />
                 </Button>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
+              </div>
+              <div className="font-medium">{t("工作空间登录地址")}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                <code
+                  className="min-w-0 flex-1 truncate"
+                  title={current.login_url}
+                >
+                  {current.login_url}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => void copyText(current.login_url)}
+                  aria-label={t("复制登录地址")}
+                >
+                  <CopyIcon />
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <Button
+            className="md:col-span-2"
+            onClick={() => void save(provider)}
+            disabled={saving !== null}
+          >
+            {saving === provider ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : (
+              <SaveIcon />
+            )}
+            {t("保存")}
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
