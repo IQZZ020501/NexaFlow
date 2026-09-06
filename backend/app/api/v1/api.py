@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.admin import audit, governance, smtp, system_logs, users
 from app.api.v1.artifacts import routes as artifacts
 from app.api.v1.workspaces import routes as workspaces
+from app.api.v1.teams import routes as teams
 from app.api.v1.identity import auth, enterprise as enterprise_identity
 from app.api.v1.endpoints import (
     agent_access,
@@ -15,7 +16,6 @@ from app.api.v1.endpoints import (
     mcp_servers,
     models,
     resource_folders,
-    teams,
     tool_sources,
     tools,
     workflows,

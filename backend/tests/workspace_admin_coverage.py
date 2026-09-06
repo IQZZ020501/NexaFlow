@@ -534,7 +534,7 @@ async def exercise_direct_identity_edges() -> None:
         user_to_response_with_scopes,
         user_workspaces_by_user_id,
     )
-    from app.entities.team import Team
+    from app.entities.teams.models import Team
     from app.entities.identity.user import RefreshSession
     from app.entities.workspaces.models import Workspace, WorkspaceMembership
     from app.infra.security.agent_rate_limit import (

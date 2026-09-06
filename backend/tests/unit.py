@@ -6657,7 +6657,7 @@ def test_agent_live_stream_round_trip() -> None:
 
 
 def test_team_to_response() -> None:
-    from app.entities.team import Team
+    from app.entities.teams.models import Team
     from app.domain.teams.services import team_to_response
 
     team = Team(

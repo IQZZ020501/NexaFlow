@@ -9,7 +9,7 @@ from app.domain.platform.models import RefreshSession as RefreshSessionOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import Workspace as WorkspaceOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.entities.team import Team, TeamMembership
+from app.entities.teams.models import Team, TeamMembership
 from app.entities.identity.user import RefreshSession, User
 from app.entities.workspaces.models import WORKSPACE_ADMIN_ROLE
 from app.entities.workspaces.models import Workspace, WorkspaceMembership

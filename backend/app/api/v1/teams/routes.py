@@ -21,7 +21,7 @@ from app.application.teams import (
     update_team,
     update_team_member_role,
 )
-from app.schemas.team import (
+from app.schemas.teams.contracts import (
     TeamCreateRequest,
     TeamMemberCreateRequest,
     TeamMemberResponse,

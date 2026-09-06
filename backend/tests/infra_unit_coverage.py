@@ -49,7 +49,7 @@ from app.adapters.llm import runtime as llm_runtime
 from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
+from app.entities.teams.models import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.tools import McpServer, McpToolPolicy
 from app.entities.identity.user import RefreshSession, User
 from app.infra.queue import celery as celery_mod
@@ -71,7 +71,7 @@ from app.ports import mcp as ports_mcp
 from app.ports import model_registry as ports_model_registry
 from app.schemas.mcp import McpServerCreateRequest
 from app.schemas.model import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
-from app.schemas.team import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
+from app.schemas.teams.contracts import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentMcpTool as AgentMcpToolOrm
 from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm

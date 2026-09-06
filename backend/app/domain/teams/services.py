@@ -6,11 +6,11 @@ from fastapi import HTTPException, status
 from app.domain.audit.services import record_audit_log
 from app.infra.runtime.validation import normalize_name
 from app.infra.runtime.model_utils import new_id
-from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
+from app.entities.teams.models import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.identity.user import User
 from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.schemas.team import (
+from app.schemas.teams.contracts import (
     TeamCreateRequest,
     TeamMemberCreateRequest,
     TeamMemberResponse,
