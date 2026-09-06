@@ -51,7 +51,7 @@ _starlette_base_middleware.BaseHTTPMiddleware.__call__ = (
 # anyio 4.14.1 on CPython 3.11): the cancellation escapes after the run was
 # already finalized in the database. Re-enter the wrapper and report the run
 # as finished; the persisted run state is authoritative.
-import app.application.workflow_executor as _workflow_executor_module
+import app.application.workflows.runs.executor as _workflow_executor_module
 
 _orig_run_durable_workflow_run = _workflow_executor_module.run_durable_workflow_run
 
@@ -93,7 +93,7 @@ async def _noop_maintain_agent_run_lease(run_id, worker_task_id, settings, lease
 
 
 _workflow_executor_module.maintain_agent_run_lease = _noop_maintain_agent_run_lease
-import app.application.run_dispatch as _run_dispatch_module
+import app.application.runs.dispatch as _run_dispatch_module
 
 _run_dispatch_module.run_durable_workflow_run = _patched_run_durable_workflow_run
 
@@ -376,7 +376,7 @@ def _classifier_node(classes: list[dict]) -> dict:
 
 
 def test_engine_validation_error_branches() -> None:
-    from app.domain.workflows.engine import (
+    from app.domain.workflows.runtime.engine import (
         WorkflowValidationError,
         validate_graph,
     )
@@ -601,7 +601,7 @@ def test_engine_validation_error_branches() -> None:
 
 def test_engine_runtime_error_branches() -> None:
     from app.infra.runtime.model_utils import utc_now
-    from app.domain.workflows.engine import (
+    from app.domain.workflows.runtime.engine import (
         NodeResult,
         NodeState,
         WorkflowEngine,
@@ -723,8 +723,8 @@ def test_engine_runtime_error_branches() -> None:
 def test_validated_form_data_branches() -> None:
     from fastapi import HTTPException
 
-    from app.application.workflow_runs import _validated_form_data
-    from app.schemas.workflow import FormNodeConfig
+    from app.application.workflows.runs.service import _validated_form_data
+    from app.schemas.workflows.contracts import FormNodeConfig
 
     config = FormNodeConfig.model_validate(_form_config())
 
@@ -781,10 +781,10 @@ def test_validated_form_data_branches() -> None:
 def test_create_workflow_run_guard_errors() -> None:
     from fastapi import HTTPException
 
-    from app.application.workflow_runs import create_workflow_run
+    from app.application.workflows.runs.service import create_workflow_run
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
-    from app.schemas.workflow import WorkflowRunCreateRequest
+    from app.schemas.workflows.contracts import WorkflowRunCreateRequest
     from tests.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
@@ -852,12 +852,12 @@ def test_create_workflow_run_guard_errors() -> None:
 def test_create_workflow_run_external_and_conflicts() -> None:
     from fastapi import HTTPException
 
-    from app.application.workflow_runs import create_workflow_run
+    from app.application.workflows.runs.service import create_workflow_run
     from app.entities.agents import AgentRun
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
-    from app.schemas.workflow import WorkflowRunCreateRequest
+    from app.schemas.workflows.contracts import WorkflowRunCreateRequest
     from tests.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
@@ -997,12 +997,12 @@ def test_create_workflow_run_external_and_conflicts() -> None:
 def test_resume_workflow_form_error_branches() -> None:
     from fastapi import HTTPException
 
-    from app.application.workflow_runs import resume_workflow_form
+    from app.application.workflows.runs.service import resume_workflow_form
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
-    from app.schemas.workflow import WorkflowFormSubmitRequest
+    from app.schemas.workflows.contracts import WorkflowFormSubmitRequest
     from tests.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
@@ -1123,7 +1123,7 @@ def _collect_stream(
     reader=None,
     flip_status: str | None = None,
 ) -> list[dict]:
-    from app.application.workflow_runs import stream_workflow_run
+    from app.application.workflows.runs.service import stream_workflow_run
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.session import get_session_factory
 
@@ -1160,7 +1160,7 @@ def _collect_stream(
 
     if reader is not None:
         with patch(
-            "app.application.workflow_runs.AgentLiveStreamReader", return_value=reader
+            "app.application.workflows.runs.service.AgentLiveStreamReader", return_value=reader
         ):
             return asyncio.run(run())
     return asyncio.run(run())
@@ -1351,8 +1351,8 @@ def test_workflow_services_boundaries() -> None:
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
-    from app.schemas.workflow import WorkflowGraph
-    from app.domain.workflows.services import (
+    from app.schemas.workflows.contracts import WorkflowGraph
+    from app.domain.workflows.definitions.service import (
         get_or_create_definition,
         get_workflow_agent,
         publish_definition,
@@ -1496,11 +1496,11 @@ def test_workflow_services_boundaries() -> None:
                 )
                 with (
                     patch(
-                        "app.domain.workflows.services.resolve_mcp_tools",
+                        "app.domain.workflows.definitions.service.resolve_mcp_tools",
                         new=AsyncMock(return_value=[tool]),
                     ),
                     patch(
-                        "app.domain.workflows.services.get_mcp_tool_policy",
+                        "app.domain.workflows.definitions.service.get_mcp_tool_policy",
                         new=AsyncMock(return_value=None),
                     ),
                 ):
@@ -2149,7 +2149,7 @@ def test_workflow_run_direct_api_functions() -> None:
     """
     from fastapi import HTTPException
 
-    from app.application.workflow_runs import (
+    from app.application.workflows.runs.service import (
         create_workflow_run,
         get_workflow_run,
         list_workflow_node_executions,
@@ -2163,7 +2163,7 @@ def test_workflow_run_direct_api_functions() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from app.schemas.workflow import WorkflowFormSubmitRequest, WorkflowRunCreateRequest
+    from app.schemas.workflows.contracts import WorkflowFormSubmitRequest, WorkflowRunCreateRequest
     from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
@@ -2476,7 +2476,7 @@ def test_workflow_run_direct_api_functions() -> None:
                         new=AsyncMock(return_value=None),
                     ),
                     patch(
-                        "app.application.workflow_runs.enqueue_agent_run",
+                        "app.application.workflows.runs.service.enqueue_agent_run",
                         new=AsyncMock(),
                     ),
                 ):
@@ -2512,7 +2512,7 @@ def test_workflow_run_direct_api_functions() -> None:
                         new=flaky_get_run,
                     ),
                     patch(
-                        "app.application.workflow_runs.enqueue_agent_run",
+                        "app.application.workflows.runs.service.enqueue_agent_run",
                         new=AsyncMock(),
                     ),
                 ):
@@ -2536,7 +2536,7 @@ def test_workflow_run_direct_api_functions() -> None:
                         assert "Workflow run not found." in str(exc.detail)
 
             # endpoint 307 + 318: reconnect_run rollback + StreamingResponse
-            from app.api.v1.endpoints.workflows import reconnect_run
+            from app.api.v1.workflows.routes import reconnect_run
 
             async with get_session_factory()() as db:
                 actor = await user_repository.get_user_by_id(db, admin_user_id)

@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import tests.support  # noqa: F401
 
-from app.schemas.workflow import WorkflowNode
+from app.schemas.workflows.contracts import WorkflowNode
 from app.domain.agents.runtime.tools import AgentToolResult
-from app.domain.workflows.engine import (
+from app.domain.workflows.runtime.engine import (
     NodeExecutionContext,
     NodeResult,
     NodeState,
@@ -23,7 +23,7 @@ from app.domain.workflows.engine import (
     WorkflowValidationError,
     validate_graph,
 )
-from app.domain.workflows.defaults import default_workflow_graph
+from app.domain.workflows.definitions.defaults import default_workflow_graph
 from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 
@@ -37,7 +37,7 @@ def test_default_workflow_only_contains_start() -> None:
 def test_workflow_interaction_config_rejects_audio_uploads() -> None:
     from pydantic import ValidationError
 
-    from app.schemas.agent import AgentCreateRequest
+    from app.schemas.agents.contracts import AgentCreateRequest
 
     try:
         AgentCreateRequest.model_validate(
@@ -256,8 +256,8 @@ def test_workflow_engine_runs_branch_and_join_deterministically() -> None:
 
 
 def test_condition_node_selects_the_first_matching_branch_or_else() -> None:
-    from app.application.workflow_nodes import execute_workflow_node
-    from app.schemas.workflow import ConditionNodeConfig
+    from app.application.workflows.nodes.executor import execute_workflow_node
+    from app.schemas.workflows.contracts import ConditionNodeConfig
 
     migrated = ConditionNodeConfig.model_validate(
         {
@@ -405,8 +405,8 @@ def test_workflow_engine_returns_enabled_llm_content() -> None:
 def test_workflow_reply_node_modes_and_result_output() -> None:
     from pydantic import ValidationError
 
-    from app.application.workflow_nodes import execute_workflow_node
-    from app.schemas.workflow import ReplyNodeConfig
+    from app.application.workflows.nodes.executor import execute_workflow_node
+    from app.schemas.workflows.contracts import ReplyNodeConfig
 
     async def run() -> None:
         context = NodeExecutionContext(
@@ -588,12 +588,12 @@ def test_workflow_engine_enforces_step_and_token_budgets() -> None:
 def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
     from pydantic import ValidationError
 
-    from app.application.workflow_nodes import (
+    from app.application.workflows.nodes.executor import (
         _condition,
         _model_output_limit,
         resolve_value,
     )
-    from app.schemas.workflow import KnowledgeNodeConfig
+    from app.schemas.workflows.contracts import KnowledgeNodeConfig
 
     assert _model_output_limit("openai_compatible", 12) == {"max_tokens": 12}
     assert _model_output_limit("google_genai", 12) == {"max_output_tokens": 12}
@@ -670,7 +670,7 @@ def test_workflow_model_output_limit_uses_provider_native_argument() -> None:
 
 
 def test_workflow_model_timeout_uses_specific_safe_error() -> None:
-    from app.application.workflow_executor import _safe_node_error
+    from app.application.workflows.runs.executor import _safe_node_error
     from app.ports.llm import ModelProviderTimeoutError
 
     assert (
@@ -682,8 +682,8 @@ def test_workflow_model_timeout_uses_specific_safe_error() -> None:
 def test_workflow_resources_come_from_nodes_without_knowledge_limit() -> None:
     from pydantic import ValidationError
 
-    from app.schemas.workflow import KnowledgeNodeConfig, WorkflowGraph
-    from app.domain.workflows.services import workflow_resource_references
+    from app.schemas.workflows.contracts import KnowledgeNodeConfig, WorkflowGraph
+    from app.domain.workflows.definitions.service import workflow_resource_references
 
     knowledge_ids = [f"base-{index}" for index in range(25)]
     assert KnowledgeNodeConfig.model_validate(
@@ -743,7 +743,7 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
 
     from fastapi import HTTPException
 
-    from app.domain.workflows.services import validate_workflow_resources
+    from app.domain.workflows.definitions.service import validate_workflow_resources
 
     knowledge_ids = [f"base-{index}" for index in range(25)]
     workflow = graph()
@@ -775,10 +775,10 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
     async def validate(knowledge_rows: list[tuple]) -> int | None:
         batch = AsyncMock(return_value=knowledge_rows)
         with patch(
-            "app.domain.workflows.services.get_agent_model",
+            "app.domain.workflows.definitions.service.get_agent_model",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.domain.workflows.services.knowledge_base_repository."
+            "app.domain.workflows.definitions.service.knowledge_base_repository."
             "list_knowledge_bases_with_user_grants",
             new=batch,
         ):
@@ -810,8 +810,8 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
 def test_workflow_context_batches_prior_node_executions() -> None:
     from unittest.mock import AsyncMock, patch
 
-    from app.application.workflow_executor import _workflow_context
-    from app.schemas.workflow import WorkflowGraph
+    from app.application.workflows.runs.executor import _workflow_context
+    from app.schemas.workflows.contracts import WorkflowGraph
 
     class SessionContext:
         async def __aenter__(self):
@@ -865,13 +865,13 @@ def test_workflow_context_batches_prior_node_executions() -> None:
         list_runs = AsyncMock(return_value=prior)
         list_executions = AsyncMock(return_value=executions)
         with patch(
-            "app.application.workflow_executor.get_session_factory",
+            "app.application.workflows.runs.executor.get_session_factory",
             return_value=lambda: SessionContext(),
         ), patch(
-            "app.application.workflow_executor.agent_repository.list_agent_runs",
+            "app.application.workflows.runs.executor.agent_repository.list_agent_runs",
             new=list_runs,
         ), patch(
-            "app.application.workflow_executor.workflow_repository."
+            "app.application.workflows.runs.executor.workflow_repository."
             "list_node_executions_for_runs",
             new=list_executions,
         ):
@@ -903,8 +903,8 @@ def test_workflow_context_batches_prior_node_executions() -> None:
 def test_workflow_start_node_outputs_question_files_and_globals() -> None:
     from types import SimpleNamespace
 
-    from app.application.workflow_nodes import execute_workflow_node
-    from app.schemas.workflow import WorkflowNode
+    from app.application.workflows.nodes.executor import execute_workflow_node
+    from app.schemas.workflows.contracts import WorkflowNode
 
     async def run() -> None:
         scope = SimpleNamespace(
@@ -951,9 +951,9 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
     from types import SimpleNamespace
     from unittest.mock import patch
 
-    from app.application.workflow_nodes import execute_workflow_node
-    from app.schemas.workflow import WorkflowNode
-    from app.domain.workflows.engine import NodeExecutionContext
+    from app.application.workflows.nodes.executor import execute_workflow_node
+    from app.schemas.workflows.contracts import WorkflowNode
+    from app.domain.workflows.runtime.engine import NodeExecutionContext
 
     class FakeTool:
         async def ainvoke(self, arguments):
@@ -1046,7 +1046,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
             }
         )
         with patch(
-            "app.application.workflow_nodes.build_knowledge_search_tool",
+            "app.application.workflows.nodes.executor.build_knowledge_search_tool",
             return_value=FakeTool(),
         ) as build_tool:
             result = await execute_workflow_node(
@@ -1116,9 +1116,9 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
 
     from pydantic import ValidationError
 
-    from app.application.workflow_nodes import execute_workflow_node
-    from app.schemas.workflow import KnowledgeNodeConfig, WorkflowNode
-    from app.domain.workflows.engine import NodeExecutionContext
+    from app.application.workflows.nodes.executor import execute_workflow_node
+    from app.schemas.workflows.contracts import KnowledgeNodeConfig, WorkflowNode
+    from app.domain.workflows.runtime.engine import NodeExecutionContext
 
     assert KnowledgeNodeConfig.model_validate(
         {"query": "q", "knowledge_base_ids": ["base-1"]}
@@ -1215,7 +1215,7 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
             }
         )
         with patch(
-            "app.application.workflow_nodes.build_knowledge_search_tool",
+            "app.application.workflows.nodes.executor.build_knowledge_search_tool",
             return_value=FakeTool(),
         ):
             result = await execute_workflow_node(
@@ -1254,7 +1254,7 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
 def test_workflow_reranker_form_and_document_nodes() -> None:
     from unittest.mock import patch
 
-    from app.application.workflow_nodes import execute_workflow_node
+    from app.application.workflows.nodes.executor import execute_workflow_node
 
     class FakeReranker:
         def rerank(self, query, documents):
@@ -1310,7 +1310,7 @@ def test_workflow_reranker_form_and_document_nodes() -> None:
             form_submissions={},
         )
         with patch(
-            "app.application.workflow_nodes.build_reranker",
+            "app.application.workflows.nodes.executor.build_reranker",
             return_value=FakeReranker(),
         ):
             reranked = await execute_workflow_node(scope, reranker, context)
@@ -2350,7 +2350,7 @@ def _llm_context(**globals_overrides) -> NodeExecutionContext:
 def test_workflow_llm_node_dialogue_history_and_params() -> None:
     from unittest.mock import patch
 
-    from app.application.workflow_nodes import execute_workflow_node
+    from app.application.workflows.nodes.executor import execute_workflow_node
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
     async def run() -> None:
@@ -2378,7 +2378,7 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
             }
         )
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=fake,
         ):
             result = await execute_workflow_node(
@@ -2418,7 +2418,7 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
             }
         )
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=fake2,
         ):
             await execute_workflow_node(
@@ -2442,7 +2442,7 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
         fake3 = _FakeLlmModel([_FakeLlmMessage("answer-3")])
         scope3 = _llm_scope(node_histories={"llm-1": []})
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=fake3,
         ):
             await execute_workflow_node(
@@ -2462,7 +2462,7 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
 
         fake4 = _FakeLlmModel([_FakeLlmMessage("answer-4")])
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=fake4,
         ):
             await execute_workflow_node(
@@ -2480,7 +2480,7 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
 
 
 def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
-    from app.application.agent_child_runs import reconcile_workflow_agent_children
+    from app.application.agents.runs.children import reconcile_workflow_agent_children
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.session import get_session_factory
     from tests.agents import agent_model_server, model_payload
@@ -2611,8 +2611,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
     async def assert_lineage() -> None:
         from datetime import datetime, timedelta
 
-        from app.application.agent_child_runs import ensure_workflow_agent_child
-        from app.application.agent_runs import cancel_run_tree, prepare_agent_run
+        from app.application.agents.runs.children import ensure_workflow_agent_child
+        from app.application.agents.runs.service import cancel_run_tree, prepare_agent_run
         from app.infra.runtime.model_utils import utc_now
         from app.infra.db.repositories.identity import users as user_repository
         from app.domain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
@@ -2851,14 +2851,14 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         # member_binder_id, retired_agent_id, retired_version_id,
         # extra_runs).
         # ------------------------------------------------------------------
-        from app.application import agent_child_runs as acr
-        from app.application import agent_runs as app_agent_runs
-        from app.application import workflow_executor
-        from app.application.agent_child_runs import (
+        from app.application.agents.runs import children as acr
+        from app.application.agents.runs import service as app_agent_runs
+        from app.application.workflows.runs import executor as workflow_executor
+        from app.application.agents.runs.children import (
             _child_goal,
             _fail_expired_waiting_parent,
         )
-        from app.application.workflow_executor import run_durable_workflow_run
+        from app.application.workflows.runs.executor import run_durable_workflow_run
         from app.entities.agents import AgentPublicationVersion
         from app.infra.runtime.model_utils import new_id
         from app.infra.db.repositories.workflows import repository as workflow_repository
@@ -2867,8 +2867,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             AGENT_RUN_SUCCEEDED_STATUS,
             agent_run_display_status,
         )
-        from app.domain.agents.publications import agent_publication_hash
-        from app.domain.workflows.engine import WorkflowChildRequired
+        from app.domain.agents.access.publications import agent_publication_hash
+        from app.domain.workflows.runtime.engine import WorkflowChildRequired
         from app.domain.workflows.models import WorkflowRunDetail as DetailORM
         from tests.support import settings as make_settings
 
@@ -3708,7 +3708,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
     assert retired_unpublish.status_code == 200, retired_unpublish.text
 
     extra_runs = {}
-    with patch("app.application.workflow_runs.enqueue_agent_run", new=AsyncMock()):
+    with patch("app.application.workflows.runs.service.enqueue_agent_run", new=AsyncMock()):
         for key, question in (
             ("expiry", "expiry parent"),
             ("expiry-reconcile", "expiry reconcile parent"),
@@ -3731,9 +3731,9 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
 def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
     from unittest.mock import patch
 
-    from app.application.workflow_nodes import execute_workflow_node
+    from app.application.workflows.nodes.executor import execute_workflow_node
     from langchain_core.messages import ToolMessage
-    from app.schemas.workflow import LlmNodeConfig
+    from app.schemas.workflows.contracts import LlmNodeConfig
 
     async def run() -> None:
         assert LlmNodeConfig.model_validate({"prompt": "x"}).is_result is True
@@ -3769,7 +3769,7 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
             }
         )
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=fake,
         ):
             result = await execute_workflow_node(scope, node, _llm_context())
@@ -3792,7 +3792,7 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
         # A canonical reference without a frozen snapshot fails the node.
         scope2 = _llm_scope()
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=_FakeLlmModel([_FakeLlmMessage("x")]),
         ):
             try:
@@ -3819,7 +3819,7 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
 def test_workflow_llm_result_streams_markdown_deltas() -> None:
     from unittest.mock import patch
 
-    from app.application.workflow_nodes import execute_workflow_node
+    from app.application.workflows.nodes.executor import execute_workflow_node
     from langchain_core.messages import AIMessageChunk
 
     class StreamingModel(_FakeLlmModel):
@@ -3836,7 +3836,7 @@ def test_workflow_llm_result_streams_markdown_deltas() -> None:
 
         model = StreamingModel([_FakeLlmMessage("fallback")])
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=model,
         ):
             result = await execute_workflow_node(
@@ -3850,7 +3850,7 @@ def test_workflow_llm_result_streams_markdown_deltas() -> None:
 
         hidden = StreamingModel([_FakeLlmMessage("内部结果")])
         with patch(
-            "app.application.workflow_nodes.build_chat_model",
+            "app.application.workflows.nodes.executor.build_chat_model",
             return_value=hidden,
         ):
             await execute_workflow_node(
@@ -3905,7 +3905,7 @@ def test_cancelling_queued_workflow_run_is_idempotent() -> None:
         )
         assert saved.status_code == 200, saved.text
         with patch(
-            "app.application.workflow_runs.enqueue_agent_run",
+            "app.application.workflows.runs.service.enqueue_agent_run",
             new=AsyncMock(),
         ):
             run = client.post(
@@ -4025,7 +4025,7 @@ def test_workflow_executor_recovery_paths() -> None:
 
         def create_run(base: str, question: str) -> str:
             with patch(
-                "app.application.workflow_runs.enqueue_agent_run",
+                "app.application.workflows.runs.service.enqueue_agent_run",
                 new=AsyncMock(),
             ):
                 created = client.post(
@@ -4037,8 +4037,8 @@ def test_workflow_executor_recovery_paths() -> None:
             return created.json()["id"]
 
         async def run_scenarios() -> None:
-            from app.application import workflow_executor
-            from app.application.workflow_executor import run_durable_workflow_run
+            from app.application.workflows.runs import executor as workflow_executor
+            from app.application.workflows.runs.executor import run_durable_workflow_run
             from app.infra.runtime.model_utils import utc_now
             from app.infra.db.repositories.agents import repository as agent_repository
             from app.infra.db.repositories.workflows import repository as workflow_repository
@@ -4133,7 +4133,7 @@ def test_workflow_executor_recovery_paths() -> None:
                 original_execute = workflow_executor.execute_workflow_node
 
                 async def huge_output(scope, node, context):
-                    from app.domain.workflows.engine import NodeResult
+                    from app.domain.workflows.runtime.engine import NodeResult
 
                     return NodeResult(
                         outputs={"result": "x" * 300000},

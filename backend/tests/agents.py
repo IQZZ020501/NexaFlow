@@ -27,13 +27,11 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import (
-    agent_access,
-    agent_executor,
-    agent_memory,
-    agent_runs,
-    agent_tools,
-)
+from app.application.agents.access import service as agent_access
+from app.application.agents.runs import executor as agent_executor
+from app.application.agents.runs import memory as agent_memory
+from app.application.agents.runs import service as agent_runs
+from app.application.agents.tools import builder as agent_tools
 from app.application import agents as agent_application
 from app.adapters.tools import runtime as tool_adapters
 from app.infra.db.repositories.agents import repository as agent_repository
@@ -1468,7 +1466,7 @@ def assert_tool_routing_context_is_explicit() -> None:
 
     from pydantic import ValidationError
 
-    from app.schemas.agent import AgentCreateRequest
+    from app.schemas.agents.contracts import AgentCreateRequest
 
     try:
         AgentCreateRequest.model_validate(
@@ -4818,7 +4816,7 @@ def test_cancelling_root_run_cancels_active_children() -> None:
         assert agent.status_code == 201, agent.text
         agent_id = agent.json()["id"]
         with patch(
-            "app.application.agent_runs.enqueue_prepared_agent_run",
+            "app.application.agents.runs.service.enqueue_prepared_agent_run",
             new=AsyncMock(),
         ):
             response = client.post(
@@ -5004,7 +5002,7 @@ def test_agent_run_approval_is_actor_scoped() -> None:
         )
         assert granted.status_code == 200, granted.text
         with patch(
-            "app.application.agent_runs.enqueue_prepared_agent_run",
+            "app.application.agents.runs.service.enqueue_prepared_agent_run",
             new=AsyncMock(),
         ):
             created = client.post(

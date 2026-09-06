@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.entities.tools import ToolRef, ToolSnapshot
-from app.schemas.workflow import (
+from app.schemas.workflows.contracts import (
     CodeNodeConfig,
     KnowledgeNodeConfig,
     LlmNodeConfig,

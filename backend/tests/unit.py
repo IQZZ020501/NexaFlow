@@ -39,7 +39,7 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphImportRecord,
     KnowledgeGraphReviewDecisionRequest,
 )
-from app.domain.agents.permissions import (
+from app.domain.agents.access.permissions import (
     effective_agent_permission,
     validate_agent_permission,
 )
@@ -1165,8 +1165,8 @@ def test_tool_ref_requires_stable_ids() -> None:
 def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
     from app.entities.agents import AgentPublicationVersion, AgentRun
     from app.entities.tools import ToolSnapshot
-    from app.domain.agents.services import agent_publication_from_version
-    from app.domain.agents.publications import (
+    from app.domain.agents.service import agent_publication_from_version
+    from app.domain.agents.access.publications import (
         agent_publication_hash,
         build_agent_configuration_snapshot,
         build_agent_resource_snapshot,
@@ -1583,7 +1583,7 @@ def test_tool_adapter_contract_is_provider_neutral() -> None:
 
 
 def test_agent_tool_definition_comes_from_unified_snapshot() -> None:
-    from app.application.agent_tools import build_unified_agent_tool
+    from app.application.agents.tools.builder import build_unified_agent_tool
     from app.entities.tools import ToolSnapshot
 
     snapshot = ToolSnapshot(
@@ -1634,7 +1634,7 @@ def test_agent_tool_definition_comes_from_unified_snapshot() -> None:
 def test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope() -> None:
     import hashlib
 
-    from app.application.agent_tool_runtime import (
+    from app.application.agents.tools.runtime import (
         agent_tool_invocation_identity,
         tool_runtime_result_to_agent_result,
     )
@@ -1976,7 +1976,7 @@ def test_tool_ref_schema_requires_canonical_ids() -> None:
 
 
 def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
-    from app.schemas.workflow import LlmNodeConfig, ToolNodeConfig
+    from app.schemas.workflows.contracts import LlmNodeConfig, ToolNodeConfig
     from app.domain.tools.catalog.service import build_inline_python_tool
 
     reference = {"tool_id": "tool-1", "version_id": "version-1"}
@@ -2005,7 +2005,7 @@ def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
 
 def test_workflow_legacy_tools_normalize_to_one_canonical_node_contract() -> None:
     from app.entities.tools import ToolRef
-    from app.schemas.workflow import WorkflowGraph
+    from app.schemas.workflows.contracts import WorkflowGraph
     from app.domain.workflows.resources import (
         canonicalize_workflow_graph,
         workflow_resource_references,
@@ -2137,7 +2137,7 @@ def test_workflow_selects_only_exact_bound_tool_versions() -> None:
 
 def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
     from app.entities.tools import ToolRef, ToolSnapshot
-    from app.schemas.workflow import WorkflowGraph
+    from app.schemas.workflows.contracts import WorkflowGraph
     from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         load_workflow_resource_snapshot,
@@ -2215,7 +2215,7 @@ def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
 
 
 def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
-    from app.domain.workflows.engine import (
+    from app.domain.workflows.runtime.engine import (
         WorkflowValidationError,
         validate_graph,
     )
@@ -2359,7 +2359,7 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
 
 
 def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
-    from app.application.workflow_tool_runtime import workflow_tool_invocation_identity
+    from app.application.workflows.tools.runtime import workflow_tool_invocation_identity
     from app.domain.tools.runtime import tool_arguments_hash
 
     first = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
@@ -2380,7 +2380,7 @@ def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
 
 
 def test_workflow_tool_runtime_serializes_unsafe_tools_and_blocks_direct_only_llm() -> None:
-    from app.application.workflow_tool_runtime import WorkflowToolRuntime
+    from app.application.workflows.tools.runtime import WorkflowToolRuntime
     from app.entities.tools import ToolSnapshot
 
     def snapshot(
@@ -3198,7 +3198,7 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
 
     import json
 
-    from app.application.agent_tools import bounded_knowledge_context
+    from app.application.agents.tools.builder import bounded_knowledge_context
 
     context = bounded_knowledge_context(
         {
@@ -3215,7 +3215,7 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
 def test_grounding_verifier_revises_and_fails_closed() -> None:
     from langchain_core.messages import AIMessage
 
-    from app.application.agent_grounding import (
+    from app.application.agents.runs.grounding import (
         GROUNDING_FALLBACK_ANSWER,
         verify_grounding,
     )
@@ -5031,7 +5031,7 @@ def test_run_knowledge_model_test_uses_injected_providers() -> None:
 
 
 def test_safe_agent_error_classification() -> None:
-    from app.application.agent_tools import safe_agent_error
+    from app.application.agents.tools.builder import safe_agent_error
     from app.ports.llm import ModelProviderError, ModelProviderStatusError
     from app.domain.agents.runtime import AgentRunnerError
 
@@ -5047,7 +5047,7 @@ def test_safe_agent_error_classification() -> None:
 
 
 def test_agent_process_events_update_in_place() -> None:
-    from app.application.agent_executor import (
+    from app.application.agents.runs.executor import (
         _completed_process_events,
         _upsert_process_event,
     )
@@ -5090,7 +5090,7 @@ def test_agent_process_events_update_in_place() -> None:
 
 
 def test_agent_event_replay_reads_every_page() -> None:
-    from app.application import agent_executor
+    from app.application.agents.runs import executor as agent_executor
 
     rows = [
         SimpleNamespace(id=index)
@@ -5125,7 +5125,7 @@ def test_agent_event_replay_reads_every_page() -> None:
 
 
 def test_stale_mcp_policy_requires_approval() -> None:
-    from app.application import agent_executor
+    from app.application.agents.runs import executor as agent_executor
     from app.entities.agents import AgentRun
     from app.entities.tools import McpToolPolicy
     from app.domain.agents.runtime import AgentExecutionPaused
@@ -5203,7 +5203,7 @@ def test_stale_mcp_policy_requires_approval() -> None:
 
 
 def test_external_mcp_policy_public_reconciles_like_console() -> None:
-    from app.application.agent_executor import current_mcp_policy_mode
+    from app.application.agents.runs.executor import current_mcp_policy_mode
     from app.entities.tools import McpToolPolicy
 
     metadata = {
@@ -5293,7 +5293,7 @@ def test_external_mcp_policy_public_reconciles_like_console() -> None:
 
 
 def test_external_mcp_policy_drift_requires_public_approval_but_blocks_api() -> None:
-    from app.application import agent_executor
+    from app.application.agents.runs import executor as agent_executor
     from app.entities.agents import AgentRun
     from app.entities.tools import McpToolPolicy
 
@@ -5427,7 +5427,7 @@ def test_external_mcp_policy_drift_requires_public_approval_but_blocks_api() -> 
 
 
 def test_external_stream_epoch_is_stable_and_sanitized() -> None:
-    from app.application.agent_access import sanitize_external_agent_stream
+    from app.application.agents.access.service import sanitize_external_agent_stream
     from app.infra.runtime.model_utils import utc_now
 
     now = utc_now()
@@ -5549,7 +5549,7 @@ def test_external_stream_epoch_is_stable_and_sanitized() -> None:
 
 
 def test_external_progress_events_carry_knowledge_hits() -> None:
-    from app.application.agent_access import external_progress_events
+    from app.application.agents.access.service import external_progress_events
 
     events = [
         {
@@ -5609,7 +5609,7 @@ def test_external_progress_events_carry_knowledge_hits() -> None:
 
 
 def test_external_progress_events_carry_mcp_tool_details() -> None:
-    from app.application.agent_access import external_progress_events
+    from app.application.agents.access.service import external_progress_events
 
     progress = external_progress_events(
         [
@@ -5643,7 +5643,7 @@ def test_external_progress_events_carry_mcp_tool_details() -> None:
 def test_external_progress_events_bound_tool_inputs_and_pass_output() -> None:
     import json
 
-    from app.application.agent_access import (
+    from app.application.agents.access.service import (
         TOOL_INPUT_LIMITS,
         _bounded_tool_payload,
         external_progress_events,
@@ -5703,7 +5703,7 @@ def test_external_progress_events_bound_tool_inputs_and_pass_output() -> None:
 
 
 def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
-    from app.application.agent_access import external_progress_events
+    from app.application.agents.access.service import external_progress_events
 
     progress = external_progress_events(
         [
@@ -5727,7 +5727,7 @@ def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
 
 
 def test_external_progress_events_include_grounding_stage() -> None:
-    from app.application.agent_access import external_progress_events
+    from app.application.agents.access.service import external_progress_events
 
     progress = external_progress_events(
         [
@@ -5830,7 +5830,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
     from mcp.types import Tool as McpTool
 
-    from app.application.agent_tools import build_mcp_agent_tool, mcp_function_name
+    from app.application.agents.tools.builder import build_mcp_agent_tool, mcp_function_name
     from app.entities.tools import McpServer
     from app.domain.tools.mcp.service import ResolvedMcpTool
 
@@ -5856,7 +5856,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
 
 def test_run_to_response_maps_run_fields() -> None:
-    from app.application.agent_tools import knowledge_source_ref, run_to_response
+    from app.application.agents.tools.builder import knowledge_source_ref, run_to_response
     from app.entities.agents import AgentRun
 
     run = AgentRun(
@@ -5937,7 +5937,7 @@ def test_run_to_response_maps_run_fields() -> None:
 
 
 def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
-    from app.application.agent_runs import build_regenerated_agent_run
+    from app.application.agents.runs.service import build_regenerated_agent_run
     from app.entities.agents import AgentRun
 
     source = AgentRun(
@@ -5984,7 +5984,7 @@ def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
 
 
 def test_edit_regeneration_rejects_a_non_latest_run() -> None:
-    from app.application.agent_runs import regenerate_agent_run_from_source
+    from app.application.agents.runs.service import regenerate_agent_run_from_source
     from app.entities.agents import AgentRun
 
     source = AgentRun(
@@ -5997,11 +5997,11 @@ def test_edit_regeneration_rejects_a_non_latest_run() -> None:
     )
     with (
         patch(
-            "app.application.agent_runs.validate_regeneration_source",
+            "app.application.agents.runs.service.validate_regeneration_source",
             new=AsyncMock(),
         ),
         patch(
-            "app.application.agent_runs.agent_repository.list_agent_runs",
+            "app.application.agents.runs.service.agent_repository.list_agent_runs",
             new=AsyncMock(return_value=[AgentRun(id="run-latest")]),
         ),
     ):
@@ -6024,7 +6024,7 @@ def test_edit_regeneration_rejects_a_non_latest_run() -> None:
 def test_repeated_run_feedback_write_is_idempotent() -> None:
     from unittest.mock import AsyncMock, patch
 
-    from app.application.agent_runs import update_run_feedback
+    from app.application.agents.runs.service import update_run_feedback
     from app.entities.agents import AgentRun
     from app.infra.runtime.model_utils import utc_now
 
@@ -6047,7 +6047,7 @@ def test_repeated_run_feedback_write_is_idempotent() -> None:
     db = FakeDatabase()
     save_run = AsyncMock(side_effect=lambda _db, current: current)
     with patch(
-        "app.application.agent_runs.agent_repository.save_agent_run",
+        "app.application.agents.runs.service.agent_repository.save_agent_run",
         new=save_run,
     ):
         updated = asyncio.run(
@@ -6110,7 +6110,7 @@ def test_agent_usage_normalizes_provider_metadata() -> None:
 def test_agent_memory_compacts_old_turns() -> None:
     from langchain_core.messages import AIMessage
 
-    from app.application import agent_memory
+    from app.application.agents.runs import memory as agent_memory
     from app.entities.agents import AgentRun
 
     history = [

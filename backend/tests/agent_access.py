@@ -3,7 +3,7 @@
 Covers app/application/agent_access.py, app/api/v1/endpoints/agent_access.py and
 app/infrastructure/agent_rate_limit.py.  Plain-script suite (no pytest): run with
 
-    uv run coverage run --source=app.application.agent_access,app.api.v1.endpoints.agent_access,app.infra.security.agent_rate_limit \
+    uv run coverage run --source=app.application.agents.access.service,app.api.v1.agents.access,app.infra.security.agent_rate_limit \
         --data-file=.coverage.AgentAccessCoverage -m tests.agent_access
     uv run coverage report -m --data-file=.coverage.AgentAccessCoverage
 
@@ -35,9 +35,9 @@ from tests.support import (  # noqa: F401
     test_client,
 )
 
-from app.application import agent_access
-from app.application import agent_runs
-from app.application.agent_access import (
+from app.application.agents.access import service as agent_access
+from app.application.agents.runs import service as agent_runs
+from app.application.agents.access.service import (
     TOOL_INPUT_LIMITS,
     ToolPayloadLimits,
     _bounded_tool_payload,
@@ -1356,7 +1356,7 @@ async def assert_direct_access_units(
 
 
 async def assert_documentation_404_direct(agent_id: str) -> None:
-    import app.api.v1.endpoints.agent_access as endpoints_module
+    import app.api.v1.agents.access as endpoints_module
 
     async def fake_auth(*_args, **_kwargs):
         return (
@@ -1393,7 +1393,7 @@ async def assert_direct_endpoint_calls(
     from fastapi.security import HTTPAuthorizationCredentials
     from starlette.datastructures import UploadFile
 
-    import app.api.v1.endpoints.agent_access as endpoints_module
+    import app.api.v1.agents.access as endpoints_module
 
     from app.entities.agents import AgentToolCall
 
@@ -2242,7 +2242,7 @@ def assert_http_external_access() -> None:
     finally:
         agent_access.enforce_external_agent_rate_limit = original_rate_limit
         if original_run_agent is not None:
-            from app.application import agent_executor
+            from app.application.agents.runs import executor as agent_executor
 
             agent_executor.run_agent = original_run_agent
 

@@ -39,12 +39,10 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
     test_client,
 )
 
-from app.application import (
-    agent_executor,
-    agent_memory,
-    agent_runs,
-    agent_tools,
-)
+from app.application.agents.runs import executor as agent_executor
+from app.application.agents.runs import memory as agent_memory
+from app.application.agents.runs import service as agent_runs
+from app.application.agents.tools import builder as agent_tools
 from app.adapters.tools import runtime as tool_adapters
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
@@ -1002,7 +1000,7 @@ def assert_executor_checkpoint_paths() -> None:
 
 
 def assert_ledger_pure_helpers() -> None:
-    from app.application.agent_executor import (
+    from app.application.agents.runs.executor import (
         _arguments_hash,
         _stored_tool_result,
         current_mcp_policy_mode,
@@ -1269,7 +1267,7 @@ def assert_event_replay_cursor_error() -> None:
 
 
 def assert_memory_pure_functions() -> None:
-    from app.application.agent_memory import (
+    from app.application.agents.runs.memory import (
         _configured_context_window,
         _fit_memory,
         _message_text,
@@ -1846,7 +1844,7 @@ async def assert_knowledge_tool_paths(
     knowledge_base_id: str,
     rerank_kb_id: str,
 ) -> None:
-    from app.application.agent_tools import (
+    from app.application.agents.tools.builder import (
         build_knowledge_search_tool,
         describe_knowledge_sources,
     )
@@ -2069,7 +2067,7 @@ async def assert_mcp_tool_paths(
     workspace_id: str,
     mcp_server_id: str,
 ) -> None:
-    from app.application.agent_tools import build_mcp_agent_tool
+    from app.application.agents.tools.builder import build_mcp_agent_tool
 
     settings = test_settings()
     async with get_session_factory()() as db:
@@ -3428,7 +3426,7 @@ async def assert_create_agent_run_paths(
             assert created.status == "succeeded"
 
         # file_ids branch (627, 629)
-        import app.application.workflow_uploads as workflow_uploads_module
+        import app.application.workflows.uploads.service as workflow_uploads_module
 
         original_resolve = workflow_uploads_module.resolve_workspace_agent_files
         holder.model = RuntimeModelStub([ok_completion("Attached answer.")])
@@ -5058,7 +5056,7 @@ async def assert_agent_tool_runtime_paths(
     """Direct coverage of app/application/agent_tool_runtime.py branches."""
     import dataclasses as dc
 
-    from app.application import agent_tool_runtime as atr
+    from app.application.agents.tools import runtime as atr
     from app.ports.tool_runtime import ToolRuntimeResult
     from app.domain.agents.runtime import (
         AgentExecutionPaused,

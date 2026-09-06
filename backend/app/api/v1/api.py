@@ -12,15 +12,13 @@ from app.api.v1.knowledge import evaluation as knowledge_evaluation
 from app.api.v1.knowledge import graph as knowledge_graph
 from app.api.v1.knowledge import lifecycle as knowledge_lifecycle
 from app.api.v1.knowledge import retrieval as knowledge_retrieval
+from app.api.v1.agents import access as agent_access
+from app.api.v1.agents import routes as agents
 from app.api.v1.knowledge import routes as knowledge
+from app.api.v1.workflows import access as workflow_access
+from app.api.v1.workflows import routes as workflows
 from app.api.v1.tools import sources as tool_sources
 from app.api.v1.identity import auth, enterprise as enterprise_identity
-from app.api.v1.endpoints import (
-    agent_access,
-    agents,
-    workflows,
-    workflow_access,
-)
 
 api_router = APIRouter(prefix="/api/v1")
 

@@ -2,13 +2,13 @@ import asyncio
 import logging
 import os
 
-from app.application.agent_executor import (
+from app.application.agents.runs.executor import (
     RUN_BUSY,
     list_recoverable_legacy_agent_run_ids,
     list_recoverable_unified_agent_run_ids,
 )
-from app.application.run_dispatch import run_durable_application_run
-from app.application.agent_child_runs import reconcile_workflow_agent_children
+from app.application.runs.dispatch import run_durable_application_run
+from app.application.agents.runs.children import reconcile_workflow_agent_children
 from app.infra.queue.celery import celery_app
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error

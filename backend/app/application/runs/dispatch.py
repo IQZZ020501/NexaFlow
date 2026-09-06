@@ -1,0 +1,39 @@
+from app.application.agents.runs.executor import (
+    RUN_FINISHED,
+    run_durable_legacy_agent_run,
+    run_durable_unified_agent_run,
+)
+from app.application.agents.runs.children import reconcile_workflow_agent_children
+from app.application.workflows.runs.executor import run_durable_workflow_run
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
+
+
+async def run_durable_application_run(
+    run_id: str,
+    settings: Settings,
+    worker_task_id: str | None = None,
+    *,
+    generation: str = "legacy",
+) -> str:
+    async with get_session_factory()() as db:
+        workflow = await workflow_repository.get_run_detail(db, run_id)
+    if workflow is not None:
+        return await run_durable_workflow_run(
+            run_id,
+            settings,
+            worker_task_id,
+            generation=generation,
+        )
+    runner = (
+        run_durable_unified_agent_run
+        if generation == "unified"
+        else run_durable_legacy_agent_run
+    )
+    outcome = await runner(run_id, settings, worker_task_id)
+    await reconcile_workflow_agent_children(
+        settings,
+        child_run_id=run_id,
+    )
+    return outcome

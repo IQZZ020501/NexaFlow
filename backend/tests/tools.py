@@ -1133,7 +1133,7 @@ def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> Non
 def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
     from mcp.types import Tool as McpTool
 
-    from app.application.agent_tools import mcp_function_name
+    from app.application.agents.tools.builder import mcp_function_name
     from app.entities.tools import McpServer
     from app.domain.tools.mcp.service import ResolvedMcpTool
 
@@ -4844,7 +4844,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from unittest.mock import patch
 
     from app.application.tools.runtime.service import ToolInvocationBusy
-    from app.application.workflow_tool_runtime import (
+    from app.application.workflows.tools.runtime import (
         WorkflowToolRuntime,
         workflow_tool_invocation_identity,
     )
@@ -5126,7 +5126,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         return item
 
     with patch(
-        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        "app.application.workflows.tools.runtime.execute_tool_invocation",
         new=flaky_execute,
     ):
         retried = await runtime.invoke(snapshot, "node-busy", "call-busy", {})
@@ -5152,7 +5152,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         raise ToolInvocationBusy("provider busy")
 
     with patch(
-        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        "app.application.workflows.tools.runtime.execute_tool_invocation",
         new=always_busy,
     ):
         try:
@@ -5175,7 +5175,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         )
 
     with patch(
-        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        "app.application.workflows.tools.runtime.execute_tool_invocation",
         new=uncertain_execute,
     ):
         try:
@@ -5198,7 +5198,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         )
 
     with patch(
-        "app.application.workflow_tool_runtime.execute_tool_invocation",
+        "app.application.workflows.tools.runtime.execute_tool_invocation",
         new=approval_execute,
     ):
         try:

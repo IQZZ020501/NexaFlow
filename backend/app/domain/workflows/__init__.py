@@ -1,4 +1,4 @@
-from app.domain.workflows.engine import (
+from app.domain.workflows.runtime.engine import (
     WorkflowEngine,
     WorkflowEngineError,
     WorkflowValidationError,
