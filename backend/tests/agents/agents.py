@@ -2632,7 +2632,7 @@ def assert_mcp_url_validation() -> None:
 
 def assert_public_access_migration_downgrade_drops_external_runs() -> None:
     migration_path = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "alembic"
         / "versions"
         / "202608100003_agent_public_access.py"
@@ -4252,7 +4252,7 @@ def main() -> None:
                     "transport": "stdio",
                     "stdio_config": {
                         "command": sys.executable,
-                        "args": ["-m", "tests.mcp_test_server"],
+                        "args": ["-m", "tests.support.mcp_test_server"],
                         "env": {"MCP_TEST_SECRET": stdio_secret},
                     },
                 },

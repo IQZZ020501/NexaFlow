@@ -1,6 +1,6 @@
 """Workflow engine and API regression suite.
 
-Run from ``backend/`` with ``uv run python -m tests.workflows``.
+Run from ``backend/`` with ``uv run python -m tests.workflows.workflows``.
 """
 
 import asyncio
@@ -1493,7 +1493,7 @@ def test_interaction_config_migration_upgrades_prerequisites() -> None:
     from sqlalchemy import create_engine, inspect, text
 
     migration_path = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "alembic"
         / "versions"
         / "202608120004_agent_interaction_config.py"
@@ -1663,7 +1663,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
     """
     Exercise the workflow API lifecycle, including definition revisions, publication, runs, permissions, feedback, regeneration, uploads, and audit events.
     """
-    from tests.agents import agent_model_server, create_workspace_user, model_payload
+    from tests.agents.agents import agent_model_server, create_workspace_user, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -2483,7 +2483,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
     from app.application.agents.runs.children import reconcile_workflow_agent_children
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.session import get_session_factory
-    from tests.agents import agent_model_server, model_payload
+    from tests.agents.agents import agent_model_server, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -3868,7 +3868,7 @@ def test_workflow_llm_result_streams_markdown_deltas() -> None:
 def test_cancelling_queued_workflow_run_is_idempotent() -> None:
     from unittest.mock import AsyncMock, patch
 
-    from tests.agents import agent_model_server, model_payload
+    from tests.agents.agents import agent_model_server, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -3931,7 +3931,7 @@ def test_workflow_executor_recovery_paths() -> None:
     """
     from unittest.mock import AsyncMock, patch
 
-    from tests.agents import agent_model_server, model_payload
+    from tests.agents.agents import agent_model_server, model_payload
     from tests.support import settings as make_settings
 
     with test_client() as client, agent_model_server() as model_base_url:

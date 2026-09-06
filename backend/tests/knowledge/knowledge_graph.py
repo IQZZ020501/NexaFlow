@@ -1,6 +1,6 @@
 """Persistent Evidence Graph RAG regression suite.
 
-Run from backend/: uv run python -m tests.knowledge_graph
+Run from backend/: uv run python -m tests.knowledge.knowledge_graph
 """
 
 import asyncio

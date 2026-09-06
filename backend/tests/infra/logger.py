@@ -1,6 +1,6 @@
 """Tests for the global logger and error-classification modules.
 
-Run from `backend/` with `uv run python -m tests.logger`.
+Run from `backend/` with `uv run python -m tests.infra.logger`.
 """
 
 import io

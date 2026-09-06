@@ -1,7 +1,7 @@
 """Coverage suite for the agent services / permissions / repository / tasks domain.
 
 Run from backend/:
-    uv run python -m tests.agent_services_coverage
+    uv run python -m tests.agents.agent_services_coverage
 
 Plain Python script suite (no pytest).  Failure = exception or failed assertion.
 """

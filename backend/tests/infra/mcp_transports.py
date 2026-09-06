@@ -22,8 +22,8 @@ from app.infra.tools.mcp_stdio import McpStdioConfig, parse_mcp_stdio_config
 from tests.support import settings
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-TEST_MODULE = "tests.mcp_test_server"
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+TEST_MODULE = "tests.support.mcp_test_server"
 TOKEN = "transport-test-token"
 
 

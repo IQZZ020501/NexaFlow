@@ -4,7 +4,7 @@ Covers app/application/agent_access.py, app/api/v1/endpoints/agent_access.py and
 app/infrastructure/agent_rate_limit.py.  Plain-script suite (no pytest): run with
 
     uv run coverage run --source=app.application.agents.access.service,app.api.v1.agents.access,app.infra.security.agent_rate_limit \
-        --data-file=.coverage.AgentAccessCoverage -m tests.agent_access
+        --data-file=.coverage.AgentAccessCoverage -m tests.agents.agent_access
     uv run coverage report -m --data-file=.coverage.AgentAccessCoverage
 
 Pure helpers (payload limiting, progress events, stream sanitizing, rate limit

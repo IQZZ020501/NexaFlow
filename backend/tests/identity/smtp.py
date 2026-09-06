@@ -1,6 +1,6 @@
 """SMTP settings and transport regression checks.
 
-Run from ``backend/`` with ``uv run python -m tests.smtp``.
+Run from ``backend/`` with ``uv run python -m tests.identity.smtp``.
 """
 
 import asyncio

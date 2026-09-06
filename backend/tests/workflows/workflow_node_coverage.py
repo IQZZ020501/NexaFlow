@@ -1,6 +1,6 @@
 """Workflow node execution and public access coverage suite.
 
-Run from ``backend/`` with ``uv run python -m tests.workflow_node_coverage``.
+Run from ``backend/`` with ``uv run python -m tests.workflows.workflow_node_coverage``.
 Covers the baseline-missing lines of ``app/application/workflow_executor.py``,
 ``app/application/workflow_nodes.py``, ``app/application/workflow_uploads.py``,
 ``app/application/workflow_access.py`` and
@@ -2988,7 +2988,7 @@ def test_executor_manual_run_scenarios() -> None:
     """Executor error paths exercised with real DB rows and targeted mocks."""
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
-    from tests.agents import agent_model_server, create_workspace_user, model_payload
+    from tests.agents.agents import agent_model_server, create_workspace_user, model_payload
 
     global WORKSPACE_ID, WORKFLOW_AGENT_ID, ADMIN_USER_ID, WORKFLOW_MODEL_ID
     global WORKFLOW_DEFINITION_ID
@@ -3341,7 +3341,7 @@ def _publish_graph(
 
 
 def test_public_and_api_workflow_access_end_to_end() -> None:
-    from tests.agents import agent_model_server, create_workspace_user, model_payload
+    from tests.agents.agents import agent_model_server, create_workspace_user, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)

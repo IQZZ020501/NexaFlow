@@ -72,7 +72,7 @@ from app.schemas.knowledge import (
     KnowledgeQueryRequest,
     KnowledgeRetrievalTraceResponse,
 )
-from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
+from tests.models.llm import ModelTestHandler, model_payload, model_test_server, models_url
 from app.domain.platform.models import ResourcePermission
 
 

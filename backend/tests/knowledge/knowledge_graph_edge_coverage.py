@@ -1,6 +1,6 @@
 """Additional persistent graph coverage edges.
 
-Run from backend/: uv run python -m tests.knowledge_graph_edge_coverage
+Run from backend/: uv run python -m tests.knowledge.knowledge_graph_edge_coverage
 """
 
 import asyncio

@@ -1,6 +1,6 @@
 """Identity email and password-reset regression checks.
 
-Run from ``backend/`` with ``uv run python -m tests.email``.
+Run from ``backend/`` with ``uv run python -m tests.identity.email``.
 """
 
 import asyncio

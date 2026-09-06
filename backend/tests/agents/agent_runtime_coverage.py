@@ -3,7 +3,7 @@
 Covers agent_executor / agent_runs / agent_memory / agent_tools, the
 shareddomain runtime graph (executor, usage, tools, callbacks) and the Redis
 live stream infrastructure. Pure-Python script suite (no pytest): run from
-``backend/`` with ``uv run python -m tests.agent_runtime_coverage``.
+``backend/`` with ``uv run python -m tests.agents.agent_runtime_coverage``.
 """
 
 import asyncio

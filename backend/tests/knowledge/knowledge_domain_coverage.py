@@ -3,7 +3,7 @@
 Targets the knowledge shared domain (kb / lifecycle / orchestration /
 documents / cleanup / permissions / task_runner), the Celery task bodies
 (``app.tasks.knowledge``) and the knowledge repository.  Runs as a plain
-script: ``uv run python -m tests.knowledge_domain_coverage`` from
+script: ``uv run python -m tests.knowledge.knowledge_domain_coverage`` from
 ``backend/``.
 """
 
@@ -22,7 +22,7 @@ from tests.support import (
     settings as test_settings,
     test_client,
 )
-from tests.llm import model_test_server
+from tests.models.llm import model_test_server
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -3982,7 +3982,7 @@ def test_evaluation_migrations_support_sqlite() -> None:
     from alembic.operations import Operations
 
     def load_migration(filename: str, module_name: str):
-        path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / filename
+        path = Path(__file__).resolve().parents[2] / "alembic" / "versions" / filename
         spec = importlib.util.spec_from_file_location(module_name, path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

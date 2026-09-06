@@ -8,7 +8,7 @@ Targets:
 - app/api/v1/endpoints/workflows.py         (validate / form / stream endpoints)
 
 Run from backend/:
-    uv run python -m tests.workflow_run_coverage
+    uv run python -m tests.workflows.workflow_run_coverage
 """
 
 import asyncio
@@ -220,7 +220,7 @@ def _form_graph() -> dict:
 
 def _setup_workflow_ctx(client, model_base_url: str, name: str = "Coverage Workflow"):
     """Create model + workflow agent; returns (token, workspace_id, model_id, agent_id, admin_user_id)."""
-    from tests.agents import model_payload
+    from tests.agents.agents import model_payload
 
     token, workspace_id = activate_admin(client)
     headers = auth_headers(token)
@@ -785,7 +785,7 @@ def test_create_workflow_run_guard_errors() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowRunCreateRequest
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -858,7 +858,7 @@ def test_create_workflow_run_external_and_conflicts() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowRunCreateRequest
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1003,7 +1003,7 @@ def test_resume_workflow_form_error_branches() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowFormSubmitRequest
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1172,7 +1172,7 @@ def test_workflow_stream_branches() -> None:
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1360,7 +1360,7 @@ def test_workflow_services_boundaries() -> None:
         validate_workflow_resources,
         workflow_resource_references,
     )
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1632,7 +1632,7 @@ def test_upload_cleanup_records() -> None:
         queue_upload_cleanups,
         run_upload_storage_cleanup,
     )
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1712,7 +1712,7 @@ def test_upload_cleanup_records() -> None:
 
 
 def test_workflow_run_lifecycle_and_error_paths() -> None:
-    from tests.agents import (
+    from tests.agents.agents import (
         agent_model_server,
         create_workspace_user,
         model_payload,
@@ -1964,7 +1964,7 @@ def _set_agent_status(agent_id: str, status: str) -> None:
 
 
 def test_workflow_form_pause_and_resume() -> None:
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -2059,7 +2059,7 @@ def test_workflow_form_pause_and_resume() -> None:
 
 
 def test_workflow_external_runs_and_conversation_conflict() -> None:
-    from tests.agents import agent_model_server, create_workspace_user
+    from tests.agents.agents import agent_model_server, create_workspace_user
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -2168,7 +2168,7 @@ def test_workflow_run_direct_api_functions() -> None:
         build_workflow_resource_snapshot,
         workflow_resource_hash,
     )
-    from tests.agents import agent_model_server
+    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(

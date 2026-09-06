@@ -2,7 +2,7 @@
 
 Run from ``backend/`` with:
 
-    uv run python -m tests.tools
+    uv run python -m tests.tools.tools
 """
 
 import asyncio
@@ -213,7 +213,7 @@ async def seed_private_tool(
 
 def load_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608160003_unified_tool_persistence.py"
     )
     spec = spec_from_file_location("unified_tool_persistence", path)
@@ -225,7 +225,7 @@ def load_migration():
 
 def load_network_policy_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608160004_mcp_network_policy.py"
     )
     spec = spec_from_file_location("mcp_network_policy", path)
@@ -237,7 +237,7 @@ def load_network_policy_migration():
 
 def load_artifact_runtime_contract_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608250007_artifact_runtime_contract.py"
     )
     spec = spec_from_file_location("artifact_runtime_contract", path)
@@ -249,7 +249,7 @@ def load_artifact_runtime_contract_migration():
 
 def load_artifact_identity_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608250005_generic_artifact_identity.py"
     )
     spec = spec_from_file_location("generic_artifact_identity", path)
@@ -261,7 +261,7 @@ def load_artifact_identity_migration():
 
 def load_artifact_renderer_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608250006_artifact_docx_renderer.py"
     )
     spec = spec_from_file_location("artifact_docx_renderer", path)
@@ -374,7 +374,7 @@ def test_artifact_contract_downgrade_rejects_durable_references() -> None:
 
 def load_pptx_schema_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608300003_builtin_pptx_skill_schema.py"
     )
     spec = spec_from_file_location("pptx_skill_schema", path)
@@ -386,7 +386,7 @@ def load_pptx_schema_migration():
 
 def load_documents_formal_legal_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202609040001_builtin_documents_formal_legal.py"
     )
     spec = spec_from_file_location("documents_formal_legal", path)
@@ -924,7 +924,7 @@ def test_agent_publication_migration_supports_sqlite_foreign_keys() -> None:
 
 def load_agent_publication_migration():
     path = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "alembic/versions/202608160005_agent_publication_versions.py"
     )
     spec = spec_from_file_location("agent_publication_versions", path)

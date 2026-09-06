@@ -3,7 +3,7 @@
 Run from ``backend/`` with:
 
     uv run coverage run --source=<modules> --data-file=.coverage.InfraUnitCoverage \
-        -m tests.infra_unit_coverage
+        -m tests.infra.infra_unit_coverage
     uv run coverage report -m --data-file=.coverage.InfraUnitCoverage
 
 Most tests are pure unit tests: repositories, capabilities and the network are
@@ -2264,7 +2264,7 @@ def test_code_sandbox_artifact_execute() -> None:
 
 
 def test_worker_supervisor_sandbox_commands() -> None:
-    script = Path(__file__).resolve().parents[1] / "scripts" / "worker.py"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "worker.py"
     spec = importlib.util.spec_from_file_location("nexaflow_worker_script", script)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

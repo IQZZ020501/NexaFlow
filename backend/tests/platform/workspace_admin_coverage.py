@@ -2,7 +2,7 @@
 
 Pure-script test suite (no pytest): run from backend/ with
 
-    uv run python -m tests.workspace_admin_coverage
+    uv run python -m tests.platform.workspace_admin_coverage
 
 Every failed assertion or raised exception fails the suite; a successful run
 prints an OK summary. Each ``test_client()`` block gets a fresh in-memory

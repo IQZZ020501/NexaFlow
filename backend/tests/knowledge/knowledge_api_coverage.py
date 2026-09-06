@@ -9,7 +9,7 @@ Covers the baseline-missing lines of:
 - app/capabilities/rag/vector_store.py (in-memory error paths)
 - app/capabilities/embedding/pipeline.py (split/clean/extract edge paths)
 
-Run from backend/:  uv run python -m tests.knowledge_api_coverage
+Run from backend/:  uv run python -m tests.knowledge.knowledge_api_coverage
 """
 
 import asyncio
@@ -31,7 +31,7 @@ from tests.support import (
     test_client,
 )
 import tests.support as support_module
-from tests.llm import model_payload, model_test_server, models_url
+from tests.models.llm import model_payload, model_test_server, models_url
 
 # The shared test storage dir is wiped (shutil.rmtree) by every suite's
 # test_client() block; concurrent suites destroy each other's uploaded
