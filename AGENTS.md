@@ -391,13 +391,17 @@ examples.
   Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
 - `backend/` Python changes: use the project's Python tooling. Run `compileall`
   over the touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (unit, logger, smtp, email, system_governance,
-  identity, enterprise_identity, workspaces, teams, knowledge, llm, agents, workflows, mcp_transports, test_main,
-  agent_access, workflow_run_coverage, workflow_node_coverage,
-  workspace_admin_coverage,
-  knowledge_graph, knowledge_graph_edge_coverage, knowledge_domain_coverage,
-  knowledge_api_coverage, resource_folders, agent_services_coverage,
-  agent_runtime_coverage, infra_unit_coverage). For migration changes,
+  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.agent_access,
+  agents.agent_services_coverage, agents.agent_runtime_coverage, workflows.workflows,
+  workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
+  knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
+  knowledge.knowledge_graph_edge_coverage, knowledge.knowledge_domain_coverage,
+  knowledge.knowledge_api_coverage, tools.tools, tools.unit, identity.identity,
+  identity.enterprise_identity, identity.email, identity.smtp,
+  platform.workspaces, platform.unit, platform.workspace_admin_coverage,
+  platform.teams, platform.system_governance, platform.resource_folders,
+  models.llm, models.unit, infra.infra_unit_coverage, infra.unit, infra.logger,
+  infra.mcp_transports, smoke.test_main). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
