@@ -207,6 +207,15 @@ export function EnterpriseIdentityPage() {
     }
   }
 
+  async function handleCopy(value: string) {
+    try {
+      await copyText(value)
+      notify("success", t("已复制"))
+    } catch {
+      notify("error", t("复制失败"))
+    }
+  }
+
   if (!workspaceId) {
     return (
       <Card>
@@ -412,7 +421,7 @@ export function EnterpriseIdentityPage() {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => void copyText(current.callback_url)}
+                  onClick={() => void handleCopy(current.callback_url)}
                   aria-label={t("复制回调地址")}
                 >
                   <CopyIcon />
@@ -429,7 +438,7 @@ export function EnterpriseIdentityPage() {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => void copyText(current.login_url)}
+                  onClick={() => void handleCopy(current.login_url)}
                   aria-label={t("复制登录地址")}
                 >
                   <CopyIcon />

@@ -32,7 +32,13 @@ const workspaces = [
     is_default: false,
   },
 ]
-const session = makeSession({ workspaces, selectedWorkspaceId: "ws-1" })
+const notifications: Array<[string, string]> = []
+const session = makeSession({
+  workspaces,
+  selectedWorkspaceId: "ws-1",
+  notify: (kind: string, message: string) =>
+    notifications.push([kind, message]),
+})
 const sessionState = session as typeof session & { selectedWorkspaceId: string }
 mockUseSession(session)
 
@@ -81,6 +87,7 @@ function WorkspaceSwitchHarness() {
 
 beforeEach(() => {
   sessionState.selectedWorkspaceId = "ws-1"
+  notifications.length = 0
 })
 
 afterEach(() => {
@@ -162,4 +169,48 @@ test("shows one provider form and switches it from the dropdown", async () => {
   expect(screen.getByDisplayValue("钉钉")).toBeTruthy()
   expect(screen.getByLabelText("企业 ID")).toBeTruthy()
   expect(screen.queryByDisplayValue("Feishu A")).toBeNull()
+})
+
+test("notifies after copying enterprise login addresses", async () => {
+  const originalClipboard = navigator.clipboard
+  const written: string[] = []
+  Object.defineProperty(navigator, "clipboard", {
+    value: {
+      writeText: async (value: string) => void written.push(value),
+    },
+    configurable: true,
+  })
+  withFetch((url) => payloadFor(url, "ws-1", "Feishu A"))
+
+  try {
+    renderPage(<EnterpriseIdentityPage />)
+    await waitFor(() =>
+      expect(screen.getByLabelText("复制回调地址")).toBeTruthy()
+    )
+
+    fireEvent.click(screen.getByLabelText("复制回调地址"))
+
+    await waitFor(() =>
+      expect(notifications).toContainEqual(["success", "已复制"])
+    )
+    expect(written).toEqual(["https://nexaflow.example/callback/ws-1"])
+
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async () => {
+          throw new Error("denied")
+        },
+      },
+      configurable: true,
+    })
+    fireEvent.click(screen.getByLabelText("复制登录地址"))
+    await waitFor(() =>
+      expect(notifications).toContainEqual(["error", "复制失败"])
+    )
+  } finally {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    })
+  }
 })
