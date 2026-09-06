@@ -597,7 +597,10 @@ function KnowledgeBasePageContent({
   }, [documents, documentSearch, documentSortDirection, documentSortKey])
 
   function selectDocumentSort(key: DocumentSortKey) {
-    if (documentSortKey === key) return
+    if (documentSortKey === key) {
+      cycleDocumentSort(key)
+      return
+    }
     setDocumentSortKey(key)
     setDocumentSortDirection(key === "name" ? "asc" : "desc")
     setDocumentPage(1)
