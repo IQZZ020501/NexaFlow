@@ -1579,6 +1579,46 @@ describe("PublicAgentChat", () => {
     )
   })
 
+  test("recovers misspelled internal source links", async () => {
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "社保怎么补缴？")] },
+      history: {
+        items: [
+          run({
+            result:
+              "可以按规定补缴。[source](#nexfaow-source-fedcba9876543210)",
+            sources: [
+              {
+                source_ref: "fedcba9876543210",
+                knowledge_base: "制度库",
+                document: "社保制度.pdf",
+                parent_title: "",
+                section_path: [],
+                chunk_index: 2,
+                content: "不足十五年时可以补缴。",
+              },
+            ],
+          }),
+        ],
+        total: 1,
+        offset: 0,
+        limit: 200,
+      },
+    })
+
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+
+    const source = await screen.findByRole("button", {
+      name: "来源：社保制度.pdf · 片段 3",
+    })
+    expect(source.closest("p")?.textContent).toBe(
+      "可以按规定补缴。社保制度.pdf"
+    )
+    expect(screen.queryByText("source")).toBeNull()
+  })
+
   test("edits and resends only the latest user message", async () => {
     let regenerateBody: unknown
     fetchHandler = (url, init) => {

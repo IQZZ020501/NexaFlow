@@ -12,15 +12,13 @@ import {
 import type { TFunction } from "@/i18n"
 import type { AgentRunSource } from "@/lib/api/agents"
 
-const SOURCE_HREF_PREFIX = "#nexaflow-source-"
-const SOURCE_REF_PATTERN = /^[a-f0-9]{16}$/
+const SOURCE_HREF_PATTERN =
+  /^#nex(?:aflow|faow)-source-([a-f0-9]{16})$/i
 const SOURCE_LINK_PATTERN =
-  /[ \t]*\[[^\]\r\n]*\]\(#nexaflow-source-([a-f0-9]{16})\)/gi
+  /[ \t]*\[[^\]\r\n]*\]\(#nex(?:aflow|faow)-source-([a-f0-9]{16})\)/gi
 
 function sourceRefFromHref(href?: string) {
-  if (!href?.startsWith(SOURCE_HREF_PREFIX)) return null
-  const sourceRef = href.slice(SOURCE_HREF_PREFIX.length)
-  return SOURCE_REF_PATTERN.test(sourceRef) ? sourceRef : null
+  return href?.match(SOURCE_HREF_PATTERN)?.[1] ?? null
 }
 
 export function stripAgentSourceLinks(content: string) {
