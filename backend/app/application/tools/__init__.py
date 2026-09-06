@@ -1,6 +1,6 @@
 """Unified Tool use cases (facade over the tools domain)."""
 
-from app.application.tool_management import (
+from app.application.tools.management.service import (
     create_mcp_source,
     create_python,
     delete_source,
@@ -20,7 +20,7 @@ from app.application.tool_management import (
     update_python_draft,
     upsert_permission,
 )
-from app.domain.tools.services import (
+from app.domain.tools.mcp.service import (
     ToolAuthorization,
     ToolCatalogDetail,
     ToolCatalogItem,

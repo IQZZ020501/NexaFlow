@@ -6,6 +6,9 @@ from app.api.v1.workspaces import routes as workspaces
 from app.api.v1.teams import routes as teams
 from app.api.v1.resource_folders import routes as resource_folders
 from app.api.v1.models import routes as models
+from app.api.v1.tools import mcp as mcp_servers
+from app.api.v1.tools import routes as tools
+from app.api.v1.tools import sources as tool_sources
 from app.api.v1.identity import auth, enterprise as enterprise_identity
 from app.api.v1.endpoints import (
     agent_access,
@@ -15,9 +18,6 @@ from app.api.v1.endpoints import (
     knowledge_graph,
     knowledge_lifecycle,
     knowledge_retrieval,
-    mcp_servers,
-    tool_sources,
-    tools,
     workflows,
     workflow_access,
 )

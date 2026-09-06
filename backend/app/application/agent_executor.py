@@ -68,7 +68,7 @@ from app.domain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.domain.tools.services import (
+from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
     get_mcp_tool_policy,

@@ -21,8 +21,8 @@ from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.tools import repository as repository
 from app.infra.runtime.validation import normalize_name
 from app.domain.audit.services import record_audit_log
-from app.domain.tools.catalog import canonical_definition_hash, stable_catalog_id
-from app.domain.tools.permissions import require_managed_tool
+from app.domain.tools.catalog.service import canonical_definition_hash, stable_catalog_id
+from app.domain.tools.access.permissions import require_managed_tool
 from app.domain.tools.runtime import build_tool_snapshot
 
 

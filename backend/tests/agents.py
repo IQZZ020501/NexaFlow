@@ -33,9 +33,9 @@ from app.application import (
     agent_memory,
     agent_runs,
     agent_tools,
-    tool_adapters,
 )
 from app.application import agents as agent_application
+from app.adapters.tools import runtime as tool_adapters
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
@@ -78,7 +78,7 @@ from app.domain.agents.runtime import (
 )
 from app.domain.agents.runtime import graph as agent_graph_module
 from app.domain.agents.runtime.graph import MAX_REASONING_CHARS
-from app.domain.tools import services as mcp_services
+from app.domain.tools.mcp import service as mcp_services
 
 MEMBER_PASSWORD = "AgentMember@12345."
 
@@ -239,7 +239,7 @@ async def grant_mcp_tool_use(
 ) -> None:
     from app.entities.workspaces.resource_permissions import ResourcePermission
     from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
-    from app.domain.tools.catalog import get_mcp_catalog_leaf
+    from app.domain.tools.catalog.service import get_mcp_catalog_leaf
 
     async with get_session_factory()() as db:
         leaf = await get_mcp_catalog_leaf(
@@ -4919,7 +4919,7 @@ def test_cancelling_root_run_cancels_active_children() -> None:
 
         # RUN-020: a late worker finalize after cancellation cannot overwrite
         # the cancelled outcome and never invokes the provider again.
-        from app.application.tool_runtime import execute_tool_invocation
+        from app.application.tools.runtime.service import execute_tool_invocation
         class LateFinalizeAdapter:
             kind = "mcp"
             calls = 0

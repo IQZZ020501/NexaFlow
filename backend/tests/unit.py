@@ -1274,7 +1274,7 @@ def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
 
 def test_agent_tool_binding_requires_current_available_policy() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.domain.tools.bindings import build_bindable_tool_snapshot
+    from app.domain.tools.access.bindings import build_bindable_tool_snapshot
 
     source = ToolSource(id="source-1", workspace_id="ws-1", kind="python")
     tool = Tool(
@@ -1810,7 +1810,7 @@ def test_unified_agent_runs_use_a_worker_generation_fence() -> None:
 
 
 def test_tool_invocation_identity_ignores_refreshable_deadline() -> None:
-    from app.application.tool_runtime import _same_invocation
+    from app.application.tools.runtime.service import _same_invocation
     from app.entities.tools import ToolInvocation
     from app.domain.tools.runtime import exhausted_tool_invocation_terminal_state
 
@@ -1866,7 +1866,7 @@ def test_tool_invocation_identity_ignores_refreshable_deadline() -> None:
 
 
 def test_public_tool_responses_exclude_execution_details() -> None:
-    from app.schemas.tool import ToolDetailResponse, ToolSummaryResponse
+    from app.schemas.tools.contracts import ToolDetailResponse, ToolSummaryResponse
 
     internal_payload = {
         "id": "tool-1",
@@ -1920,7 +1920,7 @@ def test_public_tool_responses_exclude_execution_details() -> None:
 
 
 def test_builtin_tool_summary_accepts_system_owner() -> None:
-    from app.schemas.tool import ToolSummaryResponse
+    from app.schemas.tools.contracts import ToolSummaryResponse
 
     summary = ToolSummaryResponse.model_validate(
         {
@@ -1955,7 +1955,7 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
 def test_tool_ref_schema_requires_canonical_ids() -> None:
     from pydantic import ValidationError
 
-    from app.schemas.tool import ToolRefSchema
+    from app.schemas.tools.contracts import ToolRefSchema
 
     reference = ToolRefSchema(tool_id=" tool-1 ", version_id=" version-1 ")
     assert reference.model_dump() == {
@@ -1977,7 +1977,7 @@ def test_tool_ref_schema_requires_canonical_ids() -> None:
 
 def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
     from app.schemas.workflow import LlmNodeConfig, ToolNodeConfig
-    from app.domain.tools.catalog import build_inline_python_tool
+    from app.domain.tools.catalog.service import build_inline_python_tool
 
     reference = {"tool_id": "tool-1", "version_id": "version-1"}
     node = ToolNodeConfig.model_validate(
@@ -2466,7 +2466,7 @@ def test_workflow_tool_migration_matches_runtime_catalog() -> None:
 
     import sqlalchemy as sa
 
-    from app.domain.tools.catalog import build_inline_python_tool
+    from app.domain.tools.catalog.service import build_inline_python_tool
 
     path = (
         Path(__file__).parents[1]
@@ -2933,14 +2933,14 @@ def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
 
 
 def test_artifact_tool_accepts_sandbox_sized_content() -> None:
-    from app.domain.tools.catalog import build_artifact_tool
+    from app.domain.tools.catalog.service import build_artifact_tool
 
     _tool, version, _policy = build_artifact_tool("workspace-1")
     assert version.input_schema["properties"]["content"]["maxLength"] == 262144
 
 
 def test_documents_skill_formal_legal_contract_is_versioned() -> None:
-    from app.domain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
 
     tool, version, _policy = build_skill_artifact_tool("workspace-1", "documents")
     rebuilt = build_skill_artifact_tool("workspace-1", "documents")[1]
@@ -5832,7 +5832,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
     from app.application.agent_tools import build_mcp_agent_tool, mcp_function_name
     from app.entities.tools import McpServer
-    from app.domain.tools.services import ResolvedMcpTool
+    from app.domain.tools.mcp.service import ResolvedMcpTool
 
     server = McpServer(id="server-1", name="orders")
     tool = ResolvedMcpTool(
@@ -6270,8 +6270,8 @@ def test_mcp_server_to_response() -> None:
         ToolSource,
         ToolVersion,
     )
-    from app.domain.tools.catalog import McpCatalogLeaf
-    from app.domain.tools.services import (
+    from app.domain.tools.catalog.service import McpCatalogLeaf
+    from app.domain.tools.mcp.service import (
         effective_mcp_tool_policy_mode,
         mcp_server_to_response,
         mcp_tool_definition_hash,
@@ -6406,7 +6406,7 @@ def test_mcp_server_to_response() -> None:
 
 def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.domain.tools.catalog import (
+    from app.domain.tools.catalog.service import (
         McpCatalogLeaf,
         legacy_mcp_policy_mode,
     )
@@ -6817,7 +6817,7 @@ def test_mcp_stdio_configuration() -> None:
 def test_mcp_server_create_request_transport_matrix() -> None:
     from pydantic import ValidationError
 
-    from app.schemas.mcp import McpServerCreateRequest
+    from app.schemas.tools.mcp import McpServerCreateRequest
 
     compatible = McpServerCreateRequest(
         name="Existing client",

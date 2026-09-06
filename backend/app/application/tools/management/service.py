@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.tool_runtime import queue_tool_invocation
+from app.application.tools.runtime.service import queue_tool_invocation
 from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
@@ -14,8 +14,8 @@ from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.tools.dispatch import enqueue_tool_invocation
 from app.ports.tool_runtime import ToolInvocationContext
-from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
-from app.schemas.tool import (
+from app.schemas.tools.mcp import McpServerCreateRequest, McpServerResponse
+from app.schemas.tools.contracts import (
     PythonToolCreateRequest,
     PythonToolDraftUpdateRequest,
     ToolDetailResponse,
@@ -26,20 +26,20 @@ from app.schemas.tool import (
     ToolSummaryResponse,
 )
 from app.schemas.identity.contracts import user_to_response
-from app.domain.tools.catalog import (
+from app.domain.tools.catalog.service import (
     ToolCatalogDetail,
     ToolCatalogItem,
     get_tool_catalog_detail,
     list_tool_catalog,
 )
-from app.domain.tools.permissions import (
+from app.domain.tools.access.permissions import (
     list_tool_permissions,
     require_managed_tool,
     require_tool_manage,
     revoke_tool_permission,
     upsert_tool_permission,
 )
-from app.domain.tools.python_tools import (
+from app.domain.tools.python.service import (
     archive_python_tool,
     build_python_test_snapshot,
     create_python_tool,
@@ -47,7 +47,7 @@ from app.domain.tools.python_tools import (
     set_python_tool_enabled,
     update_python_tool_draft,
 )
-from app.domain.tools.services import (
+from app.domain.tools.mcp.service import (
     create_mcp_server,
     delete_mcp_server,
     get_mcp_server,

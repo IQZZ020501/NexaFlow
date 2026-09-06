@@ -19,7 +19,7 @@ from app.application.tools import (
     set_mcp_server_enabled,
     set_mcp_tool_policy,
 )
-from app.schemas.mcp import (
+from app.schemas.tools.mcp import (
     McpServerCreateRequest,
     McpServerResponse,
     McpToolPolicyRequest,

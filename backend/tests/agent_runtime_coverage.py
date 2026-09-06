@@ -44,8 +44,8 @@ from app.application import (
     agent_memory,
     agent_runs,
     agent_tools,
-    tool_adapters,
 )
+from app.adapters.tools import runtime as tool_adapters
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
@@ -86,11 +86,11 @@ from app.domain.agents.runtime.usage import (
     merge_usage,
     usage_from_message,
 )
-from app.domain.tools.services import (
+from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
     mcp_tool_definition_hash,
 )
-from app.domain.tools.catalog import reconcile_mcp_discovery
+from app.domain.tools.catalog.service import reconcile_mcp_discovery
 from mcp.types import Tool as McpTool
 
 MODEL_BASE_URL = "http://127.0.0.1:9"
@@ -5383,8 +5383,8 @@ async def assert_tool_service_paths(
     )
     from app.entities.identity.user import User
     from app.entities.workspaces.models import WorkspaceMembership
-    from app.domain.tools import services as tool_services
-    from app.domain.tools.catalog import (
+    from app.domain.tools.mcp import service as tool_services
+    from app.domain.tools.catalog.service import (
         get_mcp_catalog_leaf,
     )
     from app.domain.tools.runtime import exhausted_tool_invocation_terminal_state

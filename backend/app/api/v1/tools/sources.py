@@ -17,8 +17,8 @@ from app.application.tools import (
     refresh_source,
     set_source_enabled,
 )
-from app.schemas.mcp import McpServerCreateRequest
-from app.schemas.tool import ToolSourceDetailResponse
+from app.schemas.tools.mcp import McpServerCreateRequest
+from app.schemas.tools.contracts import ToolSourceDetailResponse
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/tool-sources",

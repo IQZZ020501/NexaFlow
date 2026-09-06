@@ -34,17 +34,17 @@ from app.domain.knowledge.services import (
     RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
     effective_permission,
 )
-from app.domain.tools.services import (
+from app.domain.tools.mcp.service import (
     effective_mcp_tool_policy_mode,
     get_mcp_tool_policy,
     resolve_mcp_tools,
 )
-from app.domain.tools.bindings import (
+from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshots,
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
-from app.domain.tools.catalog import build_inline_python_tool
+from app.domain.tools.catalog.service import build_inline_python_tool
 from app.domain.tools.runtime import tool_snapshot_from_payload
 from app.domain.workflows.defaults import default_workflow_graph
 from app.domain.workflows.engine import (

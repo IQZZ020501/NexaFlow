@@ -6,7 +6,7 @@ import hashlib
 from typing import Any
 
 from app.application.agent_tool_runtime import tool_runtime_result_to_agent_result
-from app.application.tool_runtime import (
+from app.application.tools.runtime.service import (
     ToolInvocationBusy,
     ToolInvocationConflict,
     execute_tool_invocation,

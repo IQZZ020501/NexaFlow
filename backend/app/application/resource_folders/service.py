@@ -19,7 +19,7 @@ from app.domain.agents.permissions import require_agent_edit
 from app.domain.agents.services import get_agent
 from app.domain.knowledge.kb import get_knowledge_base
 from app.domain.knowledge.permissions import require_knowledge_base_permission
-from app.domain.tools.permissions import require_managed_tool
+from app.domain.tools.access.permissions import require_managed_tool
 
 
 def _response(folder: ResourceFolder) -> ResourceFolderResponse:

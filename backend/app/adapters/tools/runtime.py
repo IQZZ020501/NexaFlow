@@ -25,7 +25,7 @@ from app.ports.tool_runtime import (
     ToolRuntimeResult,
 )
 from app.domain.artifacts.services import artifact_format_from_filename
-from app.domain.tools.services import mcp_server_connection
+from app.domain.tools.mcp.service import mcp_server_connection
 
 
 DIRECT_ARTIFACT_CONTENT_FORMATS = frozenset(

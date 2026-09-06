@@ -69,14 +69,14 @@ from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hi
 from app.infra.db.session import get_session_factory
 from app.ports import mcp as ports_mcp
 from app.ports import model_registry as ports_model_registry
-from app.schemas.mcp import McpServerCreateRequest
+from app.schemas.tools.mcp import McpServerCreateRequest
 from app.schemas.models.contracts import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
 from app.schemas.teams.contracts import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentMcpTool as AgentMcpToolOrm
 from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm
 from app.domain.teams import services as teams_services
-from app.domain.tools import services as tools_services
+from app.domain.tools.mcp import service as tools_services
 from app.domain.tools.models import McpServer as McpServerOrm
 from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
 from app.tasks import configure_task_worker
@@ -3211,7 +3211,7 @@ def _mcp_catalog_leaf(
     tool_status="active",
 ):
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.domain.tools.catalog import (
+    from app.domain.tools.catalog.service import (
         McpCatalogLeaf,
         mcp_definition_hash,
     )
@@ -3300,7 +3300,7 @@ def test_mcp_tool_hash_and_policy_mode() -> None:
 
 def test_mcp_server_to_response() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.domain.tools.catalog import McpCatalogLeaf
+    from app.domain.tools.catalog.service import McpCatalogLeaf
 
     server = McpServer(
         id="srv-1",

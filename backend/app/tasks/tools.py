@@ -1,6 +1,6 @@
 """Celery entry points for durable Tool test execution."""
 
-from app.application.tool_runtime import (
+from app.application.tools.runtime.service import (
     ToolInvocationBusy,
     execute_tool_invocation,
     list_recoverable_tool_test_invocation_ids,

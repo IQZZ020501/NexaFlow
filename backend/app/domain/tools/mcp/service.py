@@ -32,12 +32,12 @@ from app.infra.tools.mcp_stdio import (
 )
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infra.runtime.validation import normalize_name
-from app.schemas.mcp import (
+from app.schemas.tools.mcp import (
     McpServerCreateRequest,
     McpServerResponse,
 )
 from app.domain.audit.services import record_audit_log
-from app.domain.tools.catalog import (
+from app.domain.tools.catalog.service import (
     McpCatalogLeaf,
     ToolCatalogDetail,
     ToolCatalogItem,
@@ -50,7 +50,7 @@ from app.domain.tools.catalog import (
     reconcile_mcp_discovery,
     tombstone_mcp_server_catalog,
 )
-from app.domain.tools.permissions import (
+from app.domain.tools.access.permissions import (
     ToolAuthorization,
     ToolPermissionEntry,
     evaluate_tool_authorization,

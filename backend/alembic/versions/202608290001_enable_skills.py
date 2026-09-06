@@ -15,7 +15,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def _desired(stable_key: str, workspace_id: str):
-    from app.domain.tools.catalog import (
+    from app.domain.tools.catalog.service import (
         build_artifact_tool,
         build_inline_python_tool,
     )

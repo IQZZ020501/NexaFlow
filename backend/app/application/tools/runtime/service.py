@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.tool_adapters import build_tool_adapter
+from app.adapters.tools.runtime import build_tool_adapter
 from app.entities.tools import ToolInvocation, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import utc_now
@@ -22,7 +22,7 @@ from app.ports.tool_runtime import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.domain.tools.permissions import evaluate_tool_authorization
+from app.domain.tools.access.permissions import evaluate_tool_authorization
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_AUTO,
     TOOL_APPROVAL_DISABLED,

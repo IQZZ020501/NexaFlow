@@ -53,7 +53,7 @@ from app.schemas.agent import (
 from app.domain.agents import permissions as agent_permissions
 from app.domain.agents import services as agent_services
 from app.domain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
-from app.domain.tools import services as mcp_services
+from app.domain.tools.mcp import service as mcp_services
 from app.tasks import agents as agent_tasks
 from app.application.agent_executor import RUN_BUSY
 
@@ -538,7 +538,7 @@ async def exercise_services_http_paths(
         # a bound Tool to a new version; re-publishing without Tools in the
         # payload must rebind instead of failing with "Tool binding changed".
         from app.infra.db.repositories.tools import repository as tool_repository
-        from app.schemas.tool import ToolRefSchema
+        from app.schemas.tools.contracts import ToolRefSchema
 
         bound_agent = await agent_services.create_agent(
             db,

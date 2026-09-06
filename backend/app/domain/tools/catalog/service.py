@@ -20,7 +20,7 @@ from app.entities.tools import (
 )
 from app.entities.identity.user import User
 from app.infra.runtime.model_utils import utc_now
-from app.domain.tools.permissions import (
+from app.domain.tools.access.permissions import (
     ToolAuthorization,
     ToolPermissionLabel,
     evaluate_tool_authorization,

@@ -7,7 +7,7 @@ from jinja2 import Environment, TemplateSyntaxError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.agent import AgentInteractionConfig
-from app.schemas.tool import ToolRefSchema
+from app.schemas.tools.contracts import ToolRefSchema
 
 JINJA_ENV = Environment()
 

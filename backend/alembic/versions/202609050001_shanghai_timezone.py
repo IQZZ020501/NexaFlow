@@ -32,7 +32,7 @@ def upgrade() -> None:
         server_default="Asia/Shanghai",
     )
 
-    from app.domain.tools.catalog import build_workspace_system_catalog
+    from app.domain.tools.catalog.service import build_workspace_system_catalog
 
     metadata = sa.MetaData()
     tools = sa.Table("tools", metadata, autoload_with=bind)

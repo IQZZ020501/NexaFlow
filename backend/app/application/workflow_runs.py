@@ -9,7 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.tool_runtime import preflight_tool_snapshot
+from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.agent_child_runs import preflight_workflow_agent_snapshots
 from app.application.agent_runs import cancel_run_tree, update_run_feedback
 from app.application.workflow_uploads import resolve_workspace_workflow_files

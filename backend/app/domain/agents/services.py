@@ -23,7 +23,7 @@ from app.schemas.agent import (
     AgentUpdateRequest,
     validate_agent_interaction_config,
 )
-from app.schemas.tool import ToolRefSchema
+from app.schemas.tools.contracts import ToolRefSchema
 from app.domain.agents.permissions import (
     AGENT_RESOURCE_TYPE,
     can_edit_agent,
@@ -44,14 +44,14 @@ from app.domain.knowledge.services import (
     get_knowledge_base,
     require_knowledge_base_permission,
 )
-from app.domain.tools.bindings import (
+from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshot_map,
     resolve_application_tool_snapshots,
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
-from app.domain.tools.catalog import get_tool_catalog_detail
-from app.domain.tools.services import resolve_mcp_tools
+from app.domain.tools.catalog.service import get_tool_catalog_detail
+from app.domain.tools.mcp.service import resolve_mcp_tools
 from app.domain.workflows.defaults import default_workflow_graph
 from app.domain.workflows.engine import graph_hash
 from app.domain.workflows.uploads import queue_upload_cleanups

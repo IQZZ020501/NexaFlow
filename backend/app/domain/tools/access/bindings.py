@@ -17,8 +17,8 @@ from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.repositories.tools import repository as repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.domain.tools.catalog import get_tool_catalog_detail
-from app.domain.tools.permissions import (
+from app.domain.tools.catalog.service import get_tool_catalog_detail
+from app.domain.tools.access.permissions import (
     evaluate_tool_authorization,
     require_tool_use,
 )

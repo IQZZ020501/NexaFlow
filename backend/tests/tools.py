@@ -272,7 +272,7 @@ def load_artifact_renderer_migration():
 
 
 def test_generic_artifact_migration_matches_catalog() -> None:
-    from app.domain.tools.catalog import build_artifact_tool
+    from app.domain.tools.catalog.service import build_artifact_tool
 
     _tool, version, _policy = build_artifact_tool("workspace-1")
     assert version.display_name == "Create downloadable file"
@@ -401,7 +401,7 @@ def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
     from alembic.operations import Operations
     from sqlalchemy import create_engine
 
-    from app.domain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
 
     migration = load_documents_formal_legal_migration()
     assert migration.down_revision == "202608300003"
@@ -553,7 +553,7 @@ def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
     from alembic.operations import Operations
     from sqlalchemy import create_engine
 
-    from app.domain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
 
     migration = load_pptx_schema_migration()
     assert migration.down_revision == "202608300002"
@@ -819,7 +819,7 @@ def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
 
 
 def test_pptx_argument_normalization_keeps_model_theme() -> None:
-    from app.domain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
     from app.domain.tools.runtime import normalize_tool_arguments
 
     _tool, version, _policy = build_skill_artifact_tool("workspace", "pptx")
@@ -842,7 +842,7 @@ def test_pptx_argument_normalization_keeps_model_theme() -> None:
 
 
 def test_artifact_generator_preflight_is_actionable() -> None:
-    from app.application.tool_adapters import _artifact_code_preflight
+    from app.adapters.tools.runtime import _artifact_code_preflight
 
     reportlab = _artifact_code_preflight("import reportlab", "pdf")
     assert reportlab is not None
@@ -960,7 +960,7 @@ def unique_columns(table) -> set[tuple[str, ...]]:
 
 
 def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
-    from app.domain.tools.catalog import (
+    from app.domain.tools.catalog.service import (
         build_workspace_system_catalog,
         mcp_definition_hash,
         mcp_function_name,
@@ -1114,7 +1114,7 @@ def test_legacy_disabled_tools_remain_disabled_after_backfill() -> None:
 
 
 def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> None:
-    from app.domain.tools.catalog import mcp_function_name_candidates
+    from app.domain.tools.catalog.service import mcp_function_name_candidates
 
     migration = load_migration()
     candidates = mcp_function_name_candidates("server-1", "order items!")
@@ -1135,7 +1135,7 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
 
     from app.application.agent_tools import mcp_function_name
     from app.entities.tools import McpServer
-    from app.domain.tools.services import ResolvedMcpTool
+    from app.domain.tools.mcp.service import ResolvedMcpTool
 
     resolved = ResolvedMcpTool(
         server=McpServer(id="server-1", workspace_id="workspace-1"),
@@ -1163,7 +1163,7 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
 
 def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.domain.tools.catalog import McpCatalogLeaf, legacy_mcp_policy_mode
+    from app.domain.tools.catalog.service import McpCatalogLeaf, legacy_mcp_policy_mode
 
     leaf = McpCatalogLeaf(
         source=ToolSource(id="source-1", workspace_id="workspace-1", kind="mcp"),
@@ -1193,8 +1193,8 @@ def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
 
 
 def test_mcp_hash_matches_legacy_annotation_normalization() -> None:
-    from app.domain.tools.catalog import mcp_definition_hash
-    from app.domain.tools.services import (
+    from app.domain.tools.catalog.service import mcp_definition_hash
+    from app.domain.tools.mcp.service import (
         _mcp_tool_definition,
         mcp_tool_definition_hash,
     )
@@ -1654,7 +1654,7 @@ def test_migration_reference_scanner_keeps_historical_mcp_tuples() -> None:
 
 async def assert_workspace_system_catalog(workspace_id: str) -> None:
     from app.infra.db.repositories.tools import repository as repository
-    from app.domain.tools.catalog import build_artifact_tool
+    from app.domain.tools.catalog.service import build_artifact_tool
 
     async with get_session_factory()() as db:
         sources = await repository.list_tool_sources(db, workspace_id)
@@ -2557,12 +2557,12 @@ def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.domain.tools.catalog import reconcile_mcp_discovery
-    from app.domain.tools.permissions import (
+    from app.domain.tools.catalog.service import reconcile_mcp_discovery
+    from app.domain.tools.access.permissions import (
         revoke_tool_permission,
         upsert_tool_permission,
     )
-    from app.domain.tools.services import resolve_mcp_tools
+    from app.domain.tools.mcp.service import resolve_mcp_tools
 
     async def expect_status(expected_status: int, operation) -> None:
         try:
@@ -2738,7 +2738,7 @@ def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
 
 
 def test_mcp_resolution_rejects_missing_authorization_context() -> None:
-    from app.domain.tools.services import resolve_mcp_tools
+    from app.domain.tools.mcp.service import resolve_mcp_tools
 
     try:
         run(resolve_mcp_tools(
@@ -2771,7 +2771,7 @@ async def assert_mcp_server_deletion_preserves_tool_history(
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.domain.tools import services as tool_services
+    from app.domain.tools.mcp import service as tool_services
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -2964,7 +2964,7 @@ async def assert_mcp_discovery_materializes_first_leaf(
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.domain.tools.catalog import (
+    from app.domain.tools.catalog.service import (
         list_mcp_catalog_leaves,
         mcp_function_name_candidates,
         reconcile_mcp_discovery,
@@ -3190,7 +3190,7 @@ async def assert_tool_policy_revision_compare_and_swap(workspace_id: str) -> Non
 async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
     from datetime import timedelta
 
-    from app.application.tool_runtime import (
+    from app.application.tools.runtime.service import (
         execute_tool_invocation,
         list_recoverable_tool_test_invocation_ids,
         queue_tool_invocation,
@@ -3205,7 +3205,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         ToolRuntimeResult,
     )
     from app.domain.tools.runtime import build_tool_snapshot
-    from app.application.tool_runtime import validate_tool_output
+    from app.application.tools.runtime.service import validate_tool_output
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -3419,7 +3419,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
             adapter=blocking,
         )
     except Exception as exc:
-        from app.application.tool_runtime import ToolInvocationBusy
+        from app.application.tools.runtime.service import ToolInvocationBusy
 
         assert isinstance(exc, ToolInvocationBusy)
     else:
@@ -3454,7 +3454,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
                 adapter=BusyAdapter(),
             )
         except Exception as exc:
-            from app.application.tool_runtime import ToolInvocationBusy
+            from app.application.tools.runtime.service import ToolInvocationBusy
 
             assert isinstance(exc, ToolInvocationBusy)
         else:
@@ -3596,13 +3596,13 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
 async def assert_python_tool_lifecycle(workspace_id: str) -> None:
     from datetime import timedelta
 
-    from app.application.tool_runtime import execute_tool_invocation, queue_tool_invocation
+    from app.application.tools.runtime.service import execute_tool_invocation, queue_tool_invocation
     from app.infra.config.settings import Settings
     from app.infra.runtime.model_utils import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
-    from app.domain.tools.python_tools import (
+    from app.domain.tools.python.service import (
         build_python_test_snapshot,
         create_python_tool,
         publish_python_tool,
@@ -3728,7 +3728,7 @@ async def assert_tool_runtime_edge_branches(
     from datetime import timedelta
     from unittest.mock import patch
 
-    from app.application.tool_runtime import (
+    from app.application.tools.runtime.service import (
         ToolInvocationBusy,
         ToolInvocationConflict,
         execute_tool_invocation,
@@ -4545,7 +4545,7 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
 
     from fastapi import HTTPException
 
-    from app.application.tool_management import (
+    from app.application.tools.management.service import (
         create_mcp_source,
         delete_source,
         list_sources,
@@ -4556,7 +4556,7 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
     from app.infra.config.settings import Settings
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.schemas.mcp import McpServerCreateRequest
+    from app.schemas.tools.mcp import McpServerCreateRequest
 
     settings = Settings.from_env(require_bootstrap=False)
     discovery = SimpleNamespace(
@@ -4572,7 +4572,7 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
         actor = await user_repository.get_active_user_by_username(db, "admin")
         assert actor is not None
         with patch(
-            "app.domain.tools.services.discover_mcp_tools",
+            "app.domain.tools.mcp.service.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             created = await create_mcp_source(
@@ -4593,7 +4593,7 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
         listed = await list_sources(db, workspace_id, actor, "admin", 10, 0)
         assert source_id in {item.id for item in listed}
         with patch(
-            "app.domain.tools.services.discover_mcp_tools",
+            "app.domain.tools.mcp.service.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             refreshed = await refresh_source(
@@ -4683,7 +4683,7 @@ async def assert_tool_management_branches(
 
     from fastapi import HTTPException
 
-    from app.application.tool_management import (
+    from app.application.tools.management.service import (
         create_python,
         delete_python,
         get_python_test,
@@ -4695,7 +4695,7 @@ async def assert_tool_management_branches(
     )
     from app.infra.config.settings import Settings
     from app.infra.db.repositories.identity import users as user_repository
-    from app.schemas.tool import PythonToolCreateRequest, PythonToolDraftUpdateRequest
+    from app.schemas.tools.contracts import PythonToolCreateRequest, PythonToolDraftUpdateRequest
 
     settings = Settings.from_env(require_bootstrap=False)
     input_schema = {
@@ -4745,7 +4745,7 @@ async def assert_tool_management_branches(
         )
         assert updated.revision == 2
         with patch(
-            "app.application.tool_management.enqueue_tool_invocation",
+            "app.application.tools.management.service.enqueue_tool_invocation",
             new_callable=AsyncMock,
         ) as dispatch:
             queued = await queue_python_test(
@@ -4843,7 +4843,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from datetime import datetime, timedelta
     from unittest.mock import patch
 
-    from app.application.tool_runtime import ToolInvocationBusy
+    from app.application.tools.runtime.service import ToolInvocationBusy
     from app.application.workflow_tool_runtime import (
         WorkflowToolRuntime,
         workflow_tool_invocation_identity,
@@ -5269,7 +5269,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     from unittest.mock import AsyncMock, patch
     from zipfile import ZIP_DEFLATED, ZipFile
 
-    from app.application.tool_adapters import (
+    from app.adapters.tools.runtime import (
         BuiltinToolAdapter,
         McpToolAdapter,
         PythonToolAdapter,
@@ -5282,14 +5282,14 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         WorkflowSandboxError,
         WorkflowSandboxResult,
     )
-    from app.application.tool_runtime import validate_tool_output
+    from app.application.tools.runtime.service import validate_tool_output
     from app.infra.config.settings import Settings
     from app.infra.runtime.model_utils import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.mcp import McpClientError
     from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
-    from app.domain.tools.catalog import (
+    from app.domain.tools.catalog.service import (
         build_artifact_tool,
         build_skill_artifact_tool,
     )
@@ -5374,7 +5374,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     )
     artifact_content = b"<html><body>ready</body></html>"
     with patch(
-        "app.application.tool_adapters.execute_artifact_code",
+        "app.adapters.tools.runtime.execute_artifact_code",
         new=AsyncMock(
             return_value=ArtifactSandboxResult(
                 content=artifact_content,
@@ -5405,7 +5405,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert artifact_sandbox.await_count == 1
     assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
     assert artifact_sandbox.await_args.args[4] == ["documents"]
-    from app.application.tool_adapters import _redirect_legacy_artifact_path
+    from app.adapters.tools.runtime import _redirect_legacy_artifact_path
 
     legacy_code = 'document.save("/tmp/report.docx")'
     assert _redirect_legacy_artifact_path(legacy_code, "report.docx") == (
@@ -5423,7 +5423,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         execution_spec=skill_version.execution_spec,
     )
     with patch(
-        "app.application.tool_adapters.execute_skill_artifact",
+        "app.adapters.tools.runtime.execute_skill_artifact",
         new=AsyncMock(
             return_value=ArtifactSandboxResult(
                 content=docx_bytes.getvalue(),
@@ -5458,7 +5458,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         "skill-report.docx",
     )
     with patch(
-        "app.application.tool_adapters.execute_artifact_code",
+        "app.adapters.tools.runtime.execute_artifact_code",
         new=AsyncMock(
             return_value=ArtifactSandboxResult(
                 content=docx_bytes.getvalue(),
@@ -5487,7 +5487,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert docx_sandbox.await_args.args[1] == "document.save(output_path)"
     direct_content = "output_path = 'literal text'\n"
     with patch(
-        "app.application.tool_adapters.execute_artifact_code",
+        "app.adapters.tools.runtime.execute_artifact_code",
         new=AsyncMock(),
     ) as artifact_sandbox:
         direct_result = await builtin.invoke(
@@ -5525,7 +5525,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert "mime_type" not in legacy_result.data
     validate_tool_output(legacy_snapshot, legacy_result.data)
     with patch(
-        "app.application.tool_adapters.execute_artifact_code",
+        "app.adapters.tools.runtime.execute_artifact_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("NameError: missing value")),
     ):
         result = await builtin.invoke(
@@ -5559,7 +5559,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         execution_spec={"builtin": "inline_python"},
     )
     with patch(
-        "app.application.tool_adapters.execute_workflow_code",
+        "app.adapters.tools.runtime.execute_workflow_code",
         new=AsyncMock(
             return_value=WorkflowSandboxResult(
                 result={"result": 42},
@@ -5580,7 +5580,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert sandbox.await_count == 1
     # Inline Python busy (tool_adapters.py:55-56).
     with patch(
-        "app.application.tool_adapters.execute_workflow_code",
+        "app.adapters.tools.runtime.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
     ):
         try:
@@ -5595,7 +5595,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
             raise AssertionError("A busy sandbox must raise ToolAdapterBusy.")
     # Inline Python failure (tool_adapters.py:57-58).
     with patch(
-        "app.application.tool_adapters.execute_workflow_code",
+        "app.adapters.tools.runtime.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("failed")),
     ):
         result = await builtin.invoke(
@@ -5616,7 +5616,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.error_code == "invalid_python_tool"
     # Python adapter happy path (tool_adapters.py:86-87, 95-103).
     with patch(
-        "app.application.tool_adapters.execute_workflow_code",
+        "app.adapters.tools.runtime.execute_workflow_code",
         new=AsyncMock(
             return_value=WorkflowSandboxResult(
                 result={"value": "NEXA"},
@@ -5632,7 +5632,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.usage == {"exit_code": 0}
     # Python adapter busy (tool_adapters.py:88-89).
     with patch(
-        "app.application.tool_adapters.execute_workflow_code",
+        "app.adapters.tools.runtime.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
     ):
         try:
@@ -5643,7 +5643,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
             raise AssertionError("A busy sandbox must raise ToolAdapterBusy.")
     # Python adapter failure (tool_adapters.py:90-94).
     with patch(
-        "app.application.tool_adapters.execute_workflow_code",
+        "app.adapters.tools.runtime.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("failed")),
     ):
         result = await python.invoke(python_snapshot, {"value": "nexa"}, context)
@@ -5660,7 +5660,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.error_code == "invalid_mcp_tool"
     # MCP adapter happy path (tool_adapters.py:123-129, 141-145, 145-153).
     with patch(
-        "app.application.tool_adapters.call_mcp_tool",
+        "app.adapters.tools.runtime.call_mcp_tool",
         new=AsyncMock(return_value=('{"ok": true}', False)),
     ) as call:
         result = await mcp.invoke(mcp_snapshot, {}, context)
@@ -5669,7 +5669,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert call.await_count == 1
     # MCP adapter non-JSON error content (tool_adapters.py:142-144, 147-150).
     with patch(
-        "app.application.tool_adapters.call_mcp_tool",
+        "app.adapters.tools.runtime.call_mcp_tool",
         new=AsyncMock(return_value=("plain failure", True)),
     ):
         result = await mcp.invoke(mcp_snapshot, {}, context)
@@ -5678,7 +5678,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.data == "plain failure"
     # MCP adapter client error, confirmed outcome (tool_adapters.py:130-140).
     with patch(
-        "app.application.tool_adapters.call_mcp_tool",
+        "app.adapters.tools.runtime.call_mcp_tool",
         new=AsyncMock(side_effect=McpClientError("boom")),
     ):
         result = await mcp.invoke(mcp_snapshot, {}, context)
@@ -5688,7 +5688,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     # MCP adapter client error, uncertain outcome (tool_adapters.py:131, 138).
     uncertain_mcp = dataclasses.replace(mcp_snapshot, effect="external_write")
     with patch(
-        "app.application.tool_adapters.call_mcp_tool",
+        "app.adapters.tools.runtime.call_mcp_tool",
         new=AsyncMock(side_effect=McpClientError("boom")),
     ):
         result = await mcp.invoke(uncertain_mcp, {}, context)
@@ -5752,7 +5752,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert "syntax error" in result.error_message
     # Artifact sandbox busy (tool_adapters.py:240-241).
     with patch(
-        "app.application.tool_adapters.execute_artifact_code",
+        "app.adapters.tools.runtime.execute_artifact_code",
         new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
     ):
         try:
@@ -6006,7 +6006,7 @@ def test_python_tool_http_lifecycle_and_private_grants() -> None:
         from unittest.mock import AsyncMock, patch
 
         with patch(
-            "app.application.tool_management.enqueue_tool_invocation",
+            "app.application.tools.management.service.enqueue_tool_invocation",
             new_callable=AsyncMock,
         ) as dispatch:
             queued = client.post(
@@ -6105,7 +6105,7 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
         )
         source_url = f"/api/v1/workspaces/{workspace_id}/tool-sources"
         with patch(
-            "app.domain.tools.services.discover_mcp_tools",
+            "app.domain.tools.mcp.service.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             created = client.post(
@@ -6147,7 +6147,7 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
         assert payload["workflow_callable"] is True
 
         with patch(
-            "app.domain.tools.services.discover_mcp_tools",
+            "app.domain.tools.mcp.service.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             refreshed = client.post(
@@ -6175,7 +6175,7 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
 
 
 def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
-    from app.application.tool_runtime import ToolInvocationBusy
+    from app.application.tools.runtime.service import ToolInvocationBusy
     from app.infra.tools import dispatch as tool_dispatch
     from app.tasks import tools as tool_tasks
     from tests.support import settings as test_settings

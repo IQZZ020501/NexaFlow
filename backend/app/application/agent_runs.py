@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agent_tools import (
     run_to_response,
 )
-from app.application.tool_runtime import preflight_tool_snapshot
+from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.entities.agents import Agent, AgentPublicationVersion, AgentRun
 from app.entities.identity.user import User
 from app.infra.agents.live_stream import (
@@ -52,7 +52,7 @@ from app.domain.agents.publications import (
     build_agent_configuration_snapshot,
     build_agent_resource_snapshot,
 )
-from app.domain.tools.bindings import resolve_application_tool_snapshots
+from app.domain.tools.access.bindings import resolve_application_tool_snapshots
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_EACH_CALL,
     tool_snapshot_from_payload,

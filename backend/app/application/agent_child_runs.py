@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agent_runs import prepare_agent_run
-from app.application.tool_runtime import preflight_tool_snapshot
+from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.workspaces.service import build_workspace_context
 from app.entities.agents import AgentPublicationVersion, AgentRun
 from app.entities.tools import ToolSnapshot

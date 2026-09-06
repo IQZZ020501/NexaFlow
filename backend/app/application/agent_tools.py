@@ -36,8 +36,8 @@ from app.domain.agents.runtime import (
 from app.domain.agents.services import accessible_agent_knowledge_bases
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime.graph import clean_model_text
-from app.domain.tools.catalog import mcp_function_name as catalog_mcp_function_name
-from app.domain.tools.services import (
+from app.domain.tools.catalog.service import mcp_function_name as catalog_mcp_function_name
+from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
     mcp_server_connection,

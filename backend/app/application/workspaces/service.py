@@ -25,7 +25,7 @@ from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.ports import model_registry
 from app.domain.knowledge.services import delete_workspace_knowledge_bases
-from app.domain.tools.catalog import (
+from app.domain.tools.catalog.service import (
     ensure_workspace_system_catalog,
     tombstone_workspace_mcp_catalog,
 )

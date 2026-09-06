@@ -25,7 +25,7 @@ from app.application.tools import (
     update_python_draft,
     upsert_permission,
 )
-from app.schemas.tool import (
+from app.schemas.tools.contracts import (
     PythonToolCreateRequest,
     PythonToolDraftUpdateRequest,
     ToolDetailResponse,
