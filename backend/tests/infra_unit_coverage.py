@@ -74,6 +74,7 @@ from app.schemas.model import RegisteredModelCreateRequest, RegisteredModelUpdat
 from app.schemas.team import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
 from app.shareddomain.agents.models import Agent as AgentOrm
 from app.shareddomain.agents.models import AgentMcpTool as AgentMcpToolOrm
+from app.shareddomain.resource_folders.models import ResourceFolder as ResourceFolderOrm
 from app.shareddomain.teams import services as teams_services
 from app.shareddomain.tools import services as tools_services
 from app.shareddomain.tools.models import McpServer as McpServerOrm
@@ -3031,6 +3032,47 @@ def test_configure_task_worker() -> None:
             thread.join(timeout=1)
         assert len(loop_ids) == 2
         assert len(set(loop_ids)) == 1
+
+        started = threading.Event()
+        cleaned = threading.Event()
+
+        async def interrupted_work() -> None:
+            started.set()
+            try:
+                await asyncio.sleep(10)
+            finally:
+                await asyncio.sleep(0.05)
+                cleaned.set()
+
+        class WorkerInterrupted(BaseException):
+            pass
+
+        original_submit = asyncio.run_coroutine_threadsafe
+
+        def interrupted_submit(coro, loop):
+            submitted = original_submit(coro, loop)
+            assert started.wait(timeout=1)
+
+            class InterruptedFuture:
+                def result(self):
+                    raise WorkerInterrupted
+
+                def cancel(self):
+                    return submitted.cancel()
+
+            return InterruptedFuture()
+
+        asyncio.run_coroutine_threadsafe = interrupted_submit
+        try:
+            try:
+                tasks_module.run_task_async(interrupted_work())
+            except WorkerInterrupted:
+                pass
+            else:  # pragma: no cover - regression guard
+                raise AssertionError("worker interruption should propagate")
+            assert cleaned.is_set()
+        finally:
+            asyncio.run_coroutine_threadsafe = original_submit
     finally:
         tasks_module._configured_process_id = original_pid
         tasks_module.configure_database = original_configure
@@ -4409,8 +4451,18 @@ async def db_seed_tests() -> None:
 
 async def db_registry_repository_tests(workspace_id: str, created_by: str) -> None:
     async with get_session_factory()() as db:
+        folder = ResourceFolderOrm(
+            workspace_id=workspace_id,
+            resource_type="model",
+            parent_id=None,
+            name="Archived models",
+            created_by_user_id=created_by,
+        )
+        db.add(folder)
+        await db.flush()
         model_a = _make_model_entity(workspace_id, created_by, name="Alpha Model")
         model_b = _make_model_entity(workspace_id, created_by, name="Beta Model")
+        model_b.folder_id = folder.id
         db.add_all([model_a, model_b])
         await db.commit()
         await db.refresh(model_a)
@@ -4420,6 +4472,18 @@ async def db_registry_repository_tests(workspace_id: str, created_by: str) -> No
         assert {item.id for item in listed} == {model_a.id, model_b.id}
         paged = await llm_registry_repository.list_registered_models(db, workspace_id, limit=1, offset=1)
         assert len(paged) == 1
+        root_models = await llm_registry_repository.list_registered_models(
+            db, workspace_id, folder_id=""
+        )
+        assert [item.name for item in root_models] == ["Alpha Model"]
+        folder_models = await llm_registry_repository.list_registered_models(
+            db, workspace_id, folder_id=folder.id
+        )
+        assert [item.name for item in folder_models] == ["Beta Model"]
+        named = await llm_registry_repository.list_registered_models(
+            db, workspace_id, sort="name"
+        )
+        assert [item.name for item in named] == ["Alpha Model", "Beta Model"]
         assert await llm_registry_repository.get_registered_model_by_id(db, model_a.id) is not None
         assert await llm_registry_repository.get_registered_model_by_id(db, "missing") is None
         found = await llm_registry_repository.find_registered_model_id_by_name(db, workspace_id, "Alpha Model")

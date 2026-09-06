@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.capabilities.llm.models import RegisteredModel
@@ -9,13 +9,26 @@ async def list_registered_models(
     workspace_id: str,
     limit: int | None = None,
     offset: int = 0,
+    folder_id: str | None = None,
+    sort: str = "created_at",
 ) -> list[RegisteredModel]:
+    statement = select(RegisteredModel).where(
+        RegisteredModel.workspace_id == workspace_id
+    )
+    if folder_id is not None:
+        statement = statement.where(
+            RegisteredModel.folder_id.is_(None)
+            if folder_id == ""
+            else RegisteredModel.folder_id == folder_id
+        )
+    if sort == "updated_at":
+        order_by = (RegisteredModel.updated_at.desc(), RegisteredModel.id.desc())
+    elif sort == "name":
+        order_by = (func.lower(RegisteredModel.name), RegisteredModel.id)
+    else:
+        order_by = (RegisteredModel.created_at.desc(), RegisteredModel.id.desc())
     result = await db.scalars(
-        select(RegisteredModel)
-        .where(RegisteredModel.workspace_id == workspace_id)
-        .order_by(RegisteredModel.created_at.desc(), RegisteredModel.id.desc())
-        .limit(limit)
-        .offset(offset)
+        statement.order_by(*order_by).limit(limit).offset(offset)
     )
     return list(result.all())
 

@@ -187,24 +187,6 @@ type ModelForm = {
 
 type ModelSortKey = "updated_at" | "created_at" | "name"
 
-function sortModels(
-  models: RegisteredModel[],
-  sortKey: ModelSortKey,
-  locale: string
-) {
-  const collator = new Intl.Collator(locale, {
-    numeric: true,
-    sensitivity: "base",
-  })
-  return [...models].sort((left, right) => {
-    if (sortKey === "name") return collator.compare(left.name, right.name)
-    return (
-      Date.parse(right[sortKey]) - Date.parse(left[sortKey]) ||
-      collator.compare(left.name, right.name)
-    )
-  })
-}
-
 const DEFAULT_LLM_REQUEST_PARAMS = '{\n  "max_tokens": 4096\n}'
 
 const EMPTY_MODEL_FORM: ModelForm = {
@@ -313,6 +295,8 @@ export function LlmPage() {
       const batch = await listRegisteredModels(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
         offset: 0,
+        folderId: resourceFolders.selectedFolderId,
+        sort: modelSortKey,
       })
       setModels(batch)
       setModelsHasMore(batch.length === CARD_BATCH_SIZE)
@@ -323,7 +307,13 @@ export function LlmPage() {
       modelsLoadingRef.current = false
       setIsModelsLoading(false)
     }
-  }, [reportError, selectedWorkspaceId, token])
+  }, [
+    modelSortKey,
+    reportError,
+    resourceFolders.selectedFolderId,
+    selectedWorkspaceId,
+    token,
+  ])
 
   const loadMoreModels = React.useCallback(async () => {
     if (!token || !selectedWorkspaceId) {
@@ -338,6 +328,8 @@ export function LlmPage() {
       const batch = await listRegisteredModels(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
         offset: models.length,
+        folderId: resourceFolders.selectedFolderId,
+        sort: modelSortKey,
       })
       setModels((current) => [...current, ...batch])
       setModelsHasMore(batch.length === CARD_BATCH_SIZE)
@@ -347,7 +339,15 @@ export function LlmPage() {
       modelsLoadingRef.current = false
       setIsModelsLoadingMore(false)
     }
-  }, [models.length, modelsHasMore, reportError, selectedWorkspaceId, token])
+  }, [
+    modelSortKey,
+    models.length,
+    modelsHasMore,
+    reportError,
+    resourceFolders.selectedFolderId,
+    selectedWorkspaceId,
+    token,
+  ])
 
   const modelsListEndRef = useInfiniteScroll(loadMoreModels)
 
@@ -459,10 +459,7 @@ export function LlmPage() {
 
   const visibleModels = React.useMemo(() => {
     const query = search.trim().toLowerCase()
-    const matched = models.filter((model) => {
-      if ((model.folder_id ?? null) !== resourceFolders.selectedFolderId) {
-        return false
-      }
+    return models.filter((model) => {
       if (selectedProvider && model.provider !== selectedProvider) {
         return false
       }
@@ -479,16 +476,7 @@ export function LlmPage() {
         .toLowerCase()
         .includes(query)
     })
-    return sortModels(matched, modelSortKey, languageLocales[language])
-  }, [
-    language,
-    modelSortKey,
-    models,
-    providerCatalog,
-    resourceFolders.selectedFolderId,
-    search,
-    selectedProvider,
-  ])
+  }, [models, providerCatalog, search, selectedProvider])
   const movableModelIds = canManage
     ? visibleModels.map((model) => model.id)
     : []

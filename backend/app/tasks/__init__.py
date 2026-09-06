@@ -66,9 +66,18 @@ def _get_task_event_loop() -> asyncio.AbstractEventLoop:
 
 
 def run_task_async(coro: Coroutine[Any, Any, _T]) -> _T:
-    future = asyncio.run_coroutine_threadsafe(coro, _get_task_event_loop())
+    settled = threading.Event()
+
+    async def run() -> _T:
+        try:
+            return await coro
+        finally:
+            settled.set()
+
+    future = asyncio.run_coroutine_threadsafe(run(), _get_task_event_loop())
     try:
         return future.result()
     except BaseException:
         future.cancel()
+        settled.wait()
         raise

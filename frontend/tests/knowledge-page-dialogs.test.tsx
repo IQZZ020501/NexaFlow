@@ -1404,9 +1404,16 @@ describe("lib/api/llm", () => {
       return new Response("[]", { status: 200 })
     })
     await llmApi.listRegisteredModels("tok", "ws-1")
-    await llmApi.listRegisteredModels("tok", "ws-1", { limit: 10, offset: 20 })
+    await llmApi.listRegisteredModels("tok", "ws-1", {
+      limit: 10,
+      offset: 20,
+      folderId: "folder-1",
+      sort: "name",
+    })
     expect(urls[0]).toBe("/api/v1/workspaces/ws-1/models")
-    expect(urls[1]).toBe("/api/v1/workspaces/ws-1/models?limit=10&offset=20")
+    expect(urls[1]).toBe(
+      "/api/v1/workspaces/ws-1/models?limit=10&offset=20&folder_id=folder-1&sort=name"
+    )
   })
 
   test("creates, updates and deletes registered models", async () => {

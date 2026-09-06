@@ -52,6 +52,7 @@ MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
 MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS = 1800
 MAX_AGENT_SOURCE_REFERENCES = 12
 AGENT_SOURCE_REF_LENGTH = 16
+_PROVIDER_STATUS_ERROR_PREFIX = "Provider returned status "
 
 _tool_idempotency_key: ContextVar[str | None] = ContextVar(
     "agent_tool_idempotency_key", default=None
@@ -326,9 +327,18 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
     )
 
 
+def safe_agent_run_error(error: str) -> str:
+    if not error.startswith(_PROVIDER_STATUS_ERROR_PREFIX):
+        return error
+    status_code = error.removeprefix(_PROVIDER_STATUS_ERROR_PREFIX).partition(":")[0]
+    if status_code.isdigit():
+        return f"{_PROVIDER_STATUS_ERROR_PREFIX}{status_code}"
+    return "Agent model request failed."
+
+
 def safe_agent_error(exc: Exception) -> str:
     if isinstance(exc, ModelProviderStatusError):
-        return str(exc)
+        return safe_agent_run_error(str(exc))
     if isinstance(exc, AgentRunnerError):
         return str(exc)
     if isinstance(exc, ModelProviderError):

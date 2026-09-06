@@ -5036,7 +5036,7 @@ def test_safe_agent_error_classification() -> None:
     from app.shareddomain.agents.runtime import AgentRunnerError
 
     status_error = ModelProviderStatusError(429, "rate limited")
-    assert safe_agent_error(status_error) == str(status_error)
+    assert safe_agent_error(status_error) == "Provider returned status 429"
 
     runner_error = AgentRunnerError("planning failed")
     assert safe_agent_error(runner_error) == str(runner_error)

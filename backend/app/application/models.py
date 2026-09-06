@@ -133,12 +133,16 @@ async def list_registered_models(
     workspace_id: str,
     limit: int | None = None,
     offset: int = 0,
+    folder_id: str | None = None,
+    sort: str = "created_at",
 ) -> list[RegisteredModelResponse]:
     models = await model_repository.list_registered_models(
         db,
         workspace_id,
         limit,
         offset,
+        folder_id,
+        sort,
     )
     return [model_to_response(item) for item in models]
 

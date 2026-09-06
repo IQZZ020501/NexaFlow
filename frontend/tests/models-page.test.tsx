@@ -14,6 +14,7 @@ import {
 
 const session = makeSession()
 mockUseSession(session)
+const modelListUrls: string[] = []
 
 function model(overrides: Partial<RegisteredModel>): RegisteredModel {
   return {
@@ -39,6 +40,7 @@ function model(overrides: Partial<RegisteredModel>): RegisteredModel {
 }
 
 beforeEach(() => {
+  modelListUrls.length = 0
   globalThis.fetch = ((input: RequestInfo | URL) => {
     const url = String(input)
     if (url.includes("/resource-folders")) {
@@ -72,24 +74,35 @@ beforeEach(() => {
       )
     }
     if (url.includes("/models")) {
+      modelListUrls.push(url)
+      const params = new URL(url, "http://localhost").searchParams
+      if (params.get("folder_id") === "folder-1") {
+        return Promise.resolve(
+          jsonResponse([
+            model({
+              id: "model-charlie",
+              folder_id: "folder-1",
+              name: "Charlie",
+              model_name: "charlie-chat",
+              updated_at: "2026-09-03T00:00:00Z",
+            }),
+          ])
+        )
+      }
+      const rootModels = [
+        model({}),
+        model({
+          id: "model-bravo",
+          name: "Bravo",
+          model_name: "bravo-chat",
+          created_at: "2026-09-01T00:00:00Z",
+          updated_at: "2026-09-02T00:00:00Z",
+        }),
+      ]
       return Promise.resolve(
-        jsonResponse([
-          model({}),
-          model({
-            id: "model-bravo",
-            name: "Bravo",
-            model_name: "bravo-chat",
-            created_at: "2026-09-01T00:00:00Z",
-            updated_at: "2026-09-02T00:00:00Z",
-          }),
-          model({
-            id: "model-charlie",
-            folder_id: "folder-1",
-            name: "Charlie",
-            model_name: "charlie-chat",
-            updated_at: "2026-09-03T00:00:00Z",
-          }),
-        ])
+        jsonResponse(
+          params.get("sort") === "name" ? rootModels : rootModels.reverse()
+        )
       )
     }
     return Promise.resolve(jsonResponse([]))
@@ -110,9 +123,20 @@ describe("LlmPage", () => {
     const sortTrigger = screen.getByRole("button", { name: "排序" })
     fireEvent.pointerDown(sortTrigger)
     fireEvent.click(await screen.findByRole("menuitem", { name: "名称" }))
+    await screen.findByText("Alpha")
     expect(visibleModelNames()).toEqual(["Alpha", "Bravo"])
 
     fireEvent.click(screen.getByRole("button", { name: "归档模型" }))
+    await screen.findByText("Charlie")
     expect(visibleModelNames()).toEqual(["Charlie"])
+    expect(modelListUrls).toContain(
+      "/api/v1/workspaces/ws-1/models?limit=50&offset=0&folder_id=&sort=updated_at"
+    )
+    expect(modelListUrls).toContain(
+      "/api/v1/workspaces/ws-1/models?limit=50&offset=0&folder_id=&sort=name"
+    )
+    expect(modelListUrls).toContain(
+      "/api/v1/workspaces/ws-1/models?limit=50&offset=0&folder_id=folder-1&sort=name"
+    )
   })
 })

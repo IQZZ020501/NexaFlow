@@ -511,7 +511,7 @@ def assert_external_run_to_response() -> None:
         finished_at=None,
     )
     response = external_run_to_response(failed)
-    assert response.error == "Provider returned status 402: Insufficient Balance"
+    assert response.error == "Provider returned status 402"
 
     # dict input; "question" fallback (335-336, 346-354).
     as_dict = {
