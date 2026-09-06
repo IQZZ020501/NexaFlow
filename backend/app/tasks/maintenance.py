@@ -1,6 +1,6 @@
 from celery import Task
 
-from app.application.artifacts import cleanup_expired_generated_artifacts
+from app.application.artifacts.service import cleanup_expired_generated_artifacts
 from app.infra.queue.celery import celery_app
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger

@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any
 
-from app.application.artifacts import create_generated_artifact
+from app.application.artifacts.service import create_generated_artifact
 from app.entities.tools import McpServer, ToolSnapshot
 from app.infra.sandbox.client import (
     WorkflowSandboxBusyError,

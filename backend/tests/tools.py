@@ -1767,7 +1767,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
 
 
 def test_generated_artifact_link_serves_static_html() -> None:
-    from app.application.artifacts import create_generated_artifact
+    from app.application.artifacts.service import create_generated_artifact
     from app.infra.db.session import get_session_factory
 
     with test_client() as client:
@@ -1836,7 +1836,7 @@ def test_generated_artifact_downloads_common_formats() -> None:
     from io import BytesIO
     from zipfile import ZIP_DEFLATED, ZipFile
 
-    from app.application.artifacts import create_generated_artifact
+    from app.application.artifacts.service import create_generated_artifact
     from app.infra.db.session import get_session_factory
     from app.domain.artifacts.services import artifact_format_from_filename
 

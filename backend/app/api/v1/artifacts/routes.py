@@ -6,10 +6,10 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_settings
-from app.application.artifacts import get_generated_artifact
+from app.application.artifacts.service import get_generated_artifact
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
-from app.schemas.artifact import ArtifactDownloadRequest
+from app.schemas.artifacts import ArtifactDownloadRequest
 
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])

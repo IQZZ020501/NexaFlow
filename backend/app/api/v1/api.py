@@ -1,10 +1,10 @@
 from fastapi import APIRouter
 
 from app.api.v1.admin import audit, governance, smtp, system_logs, users
+from app.api.v1.artifacts import routes as artifacts
 from app.api.v1.endpoints import (
     agent_access,
     agents,
-    artifacts,
     auth,
     enterprise_identity,
     knowledge,
