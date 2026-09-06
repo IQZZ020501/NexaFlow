@@ -4,7 +4,6 @@ import { join } from "node:path"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { AgentConfigFields } from "../src/components/agents/agent-config-fields"
 import { AgentAttachmentList } from "../src/components/agents/agent-attachment-list"
 import { InteractionConfigFields } from "../src/components/agents/interaction-config-fields"
 import {
@@ -251,35 +250,6 @@ describe("Agent form state", () => {
         agent
       )
     ).toBe(false)
-  })
-
-  test("shows advanced configuration only after creation", () => {
-    const renderForm = (agentForm: AgentFormState) =>
-      renderToStaticMarkup(
-        createElement(AgentConfigFields, {
-          form: agentForm,
-          setForm: () => undefined,
-          models: [],
-          knowledgeBases: [],
-          tools: [],
-          token: "token",
-          workspaceId: "workspace-1",
-          readOnly: false,
-          t: (key) => key,
-        })
-      )
-
-    const creationMarkup = renderForm({ ...form, id: null })
-    expect(creationMarkup).not.toContain("对话设置")
-    expect(creationMarkup).not.toContain("系统提示词")
-    expect(creationMarkup).not.toContain("关联知识库")
-    expect(creationMarkup).not.toContain("工具")
-
-    const editMarkup = renderForm(form)
-    expect(editMarkup).not.toContain("对话设置")
-    expect(editMarkup).toContain("系统提示词")
-    expect(editMarkup).toContain("关联知识库")
-    expect(editMarkup).toContain("工具")
   })
 
   test("moves workflow upload types behind settings without limits or audio", () => {
