@@ -3407,7 +3407,7 @@ def assert_external_agent_access() -> None:
             finally:
                 agent_executor.run_agent = original_run_agent
             assert failed_external.status_code == 201, failed_external.text
-            assert failed_external.json()["error"] == "Agent run failed."
+            assert failed_external.json()["error"] == "Agent execution failed."
             assert "sensitive external failure" not in failed_external.text
 
             async def exceed_rate_limit(*_args, **_kwargs) -> None:
