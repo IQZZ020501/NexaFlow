@@ -243,7 +243,7 @@ async def seed_agent_run_binder_audit(
 
 
 async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> None:
-    from app.entities.resource_permission import ResourcePermission
+    from app.entities.workspaces.resource_permissions import ResourcePermission
     from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
     from app.infra.db.repositories.tools import repository as tools_repository
 

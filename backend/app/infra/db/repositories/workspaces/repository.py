@@ -8,7 +8,7 @@ from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import Workspace as WorkspaceOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.identity.user import User
-from app.entities.workspace import WORKSPACE_ADMIN_ROLE, Workspace, WorkspaceMembership
+from app.entities.workspaces.models import WORKSPACE_ADMIN_ROLE, Workspace, WorkspaceMembership
 from app.infra.db import mapping
 
 

@@ -48,7 +48,7 @@ from app.infra.observability.system_log import record_system_log
 from app.domain.workflows.uploads import queue_upload_cleanups
 from app.domain.tools.services import delete_owned_mcp_servers_for_user
 from app.entities.team import Team, TeamMembership
-from app.entities.workspace import Workspace, WorkspaceMembership
+from app.entities.workspaces.models import Workspace, WorkspaceMembership
 
 logger = get_logger(__name__)
 

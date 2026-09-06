@@ -11,8 +11,8 @@ from app.domain.platform.models import Workspace as WorkspaceOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.team import Team, TeamMembership
 from app.entities.identity.user import RefreshSession, User
-from app.entities.workspace import WORKSPACE_ADMIN_ROLE
-from app.entities.workspace import Workspace, WorkspaceMembership
+from app.entities.workspaces.models import WORKSPACE_ADMIN_ROLE
+from app.entities.workspaces.models import Workspace, WorkspaceMembership
 from app.infra.db import mapping
 from app.infra.runtime.model_utils import utc_now
 

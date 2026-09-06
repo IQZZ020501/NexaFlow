@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import Agent
-from app.entities.resource_permission import ResourcePermission
+from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.identity.user import User
 from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
 from app.schemas.agent import AgentPermissionResponse

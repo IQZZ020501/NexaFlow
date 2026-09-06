@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.entities.resource_permission import ResourcePermission
+from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.tools import (
     ApplicationToolBinding,
     Tool,

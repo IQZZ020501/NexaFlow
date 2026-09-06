@@ -38,7 +38,7 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphReviewItem as GraphReviewRecord,
 )
 from app.entities.identity.user import User
-from app.entities.workspace import Workspace
+from app.entities.workspaces.models import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
 from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,

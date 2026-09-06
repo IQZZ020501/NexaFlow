@@ -5382,7 +5382,7 @@ async def assert_tool_service_paths(
         ToolSource,
     )
     from app.entities.identity.user import User
-    from app.entities.workspace import WorkspaceMembership
+    from app.entities.workspaces.models import WorkspaceMembership
     from app.domain.tools import services as tool_services
     from app.domain.tools.catalog import (
         get_mcp_catalog_leaf,

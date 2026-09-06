@@ -18,7 +18,7 @@ from app.entities.identity.user import User
 from app.schemas.identity.contracts import UserCreateRequest, UserPasswordResetResponse
 from app.application.identity.service import create_user
 from app.schemas.identity.contracts import user_to_response
-from app.entities.workspace import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
+from app.entities.workspaces.models import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.identity import users as user_repository
@@ -32,7 +32,7 @@ from app.domain.tools.catalog import (
 from app.domain.workflows.uploads import queue_upload_cleanups
 from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
 from app.tasks.knowledge import enqueue_upload_storage_cleanups
-from app.schemas.workspace import (
+from app.schemas.workspaces.contracts import (
     WorkspaceMemberResponse,
     WorkspaceUserCreateRequest,
     WorkspaceCreateRequest,

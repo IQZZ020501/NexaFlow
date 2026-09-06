@@ -14,7 +14,7 @@ from app.entities.identity.enterprise import (
     EnterpriseLoginState,
 )
 from app.entities.identity.user import User
-from app.entities.workspace import WorkspaceMembership
+from app.entities.workspaces.models import WorkspaceMembership
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.identity import enterprise as identity_repository

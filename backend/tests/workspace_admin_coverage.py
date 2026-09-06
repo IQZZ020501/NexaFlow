@@ -26,9 +26,9 @@ from tests.support import (
 )
 
 from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
-from app.application import workspace as workspace_service
+from app.application.workspaces import service as workspace_service
 from app.entities.identity.user import User
-from app.entities.workspace import Workspace
+from app.entities.workspaces.models import Workspace
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.teams import repository as team_repo
 from app.infra.db.repositories.identity import users as user_repo
@@ -107,8 +107,8 @@ async def exercise_direct_workspace_service_branches(
     """
     from fastapi import HTTPException
 
-    from app.application import workspace as workspace_service
-    from app.application.workspace import (
+    from app.application.workspaces import service as workspace_service
+    from app.application.workspaces.service import (
         add_workspace_member,
         build_workspace_context,
         create_workspace,
@@ -118,7 +118,7 @@ async def exercise_direct_workspace_service_branches(
         update_workspace,
         update_workspace_member_role,
     )
-    from app.schemas.workspace import (
+    from app.schemas.workspaces.contracts import (
         WorkspaceCreateRequest,
         WorkspaceUpdateRequest,
     )
@@ -423,7 +423,7 @@ async def exercise_direct_workspace_service_branches(
         else:
             raise AssertionError("missing user add did not 404")
 
-        from app.schemas.workspace import WorkspaceUserCreateRequest
+        from app.schemas.workspaces.contracts import WorkspaceUserCreateRequest
 
         created_user = await workspace_service.create_workspace_user(
             db,
@@ -477,11 +477,11 @@ async def exercise_direct_workspace_service_404() -> None:
     """update_workspace / delete_workspace_permanently with a missing id."""
     from fastapi import HTTPException
 
-    from app.application.workspace import (
+    from app.application.workspaces.service import (
         delete_workspace_permanently,
         update_workspace,
     )
-    from app.schemas.workspace import WorkspaceUpdateRequest
+    from app.schemas.workspaces.contracts import WorkspaceUpdateRequest
 
     missing = Workspace(id="no-such-workspace-id", name="Ghost", status="active")
     async with get_session_factory()() as db:
@@ -536,7 +536,7 @@ async def exercise_direct_identity_edges() -> None:
     )
     from app.entities.team import Team
     from app.entities.identity.user import RefreshSession
-    from app.entities.workspace import Workspace, WorkspaceMembership
+    from app.entities.workspaces.models import Workspace, WorkspaceMembership
     from app.infra.security.agent_rate_limit import (
         LoginRateLimitExceeded,
         LoginRateLimitUnavailable,

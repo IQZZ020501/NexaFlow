@@ -1925,7 +1925,7 @@ def test_private_catalog_filters_before_pagination_for_every_role() -> None:
         require_tool_manage,
         require_tool_use,
     )
-    from app.entities.resource_permission import ResourcePermission
+    from app.entities.workspaces.resource_permissions import ResourcePermission
     from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository

@@ -48,7 +48,7 @@ from app.infra.db.repositories.models import registry as llm_registry_repository
 from app.adapters.llm import runtime as llm_runtime
 from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.providers import PROVIDER_CATALOG
-from app.entities.resource_permission import ResourcePermission
+from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.tools import McpServer, McpToolPolicy
 from app.entities.identity.user import RefreshSession, User

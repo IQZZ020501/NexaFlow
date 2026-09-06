@@ -3647,7 +3647,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
 
     async def create_direct_user(username: str, member: bool) -> str:
         from app.entities.identity.user import User
-        from app.entities.workspace import WorkspaceMembership
+        from app.entities.workspaces.models import WorkspaceMembership
         from app.infra.db.repositories.identity import users as user_repository
 
         async with get_session_factory()() as db:

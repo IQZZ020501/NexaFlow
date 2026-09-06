@@ -4105,7 +4105,7 @@ async def run_direct_shareddomain_tests(
     from app.infra.db.repositories.workspaces import (
         resource_permissions as permission_repository,
     )
-    from app.entities.resource_permission import ResourcePermission
+    from app.entities.workspaces.resource_permissions import ResourcePermission
 
     settings = test_settings()
     direct_embedding = create_model(

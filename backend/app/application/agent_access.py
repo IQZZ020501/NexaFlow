@@ -26,7 +26,7 @@ from app.application.agent_tools import (
     knowledge_sources_from_events,
     safe_agent_run_error,
 )
-from app.application.workspace import WorkspaceContext, build_workspace_context
+from app.application.workspaces.service import WorkspaceContext, build_workspace_context
 from app.entities.agents import (
     Agent,
     AgentApiCredential,

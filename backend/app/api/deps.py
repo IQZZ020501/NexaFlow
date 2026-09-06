@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.workspace import WorkspaceContext, build_workspace_context
+from app.application.workspaces.service import WorkspaceContext, build_workspace_context
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.db.session import get_db

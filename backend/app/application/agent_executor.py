@@ -26,7 +26,7 @@ from app.application.agent_tools import (
     set_agent_tool_idempotency_key,
 )
 from app.application.agent_tool_runtime import UnifiedAgentToolRuntime
-from app.application.workspace import build_workspace_context
+from app.application.workspaces.service import build_workspace_context
 from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import McpToolPolicy, ToolSnapshot

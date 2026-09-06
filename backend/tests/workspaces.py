@@ -295,6 +295,8 @@ async def seed_workspace_analytics(
             meta={},
             created_by_user_id=global_admin_id,
         )
+        db.add_all([model, other_model])
+        await db.flush()
         agent = Agent(
             workspace_id=workspace_id,
             name="Support Agent",
@@ -325,7 +327,7 @@ async def seed_workspace_analytics(
             status="active",
             created_by_user_id=global_admin_id,
         )
-        db.add_all([model, other_model, agent, workflow, other_agent])
+        db.add_all([agent, workflow, other_agent])
         await db.flush()
         definition = WorkflowDefinition(
             workspace_id=workspace_id,

@@ -13,7 +13,7 @@ from app.entities.analytics import (
     WorkspaceAnalyticsTeamMember,
 )
 from app.entities.identity.user import User
-from app.entities.workspace import Workspace
+from app.entities.workspaces.models import Workspace
 from app.infra.runtime.model_utils import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
 from app.infra.db.repositories.analytics import repository as analytics_repository
 from app.schemas.analytics import (

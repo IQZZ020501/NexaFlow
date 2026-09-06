@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.identity.user import User
-from app.entities.workspace import WorkspaceMembership
+from app.entities.workspaces.models import WorkspaceMembership
 from app.entities.identity.invitations import WorkspaceInvitation
 from app.domain.platform.models import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
 from app.infra.db.repositories.identity import users as user_repository

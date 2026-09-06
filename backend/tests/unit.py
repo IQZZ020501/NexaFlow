@@ -33,7 +33,7 @@ from app.adapters.rag.retrieval import (
 from app.adapters.rag.vector_store import VectorHit
 from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
-from app.entities.resource_permission import ResourcePermission
+from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.identity.user import User
 from app.schemas.knowledge_graph import (
     KnowledgeGraphImportRecord,
@@ -2669,7 +2669,7 @@ def test_effective_tool_access_matrix() -> None:
 
 def test_tool_authorization_applies_builtin_and_global_admin_rules() -> None:
     from app.application.tools import evaluate_tool_authorization
-    from app.entities.resource_permission import ResourcePermission
+    from app.entities.workspaces.resource_permissions import ResourcePermission
     from app.entities.tools import Tool, ToolAccess
     from app.entities.identity.user import User
 

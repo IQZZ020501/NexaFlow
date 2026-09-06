@@ -17,7 +17,7 @@ from app.application.agent_child_runs import (
 )
 from app.application.workflow_nodes import WorkflowNodeScope, execute_workflow_node
 from app.application.workflow_tool_runtime import WorkflowToolRuntime
-from app.application.workspace import build_workspace_context
+from app.application.workspaces.service import build_workspace_context
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolSnapshot

@@ -40,7 +40,7 @@ from app.api.deps import (
 )
 from app.entities.identity.user import User
 from app.schemas.identity.contracts import UserPasswordResetResponse
-from app.schemas.workspace import (
+from app.schemas.workspaces.contracts import (
     WorkspaceMemberCreateRequest,
     WorkspaceMemberResponse,
     WorkspaceMemberUpdateRequest,
@@ -50,7 +50,7 @@ from app.schemas.workspace import (
     WorkspaceResponse,
     WorkspaceUpdateRequest,
 )
-from app.application.workspace import (
+from app.application.workspaces.service import (
     add_workspace_member,
     create_workspace,
     create_workspace_user,
