@@ -319,7 +319,7 @@ describe("Agent preview state", () => {
     ).toBe(false)
   })
 
-  test("keeps eager knowledge after the initial thought", () => {
+  test("keeps eager knowledge before later model reasoning", () => {
     const thought = {
       type: "thought",
       turn: 1,
@@ -344,7 +344,7 @@ describe("Agent preview state", () => {
       processTimeline({
         events: [knowledge, thought, updatedThought, mcp],
       } as AgentRun).map(({ event }) => event)
-    ).toEqual([updatedThought, knowledge, mcp])
+    ).toEqual([knowledge, updatedThought, mcp])
   })
 
   test("keeps an approval inline until its tool event arrives", () => {

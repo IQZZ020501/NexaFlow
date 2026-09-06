@@ -1925,7 +1925,7 @@ describe("AgentDetailWorkspace edge behavior", () => {
     ).toBe(true)
   })
 
-  test("processTimeline splices eager knowledge after the first thought", () => {
+  test("processTimeline preserves eager knowledge before later thoughts", () => {
     const knowledgeEvent = {
       type: "tool",
       turn: 0,
@@ -1961,10 +1961,10 @@ describe("AgentDetailWorkspace edge behavior", () => {
         events: [knowledgeEvent, thought],
       })
     )
-    // Knowledge is spliced in after the first thought event.
+    // Preserve the durable event order so tool calls stay above later reasoning.
     expect(withThought.map((item) => item.event.call_id)).toEqual([
-      "",
       "call-3",
+      "",
     ])
     // Knowledge at turn 0 with no thought leaves the order untouched.
     const noThought = processTimeline(

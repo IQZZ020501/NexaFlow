@@ -337,23 +337,7 @@ export function processTimeline(run: AgentRun) {
     else deduplicated[eventIndex] = event
   }
 
-  const eagerKnowledge = deduplicated.filter(
-    (event) =>
-      event.type === "tool" &&
-      event.turn === 0 &&
-      event.tool_kind === "knowledge"
-  )
-  if (eagerKnowledge.length === 0) {
-    return deduplicated.map((event) => ({ event, count: 1 }))
-  }
-
-  const events = deduplicated.filter((event) => !eagerKnowledge.includes(event))
-  const firstThought = events.findIndex((event) => event.type === "thought")
-  if (firstThought === -1) {
-    return deduplicated.map((event) => ({ event, count: 1 }))
-  }
-  events.splice(firstThought + 1, 0, ...eagerKnowledge)
-  return events.map((event) => ({ event, count: 1 }))
+  return deduplicated.map((event) => ({ event, count: 1 }))
 }
 
 export function unrenderedAgentToolCalls(
