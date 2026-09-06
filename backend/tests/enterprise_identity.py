@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import AsyncMock, patch
@@ -32,15 +33,22 @@ def _raises(error_type, callback):
 
 
 class _ProviderResponse:
-    def __init__(self, payload, *, size: int = 2) -> None:
-        self.payload = payload
-        self.content = b"x" * size
+    def __init__(self, payload, *, chunks: list[bytes] | None = None) -> None:
+        self.chunks = chunks or [json.dumps(payload).encode()]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
 
     def raise_for_status(self) -> None:
         return None
 
-    def json(self):
-        return self.payload
+    async def aiter_bytes(self, *, chunk_size: int):
+        assert chunk_size == 8192
+        for chunk in self.chunks:
+            yield chunk
 
 
 class _ProviderClient:
@@ -54,7 +62,7 @@ class _ProviderClient:
     async def __aexit__(self, *_args):
         return None
 
-    async def request(self, *_args, **_kwargs):
+    def stream(self, *_args, **_kwargs):
         if self.error:
             raise self.error
         return self.response
@@ -77,6 +85,10 @@ def main() -> None:
     assert safe_next_path("/app/agents") == "/app/agents"
     assert safe_next_path("https://evil.example") == "/app/apps"
     assert safe_next_path("//evil.example") == "/app/apps"
+    assert safe_next_path("/\\evil.example") == "/app/apps"
+    assert safe_next_path("/\t/evil.example") == "/app/apps"
+    assert safe_next_path("/app/agents\\evil") == "/app/apps"
+    assert safe_next_path("/" + "a" * 2048) == "/app/apps"
     _raises(Exception, lambda: validate_connection_fields("unknown", "id", "tenant", None))
     _raises(Exception, lambda: validate_connection_fields("feishu", " ", "tenant", None))
     _raises(Exception, lambda: validate_connection_fields("wecom", "id", "tenant", None))
@@ -161,7 +173,9 @@ def main() -> None:
         assert asyncio.run(_request_json("GET", "https://provider.example")) == {"ok": True}
     with patch(
         "app.capabilities.enterprise_identity.httpx2.AsyncClient",
-        return_value=_ProviderClient(_ProviderResponse({}, size=65 * 1024)),
+        return_value=_ProviderClient(
+            _ProviderResponse({}, chunks=[b"x" * (32 * 1024), b"x" * (33 * 1024)])
+        ),
     ):
         _raises(
             EnterpriseProviderError,

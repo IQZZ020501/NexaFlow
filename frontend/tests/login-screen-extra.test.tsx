@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { LoginPageContent } from "@/components/auth/login-page-content"
 import { LoginScreen } from "@/components/auth/login-screen"
+import { safeAuthDestination } from "@/lib/auth-path"
 import {
   cleanup,
   fireEvent,
@@ -45,6 +46,20 @@ function submitCredentials(username: string, password: string) {
 }
 
 describe("LoginScreen submission", () => {
+  test("rejects unsafe post-login destinations", () => {
+    expect(safeAuthDestination("/app/agents")).toBe("/app/agents")
+    for (const value of [
+      "https://evil.example",
+      "//evil.example",
+      "/\\evil.example",
+      "/\t/evil.example",
+      "/app/agents\\evil",
+      `/${"a".repeat(2048)}`,
+    ]) {
+      expect(safeAuthDestination(value)).toBe("/app/apps")
+    }
+  })
+
   test("renders configured providers as icon links", () => {
     renderPage(
       <LoginScreen

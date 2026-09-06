@@ -4,8 +4,20 @@ from app.entities.enterprise_identity import ENTERPRISE_IDENTITY_PROVIDERS
 
 
 def safe_next_path(value: str | None) -> str:
-    if value and value.startswith("/") and not value.startswith(("//", "/\\")):
-        return value[:2048]
+    if (
+        value
+        and len(value) <= 2048
+        and value.startswith("/")
+        and not value.startswith("//")
+        and not any(
+            character == "\\"
+            or character.isspace()
+            or ord(character) < 32
+            or 127 <= ord(character) <= 159
+            for character in value
+        )
+    ):
+        return value
     return "/app/apps"
 
 

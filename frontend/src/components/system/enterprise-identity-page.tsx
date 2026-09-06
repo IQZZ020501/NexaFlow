@@ -89,8 +89,10 @@ export function EnterpriseIdentityPage() {
   })
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState<EnterpriseProvider | null>(null)
+  const loadRequestRef = React.useRef(0)
 
   async function load() {
+    const requestId = ++loadRequestRef.current
     if (!token || !workspaceId) return
     setLoading(true)
     try {
@@ -99,6 +101,7 @@ export function EnterpriseIdentityPage() {
         listEnterpriseIdentities(token, workspaceId),
         listAllWorkspaceMembers(token, workspaceId),
       ])
+      if (requestId !== loadRequestRef.current) return
       setConnections(nextConnections)
       setIdentities(nextIdentities)
       setMembers(nextMembers.filter((item) => item.user.is_active))
@@ -133,15 +136,20 @@ export function EnterpriseIdentityPage() {
         ) as Record<EnterpriseProvider, ConnectionForm>
       )
     } catch (error) {
-      notify("error", getErrorMessage(error, t))
+      if (requestId === loadRequestRef.current) {
+        notify("error", getErrorMessage(error, t))
+      }
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
+    return () => {
+      loadRequestRef.current += 1
+    }
     // Data reload is intentionally keyed only by authentication and workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, workspaceId])

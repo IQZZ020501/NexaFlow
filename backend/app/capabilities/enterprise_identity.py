@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 from typing import Any
 from urllib.parse import urlencode
 
@@ -76,11 +77,14 @@ async def _request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
             follow_redirects=False,
             trust_env=False,
         ) as client:
-            response = await client.request(method, url, **kwargs)
-            response.raise_for_status()
-            if len(response.content) > _MAX_PROVIDER_RESPONSE_BYTES:
-                raise EnterpriseProviderError("Provider response is too large.")
-            payload = response.json()
+            async with client.stream(method, url, **kwargs) as response:
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    if len(body) + len(chunk) > _MAX_PROVIDER_RESPONSE_BYTES:
+                        raise EnterpriseProviderError("Provider response is too large.")
+                    body.extend(chunk)
+            payload = json.loads(body)
     except EnterpriseProviderError:
         raise
     except Exception as exc:

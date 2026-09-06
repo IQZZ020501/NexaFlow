@@ -6,12 +6,7 @@ import { useRouter } from "next/navigation"
 
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
-
-function safeDestination(next?: string) {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")
-    ? next
-    : "/app/apps"
-}
+import { safeAuthDestination } from "@/lib/auth-path"
 
 export function EnterpriseLoginComplete({ next }: { next?: string }) {
   const { t } = useLanguage()
@@ -20,7 +15,7 @@ export function EnterpriseLoginComplete({ next }: { next?: string }) {
 
   React.useEffect(() => {
     if (!session.isSessionRestored) return
-    router.replace(session.token ? safeDestination(next) : "/login")
+    router.replace(session.token ? safeAuthDestination(next) : "/login")
   }, [next, router, session.isSessionRestored, session.token])
 
   return (

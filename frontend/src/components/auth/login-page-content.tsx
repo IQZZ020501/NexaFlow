@@ -11,22 +11,8 @@ import {
   listPublicEnterpriseConnections,
   type PublicEnterpriseConnection,
 } from "@/lib/api/enterprise-identity"
+import { safeAuthDestination } from "@/lib/auth-path"
 import type { TranslationKey } from "@/i18n"
-
-/**
- * Validates a requested login redirect path.
- *
- * @param next - The requested redirect path
- * @returns The requested path when it is a valid internal path, or `"/app/apps"` otherwise.
- */
-function loginDestination(next: string | undefined) {
-  return next &&
-    next.startsWith("/") &&
-    !next.startsWith("//") &&
-    !next.startsWith("/\\")
-    ? next
-    : "/app/apps"
-}
 
 /**
  * Renders the login interface and redirects authenticated users to the requested destination.
@@ -53,7 +39,7 @@ export function LoginPageContent({
     notification,
     dismissNotification,
   } = useSession()
-  const destination = loginDestination(next)
+  const destination = safeAuthDestination(next)
   const [enterpriseConnections, setEnterpriseConnections] = React.useState<
     PublicEnterpriseConnection[]
   >([])
