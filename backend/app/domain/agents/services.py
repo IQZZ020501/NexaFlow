@@ -40,7 +40,7 @@ from app.domain.agents.publications import (
     publication_from_snapshots,
 )
 from app.domain.audit.services import record_audit_log
-from app.domain.knowledge.services import (
+from app.domain.knowledge.service import (
     get_knowledge_base,
     require_knowledge_base_permission,
 )

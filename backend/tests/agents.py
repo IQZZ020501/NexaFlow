@@ -55,7 +55,7 @@ from app.schemas.knowledge import (
     KnowledgeQueryInspectResponse,
     KnowledgeRetrievalTraceResponse,
 )
-from app.schemas.knowledge_graph import (
+from app.schemas.knowledge.graph import (
     KnowledgeGraphEntityResponse,
     KnowledgeGraphPathResponse,
     KnowledgeGraphPathStepResponse,

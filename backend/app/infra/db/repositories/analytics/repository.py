@@ -16,7 +16,7 @@ from app.entities.analytics import (
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentRun as AgentRunOrm
 from app.domain.agents.models import AgentRunState as AgentRunStateOrm
-from app.domain.knowledge_graph.models import (
+from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
 )
 from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailOrm

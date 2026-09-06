@@ -8,8 +8,8 @@ import logging
 from types import SimpleNamespace
 from urllib.error import URLError
 
-from app.application.knowledge_graph_build import _log_graph_build_stage
-from app.application.knowledge_graph_query import _log_graph_query_event
+from app.application.knowledge.graph.build import _log_graph_build_stage
+from app.application.knowledge.graph.query import _log_graph_query_event
 from app.infra.observability.errors import (
     ExternalServiceError,
     classify_error,

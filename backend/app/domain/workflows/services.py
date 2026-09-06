@@ -29,7 +29,7 @@ from app.domain.agents.services import (
     get_agent_model,
 )
 from app.domain.agents.publications import agent_publication_hash
-from app.domain.knowledge.services import (
+from app.domain.knowledge.service import (
     ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
     RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
     effective_permission,

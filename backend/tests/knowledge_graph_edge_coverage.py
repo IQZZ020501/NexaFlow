@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 import tests.support  # noqa: F401
-from app.application import knowledge_graph
+from app.application.knowledge.graph import service as knowledge_graph
 from app.entities.knowledge import KnowledgeBase, KnowledgeTask
-from app.entities.knowledge_graph import (
+from app.entities.knowledge.graph import (
     KnowledgeGraphAlias,
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,
@@ -26,15 +26,15 @@ from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.schemas.knowledge import KnowledgeQueryRequest
-from app.schemas.knowledge_graph import (
+from app.schemas.knowledge.graph import (
     KnowledgeGraphNeighborhoodRequest,
     KnowledgeGraphPathRequest,
     KnowledgeGraphSchemaUpdateRequest,
     KnowledgeGraphSettingsUpdateRequest,
 )
-from app.domain.knowledge_graph import revisions as graph_revisions
-from app.domain.knowledge_graph.revisions import GraphRevisionConflict
-from app.domain.knowledge_graph.schema import default_graph_schema
+from app.domain.knowledge.graph import revisions as graph_revisions
+from app.domain.knowledge.graph.revisions import GraphRevisionConflict
+from app.domain.knowledge.graph.schema import default_graph_schema
 
 
 async def _expect_http(coroutine, status_code: int) -> None:
@@ -57,7 +57,7 @@ async def test_graph_application_edge_paths() -> None:
     actor = User(id="application-edge-user", name="Application Edge User")
 
     with patch(
-        "app.application.knowledge.dispatch_knowledge_task",
+        "app.application.knowledge.documents.service.dispatch_knowledge_task",
         new=AsyncMock(),
     ) as dispatch:
         await knowledge_graph._dispatch_graph_task("dispatch-task", SimpleNamespace())

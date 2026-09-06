@@ -1,0 +1,858 @@
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from datetime import UTC, timedelta
+from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.audit.services import record_audit_log
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.session import get_session_factory
+from app.entities.identity.user import User
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.entities.knowledge import (
+    CHUNK_INDEX_FAILED_STATUS,
+    CHUNK_INDEXED_STATUS,
+    DOCUMENT_DELETED_STATUS,
+    DOCUMENT_INDEX_FAILED_STATUS,
+    DOCUMENT_INDEXED_STATUS,
+    DOCUMENT_INDEXING_STATUS,
+    DOCUMENT_PARSE_FAILED_STATUS,
+    DOCUMENT_PARSED_STATUS,
+    DOCUMENT_PARSING_STATUS,
+    TASK_FAILED_STATUS,
+    TASK_CANCELLED_STATUS,
+    TASK_CANCELLING_STATUS,
+    TASK_EVALUATE,
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
+    TASK_INDEX,
+    TASK_PARSE,
+    TASK_QUEUED_STATUS,
+    TASK_REBUILD_INDEX,
+    TASK_RUNNING_STATUS,
+    TASK_SUCCEEDED_STATUS,
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeTask,
+)
+from app.ports.parsing import (
+    EMBED_BATCH_SIZE,
+    IMAGE_DOCUMENT_EXTENSIONS,
+    KnowledgePipelineError,
+    SEGMENTATION_VERSION,
+)
+from app.ports.vector_store import (
+    VectorChunk,
+    delete_vectors,
+    upsert_vectors,
+)
+from app.domain.knowledge.tasks.orchestration import (
+    chunk_search_text,
+    enqueue_graph_rebuild,
+    enqueue_graph_sync,
+    enqueue_index_knowledge_document,
+    extract_document_chunk_contents,
+    parse_task_options_from_task,
+    replace_document_chunks,
+    resolve_embedding_model,
+    TASK_STOPPED_MESSAGE,
+    task_error_message,
+)
+from app.domain.knowledge.service import (
+    RESOURCE_TYPE,
+    get_default_knowledge_model,
+    knowledge_object_storage,
+)
+from app.ports.llm import RegisteredModel, VISION_MODEL_REQUIRED_MESSAGE
+
+# ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
+logger = get_logger(__name__)
+
+TASK_LEASE_SECONDS = 300
+TASK_LEASE_RENEW_SECONDS = 30
+TASK_RUN_BUSY = "busy"
+TASK_RUN_FINISHED = "finished"
+
+EvaluationTaskRunner = Callable[
+    [
+        AsyncSession,
+        KnowledgeTask,
+        KnowledgeBase,
+        User,
+        Settings,
+        asyncio.Event,
+    ],
+    Awaitable[None],
+]
+GraphTaskRunner = EvaluationTaskRunner
+
+
+async def persist_owned_knowledge_task_progress(
+    db: AsyncSession,
+    task: KnowledgeTask,
+) -> None:
+    if task.worker_task_id is None:
+        await knowledge_base_repository.save_knowledge_task(db, task)
+        return
+    lease_expires_at = utc_now() + timedelta(seconds=TASK_LEASE_SECONDS)
+    updated = await knowledge_base_repository.update_owned_knowledge_task_progress(
+        db,
+        task.id,
+        task.worker_task_id,
+        task.total_items,
+        task.processed_items,
+        lease_expires_at,
+    )
+    if not updated:
+        raise KnowledgePipelineError("Knowledge task lease was lost.")
+    task.lease_expires_at = lease_expires_at
+
+
+def batches(items: list[VectorChunk], size: int) -> list[list[VectorChunk]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+async def get_task_scope(
+    db: AsyncSession,
+    task: KnowledgeTask,
+) -> tuple[KnowledgeBase, User, KnowledgeDocument | None]:
+    knowledge_base = await knowledge_base_repository.get_knowledge_base_by_id(
+        db,
+        task.knowledge_base_id,
+    )
+    actor = await user_repository.get_user_by_id(db, task.created_by_user_id)
+    document = (
+        await knowledge_base_repository.get_knowledge_document_by_id(
+            db,
+            task.document_id,
+        )
+        if task.document_id
+        else None
+    )
+    if knowledge_base is None:
+        raise KnowledgePipelineError("Knowledge base no longer exists.")
+    if actor is None:
+        raise KnowledgePipelineError("Task actor no longer exists.")
+    if task.document_id is not None and (
+        document is None or document.status == DOCUMENT_DELETED_STATUS
+    ):
+        raise KnowledgePipelineError("Knowledge document no longer exists.")
+    return knowledge_base, actor, document
+
+
+async def run_parse_task(
+    db: AsyncSession,
+    task: KnowledgeTask,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument,
+    actor: User,
+    settings: Settings,
+    lease_lost: asyncio.Event,
+) -> None:
+    ensure_knowledge_task_lease(lease_lost)
+    document = await knowledge_base_repository.refresh_knowledge_document(
+        db,
+        document,
+    )
+    if document.status == DOCUMENT_DELETED_STATUS:
+        raise KnowledgePipelineError("Knowledge document no longer exists.")
+    document.status = DOCUMENT_PARSING_STATUS
+    document.last_error = None
+    await knowledge_base_repository.save_knowledge_document(db, document)
+
+    options = parse_task_options_from_task(task)
+    vision_model = None
+    if Path(document.filename).suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS:
+        vision_model = await get_default_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            "VISION",
+        )
+        if vision_model is None:
+            raise KnowledgePipelineError(VISION_MODEL_REQUIRED_MESSAGE)
+    chunks = await extract_document_chunk_contents(
+        document,
+        settings,
+        options,
+        vision_model,
+    )
+    ensure_knowledge_task_lease(lease_lost)
+    vector_ids, stale_object_keys, written_object_keys = await replace_document_chunks(
+        db,
+        knowledge_base,
+        document,
+        chunks,
+        settings,
+    )
+
+    task.total_items = len(chunks.children)
+    task.processed_items = len(chunks.children)
+    document.status = DOCUMENT_PARSED_STATUS
+    document.meta = {
+        **(document.meta or {}),
+        "segmentation_version": (
+            SEGMENTATION_VERSION
+            if options["strategy"] == "hierarchical"
+            else "flat-v1"
+        ),
+        "segmentation_strategy": options["strategy"],
+    }
+    document.last_error = None
+    await persist_owned_knowledge_task_progress(db, task)
+    await knowledge_base_repository.save_knowledge_document(db, document)
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_document.parse",
+        "knowledge_document",
+        document.id,
+        document.filename,
+        {
+            "knowledge_base_id": knowledge_base.id,
+            "chunk_count": len(chunks.children),
+            "task_id": task.id,
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+    ensure_knowledge_task_lease(lease_lost)
+    storage = knowledge_object_storage(settings)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        for object_key in written_object_keys:
+            storage.delete(object_key)
+        raise
+    for object_key in stale_object_keys:
+        storage.delete(object_key)
+    ensure_knowledge_task_lease(lease_lost)
+    await asyncio.to_thread(
+        delete_vectors,
+        settings,
+        knowledge_base.id,
+        vector_ids,
+    )
+
+
+async def run_index_task(
+    db: AsyncSession,
+    task: KnowledgeTask,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument | None,
+    actor: User,
+    settings: Settings,
+    lease_lost: asyncio.Event,
+) -> None:
+    ensure_knowledge_task_lease(lease_lost)
+    had_embedding_model = knowledge_base.embedding_model_id is not None
+    embedding_model = await resolve_embedding_model(db, knowledge_base)
+    if embedding_model is None:
+        raise KnowledgePipelineError("Embedding model is required.")
+    if not had_embedding_model:
+        await knowledge_base_repository.set_knowledge_base_embedding_model_id(
+            db,
+            knowledge_base.id,
+            embedding_model.id,
+        )
+
+    chunks = await knowledge_base_repository.list_indexable_chunks(
+        db,
+        knowledge_base,
+        document.id if document else None,
+        {CHUNK_INDEXED_STATUS} if task.task_type == TASK_REBUILD_INDEX else None,
+    )
+    chunks = [chunk for chunk in chunks if chunk.kind != "graph_record"]
+    if not chunks:
+        raise KnowledgePipelineError("Knowledge task has no chunks to index.")
+
+    documents: dict[str, KnowledgeDocument] = {}
+    for chunk in chunks:
+        chunk_document = documents.get(chunk.document_id)
+        if chunk_document is None:
+            loaded = await knowledge_base_repository.get_knowledge_document_by_id(
+                db,
+                chunk.document_id,
+            )
+            if loaded is None or loaded.status == DOCUMENT_DELETED_STATUS:
+                raise KnowledgePipelineError("Knowledge chunk document is missing.")
+            documents[chunk.document_id] = loaded
+
+    parents = await knowledge_base_repository.list_parent_chunks_by_ids(
+        db,
+        knowledge_base,
+        {chunk.parent_id for chunk in chunks if chunk.parent_id},
+    )
+    parents_by_id = {parent.id: parent for parent in parents}
+    for chunk in chunks:
+        search_text = chunk_search_text(
+            documents[chunk.document_id],
+            parents_by_id.get(chunk.parent_id) if chunk.parent_id else None,
+            chunk,
+        )
+        if chunk.search_text != search_text:
+            chunk.search_text = search_text
+            await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
+
+    if task.task_type != TASK_REBUILD_INDEX:
+        for chunk_document in documents.values():
+            chunk_document = (
+                await knowledge_base_repository.refresh_knowledge_document(
+                    db,
+                    chunk_document,
+                )
+            )
+            documents[chunk_document.id] = chunk_document
+            if chunk_document.status == DOCUMENT_DELETED_STATUS:
+                raise KnowledgePipelineError("Knowledge chunk document is missing.")
+            chunk_document.status = DOCUMENT_INDEXING_STATUS
+            chunk_document.last_error = None
+            await knowledge_base_repository.save_knowledge_document(
+                db,
+                chunk_document,
+            )
+    task.total_items = len(chunks)
+    task.processed_items = 0
+    await persist_owned_knowledge_task_progress(db, task)
+    ensure_knowledge_task_lease(lease_lost)
+    await db.commit()
+
+    vector_chunks = [
+        VectorChunk(
+            id=chunk.id,
+            document_id=chunk.document_id,
+            document_filename=documents[chunk.document_id].filename,
+            chunk_index=chunk.chunk_index,
+            content=chunk.search_text or chunk.content,
+            document_metadata={
+                **(documents[chunk.document_id].meta or {}),
+                "content_type": documents[chunk.document_id].content_type,
+            },
+        )
+        for chunk in chunks
+    ]
+    for vector_batch in batches(vector_chunks, EMBED_BATCH_SIZE):
+        ensure_knowledge_task_lease(lease_lost)
+        await asyncio.to_thread(
+            upsert_vectors,
+            settings,
+            knowledge_base.id,
+            knowledge_base.workspace_id,
+            embedding_model,
+            vector_batch,
+        )
+        ensure_knowledge_task_lease(lease_lost)
+        task.processed_items += len(vector_batch)
+        await persist_owned_knowledge_task_progress(db, task)
+        await db.commit()
+
+    ensure_knowledge_task_lease(lease_lost)
+    for chunk in chunks:
+        chunk.status = CHUNK_INDEXED_STATUS
+        chunk.vector_id = chunk.id
+        await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
+    if task.task_type != TASK_REBUILD_INDEX:
+        for chunk_document in documents.values():
+            chunk_document.status = DOCUMENT_INDEXED_STATUS
+            chunk_document.last_error = None
+            await knowledge_base_repository.save_knowledge_document(
+                db,
+                chunk_document,
+            )
+    task.processed_items = len(chunks)
+    await persist_owned_knowledge_task_progress(db, task)
+
+    record_audit_log(
+        db,
+        actor,
+        "knowledge_document.index",
+        "knowledge_document" if document else RESOURCE_TYPE,
+        document.id if document else knowledge_base.id,
+        document.filename if document else knowledge_base.name,
+        {
+            "knowledge_base_id": knowledge_base.id,
+            "chunk_count": len(chunks),
+            "task_id": task.id,
+        },
+        workspace_id=knowledge_base.workspace_id,
+    )
+
+
+async def mark_knowledge_task_failed(
+    db: AsyncSession,
+    task_id: str,
+    message: str,
+    worker_task_id: str | None = None,
+    only_if_queued: bool = False,
+) -> None:
+    task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
+    if task is None:
+        return
+    if worker_task_id is not None and task.worker_task_id != worker_task_id:
+        return
+    if task.status == TASK_CANCELLED_STATUS:
+        return
+    if task.status == TASK_CANCELLING_STATUS:
+        task.status = TASK_CANCELLED_STATUS
+        task.last_error = TASK_STOPPED_MESSAGE
+        task.lease_expires_at = None
+        task.worker_task_id = None
+        task.finished_at = task.finished_at or utc_now()
+        await knowledge_base_repository.save_knowledge_task(db, task)
+        await db.commit()
+        return
+    if only_if_queued and (
+        task.status != TASK_QUEUED_STATUS or task.worker_task_id is not None
+    ):
+        return
+
+    task.status = TASK_FAILED_STATUS
+    task.last_error = message
+    task.lease_expires_at = None
+    task.worker_task_id = None
+    task.finished_at = utc_now()
+
+    if task.document_id is not None:
+        document = await knowledge_base_repository.get_knowledge_document_by_id(
+            db,
+            task.document_id,
+        )
+        if document is not None and document.status != DOCUMENT_DELETED_STATUS:
+            document.last_error = message
+            if task.task_type == TASK_PARSE:
+                document.status = DOCUMENT_PARSE_FAILED_STATUS
+            elif task.task_type == TASK_INDEX:
+                document.status = DOCUMENT_INDEX_FAILED_STATUS
+                knowledge_base = (
+                    await knowledge_base_repository.get_knowledge_base_by_id(
+                        db,
+                        task.knowledge_base_id,
+                    )
+                )
+                if knowledge_base is not None:
+                    chunks = await knowledge_base_repository.list_document_chunks(
+                        db,
+                        knowledge_base,
+                        document.id,
+                    )
+                    for chunk in chunks:
+                        chunk.status = CHUNK_INDEX_FAILED_STATUS
+                        await knowledge_base_repository.save_knowledge_document_chunk(
+                            db,
+                            chunk,
+                        )
+            await knowledge_base_repository.save_knowledge_document(db, document)
+    await knowledge_base_repository.save_knowledge_task(db, task)
+    actor = await user_repository.get_user_by_id(db, task.created_by_user_id)
+    if actor is not None:
+        details = (
+            {
+                "knowledge_base_id": task.knowledge_base_id,
+                "task_id": task.id,
+                "action": "fail",
+                "status": "failed",
+            }
+            if task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+            else {
+                "knowledge_base_id": task.knowledge_base_id,
+                "document_id": task.document_id,
+                "error": message,
+            }
+        )
+        record_audit_log(
+            db,
+            actor,
+            f"knowledge_task.{task.task_type}.fail",
+            "knowledge_task",
+            task.id,
+            task.task_type,
+            details,
+            workspace_id=task.workspace_id,
+        )
+    await db.commit()
+
+
+async def mark_knowledge_task_cancelled(
+    db: AsyncSession,
+    task_id: str,
+    worker_task_id: str | None = None,
+) -> None:
+    task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
+    if task is None or task.status != TASK_CANCELLING_STATUS:
+        return
+    if worker_task_id is not None and task.worker_task_id != worker_task_id:
+        return
+    task.status = TASK_CANCELLED_STATUS
+    task.last_error = TASK_STOPPED_MESSAGE
+    task.lease_expires_at = None
+    task.worker_task_id = None
+    task.finished_at = task.finished_at or utc_now()
+    if task.document_id is not None:
+        document = await knowledge_base_repository.get_knowledge_document_by_id(
+            db,
+            task.document_id,
+        )
+        if document is not None and document.status != DOCUMENT_DELETED_STATUS:
+            document.last_error = TASK_STOPPED_MESSAGE
+            if task.task_type == TASK_PARSE:
+                document.status = DOCUMENT_PARSE_FAILED_STATUS
+            elif task.task_type == TASK_INDEX:
+                document.status = DOCUMENT_INDEX_FAILED_STATUS
+                knowledge_base = (
+                    await knowledge_base_repository.get_knowledge_base_by_id(
+                        db,
+                        task.knowledge_base_id,
+                    )
+                )
+                if knowledge_base is not None:
+                    for chunk in await knowledge_base_repository.list_document_chunks(
+                        db,
+                        knowledge_base,
+                        document.id,
+                    ):
+                        chunk.status = CHUNK_INDEX_FAILED_STATUS
+                        await knowledge_base_repository.save_knowledge_document_chunk(
+                            db,
+                            chunk,
+                        )
+            await knowledge_base_repository.save_knowledge_document(db, document)
+    await knowledge_base_repository.save_knowledge_task(db, task)
+    await db.commit()
+
+
+def ensure_knowledge_task_lease(lease_lost: asyncio.Event) -> None:
+    if lease_lost.is_set():
+        raise KnowledgePipelineError("Knowledge task lease was lost.")
+
+
+async def maintain_knowledge_task_lease(
+    task_id: str,
+    worker_task_id: str,
+    lease_lost: asyncio.Event,
+) -> None:
+    while True:
+        await asyncio.sleep(TASK_LEASE_RENEW_SECONDS)
+        try:
+            async with get_session_factory()() as db:
+                renewed = await knowledge_base_repository.renew_knowledge_task_lease(
+                    db,
+                    task_id,
+                    worker_task_id,
+                    utc_now() + timedelta(seconds=TASK_LEASE_SECONDS),
+                )
+                await db.commit()
+            if not renewed:
+                lease_lost.set()
+                return
+        except Exception:
+            lease_lost.set()
+            return
+
+
+async def run_knowledge_task(
+    task_id: str,
+    settings: Settings,
+    enqueue_task: Callable[[str, Settings], Awaitable[None]] | None = None,
+    worker_task_id: str | None = None,
+    evaluation_runner: EvaluationTaskRunner | None = None,
+    graph_runner: GraphTaskRunner | None = None,
+) -> str:
+    chained_task_ids: list[str] = []
+    worker_task_id = worker_task_id or new_id()
+    async with get_session_factory()() as db:
+        started_at = utc_now()
+        claimed = await knowledge_base_repository.claim_knowledge_task(
+            db,
+            task_id,
+            started_at,
+            started_at + timedelta(seconds=TASK_LEASE_SECONDS),
+            worker_task_id,
+        )
+        if not claimed:
+            task = await knowledge_base_repository.lock_knowledge_task(db, task_id)
+            lease_expires_at = task.lease_expires_at if task is not None else None
+            lease_check_at = (
+                started_at
+                if started_at.tzinfo is not None
+                else started_at.replace(tzinfo=UTC)
+            )
+            if lease_expires_at is not None and lease_expires_at.tzinfo is None:
+                lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
+            lease_expired = (
+                lease_expires_at is None or lease_expires_at <= lease_check_at
+            )
+            if task is not None and task.status == TASK_CANCELLING_STATUS:
+                if lease_expired:
+                    await mark_knowledge_task_cancelled(db, task_id)
+                    return TASK_RUN_FINISHED
+                await db.rollback()
+                return TASK_RUN_BUSY
+            if task is not None and task.attempts >= task.max_attempts and (
+                task.status == TASK_QUEUED_STATUS
+                or (
+                    task.status == TASK_RUNNING_STATUS
+                    and lease_expired
+                )
+            ):
+                await mark_knowledge_task_failed(
+                    db,
+                    task_id,
+                    "Knowledge task retry limit reached.",
+                )
+                return TASK_RUN_FINISHED
+            await db.rollback()
+            if task is not None and task.status == "running":
+                return TASK_RUN_BUSY
+            return TASK_RUN_FINISHED
+        await db.commit()
+        lease_lost = asyncio.Event()
+        lease_heartbeat = asyncio.create_task(
+            maintain_knowledge_task_lease(task_id, worker_task_id, lease_lost)
+        )
+        task: KnowledgeTask | None = None
+
+        try:
+            task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
+            assert task is not None
+            knowledge_base, actor, document = await get_task_scope(db, task)
+            log_event(
+                logger,
+                logging.INFO,
+                "Knowledge task started.",
+                task_id=task.id,
+                task_type=task.task_type,
+                knowledge_base_id=task.knowledge_base_id,
+                document_id=task.document_id or "",
+                worker_task_id=worker_task_id,
+            )
+            if task.task_type == TASK_PARSE:
+                assert document is not None
+                await run_parse_task(
+                    db,
+                    task,
+                    knowledge_base,
+                    document,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
+            elif task.task_type in {TASK_INDEX, TASK_REBUILD_INDEX}:
+                await run_index_task(
+                    db,
+                    task,
+                    knowledge_base,
+                    document,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
+            elif task.task_type == TASK_EVALUATE and evaluation_runner is not None:
+                await evaluation_runner(
+                    db,
+                    task,
+                    knowledge_base,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
+            elif (
+                task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
+                and graph_runner is not None
+            ):
+                await graph_runner(
+                    db,
+                    task,
+                    knowledge_base,
+                    actor,
+                    settings,
+                    lease_lost,
+                )
+            else:
+                raise KnowledgePipelineError("Unsupported knowledge task type.")
+
+            ensure_knowledge_task_lease(lease_lost)
+            owns_lease = await knowledge_base_repository.renew_knowledge_task_lease(
+                db,
+                task.id,
+                worker_task_id,
+                utc_now() + timedelta(seconds=TASK_LEASE_SECONDS),
+            )
+            if not owns_lease:
+                await db.rollback()
+                await mark_knowledge_task_cancelled(db, task.id, worker_task_id)
+                return TASK_RUN_FINISHED
+            task.status = TASK_SUCCEEDED_STATUS
+            task.lease_expires_at = None
+            task.worker_task_id = None
+            task.finished_at = utc_now()
+            await knowledge_base_repository.save_knowledge_task(db, task)
+            record_audit_log(
+                db,
+                actor,
+                f"knowledge_task.{task.task_type}.succeed",
+                "knowledge_task",
+                task.id,
+                task.task_type,
+                {
+                    "knowledge_base_id": task.knowledge_base_id,
+                    "document_id": task.document_id,
+                },
+                workspace_id=task.workspace_id,
+            )
+            should_chain_index = (
+                task.task_type == TASK_PARSE
+                and document is not None
+                and parse_task_options_from_task(task)["auto_index"]
+            )
+            await db.commit()
+            log_event(
+                logger,
+                logging.INFO,
+                "Knowledge task succeeded.",
+                task_id=task.id,
+                task_type=task.task_type,
+                worker_task_id=worker_task_id,
+                duration_ms=round((utc_now() - started_at).total_seconds() * 1000),
+            )
+            if should_chain_index:
+                try:
+                    index_task = await enqueue_index_knowledge_document(
+                        db,
+                        knowledge_base,
+                        document,
+                        actor,
+                    )
+                    chained_task_ids.append(index_task.id)
+                except Exception as exc:
+                    log_error(
+                        logger,
+                        "Knowledge chain index enqueue failed.",
+                        exc,
+                        task_id=task.id,
+                    )
+                    await db.rollback()
+                    assert document is not None
+                    document.last_error = task_error_message(exc)
+                    await knowledge_base_repository.save_knowledge_document(
+                        db,
+                        document,
+                    )
+                    await db.commit()
+            if knowledge_base.graph_enabled:
+                try:
+                    graph_task = None
+                    if task.task_type == TASK_INDEX and document is not None:
+                        graph_task = await enqueue_graph_sync(
+                            db,
+                            knowledge_base,
+                            actor,
+                            [document.id],
+                        )
+                    elif task.task_type == TASK_REBUILD_INDEX:
+                        graph_task = await enqueue_graph_rebuild(
+                            db,
+                            knowledge_base,
+                            actor,
+                        )
+                    if graph_task is not None and graph_task.id not in chained_task_ids:
+                        chained_task_ids.append(graph_task.id)
+                except Exception as exc:
+                    log_error(
+                        logger,
+                        "Knowledge graph chain enqueue failed.",
+                        None,
+                        source=classify_error(exc),
+                        task_id=task.id,
+                        task_type=task.task_type,
+                        error_type=type(exc).__name__,
+                    )
+                    await db.rollback()
+        except Exception as exc:
+            await db.rollback()
+            if lease_lost.is_set():
+                db.expire_all()
+                await mark_knowledge_task_cancelled(db, task_id, worker_task_id)
+                current = await knowledge_base_repository.get_knowledge_task_by_id(
+                    db,
+                    task_id,
+                )
+                if current is None or current.status == TASK_CANCELLED_STATUS:
+                    return TASK_RUN_FINISHED
+            if task is not None and task.task_type in {
+                TASK_GRAPH_SYNC,
+                TASK_GRAPH_REBUILD,
+            }:
+                log_error(
+                    logger,
+                    "Knowledge task failed.",
+                    None,
+                    source=classify_error(exc),
+                    task_id=task_id,
+                    worker_task_id=worker_task_id,
+                    task_type=task.task_type,
+                    error_type=type(exc).__name__,
+                )
+            else:
+                log_error(
+                    logger,
+                    "Knowledge task failed.",
+                    exc,
+                    task_id=task_id,
+                    worker_task_id=worker_task_id,
+                )
+            await mark_knowledge_task_failed(
+                db,
+                task_id,
+                task_error_message(exc),
+                worker_task_id,
+            )
+            return TASK_RUN_FINISHED
+        finally:
+            lease_heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await lease_heartbeat
+
+    for chained_task_id in chained_task_ids:
+        if enqueue_task is not None:
+            await enqueue_task(chained_task_id, settings)
+        else:
+            await run_knowledge_task(
+                chained_task_id,
+                settings,
+                evaluation_runner=evaluation_runner,
+                graph_runner=graph_runner,
+            )
+    return TASK_RUN_FINISHED
+
+
+async def recover_knowledge_tasks(
+    settings: Settings,
+    evaluation_runner: EvaluationTaskRunner | None = None,
+    graph_runner: GraphTaskRunner | None = None,
+) -> None:
+    task_ids = await list_recoverable_knowledge_task_ids(settings)
+    await asyncio.gather(
+        *(
+            run_knowledge_task(
+                task_id,
+                settings,
+                evaluation_runner=evaluation_runner,
+                graph_runner=graph_runner,
+            )
+            for task_id in task_ids
+        )
+    )
+
+
+async def list_recoverable_knowledge_task_ids(settings: Settings) -> list[str]:
+    del settings
+    async with get_session_factory()() as db:
+        tasks = await knowledge_base_repository.list_recoverable_tasks(db, utc_now())
+    return [task.id for task in tasks]

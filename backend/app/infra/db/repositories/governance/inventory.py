@@ -19,7 +19,7 @@ from app.domain.agents.models import (
 )
 from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
 from app.domain.knowledge.models import KnowledgeTask as KnowledgeTaskOrm
-from app.domain.knowledge_graph.models import (
+from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
 )
 from app.domain.tools.models import Tool as ToolOrm

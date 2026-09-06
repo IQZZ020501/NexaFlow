@@ -24,14 +24,14 @@ from app.schemas.knowledge import (
     KnowledgeGraphEvaluationMetrics,
     KnowledgeTaskResponse,
 )
-from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
+from app.schemas.knowledge.graph import KnowledgeGraphQueryResultResponse
 from app.domain.audit.services import record_audit_log
-from app.domain.knowledge.permissions import require_knowledge_base_active
-from app.domain.knowledge.orchestration import (
+from app.domain.knowledge.bases.permissions import require_knowledge_base_active
+from app.domain.knowledge.tasks.orchestration import (
     create_knowledge_task,
     task_to_response,
 )
-from app.domain.knowledge_graph.schema import normalize_graph_name
+from app.domain.knowledge.graph.schema import normalize_graph_name
 
 EVALUATION_SIMILARITY_SEMANTICS = "normalized_cosine"
 

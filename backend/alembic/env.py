@@ -37,7 +37,7 @@ from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.domain.knowledge_graph.models import (  # noqa: F401
+from app.domain.knowledge.graph.models import (  # noqa: F401
     KnowledgeGraphAlias,
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,

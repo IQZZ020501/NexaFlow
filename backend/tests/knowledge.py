@@ -32,11 +32,11 @@ from app.domain.knowledge.models import (
     KnowledgeEvaluationResult,
     KnowledgeTask,
 )
-from app.api.v1.endpoints import knowledge as knowledge_api
-from app.api.v1.endpoints import knowledge_evaluation as knowledge_evaluation_api
-from app.application import knowledge as knowledge_application
-from app.application import knowledge_evaluation as knowledge_evaluation_application
-from app.application import knowledge_retrieval as knowledge_retrieval_application
+from app.api.v1.knowledge import routes as knowledge_api
+from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
+from app.application.knowledge.documents import service as knowledge_application
+from app.application.knowledge.evaluation import runner as knowledge_evaluation_application
+from app.application.knowledge.retrieval import service as knowledge_retrieval_application
 from app.adapters.rag import retrieval as knowledge_retrieval
 from app.adapters.rag import vector_store as knowledge_vector_store
 from app.adapters.parsing.pipeline import (
@@ -55,11 +55,11 @@ from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     KnowledgeEvaluationResult as KnowledgeEvaluationResultEntity,
 )
-from app.domain.knowledge.orchestration import (
+from app.domain.knowledge.tasks.orchestration import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )
-from app.domain.knowledge.task_runner import (
+from app.domain.knowledge.tasks.runner import (
     mark_knowledge_task_failed,
     recover_knowledge_tasks,
     run_knowledge_task,

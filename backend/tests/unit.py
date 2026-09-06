@@ -35,7 +35,7 @@ from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
 from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.identity.user import User
-from app.schemas.knowledge_graph import (
+from app.schemas.knowledge.graph import (
     KnowledgeGraphImportRecord,
     KnowledgeGraphReviewDecisionRequest,
 )
@@ -43,22 +43,22 @@ from app.domain.agents.permissions import (
     effective_agent_permission,
     validate_agent_permission,
 )
-from app.domain.knowledge.orchestration import (
+from app.domain.knowledge.tasks.orchestration import (
     normalized_document_artifact,
     parse_task_options,
 )
-from app.domain.knowledge.services import (
+from app.domain.knowledge.service import (
     clean_upload_filename,
     effective_permission,
     validate_permission,
 )
-from app.domain.knowledge_graph.schema import (
+from app.domain.knowledge.graph.schema import (
     GraphSchemaDefinition,
     default_graph_schema,
     graph_schema_hash,
     normalize_graph_name,
 )
-from app.domain.knowledge_graph.extraction import (
+from app.domain.knowledge.graph.extraction import (
     EntityLexiconEntry,
     ExtractedEntity,
     ExtractionChunk,
@@ -68,17 +68,17 @@ from app.domain.knowledge_graph.extraction import (
     extract_graph_batch,
     validate_extraction_batch,
 )
-from app.domain.knowledge_graph.resolution import (
+from app.domain.knowledge.graph.resolution import (
     claim_fingerprint,
     choose_automatic_entity_match,
     initial_claim_status,
 )
-from app.domain.knowledge_graph.extraction import (
+from app.domain.knowledge.graph.extraction import (
     ExtractedClaim,
     _entity_type,
 )
-from app.domain.knowledge_graph import traversal as graph_traversal
-from app.domain.knowledge_graph.traversal import (
+from app.domain.knowledge.graph import traversal as graph_traversal
+from app.domain.knowledge.graph.traversal import (
     GraphEvidenceView,
     _collect_result_items,
     _load_path_records,
@@ -86,13 +86,13 @@ from app.domain.knowledge_graph.traversal import (
 )
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from unittest.mock import AsyncMock, patch
-from app.application.knowledge_graph_build import (
+from app.application.knowledge.graph.build import (
     _EntityResolutionContext,
     _parse_datetime,
     _unique_surface_span,
     finalize_abandoned_graph_reservations,
 )
-from app.application.knowledge_graph_maintenance import _revision_source_versions
+from app.application.knowledge.graph.maintenance import _revision_source_versions
 from app.application.resource_folders.service import descendant_folder_ids
 from app.entities.resource_folders.models import ResourceFolder
 
@@ -721,7 +721,7 @@ def test_graph_rule_extractor_guards_skip_noise_clauses() -> None:
 
 
 def test_graph_rule_extractor_caps_entities_and_claims() -> None:
-    from app.domain.knowledge_graph import extraction as extraction_module
+    from app.domain.knowledge.graph import extraction as extraction_module
 
     with patch.object(extraction_module, "MAX_EXTRACTED_CLAIMS", 1):
         result = extraction_module.extract_graph_batch(
@@ -2964,7 +2964,7 @@ def test_validate_agent_permission_only_accepts_view() -> None:
 
 def test_knowledge_writes_recheck_locked_owner() -> None:
     from app.schemas.knowledge import KnowledgeBaseUpdateRequest
-    from app.domain.knowledge import kb as knowledge_kb
+    from app.domain.knowledge.bases import service as knowledge_kb
 
     stale = KnowledgeBase(
         id="kb-1",
@@ -3858,7 +3858,7 @@ def test_retrieval_evaluation_metrics_are_deterministic() -> None:
 
 
 def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None:
-    from app.application import knowledge_evaluation as evaluation_application
+    from app.application.knowledge.evaluation import runner as evaluation_application
     from app.entities.knowledge import KnowledgeTask
     from app.ports.parsing import KnowledgePipelineError
     from app.schemas.knowledge import KnowledgeEvaluationRunRequest
@@ -4440,7 +4440,7 @@ def test_evaluation_result_upsert_recovers_concurrent_insert() -> None:
 
 
 def test_evaluation_routes_delegate_to_application() -> None:
-    from app.api.v1.endpoints import knowledge_evaluation as evaluation_api
+    from app.api.v1.knowledge import evaluation as evaluation_api
     from app.schemas.knowledge import (
         KnowledgeEvaluationCaseCreateRequest,
         KnowledgeEvaluationRunRequest,
@@ -4731,7 +4731,7 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
         KnowledgeDocument,
         KnowledgeDocumentParentChunk,
     )
-    from app.domain.knowledge.references import (
+    from app.domain.knowledge.documents.references import (
         _resolution_context,
         _resolved_target,
         extract_reference_labels,
@@ -4793,7 +4793,7 @@ def test_reference_rebuild_reuses_resolution_context() -> None:
         KnowledgeDocumentParentChunk,
         KnowledgeDocumentReference,
     )
-    from app.domain.knowledge import references as reference_service
+    from app.domain.knowledge.documents import references as reference_service
 
     knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
     source = KnowledgeDocument(
@@ -4977,7 +4977,7 @@ def test_provider_credentials_aws_pairing_rule() -> None:
 
 def test_run_knowledge_model_test_uses_injected_providers() -> None:
     from app.schemas.knowledge import KnowledgeModelTestRequest
-    from app.domain.knowledge.services import run_knowledge_model_test
+    from app.domain.knowledge.service import run_knowledge_model_test
 
     embedding_model = SimpleNamespace(id="emb-1")
     reranker_model = SimpleNamespace(id="rerank-1")
@@ -4996,7 +4996,7 @@ def test_run_knowledge_model_test_uses_injected_providers() -> None:
             calls["rerank"] += 1
             return [{"index": 0, "relevance_score": 0.9}]
 
-    from app.domain.knowledge import kb as knowledge_kb
+    from app.domain.knowledge.bases import service as knowledge_kb
 
     original_embeddings = knowledge_kb.build_embeddings
     original_reranker = knowledge_kb.build_reranker
@@ -6676,7 +6676,7 @@ def test_team_to_response() -> None:
 
 def test_knowledge_document_and_attachment_response_mapping() -> None:
     from app.entities.knowledge import KnowledgeAttachment, KnowledgeDocument
-    from app.domain.knowledge.services import (
+    from app.domain.knowledge.service import (
         attachment_to_response,
         document_to_response,
     )
@@ -6717,7 +6717,7 @@ def test_knowledge_document_and_attachment_response_mapping() -> None:
 
 def test_knowledge_base_to_response() -> None:
     from app.entities.knowledge import KnowledgeBase
-    from app.domain.knowledge.services import knowledge_base_to_response
+    from app.domain.knowledge.service import knowledge_base_to_response
 
     knowledge_base = KnowledgeBase(
         id="kb-1",

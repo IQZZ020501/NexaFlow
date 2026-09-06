@@ -8,16 +8,16 @@ from app.api.v1.resource_folders import routes as resource_folders
 from app.api.v1.models import routes as models
 from app.api.v1.tools import mcp as mcp_servers
 from app.api.v1.tools import routes as tools
+from app.api.v1.knowledge import evaluation as knowledge_evaluation
+from app.api.v1.knowledge import graph as knowledge_graph
+from app.api.v1.knowledge import lifecycle as knowledge_lifecycle
+from app.api.v1.knowledge import retrieval as knowledge_retrieval
+from app.api.v1.knowledge import routes as knowledge
 from app.api.v1.tools import sources as tool_sources
 from app.api.v1.identity import auth, enterprise as enterprise_identity
 from app.api.v1.endpoints import (
     agent_access,
     agents,
-    knowledge,
-    knowledge_evaluation,
-    knowledge_graph,
-    knowledge_lifecycle,
-    knowledge_retrieval,
     workflows,
     workflow_access,
 )

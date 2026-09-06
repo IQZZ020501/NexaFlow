@@ -35,7 +35,7 @@ from app.schemas.agent import AgentInteractionConfig, AgentUploadResponse
 from app.schemas.workflow import WorkflowUploadResponse
 from app.domain.agents.permissions import require_agent_view
 from app.domain.agents.services import get_agent
-from app.domain.knowledge.services import (
+from app.domain.knowledge.service import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     get_default_knowledge_model,
 )

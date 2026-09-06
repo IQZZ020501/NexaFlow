@@ -27,7 +27,7 @@ from app.entities.knowledge import (
     KnowledgeDocumentChunk,
     KnowledgeTask,
 )
-from app.entities.knowledge_graph import (
+from app.entities.knowledge.graph import (
     GRAPH_REVIEW_OPEN,
     KnowledgeGraphAlias as GraphAliasRecord,
     KnowledgeGraphClaim as GraphClaimRecord,
@@ -40,7 +40,7 @@ from app.entities.knowledge_graph import (
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
 from app.entities.governance.models import WorkspaceGovernance
-from app.domain.knowledge_graph.schema import (
+from app.domain.knowledge.graph.schema import (
     GraphSchemaDefinition,
     default_graph_schema,
     graph_schema_hash,
@@ -49,14 +49,14 @@ from app.schemas.knowledge import (
     KnowledgeGraphEvaluationExpectation,
     KnowledgeQueryRequest,
 )
-from app.schemas.knowledge_graph import KnowledgeGraphReviewDecisionRequest
+from app.schemas.knowledge.graph import KnowledgeGraphReviewDecisionRequest
 from app.domain.knowledge.evaluation import graph_evaluation_metrics
-from app.domain.knowledge_graph import revisions as graph_revisions
-from app.domain.knowledge_graph.revisions import GraphRevisionConflict
-from app.domain.knowledge_graph.resolution import claim_fingerprint
-from app.domain.knowledge_graph.services import create_graph_schema
-from app.domain.knowledge_graph import traversal as graph_traversal
-from app.domain.knowledge_graph.models import (
+from app.domain.knowledge.graph import revisions as graph_revisions
+from app.domain.knowledge.graph.revisions import GraphRevisionConflict
+from app.domain.knowledge.graph.resolution import claim_fingerprint
+from app.domain.knowledge.graph.services import create_graph_schema
+from app.domain.knowledge.graph import traversal as graph_traversal
+from app.domain.knowledge.graph.models import (
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,
     KnowledgeGraphEntity,
@@ -64,7 +64,7 @@ from app.domain.knowledge_graph.models import (
 )
 from app.domain.audit.models import AuditLog
 from app.infra.runtime.model_utils import utc_now
-from app.domain.knowledge.orchestration import (
+from app.domain.knowledge.tasks.orchestration import (
     delete_knowledge_task,
     delete_knowledge_tasks,
     enqueue_graph_rebuild,
@@ -73,16 +73,14 @@ from app.domain.knowledge.orchestration import (
     retry_knowledge_task,
     stop_knowledge_task,
 )
-from app.application import (
-    knowledge_graph,
-    knowledge_graph_build,
-    knowledge_graph_maintenance,
-)
-from app.application import knowledge_retrieval as knowledge_retrieval_application
-from app.application import knowledge_graph_query as graph_query
-from app.domain.knowledge import lifecycle as knowledge_lifecycle
-from app.domain.knowledge import cleanup as knowledge_cleanup
-from app.domain.knowledge import task_runner as knowledge_task_runner
+from app.application.knowledge.graph import build as knowledge_graph_build
+from app.application.knowledge.graph import maintenance as knowledge_graph_maintenance
+from app.application.knowledge.graph import service as knowledge_graph
+from app.application.knowledge.retrieval import service as knowledge_retrieval_application
+from app.application.knowledge.graph import query as graph_query
+from app.domain.knowledge.documents import lifecycle as knowledge_lifecycle
+from app.domain.knowledge.storage import cleanup as knowledge_cleanup
+from app.domain.knowledge.tasks import runner as knowledge_task_runner
 
 
 GRAPH_IMPORT_RECORD = {

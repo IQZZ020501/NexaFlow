@@ -725,4 +725,4 @@ class KnowledgeStorageCleanup(Base):
 
 # The knowledge table owns active graph foreign keys, so its metadata import must
 # also register the referenced graph tables for application and test startup.
-from app.domain.knowledge_graph import models as _knowledge_graph_models  # noqa: E402,F401
+from app.domain.knowledge.graph import models as _knowledge_graph_models  # noqa: E402,F401

@@ -62,13 +62,13 @@ from app.infra.queue.celery import celery_app
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.domain.knowledge import cleanup as cleanup_service
-from app.domain.knowledge import documents as documents_service
-from app.domain.knowledge import kb as kb_service
-from app.domain.knowledge import lifecycle as lifecycle_service
-from app.domain.knowledge import orchestration as orchestration_service
-from app.domain.knowledge import permissions as permissions_service
-from app.domain.knowledge import task_runner as task_runner_service
+from app.domain.knowledge.storage import cleanup as cleanup_service
+from app.domain.knowledge.documents import service as documents_service
+from app.domain.knowledge.bases import service as kb_service
+from app.domain.knowledge.documents import lifecycle as lifecycle_service
+from app.domain.knowledge.tasks import orchestration as orchestration_service
+from app.domain.knowledge.bases import permissions as permissions_service
+from app.domain.knowledge.tasks import runner as task_runner_service
 from app.domain.knowledge import models as knowledge_models
 from app.tasks import knowledge as knowledge_tasks_module
 from app.tasks.knowledge import (
@@ -95,10 +95,10 @@ from app.adapters.parsing.pipeline import (
     ParentChunkDraft,
 )
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
-from app.domain.knowledge.orchestration import (
+from app.domain.knowledge.tasks.orchestration import (
     enqueue_parse_knowledge_document,
 )
-from app.domain.knowledge.task_runner import (
+from app.domain.knowledge.tasks.runner import (
     TASK_RUN_BUSY,
     TASK_RUN_FINISHED,
     batches,
@@ -1391,7 +1391,7 @@ async def run_direct_domain_tests(
 ) -> None:
     from fastapi import HTTPException
 
-    from app.application import knowledge as application_knowledge
+    from app.application.knowledge.documents import service as application_knowledge
 
     # ---- cross-workspace get -> 404 (research KB via main workspace route)
     async with get_session_factory()() as db:
@@ -4099,7 +4099,7 @@ async def run_direct_shareddomain_tests(
         KnowledgeDocumentCreateRequest,
         KnowledgeModelTestRequest,
     )
-    from app.domain.knowledge.services import (
+    from app.domain.knowledge.service import (
         get_knowledge_model as services_get_knowledge_model,
     )
     from app.infra.db.repositories.workspaces import (
@@ -4391,7 +4391,7 @@ async def run_direct_shareddomain_tests(
         )
 
         # ---- permissions: upsert / revoke / require ----
-        from app.domain.knowledge.permissions import (
+        from app.domain.knowledge.bases.permissions import (
             require_knowledge_base_permission,
         )
 

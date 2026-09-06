@@ -62,14 +62,14 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
 )
-from app.api.v1.endpoints import knowledge as knowledge_api
-from app.api.v1.endpoints import knowledge_evaluation as knowledge_evaluation_api
-from app.application import knowledge_graph as graph_application
-from app.application import knowledge_evaluation as knowledge_evaluation_application
-from app.api.v1.endpoints import knowledge_lifecycle as knowledge_lifecycle_api
-from app.api.v1.endpoints import knowledge_retrieval as knowledge_retrieval_api
-from app.application import knowledge as knowledge_application
-from app.application import knowledge_retrieval as knowledge_retrieval_application
+from app.api.v1.knowledge import routes as knowledge_api
+from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
+from app.application.knowledge.graph import service as graph_application
+from app.application.knowledge.evaluation import runner as knowledge_evaluation_application
+from app.api.v1.knowledge import lifecycle as knowledge_lifecycle_api
+from app.api.v1.knowledge import retrieval as knowledge_retrieval_api
+from app.application.knowledge.documents import service as knowledge_application
+from app.application.knowledge.retrieval import service as knowledge_retrieval_application
 from app.adapters.rag import retrieval as knowledge_retrieval
 from app.adapters.rag import vector_store as knowledge_vector_store
 from app.adapters.parsing import pipeline as knowledge_pipeline
@@ -91,19 +91,19 @@ from app.schemas.knowledge import (
     KnowledgeTaskBulkDeleteRequest,
     ResourcePermissionUpsertRequest,
 )
-from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
-from app.domain.knowledge.orchestration import (
+from app.schemas.knowledge.graph import KnowledgeGraphQueryResultResponse
+from app.domain.knowledge.tasks.orchestration import (
     enqueue_parse_knowledge_document,
 )
-from app.domain.knowledge_graph.resolution import claim_fingerprint
-from app.domain.knowledge_graph.revisions import (
+from app.domain.knowledge.graph.resolution import claim_fingerprint
+from app.domain.knowledge.graph.revisions import (
     create_revision as create_graph_revision,
     publish_revision as publish_graph_revision,
     stage_revision_change as stage_graph_revision_change,
 )
-from app.domain.knowledge_graph.schema import default_graph_schema
-from app.domain.knowledge_graph.services import create_graph_schema
-from app.domain.knowledge.task_runner import (
+from app.domain.knowledge.graph.schema import default_graph_schema
+from app.domain.knowledge.graph.services import create_graph_schema
+from app.domain.knowledge.tasks.runner import (
     recover_knowledge_tasks,
     run_knowledge_task,
 )

@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, ValidationError
 
-from app.application.knowledge_retrieval import retrieve_knowledge_base
+from app.application.knowledge.retrieval.service import retrieve_knowledge_base
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolSnapshot

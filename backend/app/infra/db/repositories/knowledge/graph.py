@@ -27,7 +27,7 @@ from app.entities.knowledge import (
     KnowledgeDocument,
     KnowledgeDocumentChunk,
 )
-from app.entities.knowledge_graph import (
+from app.entities.knowledge.graph import (
     GRAPH_REVISION_BUILDING,
     GRAPH_SCHEMA_ACTIVE,
     GRAPH_SCHEMA_RETIRED,
@@ -50,7 +50,7 @@ from app.domain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
     KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
 )
-from app.domain.knowledge_graph.models import (
+from app.domain.knowledge.graph.models import (
     KnowledgeGraphAlias as KnowledgeGraphAliasORM,
     KnowledgeGraphClaim as KnowledgeGraphClaimORM,
     KnowledgeGraphClaimEvidence as KnowledgeGraphClaimEvidenceORM,

@@ -2,9 +2,9 @@ import asyncio
 import logging
 import os
 
-from app.application.knowledge_evaluation import run_evaluation_task
-from app.application.knowledge_graph_build import run_graph_build_task
-from app.application.knowledge_graph_maintenance import reconcile_knowledge_graphs
+from app.application.knowledge.evaluation.runner import run_evaluation_task
+from app.application.knowledge.graph.build import run_graph_build_task
+from app.application.knowledge.graph.maintenance import reconcile_knowledge_graphs
 from app.entities.knowledge import TASK_GRAPH_REBUILD, TASK_GRAPH_SYNC
 from app.infra.queue.celery import celery_app
 from app.infra.config.settings import Settings
@@ -12,14 +12,14 @@ from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.session import get_session_factory
-from app.domain.knowledge.task_runner import (
+from app.domain.knowledge.tasks.runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
     list_recoverable_knowledge_task_ids,
     mark_knowledge_task_failed,
     run_knowledge_task,
 )
-from app.domain.knowledge.cleanup import (
+from app.domain.knowledge.storage.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
     run_knowledge_storage_cleanup,
 )

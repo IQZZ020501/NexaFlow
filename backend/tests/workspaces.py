@@ -20,17 +20,17 @@ from app.domain.agents.models import (
     AgentRunSnapshot,
     AgentRunState,
 )
-from app.domain.knowledge import cleanup as knowledge_cleanup
+from app.domain.knowledge.storage import cleanup as knowledge_cleanup
 from app.domain.knowledge.models import (
     KnowledgeBase,
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.domain.knowledge_graph.models import (
+from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision,
     KnowledgeGraphSchema,
 )
-from app.domain.knowledge.services import knowledge_object_storage
+from app.domain.knowledge.service import knowledge_object_storage
 from app.domain.analytics.services import resolve_analytics_period
 from app.domain.tools.models import McpServer, ToolSource
 from app.domain.workflows.models import WorkflowDefinition, WorkflowRunDetail
