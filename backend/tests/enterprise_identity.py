@@ -104,6 +104,17 @@ def main() -> None:
         ).query
     )
     assert feishu_query["code_challenge_method"] == ["S256"]
+    feishu_qr_url = build_authorization_url(
+        feishu,
+        "https://app.example.com/callback",
+        "feishu_qr.state",
+        "unused",
+        feishu_qr=True,
+    )
+    assert urlsplit(feishu_qr_url).netloc == "passport.feishu.cn"
+    feishu_qr_query = parse_qs(urlsplit(feishu_qr_url).query)
+    assert feishu_qr_query["state"] == ["feishu_qr.state"]
+    assert "code_challenge" not in feishu_qr_query
     with patch(
         "app.capabilities.enterprise_identity._request_json",
         new=AsyncMock(
@@ -127,6 +138,38 @@ def main() -> None:
         )
     assert resolved.subject_id == "ou-feishu"
     assert resolved.email == "fei@example.com"
+    qr_requests = AsyncMock(
+        side_effect=[
+            {"access_token": "qr-token"},
+            {
+                "open_id": "ou-feishu-qr",
+                "tenant_key": "fei-tenant",
+                "name": "Feishu QR User",
+            },
+        ]
+    )
+    with patch(
+        "app.capabilities.enterprise_identity._request_json",
+        new=qr_requests,
+    ):
+        resolved = asyncio.run(
+            resolve_external_principal(
+                feishu,
+                "secret",
+                "code",
+                "https://app.example.com/callback",
+                "unused",
+                feishu_qr=True,
+            )
+        )
+    assert resolved.subject_id == "ou-feishu-qr"
+    assert qr_requests.await_args_list[0].args[1] == (
+        "https://passport.feishu.cn/suite/passport/oauth/token"
+    )
+    assert "code_verifier" not in qr_requests.await_args_list[0].kwargs["data"]
+    assert qr_requests.await_args_list[1].args[1] == (
+        "https://passport.feishu.cn/suite/passport/oauth/userinfo"
+    )
     with patch(
         "app.capabilities.enterprise_identity._request_json",
         new=AsyncMock(return_value={}),
@@ -429,6 +472,28 @@ def main() -> None:
             display_name="Enterprise User",
             email="untrusted@example.com",
         )
+        qr_prepared = client.post(
+            f"/api/v1/auth/enterprise/{connection['id']}/qr?next=/app/agents"
+        )
+        assert qr_prepared.status_code == 200, qr_prepared.text
+        qr_authorize_url = qr_prepared.json()["authorization_url"]
+        assert urlsplit(qr_authorize_url).netloc == "passport.feishu.cn"
+        qr_query = parse_qs(urlsplit(qr_authorize_url).query)
+        assert qr_query["state"][0].startswith("feishu_qr.")
+        assert "code_challenge" not in qr_query
+        qr_resolver = AsyncMock(return_value=principal)
+        with patch(
+            "app.application.enterprise_identity.resolve_external_principal",
+            new=qr_resolver,
+        ):
+            qr_login = client.get(
+                "/api/v1/auth/enterprise/callback/feishu"
+                f"?state={qr_query['state'][0]}&code=qr-code",
+                follow_redirects=False,
+            )
+        assert qr_login.status_code == 303, qr_login.text
+        assert qr_resolver.await_args.kwargs["feishu_qr"] is True
+        state, _ = _start(client, connection["id"])
         with patch(
             "app.application.enterprise_identity.resolve_external_principal",
             new=AsyncMock(return_value=principal),
@@ -699,6 +764,12 @@ def main() -> None:
             },
         )
         assert dingtalk_config.status_code == 200, dingtalk_config.text
+        assert (
+            client.post(
+                f"/api/v1/auth/enterprise/{dingtalk_config.json()['id']}/qr"
+            ).status_code
+            == 404
+        )
 
         direct_login_cases = [
             (

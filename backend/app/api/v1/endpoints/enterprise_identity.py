@@ -32,6 +32,7 @@ from app.schemas.enterprise_identity import (
     EnterpriseIdentityBindingRequest,
     EnterpriseIdentityResponse,
     EnterpriseProvider,
+    EnterpriseQrLoginResponse,
     PublicEnterpriseConnectionsResponse,
 )
 
@@ -77,6 +78,22 @@ def _login_error_redirect(
     return response
 
 
+async def _enforce_rate_limit(request: Request, settings: Settings) -> None:
+    try:
+        await enforce_enterprise_login_rate_limit(settings, get_request_ip(request))
+    except EnterpriseLoginRateLimitExceeded as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many enterprise login attempts.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except EnterpriseLoginRateLimitUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Enterprise login rate limiter is unavailable.",
+        ) from exc
+
+
 @public_router.get("/connections", response_model=PublicEnterpriseConnectionsResponse)
 async def read_public_connections(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -94,24 +111,36 @@ async def start_enterprise_login(
     next_path: Annotated[str | None, Query(alias="next", max_length=2048)] = None,
     nonce: Annotated[str | None, Cookie(alias=SSO_NONCE_COOKIE)] = None,
 ) -> RedirectResponse:
-    try:
-        await enforce_enterprise_login_rate_limit(settings, get_request_ip(request))
-    except EnterpriseLoginRateLimitExceeded as exc:
-        raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS,
-            "Too many enterprise login attempts.",
-            headers={"Retry-After": str(exc.retry_after)},
-        ) from exc
-    except EnterpriseLoginRateLimitUnavailable as exc:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Enterprise login rate limiter is unavailable.",
-        ) from exc
+    await _enforce_rate_limit(request, settings)
     browser_nonce = nonce or secrets.token_urlsafe(32)
     destination = await begin_login(db, connection_id, browser_nonce, next_path, settings)
     response = RedirectResponse(destination, status_code=status.HTTP_302_FOUND)
     _set_nonce_cookie(response, browser_nonce, settings)
     return response
+
+
+@public_router.post("/{connection_id}/qr", response_model=EnterpriseQrLoginResponse)
+async def prepare_enterprise_qr_login(
+    connection_id: str,
+    request: Request,
+    response: Response,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    next_path: Annotated[str | None, Query(alias="next", max_length=2048)] = None,
+    nonce: Annotated[str | None, Cookie(alias=SSO_NONCE_COOKIE)] = None,
+) -> EnterpriseQrLoginResponse:
+    await _enforce_rate_limit(request, settings)
+    browser_nonce = nonce or secrets.token_urlsafe(32)
+    authorization_url = await begin_login(
+        db,
+        connection_id,
+        browser_nonce,
+        next_path,
+        settings,
+        feishu_qr=True,
+    )
+    _set_nonce_cookie(response, browser_nonce, settings)
+    return EnterpriseQrLoginResponse(authorization_url=authorization_url)
 
 
 @public_router.get("/callback/{provider}")

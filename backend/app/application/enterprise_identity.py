@@ -40,6 +40,7 @@ from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.enterprise_identity.services import safe_next_path, validate_connection_fields
 
 LOGIN_STATE_TTL_SECONDS = 600
+FEISHU_QR_STATE_PREFIX = "feishu_qr."
 
 
 class EnterpriseLoginRejected(Exception):
@@ -341,13 +342,17 @@ async def begin_login(
     browser_nonce: str,
     next_path: str | None,
     settings: Settings,
+    *,
+    feishu_qr: bool = False,
 ) -> str:
     connection = await identity_repository.get_connection_by_id(db, connection_id, enabled_only=True)
     if connection is None or await identity_repository.get_active_workspace_name(
         db, connection.workspace_id
     ) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Enterprise login is not available.")
-    raw_state = secrets.token_urlsafe(32)
+    if feishu_qr and connection.provider != "feishu":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Enterprise QR login is not available.")
+    raw_state = f"{FEISHU_QR_STATE_PREFIX if feishu_qr else ''}{secrets.token_urlsafe(32)}"
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = urlsafe_b64encode(sha256(code_verifier.encode()).digest()).rstrip(b"=").decode()
     now = utc_now()
@@ -369,6 +374,7 @@ async def begin_login(
         callback_url(settings, connection.provider),
         raw_state,
         code_challenge,
+        feishu_qr=feishu_qr,
     )
 
 
@@ -411,6 +417,7 @@ async def complete_login(
             code,
             callback_url(settings, provider),
             decrypt_secret(login_state.code_verifier_ciphertext, settings.model_secret_key),
+            feishu_qr=raw_state.startswith(FEISHU_QR_STATE_PREFIX),
         )
     except EnterpriseProviderError as exc:
         raise EnterpriseLoginRejected("provider_error", connection.workspace_id) from exc

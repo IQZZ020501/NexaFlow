@@ -16,18 +16,189 @@ import {
 } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { login } from "@/lib/api/auth"
 import { apiUrl } from "@/lib/api-client"
 import type {
   EnterpriseProvider,
   PublicEnterpriseConnection,
 } from "@/lib/api/enterprise-identity"
+import { prepareEnterpriseQrLogin } from "@/lib/api/enterprise-identity"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
 
 type LoginForm = {
   username: string
   password: string
+}
+
+const FEISHU_QR_SDK_URL =
+  "https://lf-package-cn.feishucdn.com/obj/feishu-static/lark/passport/qrcode/LarkSSOSDKWebQRCode-1.0.3.js"
+
+type FeishuQrLogin = {
+  matchOrigin: (origin: string) => boolean
+  matchData: (data: unknown) => boolean
+}
+
+declare global {
+  interface Window {
+    QRLogin?: (options: {
+      id: string
+      goto: string
+      width: string
+      height: string
+      style: string
+    }) => FeishuQrLogin
+  }
+}
+
+let feishuQrSdkPromise: Promise<void> | null = null
+
+function loadFeishuQrSdk() {
+  if (window.QRLogin) return Promise.resolve()
+  if (feishuQrSdkPromise) return feishuQrSdkPromise
+
+  feishuQrSdkPromise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script")
+    script.src = FEISHU_QR_SDK_URL
+    script.async = true
+    script.onload = () =>
+      window.QRLogin
+        ? resolve()
+        : reject(new Error("Feishu QR SDK did not initialize."))
+    script.onerror = () => reject(new Error("Feishu QR SDK failed to load."))
+    document.head.appendChild(script)
+  }).catch((error) => {
+    feishuQrSdkPromise = null
+    throw error
+  })
+
+  return feishuQrSdkPromise
+}
+
+function FeishuQrDialog({
+  connection,
+  next,
+  open,
+  onOpenChange,
+}: {
+  connection: PublicEnterpriseConnection | null
+  next?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useLanguage()
+  const containerId = React.useId().replaceAll(":", "")
+  const [attempt, setAttempt] = React.useState(0)
+  const [status, setStatus] = React.useState<"loading" | "ready" | "error">(
+    "loading"
+  )
+
+  React.useEffect(() => {
+    if (!open || !connection) return
+
+    let active = true
+    let handleMessage: ((event: MessageEvent) => void) | undefined
+
+    Promise.all([
+      prepareEnterpriseQrLogin(connection.id, next),
+      loadFeishuQrSdk(),
+    ])
+      .then(([payload]) => {
+        if (!active || !window.QRLogin) return
+        document.getElementById(containerId)?.replaceChildren()
+        const qrLogin = window.QRLogin({
+          id: containerId,
+          goto: payload.authorization_url,
+          width: "300",
+          height: "300",
+          style: "width:100%;height:300px",
+        })
+        handleMessage = (event) => {
+          if (
+            !qrLogin.matchOrigin(event.origin) ||
+            !qrLogin.matchData(event.data)
+          ) {
+            return
+          }
+          const tmpCode = (event.data as { tmp_code?: unknown }).tmp_code
+          if (typeof tmpCode === "string" && tmpCode) {
+            // The verified SDK message must continue through Feishu's OAuth page.
+            // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+            window.location.assign(
+              `${payload.authorization_url}&tmp_code=${encodeURIComponent(tmpCode)}`
+            )
+          }
+        }
+        window.addEventListener("message", handleMessage)
+        setStatus("ready")
+      })
+      .catch(() => {
+        if (active) setStatus("error")
+      })
+
+    return () => {
+      active = false
+      if (handleMessage) window.removeEventListener("message", handleMessage)
+      document.getElementById(containerId)?.replaceChildren()
+    }
+  }, [attempt, connection, containerId, next, open])
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setStatus("loading")
+        onOpenChange(nextOpen)
+      }}
+    >
+      <DialogContent className="sm:max-w-[360px]">
+        <DialogHeader className="text-center sm:text-center">
+          <DialogTitle>
+            {t("使用 {provider} 扫码登录", {
+              provider: connection?.name ?? "",
+            })}
+          </DialogTitle>
+          <DialogDescription>
+            {t("请使用飞书扫描二维码完成登录")}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="relative min-h-[300px] overflow-hidden rounded-md bg-white">
+          <div id={containerId} className="min-h-[300px] [&_iframe]:mx-auto" />
+          {status === "loading" ? (
+            <div
+              role="status"
+              aria-label={t("正在加载登录二维码")}
+              className="absolute inset-0 flex items-center justify-center bg-white text-neutral-500"
+            >
+              <LoaderCircleIcon className="size-6 animate-spin" />
+            </div>
+          ) : null}
+          {status === "error" ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-white px-6 text-center text-sm text-neutral-600">
+              <p>{t("二维码加载失败，请重新尝试")}</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setStatus("loading")
+                  setAttempt((value) => value + 1)
+                }}
+              >
+                {t("重试")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function EnterpriseProviderIcon({
@@ -91,6 +262,8 @@ export function LoginScreen({
     password: "",
   })
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [feishuConnection, setFeishuConnection] =
+    React.useState<PublicEnterpriseConnection | null>(null)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -196,6 +369,24 @@ export function LoginScreen({
                   const label = t("使用 {provider} 扫码登录", {
                     provider: connection.name,
                   })
+                  if (connection.provider === "feishu") {
+                    return (
+                      <Button
+                        key={connection.id}
+                        type="button"
+                        variant="outline"
+                        size="icon-lg"
+                        className="size-10 rounded-full"
+                        aria-label={label}
+                        title={connection.name}
+                        onClick={() => setFeishuConnection(connection)}
+                      >
+                        <EnterpriseProviderIcon
+                          provider={connection.provider}
+                        />
+                      </Button>
+                    )
+                  }
                   return (
                     <Button
                       key={connection.id}
@@ -217,6 +408,14 @@ export function LoginScreen({
           ) : null}
         </Card>
       </main>
+      <FeishuQrDialog
+        connection={feishuConnection}
+        next={next}
+        open={feishuConnection !== null}
+        onOpenChange={(open) => {
+          if (!open) setFeishuConnection(null)
+        }}
+      />
     </>
   )
 }

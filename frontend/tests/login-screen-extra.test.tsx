@@ -1,5 +1,5 @@
 /* @jsxImportSource react */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 
 import { LoginPageContent } from "@/components/auth/login-page-content"
 import { LoginScreen } from "@/components/auth/login-screen"
@@ -30,9 +30,13 @@ mockUseSession(
   })
 )
 
+const originalLocationAssign = window.location.assign
+
 afterEach(() => {
   cleanup()
   resetFetch()
+  delete window.QRLogin
+  window.location.assign = originalLocationAssign
 })
 
 function submitCredentials(username: string, password: string) {
@@ -60,7 +64,7 @@ describe("LoginScreen submission", () => {
     }
   })
 
-  test("renders configured providers as icon links", () => {
+  test("renders Feishu as a QR button and other providers as links", () => {
     renderPage(
       <LoginScreen
         onLogin={() => undefined}
@@ -89,13 +93,10 @@ describe("LoginScreen submission", () => {
       />
     )
 
-    const enterpriseLink = screen.getByRole("link", {
+    const feishuButton = screen.getByRole("button", {
       name: "使用 公司飞书 扫码登录",
     })
-    expect(enterpriseLink.getAttribute("href")).toBe(
-      "/api/v1/auth/enterprise/connection-1/start?next=%2Fapp%2Fagents"
-    )
-    expect(enterpriseLink.getAttribute("title")).toBe("公司飞书")
+    expect(feishuButton.getAttribute("title")).toBe("公司飞书")
     expect(
       document.querySelector('[data-provider-icon="feishu"]')
     ).not.toBeNull()
@@ -115,6 +116,84 @@ describe("LoginScreen submission", () => {
         .getByRole("link", { name: "使用 公司企微 扫码登录" })
         .getAttribute("href")
     ).toBe("/api/v1/auth/enterprise/connection-3/start?next=%2Fapp%2Fagents")
+  })
+
+  test("embeds the official Feishu QR flow and handles a verified scan", async () => {
+    const requests: { url: string; init?: RequestInit }[] = []
+    const authorizationUrl =
+      "https://passport.feishu.cn/suite/passport/oauth/authorize?state=qr-state"
+    const assign = mock(() => undefined)
+    window.location.assign = assign
+    let qrOptions:
+      | {
+          id: string
+          goto: string
+          width: string
+          height: string
+          style: string
+        }
+      | undefined
+    window.QRLogin = (options) => {
+      qrOptions = options
+      return {
+        matchOrigin: (origin) => origin === "https://passport.feishu.cn",
+        matchData: (data) =>
+          Boolean(data && typeof data === "object" && "tmp_code" in data),
+      }
+    }
+    withFetch((url, init) => {
+      requests.push({ url, init })
+      return jsonResponse({ authorization_url: authorizationUrl })
+    })
+
+    renderPage(
+      <LoginScreen
+        onLogin={() => undefined}
+        onNotify={() => undefined}
+        next="/app/agents"
+        enterpriseConnections={[
+          {
+            id: "connection-1",
+            provider: "feishu",
+            name: "公司飞书",
+            start_url: "/api/v1/auth/enterprise/connection-1/start",
+          },
+        ]}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "使用 公司飞书 扫码登录" })
+    )
+
+    await waitFor(() => expect(qrOptions?.goto).toBe(authorizationUrl))
+    expect(requests).toEqual([
+      {
+        url: "/api/v1/auth/enterprise/connection-1/qr?next=%2Fapp%2Fagents",
+        init: expect.objectContaining({ method: "POST" }),
+      },
+    ])
+    expect(document.getElementById(qrOptions!.id)).not.toBeNull()
+
+    fireEvent(
+      window,
+      new MessageEvent("message", {
+        origin: "https://attacker.example",
+        data: { tmp_code: "forged" },
+      })
+    )
+    expect(assign).not.toHaveBeenCalled()
+
+    fireEvent(
+      window,
+      new MessageEvent("message", {
+        origin: "https://passport.feishu.cn",
+        data: { tmp_code: "temporary code" },
+      })
+    )
+    expect(assign).toHaveBeenCalledWith(
+      `${authorizationUrl}&tmp_code=temporary%20code`
+    )
   })
 
   test("discovers enabled providers on the main login page", async () => {
@@ -139,7 +218,7 @@ describe("LoginScreen submission", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("link", { name: "使用 公司飞书 扫码登录" })
+        screen.getByRole("button", { name: "使用 公司飞书 扫码登录" })
       ).toBeTruthy()
     )
     expect(requestedUrls).toEqual(["/api/v1/auth/enterprise/connections"])

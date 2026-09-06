@@ -44,6 +44,10 @@ class PublicEnterpriseConnectionsResponse(BaseModel):
     connections: list[PublicEnterpriseConnectionResponse]
 
 
+class EnterpriseQrLoginResponse(BaseModel):
+    authorization_url: str
+
+
 class EnterpriseIdentityBindingRequest(BaseModel):
     user_id: str | None = Field(default=None, max_length=36)
 

@@ -10,6 +10,9 @@ from app.entities.enterprise_identity import EnterpriseIdentityConnection
 _FEISHU_AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 _FEISHU_TOKEN_URL = "https://accounts.feishu.cn/oauth/v3/token"
 _FEISHU_USER_URL = "https://open.feishu.cn/open-apis/authen/v1/user_info"
+_FEISHU_QR_AUTHORIZE_URL = "https://passport.feishu.cn/suite/passport/oauth/authorize"
+_FEISHU_QR_TOKEN_URL = "https://passport.feishu.cn/suite/passport/oauth/token"
+_FEISHU_QR_USER_URL = "https://passport.feishu.cn/suite/passport/oauth/userinfo"
 _DINGTALK_AUTHORIZE_URL = "https://login.dingtalk.com/oauth2/auth"
 _DINGTALK_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken"
 _DINGTALK_USER_URL = "https://api.dingtalk.com/v1.0/contact/users/me"
@@ -36,6 +39,8 @@ def build_authorization_url(
     redirect_uri: str,
     state: str,
     code_challenge: str,
+    *,
+    feishu_qr: bool = False,
 ) -> str:
     if connection.provider == "feishu":
         query = {
@@ -43,9 +48,15 @@ def build_authorization_url(
             "response_type": "code",
             "redirect_uri": redirect_uri,
             "state": state,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
         }
+        if feishu_qr:
+            return f"{_FEISHU_QR_AUTHORIZE_URL}?{urlencode(query)}"
+        query.update(
+            {
+                "code_challenge": code_challenge,
+                "code_challenge_method": "S256",
+            }
+        )
         return f"{_FEISHU_AUTHORIZE_URL}?{urlencode(query)}"
     if connection.provider == "dingtalk":
         query = {
@@ -107,8 +118,34 @@ async def resolve_external_principal(
     code: str,
     redirect_uri: str,
     code_verifier: str,
+    *,
+    feishu_qr: bool = False,
 ) -> ExternalPrincipal:
     if connection.provider == "feishu":
+        if feishu_qr:
+            token = await _request_json(
+                "POST",
+                _FEISHU_QR_TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": connection.client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            user = await _request_json(
+                "GET",
+                _FEISHU_QR_USER_URL,
+                headers={"Authorization": f"Bearer {_required_text(token, 'access_token')}"},
+            )
+            return ExternalPrincipal(
+                subject_id=_required_text(user, "open_id"),
+                tenant_id=_required_text(user, "tenant_key"),
+                display_name=str(user.get("name") or ""),
+                email=user.get("email") if isinstance(user.get("email"), str) else None,
+            )
         token = await _request_json(
             "POST",
             _FEISHU_TOKEN_URL,

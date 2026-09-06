@@ -47,6 +47,10 @@ export const en = {
   或使用企业账号登录: "Or use a company account",
   "使用 {provider} 登录": "Continue with {provider}",
   "使用 {provider} 扫码登录": "Scan to sign in with {provider}",
+  请使用飞书扫描二维码完成登录:
+    "Scan the QR code with Feishu to finish signing in",
+  正在加载登录二维码: "Loading sign-in QR code",
+  "二维码加载失败，请重新尝试": "The QR code failed to load. Try again.",
   "企业身份尚未绑定，请联系系统管理员":
     "Your company identity is not linked. Contact a system administrator.",
   "企业身份已停用，请联系系统管理员":
