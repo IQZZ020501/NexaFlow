@@ -119,4 +119,26 @@ test("discards stale provider settings after switching workspaces", async () => 
 
   expect(screen.getByDisplayValue("Feishu B")).toBeTruthy()
   expect(screen.queryByDisplayValue("Feishu A")).toBeNull()
+  expect(screen.queryByText("Tenant Key")).toBeNull()
+})
+
+test("omits the Feishu tenant key when saving", async () => {
+  let savedBody: Record<string, unknown> | undefined
+  withFetch((url, init) => {
+    if (init?.method === "PUT") {
+      savedBody = JSON.parse(String(init.body)) as Record<string, unknown>
+      return jsonResponse(connection("ws-1", "Feishu A"))
+    }
+    return payloadFor(url, "ws-1", "Feishu A")
+  })
+
+  renderPage(<EnterpriseIdentityPage />)
+  await waitFor(() => expect(screen.getByDisplayValue("Feishu A")).toBeTruthy())
+
+  await act(async () => {
+    screen.getAllByRole("button", { name: "保存" })[0]?.click()
+  })
+  await waitFor(() => expect(savedBody).toBeDefined())
+
+  expect(savedBody).not.toHaveProperty("tenant_id")
 })

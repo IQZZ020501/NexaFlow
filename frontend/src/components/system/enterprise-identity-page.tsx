@@ -174,7 +174,7 @@ export function EnterpriseIdentityPage() {
         name: form.name,
         ...(provider === "wecom" ? {} : { client_id: form.clientId }),
         ...(form.clientSecret ? { client_secret: form.clientSecret } : {}),
-        tenant_id: form.tenantId,
+        ...(provider === "feishu" ? {} : { tenant_id: form.tenantId }),
         ...(form.agentId ? { agent_id: form.agentId } : {}),
         enabled: form.enabled,
       })
@@ -259,7 +259,11 @@ export function EnterpriseIdentityPage() {
               <CardHeader>
                 <CardTitle>{form.name || t("企业登录")}</CardTitle>
                 <CardDescription>
-                  {t("配置服务商应用凭证和租户标识")}
+                  {t(
+                    provider === "feishu"
+                      ? "配置应用凭证，企业信息将在首次成功登录时自动识别"
+                      : "配置服务商应用凭证和租户标识"
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid min-w-0 gap-4">
@@ -318,19 +322,21 @@ export function EnterpriseIdentityPage() {
                     </FieldDescription>
                   ) : null}
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${provider}-tenant`}>
-                    {provider === "feishu" ? t("Tenant Key") : t("企业 ID")}
-                  </FieldLabel>
-                  <Input
-                    id={`${provider}-tenant`}
-                    value={form.tenantId}
-                    maxLength={255}
-                    onChange={(event) =>
-                      updateForm(provider, "tenantId", event.target.value)
-                    }
-                  />
-                </Field>
+                {provider !== "feishu" ? (
+                  <Field>
+                    <FieldLabel htmlFor={`${provider}-tenant`}>
+                      {t("企业 ID")}
+                    </FieldLabel>
+                    <Input
+                      id={`${provider}-tenant`}
+                      value={form.tenantId}
+                      maxLength={255}
+                      onChange={(event) =>
+                        updateForm(provider, "tenantId", event.target.value)
+                      }
+                    />
+                  </Field>
+                ) : null}
                 {provider === "wecom" ? (
                   <Field>
                     <FieldLabel htmlFor="wecom-agent">

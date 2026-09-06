@@ -63,6 +63,18 @@ async def get_connection_by_id(
     return mapping.to_entity(EnterpriseIdentityConnection, row) if row else None
 
 
+async def lock_connection_by_id(
+    db: AsyncSession, connection_id: str, *, enabled_only: bool = False
+) -> EnterpriseIdentityConnection | None:
+    statement = select(EnterpriseIdentityConnectionOrm).where(
+        EnterpriseIdentityConnectionOrm.id == connection_id
+    )
+    if enabled_only:
+        statement = statement.where(EnterpriseIdentityConnectionOrm.enabled.is_(True))
+    row = await db.scalar(statement.with_for_update())
+    return mapping.to_entity(EnterpriseIdentityConnection, row) if row else None
+
+
 async def get_connection_by_provider(
     db: AsyncSession, workspace_id: str, provider: str
 ) -> EnterpriseIdentityConnection | None:

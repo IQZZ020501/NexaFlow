@@ -150,8 +150,9 @@ async def upsert_connection(
     if workspace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found.")
     validate_connection_fields(provider, payload.client_id, payload.tenant_id, payload.agent_id)
+    submitted_tenant_id = (payload.tenant_id or "").strip()
     client_id = (
-        payload.tenant_id.strip()
+        submitted_tenant_id
         if provider == "wecom"
         else (payload.client_id or "").strip()
     )
@@ -171,15 +172,23 @@ async def upsert_connection(
             provider=provider,
             created_by_user_id=actor.id,
         )
+        tenant_id = submitted_tenant_id
     else:
+        tenant_id = (
+            connection.tenant_id
+            if provider == "feishu" and payload.tenant_id is None
+            else submitted_tenant_id
+        )
+        if provider == "feishu" and connection.client_id != client_id:
+            tenant_id = ""
         reset_identities = (
             connection.client_id != client_id
-            or connection.tenant_id != payload.tenant_id.strip()
+            or connection.tenant_id != tenant_id
         )
         disable_sessions = connection.enabled and not payload.enabled
     connection.name = payload.name.strip()
     connection.client_id = client_id
-    connection.tenant_id = payload.tenant_id.strip()
+    connection.tenant_id = tenant_id
     connection.agent_id = (payload.agent_id or "").strip() or None
     connection.enabled = payload.enabled
     connection.updated_by_user_id = actor.id
@@ -409,6 +418,7 @@ async def complete_login(
         await db.commit()
         raise EnterpriseLoginRejected("invalid_state")
     await db.commit()
+    authenticated_client_id = connection.client_id
 
     try:
         principal = await resolve_external_principal(
@@ -421,8 +431,29 @@ async def complete_login(
         )
     except EnterpriseProviderError as exc:
         raise EnterpriseLoginRejected("provider_error", connection.workspace_id) from exc
-    if not secrets.compare_digest(principal.tenant_id, connection.tenant_id):
+
+    connection = await identity_repository.lock_connection_by_id(
+        db, connection.id, enabled_only=True
+    )
+    if (
+        connection is None
+        or connection.provider != provider
+        or connection.client_id != authenticated_client_id
+    ):
+        await db.rollback()
+        raise EnterpriseLoginRejected("invalid_state")
+    if connection.tenant_id and not secrets.compare_digest(
+        principal.tenant_id, connection.tenant_id
+    ):
+        await db.rollback()
         raise EnterpriseLoginRejected("tenant_mismatch", connection.workspace_id)
+    if not connection.tenant_id:
+        if provider != "feishu":
+            await db.rollback()
+            raise EnterpriseLoginRejected("tenant_mismatch", connection.workspace_id)
+        connection.tenant_id = principal.tenant_id
+        connection.updated_at = now
+        connection = await identity_repository.save_connection(db, connection)
 
     identity = await identity_repository.lock_identity_by_subject(
         db, connection.id, principal.subject_id

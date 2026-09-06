@@ -82,7 +82,7 @@ export function saveEnterpriseConnection(
     name: string
     client_id?: string
     client_secret?: string
-    tenant_id: string
+    tenant_id?: string
     agent_id?: string
     enabled: boolean
   }

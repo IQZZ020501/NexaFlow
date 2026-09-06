@@ -1765,6 +1765,8 @@ export const en = {
   企业微信: "WeCom",
   "每个身份源固定连接一个工作空间，权限仍由 NexaFlow 成员关系决定":
     "Each identity source is fixed to one workspace; NexaFlow memberships still control access.",
+  "配置应用凭证，企业信息将在首次成功登录时自动识别":
+    "Configure the app credentials; organization details are detected after the first successful sign-in.",
   配置服务商应用凭证和租户标识:
     "Configure the provider app credentials and tenant identifier.",
   显示名称: "Display name",
@@ -1773,7 +1775,6 @@ export const en = {
   留空以保留当前密钥: "Leave blank to keep the current secret",
   请输入应用密钥: "Enter the app secret",
   "当前密钥提示：{hint}": "Current secret hint: {hint}",
-  "Tenant Key": "Tenant Key",
   "企业 ID": "Company ID",
   "应用 Agent ID": "App Agent ID",
   获取应用凭证: "Get app credentials",

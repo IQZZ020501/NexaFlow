@@ -24,12 +24,15 @@ def safe_next_path(value: str | None) -> str:
 def validate_connection_fields(
     provider: str,
     client_id: str | None,
-    tenant_id: str,
+    tenant_id: str | None,
     agent_id: str | None,
 ) -> None:
     if provider not in ENTERPRISE_IDENTITY_PROVIDERS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unsupported provider.")
-    if not tenant_id.strip() or (provider != "wecom" and not (client_id or "").strip()):
+    if (
+        (provider != "feishu" and not (tenant_id or "").strip())
+        or (provider != "wecom" and not (client_id or "").strip())
+    ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Client and tenant identifiers are required.",

@@ -91,6 +91,8 @@ def main() -> None:
     assert safe_next_path("/" + "a" * 2048) == "/app/apps"
     _raises(Exception, lambda: validate_connection_fields("unknown", "id", "tenant", None))
     _raises(Exception, lambda: validate_connection_fields("feishu", " ", "tenant", None))
+    validate_connection_fields("feishu", "client", None, None)
+    _raises(Exception, lambda: validate_connection_fields("dingtalk", "client", None, None))
     _raises(Exception, lambda: validate_connection_fields("wecom", "id", "tenant", None))
 
     feishu = EnterpriseIdentityConnection(
@@ -375,12 +377,12 @@ def main() -> None:
                 "name": "Company Feishu",
                 "client_id": "cli_test",
                 "client_secret": "super-secret",
-                "tenant_id": "tenant_test",
                 "enabled": True,
             },
         )
         assert created.status_code == 200, created.text
         connection = created.json()
+        assert connection["tenant_id"] == ""
         assert connection["has_client_secret"] is True
         assert connection["client_secret_hint"] == "****cret"
         assert "super-secret" not in created.text
@@ -493,6 +495,8 @@ def main() -> None:
             )
         assert qr_login.status_code == 303, qr_login.text
         assert qr_resolver.await_args.kwargs["feishu_qr"] is True
+        configured_connection = client.get(f"{base}/connections", headers=headers).json()[0]
+        assert configured_connection["tenant_id"] == "tenant_test"
         state, _ = _start(client, connection["id"])
         with patch(
             "app.application.enterprise_identity.resolve_external_principal",
@@ -651,11 +655,11 @@ def main() -> None:
             json={
                 "name": "Company Feishu",
                 "client_id": "cli_reconfigured",
-                "tenant_id": "tenant_test",
                 "enabled": True,
             },
         )
         assert reconfigured.status_code == 200, reconfigured.text
+        assert reconfigured.json()["tenant_id"] == ""
         assert (
             client.get(
                 "/api/v1/auth/me", headers=auth_headers(enterprise_access_token)
@@ -668,7 +672,6 @@ def main() -> None:
             json={
                 "name": "Company Feishu",
                 "client_id": "cli_reconfigured",
-                "tenant_id": "tenant_test",
                 "enabled": False,
             },
         )
@@ -722,7 +725,6 @@ def main() -> None:
             json={
                 "name": "Company Feishu",
                 "client_id": "cli_reconfigured",
-                "tenant_id": "tenant_test",
                 "enabled": True,
             },
         )

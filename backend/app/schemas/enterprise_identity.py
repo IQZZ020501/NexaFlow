@@ -10,7 +10,7 @@ class EnterpriseConnectionUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     client_id: str | None = Field(default=None, min_length=1, max_length=255)
     client_secret: str | None = Field(default=None, min_length=1, max_length=4096)
-    tenant_id: str = Field(min_length=1, max_length=255)
+    tenant_id: str | None = Field(default=None, min_length=1, max_length=255)
     agent_id: str | None = Field(default=None, max_length=255)
     enabled: bool = True
 
