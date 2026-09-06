@@ -4,7 +4,7 @@ from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.smtp_settings import SmtpSettings
+from app.entities.email.smtp import SmtpSettings
 from app.entities.user import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import utc_now
@@ -17,7 +17,7 @@ from app.infra.email.smtp import (
     send_smtp_message,
 )
 from app.infra.runtime.validation import normalize_email
-from app.schemas.smtp import (
+from app.schemas.email.smtp import (
     SmtpSettingsResponse,
     SmtpSettingsUpdateRequest,
     SmtpTestRequest,

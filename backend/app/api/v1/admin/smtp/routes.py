@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Settings, User, get_db, get_settings, require_global_admin
-from app.application.smtp import (
+from app.application.email.smtp import (
     get_smtp_settings,
     test_smtp_settings,
     update_smtp_settings,
 )
-from app.schemas.smtp import SmtpSettingsResponse, SmtpSettingsUpdateRequest, SmtpTestRequest
+from app.schemas.email.smtp import SmtpSettingsResponse, SmtpSettingsUpdateRequest, SmtpTestRequest
 
 
 router = APIRouter(prefix="/smtp", tags=["smtp"])

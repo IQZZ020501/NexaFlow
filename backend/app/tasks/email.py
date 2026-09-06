@@ -1,4 +1,4 @@
-from app.application.email import (
+from app.application.email.delivery import (
     list_due_email_delivery_ids,
     run_email_delivery,
 )

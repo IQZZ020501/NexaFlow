@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.email import (
+from app.application.email.delivery import (
     dispatch_email_deliveries,
     identity_email_is_ready,
     queue_identity_email,

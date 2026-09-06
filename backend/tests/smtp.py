@@ -16,13 +16,13 @@ from tests.support import (
     settings as test_settings,
     test_client,
 )
-from app.application.smtp import (
+from app.application.email.smtp import (
     _validate_email,
     _validate_entity,
     build_smtp_transport_config,
 )
 from app.domain.platform.models import SmtpSettings as SmtpSettingsOrm
-from app.entities.smtp_settings import SmtpSettings
+from app.entities.email.smtp import SmtpSettings
 from app.infra.security.secrets import decrypt_secret
 from app.infra.db.session import get_session_factory
 from app.infra.email.smtp import (
@@ -287,7 +287,7 @@ def main() -> None:
         assert retained.status_code == 200, retained.text
         assert retained.json()["has_password"] is True
 
-        with patch("app.application.smtp.send_smtp_message", new=AsyncMock()) as sender:
+        with patch("app.application.email.smtp.send_smtp_message", new=AsyncMock()) as sender:
             tested = client.post(
                 "/api/v1/admin/smtp/test",
                 headers=headers,
@@ -298,7 +298,7 @@ def main() -> None:
         sender.assert_awaited_once()
 
         with patch(
-            "app.application.smtp.send_smtp_message",
+            "app.application.email.smtp.send_smtp_message",
             new=AsyncMock(side_effect=SmtpDeliveryError("down")),
         ):
             failed_test = client.post(

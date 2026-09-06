@@ -24,7 +24,7 @@ from app.schemas.invitation import (
 )
 from app.schemas.user import UserResponse
 from app.application.identity import user_to_response_with_scopes
-from app.application.email import (
+from app.application.email.delivery import (
     cancel_source_emails,
     dispatch_email_deliveries,
     queue_identity_email,

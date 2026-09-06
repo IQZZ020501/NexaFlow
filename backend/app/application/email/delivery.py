@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.smtp import build_smtp_transport_config, smtp_identity_ready
+from app.application.email.smtp import build_smtp_transport_config, smtp_identity_ready
 from app.entities.email import EmailDelivery
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error

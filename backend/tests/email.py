@@ -22,7 +22,7 @@ from tests.support import (
     settings as test_settings,
     test_client,
 )
-from app.application.email import (
+from app.application.email.delivery import (
     EMAIL_BROKER_TIMEOUT_SECONDS,
     EMAIL_DISPATCH_TIMEOUT_SECONDS,
     EMAIL_PUBLISH_RETRY_POLICY,
@@ -35,7 +35,7 @@ from app.application.email import (
     run_email_delivery,
 )
 from app.entities.email import EmailDelivery as EmailDeliveryEntity
-from app.entities.smtp_settings import SmtpSettings
+from app.entities.email.smtp import SmtpSettings
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.security.secrets import decrypt_secret, encrypt_secret
@@ -224,11 +224,11 @@ async def test_delivery_edge_cases() -> None:
     create_delivery_mock = AsyncMock(side_effect=lambda _db, delivery: delivery)
     with (
         patch(
-            "app.application.email.smtp_repository.get",
+            "app.application.email.delivery.smtp_repository.get",
             new=AsyncMock(return_value=smtp),
         ),
         patch(
-            "app.application.email.email_repository.create_delivery",
+            "app.application.email.delivery.email_repository.create_delivery",
             new=create_delivery_mock,
         ),
     ):
@@ -274,11 +274,11 @@ async def test_delivery_edge_cases() -> None:
 
     with (
         patch(
-            "app.application.email.smtp_repository.get",
+            "app.application.email.delivery.smtp_repository.get",
             new=AsyncMock(return_value=None),
         ),
         patch(
-            "app.application.email._defer_unconfigured",
+            "app.application.email.delivery._defer_unconfigured",
             new=AsyncMock(),
         ) as defer,
     ):
@@ -287,11 +287,11 @@ async def test_delivery_edge_cases() -> None:
 
     with (
         patch(
-            "app.application.email.build_smtp_transport_config",
+            "app.application.email.delivery.build_smtp_transport_config",
             side_effect=SmtpConfigurationError("invalid"),
         ),
         patch(
-            "app.application.email._defer_unconfigured",
+            "app.application.email.delivery._defer_unconfigured",
             new=AsyncMock(),
         ) as defer,
     ):
@@ -332,7 +332,7 @@ async def test_delivery_edge_cases() -> None:
     assert due_id in await list_due_email_delivery_ids()
 
     with patch(
-        "app.application.email.run_email_delivery",
+        "app.application.email.delivery.run_email_delivery",
         new=AsyncMock(),
     ) as eager_delivery:
         await dispatch_email_deliveries(["one", "two"], settings)
@@ -349,7 +349,7 @@ async def test_delivery_edge_cases() -> None:
     with (
         patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async,
         patch(
-            "app.application.email.asyncio.wait_for",
+            "app.application.email.delivery.asyncio.wait_for",
             wraps=asyncio.wait_for,
         ) as wait_for,
     ):
@@ -377,7 +377,7 @@ async def test_delivery_edge_cases() -> None:
             "apply_async",
             side_effect=RuntimeError("broker down"),
         ),
-        patch("app.application.email.log_error") as log_error,
+        patch("app.application.email.delivery.log_error") as log_error,
     ):
         await dispatch_email_deliveries(["deferred"], broker_settings)
     log_error.assert_called_once()
@@ -726,7 +726,7 @@ def main() -> None:
         password_delivery_id = password_dispatch.await_args.args[0][0]
 
         failure = AsyncMock(side_effect=SmtpDeliveryError("SMTP delivery failed."))
-        with patch("app.application.email.send_smtp_message", new=failure):
+        with patch("app.application.email.delivery.send_smtp_message", new=failure):
             asyncio.run(run_email_delivery(password_delivery_id, test_settings()))
         retried = next(
             row
@@ -738,11 +738,11 @@ def main() -> None:
         assert retried.last_error_code == "SmtpDeliveryError"
 
         sender = AsyncMock()
-        with patch("app.application.email.send_smtp_message", new=sender):
+        with patch("app.application.email.delivery.send_smtp_message", new=sender):
             asyncio.run(run_email_delivery(password_delivery_id, test_settings()))
         sender.assert_not_awaited()
         asyncio.run(reset_delivery_due(password_delivery_id))
-        with patch("app.application.email.send_smtp_message", new=sender):
+        with patch("app.application.email.delivery.send_smtp_message", new=sender):
             asyncio.run(run_email_delivery(password_delivery_id, test_settings()))
         sender.assert_awaited_once()
         assert all(

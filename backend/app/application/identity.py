@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from app.domain.audit.services import record_audit_log
-from app.application.email import dispatch_email_deliveries, queue_identity_email
+from app.application.email.delivery import dispatch_email_deliveries, queue_identity_email
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.security.agent_rate_limit import (
