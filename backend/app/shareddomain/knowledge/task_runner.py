@@ -9,14 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import classify_error, log_error
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.session import get_session_factory
 from app.entities.user import User
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.infrastructure.repositories import user as user_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.repositories.identity import users as user_repository
 from app.entities.knowledge import (
     CHUNK_INDEX_FAILED_STATUS,
     CHUNK_INDEXED_STATUS,

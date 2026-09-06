@@ -42,8 +42,8 @@ from app.application.agents import (
     update_agent,
     upsert_agent_permission,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.session import get_db
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.schemas.agent import (
     AgentApiCredentialCreateRequest,
     AgentApiCredentialCreateResponse,

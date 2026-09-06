@@ -13,12 +13,12 @@ from app.application.workspace import build_workspace_context
 from app.entities.agents import AgentPublicationVersion, AgentRun
 from app.entities.tools import ToolSnapshot
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
 from app.shareddomain.agents.models import (
     AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_CANCELLED_STATUS,

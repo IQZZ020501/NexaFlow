@@ -2,7 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.user import User
-from app.infrastructure.repositories import workflow as workflow_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.schemas.workflow import (
     WorkflowDefinitionResponse,
     WorkflowDefinitionUpdateRequest,

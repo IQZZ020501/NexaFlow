@@ -22,9 +22,9 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphReviewItem,
 )
 from app.entities.user import User
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.schemas.knowledge import KnowledgeQueryRequest
 from app.schemas.knowledge_graph import (
     KnowledgeGraphNeighborhoodRequest,

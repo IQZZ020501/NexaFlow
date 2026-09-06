@@ -44,9 +44,9 @@ from app.capabilities.llm.credentials import (
     legacy_credential_config,
 )
 from app.capabilities.llm.models import RegisteredModel
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import ExternalServiceError, log_error
-from app.infrastructure.logger import get_logger
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import ExternalServiceError, log_error
+from app.infra.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

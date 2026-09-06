@@ -14,13 +14,13 @@ from tests.support import (
 )
 from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
 from app.entities.user import RefreshSession
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.security import hash_refresh_token
-from app.infrastructure import agent_rate_limit
-from app.infrastructure.agent_rate_limit import LoginRateLimitExceeded
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.system_log import SystemLog
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.security.auth import hash_refresh_token
+from app.infra.security import agent_rate_limit
+from app.infra.security.agent_rate_limit import LoginRateLimitExceeded
+from app.infra.db.session import get_session_factory
+from app.infra.observability.system_log import SystemLog
 
 
 async def get_system_log_events() -> list[str]:
@@ -65,8 +65,8 @@ async def seed_owned_mcp_source(
     user_id: str,
 ) -> tuple[str, str]:
     from app.entities.tools import McpServer, ToolSource
-    from app.infrastructure.repositories import mcp as mcp_repository
-    from app.infrastructure.repositories import tools as tools_repository
+    from app.infra.db.repositories.tools import mcp as mcp_repository
+    from app.infra.db.repositories.tools import repository as tools_repository
 
     async with get_session_factory()() as db:
         server = await mcp_repository.create_mcp_server(
@@ -97,8 +97,8 @@ async def assert_owned_mcp_source_tombstoned(
     server_id: str,
     source_id: str,
 ) -> None:
-    from app.infrastructure.repositories import mcp as mcp_repository
-    from app.infrastructure.repositories import tools as tools_repository
+    from app.infra.db.repositories.tools import mcp as mcp_repository
+    from app.infra.db.repositories.tools import repository as tools_repository
 
     async with get_session_factory()() as db:
         assert await mcp_repository.get_mcp_server_by_id(db, server_id) is None
@@ -116,7 +116,7 @@ async def seed_retained_tool_invocation(
     bound_by_user_id: str | None = None,
 ) -> None:
     from app.entities.tools import ToolInvocation
-    from app.infrastructure.repositories import tools as tools_repository
+    from app.infra.db.repositories.tools import repository as tools_repository
 
     async with get_session_factory()() as db:
         tool = next(
@@ -156,7 +156,7 @@ async def seed_agent_publication_audit(
 ) -> str:
     from app.capabilities.llm.registry import RegisteredModel
     from app.entities.agents import Agent, AgentPublicationVersion
-    from app.infrastructure.repositories import agent as agent_repository
+    from app.infra.db.repositories.agents import repository as agent_repository
 
     async with get_session_factory()() as db:
         model_id = await db.scalar(
@@ -216,7 +216,7 @@ async def seed_agent_run_binder_audit(
     created_by_user_id: str,
 ) -> None:
     from app.entities.agents import AgentRun
-    from app.infrastructure.repositories import agent as agent_repository
+    from app.infra.db.repositories.agents import repository as agent_repository
 
     agent_id = await seed_agent_publication_audit(
         workspace_id,
@@ -244,8 +244,8 @@ async def seed_agent_run_binder_audit(
 
 async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> None:
     from app.entities.resource_permission import ResourcePermission
-    from app.infrastructure.repositories import resource_permission as permission_repository
-    from app.infrastructure.repositories import tools as tools_repository
+    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
+    from app.infra.db.repositories.tools import repository as tools_repository
 
     async with get_session_factory()() as db:
         tool = next(

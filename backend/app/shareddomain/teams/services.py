@@ -4,12 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from app.shareddomain.audit.services import record_audit_log
-from app.infrastructure.validation import normalize_name
-from app.infrastructure.model_utils import new_id
+from app.infra.runtime.validation import normalize_name
+from app.infra.runtime.model_utils import new_id
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.user import User
-from app.infrastructure.repositories import team as team_repository
-from app.infrastructure.repositories import workspace as workspace_repository
+from app.infra.db.repositories.teams import repository as team_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.schemas.team import (
     TeamCreateRequest,
     TeamMemberCreateRequest,

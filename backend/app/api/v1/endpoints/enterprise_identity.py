@@ -19,13 +19,13 @@ from app.application.enterprise_identity import (
     upsert_connection,
 )
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.enterprise_login_rate_limit import (
+from app.infra.config.settings import Settings
+from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
     enforce_enterprise_login_rate_limit,
 )
-from app.infrastructure.session import get_db
+from app.infra.db.session import get_db
 from app.schemas.enterprise_identity import (
     EnterpriseConnectionResponse,
     EnterpriseConnectionUpdateRequest,

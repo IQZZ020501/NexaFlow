@@ -84,7 +84,7 @@ from app.shareddomain.knowledge_graph.traversal import (
     _load_path_records,
     assemble_path,
 )
-from app.infrastructure.repositories import knowledge_graph as graph_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
 from unittest.mock import AsyncMock, patch
 from app.application.knowledge_graph_build import (
     _EntityResolutionContext,
@@ -3659,7 +3659,7 @@ def test_reciprocal_rank_fusion_reports_named_rankings_deterministically() -> No
 
 
 def test_keyword_repository_uses_scoped_bm25_query() -> None:
-    from app.infrastructure.repositories import knowledge as knowledge_repository
+    from app.infra.db.repositories.knowledge import repository as knowledge_repository
 
     class FakeResult:
         def scalars(self):
@@ -3696,7 +3696,7 @@ def test_keyword_repository_uses_scoped_bm25_query() -> None:
 
 
 def test_graph_entity_repository_uses_scoped_bm25_query() -> None:
-    from app.infrastructure.repositories import knowledge_graph as graph_repository
+    from app.infra.db.repositories.knowledge import graph as graph_repository
 
     class FakeResult:
         def scalars(self):
@@ -4163,8 +4163,8 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         KnowledgeEvaluationExpectation,
         KnowledgeTask,
     )
-    from app.infrastructure.repositories import (
-        knowledge_evaluation as evaluation_repository,
+    from app.infra.db.repositories.knowledge import (
+        evaluation as evaluation_repository,
     )
     from app.schemas.knowledge import KnowledgeEvaluationCaseCreateRequest
     from app.shareddomain.knowledge import evaluation as evaluation_service
@@ -4369,8 +4369,8 @@ def test_evaluation_result_upsert_recovers_concurrent_insert() -> None:
     from sqlalchemy.exc import IntegrityError
 
     from app.entities.knowledge import KnowledgeEvaluationResult
-    from app.infrastructure.repositories import (
-        knowledge_evaluation as evaluation_repository,
+    from app.infra.db.repositories.knowledge import (
+        evaluation as evaluation_repository,
     )
     from app.shareddomain.knowledge.models import (
         KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
@@ -5428,7 +5428,7 @@ def test_external_mcp_policy_drift_requires_public_approval_but_blocks_api() -> 
 
 def test_external_stream_epoch_is_stable_and_sanitized() -> None:
     from app.application.agent_access import sanitize_external_agent_stream
-    from app.infrastructure.model_utils import utc_now
+    from app.infra.runtime.model_utils import utc_now
 
     now = utc_now()
     raw_epoch = "worker-task-internal-epoch"
@@ -5758,8 +5758,8 @@ def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
 
     from app.entities.tools import McpToolPolicy
-    from app.infrastructure.model_utils import utc_now
-    from app.infrastructure.repositories import mcp as mcp_repository
+    from app.infra.runtime.model_utils import utc_now
+    from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
 
     now = utc_now()
@@ -6026,7 +6026,7 @@ def test_repeated_run_feedback_write_is_idempotent() -> None:
 
     from app.application.agent_runs import update_run_feedback
     from app.entities.agents import AgentRun
-    from app.infrastructure.model_utils import utc_now
+    from app.infra.runtime.model_utils import utc_now
 
     feedback_updated_at = utc_now()
     run = AgentRun(
@@ -6206,7 +6206,7 @@ def test_agent_memory_compacts_old_turns() -> None:
 
 def test_agent_memory_query_is_bounded_and_projected() -> None:
     from app.entities.agents import AgentRun
-    from app.infrastructure.repositories import agent as agent_repository
+    from app.infra.db.repositories.agents import repository as agent_repository
     from sqlalchemy.dialects import postgresql
 
     statements = []
@@ -6444,7 +6444,7 @@ def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> 
 
 
 def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
-    from app.infrastructure.celery import worker_pool_for_platform
+    from app.infra.queue.celery import worker_pool_for_platform
 
     assert worker_pool_for_platform("darwin") == "threads"
     assert worker_pool_for_platform("win32") == "solo"
@@ -6456,7 +6456,7 @@ def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
 
     from celery.concurrency import get_implementation
 
-    from app.infrastructure.celery import worker_pool_for_platform
+    from app.infra.queue.celery import worker_pool_for_platform
 
     pool = get_implementation(worker_pool_for_platform("darwin"))(limit=2)
     first_started = threading.Event()
@@ -6480,7 +6480,7 @@ def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
 
 
 def test_worker_database_rejects_in_memory_sqlite() -> None:
-    from app.infrastructure.session import configure_database
+    from app.infra.db.session import configure_database
     from tests.support import settings
 
     try:
@@ -6495,7 +6495,7 @@ def test_windows_event_loop_policy_is_selector_based() -> None:
     import asyncio
     import sys
 
-    from app.infrastructure.event_loop import configure_windows_event_loop_policy
+    from app.infra.runtime.event_loop import configure_windows_event_loop_policy
 
     original_policy = asyncio.get_event_loop_policy()
     try:
@@ -6512,7 +6512,7 @@ def test_windows_event_loop_policy_is_selector_based() -> None:
 
 
 def test_agent_live_stream_round_trip() -> None:
-    from app.infrastructure import agent_live_stream
+    from app.infra.agents import live_stream as agent_live_stream
     from tests.support import settings
 
     class FakeRedis:
@@ -6781,7 +6781,7 @@ def test_mcp_stdio_configuration() -> None:
     import os
     import sys
 
-    from app.infrastructure.mcp_stdio import (
+    from app.infra.tools.mcp_stdio import (
         McpStdioConfigError,
         parse_mcp_stdio_config,
         serialize_mcp_stdio_config,

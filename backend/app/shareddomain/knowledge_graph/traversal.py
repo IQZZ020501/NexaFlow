@@ -9,7 +9,7 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
-from app.infrastructure.repositories import knowledge_graph as graph_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
 
 MAX_GRAPH_NODES = 200
 MAX_GRAPH_CLAIMS = 400

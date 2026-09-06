@@ -19,7 +19,7 @@ from tests.support import (
     test_client,
 )
 
-from app.infrastructure.session import get_session_factory
+from app.infra.db.session import get_session_factory
 from app.shareddomain.platform.models import User
 from app.shareddomain.knowledge.models import (
     KnowledgeBase,
@@ -46,11 +46,11 @@ from app.capabilities.embedding.pipeline import (
     split_text,
 )
 from app.capabilities.rag.vector_store import VectorChunk, VectorHit
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import (
-    knowledge_evaluation as evaluation_repository,
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import (
+    evaluation as evaluation_repository,
 )
-from app.infrastructure.repositories import user as user_repository
+from app.infra.db.repositories.identity import users as user_repository
 from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     KnowledgeEvaluationResult as KnowledgeEvaluationResultEntity,

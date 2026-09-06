@@ -7,7 +7,7 @@ from typing import Protocol
 
 from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm.runtime import ModelProviderError, build_registered_reranker
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 from app.capabilities.rag.vector_store import VectorHit
 
 QUERY_OVERFETCH_FACTOR = 5

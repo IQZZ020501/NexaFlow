@@ -11,16 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.agents import Agent
 from app.entities.user import User
 from app.entities.workflows import WorkflowUpload
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import new_id
-from app.infrastructure.object_storage import (
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import new_id
+from app.infra.storage.object_storage import (
     EmptyObjectError,
     ObjectTooLargeError,
     create_object_storage,
 )
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.ports.parsing import (
     ImageTextExtractor,
     KnowledgePipelineError,

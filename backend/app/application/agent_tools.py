@@ -19,8 +19,8 @@ from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolSnapshot
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_session_factory
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderStatusError,

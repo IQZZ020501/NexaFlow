@@ -3,7 +3,7 @@
 Covers app/application/agent_access.py, app/api/v1/endpoints/agent_access.py and
 app/infrastructure/agent_rate_limit.py.  Plain-script suite (no pytest): run with
 
-    uv run coverage run --source=app.application.agent_access,app.api.v1.endpoints.agent_access,app.infrastructure.agent_rate_limit \
+    uv run coverage run --source=app.application.agent_access,app.api.v1.endpoints.agent_access,app.infra.security.agent_rate_limit \
         --data-file=.coverage.AgentAccessCoverage -m tests.agent_access
     uv run coverage report -m --data-file=.coverage.AgentAccessCoverage
 
@@ -48,16 +48,16 @@ from app.application.agent_access import (
     hash_agent_access_token,
     sanitize_external_agent_stream,
 )
-from app.infrastructure import agent_rate_limit as rate_limit_module
-from app.infrastructure.agent_rate_limit import (
+from app.infra.security import agent_rate_limit as rate_limit_module
+from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,
     enforce_external_agent_rate_limit,
 )
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.session import get_session_factory
 from app.shareddomain.agents.models import (
     Agent as AgentOrm,
     AgentApiCredential as AgentApiCredentialOrm,
@@ -2194,7 +2194,7 @@ def assert_http_external_access() -> None:
             assert republished.status_code == 200, republished.text
 
             # ---- rate limit mapping in _enforce_rate_limit (749-759) ----
-            from app.infrastructure.agent_rate_limit import (
+            from app.infra.security.agent_rate_limit import (
                 AgentRateLimitExceeded,
                 AgentRateLimitUnavailable,
             )

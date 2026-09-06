@@ -3,7 +3,7 @@ import asyncio
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.infrastructure.session import get_session_factory
+from app.infra.db.session import get_session_factory
 from app.shareddomain.platform.models import User
 from app.shareddomain.platform.models import TeamMembership
 from tests.support import (

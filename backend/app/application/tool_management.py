@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.tool_runtime import queue_tool_invocation
 from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import tools as tool_repository
-from app.infrastructure.tool_dispatch import enqueue_tool_invocation
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.tools.dispatch import enqueue_tool_invocation
 from app.ports.tool_runtime import ToolInvocationContext
 from app.schemas.mcp import McpServerCreateRequest, McpServerResponse
 from app.schemas.tool import (

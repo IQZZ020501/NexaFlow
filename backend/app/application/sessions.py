@@ -1,9 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.user import User
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.security import hash_refresh_token
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.security.auth import hash_refresh_token
 from app.schemas.user import RefreshSessionResponse
 
 

@@ -12,8 +12,8 @@ from app.capabilities.enterprise_identity import (
     resolve_external_principal,
 )
 from app.entities.enterprise_identity import EnterpriseIdentityConnection
-from app.infrastructure import enterprise_login_rate_limit as rate_limit
-from app.infrastructure.enterprise_login_rate_limit import (
+from app.infra.security import enterprise_login_rate_limit as rate_limit
+from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
 )

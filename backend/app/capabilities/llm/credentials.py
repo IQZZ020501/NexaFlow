@@ -2,7 +2,7 @@ import json
 
 from cryptography.fernet import InvalidToken
 
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret
+from app.infra.security.secrets import decrypt_secret, encrypt_secret
 
 SECRET_BUNDLE_PREFIX = "credential-v1:"
 

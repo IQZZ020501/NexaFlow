@@ -15,7 +15,7 @@ from app.capabilities.rag.vector_store import (
     VectorChunk,
     VectorHit,
 )
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 
 
 class VectorStore(Protocol):

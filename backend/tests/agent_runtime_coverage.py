@@ -50,14 +50,14 @@ from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
-from app.infrastructure import agent_live_stream as live_stream_module
-from app.infrastructure.config import Settings
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import mcp as mcp_repository
-from app.infrastructure.repositories import tools as tool_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.model_utils import new_id, utc_now
+from app.infra.agents import live_stream as live_stream_module
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryInspectResponse,
@@ -1389,7 +1389,7 @@ async def db_setup(
 
     # RERANKER model inserted directly: the API would run a live provider test.
     from app.capabilities.llm.models import RegisteredModel as RegisteredModelORM
-    from app.infrastructure.model_utils import new_id
+    from app.infra.runtime.model_utils import new_id
 
     async with get_session_factory()() as db:
         reranker_orm = RegisteredModelORM(
@@ -6031,7 +6031,7 @@ async def assert_tool_service_paths(
         else:
             raise AssertionError("Missing MCP tool was policied.")
         # a tool with no policy row creates one (704, 722)
-        from app.infrastructure.repositories import tools as tools_repository
+        from app.infra.db.repositories.tools import repository as tools_repository
         from sqlalchemy import delete
 
         await db.execute(

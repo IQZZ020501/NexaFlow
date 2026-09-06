@@ -9,21 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.smtp import build_smtp_transport_config, smtp_identity_ready
 from app.entities.email import EmailDelivery
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import email as email_repository
-from app.infrastructure.repositories import smtp_settings as smtp_repository
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.smtp import (
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.email import delivery as email_repository
+from app.infra.db.repositories.email import smtp as smtp_repository
+from app.infra.security.secrets import decrypt_secret, encrypt_secret
+from app.infra.db.session import get_session_factory
+from app.infra.email.smtp import (
     SmtpConfigurationError,
     SmtpTransportConfig,
     send_smtp_message,
 )
-from app.infrastructure.system_log import record_system_log
-from app.infrastructure.validation import normalize_email
+from app.infra.observability.system_log import record_system_log
+from app.infra.runtime.validation import normalize_email
 from app.shareddomain.email.services import render_email
 
 logger = get_logger(__name__)
@@ -283,7 +283,7 @@ async def dispatch_email_deliveries(
 
     from app.tasks.email import run_email_delivery_job
 
-    from app.infrastructure.celery import celery_app
+    from app.infra.queue.celery import celery_app
 
     broker_transport_options = dict(celery_app.conf.broker_transport_options or {})
     broker_transport_options.update(

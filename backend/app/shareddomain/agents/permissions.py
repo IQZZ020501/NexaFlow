@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.agents import Agent
 from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
-from app.infrastructure.repositories import resource_permission as permission_repository
+from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
 from app.schemas.agent import AgentPermissionResponse
 from app.schemas.user import user_to_response
 from app.shareddomain.audit.services import record_audit_log

@@ -34,16 +34,16 @@ from app.entities.agents import (
     AgentRun,
 )
 from app.entities.user import User
-from app.infrastructure.agent_rate_limit import (
+from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,
     enforce_external_agent_rate_limit,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import APP_TIMEZONE, utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.validation import normalize_name
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import APP_TIMEZONE, utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.runtime.validation import normalize_name
 from app.schemas.agent import (
     AgentApiCredentialCreateResponse,
     AgentApiCredentialListResponse,

@@ -5,8 +5,8 @@ from app.application.tool_runtime import (
     execute_tool_invocation,
     list_recoverable_tool_test_invocation_ids,
 )
-from app.infrastructure.celery import celery_app
-from app.infrastructure.config import Settings
+from app.infra.queue.celery import celery_app
+from app.infra.config.settings import Settings
 from app.tasks import configure_task_worker, run_task_async
 
 

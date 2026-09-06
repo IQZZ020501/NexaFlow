@@ -26,7 +26,7 @@ from app.application.workflow_tool_runtime import WorkflowToolRuntime
 from app.entities.agents import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 from app.ports.llm import (
     ModelToolCall,
     RegisteredModel,

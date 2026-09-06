@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.audit import count_audit_logs, list_audit_logs
 from app.schemas.audit import AuditLogResponse
-from app.infrastructure.session import get_db
+from app.infra.db.session import get_db
 from app.api.deps import require_global_admin
 from app.entities.user import User
 

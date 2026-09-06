@@ -18,9 +18,9 @@ from app.capabilities.llm.runtime import (
     ModelProviderStatusError,
     test_model_connection,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.secrets import secret_hint
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.security.secrets import secret_hint
 
 ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"

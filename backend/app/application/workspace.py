@@ -6,23 +6,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
-from app.infrastructure.config import Settings
-from app.infrastructure.logger import get_logger, log_event
+from app.infra.config.settings import Settings
+from app.infra.observability.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 
 from app.shareddomain.audit.services import record_audit_log
-from app.infrastructure.validation import normalize_name
-from app.infrastructure.model_utils import new_id
+from app.infra.runtime.validation import normalize_name
+from app.infra.runtime.model_utils import new_id
 from app.entities.user import User
 from app.schemas.user import UserCreateRequest, UserPasswordResetResponse
 from app.application.identity import create_user
 from app.schemas.user import user_to_response
 from app.entities.workspace import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import mcp as mcp_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.ports import model_registry
 from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
 from app.shareddomain.tools.catalog import (

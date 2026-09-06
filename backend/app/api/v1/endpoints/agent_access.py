@@ -38,8 +38,8 @@ from app.application.agents import (
 from app.application.agent_access import PublishedAgentContext
 from app.entities.agents import AgentApiCredential
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.session import get_db
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.schemas.agent import (
     AgentApiDocumentationResponse,
     AgentUploadResponse,

@@ -10,13 +10,13 @@ from app.entities.user import User
 from app.entities.workspace import WorkspaceMembership
 from app.entities.workspace_invitation import WorkspaceInvitation
 from app.shareddomain.platform.models import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
-from app.infrastructure.repositories import workspace_invitation as invitation_repository
-from app.infrastructure.config import Settings
-from app.infrastructure.security import hash_password
-from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
-from app.infrastructure.model_utils import utc_now
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.repositories.identity import invitations as invitation_repository
+from app.infra.config.settings import Settings
+from app.infra.security.auth import hash_password
+from app.infra.runtime.validation import normalize_email, normalize_name, normalize_username
+from app.infra.runtime.model_utils import utc_now
 from app.schemas.invitation import (
     WorkspaceInvitationAcceptRequest,
     WorkspaceInvitationCreateRequest,

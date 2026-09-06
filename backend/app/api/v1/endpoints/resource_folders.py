@@ -16,7 +16,7 @@ from app.application.resource_folders import (
     move_resources,
     update_resource_folder,
 )
-from app.infrastructure.session import get_db
+from app.infra.db.session import get_db
 from app.schemas.resource_folder import (
     ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,

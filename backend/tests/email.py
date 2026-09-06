@@ -36,11 +36,11 @@ from app.application.email import (
 )
 from app.entities.email import EmailDelivery as EmailDeliveryEntity
 from app.entities.smtp_settings import SmtpSettings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import email as email_repository
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.smtp import SmtpConfigurationError, SmtpDeliveryError
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.email import delivery as email_repository
+from app.infra.security.secrets import decrypt_secret, encrypt_secret
+from app.infra.db.session import get_session_factory
+from app.infra.email.smtp import SmtpConfigurationError, SmtpDeliveryError
 from app.shareddomain.email.models import EmailDelivery, PasswordResetToken
 from app.shareddomain.email.services import EmailPayloadError, render_email
 
@@ -344,7 +344,7 @@ async def test_delivery_edge_cases() -> None:
     broker_settings = replace(settings, celery_task_always_eager=False)
     import app.tasks.email as email_tasks
 
-    from app.infrastructure.celery import celery_app
+    from app.infra.queue.celery import celery_app
 
     with (
         patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async,
@@ -828,7 +828,7 @@ def main() -> None:
                 return [4, 1, 42, 42]
 
         with patch(
-            "app.infrastructure.agent_rate_limit._rate_limit_redis",
+            "app.infra.security.agent_rate_limit._rate_limit_redis",
             return_value=LimitedRedis(),
         ):
             limited = client.post(
@@ -843,7 +843,7 @@ def main() -> None:
                 raise OSError("unavailable")
 
         with patch(
-            "app.infrastructure.agent_rate_limit._rate_limit_redis",
+            "app.infra.security.agent_rate_limit._rate_limit_redis",
             return_value=BrokenRedis(),
         ):
             limited = client.post(
@@ -866,7 +866,7 @@ def main() -> None:
         asyncio.run(test_delivery_edge_cases())
 
         import app.tasks.email  # noqa: F401
-        from app.infrastructure.celery import celery_app
+        from app.infra.queue.celery import celery_app
 
         assert "app.email.send" in celery_app.tasks
         assert "app.email.recover" in celery_app.tasks

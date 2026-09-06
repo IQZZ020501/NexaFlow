@@ -24,14 +24,14 @@ from app.application.workflow_uploads import (
 )
 from app.entities.agents import AgentRun
 from app.entities.user import User
-from app.infrastructure.agent_rate_limit import (
+from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,
     enforce_external_agent_rate_limit,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import workflow as workflow_repository
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.schemas.workflow import (
     ExternalWorkflowProgressEventResponse,
     ExternalWorkflowRunCreateRequest,

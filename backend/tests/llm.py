@@ -24,7 +24,7 @@ from app.capabilities.llm.runtime import (
     build_reranker,
     extract_registered_image_text,
 )
-from app.infrastructure.session import get_session_factory
+from app.infra.db.session import get_session_factory
 from tests.support import (
     activate_admin,
     activate_user,

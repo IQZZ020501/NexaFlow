@@ -4,8 +4,8 @@ import threading
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-from app.infrastructure.config import Settings
-from app.infrastructure.session import configure_database
+from app.infra.config.settings import Settings
+from app.infra.db.session import configure_database
 
 _configured_process_id: int | None = None
 # ponytail: global init lock; split by settings only if worker setup becomes dynamic.

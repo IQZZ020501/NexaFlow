@@ -19,7 +19,7 @@ from app.entities.tools import (
     ToolVersion,
 )
 from app.entities.user import User
-from app.infrastructure.model_utils import utc_now
+from app.infra.runtime.model_utils import utc_now
 from app.shareddomain.tools.permissions import (
     ToolAuthorization,
     ToolPermissionLabel,
@@ -655,8 +655,8 @@ async def reconcile_mcp_discovery(
     source: ToolSource,
     discovery: list[dict[str, Any]],
 ) -> None:
-    from app.infrastructure.repositories import tools as repository
-    from app.infrastructure.repositories import workspace as workspace_repository
+    from app.infra.db.repositories.tools import repository as repository
+    from app.infra.db.repositories.workspaces import repository as workspace_repository
 
     await workspace_repository.lock_workspace(db, source.workspace_id)
     locked_source = await repository.lock_tool_source(
@@ -857,7 +857,7 @@ async def list_mcp_catalog_leaves(
     *,
     available_only: bool = False,
 ) -> list[McpCatalogLeaf]:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     return [
         McpCatalogLeaf(source=source, tool=tool, version=version, policy=policy)
@@ -888,7 +888,7 @@ async def list_tool_catalog(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[ToolCatalogItem]:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     if not has_tool_workspace_access(actor, workspace_role):
         return []
@@ -929,7 +929,7 @@ async def get_tool_catalog_detail(
     actor: User,
     workspace_role: str | None,
 ) -> ToolCatalogDetail:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     row = await repository.get_tool_catalog_detail_row(
         db,
@@ -1383,7 +1383,7 @@ async def ensure_workspace_system_catalog(
     db: AsyncSession,
     workspace_id: str,
 ) -> None:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     catalog = build_workspace_system_catalog(workspace_id)
     for source in catalog.sources:
@@ -1420,7 +1420,7 @@ async def _tombstone_mcp_sources(
     db: AsyncSession,
     sources: list[ToolSource],
 ) -> None:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     timestamp = utc_now()
     for source in sources:
@@ -1446,7 +1446,7 @@ async def tombstone_mcp_server_catalog(
     workspace_id: str,
     mcp_server_id: str,
 ) -> None:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     sources = await repository.list_mcp_tool_sources(
         db,
@@ -1460,7 +1460,7 @@ async def tombstone_workspace_mcp_catalog(
     db: AsyncSession,
     workspace_id: str,
 ) -> None:
-    from app.infrastructure.repositories import tools as repository
+    from app.infra.db.repositories.tools import repository as repository
 
     sources = await repository.list_mcp_tool_sources(db, workspace_id)
     await _tombstone_mcp_sources(db, sources)

@@ -22,8 +22,8 @@ from app.application.governance import (
     _probe_worker,
     get_admin_health,
 )
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.session import get_session_factory
 from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeTask
 from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevision,
@@ -95,12 +95,12 @@ async def check_health_probe_functions() -> None:
     connection.__enter__.return_value = connection
     celery_app.connection_for_read.return_value = connection
     celery_app.control.ping.return_value = [{"worker@test": {"ok": "pong"}}]
-    with patch("app.infrastructure.celery.celery_app", celery_app):
+    with patch("app.infra.queue.celery.celery_app", celery_app):
         await _probe_worker(test_settings())
     celery_app.control.ping.assert_called_once()
 
     celery_app.control.ping.return_value = []
-    with patch("app.infrastructure.celery.celery_app", celery_app):
+    with patch("app.infra.queue.celery.celery_app", celery_app):
         try:
             await _probe_worker(test_settings())
         except RuntimeError:

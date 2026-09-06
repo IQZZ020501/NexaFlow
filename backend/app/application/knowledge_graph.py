@@ -29,12 +29,12 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphSchema,
 )
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.ports.parsing import chunk_token_count
 from app.schemas.knowledge import KnowledgeQueryRequest, KnowledgeTaskResponse
 from app.schemas.knowledge_graph import (

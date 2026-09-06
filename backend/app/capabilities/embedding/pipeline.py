@@ -8,7 +8,7 @@ from zipfile import BadZipFile, LargeZipFile, ZipFile, is_zipfile
 
 import mammoth
 
-from app.infrastructure.model_utils import new_id
+from app.infra.runtime.model_utils import new_id
 
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150

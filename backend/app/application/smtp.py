@@ -6,17 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.smtp_settings import SmtpSettings
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import smtp_settings as smtp_repository
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infrastructure.smtp import (
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.email import smtp as smtp_repository
+from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
+from app.infra.email.smtp import (
     SmtpConfigurationError,
     SmtpDeliveryError,
     SmtpTransportConfig,
     send_smtp_message,
 )
-from app.infrastructure.validation import normalize_email
+from app.infra.runtime.validation import normalize_email
 from app.schemas.smtp import (
     SmtpSettingsResponse,
     SmtpSettingsUpdateRequest,

@@ -8,14 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tool_adapters import build_tool_adapter
 from app.entities.tools import ToolInvocation, ToolSnapshot
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import mcp as mcp_repository
-from app.infrastructure.repositories import resource_permission as permission_repository
-from app.infrastructure.repositories import tools as tool_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.session import get_session_factory
 from app.ports.tool_runtime import (
     ToolAdapter,
     ToolAdapterBusy,

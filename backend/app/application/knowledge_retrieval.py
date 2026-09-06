@@ -23,12 +23,12 @@ from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocumentChunk,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.model_utils import new_id
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.infrastructure.repositories import (
-    knowledge_reference as knowledge_reference_repository,
+from app.infra.config.settings import Settings
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.runtime.model_utils import new_id
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.repositories.knowledge import (
+    references as knowledge_reference_repository,
 )
 from app.ports.llm import build_reranker
 from app.ports.vector_store import query_vectors

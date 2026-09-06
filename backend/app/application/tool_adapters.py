@@ -7,16 +7,16 @@ from typing import Any
 
 from app.application.artifacts import create_generated_artifact
 from app.entities.tools import McpServer, ToolSnapshot
-from app.infrastructure.code_sandbox import (
+from app.infra.sandbox.client import (
     WorkflowSandboxBusyError,
     WorkflowSandboxError,
     execute_artifact_code,
     execute_skill_artifact,
     execute_workflow_code,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import APP_TIMEZONE, utc_now
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import APP_TIMEZONE, utc_now
+from app.infra.db.session import get_session_factory
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.ports.tool_runtime import (
     ToolAdapter,

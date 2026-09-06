@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.audit import AuditLog
 from app.entities.user import User
-from app.infrastructure.repositories import audit as audit_repository
+from app.infra.db.repositories.audit import repository as audit_repository
 from app.schemas.audit import AuditLogResponse
 
 

@@ -19,10 +19,10 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import ExternalServiceError, log_error
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.mcp_stdio import (
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import ExternalServiceError, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.tools.mcp_stdio import (
     McpStdioConfig,
     McpStdioConfigError,
     validate_mcp_stdio_config_runtime,

@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.infrastructure.repositories import resource_permission as permission_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.validation import normalize_name
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.runtime.validation import normalize_name
 from app.ports import model_registry as model_repository
 from app.ports.llm import (
     ModelProviderError,

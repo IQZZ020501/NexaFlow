@@ -5,11 +5,11 @@ from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.object_storage import create_object_storage
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.storage.object_storage import create_object_storage
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
 
 
 async def queue_upload_cleanups(

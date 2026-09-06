@@ -8,23 +8,23 @@ from fastapi import HTTPException, status
 
 from app.shareddomain.audit.services import record_audit_log
 from app.application.email import dispatch_email_deliveries, queue_identity_email
-from app.infrastructure.config import Settings
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.agent_rate_limit import (
+from app.infra.config.settings import Settings
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.security.agent_rate_limit import (
     LoginRateLimitExceeded,
     LoginRateLimitUnavailable,
     enforce_login_rate_limit,
 )
-from app.infrastructure.validation import normalize_email, normalize_name, normalize_username
+from app.infra.runtime.validation import normalize_email, normalize_name, normalize_username
 from app.entities.user import RefreshSession, User
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import tools as tools_repository
-from app.infrastructure.repositories import team as team_repository
-from app.infrastructure.repositories import workspace as workspace_repository
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.repositories import email as email_repository
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.tools import repository as tools_repository
+from app.infra.db.repositories.teams import repository as team_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.repositories.email import delivery as email_repository
 from app.schemas.user import (
     MembershipResponse,
     MeResponse,
@@ -37,14 +37,14 @@ from app.schemas.user import (
     UserWorkspaceResponse,
     user_to_response,
 )
-from app.infrastructure.security import (
+from app.infra.security.auth import (
     create_access_token,
     create_refresh_token,
     hash_password,
     hash_refresh_token,
     verify_password,
 )
-from app.infrastructure.system_log import record_system_log
+from app.infra.observability.system_log import record_system_log
 from app.shareddomain.workflows.uploads import queue_upload_cleanups
 from app.shareddomain.tools.services import delete_owned_mcp_servers_for_user
 from app.entities.team import Team, TeamMembership

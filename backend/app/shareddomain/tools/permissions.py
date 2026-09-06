@@ -104,8 +104,8 @@ async def require_managed_tool(
     *,
     lock: bool,
 ) -> Tool:
-    from app.infrastructure.repositories import resource_permission as repository
-    from app.infrastructure.repositories import tools as tool_repository
+    from app.infra.db.repositories.workspaces import resource_permissions as repository
+    from app.infra.db.repositories.tools import repository as tool_repository
 
     getter = tool_repository.lock_tool if lock else tool_repository.get_tool
     tool = await getter(db, workspace_id, tool_id)
@@ -133,7 +133,7 @@ async def list_tool_permissions(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[ToolPermissionEntry]:
-    from app.infrastructure.repositories import resource_permission as repository
+    from app.infra.db.repositories.workspaces import resource_permissions as repository
 
     tool = await require_managed_tool(
         db,
@@ -163,7 +163,7 @@ async def upsert_tool_permission(
     actor: User,
     workspace_role: str | None,
 ) -> ToolPermissionEntry:
-    from app.infrastructure.repositories import resource_permission as repository
+    from app.infra.db.repositories.workspaces import resource_permissions as repository
 
     tool = await require_managed_tool(
         db,
@@ -236,7 +236,7 @@ async def revoke_tool_permission(
     actor: User,
     workspace_role: str | None,
 ) -> None:
-    from app.infrastructure.repositories import resource_permission as repository
+    from app.infra.db.repositories.workspaces import resource_permissions as repository
 
     tool = await require_managed_tool(
         db,

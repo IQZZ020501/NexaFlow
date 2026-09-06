@@ -21,16 +21,16 @@ from app.application.agent_tools import (
 from app.application.tool_runtime import preflight_tool_snapshot
 from app.entities.agents import Agent, AgentPublicationVersion, AgentRun
 from app.entities.user import User
-from app.infrastructure.agent_live_stream import (
+from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,
     AgentLiveStreamReader,
 )
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 from app.application.governance import enforce_workspace_run_quota
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import tools as tool_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.session import get_session_factory
 from app.schemas.agent import AgentRunResponse, AgentToolCallResponse
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.agents.services import (

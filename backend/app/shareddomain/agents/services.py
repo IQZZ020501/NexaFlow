@@ -9,12 +9,12 @@ from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
 from app.entities.user import User
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import tools as tools_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.validation import normalize_name
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.tools import repository as tools_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.runtime.validation import normalize_name
 from app.schemas.agent import (
     AgentCreateRequest,
     AgentInteractionConfig,

@@ -9,10 +9,10 @@ from app.application.agent_executor import (
 )
 from app.application.run_dispatch import run_durable_application_run
 from app.application.agent_child_runs import reconcile_workflow_agent_children
-from app.infrastructure.celery import celery_app
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger, log_event
+from app.infra.queue.celery import celery_app
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger, log_event
 from app.tasks import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)

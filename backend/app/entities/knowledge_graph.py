@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from app.infrastructure.model_utils import new_id, utc_now
+from app.infra.runtime.model_utils import new_id, utc_now
 
 GRAPH_SCHEMA_DRAFT = "draft"
 GRAPH_SCHEMA_ACTIVE = "active"

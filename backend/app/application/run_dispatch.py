@@ -5,9 +5,9 @@ from app.application.agent_executor import (
 )
 from app.application.agent_child_runs import reconcile_workflow_agent_children
 from app.application.workflow_executor import run_durable_workflow_run
-from app.infrastructure.config import Settings
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
 
 
 async def run_durable_application_run(

@@ -36,10 +36,10 @@ from app.application import (
     tool_adapters,
 )
 from app.application import agents as agent_application
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import tools as tool_repository
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.repositories import user as user_repository
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.repositories.identity import users as user_repository
 from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
 from app.capabilities.mcp import client as mcp_client_module
 from app.capabilities.mcp.client import (
@@ -65,9 +65,9 @@ from app.entities.agents import AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolInvocation
 from app.entities.workflows import WorkflowUpload
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.system_log import SystemLog
+from app.infra.db.session import get_session_factory
+from app.infra.runtime.model_utils import utc_now
+from app.infra.observability.system_log import SystemLog
 from app.shareddomain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
@@ -238,7 +238,7 @@ async def grant_mcp_tool_use(
     user_id: str,
 ) -> None:
     from app.entities.resource_permission import ResourcePermission
-    from app.infrastructure.repositories import resource_permission as permission_repository
+    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
     from app.shareddomain.tools.catalog import get_mcp_catalog_leaf
 
     async with get_session_factory()() as db:
@@ -2749,7 +2749,7 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
 
 
 def assert_external_agent_access() -> None:
-    from app.infrastructure.agent_rate_limit import (
+    from app.infra.security.agent_rate_limit import (
         AgentRateLimitExceeded,
         AgentRateLimitUnavailable,
     )
@@ -4794,8 +4794,8 @@ def test_cancelling_root_run_cancels_active_children() -> None:
     import hashlib
     from unittest.mock import AsyncMock, patch
 
-    from app.infrastructure.model_utils import new_id, utc_now
-    from app.infrastructure.session import get_session_factory
+    from app.infra.runtime.model_utils import new_id, utc_now
+    from app.infra.db.session import get_session_factory
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)

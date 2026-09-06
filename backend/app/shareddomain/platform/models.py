@@ -18,8 +18,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.entities.smtp_settings import SMTP_SETTINGS_ID
-from app.infrastructure.base import Base
-from app.infrastructure.model_utils import APP_TIMEZONE_NAME, new_id, utc_now
+from app.infra.db.base import Base
+from app.infra.runtime.model_utils import APP_TIMEZONE_NAME, new_id, utc_now
 
 
 class User(Base):

@@ -3,8 +3,8 @@ from datetime import datetime
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infrastructure.base import Base
-from app.infrastructure.model_utils import new_id, utc_now
+from app.infra.db.base import Base
+from app.infra.runtime.model_utils import new_id, utc_now
 
 
 class EnterpriseIdentityConnection(Base):

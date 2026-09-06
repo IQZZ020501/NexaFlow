@@ -2,8 +2,8 @@
 
 Single facade consumed by the knowledge API endpoints: CRUD, document
 lifecycle, task dispatch, retrieval orchestration, and object-file access.
-Endpoints must not import ``app.shareddomain``, ``app.capabilities``, or
-``app.infrastructure`` directly; this module is the only entry point.
+Endpoints must not import ``app.domain``, ``app.adapters``, or
+``app.infra`` directly; this module is the only entry point.
 """
 
 from pathlib import Path
@@ -20,10 +20,10 @@ from app.application.knowledge_evaluation import (
     get_evaluation_summary,
     get_latest_evaluation_summary,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 from app.ports.parsing import IMAGE_DOCUMENT_EXTENSIONS
 from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse

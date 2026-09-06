@@ -28,8 +28,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.model_utils import new_id, utc_now
+from app.infra.db.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
 from app.entities.knowledge import (
     CHUNK_INDEXED_STATUS,
     CHUNK_INDEX_FAILED_STATUS,
@@ -58,10 +58,10 @@ from app.entities.knowledge import (
 )
 from app.entities.user import User
 from app.entities.workflows import WorkflowUploadStorageCleanup
-from app.infrastructure.celery import celery_app
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workflow as workflow_repository
+from app.infra.queue.celery import celery_app
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.shareddomain.knowledge import cleanup as cleanup_service
 from app.shareddomain.knowledge import documents as documents_service
 from app.shareddomain.knowledge import kb as kb_service
@@ -4102,8 +4102,8 @@ async def run_direct_shareddomain_tests(
     from app.shareddomain.knowledge.services import (
         get_knowledge_model as services_get_knowledge_model,
     )
-    from app.infrastructure.repositories import (
-        resource_permission as permission_repository,
+    from app.infra.db.repositories.workspaces import (
+        resource_permissions as permission_repository,
     )
     from app.entities.resource_permission import ResourcePermission
 

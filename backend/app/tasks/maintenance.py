@@ -1,9 +1,9 @@
 from celery import Task
 
 from app.application.artifacts import cleanup_expired_generated_artifacts
-from app.infrastructure.celery import celery_app
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger
+from app.infra.queue.celery import celery_app
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
 from app.tasks import run_task_async
 from app.tasks.agents import recover_agent_runs_job, recover_legacy_agent_runs_job
 from app.tasks.email import recover_email_deliveries_job

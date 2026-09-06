@@ -10,12 +10,12 @@ from urllib.error import URLError
 
 from app.application.knowledge_graph_build import _log_graph_build_stage
 from app.application.knowledge_graph_query import _log_graph_query_event
-from app.infrastructure.errors import (
+from app.infra.observability.errors import (
     ExternalServiceError,
     classify_error,
     log_error,
 )
-from app.infrastructure.logger import get_logger, log_event, setup_logging
+from app.infra.observability.logger import get_logger, log_event, setup_logging
 
 
 class _UpstreamFailure(ExternalServiceError):

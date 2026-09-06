@@ -34,8 +34,8 @@ from app.capabilities.llm.runtime import (
     MODEL_REQUEST_PARAMS_META_KEY,
 )
 from app.shareddomain.platform.models import User
-from app.infrastructure.config import Settings
-from app.infrastructure.validation import normalize_name
+from app.infra.config.settings import Settings
+from app.infra.runtime.validation import normalize_name
 from app.schemas.model import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,

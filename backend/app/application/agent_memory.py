@@ -8,7 +8,7 @@ from langchain_core.messages.utils import count_tokens_approximately
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import AgentRun
-from app.infrastructure.repositories import agent as agent_repository
+from app.infra.db.repositories.agents import repository as agent_repository
 from app.shareddomain.agents.runtime.usage import (
     add_compaction_usage,
     empty_usage,

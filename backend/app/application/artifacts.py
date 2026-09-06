@@ -4,14 +4,14 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.artifacts import GeneratedArtifact
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import artifacts as repository
-from app.infrastructure.security import (
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.artifacts import repository as repository
+from app.infra.security.auth import (
     create_artifact_download_token,
     decode_artifact_download_token,
 )
-from app.infrastructure.session import get_session_factory
+from app.infra.db.session import get_session_factory
 from app.shareddomain.artifacts.services import validate_generated_artifact
 
 

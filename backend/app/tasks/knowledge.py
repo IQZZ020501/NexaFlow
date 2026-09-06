@@ -6,12 +6,12 @@ from app.application.knowledge_evaluation import run_evaluation_task
 from app.application.knowledge_graph_build import run_graph_build_task
 from app.application.knowledge_graph_maintenance import reconcile_knowledge_graphs
 from app.entities.knowledge import TASK_GRAPH_REBUILD, TASK_GRAPH_SYNC
-from app.infrastructure.celery import celery_app
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import classify_error, log_error
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.queue.celery import celery_app
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.session import get_session_factory
 from app.shareddomain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,

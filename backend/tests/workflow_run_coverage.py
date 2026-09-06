@@ -600,7 +600,7 @@ def test_engine_validation_error_branches() -> None:
 
 
 def test_engine_runtime_error_branches() -> None:
-    from app.infrastructure.model_utils import utc_now
+    from app.infra.runtime.model_utils import utc_now
     from app.shareddomain.workflows.engine import (
         NodeResult,
         NodeState,
@@ -782,8 +782,8 @@ def test_create_workflow_run_guard_errors() -> None:
     from fastapi import HTTPException
 
     from app.application.workflow_runs import create_workflow_run
-    from app.infrastructure.repositories import user as user_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowRunCreateRequest
     from tests.agents import agent_model_server
 
@@ -854,9 +854,9 @@ def test_create_workflow_run_external_and_conflicts() -> None:
 
     from app.application.workflow_runs import create_workflow_run
     from app.entities.agents import AgentRun
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import user as user_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowRunCreateRequest
     from tests.agents import agent_model_server
 
@@ -972,7 +972,7 @@ def test_create_workflow_run_external_and_conflicts() -> None:
                 actor = await user_repository.get_user_by_id(db, admin_user_id)
                 assert actor is not None
                 with patch(
-                    "app.infrastructure.repositories.agent.get_active_agent_run",
+                    "app.infra.db.repositories.agents.repository.get_active_agent_run",
                     new=AsyncMock(return_value=None),
                 ):
                     try:
@@ -1000,8 +1000,8 @@ def test_resume_workflow_form_error_branches() -> None:
     from app.application.workflow_runs import resume_workflow_form
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.repositories import user as user_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowFormSubmitRequest
     from tests.agents import agent_model_server
 
@@ -1086,7 +1086,7 @@ def test_resume_workflow_form_error_branches() -> None:
                     }
                 }
                 with patch(
-                    "app.infrastructure.repositories.workflow.reset_waiting_run_deadline",
+                    "app.infra.db.repositories.workflows.repository.reset_waiting_run_deadline",
                     new=AsyncMock(return_value=False),
                 ):
                     try:
@@ -1124,8 +1124,8 @@ def _collect_stream(
     flip_status: str | None = None,
 ) -> list[dict]:
     from app.application.workflow_runs import stream_workflow_run
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.session import get_session_factory
 
     runtime = settings()
 
@@ -1169,9 +1169,9 @@ def _collect_stream(
 def test_workflow_stream_branches() -> None:
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
     from tests.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
@@ -1348,9 +1348,9 @@ def test_workflow_stream_branches() -> None:
 def test_workflow_services_boundaries() -> None:
     from fastapi import HTTPException
 
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import user as user_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowGraph
     from app.shareddomain.workflows.services import (
         get_or_create_definition,
@@ -1625,8 +1625,8 @@ def test_workflow_services_boundaries() -> None:
 
 def test_upload_cleanup_records() -> None:
     from app.entities.workflows import WorkflowUpload
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
     from app.shareddomain.workflows.uploads import (
         prepare_due_upload_cleanups,
         queue_upload_cleanups,
@@ -1949,8 +1949,8 @@ def test_workflow_run_lifecycle_and_error_paths() -> None:
 
 
 def _set_agent_status(agent_id: str, status: str) -> None:
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.session import get_session_factory
 
     async def run() -> None:
         async with get_session_factory()() as db:
@@ -2159,10 +2159,10 @@ def test_workflow_run_direct_api_functions() -> None:
     )
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import user as user_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowFormSubmitRequest, WorkflowRunCreateRequest
     from app.shareddomain.workflows.resources import (
         build_workflow_resource_snapshot,
@@ -2472,7 +2472,7 @@ def test_workflow_run_direct_api_functions() -> None:
                 await db.commit()
                 with (
                     patch(
-                        "app.infrastructure.repositories.agent.get_agent_run_by_id",
+                        "app.infra.db.repositories.agents.repository.get_agent_run_by_id",
                         new=AsyncMock(return_value=None),
                     ),
                     patch(
@@ -2508,7 +2508,7 @@ def test_workflow_run_direct_api_functions() -> None:
 
                 with (
                     patch(
-                        "app.infrastructure.repositories.agent.get_agent_run_by_id",
+                        "app.infra.db.repositories.agents.repository.get_agent_run_by_id",
                         new=flaky_get_run,
                     ),
                     patch(

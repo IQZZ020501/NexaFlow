@@ -17,21 +17,21 @@ from app.ports.mcp import (
 )
 from app.entities.tools import McpServer, McpToolPolicy, ToolPolicy, ToolSource
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.repositories import mcp as mcp_repository
-from app.infrastructure.repositories import resource_permission as permission_repository
-from app.infrastructure.repositories import tools as tools_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.mcp_stdio import (
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
+from app.infra.db.repositories.tools import repository as tools_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.runtime.model_utils import utc_now
+from app.infra.tools.mcp_stdio import (
     McpStdioConfig,
     McpStdioConfigError,
     parse_mcp_stdio_config,
     serialize_mcp_stdio_config,
 )
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infrastructure.validation import normalize_name
+from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
+from app.infra.runtime.validation import normalize_name
 from app.schemas.mcp import (
     McpServerCreateRequest,
     McpServerResponse,

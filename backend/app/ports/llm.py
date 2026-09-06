@@ -20,7 +20,7 @@ from app.capabilities.llm.runtime import (
     build_registered_reranker,
     extract_registered_image_text,
 )
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 
 VISION_MODEL_REQUIRED_MESSAGE = "Vision model is not configured for this workspace."
 

@@ -20,14 +20,14 @@ from app.entities.knowledge_graph import (
     GRAPH_REVISION_FAILED,
     KnowledgeGraphRevision,
 )
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import classify_error, log_error
-from app.infrastructure.logger import get_logger
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.session import get_session_factory
 from app.ports.vector_store import (
     GraphProfileVector,
     delete_graph_profile_vectors,

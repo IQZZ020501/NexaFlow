@@ -16,16 +16,16 @@ from app.application.workflow_uploads import resolve_workspace_workflow_files
 from app.entities.agents import AgentRun
 from app.entities.user import User
 from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
-from app.infrastructure.agent_live_stream import (
+from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,
     AgentLiveStreamReader,
 )
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 from app.application.governance import enforce_workspace_run_quota
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import workflow as workflow_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
 from app.schemas.workflow import (
     FormNodeConfig,
     WorkflowFormSubmitRequest,

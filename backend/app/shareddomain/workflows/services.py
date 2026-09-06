@@ -8,10 +8,10 @@ from app.entities.agents import Agent
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.user import User
 from app.entities.workflows import WorkflowDefinition, WorkflowVersion
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
-from app.infrastructure.repositories import workflow as workflow_repository
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.ports.model_registry import get_registered_model_by_id
 from app.schemas.workflow import (
     KnowledgeNodeConfig,

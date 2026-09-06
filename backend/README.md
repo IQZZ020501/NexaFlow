@@ -46,7 +46,7 @@ When `DATABASE_URL` is empty, the backend safely constructs it from the shared
 `POSTGRES_*` components.
 
 ```bash
-uv run celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
+uv run celery -A app.infra.queue.celery:celery_app worker --beat --loglevel=INFO
 ```
 
 The app selects Celery's `threads` pool on macOS so Agent runs can overlap

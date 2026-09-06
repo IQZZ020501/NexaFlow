@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.infrastructure.model_utils import APP_TIMEZONE_NAME
+from app.infra.runtime.model_utils import APP_TIMEZONE_NAME
 
 
 class WorkspaceGovernanceResponse(BaseModel):

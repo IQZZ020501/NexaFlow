@@ -15,14 +15,14 @@ from app.entities.enterprise_identity import (
 )
 from app.entities.user import User
 from app.entities.workspace import WorkspaceMembership
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import enterprise_identity as identity_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
-from app.infrastructure.security import hash_password
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infrastructure.system_log import record_system_log
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.identity import enterprise as identity_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.security.auth import hash_password
+from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
+from app.infra.observability.system_log import record_system_log
 from app.ports.enterprise_identity import (
     EnterpriseProviderError,
     build_authorization_url,

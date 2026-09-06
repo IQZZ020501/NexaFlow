@@ -28,8 +28,8 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import knowledge_graph as graph_repository
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.shareddomain.knowledge_graph.schema import GraphSchemaDefinition
 
 RECORD_KINDS = {"entity", "alias", "mention", "claim", "evidence", "review"}

@@ -6,11 +6,11 @@ from sqlalchemy import select
 from app.capabilities.llm.models import RegisteredModel
 from app.shareddomain.platform.models import ResourcePermission
 from app.entities.agents import AgentRun
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure import object_storage as object_storage_module
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.storage import object_storage as object_storage_module
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.session import get_session_factory
 from app.shareddomain.audit.models import AuditLog
 from app.shareddomain.agents.models import (
     Agent,

@@ -9,9 +9,9 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.capabilities.llm.models import RegisteredModel
 from app.capabilities.llm.runtime import build_registered_embeddings
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger, log_event
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 

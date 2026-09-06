@@ -14,8 +14,8 @@ from app.entities.analytics import (
 )
 from app.entities.user import User
 from app.entities.workspace import Workspace
-from app.infrastructure.model_utils import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
-from app.infrastructure.repositories import analytics as analytics_repository
+from app.infra.runtime.model_utils import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
+from app.infra.db.repositories.analytics import repository as analytics_repository
 from app.schemas.analytics import (
     AnalyticsCountComparison,
     AnalyticsRatioComparison,

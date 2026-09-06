@@ -34,9 +34,9 @@ os.environ.update(
     }
 )
 
-from app.infrastructure.config import Settings
-from app.infrastructure.base import Base
-from app.infrastructure.session import get_engine
+from app.infra.config.settings import Settings
+from app.infra.db.base import Base
+from app.infra.db.session import get_engine
 from app.main import create_app
 
 
@@ -86,10 +86,10 @@ def test_client() -> Iterator[TestClient]:
     asyncio.run(create_schema())
 
     with patch(
-        "app.infrastructure.agent_rate_limit._rate_limit_redis",
+        "app.infra.security.agent_rate_limit._rate_limit_redis",
         return_value=_PermissiveRateLimitRedis(),
     ), patch(
-        "app.infrastructure.enterprise_login_rate_limit._client",
+        "app.infra.security.enterprise_login_rate_limit._client",
         _PermissiveEnterpriseLoginRedis(),
     ):
         with TestClient(app) as client:

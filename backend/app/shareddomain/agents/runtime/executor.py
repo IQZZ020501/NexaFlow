@@ -12,7 +12,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import StructuredTool
 
-from app.infrastructure.logger import get_logger, log_event
+from app.infra.observability.logger import get_logger, log_event
 from app.shareddomain.agents.runtime.callbacks import (
     AgentEventBus,
     AgentEventHandler,

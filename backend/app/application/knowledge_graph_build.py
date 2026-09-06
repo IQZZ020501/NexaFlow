@@ -39,13 +39,13 @@ from app.entities.knowledge_graph import (
     KnowledgeGraphRevision,
 )
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import classify_error, log_error
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
-from app.infrastructure.repositories import knowledge_reference as reference_repository
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import references as reference_repository
 from app.ports.parsing import KnowledgePipelineError
 from app.ports.vector_store import (
     GraphProfileVector,

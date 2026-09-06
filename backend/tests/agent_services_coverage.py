@@ -40,10 +40,10 @@ from app.entities.agents import (
     AgentToolCall,
 )
 from app.entities.user import User
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import agent as agent_repository
-from app.infrastructure.repositories import knowledge as kb_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import repository as kb_repository
+from app.infra.db.session import get_session_factory
 from app.schemas.agent import (
     AgentCreateRequest,
     AgentInteractionConfig,
@@ -537,7 +537,7 @@ async def exercise_services_http_paths(
         # stale Tool binding heals on save: a built-in catalog refresh moves
         # a bound Tool to a new version; re-publishing without Tools in the
         # payload must rebind instead of failing with "Tool binding changed".
-        from app.infrastructure.repositories import tools as tool_repository
+        from app.infra.db.repositories.tools import repository as tool_repository
         from app.schemas.tool import ToolRefSchema
 
         bound_agent = await agent_services.create_agent(

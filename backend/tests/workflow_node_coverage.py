@@ -1297,7 +1297,7 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
     from unittest.mock import patch
 
     from app.application.workflow_nodes import execute_workflow_node
-    from app.infrastructure.code_sandbox import WorkflowSandboxResult
+    from app.infra.sandbox.client import WorkflowSandboxResult
     from app.shareddomain.agents.runtime import AgentExecutionPaused
 
     async def run() -> None:
@@ -1560,7 +1560,7 @@ def test_executor_safe_errors_and_run_error() -> None:
         _safe_node_error,
         _safe_run_error,
     )
-    from app.infrastructure.code_sandbox import WorkflowSandboxError
+    from app.infra.sandbox.client import WorkflowSandboxError
     from app.ports.llm import ModelProviderError, ModelProviderTimeoutError
 
     assert (
@@ -1699,11 +1699,9 @@ def test_executor_load_scope_branches() -> None:
     from app.application import workflow_executor as executor_module
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.repositories import (
-        agent as agent_repository,
-        user as user_repository,
-        workflow as workflow_repository,
-    )
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.shareddomain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
@@ -1897,7 +1895,7 @@ class _FakeUploadStorage:
         async for chunk in chunks:
             size += len(chunk)
             if max_bytes is not None and size > max_bytes:
-                from app.infrastructure.object_storage import ObjectTooLargeError
+                from app.infra.storage.object_storage import ObjectTooLargeError
 
                 raise ObjectTooLargeError("too large")
         self.keys.append(key)
@@ -1921,7 +1919,7 @@ def test_workflow_uploads_upload_branches() -> None:
     import app.application.workflow_uploads as uploads_module
     from app.application.workflow_uploads import _upload_files
     from app.entities.workflows import WorkflowUpload
-    from app.infrastructure.object_storage import EmptyObjectError
+    from app.infra.storage.object_storage import EmptyObjectError
     from fastapi import HTTPException
     from app.schemas.agent import AgentInteractionConfig
 
@@ -2196,7 +2194,7 @@ def test_workflow_uploads_resolve_branches() -> None:
         _resolve_workflow_files,
     )
     from app.entities.workflows import WorkflowUpload
-    from app.infrastructure.object_storage import EmptyObjectError
+    from app.infra.storage.object_storage import EmptyObjectError
     from fastapi import HTTPException
     from app.schemas.agent import AgentInteractionConfig
 
@@ -2572,7 +2570,7 @@ def test_workflow_uploads_workspace_wrappers() -> None:
 
 def test_workflow_access_helpers_and_rate_limit() -> None:
     from app.application.workflow_access import _external_error, _rate_limit
-    from app.infrastructure.agent_rate_limit import (
+    from app.infra.security.agent_rate_limit import (
         AgentRateLimitExceeded,
         AgentRateLimitUnavailable,
     )
@@ -2616,7 +2614,7 @@ def test_workflow_access_external_run_branches() -> None:
     )
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.repositories import workflow as workflow_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.schemas.workflow import ExternalWorkflowRunCreateRequest
     from fastapi import HTTPException
 
@@ -2916,10 +2914,10 @@ def _graph_node(node_id: str, node_type: str, config: dict) -> dict:
 def _make_running_run(graph: dict) -> str:
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.model_utils import utc_now
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.runtime.model_utils import utc_now
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
     from app.shareddomain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
@@ -2988,8 +2986,8 @@ def _execute_claimed(run_id: str, *, lease_lost: bool = False) -> str:
 
 def test_executor_manual_run_scenarios() -> None:
     """Executor error paths exercised with real DB rows and targeted mocks."""
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
     from tests.agents import agent_model_server, create_workspace_user, model_payload
 
     global WORKSPACE_ID, WORKFLOW_AGENT_ID, ADMIN_USER_ID, WORKFLOW_MODEL_ID
@@ -3119,7 +3117,7 @@ def test_executor_manual_run_scenarios() -> None:
         outcome = _execute_claimed(run_id)
         assert outcome == "OK", outcome
         async def check_success() -> None:
-            from app.infrastructure.session import get_session_factory
+            from app.infra.db.session import get_session_factory
 
             async with get_session_factory()() as db:
                 nodes = await workflow_repository.list_node_executions(db, run_id)
@@ -3197,10 +3195,10 @@ def test_executor_manual_run_scenarios() -> None:
         }
 
         async def create_checkpoint_run() -> str:
-            from app.infrastructure.model_utils import utc_now
-            from app.infrastructure.repositories import agent as agent_repository
-            from app.infrastructure.repositories import workflow as workflow_repository
-            from app.infrastructure.session import get_session_factory
+            from app.infra.runtime.model_utils import utc_now
+            from app.infra.db.repositories.agents import repository as agent_repository
+            from app.infra.db.repositories.workflows import repository as workflow_repository
+            from app.infra.db.session import get_session_factory
             from app.shareddomain.workflows.resources import (
                 build_workflow_resource_snapshot,
                 workflow_resource_hash,
@@ -3280,8 +3278,8 @@ def test_executor_manual_run_scenarios() -> None:
 
         # run_durable_workflow_run: claim held by another worker
         from app.entities.agents import AgentRun
-        from app.infrastructure.model_utils import utc_now
-        from app.infrastructure.session import get_session_factory
+        from app.infra.runtime.model_utils import utc_now
+        from app.infra.db.session import get_session_factory
         from app.application.workflow_executor import run_durable_workflow_run
 
         async def busy_claim() -> str:
@@ -3763,10 +3761,10 @@ def test_public_and_api_workflow_access_end_to_end() -> None:
         assert failed_detail.json()["error"] == "Workflow run failed."
 
         # expired upload cleanup flow
-        from app.infrastructure.model_utils import utc_now
-        from app.infrastructure.object_storage import create_object_storage
-        from app.infrastructure.repositories import workflow as workflow_repository
-        from app.infrastructure.session import get_session_factory
+        from app.infra.runtime.model_utils import utc_now
+        from app.infra.storage.object_storage import create_object_storage
+        from app.infra.db.repositories.workflows import repository as workflow_repository
+        from app.infra.db.session import get_session_factory
         from app.shareddomain.workflows.models import WorkflowUpload
         from app.shareddomain.workflows.uploads import (
             prepare_due_upload_cleanups,
@@ -3984,8 +3982,8 @@ def test_workflow_access_application_functions_direct() -> None:
     )
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.schemas.workflow import ExternalWorkflowRunCreateRequest
 
     async def run() -> None:

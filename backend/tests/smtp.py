@@ -23,9 +23,9 @@ from app.application.smtp import (
 )
 from app.shareddomain.platform.models import SmtpSettings as SmtpSettingsOrm
 from app.entities.smtp_settings import SmtpSettings
-from app.infrastructure.secrets import decrypt_secret
-from app.infrastructure.session import get_session_factory
-from app.infrastructure.smtp import (
+from app.infra.security.secrets import decrypt_secret
+from app.infra.db.session import get_session_factory
+from app.infra.email.smtp import (
     SmtpConfigurationError,
     SmtpDeliveryError,
     SmtpTransportConfig,
@@ -61,7 +61,7 @@ def test_transport_modes() -> None:
     )
     client = MagicMock()
     client.__enter__.return_value = client
-    with patch("app.infrastructure.smtp.smtplib.SMTP", return_value=client) as smtp:
+    with patch("app.infra.email.smtp.smtplib.SMTP", return_value=client) as smtp:
         _send_smtp_message_sync(config, "to@example.com", "subject", "body")
     smtp.assert_called_once_with("smtp.example.com", 587, timeout=7)
     client.login.assert_not_called()
@@ -69,7 +69,7 @@ def test_transport_modes() -> None:
     client.send_message.assert_called_once()
 
     client.reset_mock()
-    with patch("app.infrastructure.smtp.smtplib.SMTP", return_value=client):
+    with patch("app.infra.email.smtp.smtplib.SMTP", return_value=client):
         _send_smtp_message_sync(
             config,
             "to@example.com",
@@ -115,14 +115,14 @@ def test_transport_modes() -> None:
         }
     )
     client.reset_mock()
-    with patch("app.infrastructure.smtp.smtplib.SMTP", return_value=client):
+    with patch("app.infra.email.smtp.smtplib.SMTP", return_value=client):
         _send_smtp_message_sync(config, "to@example.com", "subject", "body")
     client.starttls.assert_called_once()
     client.login.assert_called_once_with("mailer@example.com", "secret")
 
     config = SmtpTransportConfig(**{**config.__dict__, "security": "ssl", "port": 465})
     client.reset_mock()
-    with patch("app.infrastructure.smtp.smtplib.SMTP_SSL", return_value=client) as smtp_ssl:
+    with patch("app.infra.email.smtp.smtplib.SMTP_SSL", return_value=client) as smtp_ssl:
         _send_smtp_message_sync(config, "to@example.com", "subject", "body")
     assert smtp_ssl.call_args.kwargs["timeout"] == 7
     client.send_message.assert_called_once()
@@ -138,7 +138,7 @@ def test_transport_modes() -> None:
         else:
             raise AssertionError("Invalid SMTP transport configuration was accepted")
 
-    with patch("app.infrastructure.smtp.smtplib.SMTP_SSL", side_effect=OSError("down")):
+    with patch("app.infra.email.smtp.smtplib.SMTP_SSL", side_effect=OSError("down")):
         try:
             _send_smtp_message_sync(config, "to@example.com", "subject", "body")
         except SmtpDeliveryError:
@@ -146,7 +146,7 @@ def test_transport_modes() -> None:
         else:
             raise AssertionError("SMTP transport failure was not normalized")
 
-    with patch("app.infrastructure.smtp._send_smtp_message_sync") as sync_sender:
+    with patch("app.infra.email.smtp._send_smtp_message_sync") as sync_sender:
         asyncio.run(send_smtp_message(config, "to@example.com", "subject", "body"))
     sync_sender.assert_called_once()
 

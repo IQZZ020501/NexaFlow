@@ -13,8 +13,8 @@ from app.entities.knowledge import (
     KnowledgeDocumentParentChunk,
     KnowledgeDocumentReference,
 )
-from app.infrastructure.model_utils import new_id
-from app.infrastructure.repositories import knowledge_reference as reference_repository
+from app.infra.runtime.model_utils import new_id
+from app.infra.db.repositories.knowledge import references as reference_repository
 
 MAX_REFERENCES_PER_DOCUMENT = 100
 MARKDOWN_REFERENCE_PATTERN = re.compile(

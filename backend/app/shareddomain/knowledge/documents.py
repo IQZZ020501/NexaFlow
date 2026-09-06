@@ -12,15 +12,15 @@ from app.entities.knowledge import (
     KnowledgeDocument,
 )
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import new_id
-from app.infrastructure.object_storage import (
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import new_id
+from app.infra.storage.object_storage import (
     EmptyObjectError,
     ObjectStorage,
     ObjectTooLargeError,
     create_object_storage,
 )
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.schemas.knowledge import (
     KnowledgeAttachmentResponse,
     KnowledgeDocumentCreateRequest,

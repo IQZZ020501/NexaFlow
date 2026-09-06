@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_settings, require_global_admin
 from app.application.governance import get_admin_health
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.session import get_db
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.schemas.governance import AdminHealthResponse
 
 router = APIRouter(prefix="/governance", tags=["governance"])

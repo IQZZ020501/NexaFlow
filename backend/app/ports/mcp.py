@@ -15,7 +15,7 @@ from app.capabilities.mcp.client import (
     MultiTransportMcpClient,
     normalize_mcp_url as _normalize_mcp_url,
 )
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 
 
 class McpClient(Protocol):

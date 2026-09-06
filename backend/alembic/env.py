@@ -3,7 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 from app.shareddomain.agents.models import (  # noqa: F401
     Agent,
     AgentApiCredential,
@@ -17,7 +17,7 @@ from app.shareddomain.agents.models import (  # noqa: F401
 )
 from app.shareddomain.audit.models import AuditLog  # noqa: F401
 from app.shareddomain.artifacts.models import GeneratedArtifact  # noqa: F401
-from app.infrastructure.base import Base
+from app.infra.db.base import Base
 from app.shareddomain.platform.models import RefreshSession, User  # noqa: F401
 from app.shareddomain.platform.models import WorkspaceGovernance  # noqa: F401
 from app.shareddomain.platform.models import WorkspaceInvitation  # noqa: F401
@@ -76,7 +76,7 @@ from app.shareddomain.enterprise_identity.models import (  # noqa: F401
     EnterpriseIdentityConnection,
     EnterpriseLoginState,
 )
-from app.infrastructure.system_log import SystemLog  # noqa: F401
+from app.infra.observability.system_log import SystemLog  # noqa: F401
 from app.shareddomain.platform.models import Team, TeamMembership  # noqa: F401
 from app.shareddomain.platform.models import Workspace, WorkspaceMembership  # noqa: F401
 

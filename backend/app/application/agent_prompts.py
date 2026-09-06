@@ -6,7 +6,7 @@ import json
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.config import Settings
+from app.infra.config.settings import Settings
 from app.ports.llm import build_chat_model
 from app.schemas.agent import (
     AgentInstructionsGenerateRequest,

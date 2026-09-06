@@ -54,7 +54,7 @@ def _isolated_support_settings():
 support_module.settings = _isolated_support_settings
 test_settings = support_module.settings
 
-from app.infrastructure.session import get_session_factory
+from app.infra.db.session import get_session_factory
 from app.shareddomain.knowledge.models import (
     KnowledgeAsset,
     KnowledgeBase,
@@ -75,9 +75,9 @@ from app.capabilities.rag import vector_store as knowledge_vector_store
 from app.capabilities.embedding import pipeline as knowledge_pipeline
 from app.capabilities.llm.runtime import ModelProviderError
 from app.capabilities.rag.vector_store import VectorChunk, VectorHit
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
-from app.infrastructure.repositories import user as user_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.identity import users as user_repository
 from app.schemas.knowledge import (
     KnowledgeBaseOwnerTransferRequest,
     KnowledgeBaseUpdateRequest,

@@ -21,11 +21,11 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.user import User
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import (
-    knowledge_evaluation as evaluation_repository,
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import (
+    evaluation as evaluation_repository,
 )
 from app.ports.parsing import KnowledgePipelineError
 from app.schemas.knowledge import (

@@ -4,11 +4,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shareddomain.audit.services import record_audit_log
-from app.infrastructure.config import Settings
-from app.infrastructure.errors import log_error
-from app.infrastructure.logger import get_logger
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
 from app.entities.user import User
-from app.infrastructure.repositories import knowledge as knowledge_base_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     KnowledgeAttachment,

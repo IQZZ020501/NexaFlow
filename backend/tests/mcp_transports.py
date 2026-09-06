@@ -18,7 +18,7 @@ from app.capabilities.mcp.client import (
     call_mcp_tool,
     discover_mcp_tools,
 )
-from app.infrastructure.mcp_stdio import McpStdioConfig, parse_mcp_stdio_config
+from app.infra.tools.mcp_stdio import McpStdioConfig, parse_mcp_stdio_config
 from tests.support import settings
 
 

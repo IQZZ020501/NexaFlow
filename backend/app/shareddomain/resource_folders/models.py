@@ -11,8 +11,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infrastructure.base import Base
-from app.infrastructure.model_utils import new_id, utc_now
+from app.infra.db.base import Base
+from app.infra.runtime.model_utils import new_id, utc_now
 
 
 class ResourceFolder(Base):

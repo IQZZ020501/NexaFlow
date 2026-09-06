@@ -17,9 +17,9 @@ from app.entities.tools import (
     validate_tool_json_schema,
 )
 from app.entities.user import User
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import tools as repository
-from app.infrastructure.validation import normalize_name
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.tools import repository as repository
+from app.infra.runtime.validation import normalize_name
 from app.shareddomain.audit.services import record_audit_log
 from app.shareddomain.tools.catalog import canonical_definition_hash, stable_catalog_id
 from app.shareddomain.tools.permissions import require_managed_tool

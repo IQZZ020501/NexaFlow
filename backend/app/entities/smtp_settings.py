@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from app.infrastructure.model_utils import utc_now
+from app.infra.runtime.model_utils import utc_now
 
 
 SMTP_SETTINGS_ID = "default"

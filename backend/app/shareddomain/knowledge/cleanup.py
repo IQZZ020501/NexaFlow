@@ -7,10 +7,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.knowledge import KnowledgeBase, KnowledgeStorageCleanup
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.session import get_session_factory
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.session import get_session_factory
 from app.ports.vector_store import (
     delete_graph_profile_collection,
     delete_vector_collection,

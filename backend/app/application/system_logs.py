@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.system_log import SystemLog
-from app.infrastructure.repositories import system_log as system_log_repository
+from app.infra.db.repositories.audit import system_logs as system_log_repository
 from app.schemas.system_log import SystemLogResponse
 
 _SENSITIVE_PARTS = (

@@ -14,13 +14,13 @@ import tests.support  # noqa: F401
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, text
 
-from app.infrastructure.base import Base
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import knowledge_graph as graph_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
-from app.infrastructure.repositories import workspace_governance as governance_repository
-from app.infrastructure.session import get_engine, get_session_factory
+from app.infra.db.base import Base
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.repositories.governance import settings as governance_repository
+from app.infra.db.session import get_engine, get_session_factory
 from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
@@ -63,7 +63,7 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevision,
 )
 from app.shareddomain.audit.models import AuditLog
-from app.infrastructure.model_utils import utc_now
+from app.infra.runtime.model_utils import utc_now
 from app.shareddomain.knowledge.orchestration import (
     delete_knowledge_task,
     delete_knowledge_tasks,

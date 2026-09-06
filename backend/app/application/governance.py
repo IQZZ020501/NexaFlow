@@ -13,10 +13,10 @@ from app.entities.user import User
 from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
 from app.shareddomain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
-from app.infrastructure.config import Settings
-from app.infrastructure.model_utils import APP_TIMEZONE, utc_now
-from app.infrastructure.repositories import governance as governance_repository
-from app.infrastructure.repositories import workspace_governance as workspace_governance_repository
+from app.infra.config.settings import Settings
+from app.infra.runtime.model_utils import APP_TIMEZONE, utc_now
+from app.infra.db.repositories.governance import inventory as governance_repository
+from app.infra.db.repositories.governance import settings as workspace_governance_repository
 from app.ports.vector_store import check_vector_store_health
 from app.schemas.governance import (
     AdminHealthResponse,
@@ -102,7 +102,7 @@ async def _probe_storage(settings: Settings) -> None:
 
 
 def _probe_worker_sync(settings: Settings) -> None:
-    from app.infrastructure.celery import celery_app
+    from app.infra.queue.celery import celery_app
 
     with celery_app.connection_for_read(
         settings.celery_broker_url,

@@ -13,10 +13,10 @@ from app.entities.tools import (
     ToolVersion,
 )
 from app.entities.user import User
-from app.infrastructure.model_utils import new_id, utc_now
-from app.infrastructure.repositories import tools as repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.repositories import workspace as workspace_repository
+from app.infra.runtime.model_utils import new_id, utc_now
+from app.infra.db.repositories.tools import repository as repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.shareddomain.tools.catalog import get_tool_catalog_detail
 from app.shareddomain.tools.permissions import (
     evaluate_tool_authorization,

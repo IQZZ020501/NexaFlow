@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_settings
 from app.application.artifacts import get_generated_artifact
-from app.infrastructure.config import Settings
-from app.infrastructure.session import get_db
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.schemas.artifact import ArtifactDownloadRequest
 
 

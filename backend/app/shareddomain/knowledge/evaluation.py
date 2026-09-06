@@ -11,10 +11,10 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.user import User
-from app.infrastructure.model_utils import new_id
-from app.infrastructure.repositories import knowledge as knowledge_repository
-from app.infrastructure.repositories import (
-    knowledge_evaluation as evaluation_repository,
+from app.infra.runtime.model_utils import new_id
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.knowledge import (
+    evaluation as evaluation_repository,
 )
 from app.schemas.knowledge import (
     KnowledgeEvaluationCaseCreateRequest,

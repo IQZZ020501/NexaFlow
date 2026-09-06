@@ -52,21 +52,21 @@ from app.entities.resource_permission import ResourcePermission
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.tools import McpServer, McpToolPolicy
 from app.entities.user import RefreshSession, User
-from app.infrastructure import celery as celery_mod
-from app.infrastructure import code_sandbox
-from app.infrastructure import config as config_mod
-from app.infrastructure import mcp_stdio
-from app.infrastructure import object_storage
-from app.infrastructure import seed as seed_mod
-from app.infrastructure import security as security_mod
-from app.infrastructure import session as session_mod
-from app.infrastructure import validation as validation_mod
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import mcp as mcp_repo
-from app.infrastructure.repositories import mapping as mapping_repo
-from app.infrastructure.repositories import resource_permission as rp_repo
-from app.infrastructure.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infrastructure.session import get_session_factory
+from app.infra.queue import celery as celery_mod
+from app.infra.sandbox import client as code_sandbox
+from app.infra.config import settings as config_mod
+from app.infra.tools import mcp_stdio
+from app.infra.storage import object_storage
+from app.infra.bootstrap import seed as seed_mod
+from app.infra.security import auth as security_mod
+from app.infra.db import session as session_mod
+from app.infra.runtime import validation as validation_mod
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.tools import mcp as mcp_repo
+from app.infra.db import mapping as mapping_repo
+from app.infra.db.repositories.workspaces import resource_permissions as rp_repo
+from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
+from app.infra.db.session import get_session_factory
 from app.ports import mcp as ports_mcp
 from app.ports import model_registry as ports_model_registry
 from app.schemas.mcp import McpServerCreateRequest
@@ -135,7 +135,7 @@ from app.shareddomain.platform.models import Team as TeamOrm
 from app.shareddomain.platform.models import User as UserOrm
 from app.shareddomain.platform.models import Workspace as WorkspaceOrm
 from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.infrastructure.security import (
+from app.infra.security.auth import (
     create_access_token,
     create_refresh_token,
     decode_access_token,
@@ -144,7 +144,7 @@ from app.infrastructure.security import (
     hash_refresh_token,
     verify_password,
 )
-from app.infrastructure.validation import (
+from app.infra.runtime.validation import (
     normalize_email,
     normalize_name,
     normalize_username,
@@ -3984,7 +3984,7 @@ def test_mcp_tool_policy_services() -> None:
 
 
 def test_retained_tool_user_reference_query() -> None:
-    from app.infrastructure.repositories import tools as tools_repo
+    from app.infra.db.repositories.tools import repository as tools_repo
 
     binding_db = AsyncMock()
     binding_db.scalar.side_effect = ["binding-1"]

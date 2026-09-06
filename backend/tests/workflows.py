@@ -1474,7 +1474,7 @@ def test_workflow_engine_propagates_worker_cancellation() -> None:
 
 
 def test_upload_cleanup_tasks_are_registered() -> None:
-    from app.infrastructure.celery import celery_app
+    from app.infra.queue.celery import celery_app
 
     assert "app.uploads.cleanup_storage" in celery_app.tasks
     assert "app.uploads.recover_storage_cleanups" in celery_app.tasks
@@ -1539,9 +1539,9 @@ def test_interaction_config_migration_upgrades_prerequisites() -> None:
 
 
 def assert_upload_cleanup_removes_object(upload_id: str) -> None:
-    from app.infrastructure.object_storage import create_object_storage
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.storage.object_storage import create_object_storage
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
     from app.shareddomain.workflows.uploads import (
         prepare_due_upload_cleanups,
         run_upload_storage_cleanup,
@@ -1568,10 +1568,10 @@ def assert_upload_cleanup_removes_object(upload_id: str) -> None:
 
 
 async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
-    from app.infrastructure.model_utils import utc_now
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.runtime.model_utils import utc_now
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
 
     now = utc_now()
     async with get_session_factory()() as db:
@@ -1616,10 +1616,10 @@ async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
 
 
 async def assert_first_claim_sets_deadline_once(run_id: str) -> None:
-    from app.infrastructure.model_utils import utc_now
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.repositories import workflow as workflow_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.runtime.model_utils import utc_now
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
 
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
@@ -2481,8 +2481,8 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
 
 def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
     from app.application.agent_child_runs import reconcile_workflow_agent_children
-    from app.infrastructure.repositories import agent as agent_repository
-    from app.infrastructure.session import get_session_factory
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.session import get_session_factory
     from tests.agents import agent_model_server, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
@@ -2613,8 +2613,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
 
         from app.application.agent_child_runs import ensure_workflow_agent_child
         from app.application.agent_runs import cancel_run_tree, prepare_agent_run
-        from app.infrastructure.model_utils import utc_now
-        from app.infrastructure.repositories import user as user_repository
+        from app.infra.runtime.model_utils import utc_now
+        from app.infra.db.repositories.identity import users as user_repository
         from app.shareddomain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
 
         async with get_session_factory()() as db:
@@ -2860,8 +2860,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         )
         from app.application.workflow_executor import run_durable_workflow_run
         from app.entities.agents import AgentPublicationVersion
-        from app.infrastructure.model_utils import new_id
-        from app.infrastructure.repositories import workflow as workflow_repository
+        from app.infra.runtime.model_utils import new_id
+        from app.infra.db.repositories.workflows import repository as workflow_repository
         from app.shareddomain.agents.models import (
             AGENT_RUN_FAILED_STATUS,
             AGENT_RUN_SUCCEEDED_STATUS,
@@ -3648,7 +3648,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
     async def create_direct_user(username: str, member: bool) -> str:
         from app.entities.user import User
         from app.entities.workspace import WorkspaceMembership
-        from app.infrastructure.repositories import user as user_repository
+        from app.infra.db.repositories.identity import users as user_repository
 
         async with get_session_factory()() as db:
             user = await user_repository.create_user(
@@ -4039,10 +4039,10 @@ def test_workflow_executor_recovery_paths() -> None:
         async def run_scenarios() -> None:
             from app.application import workflow_executor
             from app.application.workflow_executor import run_durable_workflow_run
-            from app.infrastructure.model_utils import utc_now
-            from app.infrastructure.repositories import agent as agent_repository
-            from app.infrastructure.repositories import workflow as workflow_repository
-            from app.infrastructure.session import get_session_factory
+            from app.infra.runtime.model_utils import utc_now
+            from app.infra.db.repositories.agents import repository as agent_repository
+            from app.infra.db.repositories.workflows import repository as workflow_repository
+            from app.infra.db.session import get_session_factory
             from app.shareddomain.agents.models import (
                 AGENT_RUN_FAILED_STATUS,
                 AgentRunSnapshot,

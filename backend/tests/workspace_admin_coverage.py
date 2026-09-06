@@ -29,12 +29,12 @@ from app.api.v1.endpoints.auth import REFRESH_TOKEN_COOKIE
 from app.application import workspace as workspace_service
 from app.entities.user import User
 from app.entities.workspace import Workspace
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.repositories import team as team_repo
-from app.infrastructure.repositories import user as user_repo
-from app.infrastructure.repositories import workspace as workspace_repo
-from app.infrastructure.security import hash_refresh_token
-from app.infrastructure.session import get_session_factory
+from app.infra.runtime.model_utils import utc_now
+from app.infra.db.repositories.teams import repository as team_repo
+from app.infra.db.repositories.identity import users as user_repo
+from app.infra.db.repositories.workspaces import repository as workspace_repo
+from app.infra.security.auth import hash_refresh_token
+from app.infra.db.session import get_session_factory
 from app.shareddomain.knowledge.models import KnowledgeTask
 
 
@@ -537,11 +537,11 @@ async def exercise_direct_identity_edges() -> None:
     from app.entities.team import Team
     from app.entities.user import RefreshSession
     from app.entities.workspace import Workspace, WorkspaceMembership
-    from app.infrastructure.agent_rate_limit import (
+    from app.infra.security.agent_rate_limit import (
         LoginRateLimitExceeded,
         LoginRateLimitUnavailable,
     )
-    from app.infrastructure.security import hash_password, verify_password
+    from app.infra.security.auth import hash_password, verify_password
     from app.schemas.user import UserCreateRequest, UserUpdateRequest
 
     async with get_session_factory()() as db:
