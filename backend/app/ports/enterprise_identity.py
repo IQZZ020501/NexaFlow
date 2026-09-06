@@ -1,4 +1,4 @@
-from app.capabilities.enterprise_identity import (
+from app.adapters.identity.enterprise import (
     EnterpriseProviderError,
     ExternalPrincipal,
     build_authorization_url,

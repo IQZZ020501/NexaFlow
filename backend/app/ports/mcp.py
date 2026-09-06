@@ -1,12 +1,12 @@
 """MCP client port.
 
 Business code discovers and invokes MCP tools through this contract instead
-of importing ``app.capabilities.mcp.client`` directly.
+of importing ``app.adapters.mcp.client`` directly.
 """
 
 from typing import Any, Protocol
 
-from app.capabilities.mcp.client import (
+from app.adapters.mcp.client import (
     MAX_MCP_TOOL_PAGES,
     McpConnection,
     McpClientError,

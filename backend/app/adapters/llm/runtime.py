@@ -39,11 +39,11 @@ from ollama import ResponseError as OllamaResponseError
 from openai import APIStatusError, OpenAIError
 from pydantic import SecretStr
 
-from app.capabilities.llm.credentials import (
+from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     legacy_credential_config,
 )
-from app.capabilities.llm.models import RegisteredModel
+from app.domain.models.registered import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import ExternalServiceError, log_error
 from app.infra.observability.logger import get_logger

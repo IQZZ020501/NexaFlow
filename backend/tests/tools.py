@@ -2160,7 +2160,7 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
         revoke_tool_permission,
         upsert_tool_permission,
     )
-    from app.capabilities.llm.models import RegisteredModel
+    from app.domain.models.registered import RegisteredModel
     from app.entities.agents import Agent
     from app.entities.tools import ApplicationToolBinding
     from app.infra.db.repositories.agents import repository as agent_repository
@@ -2550,7 +2550,7 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
 def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
     from fastapi import HTTPException
 
-    from app.capabilities.llm.models import RegisteredModel
+    from app.domain.models.registered import RegisteredModel
     from app.entities.agents import Agent
     from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
     from app.infra.db.repositories.agents import repository as agent_repository
@@ -2756,7 +2756,7 @@ def test_mcp_resolution_rejects_missing_authorization_context() -> None:
 async def assert_mcp_server_deletion_preserves_tool_history(
     workspace_id: str,
 ) -> None:
-    from app.capabilities.llm.models import RegisteredModel
+    from app.domain.models.registered import RegisteredModel
     from app.entities.agents import Agent
     from app.entities.tools import (
         ApplicationToolBinding,
@@ -4848,7 +4848,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         WorkflowToolRuntime,
         workflow_tool_invocation_identity,
     )
-    from app.capabilities.llm.models import RegisteredModel
+    from app.domain.models.registered import RegisteredModel
     from app.entities.agents import Agent as AgentEntity
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail

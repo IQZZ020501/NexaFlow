@@ -2,7 +2,7 @@
 
 Owns the model-management workflow (validation orchestration, audit
 recording, DTO assembly) on top of the LLM capability helpers in
-``app.capabilities.llm.registry``. The capability layer itself stays free of
+``app.application.models.registry``. The capability layer itself stays free of
 business-domain, audit, and API-schema imports.
 """
 
@@ -11,10 +11,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ports import model_registry as model_repository
-from app.capabilities.llm.credentials import legacy_credential_config
+from app.adapters.llm.credentials import legacy_credential_config
 from app.ports.llm import RegisteredModel
-from app.capabilities.llm.providers import PROVIDER_CATALOG
-from app.capabilities.llm.registry import (
+from app.adapters.llm.providers import PROVIDER_CATALOG
+from app.application.models.registry import (
     ACTIVE_STATUS,
     apply_model_credentials,
     credential_fields,
@@ -29,7 +29,7 @@ from app.capabilities.llm.registry import (
     validate_provider_type,
     validate_status,
 )
-from app.capabilities.llm.runtime import (
+from app.adapters.llm.runtime import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
 )

@@ -12,7 +12,7 @@ import tempfile
 
 import tests.support  # noqa: F401  (sets required env before app imports)
 
-from app.capabilities.mcp.client import (
+from app.adapters.mcp.client import (
     McpClientError,
     McpConnection,
     call_mcp_tool,

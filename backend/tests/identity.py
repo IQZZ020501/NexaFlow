@@ -154,7 +154,7 @@ async def seed_agent_publication_audit(
     created_by_user_id: str,
     bound_by_user_id: str | None = None,
 ) -> str:
-    from app.capabilities.llm.registry import RegisteredModel
+    from app.application.models.registry import RegisteredModel
     from app.entities.agents import Agent, AgentPublicationVersion
     from app.infra.db.repositories.agents import repository as agent_repository
 

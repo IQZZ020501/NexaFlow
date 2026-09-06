@@ -7,8 +7,8 @@ from typing import Any
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import build_registered_embeddings
+from app.domain.models.registered import RegisteredModel
+from app.adapters.llm.runtime import build_registered_embeddings
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event

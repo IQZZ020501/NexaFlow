@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 
-from app.capabilities.llm.models import RegisteredModel
+from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import ResourcePermission
 from app.entities.agents import AgentRun
 from app.infra.runtime.model_utils import new_id, utc_now

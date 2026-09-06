@@ -3,12 +3,12 @@
 The pipeline functions are pure and stateless (the parser integrations live
 behind ``extract_document`` inside the capability), so this
 port re-exports the contract surface; swapping the parser implementation
-touches only ``app.capabilities.embedding.pipeline``.
+touches only ``app.adapters.parsing.pipeline``.
 """
 
 from typing import Any, Protocol
 
-from app.capabilities.embedding.pipeline import (
+from app.adapters.parsing.pipeline import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     ChildChunkDraft,
@@ -32,7 +32,7 @@ from app.capabilities.embedding.pipeline import (
     split_text,
     split_text_spans,
 )
-from app.capabilities.embedding.qa_import import QaRow, extract_qa_rows
+from app.adapters.parsing.qa_import import QaRow, extract_qa_rows
 
 __all__ = [
     "CHUNK_OVERLAP",

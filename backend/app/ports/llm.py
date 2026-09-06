@@ -2,14 +2,14 @@
 
 Business code builds chat/embedding/rerank providers through the factory
 functions here and consumes them through the structural protocols, so a
-provider swap stays inside ``app.capabilities.llm``.
+provider swap stays inside ``app.adapters.llm``.
 """
 
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import (
+from app.domain.models.registered import RegisteredModel
+from app.adapters.llm.runtime import (
     ModelCompletion,
     ModelProviderError,
     ModelProviderStatusError,

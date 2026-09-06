@@ -37,15 +37,15 @@ from app.api.v1.endpoints import knowledge_evaluation as knowledge_evaluation_ap
 from app.application import knowledge as knowledge_application
 from app.application import knowledge_evaluation as knowledge_evaluation_application
 from app.application import knowledge_retrieval as knowledge_retrieval_application
-from app.capabilities.rag import retrieval as knowledge_retrieval
-from app.capabilities.rag import vector_store as knowledge_vector_store
-from app.capabilities.embedding.pipeline import (
+from app.adapters.rag import retrieval as knowledge_retrieval
+from app.adapters.rag import vector_store as knowledge_vector_store
+from app.adapters.parsing.pipeline import (
     KnowledgePipelineError,
     build_hierarchical_chunks,
     clean_text,
     split_text,
 )
-from app.capabilities.rag.vector_store import VectorChunk, VectorHit
+from app.adapters.rag.vector_store import VectorChunk, VectorHit
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import (
     evaluation as evaluation_repository,

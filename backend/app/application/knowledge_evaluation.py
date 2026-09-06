@@ -10,7 +10,7 @@ from app.application.knowledge_retrieval import (
     normalized_cosine_similarity,
     retrieve_knowledge_base,
 )
-from app.capabilities.rag.evaluation import (
+from app.domain.knowledge.evaluation.metrics import (
     RetrievalCaseMetrics,
     aggregate_retrieval_metrics,
     retrieval_case_metrics,

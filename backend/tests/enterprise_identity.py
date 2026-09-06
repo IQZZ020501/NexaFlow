@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import AsyncMock, patch
 
-from app.capabilities.enterprise_identity import (
+from app.adapters.identity.enterprise import (
     EnterpriseProviderError,
     ExternalPrincipal,
     _request_json,
@@ -118,7 +118,7 @@ def main() -> None:
     assert feishu_qr_query["state"] == ["feishu_qr.state"]
     assert "code_challenge" not in feishu_qr_query
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(
             side_effect=[
                 {"access_token": "token"},
@@ -151,7 +151,7 @@ def main() -> None:
         ]
     )
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=qr_requests,
     ):
         resolved = asyncio.run(
@@ -173,7 +173,7 @@ def main() -> None:
         "https://passport.feishu.cn/suite/passport/oauth/userinfo"
     )
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(return_value={}),
     ):
         _raises(
@@ -185,7 +185,7 @@ def main() -> None:
             ),
         )
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(side_effect=[{"access_token": "token"}, {"data": []}]),
     ):
         _raises(
@@ -212,12 +212,12 @@ def main() -> None:
     )
 
     with patch(
-        "app.capabilities.enterprise_identity.httpx2.AsyncClient",
+        "app.adapters.identity.enterprise.httpx2.AsyncClient",
         return_value=_ProviderClient(_ProviderResponse({"ok": True})),
     ):
         assert asyncio.run(_request_json("GET", "https://provider.example")) == {"ok": True}
     with patch(
-        "app.capabilities.enterprise_identity.httpx2.AsyncClient",
+        "app.adapters.identity.enterprise.httpx2.AsyncClient",
         return_value=_ProviderClient(
             _ProviderResponse({}, chunks=[b"x" * (32 * 1024), b"x" * (33 * 1024)])
         ),
@@ -227,7 +227,7 @@ def main() -> None:
             lambda: asyncio.run(_request_json("GET", "https://provider.example")),
         )
     with patch(
-        "app.capabilities.enterprise_identity.httpx2.AsyncClient",
+        "app.adapters.identity.enterprise.httpx2.AsyncClient",
         return_value=_ProviderClient(_ProviderResponse([])),
     ):
         _raises(
@@ -235,7 +235,7 @@ def main() -> None:
             lambda: asyncio.run(_request_json("GET", "https://provider.example")),
         )
     with patch(
-        "app.capabilities.enterprise_identity.httpx2.AsyncClient",
+        "app.adapters.identity.enterprise.httpx2.AsyncClient",
         return_value=_ProviderClient(error=OSError("offline")),
     ):
         _raises(
@@ -286,7 +286,7 @@ def main() -> None:
     assert wecom_query["agentid"] == ["1000002"]
 
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(
             side_effect=[
                 {"accessToken": "token", "corpId": "ding-corp"},
@@ -302,7 +302,7 @@ def main() -> None:
     assert resolved.subject_id == "union-id"
     assert resolved.tenant_id == "ding-corp"
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(
             side_effect=[
                 {"accessToken": "token", "corpId": "ding-corp"},
@@ -320,7 +320,7 @@ def main() -> None:
         )
 
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(
             side_effect=[
                 {"errcode": 0, "access_token": "token"},
@@ -336,7 +336,7 @@ def main() -> None:
     assert resolved.subject_id == "wecom-user"
     assert resolved.tenant_id == "wecom-corp"
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(return_value={"errcode": 40013}),
     ):
         _raises(
@@ -348,7 +348,7 @@ def main() -> None:
             ),
         )
     with patch(
-        "app.capabilities.enterprise_identity._request_json",
+        "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(
             side_effect=[
                 {"errcode": 0, "access_token": "token"},

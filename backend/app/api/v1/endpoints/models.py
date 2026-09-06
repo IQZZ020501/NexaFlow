@@ -22,7 +22,7 @@ from app.schemas.model import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from app.application.models import (
+from app.application.models.service import (
     create_registered_model,
     delete_registered_model,
     get_model_credential_form,

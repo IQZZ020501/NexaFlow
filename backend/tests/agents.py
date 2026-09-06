@@ -40,9 +40,9 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.repositories.identity import users as user_repository
-from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
-from app.capabilities.mcp import client as mcp_client_module
-from app.capabilities.mcp.client import (
+from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
+from app.adapters.mcp import client as mcp_client_module
+from app.adapters.mcp.client import (
     MAX_MCP_TOOL_PAGES,
     McpConnection,
     McpClientError,

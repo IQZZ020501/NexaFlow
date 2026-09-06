@@ -46,7 +46,7 @@ from app.application import (
     agent_tools,
     tool_adapters,
 )
-from app.capabilities.llm.runtime import ModelCompletion, ModelToolCall
+from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
@@ -1388,7 +1388,7 @@ async def db_setup(
     admin_user_id = me.json()["user"]["id"]
 
     # RERANKER model inserted directly: the API would run a live provider test.
-    from app.capabilities.llm.models import RegisteredModel as RegisteredModelORM
+    from app.domain.models.registered import RegisteredModel as RegisteredModelORM
     from app.infra.runtime.model_utils import new_id
 
     async with get_session_factory()() as db:

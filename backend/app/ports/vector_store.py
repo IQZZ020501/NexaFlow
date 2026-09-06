@@ -1,14 +1,14 @@
 """Vector store port.
 
 Business code imports the functions and value types from here instead of
-``app.capabilities.rag.vector_store``. The protocol documents the contract;
+``app.adapters.rag.vector_store``. The protocol documents the contract;
 ``build_vector_store`` is the single composition point for the concrete
 backend (Qdrant today).
 """
 
 from typing import Any, Protocol
 
-from app.capabilities.rag.vector_store import (
+from app.adapters.rag.vector_store import (
     GraphProfileVector,
     GraphProfileVectorHit,
     QdrantVectorStore,

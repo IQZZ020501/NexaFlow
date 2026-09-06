@@ -10,12 +10,12 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import text
 
-from app.capabilities.llm.credentials import (
+from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     encrypt_credential_secrets,
 )
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import (
+from app.domain.models.registered import RegisteredModel
+from app.adapters.llm.runtime import (
     build_chat_model,
     build_embeddings,
     build_registered_chat_model,

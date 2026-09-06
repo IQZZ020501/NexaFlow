@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.capabilities.rag.retrieval import reciprocal_rank_fusion
+from app.adapters.rag.retrieval import reciprocal_rank_fusion
 from app.entities.knowledge import KnowledgeBase
 from app.entities.knowledge_graph import (
     KnowledgeGraphEntity,

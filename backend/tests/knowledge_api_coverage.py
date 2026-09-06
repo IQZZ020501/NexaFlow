@@ -70,11 +70,11 @@ from app.api.v1.endpoints import knowledge_lifecycle as knowledge_lifecycle_api
 from app.api.v1.endpoints import knowledge_retrieval as knowledge_retrieval_api
 from app.application import knowledge as knowledge_application
 from app.application import knowledge_retrieval as knowledge_retrieval_application
-from app.capabilities.rag import retrieval as knowledge_retrieval
-from app.capabilities.rag import vector_store as knowledge_vector_store
-from app.capabilities.embedding import pipeline as knowledge_pipeline
-from app.capabilities.llm.runtime import ModelProviderError
-from app.capabilities.rag.vector_store import VectorChunk, VectorHit
+from app.adapters.rag import retrieval as knowledge_retrieval
+from app.adapters.rag import vector_store as knowledge_vector_store
+from app.adapters.parsing import pipeline as knowledge_pipeline
+from app.adapters.llm.runtime import ModelProviderError
+from app.adapters.rag.vector_store import VectorChunk, VectorHit
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.identity import users as user_repository

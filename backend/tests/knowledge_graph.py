@@ -1738,13 +1738,13 @@ async def test_graph_query_planning_edge_paths() -> None:
 
 
 def test_graph_profile_collection_is_knowledge_base_scoped() -> None:
-    from app.capabilities.rag.vector_store import graph_profile_collection_name
+    from app.adapters.rag.vector_store import graph_profile_collection_name
 
     assert graph_profile_collection_name("kb-1") == "kb_kb1_graph"
 
 
 def test_graph_profile_vectors_use_an_isolated_collection() -> None:
-    from app.capabilities.rag import vector_store
+    from app.adapters.rag import vector_store
 
     class Embeddings:
         def embed_documents(self, texts):

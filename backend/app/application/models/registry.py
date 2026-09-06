@@ -5,14 +5,14 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
-from app.capabilities.llm.credentials import (
+from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     encrypt_credential_secrets,
     legacy_credential_config,
 )
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.providers import PROVIDER_CATALOG
-from app.capabilities.llm.runtime import (
+from app.domain.models.registered import RegisteredModel
+from app.adapters.llm.providers import PROVIDER_CATALOG
+from app.adapters.llm.runtime import (
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,

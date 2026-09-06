@@ -108,7 +108,7 @@ async def check_health_probe_functions() -> None:
         else:
             raise AssertionError("Missing Celery worker was reported healthy")
 
-    from app.capabilities.rag import vector_store as qdrant_module
+    from app.adapters.rag import vector_store as qdrant_module
     from app.ports import vector_store as vector_store_port
 
     qdrant_client = MagicMock()

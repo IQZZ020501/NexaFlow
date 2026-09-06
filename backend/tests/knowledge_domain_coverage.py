@@ -87,7 +87,7 @@ from app.schemas.knowledge import (
     KnowledgeDocumentParseRequest,
     KnowledgeModelTestRequest,
 )
-from app.capabilities.embedding.pipeline import (
+from app.adapters.parsing.pipeline import (
     ChildChunkDraft,
     DocumentAssetDraft,
     DocumentChunkDrafts,
@@ -110,7 +110,7 @@ from app.domain.knowledge.task_runner import (
     run_parse_task,
     run_knowledge_task,
 )
-from app.capabilities.llm.models import RegisteredModel
+from app.domain.models.registered import RegisteredModel
 
 MEMBER_PASSWORD = "Member@12345."
 

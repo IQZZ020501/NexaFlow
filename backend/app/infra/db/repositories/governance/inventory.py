@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.capabilities.llm.models import RegisteredModel
+from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import Team as TeamOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm

@@ -30,8 +30,8 @@ from tests.support import (  # noqa: F401
     test_client,
 )
 
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.mcp.client import McpDiscovery
+from app.domain.models.registered import RegisteredModel
+from app.adapters.mcp.client import McpDiscovery
 from app.entities.agents import (
     Agent,
     AgentApiCredential,

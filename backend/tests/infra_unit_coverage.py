@@ -39,15 +39,15 @@ from sqlalchemy import URL, func, make_url, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool, StaticPool
 
-from app.application import models as app_models
+from app.application.models import service as app_models
 from app.api import deps as deps_mod
-from app.capabilities import mcp as mcp_capabilities
-from app.capabilities.llm import credentials as llm_credentials
-from app.capabilities.llm import registry as llm_registry
-from app.capabilities.llm import registry_repository as llm_registry_repository
-from app.capabilities.llm import runtime as llm_runtime
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.providers import PROVIDER_CATALOG
+from app.adapters import mcp as mcp_capabilities
+from app.adapters.llm import credentials as llm_credentials
+from app.application.models import registry as llm_registry
+from app.infra.db.repositories.models import registry as llm_registry_repository
+from app.adapters.llm import runtime as llm_runtime
+from app.domain.models.registered import RegisteredModel
+from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.entities.resource_permission import ResourcePermission
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.tools import McpServer, McpToolPolicy
@@ -85,7 +85,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from mcp.types import Tool as McpTool
 from mcp.types import ToolAnnotations
 
-from app.capabilities.mcp.client import (
+from app.adapters.mcp.client import (
     MAX_MCP_RESULT_CHARS,
     MAX_MCP_TOOLS,
     McpClientError,
@@ -102,7 +102,7 @@ from app.capabilities.mcp.client import (
     normalize_mcp_url,
     validate_mcp_destination,
 )
-from app.capabilities.llm.runtime import (
+from app.adapters.llm.runtime import (
     STREAM_USAGE_SUPPORTED_META_KEY,
     CheckedEmbeddings,
     ModelCompletion,
@@ -448,7 +448,7 @@ def test_checked_embeddings() -> None:
 
 def test_openai_compatible_embeddings_construction() -> None:
     embeddings = __import__(
-        "app.capabilities.llm.runtime", fromlist=["OpenAICompatibleEmbeddings"]
+        "app.adapters.llm.runtime", fromlist=["OpenAICompatibleEmbeddings"]
     ).OpenAICompatibleEmbeddings(
         "http://localhost:9/v1", "k", "embed-model", timeout=7
     )
@@ -513,7 +513,7 @@ def test_openai_compatible_reranker() -> None:
 
 
 def test_bedrock_model_reranker() -> None:
-    from app.capabilities.llm.runtime import BedrockModelReranker
+    from app.adapters.llm.runtime import BedrockModelReranker
 
     delegate = MagicMock()
     delegate.rerank.return_value = [{"index": 0, "relevance_score": 1.0}]
@@ -532,7 +532,7 @@ def test_credential_helpers() -> None:
     assert _required({"api_key": "  k  "}, "api_key") == "k"
     assert isinstance(expect_error(lambda: _required({}, "api_key"), ModelProviderError), ModelProviderError)
 
-    from app.capabilities.llm.runtime import _optional, _openai_api_key, _secret
+    from app.adapters.llm.runtime import _optional, _openai_api_key, _secret
 
     assert _optional({"x": "  v  "}, "x") == "v"
     assert _optional({"x": "  "}, "x") is None

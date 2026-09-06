@@ -2,15 +2,15 @@
 
 The registered-model table is owned by the LLM capability; business domains
 read it through this contract instead of importing
-``app.capabilities.llm.registry_repository`` directly.
+``app.infra.db.repositories.models.registry`` directly.
 """
 
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.capabilities.llm import registry_repository as _registry_repository
-from app.capabilities.llm.models import RegisteredModel
+from app.infra.db.repositories.models import registry as _registry_repository
+from app.domain.models.registered import RegisteredModel
 
 
 class ModelRegistry(Protocol):

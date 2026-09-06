@@ -67,7 +67,7 @@ from app.domain.workflows.models import (  # noqa: F401
     WorkflowUploadStorageCleanup,
     WorkflowVersion,
 )
-from app.capabilities.llm.models import RegisteredModel  # noqa: F401
+from app.domain.models.registered import RegisteredModel  # noqa: F401
 from app.domain.platform.models import ResourcePermission  # noqa: F401
 from app.domain.platform.models import SmtpSettings  # noqa: F401
 from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401

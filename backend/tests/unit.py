@@ -15,14 +15,14 @@ from types import SimpleNamespace
 import tests.support  # noqa: F401  (sets required env before app imports)
 
 from fastapi import HTTPException
-from app.capabilities.llm.registry import (
+from app.application.models.registry import (
     is_masked_secret,
     normalize_model_type,
     normalize_provider_credentials,
     normalize_url_credential,
     validate_status,
 )
-from app.capabilities.rag.retrieval import (
+from app.adapters.rag.retrieval import (
     MAX_PARENT_CONTEXT_CHARS,
     RankedHit,
     bounded_text_chunks,
@@ -30,7 +30,7 @@ from app.capabilities.rag.retrieval import (
     parent_context,
     reciprocal_rank_fusion,
 )
-from app.capabilities.rag.vector_store import VectorHit
+from app.adapters.rag.vector_store import VectorHit
 from app.entities.agents import Agent
 from app.entities.knowledge import KnowledgeBase
 from app.entities.resource_permission import ResourcePermission
@@ -3067,7 +3067,7 @@ def test_parse_task_options_validates_boundaries() -> None:
 
 
 def test_markdown_tables_split_only_between_rows_and_repeat_headers() -> None:
-    from app.capabilities.embedding.pipeline import split_text
+    from app.adapters.parsing.pipeline import split_text
 
     header = "| Name | Description |"
     alignment = "| --- | --- |"
@@ -3087,7 +3087,7 @@ def test_markdown_tables_split_only_between_rows_and_repeat_headers() -> None:
 
 
 def test_markdown_table_keeps_single_overlong_row_intact() -> None:
-    from app.capabilities.embedding.pipeline import split_text
+    from app.adapters.parsing.pipeline import split_text
 
     long_cell = "word " * 30
     row = f"| 1 | {long_cell.strip()} |"
@@ -3100,7 +3100,7 @@ def test_markdown_table_keeps_single_overlong_row_intact() -> None:
 
 
 def test_markdown_table_rules_apply_to_parent_and_child_chunks() -> None:
-    from app.capabilities.embedding.pipeline import (
+    from app.adapters.parsing.pipeline import (
         build_hierarchical_chunks,
         split_parent_chunks,
     )
@@ -3126,7 +3126,7 @@ def test_markdown_table_rules_apply_to_parent_and_child_chunks() -> None:
 
 
 def test_plain_legal_headings_keep_chapters_in_separate_parents() -> None:
-    from app.capabilities.embedding.pipeline import split_parent_chunks
+    from app.adapters.parsing.pipeline import split_parent_chunks
 
     text = (
         "第一章 总则\n第一条 说明。\n"
@@ -3283,7 +3283,7 @@ def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.capabilities.embedding import pipeline
+    from app.adapters.parsing import pipeline
 
     images = [
         SimpleNamespace(
@@ -3346,7 +3346,7 @@ def test_docx_image_mime_cannot_shape_asset_paths() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.capabilities.embedding import pipeline
+    from app.adapters.parsing import pipeline
 
     image = SimpleNamespace(
         content_type="image/../../../../other-document/asset",
@@ -3389,7 +3389,7 @@ def test_archive_limits_run_before_document_conversion() -> None:
     from unittest.mock import patch
     from zipfile import ZIP_DEFLATED, ZipFile
 
-    from app.capabilities.embedding import pipeline
+    from app.adapters.parsing import pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "expanded.zip"
@@ -3415,7 +3415,7 @@ def test_supported_document_formats_are_accepted() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.capabilities.embedding import pipeline
+    from app.adapters.parsing import pipeline
 
     expected_extensions = {
         ".c",
@@ -3512,7 +3512,7 @@ def test_pdf_documents_extract_only_the_text_layer() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.capabilities.embedding import pipeline
+    from app.adapters.parsing import pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.pdf"
@@ -3551,7 +3551,7 @@ def test_image_documents_use_the_configured_vision_extractor() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
 
-    from app.capabilities.embedding import pipeline
+    from app.adapters.parsing import pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.png"
@@ -3823,7 +3823,7 @@ def test_detailed_knowledge_query_contract_defaults() -> None:
 
 
 def test_retrieval_evaluation_metrics_are_deterministic() -> None:
-    from app.capabilities.rag.evaluation import (
+    from app.domain.knowledge.evaluation.metrics import (
         aggregate_retrieval_metrics,
         retrieval_case_metrics,
     )
@@ -3862,7 +3862,7 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
     from app.entities.knowledge import KnowledgeTask
     from app.ports.parsing import KnowledgePipelineError
     from app.schemas.knowledge import KnowledgeEvaluationRunRequest
-    from app.domain.knowledge import evaluation as evaluation_service
+    from app.domain.knowledge.evaluation import service as evaluation_service
 
     assert evaluation_application._evaluation_run_request(
         {"case_ids": ["case-1"], "similarity": 0.4}
@@ -4167,7 +4167,7 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         evaluation as evaluation_repository,
     )
     from app.schemas.knowledge import KnowledgeEvaluationCaseCreateRequest
-    from app.domain.knowledge import evaluation as evaluation_service
+    from app.domain.knowledge.evaluation import service as evaluation_service
 
     knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
     actor = User(id="user-1", username="user")
@@ -4609,8 +4609,8 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
     from openpyxl import Workbook
     from openpyxl.chart import BarChart, Reference
 
-    from app.capabilities.embedding.pipeline import KnowledgePipelineError
-    from app.capabilities.embedding.qa_import import (
+    from app.adapters.parsing.pipeline import KnowledgePipelineError
+    from app.adapters.parsing.qa_import import (
         QaRow,
         extract_qa_rows,
         validate_qa_rows,
@@ -4661,7 +4661,7 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
 
         empty_workbook = SimpleNamespace(worksheets=[], close=lambda: None)
         with patch(
-            "app.capabilities.embedding.qa_import.load_workbook",
+            "app.adapters.parsing.qa_import.load_workbook",
             return_value=empty_workbook,
         ):
             try:
@@ -6762,7 +6762,7 @@ def test_normalize_mcp_url() -> None:
 
 
 def test_mcp_private_network_policy() -> None:
-    from app.capabilities.mcp.client import (
+    from app.adapters.mcp.client import (
         McpClientError,
         validate_mcp_destination,
     )

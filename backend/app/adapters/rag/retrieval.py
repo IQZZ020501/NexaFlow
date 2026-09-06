@@ -5,10 +5,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from app.capabilities.llm.models import RegisteredModel
-from app.capabilities.llm.runtime import ModelProviderError, build_registered_reranker
+from app.domain.models.registered import RegisteredModel
+from app.adapters.llm.runtime import ModelProviderError, build_registered_reranker
 from app.infra.config.settings import Settings
-from app.capabilities.rag.vector_store import VectorHit
+from app.adapters.rag.vector_store import VectorHit
 
 QUERY_OVERFETCH_FACTOR = 5
 RRF_K = 60
