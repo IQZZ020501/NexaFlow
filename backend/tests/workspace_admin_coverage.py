@@ -514,7 +514,7 @@ async def exercise_direct_identity_edges() -> None:
     """Direct service/repository branches not reachable through the API."""
     from fastapi import HTTPException
 
-    from app.application import identity as identity_service
+    from app.application.identity import service as identity_service
     from app.application.identity.service import (
         authenticate_user,
         change_password,
