@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
@@ -94,6 +95,7 @@ class Settings:
     workflow_sandbox_timeout_seconds: float = 5.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
+    public_app_url: str = "http://localhost:8080"
     cors_origins: tuple[str, ...] = ()
     environment: str = "development"
     log_level: str = "INFO"
@@ -166,6 +168,7 @@ class Settings:
             ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "1440")),
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
+            public_app_url=os.getenv("PUBLIC_APP_URL", "http://localhost:8080").rstrip("/"),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -197,6 +200,13 @@ class Settings:
             raise RuntimeError("QDRANT_URL must be set via environment or the .env file.")
         if not self.celery_broker_url:
             raise RuntimeError("CELERY_BROKER_URL must be set via environment or the .env file.")
+        public_url = urlsplit(self.public_app_url)
+        if public_url.scheme not in {"http", "https"} or not public_url.netloc:
+            raise RuntimeError("PUBLIC_APP_URL must be an absolute HTTP(S) URL.")
+        if public_url.path not in {"", "/"} or public_url.query or public_url.fragment:
+            raise RuntimeError("PUBLIC_APP_URL must not include a path, query, or fragment.")
+        if self.environment == "production" and public_url.scheme != "https":
+            raise RuntimeError("PUBLIC_APP_URL must use HTTPS in production.")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise RuntimeError(f"Invalid LOG_LEVEL: {self.log_level}.")
         if self.mcp_request_timeout_seconds <= 0:

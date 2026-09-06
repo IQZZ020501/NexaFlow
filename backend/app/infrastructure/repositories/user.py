@@ -184,6 +184,16 @@ async def delete_refresh_sessions_for_user(db: AsyncSession, user_id: str) -> No
     )
 
 
+async def delete_refresh_sessions_for_enterprise_identity(
+    db: AsyncSession, enterprise_identity_id: str
+) -> None:
+    await db.execute(
+        delete(RefreshSessionOrm).where(
+            RefreshSessionOrm.enterprise_identity_id == enterprise_identity_id
+        )
+    )
+
+
 async def revoke_other_refresh_sessions(
     db: AsyncSession,
     user_id: str,

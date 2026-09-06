@@ -52,9 +52,13 @@ from app.entities.workspace import Workspace, WorkspaceMembership
 
 logger = get_logger(__name__)
 
-def access_token_response(user: User, settings: Settings) -> TokenResponse:
+def access_token_response(
+    user: User, settings: Settings, refresh_token: str
+) -> TokenResponse:
     return TokenResponse(
-        access_token=create_access_token(user.id, settings),
+        access_token=create_access_token(
+            user.id, settings, hash_refresh_token(refresh_token)
+        ),
         expires_in=settings.jwt_expires_minutes * 60,
         must_change_password=user.must_change_password,
     )
@@ -67,6 +71,7 @@ async def issue_refresh_session(
     *,
     user_agent: str | None = None,
     ip_address: str | None = None,
+    enterprise_identity_id: str | None = None,
 ) -> str:
     """
     Create a refresh session and return its plaintext token.
@@ -90,6 +95,7 @@ async def issue_refresh_session(
             user_agent=user_agent[:512] if user_agent else None,
             ip_address=ip_address,
             last_used_at=now,
+            enterprise_identity_id=enterprise_identity_id,
         ),
     )
     return token
@@ -528,7 +534,7 @@ async def authenticate_user(
         username=user.username,
         ip_address=ip_address or "",
     )
-    return access_token_response(user, settings), refresh_token
+    return access_token_response(user, settings, refresh_token), refresh_token
 
 
 async def refresh_access_token(
@@ -578,7 +584,7 @@ async def refresh_access_token(
         user_id=user.id,
         username=user.username,
     )
-    return access_token_response(user, settings)
+    return access_token_response(user, settings, refresh_token)
 
 
 async def revoke_refresh_token(db: AsyncSession, refresh_token: str | None) -> None:

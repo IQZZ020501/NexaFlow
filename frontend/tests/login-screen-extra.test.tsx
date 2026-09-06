@@ -1,13 +1,17 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test"
 
+import { LoginPageContent } from "@/components/auth/login-page-content"
 import { LoginScreen } from "@/components/auth/login-screen"
 import {
   cleanup,
   fireEvent,
   jsonResponse,
+  makeSession,
   mockNextImage,
   mockNextLink,
+  mockNextNavigation,
+  mockUseSession,
   renderPage,
   resetFetch,
   screen,
@@ -17,6 +21,13 @@ import {
 
 mockNextImage()
 mockNextLink()
+mockNextNavigation()
+mockUseSession(
+  makeSession({
+    token: null,
+    isSessionRestored: true,
+  })
+)
 
 afterEach(() => {
   cleanup()
@@ -34,6 +45,91 @@ function submitCredentials(username: string, password: string) {
 }
 
 describe("LoginScreen submission", () => {
+  test("renders configured providers as icon links", () => {
+    renderPage(
+      <LoginScreen
+        onLogin={() => undefined}
+        onNotify={() => undefined}
+        next="/app/agents"
+        enterpriseConnections={[
+          {
+            id: "connection-1",
+            provider: "feishu",
+            name: "公司飞书",
+            start_url: "/api/v1/auth/enterprise/connection-1/start",
+          },
+          {
+            id: "connection-2",
+            provider: "dingtalk",
+            name: "公司钉钉",
+            start_url: "/api/v1/auth/enterprise/connection-2/start",
+          },
+          {
+            id: "connection-3",
+            provider: "wecom",
+            name: "公司企微",
+            start_url: "/api/v1/auth/enterprise/connection-3/start",
+          },
+        ]}
+      />
+    )
+
+    const enterpriseLink = screen.getByRole("link", {
+      name: "使用 公司飞书 扫码登录",
+    })
+    expect(enterpriseLink.getAttribute("href")).toBe(
+      "/api/v1/auth/enterprise/connection-1/start?next=%2Fapp%2Fagents"
+    )
+    expect(enterpriseLink.getAttribute("title")).toBe("公司飞书")
+    expect(
+      document.querySelector('[data-provider-icon="feishu"]')
+    ).not.toBeNull()
+    expect(
+      document.querySelector('[data-provider-icon="dingtalk"]')
+    ).not.toBeNull()
+    expect(
+      document.querySelector('[data-provider-icon="wecom"]')
+    ).not.toBeNull()
+    expect(
+      screen
+        .getByRole("link", { name: "使用 公司钉钉 扫码登录" })
+        .getAttribute("href")
+    ).toBe("/api/v1/auth/enterprise/connection-2/start?next=%2Fapp%2Fagents")
+    expect(
+      screen
+        .getByRole("link", { name: "使用 公司企微 扫码登录" })
+        .getAttribute("href")
+    ).toBe("/api/v1/auth/enterprise/connection-3/start?next=%2Fapp%2Fagents")
+  })
+
+  test("discovers enabled providers on the main login page", async () => {
+    const requestedUrls: string[] = []
+    withFetch((url) => {
+      requestedUrls.push(url)
+      return jsonResponse({
+        workspace_id: null,
+        workspace_name: null,
+        connections: [
+          {
+            id: "connection-1",
+            provider: "feishu",
+            name: "公司飞书",
+            start_url: "/api/v1/auth/enterprise/connection-1/start",
+          },
+        ],
+      })
+    })
+
+    renderPage(<LoginPageContent />)
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: "使用 公司飞书 扫码登录" })
+      ).toBeTruthy()
+    )
+    expect(requestedUrls).toEqual(["/api/v1/auth/enterprise/connections"])
+  })
+
   test("submits credentials and reports a successful login", async () => {
     const calls: { url: string; init?: RequestInit }[] = []
     withFetch((url, init) => {
@@ -138,7 +234,9 @@ describe("LoginScreen submission", () => {
 
     submitCredentials("alice", "pw")
 
-    await waitFor(() => expect(notifications).toEqual(["error:Maintenance window."]))
+    await waitFor(() =>
+      expect(notifications).toEqual(["error:Maintenance window."])
+    )
   })
 
   test("disables the submit button and shows a spinner while submitting", async () => {

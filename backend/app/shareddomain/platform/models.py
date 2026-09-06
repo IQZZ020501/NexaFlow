@@ -62,6 +62,11 @@ class RefreshSession(Base):
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enterprise_identity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("enterprise_identities.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
 
 
 class Workspace(Base):

@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     agents,
     artifacts,
     auth,
+    enterprise_identity,
     knowledge,
     knowledge_evaluation,
     knowledge_graph,
@@ -30,9 +31,11 @@ admin_router.include_router(audit.router)
 admin_router.include_router(system_logs.router)
 admin_router.include_router(governance.router)
 admin_router.include_router(smtp.router)
+admin_router.include_router(enterprise_identity.admin_router)
 api_router.include_router(admin_router)
 
 api_router.include_router(auth.router)
+api_router.include_router(enterprise_identity.public_router)
 api_router.include_router(artifacts.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(teams.router)

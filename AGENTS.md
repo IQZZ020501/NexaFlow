@@ -392,7 +392,7 @@ examples.
 - `backend/` Python changes: use the project's Python tooling. Run `compileall`
   over the touched packages, then run the affected suite from `backend/` with
   `uv run python -m tests.<suite>` (unit, logger, smtp, email, system_governance,
-  identity, workspaces, teams, knowledge, llm, agents, workflows, mcp_transports, test_main,
+  identity, enterprise_identity, workspaces, teams, knowledge, llm, agents, workflows, mcp_transports, test_main,
   agent_access, workflow_run_coverage, workflow_node_coverage,
   workspace_admin_coverage,
   knowledge_graph, knowledge_graph_edge_coverage, knowledge_domain_coverage,

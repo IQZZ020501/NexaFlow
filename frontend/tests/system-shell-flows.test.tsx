@@ -380,6 +380,7 @@ describe("SystemShell access control", () => {
     ])
     renderPage(<SystemShell activeTab="audit" />)
     expect(await screen.findByText("暂无审计日志")).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "企业登录" })).toBeNull()
     expect(replacements).toEqual([])
   })
 })
@@ -405,7 +406,13 @@ describe("workspaces tab", () => {
     for (const label of ["工作空间", "团队", "用户管理", "审计日志"]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy()
     }
-    for (const label of ["系统运行", "SMTP 邮件", "工作空间治理", "会话安全"]) {
+    for (const label of [
+      "系统运行",
+      "SMTP 邮件",
+      "企业登录",
+      "工作空间治理",
+      "会话安全",
+    ]) {
       expect(screen.getByText(label)).toBeTruthy()
     }
 

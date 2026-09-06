@@ -1,3 +1,5 @@
+import DingtalkOutlined from "@ant-design/icons/es/icons/DingtalkOutlined"
+import WechatWorkOutlined from "@ant-design/icons/es/icons/WechatWorkOutlined"
 import * as React from "react"
 import { LoaderCircleIcon } from "lucide-react"
 import Image from "next/image"
@@ -15,12 +17,51 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { login } from "@/lib/api/auth"
+import { apiUrl } from "@/lib/api-client"
+import type {
+  EnterpriseProvider,
+  PublicEnterpriseConnection,
+} from "@/lib/api/enterprise-identity"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
 
 type LoginForm = {
   username: string
   password: string
+}
+
+function EnterpriseProviderIcon({
+  provider,
+}: {
+  provider: EnterpriseProvider
+}) {
+  if (provider === "feishu") {
+    return (
+      <Image
+        src="/feishu.svg"
+        alt=""
+        width={20}
+        height={20}
+        data-provider-icon={provider}
+      />
+    )
+  }
+  if (provider === "dingtalk") {
+    return (
+      <DingtalkOutlined
+        aria-hidden="true"
+        data-provider-icon={provider}
+        className="text-xl text-[#1677ff]"
+      />
+    )
+  }
+  return (
+    <WechatWorkOutlined
+      aria-hidden="true"
+      data-provider-icon={provider}
+      className="text-xl text-[#07c160]"
+    />
+  )
 }
 
 /**
@@ -32,9 +73,17 @@ type LoginForm = {
 export function LoginScreen({
   onLogin,
   onNotify,
+  enterpriseConnections = [],
+  next,
 }: {
-  onLogin: (token: string, mustChangePassword: boolean, expiresIn: number) => void
+  onLogin: (
+    token: string,
+    mustChangePassword: boolean,
+    expiresIn: number
+  ) => void
   onNotify: (kind: AppNotification["kind"], message: string) => void
+  enterpriseConnections?: PublicEnterpriseConnection[]
+  next?: string
 }) {
   const { t } = useLanguage()
   const [form, setForm] = React.useState<LoginForm>({
@@ -115,7 +164,7 @@ export function LoginScreen({
                   <div className="flex justify-end">
                     <Link
                       href="/forgot-password"
-                      className="rounded-sm text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                      className="rounded-sm text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
                     >
                       {t("忘记密码")}
                     </Link>
@@ -132,6 +181,40 @@ export function LoginScreen({
               </Button>
             </CardFooter>
           </form>
+          {enterpriseConnections.length ? (
+            <CardContent className="grid gap-3 border-t pt-6">
+              <div className="text-center text-xs text-muted-foreground">
+                {t("或使用企业账号登录")}
+              </div>
+              <div className="flex flex-wrap justify-center gap-3">
+                {enterpriseConnections.map((connection) => {
+                  const params = new URLSearchParams()
+                  if (next) params.set("next", next)
+                  const href = apiUrl(
+                    `${connection.start_url}${params.size ? `?${params}` : ""}`
+                  )
+                  const label = t("使用 {provider} 扫码登录", {
+                    provider: connection.name,
+                  })
+                  return (
+                    <Button
+                      key={connection.id}
+                      variant="outline"
+                      size="icon-lg"
+                      className="size-10 rounded-full"
+                      asChild
+                    >
+                      <a href={href} aria-label={label} title={connection.name}>
+                        <EnterpriseProviderIcon
+                          provider={connection.provider}
+                        />
+                      </a>
+                    </Button>
+                  )
+                })}
+              </div>
+            </CardContent>
+          ) : null}
         </Card>
       </main>
     </>

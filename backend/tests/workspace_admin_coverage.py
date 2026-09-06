@@ -2000,6 +2000,10 @@ def run_identity_block() -> None:
             json={"new_password": "AdminSelfPass@123"},
         )
         assert self_managed.status_code == 200, self_managed.text
+        admin_token = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "AdminSelfPass@123"},
+        ).json()["access_token"]
 
         # --- deletion -------------------------------------------------------
         # Delete self -> 400.
@@ -2091,6 +2095,7 @@ def run_identity_block() -> None:
         )
         assert changed_self.status_code == 204, changed_self.text
         assert client.cookies.get(REFRESH_TOKEN_COOKIE)
+        admin_token = client.post("/api/v1/auth/refresh").json()["access_token"]
 
         # Wrong current password -> 400.
         wrong_current = client.post(

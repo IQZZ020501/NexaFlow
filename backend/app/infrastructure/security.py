@@ -23,9 +23,15 @@ def verify_password(password: str, password_hash: str) -> bool:
     return _password_hash.verify(password, password_hash)
 
 
-def create_access_token(user_id: str, settings: Settings) -> str:
+def create_access_token(
+    user_id: str, settings: Settings, session_token_hash: str
+) -> str:
     expires_at = datetime.now(UTC) + timedelta(minutes=settings.jwt_expires_minutes)
-    payload: dict[str, Any] = {"sub": user_id, "exp": expires_at}
+    payload: dict[str, Any] = {
+        "sub": user_id,
+        "sid": session_token_hash,
+        "exp": expires_at,
+    }
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=ALGORITHM)
 
 
@@ -44,6 +50,18 @@ def decode_access_token(token: str, settings: Settings) -> str | None:
         return None
     subject = payload.get("sub")
     return subject if isinstance(subject, str) else None
+
+
+def decode_access_session(token: str, settings: Settings) -> tuple[str, str] | None:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        return None
+    subject = payload.get("sub")
+    session_token_hash = payload.get("sid")
+    if not isinstance(subject, str) or not isinstance(session_token_hash, str):
+        return None
+    return subject, session_token_hash
 
 
 def _artifact_signing_key(settings: Settings) -> bytes:

@@ -1,0 +1,26 @@
+from fastapi import HTTPException, status
+
+from app.entities.enterprise_identity import ENTERPRISE_IDENTITY_PROVIDERS
+
+
+def safe_next_path(value: str | None) -> str:
+    if value and value.startswith("/") and not value.startswith(("//", "/\\")):
+        return value[:2048]
+    return "/app/apps"
+
+
+def validate_connection_fields(
+    provider: str,
+    client_id: str | None,
+    tenant_id: str,
+    agent_id: str | None,
+) -> None:
+    if provider not in ENTERPRISE_IDENTITY_PROVIDERS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unsupported provider.")
+    if not tenant_id.strip() or (provider != "wecom" and not (client_id or "").strip()):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Client and tenant identifiers are required.",
+        )
+    if provider == "wecom" and not (agent_id or "").strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "WeCom agent ID is required.")
