@@ -2,7 +2,7 @@
 
 Targets the knowledge shared domain (kb / lifecycle / orchestration /
 documents / cleanup / permissions / task_runner), the Celery task bodies
-(``app.tasks.knowledge``) and the knowledge repository.  Runs as a plain
+(``app.tasks.knowledge.jobs``) and the knowledge repository.  Runs as a plain
 script: ``uv run python -m tests.knowledge.knowledge_domain_coverage`` from
 ``backend/``.
 """
