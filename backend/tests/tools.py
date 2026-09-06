@@ -6177,7 +6177,7 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
 def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
     from app.application.tools.runtime.service import ToolInvocationBusy
     from app.infra.tools import dispatch as tool_dispatch
-    from app.tasks import tools as tool_tasks
+    from app.tasks.tools import jobs as tool_tasks
     from tests.support import settings as test_settings
 
     original_configure = tool_tasks.configure_task_worker
@@ -6406,7 +6406,7 @@ def test_tool_boundaries_reject_unsafe_payloads() -> None:
 
 def test_tool_tasks_are_registered() -> None:
     from app.infra.queue.celery import celery_app
-    from app.tasks.maintenance import cleanup_expired_generated_artifacts_job
+    from app.tasks.maintenance.jobs import cleanup_expired_generated_artifacts_job
 
     assert "app.tools.run" in celery_app.tasks
     assert "app.tools.recover" in celery_app.tasks

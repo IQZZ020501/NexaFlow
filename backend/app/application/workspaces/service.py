@@ -30,8 +30,8 @@ from app.domain.tools.catalog.service import (
     tombstone_workspace_mcp_catalog,
 )
 from app.domain.workflows.uploads import queue_upload_cleanups
-from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
-from app.tasks.knowledge import enqueue_upload_storage_cleanups
+from app.tasks.knowledge.jobs import enqueue_knowledge_storage_cleanup
+from app.tasks.knowledge.jobs import enqueue_upload_storage_cleanups
 from app.schemas.workspaces.contracts import (
     WorkspaceMemberResponse,
     WorkspaceUserCreateRequest,

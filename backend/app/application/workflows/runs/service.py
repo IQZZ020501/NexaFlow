@@ -59,7 +59,7 @@ from app.domain.workflows.resources import (
     load_workflow_agent_snapshots,
     load_workflow_resource_snapshot,
 )
-from app.tasks.agents import enqueue_agent_run
+from app.tasks.agents.jobs import enqueue_agent_run
 
 WORKFLOW_MAX_STEPS = 100
 WORKFLOW_MAX_MODEL_TOKENS = 100_000

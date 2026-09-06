@@ -80,7 +80,7 @@ from app.domain.knowledge.service import (
     upload_knowledge_attachment as upload_knowledge_attachment_record,
     upsert_resource_permission,
 )
-from app.tasks.knowledge import (
+from app.tasks.knowledge.jobs import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
 )

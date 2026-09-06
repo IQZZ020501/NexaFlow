@@ -76,7 +76,7 @@ async def enqueue_prepared_agent_run(
     *,
     unified: bool = True,
 ) -> None:
-    from app.tasks.agents import enqueue_agent_run
+    from app.tasks.agents.jobs import enqueue_agent_run
 
     await enqueue_agent_run(
         run_id,

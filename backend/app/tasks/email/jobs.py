@@ -6,7 +6,7 @@ from app.infra.queue.celery import celery_app
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
-from app.tasks import configure_task_worker, run_task_async
+from app.tasks.runtime import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
 

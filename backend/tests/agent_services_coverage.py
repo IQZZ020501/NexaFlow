@@ -54,7 +54,7 @@ from app.domain.agents.access import permissions as agent_permissions
 from app.domain.agents import service as agent_services
 from app.domain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
 from app.domain.tools.mcp import service as mcp_services
-from app.tasks import agents as agent_tasks
+from app.tasks.agents import jobs as agent_tasks
 from app.application.agents.runs.executor import RUN_BUSY
 
 MEMBER_PASSWORD = "AgentCoverage@12345."

@@ -7,7 +7,7 @@ from app.application.tools.runtime.service import (
 )
 from app.infra.queue.celery import celery_app
 from app.infra.config.settings import Settings
-from app.tasks import configure_task_worker, run_task_async
+from app.tasks.runtime import configure_task_worker, run_task_async
 
 
 @celery_app.task(

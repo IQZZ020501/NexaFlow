@@ -4,16 +4,16 @@ from app.application.artifacts.service import cleanup_expired_generated_artifact
 from app.infra.queue.celery import celery_app
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
-from app.tasks import run_task_async
-from app.tasks.agents import recover_agent_runs_job, recover_legacy_agent_runs_job
-from app.tasks.email import recover_email_deliveries_job
-from app.tasks.knowledge import (
+from app.tasks.runtime import run_task_async
+from app.tasks.agents.jobs import recover_agent_runs_job, recover_legacy_agent_runs_job
+from app.tasks.email.jobs import recover_email_deliveries_job
+from app.tasks.knowledge.jobs import (
     reconcile_knowledge_graphs_job,
     recover_knowledge_storage_cleanups_job,
     recover_knowledge_tasks_job,
     recover_upload_storage_cleanups_job,
 )
-from app.tasks.tools import recover_tool_invocations_job
+from app.tasks.tools.jobs import recover_tool_invocations_job
 
 logger = get_logger(__name__)
 

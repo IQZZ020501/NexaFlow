@@ -281,7 +281,7 @@ async def dispatch_email_deliveries(
             await run_email_delivery(delivery_id, settings)
         return
 
-    from app.tasks.email import run_email_delivery_job
+    from app.tasks.email.jobs import run_email_delivery_job
 
     from app.infra.queue.celery import celery_app
 

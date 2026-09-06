@@ -147,11 +147,11 @@ def create_celery_app() -> Celery:
         broker=settings.celery_broker_url,
         task_cls=NexaFlowTask,
         include=[
-            "app.tasks.knowledge",
-            "app.tasks.agents",
-            "app.tasks.tools",
-            "app.tasks.email",
-            "app.tasks.maintenance",
+            "app.tasks.knowledge.jobs",
+            "app.tasks.agents.jobs",
+            "app.tasks.tools.jobs",
+            "app.tasks.email.jobs",
+            "app.tasks.maintenance.jobs",
         ],
     )
     app.conf.update(
@@ -177,5 +177,5 @@ def create_celery_app() -> Celery:
 
 
 celery_app = create_celery_app()
-if "app.tasks.knowledge" not in sys.modules:
-    celery_app.loader.import_task_module("app.tasks.knowledge")
+if "app.tasks.knowledge.jobs" not in sys.modules:
+    celery_app.loader.import_task_module("app.tasks.knowledge.jobs")

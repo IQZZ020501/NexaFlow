@@ -171,35 +171,35 @@ def test_email_templates() -> None:
 
 
 def test_email_task_wrappers() -> None:
-    import app.tasks.email as email_tasks
+    import app.tasks.email.jobs as email_tasks
 
     settings = test_settings()
     with (
-        patch("app.tasks.email.Settings.from_env", return_value=settings),
-        patch("app.tasks.email.configure_task_worker") as configure_worker,
-        patch("app.tasks.email.run_email_delivery", new=AsyncMock()) as run_delivery,
+        patch("app.tasks.email.jobs.Settings.from_env", return_value=settings),
+        patch("app.tasks.email.jobs.configure_task_worker") as configure_worker,
+        patch("app.tasks.email.jobs.run_email_delivery", new=AsyncMock()) as run_delivery,
     ):
         email_tasks.run_email_delivery_job.run("delivery-id")
     configure_worker.assert_called_once_with(settings)
     run_delivery.assert_awaited_once_with("delivery-id", settings)
 
     with (
-        patch("app.tasks.email.Settings.from_env", return_value=settings),
-        patch("app.tasks.email.configure_task_worker"),
+        patch("app.tasks.email.jobs.Settings.from_env", return_value=settings),
+        patch("app.tasks.email.jobs.configure_task_worker"),
         patch(
-            "app.tasks.email.run_email_delivery",
+            "app.tasks.email.jobs.run_email_delivery",
             new=AsyncMock(side_effect=RuntimeError("crashed")),
         ),
-        patch("app.tasks.email.log_error") as log_error,
+        patch("app.tasks.email.jobs.log_error") as log_error,
     ):
         email_tasks.run_email_delivery_job.run("failed-id")
     log_error.assert_called_once()
 
     with (
-        patch("app.tasks.email.Settings.from_env", return_value=settings),
-        patch("app.tasks.email.configure_task_worker") as configure_worker,
+        patch("app.tasks.email.jobs.Settings.from_env", return_value=settings),
+        patch("app.tasks.email.jobs.configure_task_worker") as configure_worker,
         patch(
-            "app.tasks.email.list_due_email_delivery_ids",
+            "app.tasks.email.jobs.list_due_email_delivery_ids",
             new=AsyncMock(return_value=["one", "two"]),
         ),
         patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async,
@@ -342,7 +342,7 @@ async def test_delivery_edge_cases() -> None:
     ]
 
     broker_settings = replace(settings, celery_task_always_eager=False)
-    import app.tasks.email as email_tasks
+    import app.tasks.email.jobs as email_tasks
 
     from app.infra.queue.celery import celery_app
 
@@ -865,7 +865,7 @@ def main() -> None:
 
         asyncio.run(test_delivery_edge_cases())
 
-        import app.tasks.email  # noqa: F401
+        import app.tasks.email.jobs  # noqa: F401
         from app.infra.queue.celery import celery_app
 
         assert "app.email.send" in celery_app.tasks

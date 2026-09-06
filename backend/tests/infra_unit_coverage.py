@@ -79,7 +79,7 @@ from app.domain.teams import services as teams_services
 from app.domain.tools.mcp import service as tools_services
 from app.domain.tools.models import McpServer as McpServerOrm
 from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
-from app.tasks import configure_task_worker
+from app.tasks.runtime import configure_task_worker
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from mcp.types import Tool as McpTool
@@ -2940,7 +2940,7 @@ def test_celery() -> None:
 
 
 def test_maintenance_recovery_sweeps() -> None:
-    from app.tasks import maintenance
+    from app.tasks.maintenance import jobs as maintenance
 
     first = SimpleNamespace(name="first", run=MagicMock())
     broken = SimpleNamespace(
@@ -2978,7 +2978,7 @@ def test_configure_task_worker() -> None:
     import threading
     import time
 
-    import app.tasks as tasks_module
+    import app.tasks.runtime as tasks_module
 
     original_pid = tasks_module._configured_process_id
     original_configure = tasks_module.configure_database

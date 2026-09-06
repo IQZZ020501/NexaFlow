@@ -27,7 +27,7 @@ from app.domain.workflows.uploads import (
     prepare_due_upload_cleanups,
     run_upload_storage_cleanup,
 )
-from app.tasks import configure_task_worker, run_task_async
+from app.tasks.runtime import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
 

@@ -70,8 +70,8 @@ from app.domain.knowledge.tasks import orchestration as orchestration_service
 from app.domain.knowledge.bases import permissions as permissions_service
 from app.domain.knowledge.tasks import runner as task_runner_service
 from app.domain.knowledge import models as knowledge_models
-from app.tasks import knowledge as knowledge_tasks_module
-from app.tasks.knowledge import (
+from app.tasks.knowledge import jobs as knowledge_tasks_module
+from app.tasks.knowledge.jobs import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
     recover_knowledge_tasks_job,
@@ -4059,7 +4059,7 @@ def test_evaluation_migrations_support_sqlite() -> None:
 
 
 def main() -> None:
-    import app.tasks as tasks_package
+    import app.tasks.runtime as tasks_package
 
     tasks_package._configured_process_id = os.getpid()
 
