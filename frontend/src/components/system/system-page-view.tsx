@@ -3,6 +3,7 @@ import Link from "next/link"
 import {
   ActivityIcon,
   KeyRoundIcon,
+  LogInIcon,
   MailIcon,
   ShieldCheckIcon,
 } from "lucide-react"
@@ -356,6 +357,15 @@ export function SystemPageView({
             >
               <MailIcon className="size-4 shrink-0" />
               <span>{t("SMTP 邮件")}</span>
+            </Link>
+          ) : null}
+          {me.user.is_global_admin ? (
+            <Link
+              href="/system/identity"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+            >
+              <LogInIcon className="size-4 shrink-0" />
+              <span>{t("企业登录")}</span>
             </Link>
           ) : null}
           {canManageAnyWorkspace(me, selectedWorkspaceId) ? (

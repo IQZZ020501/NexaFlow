@@ -1391,6 +1391,24 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"])
   })
 
+  test("uses the shared dropdown for the document sort field", async () => {
+    const documents = [
+      makeDocument({ id: "doc-a", filename: "a.md", size_bytes: 100 }),
+      makeDocument({ id: "doc-b", filename: "b.md", size_bytes: 500 }),
+      makeDocument({ id: "doc-c", filename: "c.md", size_bytes: 300 }),
+    ]
+    renderDetailPage({ documents })
+
+    await waitFor(() => expect(visibleFilenames().length).toBe(3))
+    openMenu(screen.getByRole("button", { name: "排序" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "大小" }))
+    expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"])
+
+    openMenu(screen.getByRole("button", { name: "排序" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "大小" }))
+    expect(visibleFilenames()).toEqual(["a.md", "c.md", "b.md"])
+  })
+
   test("selects all documents and runs bulk index and delete", async () => {
     const documents = [
       makeDocument({ id: "doc-1", filename: "a.md" }),

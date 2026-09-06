@@ -71,6 +71,11 @@ from app.capabilities.llm.models import RegisteredModel  # noqa: F401
 from app.shareddomain.platform.models import ResourcePermission  # noqa: F401
 from app.shareddomain.platform.models import SmtpSettings  # noqa: F401
 from app.shareddomain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
+from app.shareddomain.enterprise_identity.models import (  # noqa: F401
+    EnterpriseIdentity,
+    EnterpriseIdentityConnection,
+    EnterpriseLoginState,
+)
 from app.infrastructure.system_log import SystemLog  # noqa: F401
 from app.shareddomain.platform.models import Team, TeamMembership  # noqa: F401
 from app.shareddomain.platform.models import Workspace, WorkspaceMembership  # noqa: F401

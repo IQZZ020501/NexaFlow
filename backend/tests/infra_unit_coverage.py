@@ -51,7 +51,7 @@ from app.capabilities.llm.providers import PROVIDER_CATALOG
 from app.entities.resource_permission import ResourcePermission
 from app.entities.team import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.tools import McpServer, McpToolPolicy
-from app.entities.user import User
+from app.entities.user import RefreshSession, User
 from app.infrastructure import celery as celery_mod
 from app.infrastructure import code_sandbox
 from app.infrastructure import config as config_mod
@@ -139,6 +139,7 @@ from app.infrastructure.security import (
     create_access_token,
     create_refresh_token,
     decode_access_token,
+    decode_access_session,
     hash_password,
     hash_refresh_token,
     verify_password,
@@ -2734,15 +2735,16 @@ def test_security_tokens() -> None:
     assert verify_password("NexaFlow@12345.", password_hash)
     assert not verify_password("wrong", password_hash)
 
-    token = create_access_token("user-42", runtime_settings)
+    token = create_access_token("user-42", runtime_settings, "session-hash")
     assert decode_access_token(token, runtime_settings) == "user-42"
+    assert decode_access_session(token, runtime_settings) == ("user-42", "session-hash")
     assert decode_access_token(token + "tampered", runtime_settings) is None
     assert decode_access_token("not-a-jwt", runtime_settings) is None
     wrong_secret = decode_access_token(token, replace(runtime_settings, jwt_secret_key="other"))
     assert wrong_secret is None
 
     expired_settings = replace(runtime_settings, jwt_expires_minutes=-5)
-    expired_token = create_access_token("user-42", expired_settings)
+    expired_token = create_access_token("user-42", expired_settings, "session-hash")
     assert decode_access_token(expired_token, expired_settings) is None
 
     refresh = create_refresh_token()
@@ -3087,26 +3089,38 @@ def test_deps() -> None:
     active_user = User(id="u1", username="alice", name="Alice", is_global_admin=False, must_change_password=False, is_active=True)
     admin_user = User(id="u1", username="alice", name="Alice", is_global_admin=True, must_change_password=False, is_active=True)
     pending_user = User(id="u1", username="alice", name="Alice", must_change_password=True, is_active=True)
+    active_session = RefreshSession(user_id="u1", token_hash="session-1")
 
     # no credentials
     expect_http_error(lambda: run(deps_mod.get_current_user(None, runtime_settings, db)), 401)
 
     credentials = SimpleNamespace(credentials="token-1")
-    with patch.object(deps_mod, "decode_access_token", return_value=None):
+    with patch.object(deps_mod, "decode_access_session", return_value=None):
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
-    with patch.object(deps_mod, "decode_access_token", return_value="u1"), patch.object(
+    with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
+        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=None)
+    ):
+        expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
+
+    with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
+        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=active_session)
+    ), patch.object(
         deps_mod.user_repository, "get_user_by_id", new=AsyncMock(return_value=None)
     ):
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
     inactive = User(id="u1", username="alice", name="Alice", is_active=False)
-    with patch.object(deps_mod, "decode_access_token", return_value="u1"), patch.object(
+    with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
+        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=active_session)
+    ), patch.object(
         deps_mod.user_repository, "get_user_by_id", new=AsyncMock(return_value=inactive)
     ):
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
-    with patch.object(deps_mod, "decode_access_token", return_value="u1"), patch.object(
+    with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
+        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=active_session)
+    ), patch.object(
         deps_mod.user_repository, "get_user_by_id", new=AsyncMock(return_value=active_user)
     ):
         assert run(deps_mod.get_current_user(credentials, runtime_settings, db)) is active_user

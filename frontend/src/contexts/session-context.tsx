@@ -281,9 +281,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     let isCurrent = true
     let restoredToken = false
     localStorage.removeItem(LEGACY_TOKEN_KEY)
+    if (initialPathnameRef.current === "/auth/complete") {
+      localStorage.removeItem(LOGGED_OUT_KEY)
+      const workspaceId = new URLSearchParams(window.location.search).get("workspace")
+      if (workspaceId && workspaceId.length <= 36) {
+        localStorage.setItem(WORKSPACE_KEY, workspaceId)
+      }
+    }
     // Login is anonymous; probing an HttpOnly cookie here only creates expected 401 noise.
     if (
-      initialPathnameRef.current === "/login" ||
+      initialPathnameRef.current.startsWith("/login") ||
       localStorage.getItem(LOGGED_OUT_KEY)
     ) {
       setIsSessionRestored(true)

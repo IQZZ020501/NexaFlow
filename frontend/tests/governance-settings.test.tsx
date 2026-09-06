@@ -776,7 +776,7 @@ describe("session security panel", () => {
     fireEvent.pointerDown(userSelect)
     fireEvent.click(userSelect)
     fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Other User (other)" })
+      await screen.findByRole("menuitem", { name: "other" })
     )
 
     await waitFor(() => expect(screen.getByText("Safari/17")).toBeTruthy())

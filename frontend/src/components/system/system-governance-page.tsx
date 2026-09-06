@@ -12,6 +12,7 @@ import {
   FileTextIcon,
   HistoryIcon,
   KeyRoundIcon,
+  LogInIcon,
   LoaderCircleIcon,
   MailIcon,
   RefreshCwIcon,
@@ -78,8 +79,9 @@ import {
   type SystemPageSize,
 } from "@/components/system/pagination-footer"
 import { ResourcePermissionNavGroup } from "@/components/system/resource-permissions-page"
+import { EnterpriseIdentityPage } from "@/components/system/enterprise-identity-page"
 
-export type SystemGovernanceSection = "operations" | "governance" | "security" | "email"
+export type SystemGovernanceSection = "operations" | "governance" | "security" | "email" | "identity"
 
 type Props = {
   section: SystemGovernanceSection
@@ -87,7 +89,7 @@ type Props = {
 
 const navItems: Array<{
   href: string
-  label: "工作空间" | "团队" | "用户管理" | "审计日志" | "系统运行" | "工作空间治理" | "会话安全" | "SMTP 邮件"
+  label: "工作空间" | "团队" | "用户管理" | "审计日志" | "系统运行" | "工作空间治理" | "会话安全" | "SMTP 邮件" | "企业登录"
   icon: React.ElementType
 }> = [
   { href: "/system/workspaces", label: "工作空间", icon: Building2Icon },
@@ -96,12 +98,14 @@ const navItems: Array<{
   { href: "/system/audit", label: "审计日志", icon: HistoryIcon },
   { href: "/system/operations", label: "系统运行", icon: ActivityIcon },
   { href: "/system/email", label: "SMTP 邮件", icon: MailIcon },
+  { href: "/system/identity", label: "企业登录", icon: LogInIcon },
   { href: "/system/governance", label: "工作空间治理", icon: ShieldCheckIcon },
   { href: "/system/security", label: "会话安全", icon: KeyRoundIcon },
 ]
 const secondaryNavHrefs = new Set([
   "/system/operations",
   "/system/email",
+  "/system/identity",
   "/system/governance",
   "/system/security",
 ])
@@ -134,7 +138,7 @@ export function SystemGovernancePage({ section }: Props) {
       router.replace("/app/apps")
       return
     }
-    if ((section === "operations" || section === "email") && !session.me.user.is_global_admin) {
+    if ((section === "operations" || section === "email" || section === "identity") && !session.me.user.is_global_admin) {
       router.replace("/system/teams")
     }
     if (section === "governance" && !canManageWorkspace) {
@@ -143,6 +147,12 @@ export function SystemGovernancePage({ section }: Props) {
   }, [canAccess, canManageWorkspace, router, section, session.me])
 
   if (!session.me || !session.token || !canAccess) return null
+  if (
+    (section === "operations" || section === "email" || section === "identity") &&
+    !session.me.user.is_global_admin
+  ) {
+    return null
+  }
 
   return (
     <div className="grid min-w-0 gap-4 lg:h-[calc(100svh-9.25rem)] lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -152,6 +162,7 @@ export function SystemGovernancePage({ section }: Props) {
         {section === "governance" ? <GovernancePanel /> : null}
         {section === "security" ? <SecurityPanel /> : null}
         {section === "email" ? <SmtpSettingsPage /> : null}
+        {section === "identity" ? <EnterpriseIdentityPage /> : null}
       </main>
     </div>
   )
@@ -180,7 +191,7 @@ function SystemGovernanceNav({
   )
   const visible = navItems.filter((item) => {
     if (item.href === "/system/users") return canManageUsers
-    if (item.href === "/system/audit" || item.href === "/system/operations" || item.href === "/system/email") {
+    if (item.href === "/system/audit" || item.href === "/system/operations" || item.href === "/system/email" || item.href === "/system/identity") {
       return me.user.is_global_admin
     }
     if (item.href === "/system/governance") return canManageWorkspace
@@ -630,7 +641,7 @@ function GovernancePanel() {
   const cards: Array<[string, number]> = inventory ? [["成员", inventory.members_total], ["团队", inventory.teams_total], ["Agent", inventory.agents_total], ["知识库", inventory.knowledge_bases_total], ["模型", inventory.models_total], ["工具", inventory.tools_total], ["工作流", inventory.workflows_total], ["活跃运行", inventory.active_runs], ["失败运行（24小时）", inventory.failed_runs_24h], ["失败任务（24小时）", inventory.failed_tasks_24h]] : []
   return <div className="grid min-w-0 gap-4">
     {confirmDialog}
-    <Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><ShieldCheckIcon className="size-4" />{t("工作空间治理")}</CardTitle><CardDescription>{t("系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略")}</CardDescription></div><div className="flex items-center gap-2"><label className="text-sm text-muted-foreground">{t("工作空间")}</label><FilterDropdown className="h-9 w-56" value={selectedWorkspaceId} onChange={session.selectWorkspace} ariaLabel={t("选择工作空间")} options={manageableWorkspaces.map((workspace) => ({ value: workspace.id, label: displayWorkspaceName(workspace, t) }))} /><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{cards.map(([label, value]) => <div key={label} className="rounded-lg border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">{t(label as never)}</div><div className="mt-1 text-2xl font-semibold">{value}</div></div>)}</CardContent></Card>
+    <Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><ShieldCheckIcon className="size-4" />{t("工作空间治理")}</CardTitle><CardDescription>{t("系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略")}</CardDescription></div><div className="flex items-center gap-2"><label className="text-sm text-muted-foreground">{t("工作空间")}</label><FilterDropdown className="h-9 w-fit max-w-56" value={selectedWorkspaceId} onChange={session.selectWorkspace} ariaLabel={t("选择工作空间")} options={manageableWorkspaces.map((workspace) => ({ value: workspace.id, label: displayWorkspaceName(workspace, t) }))} /><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{cards.map(([label, value]) => <div key={label} className="rounded-lg border bg-muted/20 p-3"><div className="text-xs text-muted-foreground">{t(label as never)}</div><div className="mt-1 text-2xl font-semibold">{value}</div></div>)}</CardContent></Card>
     <div className="grid gap-4 xl:grid-cols-2">
       <Card><CardHeader><CardTitle>{t("配额策略")}</CardTitle><CardDescription>{t("先限制运行规模，再根据用量告警调整")}</CardDescription></CardHeader><CardContent><form className="grid gap-3" onSubmit={saveGovernance}><Field label={t("每日运行上限")} value={form.daily} onChange={(value) => setForm((current) => ({ ...current, daily: value }))} placeholder={t("不限制")} type="number" /><Field label={t("月度 Token 上限")} value={form.monthly} onChange={(value) => setForm((current) => ({ ...current, monthly: value }))} placeholder={t("不限制")} type="number" /><Field label={t("告警阈值（百分比）")} value={form.threshold} onChange={(value) => setForm((current) => ({ ...current, threshold: value }))} type="number" /><Field label={t("数据保留天数")} value={form.retention} onChange={(value) => setForm((current) => ({ ...current, retention: value }))} placeholder={t("不限制")} type="number" /><div className="flex justify-end"><Button type="submit"><ClipboardIcon className="size-4" />{t("保存策略")}</Button></div></form></CardContent></Card>
     <Card>
@@ -796,7 +807,7 @@ function SecurityPanel() {
     try { if (isGlobal && targetUserId !== session.me?.user.id) await revokeAllUserSessions(session.token, targetUserId); else await revokeOtherSessions(session.token); await load(); session.notify("success", t("其他会话已撤销")) } catch (error) { reportError(error) }
   }
 
-  return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2">{isGlobal ? <FilterDropdown className="h-9 w-56" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: `${user.name} (${user.username})` }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid gap-2">{visibleSessions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0"><div className="truncate text-sm font-medium" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}<SystemPagination page={page} pageSize={pageSize} itemCount={visibleSessions.length} total={sessions.length} hasNext={page * pageSize < sessions.length} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1) }} /></CardContent></Card>{confirmDialog}</>
+  return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2"><div className={cn("grid gap-2", isGlobal && "grid-cols-2")}>{isGlobal ? <FilterDropdown className="h-7 min-w-0" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: user.username }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button></div><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid gap-2">{visibleSessions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0"><div className="truncate text-sm font-medium" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}<SystemPagination page={page} pageSize={pageSize} itemCount={visibleSessions.length} total={sessions.length} hasNext={page * pageSize < sessions.length} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1) }} /></CardContent></Card>{confirmDialog}</>
 }
 
 /**

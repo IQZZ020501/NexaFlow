@@ -44,6 +44,26 @@ export const en = {
   密码: "Password",
   登录: "Sign in",
   忘记密码: "Forgot password",
+  或使用企业账号登录: "Or use a company account",
+  "使用 {provider} 登录": "Continue with {provider}",
+  "使用 {provider} 扫码登录": "Scan to sign in with {provider}",
+  请使用飞书扫描二维码完成登录:
+    "Scan the QR code with Feishu to finish signing in",
+  正在加载登录二维码: "Loading sign-in QR code",
+  "二维码加载失败，请重新尝试": "The QR code failed to load. Try again.",
+  "企业身份尚未绑定，请联系系统管理员":
+    "Your company identity is not linked. Contact a system administrator.",
+  "企业身份已停用，请联系系统管理员":
+    "Your company identity is disabled. Contact a system administrator.",
+  企业身份不属于当前工作空间:
+    "This company identity does not belong to the selected workspace.",
+  你已不在当前工作空间中: "You are no longer a member of this workspace.",
+  "企业登录已过期，请重新尝试":
+    "The company sign-in attempt expired. Try again.",
+  "企业登录服务暂时不可用，请稍后重试":
+    "Company sign-in is temporarily unavailable. Try again later.",
+  "企业登录失败，请重新尝试": "Company sign-in failed. Try again.",
+  正在完成企业登录: "Completing company sign-in",
   "输入你的邮箱，我们会发送密码重置链接":
     "Enter your email to receive a password reset link",
   发送重置链接: "Send reset link",
@@ -146,8 +166,7 @@ export const en = {
   所选范围内暂无运行数据: "No run data in the selected range",
   按自然日统计顶层运行: "Top-level runs grouped by calendar day",
   时段活跃曲线: "Hourly activity",
-  所选周期内各小时的运行活跃度:
-    "Run activity by hour in the selected period",
+  所选周期内各小时的运行活跃度: "Run activity by hour in the selected period",
   "每日 Token 趋势": "Daily token trend",
   "Workflow 使用工作流级 Token 口径":
     "Workflows use workflow-level token totals",
@@ -461,7 +480,6 @@ export const en = {
   "保存时会先测试模型调用，测试通过后才会保存。":
     "Saving tests the model call first; the config is saved only after the test passes.",
   "测试并保存中...": "Testing and saving...",
-  显示名称: "Display name",
   模型类型: "Model type",
   上下文: "Context",
   上下文长度: "Context length",
@@ -512,8 +530,9 @@ export const en = {
     "The platform still owns sandbox isolation, resource limits, file validation, temporary storage, and download links.",
   "Word 与 Google Docs 文档": "Word and Google Docs documents",
   "PDF 创建、检查与渲染": "PDF creation, inspection, and rendering",
-  "演示文稿、模板与品牌主题": "Presentation creation, templates, and brand themes",
-  "电子表格创建与分析": "Spreadsheet creation and analysis",
+  "演示文稿、模板与品牌主题":
+    "Presentation creation, templates, and brand themes",
+  电子表格创建与分析: "Spreadsheet creation and analysis",
   "DOCX · python-docx": "DOCX · python-docx",
   "PDF · PyMuPDF": "PDF · PyMuPDF",
   "PPTX · python-pptx": "PPTX · python-pptx",
@@ -859,9 +878,11 @@ export const en = {
   暂无成员: "No members",
   不授权: "No access",
   管理: "Manage",
-    资源授权已更新: "Resource permissions updated",
-  "部分资源已不存在，已从列表移除": "Some resources no longer exist and were removed from the list",
-  "资源已不存在，已从列表移除": "The resource no longer exists and was removed from the list",
+  资源授权已更新: "Resource permissions updated",
+  "部分资源已不存在，已从列表移除":
+    "Some resources no longer exist and were removed from the list",
+  "资源已不存在，已从列表移除":
+    "The resource no longer exists and was removed from the list",
   输入模型名: "Enter model name",
   输入要测试的检索问题: "Enter a query to test",
   运行中: "Running",
@@ -1738,6 +1759,40 @@ export const en = {
   "仅系统管理员可见，敏感字段已脱敏":
     "Global admins only; sensitive fields are redacted",
   会话安全: "Session security",
+  企业登录: "Enterprise sign-in",
+  飞书: "Feishu",
+  钉钉: "DingTalk",
+  企业微信: "WeCom",
+  "每个身份源固定连接一个工作空间，权限仍由 NexaFlow 成员关系决定":
+    "Each identity source is fixed to one workspace; NexaFlow memberships still control access.",
+  选择登录平台: "Select sign-in provider",
+  "配置应用凭证，企业信息将在首次成功登录时自动识别":
+    "Configure the app credentials; organization details are detected after the first successful sign-in.",
+  配置服务商应用凭证和租户标识:
+    "Configure the provider app credentials and tenant identifier.",
+  显示名称: "Display name",
+  "应用 ID": "App ID",
+  应用密钥: "App secret",
+  留空以保留当前密钥: "Leave blank to keep the current secret",
+  请输入应用密钥: "Enter the app secret",
+  "当前密钥提示：{hint}": "Current secret hint: {hint}",
+  "企业 ID": "Company ID",
+  "应用 Agent ID": "App Agent ID",
+  获取应用凭证: "Get app credentials",
+  启用企业登录: "Enable enterprise sign-in",
+  回调地址: "Callback URL",
+  工作空间登录地址: "Workspace sign-in URL",
+  复制回调地址: "Copy callback URL",
+  复制登录地址: "Copy sign-in URL",
+  企业登录配置已保存: "Enterprise sign-in configuration saved",
+  企业身份绑定: "Enterprise identity links",
+  "首次扫码会自动创建普通成员；管理员可在此调整绑定或停用身份":
+    "First-time users are created as members automatically; administrators can relink or disable identities here.",
+  "绑定 NexaFlow 成员": "Link a NexaFlow member",
+  停用此身份: "Disable this identity",
+  暂无企业身份: "No enterprise identities",
+  企业身份已绑定: "Enterprise identity linked",
+  企业身份已解除绑定: "Enterprise identity unlinked",
   会话已撤销: "Session revoked",
   保存策略: "Save policy",
   "先限制运行规模，再根据用量告警调整":

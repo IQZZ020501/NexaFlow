@@ -29,3 +29,4 @@ class RefreshSession:
     ip_address: str | None = None
     last_used_at: datetime = field(default_factory=utc_now)
     revoked_at: datetime | None = None
+    enterprise_identity_id: str | None = None

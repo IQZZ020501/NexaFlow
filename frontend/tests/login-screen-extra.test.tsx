@@ -1,13 +1,18 @@
 /* @jsxImportSource react */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 
+import { LoginPageContent } from "@/components/auth/login-page-content"
 import { LoginScreen } from "@/components/auth/login-screen"
+import { safeAuthDestination } from "@/lib/auth-path"
 import {
   cleanup,
   fireEvent,
   jsonResponse,
+  makeSession,
   mockNextImage,
   mockNextLink,
+  mockNextNavigation,
+  mockUseSession,
   renderPage,
   resetFetch,
   screen,
@@ -17,10 +22,21 @@ import {
 
 mockNextImage()
 mockNextLink()
+mockNextNavigation()
+mockUseSession(
+  makeSession({
+    token: null,
+    isSessionRestored: true,
+  })
+)
+
+const originalLocationAssign = window.location.assign
 
 afterEach(() => {
   cleanup()
   resetFetch()
+  delete window.QRLogin
+  window.location.assign = originalLocationAssign
 })
 
 function submitCredentials(username: string, password: string) {
@@ -34,6 +50,180 @@ function submitCredentials(username: string, password: string) {
 }
 
 describe("LoginScreen submission", () => {
+  test("rejects unsafe post-login destinations", () => {
+    expect(safeAuthDestination("/app/agents")).toBe("/app/agents")
+    for (const value of [
+      "https://evil.example",
+      "//evil.example",
+      "/\\evil.example",
+      "/\t/evil.example",
+      "/app/agents\\evil",
+      `/${"a".repeat(2048)}`,
+    ]) {
+      expect(safeAuthDestination(value)).toBe("/app/apps")
+    }
+  })
+
+  test("renders Feishu as a QR button and other providers as links", () => {
+    renderPage(
+      <LoginScreen
+        onLogin={() => undefined}
+        onNotify={() => undefined}
+        next="/app/agents"
+        enterpriseConnections={[
+          {
+            id: "connection-1",
+            provider: "feishu",
+            name: "公司飞书",
+            start_url: "/api/v1/auth/enterprise/connection-1/start",
+          },
+          {
+            id: "connection-2",
+            provider: "dingtalk",
+            name: "公司钉钉",
+            start_url: "/api/v1/auth/enterprise/connection-2/start",
+          },
+          {
+            id: "connection-3",
+            provider: "wecom",
+            name: "公司企微",
+            start_url: "/api/v1/auth/enterprise/connection-3/start",
+          },
+        ]}
+      />
+    )
+
+    const feishuButton = screen.getByRole("button", {
+      name: "使用 公司飞书 扫码登录",
+    })
+    expect(feishuButton.getAttribute("title")).toBe("公司飞书")
+    expect(
+      document.querySelector('[data-provider-icon="feishu"]')
+    ).not.toBeNull()
+    expect(
+      document.querySelector('[data-provider-icon="dingtalk"]')
+    ).not.toBeNull()
+    expect(
+      document.querySelector('[data-provider-icon="wecom"]')
+    ).not.toBeNull()
+    expect(
+      screen
+        .getByRole("link", { name: "使用 公司钉钉 扫码登录" })
+        .getAttribute("href")
+    ).toBe("/api/v1/auth/enterprise/connection-2/start?next=%2Fapp%2Fagents")
+    expect(
+      screen
+        .getByRole("link", { name: "使用 公司企微 扫码登录" })
+        .getAttribute("href")
+    ).toBe("/api/v1/auth/enterprise/connection-3/start?next=%2Fapp%2Fagents")
+  })
+
+  test("embeds the official Feishu QR flow and handles a verified scan", async () => {
+    const requests: { url: string; init?: RequestInit }[] = []
+    const authorizationUrl =
+      "https://passport.feishu.cn/suite/passport/oauth/authorize?state=qr-state"
+    const assign = mock(() => undefined)
+    window.location.assign = assign
+    let qrOptions:
+      | {
+          id: string
+          goto: string
+          width: string
+          height: string
+          style: string
+        }
+      | undefined
+    window.QRLogin = (options) => {
+      qrOptions = options
+      return {
+        matchOrigin: (origin) => origin === "https://passport.feishu.cn",
+        matchData: (data) =>
+          Boolean(data && typeof data === "object" && "tmp_code" in data),
+      }
+    }
+    withFetch((url, init) => {
+      requests.push({ url, init })
+      return jsonResponse({ authorization_url: authorizationUrl })
+    })
+
+    renderPage(
+      <LoginScreen
+        onLogin={() => undefined}
+        onNotify={() => undefined}
+        next="/app/agents"
+        enterpriseConnections={[
+          {
+            id: "connection-1",
+            provider: "feishu",
+            name: "公司飞书",
+            start_url: "/api/v1/auth/enterprise/connection-1/start",
+          },
+        ]}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "使用 公司飞书 扫码登录" })
+    )
+
+    await waitFor(() => expect(qrOptions?.goto).toBe(authorizationUrl))
+    expect(requests).toEqual([
+      {
+        url: "/api/v1/auth/enterprise/connection-1/qr?next=%2Fapp%2Fagents",
+        init: expect.objectContaining({ method: "POST" }),
+      },
+    ])
+    expect(document.getElementById(qrOptions!.id)).not.toBeNull()
+
+    fireEvent(
+      window,
+      new MessageEvent("message", {
+        origin: "https://attacker.example",
+        data: { tmp_code: "forged" },
+      })
+    )
+    expect(assign).not.toHaveBeenCalled()
+
+    fireEvent(
+      window,
+      new MessageEvent("message", {
+        origin: "https://passport.feishu.cn",
+        data: { tmp_code: "temporary code" },
+      })
+    )
+    expect(assign).toHaveBeenCalledWith(
+      `${authorizationUrl}&tmp_code=temporary%20code`
+    )
+  })
+
+  test("discovers enabled providers on the main login page", async () => {
+    const requestedUrls: string[] = []
+    withFetch((url) => {
+      requestedUrls.push(url)
+      return jsonResponse({
+        workspace_id: null,
+        workspace_name: null,
+        connections: [
+          {
+            id: "connection-1",
+            provider: "feishu",
+            name: "公司飞书",
+            start_url: "/api/v1/auth/enterprise/connection-1/start",
+          },
+        ],
+      })
+    })
+
+    renderPage(<LoginPageContent />)
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "使用 公司飞书 扫码登录" })
+      ).toBeTruthy()
+    )
+    expect(requestedUrls).toEqual(["/api/v1/auth/enterprise/connections"])
+  })
+
   test("submits credentials and reports a successful login", async () => {
     const calls: { url: string; init?: RequestInit }[] = []
     withFetch((url, init) => {
@@ -138,7 +328,9 @@ describe("LoginScreen submission", () => {
 
     submitCredentials("alice", "pw")
 
-    await waitFor(() => expect(notifications).toEqual(["error:Maintenance window."]))
+    await waitFor(() =>
+      expect(notifications).toEqual(["error:Maintenance window."])
+    )
   })
 
   test("disables the submit button and shows a spinner while submitting", async () => {

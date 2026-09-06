@@ -16,6 +16,7 @@ SUITES = (
     "email",
     "system_governance",
     "identity",
+    "enterprise_identity",
     "workspaces",
     "teams",
     "knowledge",

@@ -67,6 +67,11 @@ class _PermissiveRateLimitRedis:
         return [1, 1, 60, 60]
 
 
+class _PermissiveEnterpriseLoginRedis:
+    async def eval(self, *_args):
+        return [1, 60]
+
+
 @contextmanager
 def test_client() -> Iterator[TestClient]:
     runtime_settings = settings()
@@ -83,6 +88,9 @@ def test_client() -> Iterator[TestClient]:
     with patch(
         "app.infrastructure.agent_rate_limit._rate_limit_redis",
         return_value=_PermissiveRateLimitRedis(),
+    ), patch(
+        "app.infrastructure.enterprise_login_rate_limit._client",
+        _PermissiveEnterpriseLoginRedis(),
     ):
         with TestClient(app) as client:
             yield client

@@ -12,7 +12,8 @@ from app.infrastructure.session import get_db
 from app.entities.user import User
 from app.infrastructure.repositories import team as team_repository
 from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.security import decode_access_token
+from app.infrastructure.model_utils import utc_now
+from app.infrastructure.security import decode_access_session
 
 logger = get_logger(__name__)
 
@@ -32,9 +33,17 @@ async def get_current_user(
         log_event(logger, logging.WARNING, "Authentication failed.", reason="missing_token")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required.")
 
-    user_id = decode_access_token(credentials.credentials, settings)
-    if user_id is None:
+    access_session = decode_access_session(credentials.credentials, settings)
+    if access_session is None:
         log_event(logger, logging.WARNING, "Authentication failed.", reason="invalid_token")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
+    user_id, session_token_hash = access_session
+
+    session = await user_repository.get_active_refresh_session(
+        db, session_token_hash, utc_now()
+    )
+    if session is None or session.user_id != user_id:
+        log_event(logger, logging.WARNING, "Authentication failed.", reason="revoked_session")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
 
     user = await user_repository.get_user_by_id(db, user_id)

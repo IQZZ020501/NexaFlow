@@ -299,7 +299,12 @@ def main() -> None:
         assert logged_out.status_code == 204, logged_out.text
         assert asyncio.run(get_refresh_session(refresh_token)) is None
         assert client.post("/api/v1/auth/refresh").status_code == 401
+        assert (
+            client.get("/api/v1/workspaces", headers=auth_headers(admin_token)).status_code
+            == 401
+        )
 
+        admin_token = login(client, "admin", BOOTSTRAP_ADMIN_PASSWORD)["access_token"]
         blocked = client.get("/api/v1/workspaces", headers=auth_headers(admin_token))
         assert blocked.status_code == 403, blocked.text
 
@@ -326,7 +331,9 @@ def main() -> None:
             },
         )
         assert changed.status_code == 204, changed.text
-        assert client.post("/api/v1/auth/refresh").status_code == 200
+        refreshed_after_change = client.post("/api/v1/auth/refresh")
+        assert refreshed_after_change.status_code == 200
+        admin_token = refreshed_after_change.json()["access_token"]
 
         rotated_password = "NexaFlow@123456."
         wrong_current_password = client.post(
@@ -348,6 +355,10 @@ def main() -> None:
             },
         )
         assert repeated_change.status_code == 204, repeated_change.text
+
+        refreshed_after_rotation = client.post("/api/v1/auth/refresh")
+        assert refreshed_after_rotation.status_code == 200
+        admin_token = refreshed_after_rotation.json()["access_token"]
 
         same_password = client.post(
             "/api/v1/auth/change-password",

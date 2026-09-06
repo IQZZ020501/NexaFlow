@@ -596,6 +596,16 @@ function KnowledgeBasePageContent({
     })
   }, [documents, documentSearch, documentSortDirection, documentSortKey])
 
+  function selectDocumentSort(key: DocumentSortKey) {
+    if (documentSortKey === key) {
+      cycleDocumentSort(key)
+      return
+    }
+    setDocumentSortKey(key)
+    setDocumentSortDirection(key === "name" ? "asc" : "desc")
+    setDocumentPage(1)
+  }
+
   function cycleDocumentSort(key: DocumentSortKey) {
     if (documentSortKey === key) {
       setDocumentSortDirection((current) =>
@@ -603,9 +613,7 @@ function KnowledgeBasePageContent({
       )
       return
     }
-    setDocumentSortKey(key)
-    setDocumentSortDirection(key === "name" ? "asc" : "desc")
-    setDocumentPage(1)
+    selectDocumentSort(key)
   }
   const selectedDocuments = documents.filter((document) =>
     selectedDocumentIds.includes(document.id)
@@ -1841,7 +1849,7 @@ function KnowledgeBasePageContent({
                           : ""}
                       </Button>
                     </div>
-                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_140px] gap-2 sm:flex sm:items-center">
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_128px] gap-2 sm:flex sm:items-center">
                       <div className="relative min-w-0 sm:w-72 xl:w-80">
                         <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
@@ -1854,46 +1862,18 @@ function KnowledgeBasePageContent({
                           placeholder={t("按名称搜索")}
                         />
                       </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-9 w-full justify-between sm:w-40"
-                          >
-                            <span className="truncate">
-                              {t(
-                                DOCUMENT_SORT_OPTIONS.find(
-                                  (option) => option.key === documentSortKey
-                                )?.label ?? "排序"
-                              )}
-                            </span>
-                            {documentSortDirection === "asc" ? (
-                              <ArrowUpIcon className="size-3.5" />
-                            ) : (
-                              <ArrowDownIcon className="size-3.5" />
-                            )}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40">
-                          {DOCUMENT_SORT_OPTIONS.map((option) => (
-                            <DropdownMenuItem
-                              key={option.key}
-                              className="justify-between"
-                              onSelect={() => cycleDocumentSort(option.key)}
-                            >
-                              {t(option.label)}
-                              {documentSortKey === option.key ? (
-                                documentSortDirection === "asc" ? (
-                                  <ArrowUpIcon className="size-3.5 text-primary" />
-                                ) : (
-                                  <ArrowDownIcon className="size-3.5 text-primary" />
-                                )
-                              ) : null}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <FilterDropdown
+                        ariaLabel={t("排序")}
+                        value={documentSortKey}
+                        options={DOCUMENT_SORT_OPTIONS.map((option) => ({
+                          value: option.key,
+                          label: t(option.label),
+                        }))}
+                        className="h-9 sm:w-32"
+                        onChange={(value) =>
+                          selectDocumentSort(value as DocumentSortKey)
+                        }
+                      />
                     </div>
                   </div>
 
