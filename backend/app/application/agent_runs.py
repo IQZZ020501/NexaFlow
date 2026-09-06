@@ -32,28 +32,28 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.schemas.agent import AgentRunResponse, AgentToolCallResponse
-from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.agents.services import (
+from app.domain.audit.services import record_audit_log
+from app.domain.agents.services import (
     ACTIVE_STATUS,
     AgentPublication,
     agent_publication_from_version,
     get_agent,
     get_agent_model,
 )
-from app.shareddomain.agents.permissions import require_agent_view
-from app.shareddomain.agents.models import (
+from app.domain.agents.permissions import require_agent_view
+from app.domain.agents.models import (
     AGENT_RUN_SUCCEEDED_STATUS,
     agent_run_generation,
     queued_agent_run_status,
 )
-from app.shareddomain.agents.publications import (
+from app.domain.agents.publications import (
     AGENT_PUBLICATION_SCHEMA_VERSION,
     agent_publication_hash,
     build_agent_configuration_snapshot,
     build_agent_resource_snapshot,
 )
-from app.shareddomain.tools.bindings import resolve_application_tool_snapshots
-from app.shareddomain.tools.runtime import (
+from app.domain.tools.bindings import resolve_application_tool_snapshots
+from app.domain.tools.runtime import (
     TOOL_APPROVAL_EACH_CALL,
     tool_snapshot_from_payload,
     tool_snapshot_payload,

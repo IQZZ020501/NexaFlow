@@ -28,16 +28,16 @@ from app.ports.llm import (
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.schemas.agent import AgentRunResponse, AgentRunSourceResponse
 from app.schemas.knowledge import KnowledgeQueryRequest
-from app.shareddomain.agents.runtime import (
+from app.domain.agents.runtime import (
     AgentRunnerError,
     AgentToolResult,
     create_agent_tool,
 )
-from app.shareddomain.agents.services import accessible_agent_knowledge_bases
-from app.shareddomain.agents.models import agent_run_display_status
-from app.shareddomain.agents.runtime.graph import clean_model_text
-from app.shareddomain.tools.catalog import mcp_function_name as catalog_mcp_function_name
-from app.shareddomain.tools.services import (
+from app.domain.agents.services import accessible_agent_knowledge_bases
+from app.domain.agents.models import agent_run_display_status
+from app.domain.agents.runtime.graph import clean_model_text
+from app.domain.tools.catalog import mcp_function_name as catalog_mcp_function_name
+from app.domain.tools.services import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
     mcp_server_connection,

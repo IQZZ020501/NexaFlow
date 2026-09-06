@@ -3,9 +3,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionORM
-from app.shareddomain.platform.models import User as UserORM
-from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipORM
+from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
+from app.domain.platform.models import User as UserORM
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipORM
 from app.entities.resource_permission import ResourcePermission
 from app.entities.user import User
 from app.infra.db.mapping import save, to_entity, to_orm

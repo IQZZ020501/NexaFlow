@@ -20,8 +20,8 @@ from tests.support import (
 )
 
 from app.infra.db.session import get_session_factory
-from app.shareddomain.platform.models import User
-from app.shareddomain.knowledge.models import (
+from app.domain.platform.models import User
+from app.domain.knowledge.models import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
@@ -55,11 +55,11 @@ from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     KnowledgeEvaluationResult as KnowledgeEvaluationResultEntity,
 )
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
 )
-from app.shareddomain.knowledge.task_runner import (
+from app.domain.knowledge.task_runner import (
     mark_knowledge_task_failed,
     recover_knowledge_tasks,
     run_knowledge_task,
@@ -73,7 +73,7 @@ from app.schemas.knowledge import (
     KnowledgeRetrievalTraceResponse,
 )
 from tests.llm import ModelTestHandler, model_payload, model_test_server, models_url
-from app.shareddomain.platform.models import ResourcePermission
+from app.domain.platform.models import ResourcePermission
 
 
 MEMBER_PASSWORD = "Member@12345."

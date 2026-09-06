@@ -40,7 +40,7 @@ from app.entities.knowledge_graph import (
 from app.entities.user import User
 from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
-from app.shareddomain.knowledge_graph.schema import (
+from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     default_graph_schema,
     graph_schema_hash,
@@ -50,21 +50,21 @@ from app.schemas.knowledge import (
     KnowledgeQueryRequest,
 )
 from app.schemas.knowledge_graph import KnowledgeGraphReviewDecisionRequest
-from app.shareddomain.knowledge.evaluation import graph_evaluation_metrics
-from app.shareddomain.knowledge_graph import revisions as graph_revisions
-from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
-from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
-from app.shareddomain.knowledge_graph.services import create_graph_schema
-from app.shareddomain.knowledge_graph import traversal as graph_traversal
-from app.shareddomain.knowledge_graph.models import (
+from app.domain.knowledge.evaluation import graph_evaluation_metrics
+from app.domain.knowledge_graph import revisions as graph_revisions
+from app.domain.knowledge_graph.revisions import GraphRevisionConflict
+from app.domain.knowledge_graph.resolution import claim_fingerprint
+from app.domain.knowledge_graph.services import create_graph_schema
+from app.domain.knowledge_graph import traversal as graph_traversal
+from app.domain.knowledge_graph.models import (
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
-from app.shareddomain.audit.models import AuditLog
+from app.domain.audit.models import AuditLog
 from app.infra.runtime.model_utils import utc_now
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     delete_knowledge_task,
     delete_knowledge_tasks,
     enqueue_graph_rebuild,
@@ -80,9 +80,9 @@ from app.application import (
 )
 from app.application import knowledge_retrieval as knowledge_retrieval_application
 from app.application import knowledge_graph_query as graph_query
-from app.shareddomain.knowledge import lifecycle as knowledge_lifecycle
-from app.shareddomain.knowledge import cleanup as knowledge_cleanup
-from app.shareddomain.knowledge import task_runner as knowledge_task_runner
+from app.domain.knowledge import lifecycle as knowledge_lifecycle
+from app.domain.knowledge import cleanup as knowledge_cleanup
+from app.domain.knowledge import task_runner as knowledge_task_runner
 
 
 GRAPH_IMPORT_RECORD = {

@@ -63,7 +63,7 @@ from app.schemas.knowledge import (
     KnowledgeQueryInspectResponse,
     KnowledgeRetrievalTraceResponse,
 )
-from app.shareddomain.agents.runtime import (
+from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
     AgentToolBusy,
@@ -73,24 +73,24 @@ from app.shareddomain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     AGENT_RUN_UNIFIED_RUNNING_STATUS,
     agent_run_display_status,
 )
-from app.shareddomain.agents.runtime import graph as graph_module
-from app.shareddomain.agents.runtime import executor as executor_module
-from app.shareddomain.agents.runtime import usage as usage_module
-from app.shareddomain.agents.runtime.usage import (
+from app.domain.agents.runtime import graph as graph_module
+from app.domain.agents.runtime import executor as executor_module
+from app.domain.agents.runtime import usage as usage_module
+from app.domain.agents.runtime.usage import (
     add_compaction_usage,
     empty_usage,
     merge_usage,
     usage_from_message,
 )
-from app.shareddomain.tools.services import (
+from app.domain.tools.services import (
     ResolvedMcpTool,
     mcp_tool_definition_hash,
 )
-from app.shareddomain.tools.catalog import reconcile_mcp_discovery
+from app.domain.tools.catalog import reconcile_mcp_discovery
 from mcp.types import Tool as McpTool
 
 MODEL_BASE_URL = "http://127.0.0.1:9"
@@ -508,7 +508,7 @@ def assert_agent_tool_construction() -> None:
     assert tool.name == "echo"
     metadata = tool.metadata or {}
     assert metadata["kind"] == "custom" and metadata["parallel_safe"] is True
-    from app.shareddomain.agents.runtime.tools import (
+    from app.domain.agents.runtime.tools import (
         agent_tool_metadata,
         is_parallel_safe,
     )
@@ -646,7 +646,7 @@ def assert_callback_safety() -> None:
     assert isinstance(rendered["key"], str)
     assert len(rendered["key"]) <= 2000
 
-    from app.shareddomain.agents.runtime.callbacks import NexaFlowCallback
+    from app.domain.agents.runtime.callbacks import NexaFlowCallback
 
     event = NexaFlowCallback(None).tool_event(
         turn=1,
@@ -5060,13 +5060,13 @@ async def assert_agent_tool_runtime_paths(
 
     from app.application import agent_tool_runtime as atr
     from app.ports.tool_runtime import ToolRuntimeResult
-    from app.shareddomain.agents.runtime import (
+    from app.domain.agents.runtime import (
         AgentExecutionPaused,
         AgentRunnerError,
         AgentToolBusy,
         AgentToolUncertain,
     )
-    from app.shareddomain.tools.runtime import tool_snapshot_from_payload
+    from app.domain.tools.runtime import tool_snapshot_from_payload
 
     settings = test_settings()
 
@@ -5383,11 +5383,11 @@ async def assert_tool_service_paths(
     )
     from app.entities.user import User
     from app.entities.workspace import WorkspaceMembership
-    from app.shareddomain.tools import services as tool_services
-    from app.shareddomain.tools.catalog import (
+    from app.domain.tools import services as tool_services
+    from app.domain.tools.catalog import (
         get_mcp_catalog_leaf,
     )
-    from app.shareddomain.tools.runtime import exhausted_tool_invocation_terminal_state
+    from app.domain.tools.runtime import exhausted_tool_invocation_terminal_state
 
     actor = await get_admin_actor()
     settings = test_settings()
@@ -6094,7 +6094,7 @@ async def assert_cancel_stops_claimed_run(
     """Cancelling a claimed run marks it terminal and ends its stream."""
     from sqlalchemy import update
 
-    from app.shareddomain.agents.models import AgentRunState
+    from app.domain.agents.models import AgentRunState
 
     actor = await get_admin_actor()
     settings = test_settings()
@@ -6157,7 +6157,7 @@ async def assert_orphaned_stream_ends_with_error(
     """A run whose executor lease expired must end the stream with an error."""
     from sqlalchemy import update
 
-    from app.shareddomain.agents.models import AgentRunState
+    from app.domain.agents.models import AgentRunState
 
     actor = await get_admin_actor()
     settings = test_settings()

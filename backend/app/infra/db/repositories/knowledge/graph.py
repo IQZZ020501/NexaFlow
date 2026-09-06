@@ -43,14 +43,14 @@ from app.entities.knowledge_graph import (
 )
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.mapping import save, to_entity
-from app.shareddomain.agents.models import AgentRun as AgentRunORM
-from app.shareddomain.agents.models import AgentRunState as AgentRunStateORM
-from app.shareddomain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
-from app.shareddomain.knowledge.models import (
+from app.domain.agents.models import AgentRun as AgentRunORM
+from app.domain.agents.models import AgentRunState as AgentRunStateORM
+from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
+from app.domain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
     KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
 )
-from app.shareddomain.knowledge_graph.models import (
+from app.domain.knowledge_graph.models import (
     KnowledgeGraphAlias as KnowledgeGraphAliasORM,
     KnowledgeGraphClaim as KnowledgeGraphClaimORM,
     KnowledgeGraphClaimEvidence as KnowledgeGraphClaimEvidenceORM,
@@ -61,7 +61,7 @@ from app.shareddomain.knowledge_graph.models import (
     KnowledgeGraphRevisionChange as KnowledgeGraphRevisionChangeORM,
     KnowledgeGraphSchema as KnowledgeGraphSchemaORM,
 )
-from app.shareddomain.workflows.models import WorkflowRunDetail as WorkflowRunDetailORM
+from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailORM
 
 _GRAPH_SQL_DIR = Path(__file__).parent.parent.parent / "sql" / "knowledge" / "graph"
 _SHORTEST_PATH_SQL = text(

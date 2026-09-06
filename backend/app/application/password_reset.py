@@ -25,7 +25,7 @@ from app.infra.db.repositories.identity import users as user_repository
 from app.infra.security.auth import hash_password, verify_password
 from app.infra.observability.system_log import record_system_log
 from app.infra.runtime.validation import normalize_email
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 
 RESET_EXPIRES_MINUTES = 30
 RESET_INVALID_DETAIL = "Password reset link is invalid or expired."

@@ -58,7 +58,7 @@ from app.infra.runtime.model_utils import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     Agent as AgentOrm,
     AgentApiCredential as AgentApiCredentialOrm,
     AgentRun as AgentRunOrm,
@@ -1574,7 +1574,7 @@ async def assert_direct_endpoint_calls(
 
 async def seed_approval(workspace_id: str, run_id: str, call_id: str) -> None:
     from app.entities.agents import AgentToolCall
-    from app.shareddomain.agents.models import (
+    from app.domain.agents.models import (
         AgentRunSnapshot,
         AgentRunState,
     )
@@ -1627,7 +1627,7 @@ async def seed_runs_for_logs_and_monitoring(
         workspace_id (str): Workspace containing the runs.
         agent_id (str): Agent associated with the runs.
     """
-    from app.shareddomain.agents.models import (
+    from app.domain.agents.models import (
         AgentRun as AgentRunOrm,
         AgentRunState,
     )

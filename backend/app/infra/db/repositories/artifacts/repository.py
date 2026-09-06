@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.artifacts import GeneratedArtifact
 from app.infra.db import mapping
-from app.shareddomain.artifacts.models import GeneratedArtifact as GeneratedArtifactOrm
+from app.domain.artifacts.models import GeneratedArtifact as GeneratedArtifactOrm
 
 
 async def create_artifact(

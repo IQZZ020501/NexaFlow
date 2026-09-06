@@ -272,7 +272,7 @@ def load_artifact_renderer_migration():
 
 
 def test_generic_artifact_migration_matches_catalog() -> None:
-    from app.shareddomain.tools.catalog import build_artifact_tool
+    from app.domain.tools.catalog import build_artifact_tool
 
     _tool, version, _policy = build_artifact_tool("workspace-1")
     assert version.display_name == "Create downloadable file"
@@ -401,7 +401,7 @@ def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
     from alembic.operations import Operations
     from sqlalchemy import create_engine
 
-    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog import build_skill_artifact_tool
 
     migration = load_documents_formal_legal_migration()
     assert migration.down_revision == "202608300003"
@@ -553,7 +553,7 @@ def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
     from alembic.operations import Operations
     from sqlalchemy import create_engine
 
-    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog import build_skill_artifact_tool
 
     migration = load_pptx_schema_migration()
     assert migration.down_revision == "202608300002"
@@ -819,8 +819,8 @@ def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
 
 
 def test_pptx_argument_normalization_keeps_model_theme() -> None:
-    from app.shareddomain.tools.catalog import build_skill_artifact_tool
-    from app.shareddomain.tools.runtime import normalize_tool_arguments
+    from app.domain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.runtime import normalize_tool_arguments
 
     _tool, version, _policy = build_skill_artifact_tool("workspace", "pptx")
     normalized = normalize_tool_arguments(
@@ -960,7 +960,7 @@ def unique_columns(table) -> set[tuple[str, ...]]:
 
 
 def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
-    from app.shareddomain.tools.catalog import (
+    from app.domain.tools.catalog import (
         build_workspace_system_catalog,
         mcp_definition_hash,
         mcp_function_name,
@@ -1047,7 +1047,7 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
 
 def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> None:
     from app.entities.tools import McpServer as McpServerEntity
-    from app.shareddomain.tools.models import McpServer
+    from app.domain.tools.models import McpServer
 
     migration = load_network_policy_migration()
     assert migration.revision == "202608160004"
@@ -1114,7 +1114,7 @@ def test_legacy_disabled_tools_remain_disabled_after_backfill() -> None:
 
 
 def test_mcp_function_name_candidates_extend_stable_digest_on_collision() -> None:
-    from app.shareddomain.tools.catalog import mcp_function_name_candidates
+    from app.domain.tools.catalog import mcp_function_name_candidates
 
     migration = load_migration()
     candidates = mcp_function_name_candidates("server-1", "order items!")
@@ -1135,7 +1135,7 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
 
     from app.application.agent_tools import mcp_function_name
     from app.entities.tools import McpServer
-    from app.shareddomain.tools.services import ResolvedMcpTool
+    from app.domain.tools.services import ResolvedMcpTool
 
     resolved = ResolvedMcpTool(
         server=McpServer(id="server-1", workspace_id="workspace-1"),
@@ -1163,7 +1163,7 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
 
 def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.shareddomain.tools.catalog import McpCatalogLeaf, legacy_mcp_policy_mode
+    from app.domain.tools.catalog import McpCatalogLeaf, legacy_mcp_policy_mode
 
     leaf = McpCatalogLeaf(
         source=ToolSource(id="source-1", workspace_id="workspace-1", kind="mcp"),
@@ -1193,8 +1193,8 @@ def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
 
 
 def test_mcp_hash_matches_legacy_annotation_normalization() -> None:
-    from app.shareddomain.tools.catalog import mcp_definition_hash
-    from app.shareddomain.tools.services import (
+    from app.domain.tools.catalog import mcp_definition_hash
+    from app.domain.tools.services import (
         _mcp_tool_definition,
         mcp_tool_definition_hash,
     )
@@ -1448,7 +1448,7 @@ def test_agent_publication_backfill_does_not_restore_membership_revoked_use() ->
 
 def test_entities_and_orm_columns_match_exactly() -> None:
     from app.entities import tools as entities
-    from app.shareddomain.tools import models
+    from app.domain.tools import models
 
     expected_tables = {
         "ToolSource": "tool_sources",
@@ -1472,8 +1472,8 @@ def test_entities_and_orm_columns_match_exactly() -> None:
 
 
 def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
-    from app.shareddomain.platform.models import ResourcePermission
-    from app.shareddomain.tools.models import (
+    from app.domain.platform.models import ResourcePermission
+    from app.domain.tools.models import (
         ApplicationToolBinding,
         Tool,
         ToolDraft,
@@ -1654,7 +1654,7 @@ def test_migration_reference_scanner_keeps_historical_mcp_tuples() -> None:
 
 async def assert_workspace_system_catalog(workspace_id: str) -> None:
     from app.infra.db.repositories.tools import repository as repository
-    from app.shareddomain.tools.catalog import build_artifact_tool
+    from app.domain.tools.catalog import build_artifact_tool
 
     async with get_session_factory()() as db:
         sources = await repository.list_tool_sources(db, workspace_id)
@@ -1818,7 +1818,7 @@ def test_generated_artifact_link_serves_static_html() -> None:
         assert body_response.content == response.content
 
 def test_generated_artifact_rejects_source_as_docx() -> None:
-    from app.shareddomain.artifacts.services import validate_generated_artifact
+    from app.domain.artifacts.services import validate_generated_artifact
 
     try:
         validate_generated_artifact(
@@ -1838,7 +1838,7 @@ def test_generated_artifact_downloads_common_formats() -> None:
 
     from app.application.artifacts import create_generated_artifact
     from app.infra.db.session import get_session_factory
-    from app.shareddomain.artifacts.services import artifact_format_from_filename
+    from app.domain.artifacts.services import artifact_format_from_filename
 
     def office_bytes(root: str) -> bytes:
         buffer = BytesIO()
@@ -2557,12 +2557,12 @@ def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.shareddomain.tools.catalog import reconcile_mcp_discovery
-    from app.shareddomain.tools.permissions import (
+    from app.domain.tools.catalog import reconcile_mcp_discovery
+    from app.domain.tools.permissions import (
         revoke_tool_permission,
         upsert_tool_permission,
     )
-    from app.shareddomain.tools.services import resolve_mcp_tools
+    from app.domain.tools.services import resolve_mcp_tools
 
     async def expect_status(expected_status: int, operation) -> None:
         try:
@@ -2738,7 +2738,7 @@ def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
 
 
 def test_mcp_resolution_rejects_missing_authorization_context() -> None:
-    from app.shareddomain.tools.services import resolve_mcp_tools
+    from app.domain.tools.services import resolve_mcp_tools
 
     try:
         run(resolve_mcp_tools(
@@ -2771,7 +2771,7 @@ async def assert_mcp_server_deletion_preserves_tool_history(
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.shareddomain.tools import services as tool_services
+    from app.domain.tools import services as tool_services
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -2964,7 +2964,7 @@ async def assert_mcp_discovery_materializes_first_leaf(
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.shareddomain.tools.catalog import (
+    from app.domain.tools.catalog import (
         list_mcp_catalog_leaves,
         mcp_function_name_candidates,
         reconcile_mcp_discovery,
@@ -3204,7 +3204,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         ToolInvocationContext,
         ToolRuntimeResult,
     )
-    from app.shareddomain.tools.runtime import build_tool_snapshot
+    from app.domain.tools.runtime import build_tool_snapshot
     from app.application.tool_runtime import validate_tool_output
 
     async with get_session_factory()() as db:
@@ -3602,7 +3602,7 @@ async def assert_python_tool_lifecycle(workspace_id: str) -> None:
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
-    from app.shareddomain.tools.python_tools import (
+    from app.domain.tools.python_tools import (
         build_python_test_snapshot,
         create_python_tool,
         publish_python_tool,
@@ -3742,8 +3742,8 @@ async def assert_tool_runtime_edge_branches(
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
-    from app.shareddomain.tools.models import ToolInvocation as ToolInvocationOrm
-    from app.shareddomain.tools.runtime import (
+    from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
+    from app.domain.tools.runtime import (
         TOOL_APPROVAL_EACH_CALL,
         build_tool_snapshot,
         tool_snapshot_payload,
@@ -4572,7 +4572,7 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
         actor = await user_repository.get_active_user_by_username(db, "admin")
         assert actor is not None
         with patch(
-            "app.shareddomain.tools.services.discover_mcp_tools",
+            "app.domain.tools.services.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             created = await create_mcp_source(
@@ -4593,7 +4593,7 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
         listed = await list_sources(db, workspace_id, actor, "admin", 10, 0)
         assert source_id in {item.id for item in listed}
         with patch(
-            "app.shareddomain.tools.services.discover_mcp_tools",
+            "app.domain.tools.services.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             refreshed = await refresh_source(
@@ -4858,7 +4858,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.tool_runtime import ToolRuntimeResult
-    from app.shareddomain.tools.runtime import (
+    from app.domain.tools.runtime import (
         TOOL_APPROVAL_EACH_CALL,
         build_tool_snapshot,
     )
@@ -5289,11 +5289,11 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.mcp import McpClientError
     from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
-    from app.shareddomain.tools.catalog import (
+    from app.domain.tools.catalog import (
         build_artifact_tool,
         build_skill_artifact_tool,
     )
-    from app.shareddomain.tools.runtime import build_tool_snapshot
+    from app.domain.tools.runtime import build_tool_snapshot
 
     settings = Settings.from_env(require_bootstrap=False)
     context = ToolInvocationContext(
@@ -6105,7 +6105,7 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
         )
         source_url = f"/api/v1/workspaces/{workspace_id}/tool-sources"
         with patch(
-            "app.shareddomain.tools.services.discover_mcp_tools",
+            "app.domain.tools.services.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             created = client.post(
@@ -6147,7 +6147,7 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
         assert payload["workflow_callable"] is True
 
         with patch(
-            "app.shareddomain.tools.services.discover_mcp_tools",
+            "app.domain.tools.services.discover_mcp_tools",
             new=AsyncMock(return_value=discovery),
         ):
             refreshed = client.post(
@@ -6287,7 +6287,7 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
 
 def test_tool_boundaries_reject_unsafe_payloads() -> None:
     from app.entities.tools import MAX_TOOL_SCHEMA_DEPTH, validate_tool_json_schema
-    from app.shareddomain.tools.runtime import (
+    from app.domain.tools.runtime import (
         build_tool_snapshot,
         validate_tool_arguments,
     )

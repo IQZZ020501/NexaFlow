@@ -68,7 +68,7 @@ from app.entities.workflows import WorkflowUpload
 from app.infra.db.session import get_session_factory
 from app.infra.runtime.model_utils import utc_now
 from app.infra.observability.system_log import SystemLog
-from app.shareddomain.agents.runtime import (
+from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
     AgentToolResult,
@@ -76,9 +76,9 @@ from app.shareddomain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
-from app.shareddomain.agents.runtime import graph as agent_graph_module
-from app.shareddomain.agents.runtime.graph import MAX_REASONING_CHARS
-from app.shareddomain.tools import services as mcp_services
+from app.domain.agents.runtime import graph as agent_graph_module
+from app.domain.agents.runtime.graph import MAX_REASONING_CHARS
+from app.domain.tools import services as mcp_services
 
 MEMBER_PASSWORD = "AgentMember@12345."
 
@@ -239,7 +239,7 @@ async def grant_mcp_tool_use(
 ) -> None:
     from app.entities.resource_permission import ResourcePermission
     from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
-    from app.shareddomain.tools.catalog import get_mcp_catalog_leaf
+    from app.domain.tools.catalog import get_mcp_catalog_leaf
 
     async with get_session_factory()() as db:
         leaf = await get_mcp_catalog_leaf(

@@ -9,13 +9,13 @@ from app.entities.enterprise_identity import (
     EnterpriseLoginState,
 )
 from app.infra.db import mapping
-from app.shareddomain.enterprise_identity.models import (
+from app.domain.enterprise_identity.models import (
     EnterpriseIdentity as EnterpriseIdentityOrm,
     EnterpriseIdentityConnection as EnterpriseIdentityConnectionOrm,
     EnterpriseLoginState as EnterpriseLoginStateOrm,
 )
-from app.shareddomain.platform.models import Workspace as WorkspaceOrm
-from app.shareddomain.platform.models import RefreshSession as RefreshSessionOrm
+from app.domain.platform.models import Workspace as WorkspaceOrm
+from app.domain.platform.models import RefreshSession as RefreshSessionOrm
 
 
 async def list_connections(

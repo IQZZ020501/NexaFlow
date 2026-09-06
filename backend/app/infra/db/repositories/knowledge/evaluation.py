@@ -18,7 +18,7 @@ from app.infra.db.mapping import (
     to_entity,
     to_orm,
 )
-from app.shareddomain.knowledge.models import (
+from app.domain.knowledge.models import (
     KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
     KnowledgeEvaluationExpectation as KnowledgeEvaluationExpectationORM,
     KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,

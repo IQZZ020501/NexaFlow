@@ -50,15 +50,15 @@ from app.schemas.workflow import (
     WorkflowNode,
     WorkflowAgentNodeConfig,
 )
-from app.shareddomain.agents.models import AGENT_RUN_SUCCEEDED_STATUS
-from app.shareddomain.agents.runtime.graph import (
+from app.domain.agents.models import AGENT_RUN_SUCCEEDED_STATUS
+from app.domain.agents.runtime.graph import (
     ModelTextStreamFilter,
     model_completion,
     sanitized_model_message,
 )
-from app.shareddomain.agents.runtime.tools import AgentToolResult
-from app.shareddomain.agents.runtime.usage import merge_usage, usage_from_message
-from app.shareddomain.workflows.engine import NodeExecutionContext, NodeResult
+from app.domain.agents.runtime.tools import AgentToolResult
+from app.domain.agents.runtime.usage import merge_usage, usage_from_message
+from app.domain.workflows.engine import NodeExecutionContext, NodeResult
 
 MAX_WORKFLOW_LLM_TOOL_CALLS = 8
 DEFAULT_WORKFLOW_LLM_MAX_TOKENS = 4096
@@ -99,7 +99,7 @@ def _path_value(value: Any, path: str) -> Any:
 
 
 def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
-    from app.shareddomain.workflows.engine import REFERENCE_PATTERN
+    from app.domain.workflows.engine import REFERENCE_PATTERN
 
     if isinstance(value, dict):
         return {key: resolve_value(item, context) for key, item in value.items()}
@@ -136,7 +136,7 @@ def resolve_value(value: Any, context: NodeExecutionContext) -> Any:
 
 
 def render_reply_template(template: str, context: NodeExecutionContext) -> str:
-    from app.shareddomain.workflows.engine import REFERENCE_PATTERN
+    from app.domain.workflows.engine import REFERENCE_PATTERN
 
     references: dict[str, Any] = {}
 

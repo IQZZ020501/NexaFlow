@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import HTTPException, status
 
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 from app.application.email import dispatch_email_deliveries, queue_identity_email
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
@@ -45,8 +45,8 @@ from app.infra.security.auth import (
     verify_password,
 )
 from app.infra.observability.system_log import record_system_log
-from app.shareddomain.workflows.uploads import queue_upload_cleanups
-from app.shareddomain.tools.services import delete_owned_mcp_servers_for_user
+from app.domain.workflows.uploads import queue_upload_cleanups
+from app.domain.tools.services import delete_owned_mcp_servers_for_user
 from app.entities.team import Team, TeamMembership
 from app.entities.workspace import Workspace, WorkspaceMembership
 

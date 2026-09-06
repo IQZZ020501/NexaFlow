@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionORM
+from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
 from app.entities.agents import (
@@ -25,7 +25,7 @@ from app.infra.db.mapping import (
     to_entity,
     to_orm,
 )
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_AWAITING_APPROVAL_STATUSES,
@@ -57,8 +57,8 @@ from app.shareddomain.agents.models import (
     AgentRunSnapshot,
     AgentRunState,
 )
-from app.shareddomain.tools.models import ToolInvocation
-from app.shareddomain.workflows.models import WorkflowNodeExecution
+from app.domain.tools.models import ToolInvocation
+from app.domain.workflows.models import WorkflowNodeExecution
 
 _RUN_CORE_FIELDS = (
     "id",

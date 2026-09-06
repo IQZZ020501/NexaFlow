@@ -9,7 +9,7 @@ from app.entities.knowledge import (
     KnowledgeDocumentReference,
 )
 from app.infra.db.mapping import save, to_entity, to_orm
-from app.shareddomain.knowledge.models import (
+from app.domain.knowledge.models import (
     KnowledgeDocument as KnowledgeDocumentORM,
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
     KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,

@@ -36,8 +36,8 @@ from app.schemas.enterprise_identity import (
     PublicEnterpriseConnectionResponse,
     PublicEnterpriseConnectionsResponse,
 )
-from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.enterprise_identity.services import safe_next_path, validate_connection_fields
+from app.domain.audit.services import record_audit_log
+from app.domain.enterprise_identity.services import safe_next_path, validate_connection_fields
 
 LOGIN_STATE_TTL_SECONDS = 600
 FEISHU_QR_STATE_PREFIX = "feishu_qr."

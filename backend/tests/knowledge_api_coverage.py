@@ -55,7 +55,7 @@ support_module.settings = _isolated_support_settings
 test_settings = support_module.settings
 
 from app.infra.db.session import get_session_factory
-from app.shareddomain.knowledge.models import (
+from app.domain.knowledge.models import (
     KnowledgeAsset,
     KnowledgeBase,
     KnowledgeDocument,
@@ -92,18 +92,18 @@ from app.schemas.knowledge import (
     ResourcePermissionUpsertRequest,
 )
 from app.schemas.knowledge_graph import KnowledgeGraphQueryResultResponse
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
 )
-from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
-from app.shareddomain.knowledge_graph.revisions import (
+from app.domain.knowledge_graph.resolution import claim_fingerprint
+from app.domain.knowledge_graph.revisions import (
     create_revision as create_graph_revision,
     publish_revision as publish_graph_revision,
     stage_revision_change as stage_graph_revision_change,
 )
-from app.shareddomain.knowledge_graph.schema import default_graph_schema
-from app.shareddomain.knowledge_graph.services import create_graph_schema
-from app.shareddomain.knowledge.task_runner import (
+from app.domain.knowledge_graph.schema import default_graph_schema
+from app.domain.knowledge_graph.services import create_graph_schema
+from app.domain.knowledge.task_runner import (
     recover_knowledge_tasks,
     run_knowledge_task,
 )

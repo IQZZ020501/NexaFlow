@@ -1,6 +1,6 @@
 """Audit log use cases (facade over the audit domain)."""
 
-from app.shareddomain.audit.services import (
+from app.domain.audit.services import (
     count_audit_logs,
     list_audit_logs,
     list_workspace_audit_logs,

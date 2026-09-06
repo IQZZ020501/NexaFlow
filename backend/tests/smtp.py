@@ -21,7 +21,7 @@ from app.application.smtp import (
     _validate_entity,
     build_smtp_transport_config,
 )
-from app.shareddomain.platform.models import SmtpSettings as SmtpSettingsOrm
+from app.domain.platform.models import SmtpSettings as SmtpSettingsOrm
 from app.entities.smtp_settings import SmtpSettings
 from app.infra.security.secrets import decrypt_secret
 from app.infra.db.session import get_session_factory
@@ -33,7 +33,7 @@ from app.infra.email.smtp import (
     _send_smtp_message_sync,
     send_smtp_message,
 )
-from app.shareddomain.audit.models import AuditLog
+from app.domain.audit.models import AuditLog
 
 
 async def stored_password() -> tuple[str | None, list[dict]]:

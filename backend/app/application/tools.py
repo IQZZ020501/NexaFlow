@@ -20,7 +20,7 @@ from app.application.tool_management import (
     update_python_draft,
     upsert_permission,
 )
-from app.shareddomain.tools.services import (
+from app.domain.tools.services import (
     ToolAuthorization,
     ToolCatalogDetail,
     ToolCatalogItem,

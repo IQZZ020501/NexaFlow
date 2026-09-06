@@ -33,7 +33,7 @@ from app.ports.vector_store import (
     delete_graph_profile_vectors,
     upsert_graph_profile_vectors,
 )
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     enqueue_graph_rebuild,
     enqueue_graph_sync,
     resolve_embedding_model,

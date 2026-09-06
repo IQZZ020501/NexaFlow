@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import tests.support  # noqa: F401
 
 from app.schemas.workflow import WorkflowNode
-from app.shareddomain.agents.runtime.tools import AgentToolResult
-from app.shareddomain.workflows.engine import (
+from app.domain.agents.runtime.tools import AgentToolResult
+from app.domain.workflows.engine import (
     NodeExecutionContext,
     NodeResult,
     NodeState,
@@ -23,7 +23,7 @@ from app.shareddomain.workflows.engine import (
     WorkflowValidationError,
     validate_graph,
 )
-from app.shareddomain.workflows.defaults import default_workflow_graph
+from app.domain.workflows.defaults import default_workflow_graph
 from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 
@@ -683,7 +683,7 @@ def test_workflow_resources_come_from_nodes_without_knowledge_limit() -> None:
     from pydantic import ValidationError
 
     from app.schemas.workflow import KnowledgeNodeConfig, WorkflowGraph
-    from app.shareddomain.workflows.services import workflow_resource_references
+    from app.domain.workflows.services import workflow_resource_references
 
     knowledge_ids = [f"base-{index}" for index in range(25)]
     assert KnowledgeNodeConfig.model_validate(
@@ -743,7 +743,7 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
 
     from fastapi import HTTPException
 
-    from app.shareddomain.workflows.services import validate_workflow_resources
+    from app.domain.workflows.services import validate_workflow_resources
 
     knowledge_ids = [f"base-{index}" for index in range(25)]
     workflow = graph()
@@ -775,10 +775,10 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
     async def validate(knowledge_rows: list[tuple]) -> int | None:
         batch = AsyncMock(return_value=knowledge_rows)
         with patch(
-            "app.shareddomain.workflows.services.get_agent_model",
+            "app.domain.workflows.services.get_agent_model",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.shareddomain.workflows.services.knowledge_base_repository."
+            "app.domain.workflows.services.knowledge_base_repository."
             "list_knowledge_bases_with_user_grants",
             new=batch,
         ):
@@ -953,7 +953,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
 
     from app.application.workflow_nodes import execute_workflow_node
     from app.schemas.workflow import WorkflowNode
-    from app.shareddomain.workflows.engine import NodeExecutionContext
+    from app.domain.workflows.engine import NodeExecutionContext
 
     class FakeTool:
         async def ainvoke(self, arguments):
@@ -1118,7 +1118,7 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
 
     from app.application.workflow_nodes import execute_workflow_node
     from app.schemas.workflow import KnowledgeNodeConfig, WorkflowNode
-    from app.shareddomain.workflows.engine import NodeExecutionContext
+    from app.domain.workflows.engine import NodeExecutionContext
 
     assert KnowledgeNodeConfig.model_validate(
         {"query": "q", "knowledge_base_ids": ["base-1"]}
@@ -1542,7 +1542,7 @@ def assert_upload_cleanup_removes_object(upload_id: str) -> None:
     from app.infra.storage.object_storage import create_object_storage
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from app.shareddomain.workflows.uploads import (
+    from app.domain.workflows.uploads import (
         prepare_due_upload_cleanups,
         run_upload_storage_cleanup,
     )
@@ -2615,7 +2615,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         from app.application.agent_runs import cancel_run_tree, prepare_agent_run
         from app.infra.runtime.model_utils import utc_now
         from app.infra.db.repositories.identity import users as user_repository
-        from app.shareddomain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
+        from app.domain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
 
         async with get_session_factory()() as db:
             children = await agent_repository.list_agent_child_runs(
@@ -2776,7 +2776,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                 deadline_at=future_deadline,
                 remaining_model_tokens=1000,
             )
-            from app.shareddomain.agents.models import AGENT_RUN_FAILED_STATUS
+            from app.domain.agents.models import AGENT_RUN_FAILED_STATUS
 
             failed_child.status = AGENT_RUN_FAILED_STATUS
             failed_child.last_error = "boom"
@@ -2793,7 +2793,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                 parent_for_reconcile.id,
             )
             assert requeued is not None
-            from app.shareddomain.agents.models import agent_run_display_status
+            from app.domain.agents.models import agent_run_display_status
 
             assert agent_run_display_status(requeued.status) == "queued"
 
@@ -2862,14 +2862,14 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         from app.entities.agents import AgentPublicationVersion
         from app.infra.runtime.model_utils import new_id
         from app.infra.db.repositories.workflows import repository as workflow_repository
-        from app.shareddomain.agents.models import (
+        from app.domain.agents.models import (
             AGENT_RUN_FAILED_STATUS,
             AGENT_RUN_SUCCEEDED_STATUS,
             agent_run_display_status,
         )
-        from app.shareddomain.agents.publications import agent_publication_hash
-        from app.shareddomain.workflows.engine import WorkflowChildRequired
-        from app.shareddomain.workflows.models import WorkflowRunDetail as DetailORM
+        from app.domain.agents.publications import agent_publication_hash
+        from app.domain.workflows.engine import WorkflowChildRequired
+        from app.domain.workflows.models import WorkflowRunDetail as DetailORM
         from tests.support import settings as make_settings
 
         runner_settings = make_settings()
@@ -4043,14 +4043,14 @@ def test_workflow_executor_recovery_paths() -> None:
             from app.infra.db.repositories.agents import repository as agent_repository
             from app.infra.db.repositories.workflows import repository as workflow_repository
             from app.infra.db.session import get_session_factory
-            from app.shareddomain.agents.models import (
+            from app.domain.agents.models import (
                 AGENT_RUN_FAILED_STATUS,
                 AgentRunSnapshot,
                 AgentRunState,
                 agent_run_display_status,
             )
             from sqlalchemy import update
-            from app.shareddomain.workflows.models import (
+            from app.domain.workflows.models import (
                 WorkflowRunDetail as DetailORM,
             )
 
@@ -4133,7 +4133,7 @@ def test_workflow_executor_recovery_paths() -> None:
                 original_execute = workflow_executor.execute_workflow_node
 
                 async def huge_output(scope, node, context):
-                    from app.shareddomain.workflows.engine import NodeResult
+                    from app.domain.workflows.engine import NodeResult
 
                     return NodeResult(
                         outputs={"result": "x" * 300000},

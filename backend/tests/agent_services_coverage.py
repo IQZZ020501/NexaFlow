@@ -50,10 +50,10 @@ from app.schemas.agent import (
     AgentMcpToolRef,
     AgentUpdateRequest,
 )
-from app.shareddomain.agents import permissions as agent_permissions
-from app.shareddomain.agents import services as agent_services
-from app.shareddomain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
-from app.shareddomain.tools import services as mcp_services
+from app.domain.agents import permissions as agent_permissions
+from app.domain.agents import services as agent_services
+from app.domain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
+from app.domain.tools import services as mcp_services
 from app.tasks import agents as agent_tasks
 from app.application.agent_executor import RUN_BUSY
 

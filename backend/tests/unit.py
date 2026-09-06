@@ -39,26 +39,26 @@ from app.schemas.knowledge_graph import (
     KnowledgeGraphImportRecord,
     KnowledgeGraphReviewDecisionRequest,
 )
-from app.shareddomain.agents.permissions import (
+from app.domain.agents.permissions import (
     effective_agent_permission,
     validate_agent_permission,
 )
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     normalized_document_artifact,
     parse_task_options,
 )
-from app.shareddomain.knowledge.services import (
+from app.domain.knowledge.services import (
     clean_upload_filename,
     effective_permission,
     validate_permission,
 )
-from app.shareddomain.knowledge_graph.schema import (
+from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     default_graph_schema,
     graph_schema_hash,
     normalize_graph_name,
 )
-from app.shareddomain.knowledge_graph.extraction import (
+from app.domain.knowledge_graph.extraction import (
     EntityLexiconEntry,
     ExtractedEntity,
     ExtractionChunk,
@@ -68,17 +68,17 @@ from app.shareddomain.knowledge_graph.extraction import (
     extract_graph_batch,
     validate_extraction_batch,
 )
-from app.shareddomain.knowledge_graph.resolution import (
+from app.domain.knowledge_graph.resolution import (
     claim_fingerprint,
     choose_automatic_entity_match,
     initial_claim_status,
 )
-from app.shareddomain.knowledge_graph.extraction import (
+from app.domain.knowledge_graph.extraction import (
     ExtractedClaim,
     _entity_type,
 )
-from app.shareddomain.knowledge_graph import traversal as graph_traversal
-from app.shareddomain.knowledge_graph.traversal import (
+from app.domain.knowledge_graph import traversal as graph_traversal
+from app.domain.knowledge_graph.traversal import (
     GraphEvidenceView,
     _collect_result_items,
     _load_path_records,
@@ -721,7 +721,7 @@ def test_graph_rule_extractor_guards_skip_noise_clauses() -> None:
 
 
 def test_graph_rule_extractor_caps_entities_and_claims() -> None:
-    from app.shareddomain.knowledge_graph import extraction as extraction_module
+    from app.domain.knowledge_graph import extraction as extraction_module
 
     with patch.object(extraction_module, "MAX_EXTRACTED_CLAIMS", 1):
         result = extraction_module.extract_graph_batch(
@@ -1165,8 +1165,8 @@ def test_tool_ref_requires_stable_ids() -> None:
 def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
     from app.entities.agents import AgentPublicationVersion, AgentRun
     from app.entities.tools import ToolSnapshot
-    from app.shareddomain.agents.services import agent_publication_from_version
-    from app.shareddomain.agents.publications import (
+    from app.domain.agents.services import agent_publication_from_version
+    from app.domain.agents.publications import (
         agent_publication_hash,
         build_agent_configuration_snapshot,
         build_agent_resource_snapshot,
@@ -1274,7 +1274,7 @@ def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
 
 def test_agent_tool_binding_requires_current_available_policy() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.shareddomain.tools.bindings import build_bindable_tool_snapshot
+    from app.domain.tools.bindings import build_bindable_tool_snapshot
 
     source = ToolSource(id="source-1", workspace_id="ws-1", kind="python")
     tool = Tool(
@@ -1788,7 +1788,7 @@ def test_agent_tool_call_migration_preserves_approval_gate() -> None:
 
 
 def test_unified_agent_runs_use_a_worker_generation_fence() -> None:
-    from app.shareddomain.agents.models import (
+    from app.domain.agents.models import (
         AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
         AGENT_RUN_UNIFIED_QUEUED_STATUS,
         AGENT_RUN_UNIFIED_RUNNING_STATUS,
@@ -1812,7 +1812,7 @@ def test_unified_agent_runs_use_a_worker_generation_fence() -> None:
 def test_tool_invocation_identity_ignores_refreshable_deadline() -> None:
     from app.application.tool_runtime import _same_invocation
     from app.entities.tools import ToolInvocation
-    from app.shareddomain.tools.runtime import exhausted_tool_invocation_terminal_state
+    from app.domain.tools.runtime import exhausted_tool_invocation_terminal_state
 
     fields = {
         "workspace_id": "workspace-1",
@@ -1977,7 +1977,7 @@ def test_tool_ref_schema_requires_canonical_ids() -> None:
 
 def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
     from app.schemas.workflow import LlmNodeConfig, ToolNodeConfig
-    from app.shareddomain.tools.catalog import build_inline_python_tool
+    from app.domain.tools.catalog import build_inline_python_tool
 
     reference = {"tool_id": "tool-1", "version_id": "version-1"}
     node = ToolNodeConfig.model_validate(
@@ -2006,7 +2006,7 @@ def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
 def test_workflow_legacy_tools_normalize_to_one_canonical_node_contract() -> None:
     from app.entities.tools import ToolRef
     from app.schemas.workflow import WorkflowGraph
-    from app.shareddomain.workflows.resources import (
+    from app.domain.workflows.resources import (
         canonicalize_workflow_graph,
         workflow_resource_references,
     )
@@ -2087,7 +2087,7 @@ def test_workflow_legacy_tools_normalize_to_one_canonical_node_contract() -> Non
 
 def test_workflow_selects_only_exact_bound_tool_versions() -> None:
     from app.entities.tools import ToolRef, ToolSnapshot
-    from app.shareddomain.workflows.resources import select_tool_snapshots
+    from app.domain.workflows.resources import select_tool_snapshots
 
     def snapshot(tool_id: str, version_id: str) -> ToolSnapshot:
         return ToolSnapshot(
@@ -2138,7 +2138,7 @@ def test_workflow_selects_only_exact_bound_tool_versions() -> None:
 def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
     from app.entities.tools import ToolRef, ToolSnapshot
     from app.schemas.workflow import WorkflowGraph
-    from app.shareddomain.workflows.resources import (
+    from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         load_workflow_resource_snapshot,
         workflow_resource_hash,
@@ -2215,11 +2215,11 @@ def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
 
 
 def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
-    from app.shareddomain.workflows.engine import (
+    from app.domain.workflows.engine import (
         WorkflowValidationError,
         validate_graph,
     )
-    from app.shareddomain.workflows.resources import (
+    from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         load_workflow_agent_snapshots,
         workflow_resource_hash,
@@ -2360,7 +2360,7 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
 
 def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
     from app.application.workflow_tool_runtime import workflow_tool_invocation_identity
-    from app.shareddomain.tools.runtime import tool_arguments_hash
+    from app.domain.tools.runtime import tool_arguments_hash
 
     first = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
     second = workflow_tool_invocation_identity("run-1", "node-1", "call-1")
@@ -2466,7 +2466,7 @@ def test_workflow_tool_migration_matches_runtime_catalog() -> None:
 
     import sqlalchemy as sa
 
-    from app.shareddomain.tools.catalog import build_inline_python_tool
+    from app.domain.tools.catalog import build_inline_python_tool
 
     path = (
         Path(__file__).parents[1]
@@ -2933,14 +2933,14 @@ def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
 
 
 def test_artifact_tool_accepts_sandbox_sized_content() -> None:
-    from app.shareddomain.tools.catalog import build_artifact_tool
+    from app.domain.tools.catalog import build_artifact_tool
 
     _tool, version, _policy = build_artifact_tool("workspace-1")
     assert version.input_schema["properties"]["content"]["maxLength"] == 262144
 
 
 def test_documents_skill_formal_legal_contract_is_versioned() -> None:
-    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog import build_skill_artifact_tool
 
     tool, version, _policy = build_skill_artifact_tool("workspace-1", "documents")
     rebuilt = build_skill_artifact_tool("workspace-1", "documents")[1]
@@ -2964,7 +2964,7 @@ def test_validate_agent_permission_only_accepts_view() -> None:
 
 def test_knowledge_writes_recheck_locked_owner() -> None:
     from app.schemas.knowledge import KnowledgeBaseUpdateRequest
-    from app.shareddomain.knowledge import kb as knowledge_kb
+    from app.domain.knowledge import kb as knowledge_kb
 
     stale = KnowledgeBase(
         id="kb-1",
@@ -3862,7 +3862,7 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
     from app.entities.knowledge import KnowledgeTask
     from app.ports.parsing import KnowledgePipelineError
     from app.schemas.knowledge import KnowledgeEvaluationRunRequest
-    from app.shareddomain.knowledge import evaluation as evaluation_service
+    from app.domain.knowledge import evaluation as evaluation_service
 
     assert evaluation_application._evaluation_run_request(
         {"case_ids": ["case-1"], "similarity": 0.4}
@@ -4167,7 +4167,7 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         evaluation as evaluation_repository,
     )
     from app.schemas.knowledge import KnowledgeEvaluationCaseCreateRequest
-    from app.shareddomain.knowledge import evaluation as evaluation_service
+    from app.domain.knowledge import evaluation as evaluation_service
 
     knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
     actor = User(id="user-1", username="user")
@@ -4372,7 +4372,7 @@ def test_evaluation_result_upsert_recovers_concurrent_insert() -> None:
     from app.infra.db.repositories.knowledge import (
         evaluation as evaluation_repository,
     )
-    from app.shareddomain.knowledge.models import (
+    from app.domain.knowledge.models import (
         KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
     )
 
@@ -4731,7 +4731,7 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
         KnowledgeDocument,
         KnowledgeDocumentParentChunk,
     )
-    from app.shareddomain.knowledge.references import (
+    from app.domain.knowledge.references import (
         _resolution_context,
         _resolved_target,
         extract_reference_labels,
@@ -4793,7 +4793,7 @@ def test_reference_rebuild_reuses_resolution_context() -> None:
         KnowledgeDocumentParentChunk,
         KnowledgeDocumentReference,
     )
-    from app.shareddomain.knowledge import references as reference_service
+    from app.domain.knowledge import references as reference_service
 
     knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
     source = KnowledgeDocument(
@@ -4977,7 +4977,7 @@ def test_provider_credentials_aws_pairing_rule() -> None:
 
 def test_run_knowledge_model_test_uses_injected_providers() -> None:
     from app.schemas.knowledge import KnowledgeModelTestRequest
-    from app.shareddomain.knowledge.services import run_knowledge_model_test
+    from app.domain.knowledge.services import run_knowledge_model_test
 
     embedding_model = SimpleNamespace(id="emb-1")
     reranker_model = SimpleNamespace(id="rerank-1")
@@ -4996,7 +4996,7 @@ def test_run_knowledge_model_test_uses_injected_providers() -> None:
             calls["rerank"] += 1
             return [{"index": 0, "relevance_score": 0.9}]
 
-    from app.shareddomain.knowledge import kb as knowledge_kb
+    from app.domain.knowledge import kb as knowledge_kb
 
     original_embeddings = knowledge_kb.build_embeddings
     original_reranker = knowledge_kb.build_reranker
@@ -5033,7 +5033,7 @@ def test_run_knowledge_model_test_uses_injected_providers() -> None:
 def test_safe_agent_error_classification() -> None:
     from app.application.agent_tools import safe_agent_error
     from app.ports.llm import ModelProviderError, ModelProviderStatusError
-    from app.shareddomain.agents.runtime import AgentRunnerError
+    from app.domain.agents.runtime import AgentRunnerError
 
     status_error = ModelProviderStatusError(429, "rate limited")
     assert safe_agent_error(status_error) == "Provider returned status 429"
@@ -5128,7 +5128,7 @@ def test_stale_mcp_policy_requires_approval() -> None:
     from app.application import agent_executor
     from app.entities.agents import AgentRun
     from app.entities.tools import McpToolPolicy
-    from app.shareddomain.agents.runtime import AgentExecutionPaused
+    from app.domain.agents.runtime import AgentExecutionPaused
 
     created_calls = []
 
@@ -5760,7 +5760,7 @@ def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from app.entities.tools import McpToolPolicy
     from app.infra.runtime.model_utils import utc_now
     from app.infra.db.repositories.tools import mcp as mcp_repository
-    from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
+    from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
 
     now = utc_now()
     existing = McpToolPolicyOrm(
@@ -5832,7 +5832,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
     from app.application.agent_tools import build_mcp_agent_tool, mcp_function_name
     from app.entities.tools import McpServer
-    from app.shareddomain.tools.services import ResolvedMcpTool
+    from app.domain.tools.services import ResolvedMcpTool
 
     server = McpServer(id="server-1", name="orders")
     tool = ResolvedMcpTool(
@@ -6063,7 +6063,7 @@ def test_repeated_run_feedback_write_is_idempotent() -> None:
 def test_agent_usage_normalizes_provider_metadata() -> None:
     from langchain_core.messages import AIMessage
 
-    from app.shareddomain.agents.runtime import (
+    from app.domain.agents.runtime import (
         add_compaction_usage,
         merge_usage,
         usage_from_message,
@@ -6270,8 +6270,8 @@ def test_mcp_server_to_response() -> None:
         ToolSource,
         ToolVersion,
     )
-    from app.shareddomain.tools.catalog import McpCatalogLeaf
-    from app.shareddomain.tools.services import (
+    from app.domain.tools.catalog import McpCatalogLeaf
+    from app.domain.tools.services import (
         effective_mcp_tool_policy_mode,
         mcp_server_to_response,
         mcp_tool_definition_hash,
@@ -6406,7 +6406,7 @@ def test_mcp_server_to_response() -> None:
 
 def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.shareddomain.tools.catalog import (
+    from app.domain.tools.catalog import (
         McpCatalogLeaf,
         legacy_mcp_policy_mode,
     )
@@ -6658,7 +6658,7 @@ def test_agent_live_stream_round_trip() -> None:
 
 def test_team_to_response() -> None:
     from app.entities.team import Team
-    from app.shareddomain.teams.services import team_to_response
+    from app.domain.teams.services import team_to_response
 
     team = Team(
         id="team-1",
@@ -6676,7 +6676,7 @@ def test_team_to_response() -> None:
 
 def test_knowledge_document_and_attachment_response_mapping() -> None:
     from app.entities.knowledge import KnowledgeAttachment, KnowledgeDocument
-    from app.shareddomain.knowledge.services import (
+    from app.domain.knowledge.services import (
         attachment_to_response,
         document_to_response,
     )
@@ -6717,7 +6717,7 @@ def test_knowledge_document_and_attachment_response_mapping() -> None:
 
 def test_knowledge_base_to_response() -> None:
     from app.entities.knowledge import KnowledgeBase
-    from app.shareddomain.knowledge.services import knowledge_base_to_response
+    from app.domain.knowledge.services import knowledge_base_to_response
 
     knowledge_base = KnowledgeBase(
         id="kb-1",

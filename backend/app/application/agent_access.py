@@ -65,7 +65,7 @@ from app.schemas.agent import (
     PublicAgentProfileResponse,
 )
 from app.application.workflow_uploads import resolve_public_agent_files
-from app.shareddomain.agents.services import (
+from app.domain.agents.services import (
     ACTIVE_STATUS,
     AgentPublication,
     agent_publication_from_version,
@@ -73,10 +73,10 @@ from app.shareddomain.agents.services import (
     get_agent,
     require_agent_edit,
 )
-from app.shareddomain.agents.models import agent_run_display_status
-from app.shareddomain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
-from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.agents.runtime.callbacks import safe_event_value
+from app.domain.agents.models import agent_run_display_status
+from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
+from app.domain.audit.services import record_audit_log
+from app.domain.agents.runtime.callbacks import safe_event_value
 
 ExternalAccessSource = Literal["public", "api"]
 

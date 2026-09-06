@@ -38,8 +38,8 @@ from app.schemas.knowledge import (
     KnowledgeQueryRequest,
     KnowledgeRetrievalTraceResponse,
 )
-from app.shareddomain.knowledge.orchestration import resolve_embedding_model
-from app.shareddomain.knowledge.services import get_knowledge_model
+from app.domain.knowledge.orchestration import resolve_embedding_model
+from app.domain.knowledge.services import get_knowledge_model
 
 logger = get_logger(__name__)
 RerankStatus = Literal["not_configured", "applied", "fallback", "skipped"]

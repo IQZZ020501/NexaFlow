@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.infra.config.settings import Settings
-from app.shareddomain.agents.models import (  # noqa: F401
+from app.domain.agents.models import (  # noqa: F401
     Agent,
     AgentApiCredential,
     AgentKnowledgeBase,
@@ -15,14 +15,14 @@ from app.shareddomain.agents.models import (  # noqa: F401
     AgentRunSnapshot,
     AgentRunState,
 )
-from app.shareddomain.audit.models import AuditLog  # noqa: F401
-from app.shareddomain.artifacts.models import GeneratedArtifact  # noqa: F401
+from app.domain.audit.models import AuditLog  # noqa: F401
+from app.domain.artifacts.models import GeneratedArtifact  # noqa: F401
 from app.infra.db.base import Base
-from app.shareddomain.platform.models import RefreshSession, User  # noqa: F401
-from app.shareddomain.platform.models import WorkspaceGovernance  # noqa: F401
-from app.shareddomain.platform.models import WorkspaceInvitation  # noqa: F401
-from app.shareddomain.resource_folders.models import ResourceFolder  # noqa: F401
-from app.shareddomain.knowledge.models import (  # noqa: F401
+from app.domain.platform.models import RefreshSession, User  # noqa: F401
+from app.domain.platform.models import WorkspaceGovernance  # noqa: F401
+from app.domain.platform.models import WorkspaceInvitation  # noqa: F401
+from app.domain.resource_folders.models import ResourceFolder  # noqa: F401
+from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeAsset,
     KnowledgeAttachment,
     KnowledgeBase,
@@ -37,7 +37,7 @@ from app.shareddomain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.shareddomain.knowledge_graph.models import (  # noqa: F401
+from app.domain.knowledge_graph.models import (  # noqa: F401
     KnowledgeGraphAlias,
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,
@@ -48,7 +48,7 @@ from app.shareddomain.knowledge_graph.models import (  # noqa: F401
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.shareddomain.tools.models import (  # noqa: F401
+from app.domain.tools.models import (  # noqa: F401
     ApplicationToolBinding,
     McpServer,
     McpToolPolicy,
@@ -59,7 +59,7 @@ from app.shareddomain.tools.models import (  # noqa: F401
     ToolSource,
     ToolVersion,
 )
-from app.shareddomain.workflows.models import (  # noqa: F401
+from app.domain.workflows.models import (  # noqa: F401
     WorkflowDefinition,
     WorkflowNodeExecution,
     WorkflowRunDetail,
@@ -68,17 +68,17 @@ from app.shareddomain.workflows.models import (  # noqa: F401
     WorkflowVersion,
 )
 from app.capabilities.llm.models import RegisteredModel  # noqa: F401
-from app.shareddomain.platform.models import ResourcePermission  # noqa: F401
-from app.shareddomain.platform.models import SmtpSettings  # noqa: F401
-from app.shareddomain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
-from app.shareddomain.enterprise_identity.models import (  # noqa: F401
+from app.domain.platform.models import ResourcePermission  # noqa: F401
+from app.domain.platform.models import SmtpSettings  # noqa: F401
+from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
+from app.domain.enterprise_identity.models import (  # noqa: F401
     EnterpriseIdentity,
     EnterpriseIdentityConnection,
     EnterpriseLoginState,
 )
 from app.infra.observability.system_log import SystemLog  # noqa: F401
-from app.shareddomain.platform.models import Team, TeamMembership  # noqa: F401
-from app.shareddomain.platform.models import Workspace, WorkspaceMembership  # noqa: F401
+from app.domain.platform.models import Team, TeamMembership  # noqa: F401
+from app.domain.platform.models import Workspace, WorkspaceMembership  # noqa: F401
 
 config = context.config
 

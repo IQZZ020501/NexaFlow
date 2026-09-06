@@ -33,7 +33,7 @@ from app.capabilities.llm.runtime import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
 )
-from app.shareddomain.platform.models import User
+from app.domain.platform.models import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.validation import normalize_name
 from app.schemas.model import (
@@ -45,7 +45,7 @@ from app.schemas.model import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 
 
 def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:

@@ -41,8 +41,8 @@ from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.security.secrets import decrypt_secret, encrypt_secret
 from app.infra.db.session import get_session_factory
 from app.infra.email.smtp import SmtpConfigurationError, SmtpDeliveryError
-from app.shareddomain.email.models import EmailDelivery, PasswordResetToken
-from app.shareddomain.email.services import EmailPayloadError, render_email
+from app.domain.email.models import EmailDelivery, PasswordResetToken
+from app.domain.email.services import EmailPayloadError, render_email
 
 
 async def delivery_rows() -> list[EmailDelivery]:

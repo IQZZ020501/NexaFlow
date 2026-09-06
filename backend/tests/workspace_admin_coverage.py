@@ -35,7 +35,7 @@ from app.infra.db.repositories.identity import users as user_repo
 from app.infra.db.repositories.workspaces import repository as workspace_repo
 from app.infra.security.auth import hash_refresh_token
 from app.infra.db.session import get_session_factory
-from app.shareddomain.knowledge.models import KnowledgeTask
+from app.domain.knowledge.models import KnowledgeTask
 
 
 def members_url(workspace_id: str, suffix: str = "") -> str:
@@ -84,7 +84,7 @@ async def fail_knowledge_task(task_id: str) -> None:
 
 async def expire_refresh_session(token: str) -> None:
     token_hash = hash_refresh_token(token)
-    from app.shareddomain.platform.models import RefreshSession as RefreshSessionOrm
+    from app.domain.platform.models import RefreshSession as RefreshSessionOrm
 
     async with get_session_factory()() as db:
         await db.execute(

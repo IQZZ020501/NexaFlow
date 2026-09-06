@@ -4,10 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.capabilities.llm.models import RegisteredModel
 from app.entities.resource_folders import ResourceFolder
 from app.infra.db.mapping import save, to_entity
-from app.shareddomain.agents.models import Agent
-from app.shareddomain.knowledge.models import KnowledgeBase
-from app.shareddomain.resource_folders.models import ResourceFolder as ResourceFolderOrm
-from app.shareddomain.tools.models import Tool
+from app.domain.agents.models import Agent
+from app.domain.knowledge.models import KnowledgeBase
+from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm
+from app.domain.tools.models import Tool
 
 
 async def list_folders(

@@ -30,7 +30,7 @@ class _FakeProviderError(Exception):
     pass
 
 
-_PipelineError.__module__ = "app.shareddomain.knowledge"
+_PipelineError.__module__ = "app.domain.knowledge"
 _FakeProviderError.__module__ = "openai"
 
 

@@ -33,14 +33,14 @@ from app.ports.llm import (
 )
 from app.schemas.agent import AgentInteractionConfig, AgentUploadResponse
 from app.schemas.workflow import WorkflowUploadResponse
-from app.shareddomain.agents.permissions import require_agent_view
-from app.shareddomain.agents.services import get_agent
-from app.shareddomain.knowledge.services import (
+from app.domain.agents.permissions import require_agent_view
+from app.domain.agents.services import get_agent
+from app.domain.knowledge.services import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     get_default_knowledge_model,
 )
-from app.shareddomain.workflows.services import get_workflow_agent
-from app.shareddomain.workflows.uploads import queue_upload_cleanups
+from app.domain.workflows.services import get_workflow_agent
+from app.domain.workflows.uploads import queue_upload_cleanups
 
 if TYPE_CHECKING:
     from app.application.agent_access import PublishedAgentContext

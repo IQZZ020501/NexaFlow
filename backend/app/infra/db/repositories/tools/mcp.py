@@ -10,10 +10,10 @@ from app.infra.db.mapping import (
     to_entity,
     to_orm,
 )
-from app.shareddomain.agents.models import AgentMcpTool
-from app.shareddomain.tools.models import McpServer as McpServerOrm
-from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
-from app.shareddomain.tools.models import ToolSource as ToolSourceOrm
+from app.domain.agents.models import AgentMcpTool
+from app.domain.tools.models import McpServer as McpServerOrm
+from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
+from app.domain.tools.models import ToolSource as ToolSourceOrm
 
 
 async def list_mcp_servers(

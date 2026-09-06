@@ -1,12 +1,12 @@
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionOrm
-from app.shareddomain.platform.models import Team as TeamOrm
-from app.shareddomain.platform.models import TeamMembership as TeamMembershipOrm
-from app.shareddomain.platform.models import User as UserOrm
-from app.shareddomain.platform.models import Workspace as WorkspaceOrm
-from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
+from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.domain.platform.models import Team as TeamOrm
+from app.domain.platform.models import TeamMembership as TeamMembershipOrm
+from app.domain.platform.models import User as UserOrm
+from app.domain.platform.models import Workspace as WorkspaceOrm
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.user import User
 from app.entities.workspace import WORKSPACE_ADMIN_ROLE, Workspace, WorkspaceMembership
 from app.infra.db import mapping

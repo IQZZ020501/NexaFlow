@@ -19,15 +19,15 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.session import get_session_factory
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_SUCCEEDED_STATUS,
 )
-from app.shareddomain.agents.permissions import require_agent_view
-from app.shareddomain.agents.publications import agent_publication_hash
-from app.shareddomain.tools.runtime import tool_snapshot_from_payload
+from app.domain.agents.permissions import require_agent_view
+from app.domain.agents.publications import agent_publication_hash
+from app.domain.tools.runtime import tool_snapshot_from_payload
 
 MAX_WORKFLOW_CHILDREN = 4
 MAX_CHILD_TURNS = 4

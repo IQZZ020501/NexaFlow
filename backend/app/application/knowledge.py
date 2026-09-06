@@ -27,11 +27,11 @@ from app.infra.db.repositories.knowledge import repository as knowledge_base_rep
 from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 from app.ports.parsing import IMAGE_DOCUMENT_EXTENSIONS
 from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
-from app.shareddomain.knowledge.lifecycle import (
+from app.domain.knowledge.lifecycle import (
     delete_knowledge_document as delete_knowledge_document_record,
     set_knowledge_document_active as set_knowledge_document_active_record,
 )
-from app.shareddomain.knowledge.evaluation import (
+from app.domain.knowledge.evaluation import (
     create_evaluation_case,
     delete_evaluation_case,
     delete_evaluation_run,
@@ -40,7 +40,7 @@ from app.shareddomain.knowledge.evaluation import (
     list_evaluation_cases,
     list_evaluation_runs,
 )
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     enqueue_index_knowledge_document,
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
@@ -58,7 +58,7 @@ from app.entities.knowledge import (
     KnowledgeDocument,
 )
 from app.entities.user import User
-from app.shareddomain.knowledge.services import (
+from app.domain.knowledge.services import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,
     delete_knowledge_attachment,

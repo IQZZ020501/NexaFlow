@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.agents import AgentRun
 from app.infra.db.repositories.agents import repository as agent_repository
-from app.shareddomain.agents.runtime.usage import (
+from app.domain.agents.runtime.usage import (
     add_compaction_usage,
     empty_usage,
     usage_from_message,

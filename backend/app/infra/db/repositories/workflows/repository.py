@@ -13,13 +13,13 @@ from app.entities.workflows import (
 )
 from app.infra.db.mapping import refresh_entity, save, to_entity, to_orm
 from app.infra.runtime.model_utils import utc_now
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     AGENT_RUN_AWAITING_INPUT_STATUSES,
     AGENT_RUN_RUNNING_STATUSES,
     Agent,
     AgentRunState,
 )
-from app.shareddomain.workflows.models import (
+from app.domain.workflows.models import (
     WorkflowDefinition,
     WorkflowNodeExecution,
     WorkflowRunDetail,

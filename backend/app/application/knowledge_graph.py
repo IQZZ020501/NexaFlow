@@ -56,13 +56,13 @@ from app.schemas.knowledge_graph import (
     KnowledgeGraphSettingsUpdateRequest,
     KnowledgeGraphStatusResponse,
 )
-from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.orchestration import (
     enqueue_graph_rebuild,
     enqueue_graph_sync,
     task_to_response,
 )
-from app.shareddomain.knowledge.services import (
+from app.domain.knowledge.services import (
     DEFAULT_DOCUMENT_META,
     clean_upload_filename,
     get_knowledge_base,
@@ -71,13 +71,13 @@ from app.shareddomain.knowledge.services import (
     require_knowledge_base_active,
     require_knowledge_base_permission,
 )
-from app.shareddomain.knowledge_graph.resolution import claim_fingerprint
-from app.shareddomain.knowledge_graph.revisions import stage_revision_change
-from app.shareddomain.knowledge_graph.schema import (
+from app.domain.knowledge_graph.resolution import claim_fingerprint
+from app.domain.knowledge_graph.revisions import stage_revision_change
+from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     normalize_graph_name,
 )
-from app.shareddomain.knowledge_graph.services import create_graph_schema
+from app.domain.knowledge_graph.services import create_graph_schema
 
 MAX_GRAPH_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_GRAPH_IMPORT_RECORDS = 5_000

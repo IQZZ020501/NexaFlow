@@ -32,9 +32,9 @@ from app.schemas.knowledge_graph import (
     KnowledgeGraphPathStepResponse,
     KnowledgeGraphQueryResultResponse,
 )
-from app.shareddomain.knowledge.orchestration import resolve_embedding_model
-from app.shareddomain.knowledge_graph import traversal as graph_traversal
-from app.shareddomain.knowledge_graph.schema import (
+from app.domain.knowledge.orchestration import resolve_embedding_model
+from app.domain.knowledge_graph import traversal as graph_traversal
+from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     normalize_graph_name,
 )

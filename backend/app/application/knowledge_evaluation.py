@@ -35,16 +35,16 @@ from app.schemas.knowledge import (
     KnowledgeGraphEvaluationExpectation,
     KnowledgeQueryRequest,
 )
-from app.shareddomain.knowledge.evaluation import (
+from app.domain.knowledge.evaluation import (
     EVALUATION_SIMILARITY_SEMANTICS,
     get_evaluation_task,
     graph_evaluation_metrics,
 )
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     task_error_message,
     task_to_response,
 )
-from app.shareddomain.knowledge.task_runner import (
+from app.domain.knowledge.task_runner import (
     TASK_LEASE_SECONDS,
     ensure_knowledge_task_lease,
 )

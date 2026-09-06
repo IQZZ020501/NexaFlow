@@ -22,8 +22,8 @@ from app.ports.tool_runtime import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.shareddomain.tools.permissions import evaluate_tool_authorization
-from app.shareddomain.tools.runtime import (
+from app.domain.tools.permissions import evaluate_tool_authorization
+from app.domain.tools.runtime import (
     TOOL_APPROVAL_AUTO,
     TOOL_APPROVAL_DISABLED,
     TOOL_APPROVAL_EACH_CALL,

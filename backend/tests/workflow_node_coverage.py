@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, patch
 import tests.support  # noqa: F401
 
 from app.schemas.workflow import WorkflowNode
-from app.shareddomain.agents.runtime.tools import AgentToolResult
-from app.shareddomain.workflows.engine import (
+from app.domain.agents.runtime.tools import AgentToolResult
+from app.domain.workflows.engine import (
     NodeExecutionContext,
     NodeResult,
     WorkflowEngineError,
@@ -338,7 +338,7 @@ def _legacy_test_nodes_llm_tool_call_and_loop_branches() -> None:
     from unittest.mock import patch
 
     from app.application.workflow_nodes import execute_workflow_node
-    from app.shareddomain.agents.runtime import AgentExecutionPaused
+    from app.domain.agents.runtime import AgentExecutionPaused
 
     async def run() -> None:
         # direct _llm_tool_call: malformed JSON and non-dict arguments
@@ -1298,7 +1298,7 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
 
     from app.application.workflow_nodes import execute_workflow_node
     from app.infra.sandbox.client import WorkflowSandboxResult
-    from app.shareddomain.agents.runtime import AgentExecutionPaused
+    from app.domain.agents.runtime import AgentExecutionPaused
 
     async def run() -> None:
         fake_tool = SimpleNamespace(
@@ -1702,7 +1702,7 @@ def test_executor_load_scope_branches() -> None:
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
-    from app.shareddomain.workflows.resources import (
+    from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
     )
@@ -2918,7 +2918,7 @@ def _make_running_run(graph: dict) -> str:
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from app.shareddomain.workflows.resources import (
+    from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
     )
@@ -3132,7 +3132,7 @@ def test_executor_manual_run_scenarios() -> None:
 
         # node output exceeds the 256 KiB budget
         from app.application.workflow_executor import execute_workflow_node as real_execute
-        from app.shareddomain.workflows.engine import NodeResult
+        from app.domain.workflows.engine import NodeResult
 
         async def huge_node(scope, node, context):
             return NodeResult(outputs={"text": "x" * (300 * 1024)})
@@ -3199,7 +3199,7 @@ def test_executor_manual_run_scenarios() -> None:
             from app.infra.db.repositories.agents import repository as agent_repository
             from app.infra.db.repositories.workflows import repository as workflow_repository
             from app.infra.db.session import get_session_factory
-            from app.shareddomain.workflows.resources import (
+            from app.domain.workflows.resources import (
                 build_workflow_resource_snapshot,
                 workflow_resource_hash,
             )
@@ -3765,8 +3765,8 @@ def test_public_and_api_workflow_access_end_to_end() -> None:
         from app.infra.storage.object_storage import create_object_storage
         from app.infra.db.repositories.workflows import repository as workflow_repository
         from app.infra.db.session import get_session_factory
-        from app.shareddomain.workflows.models import WorkflowUpload
-        from app.shareddomain.workflows.uploads import (
+        from app.domain.workflows.models import WorkflowUpload
+        from app.domain.workflows.uploads import (
             prepare_due_upload_cleanups,
             run_upload_storage_cleanup,
         )

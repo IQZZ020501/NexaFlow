@@ -3,7 +3,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shareddomain.platform.models import User
+from app.domain.platform.models import User
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.security.auth import hash_password

@@ -8,8 +8,8 @@ from typing import Any, Literal
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field, ValidationError
 
-from app.shareddomain.agents.runtime import AgentGroundingResult, empty_usage
-from app.shareddomain.agents.runtime.usage import usage_from_message
+from app.domain.agents.runtime import AgentGroundingResult, empty_usage
+from app.domain.agents.runtime.usage import usage_from_message
 
 GROUNDING_TIMEOUT_SECONDS = 45
 MAX_GROUNDING_QUESTION_CHARS = 4_000

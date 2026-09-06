@@ -23,7 +23,7 @@ from app.schemas.smtp import (
     SmtpTestRequest,
     normalize_site_url,
 )
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 
 
 def _response(entity: SmtpSettings) -> SmtpSettingsResponse:

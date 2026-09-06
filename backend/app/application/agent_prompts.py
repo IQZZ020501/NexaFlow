@@ -12,7 +12,7 @@ from app.schemas.agent import (
     AgentInstructionsGenerateRequest,
     AgentInstructionsGenerateResponse,
 )
-from app.shareddomain.agents.services import get_agent_model
+from app.domain.agents.services import get_agent_model
 
 
 async def generate_agent_instructions(

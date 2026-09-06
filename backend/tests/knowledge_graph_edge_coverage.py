@@ -32,9 +32,9 @@ from app.schemas.knowledge_graph import (
     KnowledgeGraphSchemaUpdateRequest,
     KnowledgeGraphSettingsUpdateRequest,
 )
-from app.shareddomain.knowledge_graph import revisions as graph_revisions
-from app.shareddomain.knowledge_graph.revisions import GraphRevisionConflict
-from app.shareddomain.knowledge_graph.schema import default_graph_schema
+from app.domain.knowledge_graph import revisions as graph_revisions
+from app.domain.knowledge_graph.revisions import GraphRevisionConflict
+from app.domain.knowledge_graph.schema import default_graph_schema
 
 
 async def _expect_http(coroutine, status_code: int) -> None:

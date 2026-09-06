@@ -53,14 +53,14 @@ from app.ports.vector_store import (
     upsert_graph_profile_vectors,
 )
 from app.schemas.knowledge_graph import KnowledgeGraphImportRecord
-from app.shareddomain.agents.runtime.usage import merge_usage
-from app.shareddomain.audit.services import record_audit_log
-from app.shareddomain.knowledge.orchestration import resolve_embedding_model
-from app.shareddomain.knowledge.task_runner import (
+from app.domain.agents.runtime.usage import merge_usage
+from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.orchestration import resolve_embedding_model
+from app.domain.knowledge.task_runner import (
     ensure_knowledge_task_lease,
     persist_owned_knowledge_task_progress,
 )
-from app.shareddomain.knowledge_graph.extraction import (
+from app.domain.knowledge_graph.extraction import (
     EntityLexiconEntry,
     ExtractedClaim,
     ExtractedEntity,
@@ -75,23 +75,23 @@ from app.shareddomain.knowledge_graph.extraction import (
     extract_graph_batch,
     validate_extraction_batch,
 )
-from app.shareddomain.knowledge_graph.resolution import (
+from app.domain.knowledge_graph.resolution import (
     claim_fingerprint,
     choose_automatic_entity_match,
     initial_claim_status,
 )
-from app.shareddomain.knowledge_graph.revisions import (
+from app.domain.knowledge_graph.revisions import (
     create_revision,
     publish_revision,
     stage_revision_change,
 )
-from app.shareddomain.knowledge_graph.schema import (
+from app.domain.knowledge_graph.schema import (
     GraphSchemaDefinition,
     default_graph_schema,
     graph_schema_hash,
     normalize_graph_name,
 )
-from app.shareddomain.knowledge_graph.services import create_graph_schema
+from app.domain.knowledge_graph.services import create_graph_schema
 
 GRAPH_BUILD_STAGES = (
     "extract",

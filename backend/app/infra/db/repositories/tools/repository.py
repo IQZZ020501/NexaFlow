@@ -6,9 +6,9 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionOrm
-from app.shareddomain.platform.models import User as UserOrm
-from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
+from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.domain.platform.models import User as UserOrm
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.resource_permission import ResourcePermission
 from app.entities.tools import (
     ApplicationToolBinding,
@@ -22,16 +22,16 @@ from app.entities.tools import (
 )
 from app.entities.user import User
 from app.infra.db.mapping import save, to_entity
-from app.shareddomain.tools.models import (
+from app.domain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
 )
-from app.shareddomain.tools.models import Tool as ToolOrm
-from app.shareddomain.tools.models import ToolDraft as ToolDraftOrm
-from app.shareddomain.tools.models import ToolInvocation as ToolInvocationOrm
-from app.shareddomain.tools.models import ToolPolicy as ToolPolicyOrm
-from app.shareddomain.tools.models import ToolSource as ToolSourceOrm
-from app.shareddomain.tools.models import ToolVersion as ToolVersionOrm
-from app.shareddomain.tools.runtime import (
+from app.domain.tools.models import Tool as ToolOrm
+from app.domain.tools.models import ToolDraft as ToolDraftOrm
+from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
+from app.domain.tools.models import ToolPolicy as ToolPolicyOrm
+from app.domain.tools.models import ToolSource as ToolSourceOrm
+from app.domain.tools.models import ToolVersion as ToolVersionOrm
+from app.domain.tools.runtime import (
     TOOL_INVOCATION_APPROVED,
     TOOL_INVOCATION_AWAITING_APPROVAL,
     TOOL_INVOCATION_CLAIMABLE_STATUSES,

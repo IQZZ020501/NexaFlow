@@ -1,6 +1,6 @@
 """Team use cases (facade over the teams domain)."""
 
-from app.shareddomain.teams.services import (
+from app.domain.teams.services import (
     add_team_member,
     create_team,
     delete_team_permanently,

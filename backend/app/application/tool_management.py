@@ -26,20 +26,20 @@ from app.schemas.tool import (
     ToolSummaryResponse,
 )
 from app.schemas.user import user_to_response
-from app.shareddomain.tools.catalog import (
+from app.domain.tools.catalog import (
     ToolCatalogDetail,
     ToolCatalogItem,
     get_tool_catalog_detail,
     list_tool_catalog,
 )
-from app.shareddomain.tools.permissions import (
+from app.domain.tools.permissions import (
     list_tool_permissions,
     require_managed_tool,
     require_tool_manage,
     revoke_tool_permission,
     upsert_tool_permission,
 )
-from app.shareddomain.tools.python_tools import (
+from app.domain.tools.python_tools import (
     archive_python_tool,
     build_python_test_snapshot,
     create_python_tool,
@@ -47,7 +47,7 @@ from app.shareddomain.tools.python_tools import (
     set_python_tool_enabled,
     update_python_tool_draft,
 )
-from app.shareddomain.tools.services import (
+from app.domain.tools.services import (
     create_mcp_server,
     delete_mcp_server,
     get_mcp_server,
@@ -56,7 +56,7 @@ from app.shareddomain.tools.services import (
     set_mcp_server_enabled,
     set_mcp_tool_policy,
 )
-from app.shareddomain.tools.runtime import validate_tool_arguments
+from app.domain.tools.runtime import validate_tool_arguments
 
 
 async def list_tools(

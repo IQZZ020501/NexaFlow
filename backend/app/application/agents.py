@@ -59,7 +59,7 @@ from app.application.workflow_uploads import (
     upload_public_agent_files,
     upload_workspace_agent_files,
 )
-from app.shareddomain.agents.services import (
+from app.domain.agents.services import (
     ACTIVE_STATUS,
     accessible_agent_knowledge_bases,
     can_edit_agent,
@@ -71,7 +71,7 @@ from app.shareddomain.agents.services import (
     list_agents,
     update_agent,
 )
-from app.shareddomain.agents.permissions import (
+from app.domain.agents.permissions import (
     list_agent_permissions,
     require_agent_edit,
     revoke_agent_permission,

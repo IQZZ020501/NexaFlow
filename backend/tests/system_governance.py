@@ -24,8 +24,8 @@ from app.application.governance import (
 )
 from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.db.session import get_session_factory
-from app.shareddomain.knowledge.models import KnowledgeBase, KnowledgeTask
-from app.shareddomain.knowledge_graph.models import (
+from app.domain.knowledge.models import KnowledgeBase, KnowledgeTask
+from app.domain.knowledge_graph.models import (
     KnowledgeGraphRevision,
     KnowledgeGraphSchema,
 )

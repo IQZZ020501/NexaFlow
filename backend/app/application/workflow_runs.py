@@ -36,25 +36,25 @@ from app.schemas.workflow import (
     WorkflowPendingForm,
     WorkflowGraph,
 )
-from app.shareddomain.agents.permissions import require_agent_edit, require_agent_view
-from app.shareddomain.agents.models import (
+from app.domain.agents.permissions import require_agent_edit, require_agent_view
+from app.domain.agents.models import (
     agent_run_display_status,
     agent_run_generation,
     queued_agent_run_status,
 )
-from app.shareddomain.agents.services import ACTIVE_STATUS, get_agent_model
-from app.shareddomain.workflows.services import (
+from app.domain.agents.services import ACTIVE_STATUS, get_agent_model
+from app.domain.workflows.services import (
     get_or_create_definition,
     get_workflow_agent,
     prepare_workflow_resources,
     validate_workflow_resources,
 )
-from app.shareddomain.tools.runtime import (
+from app.domain.tools.runtime import (
     tool_snapshot_from_payload,
     tool_snapshot_payload,
 )
-from app.shareddomain.workflows.engine import graph_hash
-from app.shareddomain.workflows.resources import (
+from app.domain.workflows.engine import graph_hash
+from app.domain.workflows.resources import (
     canonicalize_workflow_snapshot_graph,
     load_workflow_agent_snapshots,
     load_workflow_resource_snapshot,

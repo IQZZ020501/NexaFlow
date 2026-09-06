@@ -39,24 +39,24 @@ from app.ports.llm import (
 )
 from app.ports.model_registry import get_registered_model_by_id
 from app.schemas.workflow import LlmNodeConfig, RerankerNodeConfig, WorkflowGraph
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
     AGENT_RUN_UNIFIED_RUNNING_STATUS,
 )
-from app.shareddomain.agents.runtime import (
+from app.domain.agents.runtime import (
     empty_usage,
     merge_usage,
     safe_event_value,
 )
-from app.shareddomain.agents.services import (
+from app.domain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.shareddomain.tools.runtime import tool_snapshot_payload
-from app.shareddomain.workflows.engine import (
+from app.domain.tools.runtime import tool_snapshot_payload
+from app.domain.workflows.engine import (
     NodeTransition,
     WorkflowEngine,
     WorkflowEngineError,
@@ -64,7 +64,7 @@ from app.shareddomain.workflows.engine import (
     WorkflowInputRequired,
     WorkflowChildRequired,
 )
-from app.shareddomain.workflows.resources import (
+from app.domain.workflows.resources import (
     load_workflow_agent_snapshots,
     load_workflow_resource_snapshot,
 )

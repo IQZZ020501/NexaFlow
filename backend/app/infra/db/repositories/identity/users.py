@@ -3,12 +3,12 @@ from datetime import datetime
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shareddomain.platform.models import Team as TeamOrm
-from app.shareddomain.platform.models import TeamMembership as TeamMembershipOrm
-from app.shareddomain.platform.models import RefreshSession as RefreshSessionOrm
-from app.shareddomain.platform.models import User as UserOrm
-from app.shareddomain.platform.models import Workspace as WorkspaceOrm
-from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
+from app.domain.platform.models import Team as TeamOrm
+from app.domain.platform.models import TeamMembership as TeamMembershipOrm
+from app.domain.platform.models import RefreshSession as RefreshSessionOrm
+from app.domain.platform.models import User as UserOrm
+from app.domain.platform.models import Workspace as WorkspaceOrm
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.entities.team import Team, TeamMembership
 from app.entities.user import RefreshSession, User
 from app.entities.workspace import WORKSPACE_ADMIN_ROLE

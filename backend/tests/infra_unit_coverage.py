@@ -72,13 +72,13 @@ from app.ports import model_registry as ports_model_registry
 from app.schemas.mcp import McpServerCreateRequest
 from app.schemas.model import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
 from app.schemas.team import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
-from app.shareddomain.agents.models import Agent as AgentOrm
-from app.shareddomain.agents.models import AgentMcpTool as AgentMcpToolOrm
-from app.shareddomain.resource_folders.models import ResourceFolder as ResourceFolderOrm
-from app.shareddomain.teams import services as teams_services
-from app.shareddomain.tools import services as tools_services
-from app.shareddomain.tools.models import McpServer as McpServerOrm
-from app.shareddomain.tools.models import McpToolPolicy as McpToolPolicyOrm
+from app.domain.agents.models import Agent as AgentOrm
+from app.domain.agents.models import AgentMcpTool as AgentMcpToolOrm
+from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm
+from app.domain.teams import services as teams_services
+from app.domain.tools import services as tools_services
+from app.domain.tools.models import McpServer as McpServerOrm
+from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
 from app.tasks import configure_task_worker
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
@@ -130,11 +130,11 @@ from app.capabilities.llm.runtime import (
     openai_compatible_base,
     test_model_connection,
 )
-from app.shareddomain.platform.models import ResourcePermission as ResourcePermissionOrm
-from app.shareddomain.platform.models import Team as TeamOrm
-from app.shareddomain.platform.models import User as UserOrm
-from app.shareddomain.platform.models import Workspace as WorkspaceOrm
-from app.shareddomain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
+from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.domain.platform.models import Team as TeamOrm
+from app.domain.platform.models import User as UserOrm
+from app.domain.platform.models import Workspace as WorkspaceOrm
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.infra.security.auth import (
     create_access_token,
     create_refresh_token,
@@ -3211,7 +3211,7 @@ def _mcp_catalog_leaf(
     tool_status="active",
 ):
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.shareddomain.tools.catalog import (
+    from app.domain.tools.catalog import (
         McpCatalogLeaf,
         mcp_definition_hash,
     )
@@ -3300,7 +3300,7 @@ def test_mcp_tool_hash_and_policy_mode() -> None:
 
 def test_mcp_server_to_response() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.shareddomain.tools.catalog import McpCatalogLeaf
+    from app.domain.tools.catalog import McpCatalogLeaf
 
     server = McpServer(
         id="srv-1",

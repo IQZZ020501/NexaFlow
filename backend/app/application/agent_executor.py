@@ -42,14 +42,14 @@ from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory
 from app.infra.observability.system_log import record_system_log
 from app.ports.llm import RegisteredModel, build_chat_model
-from app.shareddomain.agents.models import (
+from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
     AGENT_RUN_UNIFIED_RUNNING_STATUS,
 )
-from app.shareddomain.agents.runtime import (
+from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
     AgentToolBusy,
@@ -59,23 +59,23 @@ from app.shareddomain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
-from app.shareddomain.agents.runtime.state import PendingToolCall
-from app.shareddomain.agents.runtime.graph import (
+from app.domain.agents.runtime.state import PendingToolCall
+from app.domain.agents.runtime.graph import (
     MAX_AGENT_TOOL_CALLS,
     MAX_AGENT_TURNS,
 )
-from app.shareddomain.agents.services import (
+from app.domain.agents.services import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.shareddomain.tools.services import (
+from app.domain.tools.services import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
     get_mcp_tool_policy,
     mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
-from app.shareddomain.tools.runtime import tool_snapshot_from_payload
+from app.domain.tools.runtime import tool_snapshot_from_payload
 
 logger = get_logger(__name__)
 

@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.email import EmailDelivery, PasswordResetToken
 from app.infra.db import mapping
-from app.shareddomain.email.models import EmailDelivery as EmailDeliveryOrm
-from app.shareddomain.email.models import PasswordResetToken as PasswordResetTokenOrm
+from app.domain.email.models import EmailDelivery as EmailDeliveryOrm
+from app.domain.email.models import PasswordResetToken as PasswordResetTokenOrm
 
 
 async def create_delivery(

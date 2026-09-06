@@ -4,15 +4,15 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 
 from app.capabilities.llm.models import RegisteredModel
-from app.shareddomain.platform.models import ResourcePermission
+from app.domain.platform.models import ResourcePermission
 from app.entities.agents import AgentRun
 from app.infra.runtime.model_utils import new_id, utc_now
 from app.infra.storage import object_storage as object_storage_module
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.session import get_session_factory
-from app.shareddomain.audit.models import AuditLog
-from app.shareddomain.agents.models import (
+from app.domain.audit.models import AuditLog
+from app.domain.agents.models import (
     Agent,
     AgentKnowledgeBase,
     AgentMcpTool,
@@ -20,20 +20,20 @@ from app.shareddomain.agents.models import (
     AgentRunSnapshot,
     AgentRunState,
 )
-from app.shareddomain.knowledge import cleanup as knowledge_cleanup
-from app.shareddomain.knowledge.models import (
+from app.domain.knowledge import cleanup as knowledge_cleanup
+from app.domain.knowledge.models import (
     KnowledgeBase,
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.shareddomain.knowledge_graph.models import (
+from app.domain.knowledge_graph.models import (
     KnowledgeGraphRevision,
     KnowledgeGraphSchema,
 )
-from app.shareddomain.knowledge.services import knowledge_object_storage
-from app.shareddomain.analytics.services import resolve_analytics_period
-from app.shareddomain.tools.models import McpServer, ToolSource
-from app.shareddomain.workflows.models import WorkflowDefinition, WorkflowRunDetail
+from app.domain.knowledge.services import knowledge_object_storage
+from app.domain.analytics.services import resolve_analytics_period
+from app.domain.tools.models import McpServer, ToolSource
+from app.domain.workflows.models import WorkflowDefinition, WorkflowRunDetail
 from tests.support import (
     activate_admin,
     auth_headers,

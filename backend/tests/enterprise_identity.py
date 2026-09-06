@@ -17,7 +17,7 @@ from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
 )
-from app.shareddomain.enterprise_identity.services import (
+from app.domain.enterprise_identity.services import (
     safe_next_path,
     validate_connection_fields,
 )

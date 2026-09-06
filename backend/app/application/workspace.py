@@ -11,7 +11,7 @@ from app.infra.observability.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 from app.infra.runtime.validation import normalize_name
 from app.infra.runtime.model_utils import new_id
 from app.entities.user import User
@@ -24,12 +24,12 @@ from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.ports import model_registry
-from app.shareddomain.knowledge.services import delete_workspace_knowledge_bases
-from app.shareddomain.tools.catalog import (
+from app.domain.knowledge.services import delete_workspace_knowledge_bases
+from app.domain.tools.catalog import (
     ensure_workspace_system_catalog,
     tombstone_workspace_mcp_catalog,
 )
-from app.shareddomain.workflows.uploads import queue_upload_cleanups
+from app.domain.workflows.uploads import queue_upload_cleanups
 from app.tasks.knowledge import enqueue_knowledge_storage_cleanup
 from app.tasks.knowledge import enqueue_upload_storage_cleanups
 from app.schemas.workspace import (

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.audit import AuditLog as AuditLogEntity
 from app.infra.db.mapping import to_entity
-from app.shareddomain.audit.models import AuditLog
+from app.domain.audit.models import AuditLog
 
 
 def add(db: AsyncSession, entity: AuditLogEntity) -> None:

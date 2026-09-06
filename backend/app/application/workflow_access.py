@@ -45,7 +45,7 @@ from app.schemas.workflow import (
     WorkflowGraph,
     WorkflowRunCreateRequest,
 )
-from app.shareddomain.agents.models import agent_run_display_status
+from app.domain.agents.models import agent_run_display_status
 
 
 def _external_error(status_value: str) -> str | None:

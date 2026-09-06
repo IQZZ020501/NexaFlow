@@ -12,18 +12,18 @@ from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.session import get_session_factory
-from app.shareddomain.knowledge.task_runner import (
+from app.domain.knowledge.task_runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
     list_recoverable_knowledge_task_ids,
     mark_knowledge_task_failed,
     run_knowledge_task,
 )
-from app.shareddomain.knowledge.cleanup import (
+from app.domain.knowledge.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
     run_knowledge_storage_cleanup,
 )
-from app.shareddomain.workflows.uploads import (
+from app.domain.workflows.uploads import (
     prepare_due_upload_cleanups,
     run_upload_storage_cleanup,
 )

@@ -19,8 +19,8 @@ from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.session import get_session_factory
 from app.ports.tool_runtime import ToolInvocationContext
-from app.shareddomain.agents.runtime import AgentToolResult
-from app.shareddomain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
+from app.domain.agents.runtime import AgentToolResult
+from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
 
 
 def workflow_tool_invocation_identity(

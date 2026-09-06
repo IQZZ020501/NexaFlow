@@ -24,7 +24,7 @@ from app.infra.email.smtp import (
 )
 from app.infra.observability.system_log import record_system_log
 from app.infra.runtime.validation import normalize_email
-from app.shareddomain.email.services import render_email
+from app.domain.email.services import render_email
 
 logger = get_logger(__name__)
 

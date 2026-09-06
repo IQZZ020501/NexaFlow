@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.user import User
 from app.entities.workspace import WorkspaceMembership
 from app.entities.workspace_invitation import WorkspaceInvitation
-from app.shareddomain.platform.models import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
+from app.domain.platform.models import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.db.repositories.identity import invitations as invitation_repository
@@ -29,7 +29,7 @@ from app.application.email import (
     dispatch_email_deliveries,
     queue_identity_email,
 )
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 
 
 def _hash_token(token: str) -> str:

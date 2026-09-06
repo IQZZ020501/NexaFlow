@@ -18,15 +18,15 @@ from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import utc_now
 from app.infra.db.session import get_session_factory
 from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
-from app.shareddomain.agents.runtime import (
+from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
     AgentToolBusy,
     AgentToolResult,
     AgentToolUncertain,
 )
-from app.shareddomain.agents.runtime.state import PendingToolCall
-from app.shareddomain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
+from app.domain.agents.runtime.state import PendingToolCall
+from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
 
 
 def agent_tool_invocation_identity(

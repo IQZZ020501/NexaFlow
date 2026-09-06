@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.shareddomain.platform.models import SmtpSettings as SmtpSettingsOrm
+from app.domain.platform.models import SmtpSettings as SmtpSettingsOrm
 from app.entities.smtp_settings import SMTP_SETTINGS_ID, SmtpSettings
 from app.infra.db import mapping
 

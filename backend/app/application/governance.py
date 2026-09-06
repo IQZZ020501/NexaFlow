@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.user import User
 from app.entities.workspace import Workspace
 from app.entities.workspace_governance import WorkspaceGovernance
-from app.shareddomain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
+from app.domain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
 from app.infra.config.settings import Settings
 from app.infra.runtime.model_utils import APP_TIMEZONE, utc_now
 from app.infra.db.repositories.governance import inventory as governance_repository
@@ -25,7 +25,7 @@ from app.schemas.governance import (
     WorkspaceGovernanceUpdateRequest,
     WorkspaceInventoryResponse,
 )
-from app.shareddomain.audit.services import record_audit_log
+from app.domain.audit.services import record_audit_log
 
 
 HEALTH_PROBE_TIMEOUT_SECONDS = 3.0

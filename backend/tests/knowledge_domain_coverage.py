@@ -62,14 +62,14 @@ from app.infra.queue.celery import celery_app
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.shareddomain.knowledge import cleanup as cleanup_service
-from app.shareddomain.knowledge import documents as documents_service
-from app.shareddomain.knowledge import kb as kb_service
-from app.shareddomain.knowledge import lifecycle as lifecycle_service
-from app.shareddomain.knowledge import orchestration as orchestration_service
-from app.shareddomain.knowledge import permissions as permissions_service
-from app.shareddomain.knowledge import task_runner as task_runner_service
-from app.shareddomain.knowledge import models as knowledge_models
+from app.domain.knowledge import cleanup as cleanup_service
+from app.domain.knowledge import documents as documents_service
+from app.domain.knowledge import kb as kb_service
+from app.domain.knowledge import lifecycle as lifecycle_service
+from app.domain.knowledge import orchestration as orchestration_service
+from app.domain.knowledge import permissions as permissions_service
+from app.domain.knowledge import task_runner as task_runner_service
+from app.domain.knowledge import models as knowledge_models
 from app.tasks import knowledge as knowledge_tasks_module
 from app.tasks.knowledge import (
     enqueue_knowledge_storage_cleanup,
@@ -95,10 +95,10 @@ from app.capabilities.embedding.pipeline import (
     ParentChunkDraft,
 )
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
-from app.shareddomain.knowledge.orchestration import (
+from app.domain.knowledge.orchestration import (
     enqueue_parse_knowledge_document,
 )
-from app.shareddomain.knowledge.task_runner import (
+from app.domain.knowledge.task_runner import (
     TASK_RUN_BUSY,
     TASK_RUN_FINISHED,
     batches,
@@ -3165,7 +3165,7 @@ def run_celery_job_tests(
     failing_upload_cleanup_id = asyncio.run(
         _create_upload_cleanup(workspace_id, actor_user_id, "uploads/failing.bin")
     )
-    from app.shareddomain.workflows import uploads as uploads_module
+    from app.domain.workflows import uploads as uploads_module
 
     with patch.object(
         uploads_module,
@@ -4099,7 +4099,7 @@ async def run_direct_shareddomain_tests(
         KnowledgeDocumentCreateRequest,
         KnowledgeModelTestRequest,
     )
-    from app.shareddomain.knowledge.services import (
+    from app.domain.knowledge.services import (
         get_knowledge_model as services_get_knowledge_model,
     )
     from app.infra.db.repositories.workspaces import (
@@ -4391,7 +4391,7 @@ async def run_direct_shareddomain_tests(
         )
 
         # ---- permissions: upsert / revoke / require ----
-        from app.shareddomain.knowledge.permissions import (
+        from app.domain.knowledge.permissions import (
             require_knowledge_base_permission,
         )
 

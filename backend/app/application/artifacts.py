@@ -12,7 +12,7 @@ from app.infra.security.auth import (
     decode_artifact_download_token,
 )
 from app.infra.db.session import get_session_factory
-from app.shareddomain.artifacts.services import validate_generated_artifact
+from app.domain.artifacts.services import validate_generated_artifact
 
 
 ARTIFACT_TTL = timedelta(hours=24)

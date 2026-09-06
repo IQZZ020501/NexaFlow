@@ -11,9 +11,9 @@ from app.schemas.workflow import (
     WorkflowVersionListResponse,
     WorkflowVersionResponse,
 )
-from app.shareddomain.agents.permissions import require_agent_edit, require_agent_view
-from app.shareddomain.workflows.engine import graph_hash
-from app.shareddomain.workflows.services import (
+from app.domain.agents.permissions import require_agent_edit, require_agent_view
+from app.domain.workflows.engine import graph_hash
+from app.domain.workflows.services import (
     definition_to_response,
     get_or_create_definition,
     get_workflow_agent,

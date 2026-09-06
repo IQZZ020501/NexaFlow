@@ -376,7 +376,7 @@ def _classifier_node(classes: list[dict]) -> dict:
 
 
 def test_engine_validation_error_branches() -> None:
-    from app.shareddomain.workflows.engine import (
+    from app.domain.workflows.engine import (
         WorkflowValidationError,
         validate_graph,
     )
@@ -601,7 +601,7 @@ def test_engine_validation_error_branches() -> None:
 
 def test_engine_runtime_error_branches() -> None:
     from app.infra.runtime.model_utils import utc_now
-    from app.shareddomain.workflows.engine import (
+    from app.domain.workflows.engine import (
         NodeResult,
         NodeState,
         WorkflowEngine,
@@ -1352,7 +1352,7 @@ def test_workflow_services_boundaries() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowGraph
-    from app.shareddomain.workflows.services import (
+    from app.domain.workflows.services import (
         get_or_create_definition,
         get_workflow_agent,
         publish_definition,
@@ -1496,11 +1496,11 @@ def test_workflow_services_boundaries() -> None:
                 )
                 with (
                     patch(
-                        "app.shareddomain.workflows.services.resolve_mcp_tools",
+                        "app.domain.workflows.services.resolve_mcp_tools",
                         new=AsyncMock(return_value=[tool]),
                     ),
                     patch(
-                        "app.shareddomain.workflows.services.get_mcp_tool_policy",
+                        "app.domain.workflows.services.get_mcp_tool_policy",
                         new=AsyncMock(return_value=None),
                     ),
                 ):
@@ -1558,7 +1558,7 @@ def test_workflow_services_boundaries() -> None:
                 # fresh workflow agent takes the create path
                 from sqlalchemy import delete as sa_delete
 
-                from app.shareddomain.workflows.models import (
+                from app.domain.workflows.models import (
                     WorkflowDefinition as WorkflowDefinitionOrm,
                 )
 
@@ -1627,7 +1627,7 @@ def test_upload_cleanup_records() -> None:
     from app.entities.workflows import WorkflowUpload
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from app.shareddomain.workflows.uploads import (
+    from app.domain.workflows.uploads import (
         prepare_due_upload_cleanups,
         queue_upload_cleanups,
         run_upload_storage_cleanup,
@@ -1663,7 +1663,7 @@ def test_upload_cleanup_records() -> None:
 
         async def failure_path(cleanup_id: str) -> None:
             with patch(
-                "app.shareddomain.workflows.uploads.create_object_storage",
+                "app.domain.workflows.uploads.create_object_storage",
                 return_value=_RaisingStorage(),
             ):
                 try:
@@ -2164,7 +2164,7 @@ def test_workflow_run_direct_api_functions() -> None:
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflow import WorkflowFormSubmitRequest, WorkflowRunCreateRequest
-    from app.shareddomain.workflows.resources import (
+    from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
     )
