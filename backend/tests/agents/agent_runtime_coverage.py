@@ -5542,12 +5542,14 @@ async def assert_tool_service_paths(
         )
 
         # create_or_get_tool_invocation cannot persist (778)
-        original_by_key = tool_repository.get_tool_invocation_by_idempotency_key
+        from app.infra.db.repositories.tools import invocations as tool_invocation_repo
+
+        original_by_key = tool_invocation_repo.get_tool_invocation_by_idempotency_key
 
         async def never_found(db, workspace_id, idempotency_key):
             return None
 
-        tool_repository.get_tool_invocation_by_idempotency_key = never_found
+        tool_invocation_repo.get_tool_invocation_by_idempotency_key = never_found
         try:
             try:
                 await tool_repository.create_or_get_tool_invocation(
@@ -5571,7 +5573,7 @@ async def assert_tool_service_paths(
             else:
                 raise AssertionError("Unpersisted invocation was returned.")
         finally:
-            tool_repository.get_tool_invocation_by_idempotency_key = original_by_key
+            tool_invocation_repo.get_tool_invocation_by_idempotency_key = original_by_key
 
         # resolve_tool_invocation_approval reject branch (848-853)
         run, _model = await agent_runs.prepare_agent_run(
