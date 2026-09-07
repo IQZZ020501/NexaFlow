@@ -73,9 +73,10 @@ not trigger unrelated cleanup.
   `infra/storage/object_storage.py::ObjectStorage`); domain services must not
   import the concrete implementation.
 - Capability contracts live in `app/ports/` (Protocols plus delegate functions
-  for vector store, LLM providers, document parsing, MCP client, and model
-  registry). Swapping an implementation (for example Qdrant to Milvus) should
-  touch only the capability module and its port factory.
+  for LLM providers, MCP clients, vector store and enterprise identity; parsing
+  and the tool runtime live inside their features). Swapping an implementation
+  (for example Qdrant to Milvus) should touch only the adapter module and its
+  port factory.
 - Data isolation: pure domain entities live in `app/entities/` (dataclasses
   mirroring the database columns); `app/domain/platform/models.py` and other
   `app/domain/<feature>/models.py` hold the SQLAlchemy database models.
@@ -407,7 +408,7 @@ examples.
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,
   platform.teams, platform.system_governance, platform.resource_folders,
   models.llm, models.unit, infra.infra_unit_coverage, infra.unit, infra.logger,
-  infra.mcp_transports, smoke.test_main). For migration changes,
+  infra.mcp_transports, infra.architecture, smoke.test_main). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
