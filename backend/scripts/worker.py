@@ -322,7 +322,7 @@ def _celery_command(autoscale: str | None, loglevel: str) -> list[str]:
         "-m",
         "celery",
         "-A",
-        "app.infrastructure.celery:celery_app",
+        "app.infra.queue.celery:celery_app",
         "worker",
         "--beat",
         "--queues=celery,agents-legacy,agents-v2",

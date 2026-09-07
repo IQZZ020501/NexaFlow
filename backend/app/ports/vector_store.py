@@ -1,24 +1,52 @@
 """Vector store port.
 
-Business code imports the functions and value types from here instead of
-``app.capabilities.rag.vector_store``. The protocol documents the contract;
-``build_vector_store`` is the single composition point for the concrete
-backend (Qdrant today).
+Business code imports the value types and delegates from here instead of
+``app.adapters.rag.vector_store``. The protocol documents the contract;
+``build_vector_store`` is the composition point for the concrete backend
+(Qdrant today). Adapters and infra are never imported at module load.
 """
 
-from typing import Any, Protocol
+from __future__ import annotations
 
-from app.capabilities.rag.vector_store import (
-    GraphProfileVector,
-    GraphProfileVectorHit,
-    QdrantVectorStore,
-    VectorChunk,
-    VectorHit,
-)
-from app.infrastructure.config import Settings
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from app.infra.config.settings import Settings
+
+
+@dataclass(frozen=True)
+class VectorChunk:
+    id: str
+    document_id: str
+    document_filename: str
+    chunk_index: int
+    content: str
+    document_metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class VectorHit:
+    chunk_id: str
+    distance: float | None
+
+
+@dataclass(frozen=True)
+class GraphProfileVector:
+    entity_id: str
+    profile_hash: str
+    content: str
+
+
+@dataclass(frozen=True)
+class GraphProfileVectorHit:
+    entity_id: str
+    profile_hash: str
+    distance: float | None
 
 
 class VectorStore(Protocol):
+
     def check_health(self) -> None: ...
 
     def delete_vector_collection(self, knowledge_base_id: str) -> None: ...
@@ -74,6 +102,8 @@ class VectorStore(Protocol):
 
 
 def build_vector_store(settings: Settings) -> VectorStore:
+    from app.adapters.rag.vector_store import QdrantVectorStore
+
     return QdrantVectorStore(settings)
 
 

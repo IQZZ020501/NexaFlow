@@ -5,15 +5,15 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.workspace import WorkspaceContext, build_workspace_context
-from app.infrastructure.config import Settings
-from app.infrastructure.logger import get_logger, log_event
-from app.infrastructure.session import get_db
-from app.entities.user import User
-from app.infrastructure.repositories import team as team_repository
-from app.infrastructure.repositories import user as user_repository
-from app.infrastructure.model_utils import utc_now
-from app.infrastructure.security import decode_access_session
+from app.application.workspaces.service import WorkspaceContext, build_workspace_context
+from app.infra.config.settings import Settings
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.db.session import get_db
+from app.entities.identity.user import User
+from app.infra.db.repositories.teams import repository as team_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.entities.defaults import utc_now
+from app.infra.security.auth import decode_access_session
 
 logger = get_logger(__name__)
 

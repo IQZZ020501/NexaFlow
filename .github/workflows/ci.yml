@@ -57,40 +57,47 @@ jobs:
         run: uv run python -m compileall app tests main.py
 
       - name: Run unit tests
-        run: uv run python -m tests.unit
+        run: |
+          uv run python -m tests.agents.unit
+          uv run python -m tests.knowledge.unit
+          uv run python -m tests.tools.unit
+          uv run python -m tests.workflows.unit
+          uv run python -m tests.models.unit
+          uv run python -m tests.platform.unit
+          uv run python -m tests.infra.unit
 
       - name: Run logger tests
-        run: uv run python -m tests.logger
+        run: uv run python -m tests.infra.logger
 
       - name: Run SMTP tests
-        run: uv run python -m tests.smtp
+        run: uv run python -m tests.identity.smtp
 
       - name: Run email tests
-        run: uv run python -m tests.email
+        run: uv run python -m tests.identity.email
 
       - name: Run system governance tests
-        run: uv run python -m tests.system_governance
+        run: uv run python -m tests.platform.system_governance
 
       - name: Run identity tests
-        run: uv run python -m tests.identity
+        run: uv run python -m tests.identity.identity
 
       - name: Run workspace tests
-        run: uv run python -m tests.workspaces
+        run: uv run python -m tests.platform.workspaces
 
       - name: Run team tests
-        run: uv run python -m tests.teams
+        run: uv run python -m tests.platform.teams
 
       - name: Run knowledge tests
-        run: uv run python -m tests.knowledge
+        run: uv run python -m tests.knowledge.knowledge
 
       - name: Run llm tests
-        run: uv run python -m tests.llm
+        run: uv run python -m tests.models.llm
 
       - name: Run agent tests
-        run: uv run python -m tests.agents
+        run: uv run python -m tests.agents.agents
 
       - name: Run workflow tests
-        run: uv run python -m tests.workflows
+        run: uv run python -m tests.workflows.workflows
 
       - name: Run sandbox self-check
         working-directory: .
@@ -118,8 +125,11 @@ jobs:
             --entrypoint python nexaflow-sandbox-ci \
             /opt/sandbox/worker.py --sandbox-self-check
 
+      - name: Run architecture guard
+        run: uv run python -m tests.infra.architecture
+
       - name: Run main smoke tests
-        run: uv run python -m tests.test_main
+        run: uv run python -m tests.smoke.test_main
 
   frontend:
     name: Frontend

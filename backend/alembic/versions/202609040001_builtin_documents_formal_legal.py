@@ -15,7 +15,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def _desired(workspace_id: str):
-    from app.shareddomain.tools.catalog import build_skill_artifact_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
 
     return build_skill_artifact_tool(workspace_id, "documents")
 

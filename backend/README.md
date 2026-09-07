@@ -30,7 +30,7 @@ with RAG, LLM-powered agents, and MCP tool integration — with a trilingual UI
 ## Repository layout
 
 ```text
-backend/   FastAPI application (api → application → shareddomain/capabilities → infrastructure)
+backend/   FastAPI application (api → application → domain/adapters + ports → infra)
 frontend/  Next.js application (app routes, components, i18n, lib/api)
 deploy/    Docker Compose topology, Dockerfiles, Nginx examples
 docs/      module documentation — start at docs/INDEX.md
@@ -46,7 +46,7 @@ When `DATABASE_URL` is empty, the backend safely constructs it from the shared
 `POSTGRES_*` components.
 
 ```bash
-uv run celery -A app.infrastructure.celery:celery_app worker --beat --loglevel=INFO
+uv run celery -A app.infra.queue.celery:celery_app worker --beat --loglevel=INFO
 ```
 
 The app selects Celery's `threads` pool on macOS so Agent runs can overlap

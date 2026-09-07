@@ -30,23 +30,23 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/deps.py` — 认证与授权依赖：Bearer token 解析、当前用户、全局管理员、工作空间上下文（`WorkspaceContext`）与路径角色守卫
 - `backend/app/api/v1/api.py` — 汇总所有子路由为 `/api/v1` 前缀并挂载 `/admin` 子路由的聚合入口
 
-### app/api/v1/endpoints/
+### app/api/v1/<feature>/
 
-- `backend/app/api/v1/endpoints/auth.py` — `/auth`：登录/刷新/登出/改密/当前用户（`/me`），refresh token 走 HttpOnly Cookie
-- `backend/app/api/v1/endpoints/workspaces.py` — `/workspaces`：工作区 CRUD、成员/团队管理、治理配额、资源盘点、邀请与工作区审计日志
-- `backend/app/api/v1/endpoints/teams.py` — `/workspaces/{workspace_id}/teams`：团队 CRUD（admin 角色限定）
-- `backend/app/api/v1/endpoints/knowledge.py` — `/workspaces/{workspace_id}/knowledge-bases` 主接口族：知识库 CRUD、普通文档/QA 表上传、分块/解析/索引、任务列表与重试、重建索引、模型测试、资源权限管理；文档创建通过 `import_mode=document|qa` 显式选择导入语义
-- `backend/app/api/v1/endpoints/knowledge_lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
-- `backend/app/api/v1/endpoints/knowledge_retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
-- `backend/app/api/v1/endpoints/knowledge_evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
-- `backend/app/api/v1/endpoints/models.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
-- `backend/app/api/v1/endpoints/tool_sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
-- `backend/app/api/v1/endpoints/tools.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权
-- `backend/app/api/v1/endpoints/mcp_servers.py` — 旧 MCP Server 契约兼容接口；新工具中心使用 `tool-sources` 与 `tools` 路由
-- `backend/app/api/v1/endpoints/agents.py` — Agent CRUD、发布、API 凭据、跨来源对话日志/用户/统计，以及登录态 Run 提交、工具账本、审批/拒绝与游标 NDJSON 订阅
-- `backend/app/api/v1/endpoints/agent_access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、访客会话、对话历史和安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
-- `backend/app/api/v1/endpoints/workflows.py` — Workflow 草稿定义、资源校验、不可变版本、恢复、调试运行、表单恢复与节点审计
-- `backend/app/api/v1/endpoints/workflow_access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、会话、API 文档、Run 和安全流
+- `backend/app/api/v1/identity/auth.py` — `/auth`：登录/刷新/登出/改密/当前用户（`/me`），refresh token 走 HttpOnly Cookie
+- `backend/app/api/v1/workspaces/routes.py` — `/workspaces`：工作区 CRUD、成员/团队管理、治理配额、资源盘点、邀请与工作区审计日志
+- `backend/app/api/v1/teams/routes.py` — `/workspaces/{workspace_id}/teams`：团队 CRUD（admin 角色限定）
+- `backend/app/api/v1/knowledge/routes.py` — `/workspaces/{workspace_id}/knowledge-bases` 主接口族：知识库 CRUD、普通文档/QA 表上传、分块/解析/索引、任务列表与重试、重建索引、模型测试、资源权限管理；文档创建通过 `import_mode=document|qa` 显式选择导入语义
+- `backend/app/api/v1/knowledge/lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
+- `backend/app/api/v1/knowledge/retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
+- `backend/app/api/v1/knowledge/evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
+- `backend/app/api/v1/models/routes.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
+- `backend/app/api/v1/tools/sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
+- `backend/app/api/v1/tools/routes.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权
+- `backend/app/api/v1/tools/mcp.py` — 旧 MCP Server 契约兼容接口；新工具中心使用 `tool-sources` 与 `tools` 路由
+- `backend/app/api/v1/agents/routes.py` — Agent CRUD、发布、API 凭据、跨来源对话日志/用户/统计，以及登录态 Run 提交、工具账本、审批/拒绝与游标 NDJSON 订阅
+- `backend/app/api/v1/agents/access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、访客会话、对话历史和安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
+- `backend/app/api/v1/workflows/routes.py` — Workflow 草稿定义、资源校验、不可变版本、恢复、调试运行、表单恢复与节点审计
+- `backend/app/api/v1/workflows/access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、会话、API 文档、Run 和安全流
 
 ### app/api/v1/admin/
 

@@ -1,0 +1,422 @@
+"""Knowledge use cases.
+
+Single facade consumed by the knowledge API endpoints: CRUD, document
+lifecycle, task dispatch, retrieval orchestration, and object-file access.
+Endpoints must not import ``app.domain``, ``app.adapters``, or
+``app.infra`` directly; this module is the only entry point.
+"""
+
+from pathlib import Path
+
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.application.knowledge.retrieval.service import (
+    query_knowledge_base,
+    retrieve_knowledge_base,
+)
+from app.application.knowledge.graph.service import import_graph_records
+from app.application.knowledge.evaluation.runner import (
+    get_evaluation_summary,
+    get_latest_evaluation_summary,
+    run_evaluation_task,
+)
+from app.application.knowledge.graph.build import run_graph_build_task
+from app.infra.config.settings import Settings
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
+from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
+from app.domain.knowledge.documents.lifecycle import (
+    delete_knowledge_document as delete_knowledge_document_record,
+    set_knowledge_document_active as set_knowledge_document_active_record,
+)
+from app.domain.knowledge.evaluation import (
+    create_evaluation_case,
+    delete_evaluation_case,
+    delete_evaluation_run,
+    enqueue_evaluation_run,
+    get_evaluation_run,
+    list_evaluation_cases,
+    list_evaluation_runs,
+)
+from app.domain.knowledge.tasks.orchestration import (
+    enqueue_index_knowledge_document,
+    enqueue_parse_knowledge_document,
+    enqueue_rebuild_knowledge_index,
+    get_knowledge_document,
+    list_knowledge_document_chunks,
+    list_knowledge_tasks,
+    retry_knowledge_task,
+    stop_knowledge_task,
+    delete_knowledge_task,
+    delete_knowledge_tasks,
+)
+from app.entities.knowledge import (
+    KnowledgeAsset,
+    KnowledgeBase,
+    KnowledgeDocument,
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
+)
+from app.entities.identity.user import User
+from app.domain.knowledge.service import (
+    create_knowledge_base,
+    create_knowledge_documents_from_attachments,
+    delete_knowledge_attachment,
+    delete_knowledge_base_permanently as delete_knowledge_base_record,
+    document_to_response,
+    get_default_knowledge_model,
+    get_knowledge_base,
+    knowledge_document_path,
+    knowledge_object_storage,
+    list_knowledge_bases,
+    list_knowledge_documents,
+    list_resource_permissions,
+    require_can_manage_permissions,
+    require_knowledge_base_permission,
+    revoke_resource_permission,
+    test_knowledge_base_models,
+    transfer_knowledge_base_owner,
+    update_knowledge_base,
+    upload_knowledge_attachment as upload_knowledge_attachment_record,
+    upsert_resource_permission,
+)
+
+import asyncio
+
+from app.domain.knowledge.documents.parsing import (
+    IMAGE_DOCUMENT_EXTENSIONS,
+)
+logger = get_logger(__name__)
+
+from app.domain.knowledge.storage.cleanup import run_knowledge_storage_cleanup
+from app.domain.knowledge.tasks.runner import (
+    mark_knowledge_task_failed,
+    run_knowledge_task,
+)
+from app.infra.observability.errors import classify_error
+from app.infra.db.session import get_session_factory
+
+GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
+GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
+
+
+
+async def upload_knowledge_attachment(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    upload: UploadFile,
+    actor: User,
+    settings: Settings,
+) -> KnowledgeAttachmentResponse:
+    if Path(upload.filename or "").suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS:
+        if await get_default_knowledge_model(
+            db,
+            knowledge_base.workspace_id,
+            "VISION",
+        ) is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                VISION_MODEL_REQUIRED_MESSAGE,
+            )
+    return await upload_knowledge_attachment_record(
+        db,
+        knowledge_base,
+        upload,
+        actor,
+        settings,
+    )
+
+
+async def delete_knowledge_base_permanently(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+) -> None:
+    cleanup_id = await delete_knowledge_base_record(
+        db,
+        knowledge_base,
+        actor,
+        workspace_role,
+    )
+    await enqueue_knowledge_storage_cleanup(cleanup_id, settings)
+
+
+async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
+    try:
+        await enqueue_knowledge_task(task_id, settings)
+    except Exception as exc:
+        log_error(logger, "Knowledge task dispatch failed.", exc, task_id=task_id)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Knowledge task queue is unavailable.",
+        ) from exc
+
+
+async def _dispatch_queued_document_graph_task(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    settings: Settings,
+) -> None:
+    if not knowledge_base.graph_enabled:
+        return
+    task = await knowledge_base_repository.get_queued_graph_sync(
+        db,
+        knowledge_base,
+    ) or await knowledge_base_repository.get_queued_graph_rebuild(
+        db,
+        knowledge_base,
+    )
+    if task is None:
+        return
+    try:
+        await enqueue_knowledge_task(task.id, settings)
+    except Exception as exc:
+        log_error(
+            logger,
+            "Knowledge graph task dispatch deferred after document change.",
+            exc,
+            task_id=task.id,
+        )
+
+
+async def delete_knowledge_document(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument,
+    actor: User,
+    settings: Settings,
+) -> None:
+    await delete_knowledge_document_record(
+        db,
+        knowledge_base,
+        document,
+        actor,
+        settings,
+    )
+    await _dispatch_queued_document_graph_task(db, knowledge_base, settings)
+
+
+async def set_knowledge_document_active(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument,
+    actor: User,
+    is_active: bool,
+    settings: Settings,
+) -> KnowledgeDocument:
+    changed = document.is_active != is_active
+    document = await set_knowledge_document_active_record(
+        db,
+        knowledge_base,
+        document,
+        actor,
+        is_active,
+    )
+    if changed:
+        await _dispatch_queued_document_graph_task(db, knowledge_base, settings)
+    return document
+
+
+async def list_knowledge_documents_with_counts(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    *,
+    include_staged: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[KnowledgeDocumentResponse]:
+    documents = await list_knowledge_documents(
+        db,
+        knowledge_base,
+        include_staged=include_staged,
+        limit=limit,
+        offset=offset,
+    )
+    chunk_counts = await knowledge_base_repository.count_document_chunks(
+        db,
+        knowledge_base,
+    )
+    return [
+        document_to_response(document, chunk_count=chunk_counts.get(document.id, 0))
+        for document in documents
+    ]
+
+
+async def document_response_with_chunk_count(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document: KnowledgeDocument,
+) -> KnowledgeDocumentResponse:
+    chunk_counts = await knowledge_base_repository.count_document_chunks(
+        db,
+        knowledge_base,
+    )
+    return document_to_response(
+        document,
+        chunk_count=chunk_counts.get(document.id, 0),
+    )
+
+
+async def get_knowledge_asset_file(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    document_id: str,
+    asset_id: str,
+    settings: Settings,
+) -> tuple[KnowledgeAsset, Path]:
+    """Resolve a knowledge asset and its on-disk path for HTTP serving."""
+    asset = await knowledge_base_repository.get_document_asset(
+        db,
+        knowledge_base,
+        document_id,
+        asset_id,
+    )
+    if asset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset not found.")
+    asset_path = knowledge_object_storage(settings).path(asset.object_key)
+    if not asset_path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset file is missing.")
+    return asset, asset_path
+
+
+__all__ = [
+    "create_knowledge_base",
+    "create_knowledge_documents_from_attachments",
+    "delete_knowledge_attachment",
+    "delete_knowledge_base_permanently",
+    "delete_knowledge_document",
+    "create_evaluation_case",
+    "delete_evaluation_case",
+    "delete_evaluation_run",
+    "dispatch_knowledge_task",
+    "document_response_with_chunk_count",
+    "document_to_response",
+    "enqueue_index_knowledge_document",
+    "enqueue_evaluation_run",
+    "enqueue_parse_knowledge_document",
+    "enqueue_rebuild_knowledge_index",
+    "get_knowledge_asset_file",
+    "get_evaluation_run",
+    "get_evaluation_summary",
+    "get_latest_evaluation_summary",
+    "get_knowledge_base",
+    "get_knowledge_document",
+    "import_graph_records",
+    "knowledge_document_path",
+    "list_knowledge_bases",
+    "list_evaluation_cases",
+    "list_evaluation_runs",
+    "list_knowledge_document_chunks",
+    "list_knowledge_documents",
+    "list_knowledge_documents_with_counts",
+    "list_knowledge_tasks",
+    "list_resource_permissions",
+    "query_knowledge_base",
+    "retrieve_knowledge_base",
+    "require_can_manage_permissions",
+    "require_knowledge_base_permission",
+    "retry_knowledge_task",
+    "stop_knowledge_task",
+    "delete_knowledge_task",
+    "delete_knowledge_tasks",
+    "revoke_resource_permission",
+    "set_knowledge_document_active",
+    "test_knowledge_base_models",
+    "transfer_knowledge_base_owner",
+    "update_knowledge_base",
+    "upload_knowledge_attachment",
+    "upsert_resource_permission",
+]
+
+
+async def mark_task_dispatch_failed(task_id: str) -> None:
+    async with get_session_factory()() as db:
+        await mark_knowledge_task_failed(
+            db,
+            task_id,
+            "Knowledge task queue is unavailable.",
+            only_if_queued=True,
+        )
+
+
+async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
+    """Publish a knowledge task by stable name; eager mode runs it inline."""
+    if settings.celery_task_always_eager:
+        await run_knowledge_task(
+            task_id,
+            settings,
+            enqueue_knowledge_task,
+            evaluation_runner=run_evaluation_task,
+            graph_runner=run_graph_build_task,
+        )
+        return
+
+    from app.infra.queue.celery import publish_task
+
+    async with get_session_factory()() as db:
+        task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
+    soft_time_limit = time_limit = None
+    if task is not None and task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}:
+        soft_time_limit = GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS
+        time_limit = GRAPH_TASK_TIME_LIMIT_SECONDS
+    try:
+        await publish_task(
+            "app.knowledge.run_task",
+            (task_id,),
+            settings=settings,
+            soft_time_limit=soft_time_limit,
+            time_limit=time_limit,
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Failed to dispatch knowledge task.",
+            None,
+            source=classify_error(exc),
+            task_id=task_id,
+            error_type=type(exc).__name__,
+        )
+        try:
+            await mark_task_dispatch_failed(task_id)
+        except Exception:
+            pass
+        raise
+
+
+async def enqueue_knowledge_storage_cleanup(
+    cleanup_id: str,
+    settings: Settings,
+) -> None:
+    """Publish knowledge storage cleanup by stable name; eager runs it inline."""
+    if settings.celery_task_always_eager:
+        try:
+            await run_knowledge_storage_cleanup(cleanup_id, settings)
+        except Exception as exc:
+            log_error(
+                logger,
+                "Knowledge storage cleanup deferred after eager failure.",
+                exc,
+                cleanup_id=cleanup_id,
+            )
+        return
+
+    from app.infra.queue.celery import publish_task
+
+    try:
+        await publish_task(
+            "app.knowledge.cleanup_storage",
+            (cleanup_id,),
+            settings=settings,
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Knowledge storage cleanup dispatch deferred.",
+            exc,
+            cleanup_id=cleanup_id,
+        )
