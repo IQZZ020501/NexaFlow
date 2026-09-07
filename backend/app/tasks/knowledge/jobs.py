@@ -1,17 +1,14 @@
-import asyncio
 import logging
 import os
 
 from app.application.knowledge.evaluation.runner import run_evaluation_task
+from app.application.knowledge.documents.service import enqueue_knowledge_task
 from app.application.knowledge.graph.build import run_graph_build_task
 from app.application.knowledge.graph.maintenance import reconcile_knowledge_graphs
-from app.entities.knowledge import TASK_GRAPH_REBUILD, TASK_GRAPH_SYNC
 from app.infra.queue.celery import celery_app
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.infra.db.session import get_session_factory
 from app.domain.knowledge.tasks.runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
@@ -30,9 +27,6 @@ from app.domain.workflows.uploads import (
 from app.tasks.runtime import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
-
-GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
-GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
 
 @celery_app.task(
     bind=True,
@@ -170,131 +164,3 @@ def recover_upload_storage_cleanups_job() -> None:
     cleanup_ids = run_task_async(prepare_due_upload_cleanups())
     for cleanup_id in cleanup_ids:
         run_upload_storage_cleanup_job.apply_async(args=(cleanup_id,))
-
-
-async def mark_task_dispatch_failed(task_id: str) -> None:
-    async with get_session_factory()() as db:
-        await mark_knowledge_task_failed(
-            db,
-            task_id,
-            "Knowledge task queue is unavailable.",
-            only_if_queued=True,
-        )
-
-
-async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
-    if settings.celery_task_always_eager:
-        await run_knowledge_task(
-            task_id,
-            settings,
-            enqueue_knowledge_task,
-            evaluation_runner=run_evaluation_task,
-            graph_runner=run_graph_build_task,
-        )
-        return
-
-    celery_app.conf.update(
-        broker_url=settings.celery_broker_url,
-        task_always_eager=False,
-    )
-    async with get_session_factory()() as db:
-        task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
-    dispatch_options = (
-        {
-            "soft_time_limit": GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS,
-            "time_limit": GRAPH_TASK_TIME_LIMIT_SECONDS,
-        }
-        if task is not None
-        and task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
-        else {}
-    )
-    try:
-        await asyncio.to_thread(
-            run_knowledge_task_job.apply_async,
-            args=(task_id,),
-            **dispatch_options,
-        )
-    except Exception as exc:
-        log_error(
-            logger,
-            "Failed to dispatch knowledge task.",
-            None,
-            source=classify_error(exc),
-            task_id=task_id,
-            error_type=type(exc).__name__,
-        )
-        try:
-            await mark_task_dispatch_failed(task_id)
-        except Exception:
-            pass
-        raise
-
-
-async def enqueue_knowledge_storage_cleanup(
-    cleanup_id: str,
-    settings: Settings,
-) -> None:
-    if settings.celery_task_always_eager:
-        try:
-            await run_knowledge_storage_cleanup(cleanup_id, settings)
-        except Exception as exc:
-            log_error(
-                logger,
-                "Knowledge storage cleanup deferred after eager failure.",
-                exc,
-                cleanup_id=cleanup_id,
-            )
-        return
-
-    celery_app.conf.update(
-        broker_url=settings.celery_broker_url,
-        task_always_eager=False,
-    )
-    try:
-        await asyncio.to_thread(
-            run_knowledge_storage_cleanup_job.apply_async,
-            args=(cleanup_id,),
-        )
-    except Exception as exc:
-        log_error(
-            logger,
-            "Knowledge storage cleanup dispatch deferred.",
-            exc,
-            cleanup_id=cleanup_id,
-        )
-
-
-async def enqueue_upload_storage_cleanups(
-    cleanup_ids: list[str],
-    settings: Settings,
-) -> None:
-    eager = settings.celery_task_always_eager
-    if not eager:
-        celery_app.conf.update(
-            broker_url=settings.celery_broker_url,
-            task_always_eager=False,
-        )
-    for cleanup_id in cleanup_ids:
-        if eager:
-            try:
-                await run_upload_storage_cleanup(cleanup_id, settings)
-            except Exception as exc:
-                log_error(
-                    logger,
-                    "Upload storage cleanup deferred after eager failure.",
-                    exc,
-                    cleanup_id=cleanup_id,
-                )
-            continue
-        try:
-            await asyncio.to_thread(
-                run_upload_storage_cleanup_job.apply_async,
-                args=(cleanup_id,),
-            )
-        except Exception as exc:
-            log_error(
-                logger,
-                "Upload storage cleanup dispatch deferred.",
-                exc,
-                cleanup_id=cleanup_id,
-            )

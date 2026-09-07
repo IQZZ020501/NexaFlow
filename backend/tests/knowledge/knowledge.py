@@ -65,7 +65,7 @@ from app.domain.knowledge.tasks.runner import (
     run_knowledge_task,
     run_parse_task,
 )
-from app.tasks.knowledge.jobs import mark_task_dispatch_failed
+from app.application.knowledge.documents.service import mark_task_dispatch_failed
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryInspectResponse,

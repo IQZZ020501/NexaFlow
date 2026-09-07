@@ -281,32 +281,25 @@ async def dispatch_email_deliveries(
             await run_email_delivery(delivery_id, settings)
         return
 
-    from app.tasks.email.jobs import run_email_delivery_job
+    from app.infra.queue.celery import publish_task
 
-    from app.infra.queue.celery import celery_app
-
-    broker_transport_options = dict(celery_app.conf.broker_transport_options or {})
-    broker_transport_options.update(
-        socket_connect_timeout=EMAIL_BROKER_TIMEOUT_SECONDS,
-        socket_timeout=EMAIL_BROKER_TIMEOUT_SECONDS,
-    )
-    celery_app.conf.update(
-        broker_url=settings.celery_broker_url,
-        broker_connection_timeout=EMAIL_BROKER_TIMEOUT_SECONDS,
-        broker_transport_options=broker_transport_options,
-        task_always_eager=False,
-    )
     for delivery_id in delivery_ids:
         try:
             # Durable Beat recovery owns retries; requests get one bounded publish attempt.
-            await asyncio.wait_for(
-                asyncio.to_thread(
-                    run_email_delivery_job.apply_async,
-                    args=(delivery_id,),
-                    retry=True,
-                    retry_policy=EMAIL_PUBLISH_RETRY_POLICY,
-                ),
-                timeout=EMAIL_DISPATCH_TIMEOUT_SECONDS,
+            await publish_task(
+                "app.email.send",
+                (delivery_id,),
+                settings=settings,
+                retry=True,
+                retry_policy=EMAIL_PUBLISH_RETRY_POLICY,
+                timeout_seconds=EMAIL_DISPATCH_TIMEOUT_SECONDS,
+                conf_updates={
+                    "broker_connection_timeout": EMAIL_BROKER_TIMEOUT_SECONDS,
+                    "broker_transport_options": {
+                        "socket_connect_timeout": EMAIL_BROKER_TIMEOUT_SECONDS,
+                        "socket_timeout": EMAIL_BROKER_TIMEOUT_SECONDS,
+                    },
+                },
             )
         except Exception as exc:
             log_error(

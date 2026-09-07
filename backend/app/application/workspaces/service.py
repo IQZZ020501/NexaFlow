@@ -30,8 +30,9 @@ from app.domain.tools.catalog.service import (
     tombstone_workspace_mcp_catalog,
 )
 from app.domain.workflows.uploads import queue_upload_cleanups
-from app.tasks.knowledge.jobs import enqueue_knowledge_storage_cleanup
-from app.tasks.knowledge.jobs import enqueue_upload_storage_cleanups
+from app.application.knowledge.documents.service import enqueue_knowledge_storage_cleanup
+from app.domain.workflows.uploads import run_upload_storage_cleanup
+from app.infra.observability.errors import log_error
 from app.schemas.workspaces.contracts import (
     WorkspaceMemberResponse,
     WorkspaceUserCreateRequest,
@@ -483,3 +484,38 @@ async def delete_workspace_permanently(
     for cleanup_id in cleanup_ids:
         await enqueue_knowledge_storage_cleanup(cleanup_id, settings)
     await enqueue_upload_storage_cleanups(upload_cleanup_ids, settings)
+
+
+async def enqueue_upload_storage_cleanups(
+    cleanup_ids: list[str],
+    settings: Settings,
+) -> None:
+    """Publish upload storage cleanups by stable name; eager runs them inline."""
+    eager = settings.celery_task_always_eager
+    for cleanup_id in cleanup_ids:
+        if eager:
+            try:
+                await run_upload_storage_cleanup(cleanup_id, settings)
+            except Exception as exc:
+                log_error(
+                    logger,
+                    "Upload storage cleanup deferred after eager failure.",
+                    exc,
+                    cleanup_id=cleanup_id,
+                )
+            continue
+        from app.infra.queue.celery import publish_task
+
+        try:
+            await publish_task(
+                "app.uploads.cleanup_storage",
+                (cleanup_id,),
+                settings=settings,
+            )
+        except Exception as exc:
+            log_error(
+                logger,
+                "Upload storage cleanup dispatch deferred.",
+                exc,
+                cleanup_id=cleanup_id,
+            )

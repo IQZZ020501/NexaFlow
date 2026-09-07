@@ -1,3 +1,4 @@
+import asyncio
 import gc
 import logging
 import sys
@@ -179,3 +180,46 @@ def create_celery_app() -> Celery:
 celery_app = create_celery_app()
 if "app.tasks.knowledge.jobs" not in sys.modules:
     celery_app.loader.import_task_module("app.tasks.knowledge.jobs")
+
+
+async def publish_task(
+    task_name: str,
+    args: tuple = (),
+    *,
+    settings: Settings,
+    queue: str | None = None,
+    countdown: float | None = None,
+    retry: bool = False,
+    retry_policy: dict | None = None,
+    soft_time_limit: float | None = None,
+    time_limit: float | None = None,
+    conf_updates: dict | None = None,
+    timeout_seconds: float | None = None,
+) -> None:
+    """Publish work by stable task name.
+
+    The worker-side registry owns execution; producers only build the
+    message. Eager execution, failure persistence and recovery policy
+    stay in the application use cases that call this helper.
+    """
+    celery_app.conf.update(broker_url=settings.celery_broker_url, task_always_eager=False)
+    if conf_updates:
+        celery_app.conf.update(**conf_updates)
+
+    async def _dispatch() -> None:
+        await asyncio.to_thread(
+            celery_app.send_task,
+            task_name,
+            args=args,
+            queue=queue,
+            countdown=countdown,
+            retry=retry,
+            retry_policy=retry_policy,
+            soft_time_limit=soft_time_limit,
+            time_limit=time_limit,
+        )
+
+    if timeout_seconds is not None:
+        await asyncio.wait_for(_dispatch(), timeout=timeout_seconds)
+    else:
+        await _dispatch()

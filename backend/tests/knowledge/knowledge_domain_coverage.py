@@ -71,14 +71,19 @@ from app.domain.knowledge.bases import permissions as permissions_service
 from app.domain.knowledge.tasks import runner as task_runner_service
 from app.domain.knowledge import models as knowledge_models
 from app.tasks.knowledge import jobs as knowledge_tasks_module
-from app.tasks.knowledge.jobs import (
+from app.application.knowledge.documents import service as application_knowledge
+from app.application.workspaces import service as uploads_cleanup_module
+from app.application.knowledge.documents.service import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
-    recover_knowledge_tasks_job,
-    reconcile_knowledge_graphs_job,
-    enqueue_upload_storage_cleanups,
+    mark_task_dispatch_failed,
+)
+from app.application.workspaces.service import enqueue_upload_storage_cleanups
+from app.tasks.knowledge.jobs import (
     recover_knowledge_storage_cleanups_job,
+    recover_knowledge_tasks_job,
     recover_upload_storage_cleanups_job,
+    reconcile_knowledge_graphs_job,
     run_knowledge_storage_cleanup_job,
     run_knowledge_task_job,
     run_upload_storage_cleanup_job,
@@ -1511,7 +1516,7 @@ async def run_direct_domain_tests(
     original_enqueue_knowledge_task = application_knowledge.enqueue_knowledge_task
 
     async def fail_dispatch(task_id: str, _settings) -> None:
-        await knowledge_tasks_module.mark_task_dispatch_failed(task_id)
+        await mark_task_dispatch_failed(task_id)
         raise RuntimeError("queue unavailable")
 
     application_knowledge.enqueue_knowledge_task = fail_dispatch
@@ -3205,8 +3210,8 @@ def run_celery_job_tests(
         )
     )
     with patch.object(
-        knowledge_tasks_module.run_knowledge_task_job,
-        "apply_async",
+        celery_app,
+        "send_task",
         new=Mock(side_effect=RuntimeError("broker down")),
     ):
         try:
@@ -3230,8 +3235,8 @@ def run_celery_job_tests(
     )
     graph_dispatch = Mock()
     with patch.object(
-        knowledge_tasks_module.run_knowledge_task_job,
-        "apply_async",
+        celery_app,
+        "send_task",
         new=graph_dispatch,
     ):
         asyncio.run(enqueue_knowledge_task(graph_dispatch_task.id, non_eager_settings))
@@ -3250,7 +3255,7 @@ def run_celery_job_tests(
 
     # enqueue_knowledge_storage_cleanup: eager failure swallowed
     with patch.object(
-        knowledge_tasks_module,
+        application_knowledge,
         "run_knowledge_storage_cleanup",
         new=AsyncMock(side_effect=RuntimeError("eager cleanup boom")),
     ):
@@ -3258,8 +3263,8 @@ def run_celery_job_tests(
 
     # enqueue_knowledge_storage_cleanup: non-eager dispatch failure swallowed
     with patch.object(
-        knowledge_tasks_module.run_knowledge_storage_cleanup_job,
-        "apply_async",
+        celery_app,
+        "send_task",
         new=Mock(side_effect=RuntimeError("broker down")),
     ):
         asyncio.run(
@@ -3272,7 +3277,7 @@ def run_celery_job_tests(
 
     # enqueue_upload_storage_cleanups: eager failure swallowed + continue
     with patch.object(
-        knowledge_tasks_module,
+        uploads_cleanup_module,
         "run_upload_storage_cleanup",
         new=AsyncMock(side_effect=RuntimeError("upload boom")),
     ):
@@ -3280,8 +3285,8 @@ def run_celery_job_tests(
 
     # enqueue_upload_storage_cleanups: non-eager dispatch failure swallowed
     with patch.object(
-        knowledge_tasks_module.run_upload_storage_cleanup_job,
-        "apply_async",
+        celery_app,
+        "send_task",
         new=Mock(side_effect=RuntimeError("broker down")),
     ):
         asyncio.run(

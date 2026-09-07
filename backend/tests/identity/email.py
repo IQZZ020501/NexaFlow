@@ -347,17 +347,22 @@ async def test_delivery_edge_cases() -> None:
     from app.infra.queue.celery import celery_app
 
     with (
-        patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async,
+        patch.object(celery_app, "send_task") as send_task,
         patch(
             "app.application.email.delivery.asyncio.wait_for",
             wraps=asyncio.wait_for,
         ) as wait_for,
     ):
         await dispatch_email_deliveries(["queued"], broker_settings)
-    apply_async.assert_called_once_with(
+    send_task.assert_called_once_with(
+        "app.email.send",
         args=("queued",),
+        queue=None,
+        countdown=None,
         retry=True,
         retry_policy=EMAIL_PUBLISH_RETRY_POLICY,
+        soft_time_limit=None,
+        time_limit=None,
     )
     wait_for.assert_awaited_once()
     assert wait_for.await_args.kwargs["timeout"] == EMAIL_DISPATCH_TIMEOUT_SECONDS
@@ -373,8 +378,8 @@ async def test_delivery_edge_cases() -> None:
 
     with (
         patch.object(
-            email_tasks.run_email_delivery_job,
-            "apply_async",
+            celery_app,
+            "send_task",
             side_effect=RuntimeError("broker down"),
         ),
         patch("app.application.email.delivery.log_error") as log_error,

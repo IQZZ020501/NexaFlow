@@ -1,6 +1,3 @@
-import asyncio
-import logging
-import os
 
 from app.application.agents.runs.executor import (
     RUN_BUSY,
@@ -12,11 +9,10 @@ from app.application.agents.runs.children import reconcile_workflow_agent_childr
 from app.infra.queue.celery import celery_app
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
-from app.infra.observability.logger import get_logger, log_event
+from app.infra.observability.logger import get_logger
 from app.tasks.runtime import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
-
 
 @celery_app.task(
     bind=True,
@@ -39,7 +35,6 @@ def run_agent_job(self, run_id: str) -> None:
             countdown=settings.agent_executor_heartbeat_seconds,
             queue="agents-legacy",
         )
-
 
 @celery_app.task(
     bind=True,
@@ -68,7 +63,6 @@ def run_unified_agent_job(self, run_id: str) -> None:
             queue="agents-v2",
         )
 
-
 @celery_app.task(
     name="app.agents.recover",
     ignore_result=True,
@@ -81,7 +75,6 @@ def recover_agent_runs_job() -> None:
     for run_id in run_ids:
         run_unified_agent_job.apply_async(args=(run_id,), queue="agents-v2")
 
-
 @celery_app.task(
     name="app.agents.recover_legacy",
     ignore_result=True,
@@ -93,41 +86,3 @@ def recover_legacy_agent_runs_job() -> None:
     for run_id in run_ids:
         run_agent_job.apply_async(args=(run_id,), queue="agents-legacy")
 
-
-async def enqueue_agent_run(
-    run_id: str,
-    settings: Settings,
-    *,
-    generation: str = "legacy",
-) -> None:
-    task = run_unified_agent_job if generation == "unified" else run_agent_job
-    queue = "agents-v2" if generation == "unified" else "agents-legacy"
-    if settings.celery_task_always_eager:
-        await run_durable_application_run(
-            run_id,
-            settings,
-            generation=generation,
-        )
-        return
-
-    celery_app.conf.update(
-        broker_url=settings.celery_broker_url,
-        task_always_eager=False,
-    )
-    try:
-        await asyncio.to_thread(task.apply_async, args=(run_id,), queue=queue)
-    except Exception as exc:
-        log_error(
-            logger,
-            "Agent queue dispatch deferred to recovery beat.",
-            exc,
-            agent_run_id=run_id,
-            worker_pid=os.getpid(),
-        )
-    else:
-        log_event(
-            logger,
-            logging.INFO,
-            "Agent run queued.",
-            agent_run_id=run_id,
-        )

@@ -19,7 +19,9 @@ from app.application.knowledge.graph.service import import_graph_records
 from app.application.knowledge.evaluation.runner import (
     get_evaluation_summary,
     get_latest_evaluation_summary,
+    run_evaluation_task,
 )
+from app.application.knowledge.graph.build import run_graph_build_task
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
@@ -56,6 +58,8 @@ from app.entities.knowledge import (
     KnowledgeAsset,
     KnowledgeBase,
     KnowledgeDocument,
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
 )
 from app.entities.identity.user import User
 from app.domain.knowledge.service import (
@@ -80,12 +84,22 @@ from app.domain.knowledge.service import (
     upload_knowledge_attachment as upload_knowledge_attachment_record,
     upsert_resource_permission,
 )
-from app.tasks.knowledge.jobs import (
-    enqueue_knowledge_storage_cleanup,
-    enqueue_knowledge_task,
-)
+
+import asyncio
 
 logger = get_logger(__name__)
+
+from app.domain.knowledge.storage.cleanup import run_knowledge_storage_cleanup
+from app.domain.knowledge.tasks.runner import (
+    mark_knowledge_task_failed,
+    run_knowledge_task,
+)
+from app.infra.observability.errors import classify_error
+from app.infra.db.session import get_session_factory
+
+GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
+GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
+
 
 
 async def upload_knowledge_attachment(
@@ -316,3 +330,91 @@ __all__ = [
     "upload_knowledge_attachment",
     "upsert_resource_permission",
 ]
+
+
+async def mark_task_dispatch_failed(task_id: str) -> None:
+    async with get_session_factory()() as db:
+        await mark_knowledge_task_failed(
+            db,
+            task_id,
+            "Knowledge task queue is unavailable.",
+            only_if_queued=True,
+        )
+
+
+async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
+    """Publish a knowledge task by stable name; eager mode runs it inline."""
+    if settings.celery_task_always_eager:
+        await run_knowledge_task(
+            task_id,
+            settings,
+            enqueue_knowledge_task,
+            evaluation_runner=run_evaluation_task,
+            graph_runner=run_graph_build_task,
+        )
+        return
+
+    from app.infra.queue.celery import publish_task
+
+    async with get_session_factory()() as db:
+        task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
+    soft_time_limit = time_limit = None
+    if task is not None and task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}:
+        soft_time_limit = GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS
+        time_limit = GRAPH_TASK_TIME_LIMIT_SECONDS
+    try:
+        await publish_task(
+            "app.knowledge.run_task",
+            (task_id,),
+            settings=settings,
+            soft_time_limit=soft_time_limit,
+            time_limit=time_limit,
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Failed to dispatch knowledge task.",
+            None,
+            source=classify_error(exc),
+            task_id=task_id,
+            error_type=type(exc).__name__,
+        )
+        try:
+            await mark_task_dispatch_failed(task_id)
+        except Exception:
+            pass
+        raise
+
+
+async def enqueue_knowledge_storage_cleanup(
+    cleanup_id: str,
+    settings: Settings,
+) -> None:
+    """Publish knowledge storage cleanup by stable name; eager runs it inline."""
+    if settings.celery_task_always_eager:
+        try:
+            await run_knowledge_storage_cleanup(cleanup_id, settings)
+        except Exception as exc:
+            log_error(
+                logger,
+                "Knowledge storage cleanup deferred after eager failure.",
+                exc,
+                cleanup_id=cleanup_id,
+            )
+        return
+
+    from app.infra.queue.celery import publish_task
+
+    try:
+        await publish_task(
+            "app.knowledge.cleanup_storage",
+            (cleanup_id,),
+            settings=settings,
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Knowledge storage cleanup dispatch deferred.",
+            exc,
+            cleanup_id=cleanup_id,
+        )

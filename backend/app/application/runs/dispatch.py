@@ -8,7 +8,11 @@ from app.application.workflows.runs.executor import run_durable_workflow_run
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.session import get_session_factory
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.queue.celery import publish_task
 
+logger = get_logger(__name__)
 
 async def run_durable_application_run(
     run_id: str,
@@ -37,3 +41,49 @@ async def run_durable_application_run(
         child_run_id=run_id,
     )
     return outcome
+
+
+
+async def enqueue_agent_run(
+    run_id: str,
+    settings: Settings,
+    *,
+    generation: str = "legacy",
+) -> None:
+    """Publish an agent run by stable task name; eager mode runs it inline."""
+    import asyncio
+    import logging
+    import os
+
+    queue = "agents-v2" if generation == "unified" else "agents-legacy"
+    if settings.celery_task_always_eager:
+        await run_durable_application_run(
+            run_id,
+            settings,
+            generation=generation,
+        )
+        return
+
+    task_name = "app.agents.run_v2" if generation == "unified" else "app.agents.run"
+    try:
+        await publish_task(
+            task_name,
+            (run_id,),
+            settings=settings,
+            queue=queue,
+        )
+    except Exception as exc:
+        log_error(
+            logger,
+            "Agent queue dispatch deferred to recovery beat.",
+            exc,
+            agent_run_id=run_id,
+            worker_pid=os.getpid(),
+        )
+    else:
+        log_event(
+            logger,
+            logging.INFO,
+            "Agent run queued.",
+            agent_run_id=run_id,
+        )
