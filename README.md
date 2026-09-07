@@ -213,15 +213,26 @@ NexaFlow/
 
 ## 测试
 
-后端：
+后端（套件按功能分包，模块名形如 `tests.<feature>.<module>`；完整清单见 `AGENTS.md`）：
 
 ```bash
 cd backend
-uv run python -m compileall app tests main.py
-uv run python -m tests.unit
-uv run python -m tests.knowledge
-uv run python -m tests.agents
-uv run python -m tests.workflows
+uv run python -m compileall -q app tests
+uv run python -m tests.smoke.test_main
+uv run python -m tests.knowledge.knowledge
+uv run python -m tests.knowledge.unit
+uv run python -m tests.agents.agents
+uv run python -m tests.agents.unit
+uv run python -m tests.workflows.workflows
+uv run python -m tests.tools.tools
+uv run python -m tests.infra.architecture
+```
+
+后端完整覆盖率 gate（97%）：
+
+```bash
+cd backend
+COVERAGE_JOBS=1 make coverage
 ```
 
 前端：
