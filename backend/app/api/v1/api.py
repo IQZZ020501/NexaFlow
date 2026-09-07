@@ -1,6 +1,10 @@
 from fastapi import APIRouter
 
-from app.api.v1.admin import audit, governance, smtp, system_logs, users
+from app.api.v1.admin.audit import routes as audit
+from app.api.v1.admin.governance import routes as governance
+from app.api.v1.admin.smtp import routes as smtp
+from app.api.v1.admin.system_logs import routes as system_logs
+from app.api.v1.admin.users import routes as users
 from app.api.v1.artifacts import routes as artifacts
 from app.api.v1.workspaces import routes as workspaces
 from app.api.v1.teams import routes as teams
