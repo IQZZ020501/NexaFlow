@@ -60,81 +60,11 @@ from app.domain.agents.models import (
 from app.domain.tools.models import ToolInvocation
 from app.domain.workflows.models import WorkflowNodeExecution
 
-_RUN_CORE_FIELDS = (
-    "id",
-    "workspace_id",
-    "agent_id",
-    "requested_by_user_id",
-    "execution_user_id",
-    "access_source",
-    "consumer_id",
-    "conversation_id",
-    "root_run_id",
-    "parent_run_id",
-    "parent_node_id",
-    "regenerated_from_run_id",
-    "depth",
-    "goal",
-    "attachment_context",
-    "feedback",
-    "feedback_updated_at",
-    "trace_id",
-    "created_at",
-)
-_RUN_CORE_MUTABLE_FIELDS = (
-    "goal",
-    "attachment_context",
-    "feedback",
-    "feedback_updated_at",
-    "trace_id",
-)
-_RUN_STATE_FIELDS = (
-    "status",
-    "attempts",
-    "max_attempts",
-    "worker_task_id",
-    "lease_expires_at",
-    "checkpoint",
-    "checkpoint_phase",
-    "grounding_status",
-    "grounding_meta",
-    "plan",
-    "result",
-    "context_summary",
-    "model_usage",
-    "last_error",
-    "planned_at",
-    "started_at",
-    "finished_at",
-    "updated_at",
-)
-_RUN_SNAPSHOT_FIELDS = (
-    "snapshot_schema_version",
-    "configuration_source",
-    "agent_publication_version_id",
-    "instructions",
-    "knowledge_base_ids",
-    "knowledge_query_mode",
-    "mcp_tools",
-    "application_snapshot",
-    "application_snapshot_hash",
-    "tool_snapshots",
-    "model_id",
-    "model_name",
-)
 _INTERNAL_TOOL_LEDGER = "agent_internal_v1"
 
 
-def _entity_values(entity: Any, names: tuple[str, ...]) -> dict[str, Any]:
-    return {name: getattr(entity, name) for name in names}
 
 
-def _run_query():
-    return (
-        select(AgentRun, AgentRunState, AgentRunSnapshot)
-        .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
-        .join(AgentRunSnapshot, AgentRunSnapshot.run_id == AgentRun.id)
-    )
 
 
 def _memory_run_query():
@@ -158,111 +88,18 @@ def _to_memory_run_entity(row: Any) -> AgentRunEntity:
     return AgentRunEntity(**dict(row))
 
 
-def _to_agent_run_entity(
-    run: AgentRun,
-    state: AgentRunState,
-    snapshot: AgentRunSnapshot,
-    *,
-    events: list[dict[str, Any]] | None = None,
-) -> AgentRunEntity:
-    sources = (run, state, snapshot)
-    values: dict[str, Any] = {}
-    for field in fields(AgentRunEntity):
-        if field.name == "events":
-            values[field.name] = events or []
-            continue
-        for source in sources:
-            if hasattr(source, field.name):
-                values[field.name] = getattr(source, field.name)
-                break
-    return AgentRunEntity(**values)
 
 
-def _project_process_events(stored_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    projected: list[dict[str, Any]] = []
-    for stored in stored_events:
-        if stored.get("type") != "process" or not isinstance(stored.get("event"), dict):
-            continue
-        event = stored["event"]
-        call_id = event.get("call_id")
-        for index, current in enumerate(projected):
-            same_event = (
-                current.get("call_id") == call_id
-                if call_id
-                else current.get("type") == event.get("type")
-                and current.get("turn") == event.get("turn")
-                and current.get("tool_name") == event.get("tool_name")
-            )
-            if same_event:
-                projected[index] = event
-                break
-        else:
-            projected.append(event)
-    return [event for event in projected if event.get("status") != "running"]
 
 
-def _with_answer_ready_timestamp(
-    event: dict[str, Any], created_at: datetime
-) -> dict[str, Any]:
-    process_event = event.get("event")
-    if (
-        event.get("type") != "process"
-        or not isinstance(process_event, dict)
-        or process_event.get("summary") != "agent.answer_ready"
-        or process_event.get("created_at")
-    ):
-        return event
-    return {
-        **event,
-        "event": {**process_event, "created_at": created_at.isoformat()},
-    }
 
 
-async def _run_event_projections(
-    db: AsyncSession,
-    run_ids: list[str],
-) -> dict[str, list[dict[str, Any]]]:
-    if not run_ids:
-        return {}
-    rows = await db.execute(
-        select(AgentRunEvent.run_id, AgentRunEvent.event, AgentRunEvent.created_at)
-        .where(AgentRunEvent.run_id.in_(run_ids))
-        .order_by(AgentRunEvent.id)
-    )
-    stored: dict[str, list[dict[str, Any]]] = {run_id: [] for run_id in run_ids}
-    for run_id, event, created_at in rows.all():
-        stored.setdefault(run_id, []).append(
-            _with_answer_ready_timestamp(event, created_at)
-        )
-    return {
-        run_id: _project_process_events(events)
-        for run_id, events in stored.items()
-    }
 
 
-async def _to_agent_run_entities(
-    db: AsyncSession,
-    rows: list[tuple[AgentRun, AgentRunState, AgentRunSnapshot]],
-) -> list[AgentRunEntity]:
-    projections = await _run_event_projections(db, [row[0].id for row in rows])
-    return [
-        _to_agent_run_entity(run, state, snapshot, events=projections.get(run.id))
-        for run, state, snapshot in rows
-    ]
 
 
-def _worker_generation(configuration_source: str) -> str:
-    return "unified" if configuration_source in {"draft", "published"} else "legacy"
 
 
-async def _load_run_rows(
-    db: AsyncSession,
-    run_id: str,
-) -> tuple[AgentRun, AgentRunState, AgentRunSnapshot] | None:
-    row = (
-        await db.execute(_run_query().where(AgentRun.id == run_id))
-    ).first()
-    return tuple(row) if row is not None else None
 
 
 async def list_agents(
@@ -952,30 +789,6 @@ async def latest_agent_conversation_id(
     )
 
 
-async def get_active_agent_run(
-    db: AsyncSession,
-    agent_id: str,
-    access_source: str,
-    consumer_id: str,
-    conversation_id: str,
-) -> AgentRunEntity | None:
-    row = (
-        await db.execute(
-            _run_query()
-        .where(
-            AgentRun.agent_id == agent_id,
-            AgentRun.access_source == access_source,
-            AgentRun.consumer_id == consumer_id,
-            AgentRun.conversation_id == conversation_id,
-            AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES),
-        )
-        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-        .limit(1)
-        )
-    ).first()
-    if row is None:
-        return None
-    return (await _to_agent_run_entities(db, [tuple(row)]))[0]
 
 
 async def list_conversation_memory_runs(
@@ -1115,48 +928,8 @@ async def save_conversation_summary(
     return True
 
 
-async def get_agent_run_by_id(
-    db: AsyncSession,
-    run_id: str,
-) -> AgentRunEntity | None:
-    row = await _load_run_rows(db, run_id)
-    if row is None:
-        return None
-    projections = await _run_event_projections(db, [run_id])
-    return _to_agent_run_entity(*row, events=projections.get(run_id))
 
 
-async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
-    run = AgentRun(**_entity_values(entity, _RUN_CORE_FIELDS))
-    state = AgentRunState(
-        run_id=entity.id,
-        workspace_id=entity.workspace_id,
-        agent_id=entity.agent_id,
-        access_source=entity.access_source,
-        consumer_id=entity.consumer_id,
-        conversation_id=entity.conversation_id,
-        worker_generation=_worker_generation(entity.configuration_source),
-        state_version=1,
-        **_entity_values(entity, _RUN_STATE_FIELDS),
-    )
-    snapshot = AgentRunSnapshot(
-        run_id=entity.id,
-        workspace_id=entity.workspace_id,
-        agent_id=entity.agent_id,
-        created_at=entity.created_at,
-        **_entity_values(entity, _RUN_SNAPSHOT_FIELDS),
-    )
-    db.add_all((run, state, snapshot))
-    for event in entity.events:
-        db.add(
-            AgentRunEvent(
-                workspace_id=entity.workspace_id,
-                run_id=entity.id,
-                event={"type": "process", "event": event},
-            )
-        )
-    await db.flush()
-    return _to_agent_run_entity(run, state, snapshot, events=list(entity.events))
 
 
 async def get_agent_child_run(
@@ -1227,652 +1000,46 @@ async def list_terminal_children_for_waiting_parents(
     return await _to_agent_run_entities(db, [tuple(row[:3]) for row in rows.all()])
 
 
-async def save_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
-    rows = await _load_run_rows(db, entity.id)
-    if rows is None:
-        return await create_agent_run(db, entity)
-    run, state, snapshot = rows
-    for name in _RUN_CORE_MUTABLE_FIELDS:
-        setattr(run, name, getattr(entity, name))
-    for name in _RUN_STATE_FIELDS:
-        setattr(state, name, getattr(entity, name))
-    state.state_version += 1
-    if entity.events:
-        current = (await _run_event_projections(db, [entity.id])).get(entity.id, [])
-        if current != entity.events:
-            for event in entity.events:
-                db.add(
-                    AgentRunEvent(
-                        workspace_id=entity.workspace_id,
-                        run_id=entity.id,
-                        event={"type": "process", "event": event},
-                    )
-                )
-    await db.flush()
-    return _to_agent_run_entity(run, state, snapshot, events=list(entity.events))
 
 
-async def refresh_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
-    current = await get_agent_run_by_id(db, entity.id)
-    if current is None:
-        raise RuntimeError("Agent run no longer exists.")
-    return current
 
 
-async def claim_agent_run(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-    started_at: datetime,
-    lease_expires_at: datetime,
-    *,
-    generation: str = "legacy",
-) -> bool:
-    claimable_statuses = (
-        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
-        if generation == "unified"
-        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
-    )
-    running_status = (
-        AGENT_RUN_UNIFIED_RUNNING_STATUS
-        if generation == "unified"
-        else AGENT_RUN_RUNNING_STATUS
-    )
-    result = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.worker_generation == generation,
-            AgentRunState.attempts < AgentRunState.max_attempts,
-            or_(
-                AgentRunState.status == claimable_statuses[0],
-                and_(
-                    AgentRunState.status == claimable_statuses[1],
-                    or_(
-                        AgentRunState.lease_expires_at.is_(None),
-                        AgentRunState.lease_expires_at <= started_at,
-                    ),
-                ),
-            ),
-        )
-        .values(
-            status=running_status,
-            attempts=AgentRunState.attempts + 1,
-            state_version=AgentRunState.state_version + 1,
-            worker_task_id=worker_task_id,
-            lease_expires_at=lease_expires_at,
-            started_at=func.coalesce(AgentRunState.started_at, started_at),
-            finished_at=None,
-            updated_at=started_at,
-        )
-    )
-    return bool(result.rowcount)
 
 
-async def renew_agent_run_lease(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-    lease_expires_at: datetime,
-) -> bool:
-    result = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(
-            lease_expires_at=lease_expires_at,
-            state_version=AgentRunState.state_version + 1,
-            updated_at=func.now(),
-        )
-    )
-    return bool(result.rowcount)
 
 
-async def save_agent_run_checkpoint(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-    checkpoint: dict,
-    checkpoint_phase: str,
-) -> bool:
-    values = {
-        "checkpoint": checkpoint,
-        "checkpoint_phase": checkpoint_phase,
-        "state_version": AgentRunState.state_version + 1,
-        "updated_at": func.now(),
-    }
-    if "model_usage" in checkpoint:
-        values["model_usage"] = checkpoint["model_usage"]
-    if "grounding_status" in checkpoint:
-        values["grounding_status"] = checkpoint["grounding_status"]
-    if "grounding_meta" in checkpoint:
-        values["grounding_meta"] = checkpoint["grounding_meta"] or {}
-    result = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(**values)
-    )
-    return bool(result.rowcount)
 
 
-async def finalize_agent_run(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-    *,
-    status: str,
-    result: str,
-    events: list[dict],
-    last_error: str | None,
-    finished_at: datetime,
-    model_usage: dict | None = None,
-    grounding_status: str | None = None,
-    grounding_meta: dict | None = None,
-) -> bool:
-    del events
-    values = {
-        "status": status,
-        "result": result,
-        "state_version": AgentRunState.state_version + 1,
-        "last_error": last_error,
-        "finished_at": finished_at,
-        "worker_task_id": None,
-        "lease_expires_at": None,
-        "updated_at": finished_at,
-    }
-    if model_usage is not None:
-        values["model_usage"] = model_usage
-    if grounding_status is not None:
-        values["grounding_status"] = grounding_status
-    if grounding_meta is not None:
-        values["grounding_meta"] = grounding_meta
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(**values)
-    )
-    return bool(updated.rowcount)
 
 
-async def pause_agent_run(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-    reason: str,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
-                ),
-                else_=AGENT_RUN_AWAITING_APPROVAL_STATUS,
-            ),
-            attempts=case(
-                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
-                else_=0,
-            ),
-            state_version=AgentRunState.state_version + 1,
-            last_error=reason,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def pause_agent_run_for_input(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
-                ),
-                else_=AGENT_RUN_AWAITING_INPUT_STATUS,
-            ),
-            attempts=case(
-                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
-                else_=0,
-            ),
-            state_version=AgentRunState.state_version + 1,
-            last_error=None,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def pause_agent_run_for_child(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
-                ),
-                else_=AGENT_RUN_AWAITING_CHILD_STATUS,
-            ),
-            attempts=case(
-                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
-                else_=0,
-            ),
-            state_version=AgentRunState.state_version + 1,
-            last_error=None,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def requeue_owned_agent_run(
-    db: AsyncSession,
-    run_id: str,
-    worker_task_id: str,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
-                ),
-                else_=AGENT_RUN_QUEUED_STATUS,
-            ),
-            attempts=case(
-                (AgentRunState.attempts > 0, AgentRunState.attempts - 1),
-                else_=0,
-            ),
-            state_version=AgentRunState.state_version + 1,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def queue_agent_run(
-    db: AsyncSession,
-    run_id: str,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_AWAITING_APPROVAL_STATUSES),
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
-                ),
-                else_=AGENT_RUN_QUEUED_STATUS,
-            ),
-            state_version=AgentRunState.state_version + 1,
-            last_error=None,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def queue_agent_run_from_input(
-    db: AsyncSession,
-    run_id: str,
-    checkpoint: dict,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_AWAITING_INPUT_STATUSES),
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
-                ),
-                else_=AGENT_RUN_QUEUED_STATUS,
-            ),
-            checkpoint=checkpoint,
-            state_version=AgentRunState.state_version + 1,
-            last_error=None,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def queue_agent_run_from_child(
-    db: AsyncSession,
-    run_id: str,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
-        )
-        .values(
-            status=case(
-                (
-                    AgentRunState.worker_generation == "unified",
-                    AGENT_RUN_UNIFIED_QUEUED_STATUS,
-                ),
-                else_=AGENT_RUN_QUEUED_STATUS,
-            ),
-            state_version=AgentRunState.state_version + 1,
-            last_error=None,
-            worker_task_id=None,
-            lease_expires_at=None,
-            updated_at=func.now(),
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def fail_agent_run_waiting_for_child(
-    db: AsyncSession,
-    run_id: str,
-    error: str,
-    finished_at: datetime,
-) -> bool:
-    updated = await db.execute(
-        update(AgentRunState)
-        .where(
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_AWAITING_CHILD_STATUSES),
-        )
-        .values(
-            status=AGENT_RUN_FAILED_STATUS,
-            state_version=AgentRunState.state_version + 1,
-            last_error=error,
-            worker_task_id=None,
-            lease_expires_at=None,
-            finished_at=finished_at,
-            updated_at=finished_at,
-        )
-    )
-    return bool(updated.rowcount)
 
 
-async def cancel_agent_run_tree(
-    db: AsyncSession,
-    run_id: str,
-    finished_at: datetime,
-) -> list[str]:
-    cancelled = list(
-        await db.scalars(
-            select(AgentRun.id)
-            .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
-            .where(
-                or_(AgentRun.id == run_id, AgentRun.root_run_id == run_id),
-                AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES),
-            )
-            .with_for_update()
-        )
-    )
-    if not cancelled:
-        return []
-    await db.execute(
-        update(AgentRunState)
-        .where(AgentRunState.run_id.in_(cancelled))
-        .values(
-            status=AGENT_RUN_CANCELLED_STATUS,
-            state_version=AgentRunState.state_version + 1,
-            last_error="Cancelled by user.",
-            worker_task_id=None,
-            lease_expires_at=None,
-            finished_at=finished_at,
-            updated_at=finished_at,
-        )
-    )
-    from app.infra.db.repositories.tools import repository as tool_repository
-
-    await tool_repository.settle_cancelled_agent_tool_invocations(
-        db, cancelled, finished_at
-    )
-    await db.execute(
-        update(WorkflowNodeExecution)
-        .where(
-            WorkflowNodeExecution.run_id.in_(cancelled),
-            WorkflowNodeExecution.status.in_(
-                ("running", "awaiting_input", "awaiting_child")
-            ),
-        )
-        .values(
-            status="failed",
-            error="Workflow run was cancelled.",
-            finished_at=finished_at,
-            updated_at=finished_at,
-        )
-    )
-    return cancelled
 
 
-async def list_recoverable_agent_run_ids(
-    db: AsyncSession,
-    now: datetime,
-    limit: int = 200,
-    *,
-    generation: str = "legacy",
-) -> list[str]:
-    claimable_statuses = (
-        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
-        if generation == "unified"
-        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
-    )
-    rows = await db.scalars(
-        select(AgentRunState.run_id)
-        .join(AgentRun, AgentRun.id == AgentRunState.run_id)
-        .where(
-            AgentRunState.worker_generation == generation,
-            AgentRunState.attempts < AgentRunState.max_attempts,
-            or_(
-                AgentRunState.status == claimable_statuses[0],
-                and_(
-                    AgentRunState.status == claimable_statuses[1],
-                    or_(
-                        AgentRunState.lease_expires_at.is_(None),
-                        AgentRunState.lease_expires_at <= now,
-                    ),
-                ),
-            ),
-        )
-        .order_by(AgentRun.created_at, AgentRun.id)
-        .limit(limit)
-    )
-    return list(rows.all())
 
 
-async def fail_exhausted_agent_run_ids(
-    db: AsyncSession,
-    now: datetime,
-    *,
-    generation: str = "legacy",
-) -> list[str]:
-    claimable_statuses = (
-        AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
-        if generation == "unified"
-        else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
-    )
-    updated = await db.scalars(
-        update(AgentRunState)
-        .where(
-            AgentRunState.worker_generation == generation,
-            AgentRunState.attempts >= AgentRunState.max_attempts,
-            or_(
-                AgentRunState.status == claimable_statuses[0],
-                and_(
-                    AgentRunState.status == claimable_statuses[1],
-                    or_(
-                        AgentRunState.lease_expires_at.is_(None),
-                        AgentRunState.lease_expires_at <= now,
-                    ),
-                ),
-            ),
-        )
-        .values(
-            status=AGENT_RUN_FAILED_STATUS,
-            state_version=AgentRunState.state_version + 1,
-            last_error="Agent run retry limit reached.",
-            worker_task_id=None,
-            lease_expires_at=None,
-            finished_at=now,
-            updated_at=now,
-        )
-        .returning(AgentRunState.run_id)
-    )
-    exhausted_run_ids = list(updated.all())
-    if not exhausted_run_ids:
-        return []
-    from app.infra.db.repositories.tools import repository as tool_repository
-
-    await tool_repository.settle_exhausted_agent_tool_invocations(
-        db, exhausted_run_ids, now
-    )
-    await db.execute(
-        update(WorkflowNodeExecution)
-        .where(
-            WorkflowNodeExecution.run_id.in_(exhausted_run_ids),
-            WorkflowNodeExecution.status == "running",
-        )
-        .values(
-            status="failed",
-            error=(
-                "Workflow run retry limit reached before the node result was "
-                "durably recorded."
-            ),
-            finished_at=now,
-            updated_at=now,
-        )
-    )
-    return exhausted_run_ids
 
 
-async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
-    return len(await fail_exhausted_agent_run_ids(db, now))
 
 
-async def append_agent_run_event(
-    db: AsyncSession,
-    workspace_id: str,
-    run_id: str,
-    event: dict,
-) -> AgentRunEventEntity:
-    created_at = utc_now()
-    row = AgentRunEvent(
-        workspace_id=workspace_id,
-        run_id=run_id,
-        event=_with_answer_ready_timestamp(event, created_at),
-        created_at=created_at,
-    )
-    db.add(row)
-    await db.flush()
-    return to_entity(AgentRunEventEntity, row)
 
 
-async def append_owned_agent_run_event(
-    db: AsyncSession,
-    workspace_id: str,
-    run_id: str,
-    worker_task_id: str,
-    event: dict,
-) -> AgentRunEventEntity | None:
-    """Append an event only while the worker still owns the run lease."""
-    run = await db.scalar(
-        select(AgentRunState)
-        .where(
-            AgentRunState.workspace_id == workspace_id,
-            AgentRunState.run_id == run_id,
-            AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
-            AgentRunState.worker_task_id == worker_task_id,
-        )
-        .with_for_update()
-    )
-    if run is None:
-        return None
-    return await append_agent_run_event(db, workspace_id, run_id, event)
 
 
-async def list_agent_run_events(
-    db: AsyncSession,
-    run_id: str,
-    after: int = 0,
-    limit: int = 200,
-) -> list[AgentRunEventEntity]:
-    rows = await db.scalars(
-        select(AgentRunEvent)
-        .where(AgentRunEvent.run_id == run_id, AgentRunEvent.id > after)
-        .order_by(AgentRunEvent.id)
-        .limit(limit)
-    )
-    return [
-        AgentRunEventEntity(
-            id=row.id,
-            workspace_id=row.workspace_id,
-            run_id=row.run_id,
-            event=_with_answer_ready_timestamp(row.event, row.created_at),
-            created_at=row.created_at,
-        )
-        for row in rows.all()
-    ]
 
 
 def _internal_tool_metadata(invocation: ToolInvocation) -> dict[str, Any]:
@@ -2384,3 +1551,37 @@ async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> N
         .values(current_published_version_id=None)
     )
     await db.execute(delete(Agent).where(Agent.workspace_id == workspace_id))
+
+from app.infra.db.repositories.runs.runs import _entity_values
+from app.infra.db.repositories.runs.runs import _load_run_rows
+from app.infra.db.repositories.runs.runs import _project_process_events
+from app.infra.db.repositories.runs.runs import _run_event_projections
+from app.infra.db.repositories.runs.runs import _run_query
+from app.infra.db.repositories.runs.runs import _to_agent_run_entities
+from app.infra.db.repositories.runs.runs import _to_agent_run_entity
+from app.infra.db.repositories.runs.runs import _with_answer_ready_timestamp
+from app.infra.db.repositories.runs.runs import _worker_generation
+from app.infra.db.repositories.runs.runs import create_agent_run
+from app.infra.db.repositories.runs.runs import finalize_agent_run
+from app.infra.db.repositories.runs.runs import get_active_agent_run
+from app.infra.db.repositories.runs.runs import get_agent_run_by_id
+from app.infra.db.repositories.runs.runs import pause_agent_run
+from app.infra.db.repositories.runs.runs import pause_agent_run_for_child
+from app.infra.db.repositories.runs.runs import pause_agent_run_for_input
+from app.infra.db.repositories.runs.runs import refresh_agent_run
+from app.infra.db.repositories.runs.runs import save_agent_run
+from app.infra.db.repositories.runs.events import append_agent_run_event
+from app.infra.db.repositories.runs.events import append_owned_agent_run_event
+from app.infra.db.repositories.runs.events import list_agent_run_events
+from app.infra.db.repositories.runs.leases import cancel_agent_run_tree
+from app.infra.db.repositories.runs.leases import claim_agent_run
+from app.infra.db.repositories.runs.leases import fail_agent_run_waiting_for_child
+from app.infra.db.repositories.runs.leases import fail_exhausted_agent_run_ids
+from app.infra.db.repositories.runs.leases import fail_exhausted_agent_runs
+from app.infra.db.repositories.runs.leases import list_recoverable_agent_run_ids
+from app.infra.db.repositories.runs.leases import queue_agent_run
+from app.infra.db.repositories.runs.leases import queue_agent_run_from_child
+from app.infra.db.repositories.runs.leases import queue_agent_run_from_input
+from app.infra.db.repositories.runs.leases import renew_agent_run_lease
+from app.infra.db.repositories.runs.leases import requeue_owned_agent_run
+from app.infra.db.repositories.runs.leases import save_agent_run_checkpoint
