@@ -2612,7 +2612,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         from datetime import datetime, timedelta
 
         from app.application.agents.runs.children import ensure_workflow_agent_child
-        from app.application.agents.runs.service import cancel_run_tree, prepare_agent_run
+        from app.application.agents.runs.service import prepare_agent_run
+        from app.application.runs.lifecycle import cancel_run_tree
         from app.entities.defaults import utc_now
         from app.infra.db.repositories.identity import users as user_repository
         from app.domain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS

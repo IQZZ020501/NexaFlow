@@ -1893,7 +1893,7 @@ def test_edit_regeneration_rejects_a_non_latest_run() -> None:
 def test_repeated_run_feedback_write_is_idempotent() -> None:
     from unittest.mock import AsyncMock, patch
 
-    from app.application.agents.runs.service import update_run_feedback
+    from app.application.runs.feedback import update_run_feedback
     from app.entities.runs import AgentRun
     from app.entities.defaults import utc_now
 

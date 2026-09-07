@@ -71,6 +71,9 @@ def _require_agent_run_application(agent: Agent) -> None:
         )
 
 
+from app.application.runs.feedback import update_run_feedback
+from app.application.runs.lifecycle import cancel_run_tree
+
 async def enqueue_prepared_agent_run(
     run_id: str,
     settings: Settings,
@@ -294,13 +297,6 @@ async def cancel_agent_run(
     return run_to_response(current, trace_id=current.trace_id)
 
 
-async def cancel_run_tree(db: AsyncSession, run_id: str) -> bool:
-    now = utc_now()
-    run_ids = await agent_repository.cancel_agent_run_tree(db, run_id, now)
-    if not run_ids:
-        return False
-    await tool_repository.settle_cancelled_agent_tool_invocations(db, run_ids, now)
-    return True
 
 
 async def get_agent_run_entity(
@@ -545,40 +541,6 @@ async def regenerate_agent_run_from_source(
     return current
 
 
-async def update_run_feedback(
-    db: AsyncSession,
-    run: AgentRun,
-    value: str | None,
-) -> AgentRun:
-    """
-    Update the feedback value for a completed agent run.
-    
-    Parameters:
-    	run (AgentRun): The completed run to update.
-    	value (str | None): The feedback value, either `"positive"`, `"negative"`, or `None` to clear existing feedback.
-    
-    Returns:
-    	AgentRun: The refreshed agent run with the updated feedback.
-    
-    Raises:
-    	HTTPException: If the run has no completed result or the feedback value is invalid.
-    """
-    if run.status != AGENT_RUN_SUCCEEDED_STATUS or not run.result:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Feedback is available only for completed results.",
-        )
-    if value not in {None, "positive", "negative"}:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid feedback.")
-    if run.feedback == value:
-        return run
-    run.feedback = value
-    run.feedback_updated_at = utc_now() if value is not None else None
-    run = await agent_repository.save_agent_run(db, run)
-    await db.commit()
-    current = await agent_repository.get_agent_run_by_id(db, run.id)
-    assert current is not None
-    return current
 
 
 async def regenerate_agent_run(
