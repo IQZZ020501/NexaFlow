@@ -20,6 +20,7 @@ SUITES = (
     "infra.logger",
     "infra.mcp_transports",
     "infra.infra_unit_coverage",
+    "infra.architecture",
     "identity.smtp",
     "identity.email",
     "identity.identity",
