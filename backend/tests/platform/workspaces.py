@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import ResourcePermission
 from app.entities.agents import AgentRun
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.storage import object_storage as object_storage_module
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository

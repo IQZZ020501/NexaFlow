@@ -28,7 +28,7 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.domain.knowledge.graph.schema import GraphSchemaDefinition
 

@@ -9,7 +9,7 @@ from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
 from app.entities.identity.user import User
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tools_repository
 from app.infra.db.repositories.identity import users as user_repository

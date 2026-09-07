@@ -14,7 +14,7 @@ from app.entities.agents import AgentPublicationVersion, AgentRun
 from app.entities.tools import ToolSnapshot
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository

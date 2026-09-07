@@ -23,7 +23,7 @@ from app.infra.db.repositories.workspaces import resource_permissions as permiss
 from app.infra.db.repositories.tools import repository as tools_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.tools.mcp_stdio import (
     McpStdioConfig,
     McpStdioConfigError,

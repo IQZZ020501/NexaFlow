@@ -1307,7 +1307,7 @@ def test_external_mcp_policy_drift_requires_public_approval_but_blocks_api() -> 
 
 def test_external_stream_epoch_is_stable_and_sanitized() -> None:
     from app.application.agents.access.service import sanitize_external_agent_stream
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
 
     now = utc_now()
     raw_epoch = "worker-task-internal-epoch"
@@ -1631,7 +1631,7 @@ def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
 
     from app.entities.tools import McpToolPolicy
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
 
@@ -1894,7 +1894,7 @@ def test_repeated_run_feedback_write_is_idempotent() -> None:
 
     from app.application.agents.runs.service import update_run_feedback
     from app.entities.agents import AgentRun
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
 
     feedback_updated_at = utc_now()
     run = AgentRun(

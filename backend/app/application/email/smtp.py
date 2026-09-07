@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.entities.email.smtp import SmtpSettings
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.email import smtp as smtp_repository
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infra.email.smtp import (

@@ -1568,7 +1568,7 @@ def assert_upload_cleanup_removes_object(upload_id: str) -> None:
 
 
 async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
@@ -1616,7 +1616,7 @@ async def assert_exhausted_workflow_closes_running_node(run_id: str) -> None:
 
 
 async def assert_first_claim_sets_deadline_once(run_id: str) -> None:
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
@@ -2613,7 +2613,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
 
         from app.application.agents.runs.children import ensure_workflow_agent_child
         from app.application.agents.runs.service import cancel_run_tree, prepare_agent_run
-        from app.infra.runtime.model_utils import utc_now
+        from app.entities.defaults import utc_now
         from app.infra.db.repositories.identity import users as user_repository
         from app.domain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
 
@@ -2860,7 +2860,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         )
         from app.application.workflows.runs.executor import run_durable_workflow_run
         from app.entities.agents import AgentPublicationVersion
-        from app.infra.runtime.model_utils import new_id
+        from app.entities.defaults import new_id
         from app.infra.db.repositories.workflows import repository as workflow_repository
         from app.domain.agents.models import (
             AGENT_RUN_FAILED_STATUS,
@@ -4039,7 +4039,7 @@ def test_workflow_executor_recovery_paths() -> None:
         async def run_scenarios() -> None:
             from app.application.workflows.runs import executor as workflow_executor
             from app.application.workflows.runs.executor import run_durable_workflow_run
-            from app.infra.runtime.model_utils import utc_now
+            from app.entities.defaults import utc_now
             from app.infra.db.repositories.agents import repository as agent_repository
             from app.infra.db.repositories.workflows import repository as workflow_repository
             from app.infra.db.session import get_session_factory

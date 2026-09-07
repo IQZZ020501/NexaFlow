@@ -10,7 +10,7 @@ from app.application.tools.runtime.service import queue_tool_invocation
 from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.tools.dispatch import enqueue_tool_invocation
 from app.ports.tool_runtime import ToolInvocationContext

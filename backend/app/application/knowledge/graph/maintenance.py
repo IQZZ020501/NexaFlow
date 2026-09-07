@@ -23,7 +23,7 @@ from app.entities.knowledge.graph import (
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.identity import users as user_repository

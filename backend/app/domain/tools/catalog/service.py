@@ -19,7 +19,7 @@ from app.entities.tools import (
     ToolVersion,
 )
 from app.entities.identity.user import User
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.domain.tools.access.permissions import (
     ToolAuthorization,
     ToolPermissionLabel,

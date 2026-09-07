@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.tools.runtime import build_tool_adapter
 from app.entities.tools import ToolInvocation, ToolSnapshot
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
 from app.infra.db.repositories.tools import repository as tool_repository

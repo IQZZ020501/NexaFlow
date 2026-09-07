@@ -22,7 +22,7 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphReviewItem,
 )
 from app.entities.identity.user import User
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.schemas.knowledge import KnowledgeQueryRequest

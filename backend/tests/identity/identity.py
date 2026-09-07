@@ -14,7 +14,7 @@ from tests.support import (
 )
 from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
 from app.entities.identity.user import RefreshSession
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.security.auth import hash_refresh_token
 from app.infra.security import agent_rate_limit

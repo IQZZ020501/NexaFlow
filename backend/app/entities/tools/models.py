@@ -8,7 +8,7 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 
 
 MAX_PYTHON_TOOL_CODE_BYTES = 8 * 1024

@@ -12,7 +12,7 @@ from app.entities.email import EmailDelivery
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.db.repositories.email import smtp as smtp_repository
 from app.infra.security.secrets import decrypt_secret, encrypt_secret

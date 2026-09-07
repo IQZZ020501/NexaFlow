@@ -41,7 +41,7 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.mapping import save, to_entity
 from app.domain.agents.models import AgentRun as AgentRunORM
 from app.domain.agents.models import AgentRunState as AgentRunStateORM

@@ -12,7 +12,7 @@ from app.entities.agents import Agent
 from app.entities.identity.user import User
 from app.entities.workflows import WorkflowUpload
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import new_id
+from app.entities.defaults import new_id
 from app.infra.storage.object_storage import (
     EmptyObjectError,
     ObjectTooLargeError,

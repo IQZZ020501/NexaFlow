@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 
 ENTERPRISE_IDENTITY_PROVIDERS = {"feishu", "dingtalk", "wecom"}
 

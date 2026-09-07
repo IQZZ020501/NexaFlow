@@ -64,7 +64,7 @@ from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolInvocation
 from app.entities.workflows import WorkflowUpload
 from app.infra.db.session import get_session_factory
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.observability.system_log import SystemLog
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
@@ -4792,7 +4792,7 @@ def test_cancelling_root_run_cancels_active_children() -> None:
     import hashlib
     from unittest.mock import AsyncMock, patch
 
-    from app.infra.runtime.model_utils import new_id, utc_now
+    from app.entities.defaults import new_id, utc_now
     from app.infra.db.session import get_session_factory
 
     with test_client() as client, agent_model_server() as model_base_url:

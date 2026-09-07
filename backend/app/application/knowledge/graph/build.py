@@ -42,7 +42,7 @@ from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.knowledge import references as reference_repository

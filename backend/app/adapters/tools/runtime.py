@@ -15,7 +15,7 @@ from app.infra.sandbox.client import (
     execute_workflow_code,
 )
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import APP_TIMEZONE, utc_now
+from app.entities.defaults import APP_TIMEZONE, utc_now
 from app.infra.db.session import get_session_factory
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.ports.tool_runtime import (

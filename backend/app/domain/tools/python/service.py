@@ -17,7 +17,7 @@ from app.entities.tools import (
     validate_tool_json_schema,
 )
 from app.entities.identity.user import User
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.tools import repository as repository
 from app.infra.runtime.validation import normalize_name
 from app.domain.audit.services import record_audit_log

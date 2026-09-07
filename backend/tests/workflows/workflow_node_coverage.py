@@ -2914,7 +2914,7 @@ def _graph_node(node_id: str, node_type: str, config: dict) -> dict:
 def _make_running_run(graph: dict) -> str:
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
@@ -3195,7 +3195,7 @@ def test_executor_manual_run_scenarios() -> None:
         }
 
         async def create_checkpoint_run() -> str:
-            from app.infra.runtime.model_utils import utc_now
+            from app.entities.defaults import utc_now
             from app.infra.db.repositories.agents import repository as agent_repository
             from app.infra.db.repositories.workflows import repository as workflow_repository
             from app.infra.db.session import get_session_factory
@@ -3278,7 +3278,7 @@ def test_executor_manual_run_scenarios() -> None:
 
         # run_durable_workflow_run: claim held by another worker
         from app.entities.agents import AgentRun
-        from app.infra.runtime.model_utils import utc_now
+        from app.entities.defaults import utc_now
         from app.infra.db.session import get_session_factory
         from app.application.workflows.runs.executor import run_durable_workflow_run
 
@@ -3761,7 +3761,7 @@ def test_public_and_api_workflow_access_end_to_end() -> None:
         assert failed_detail.json()["error"] == "Workflow run failed."
 
         # expired upload cleanup flow
-        from app.infra.runtime.model_utils import utc_now
+        from app.entities.defaults import utc_now
         from app.infra.storage.object_storage import create_object_storage
         from app.infra.db.repositories.workflows import repository as workflow_repository
         from app.infra.db.session import get_session_factory

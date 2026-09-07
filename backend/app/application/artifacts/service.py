@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.entities.artifacts import GeneratedArtifact
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.artifacts import repository as repository
 from app.infra.security.auth import (
     create_artifact_download_token,

@@ -11,7 +11,7 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.identity.user import User
-from app.infra.runtime.model_utils import new_id
+from app.entities.defaults import new_id
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import (
     evaluation as evaluation_repository,

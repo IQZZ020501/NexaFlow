@@ -61,7 +61,7 @@ from app.infra.bootstrap import seed as seed_mod
 from app.infra.security import auth as security_mod
 from app.infra.db import session as session_mod
 from app.infra.runtime import validation as validation_mod
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.tools import mcp as mcp_repo
 from app.infra.db import mapping as mapping_repo
 from app.infra.db.repositories.workspaces import resource_permissions as rp_repo

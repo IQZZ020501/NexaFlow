@@ -63,7 +63,7 @@ from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision,
 )
 from app.domain.audit.models import AuditLog
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.domain.knowledge.tasks.orchestration import (
     delete_knowledge_task,
     delete_knowledge_tasks,

@@ -3196,7 +3196,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         queue_tool_invocation,
     )
     from app.infra.config.settings import Settings
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.tool_runtime import (
@@ -3598,7 +3598,7 @@ async def assert_python_tool_lifecycle(workspace_id: str) -> None:
 
     from app.application.tools.runtime.service import execute_tool_invocation, queue_tool_invocation
     from app.infra.config.settings import Settings
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
@@ -3737,7 +3737,7 @@ async def assert_tool_runtime_edge_branches(
     )
     from app.entities.tools import McpServer, Tool, ToolPolicy, ToolSource, ToolVersion
     from app.infra.config.settings import Settings
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
@@ -4853,7 +4853,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from app.entities.agents import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.config.settings import Settings
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
@@ -5284,7 +5284,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     )
     from app.application.tools.runtime.service import validate_tool_output
     from app.infra.config.settings import Settings
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.mcp import McpClientError

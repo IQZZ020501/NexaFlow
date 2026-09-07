@@ -29,7 +29,7 @@ from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
 from app.application.workspaces import service as workspace_service
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.teams import repository as team_repo
 from app.infra.db.repositories.identity import users as user_repo
 from app.infra.db.repositories.workspaces import repository as workspace_repo

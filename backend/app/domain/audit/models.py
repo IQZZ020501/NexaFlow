@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.infra.db.base import Base
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 
 
 class AuditLog(Base):

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.entities.email.smtp import SMTP_SETTINGS_ID
 from app.infra.db.base import Base
-from app.infra.runtime.model_utils import APP_TIMEZONE_NAME, new_id, utc_now
+from app.entities.defaults import APP_TIMEZONE_NAME, new_id, utc_now
 
 
 class User(Base):

@@ -35,7 +35,7 @@ from app.infra.config.settings import Settings
 from app.infra.agents.live_stream import AgentLiveStreamPublisher
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.identity import users as user_repository

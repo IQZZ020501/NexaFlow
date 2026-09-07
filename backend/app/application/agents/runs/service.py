@@ -27,7 +27,7 @@ from app.infra.agents.live_stream import (
 )
 from app.infra.config.settings import Settings
 from app.application.governance.service import enforce_workspace_run_quota
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory

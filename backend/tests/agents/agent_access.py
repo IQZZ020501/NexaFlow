@@ -54,7 +54,7 @@ from app.infra.security.agent_rate_limit import (
     AgentRateLimitUnavailable,
     enforce_external_agent_rate_limit,
 )
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory

@@ -18,7 +18,7 @@ from app.entities.agents import AgentRun as AgentRunEntity
 from app.entities.agents import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
 from app.entities.tools import ToolInvocation as ToolInvocationEntity
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.mapping import (
     refresh_entity,
     save,

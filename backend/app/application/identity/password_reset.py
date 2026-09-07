@@ -19,7 +19,7 @@ from app.infra.security.agent_rate_limit import (
     enforce_password_reset_rate_limit,
 )
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.security.auth import hash_password, verify_password

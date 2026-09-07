@@ -55,7 +55,7 @@ from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryInspectResponse,
@@ -1387,7 +1387,7 @@ async def db_setup(
 
     # RERANKER model inserted directly: the API would run a live provider test.
     from app.domain.models.registered import RegisteredModel as RegisteredModelORM
-    from app.infra.runtime.model_utils import new_id
+    from app.entities.defaults import new_id
 
     async with get_session_factory()() as db:
         reranker_orm = RegisteredModelORM(

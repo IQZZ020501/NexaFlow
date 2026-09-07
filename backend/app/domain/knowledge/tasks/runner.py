@@ -12,7 +12,7 @@ from app.domain.audit.services import record_audit_log
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.session import get_session_factory
 from app.entities.identity.user import User
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository

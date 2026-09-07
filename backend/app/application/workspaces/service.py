@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 
 from app.domain.audit.services import record_audit_log
 from app.infra.runtime.validation import normalize_name
-from app.infra.runtime.model_utils import new_id
+from app.entities.defaults import new_id
 from app.entities.identity.user import User
 from app.schemas.identity.contracts import UserCreateRequest, UserPasswordResetResponse
 from app.application.identity.service import create_user

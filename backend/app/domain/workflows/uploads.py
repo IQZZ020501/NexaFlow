@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.storage.object_storage import create_object_storage
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.session import get_session_factory

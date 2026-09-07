@@ -17,7 +17,7 @@ from app.infra.security.agent_rate_limit import (
 )
 from app.infra.runtime.validation import normalize_email, normalize_name, normalize_username
 from app.entities.identity.user import RefreshSession, User
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.tools import repository as tools_repository

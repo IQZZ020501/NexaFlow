@@ -12,7 +12,7 @@ from app.infra.db.session import get_db
 from app.entities.identity.user import User
 from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.identity import users as user_repository
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.security.auth import decode_access_session
 
 logger = get_logger(__name__)

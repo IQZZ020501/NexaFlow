@@ -16,7 +16,7 @@ from app.infra.db.repositories.identity import invitations as invitation_reposit
 from app.infra.config.settings import Settings
 from app.infra.security.auth import hash_password
 from app.infra.runtime.validation import normalize_email, normalize_name, normalize_username
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.schemas.identity.invitations import (
     WorkspaceInvitationAcceptRequest,
     WorkspaceInvitationCreateRequest,

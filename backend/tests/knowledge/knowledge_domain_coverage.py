@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infra.db.session import get_session_factory
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.entities.knowledge import (
     CHUNK_INDEXED_STATUS,
     CHUNK_INDEX_FAILED_STATUS,

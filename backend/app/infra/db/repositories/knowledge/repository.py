@@ -27,7 +27,7 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.infra.runtime.model_utils import new_id, utc_now
+from app.entities.defaults import new_id, utc_now
 from app.infra.db.mapping import (
     refresh_entity,
     save,

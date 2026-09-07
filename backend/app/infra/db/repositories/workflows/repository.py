@@ -12,7 +12,7 @@ from app.entities.workflows import (
     WorkflowUploadStorageCleanup as WorkflowUploadStorageCleanupEntity,
 )
 from app.infra.db.mapping import refresh_entity, save, to_entity, to_orm
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.domain.agents.models import (
     AGENT_RUN_AWAITING_INPUT_STATUSES,
     AGENT_RUN_RUNNING_STATUSES,

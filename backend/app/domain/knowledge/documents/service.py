@@ -13,7 +13,7 @@ from app.entities.knowledge import (
 )
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import new_id
+from app.entities.defaults import new_id
 from app.infra.storage.object_storage import (
     EmptyObjectError,
     ObjectStorage,

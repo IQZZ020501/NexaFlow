@@ -600,7 +600,7 @@ def test_engine_validation_error_branches() -> None:
 
 
 def test_engine_runtime_error_branches() -> None:
-    from app.infra.runtime.model_utils import utc_now
+    from app.entities.defaults import utc_now
     from app.domain.workflows.runtime.engine import (
         NodeResult,
         NodeState,

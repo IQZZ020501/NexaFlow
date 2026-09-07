@@ -19,7 +19,7 @@ from app.adapters.llm.runtime import (
     test_model_connection,
 )
 from app.infra.config.settings import Settings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.security.secrets import secret_hint
 
 ACTIVE_STATUS = "active"

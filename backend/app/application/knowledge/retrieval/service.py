@@ -25,7 +25,7 @@ from app.entities.knowledge import (
 )
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
-from app.infra.runtime.model_utils import new_id
+from app.entities.defaults import new_id
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.repositories.knowledge import (
     references as knowledge_reference_repository,

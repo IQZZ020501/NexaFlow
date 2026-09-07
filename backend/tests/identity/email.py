@@ -36,7 +36,7 @@ from app.application.email.delivery import (
 )
 from app.entities.email import EmailDelivery as EmailDeliveryEntity
 from app.entities.email.smtp import SmtpSettings
-from app.infra.runtime.model_utils import utc_now
+from app.entities.defaults import utc_now
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.security.secrets import decrypt_secret, encrypt_secret
 from app.infra.db.session import get_session_factory
