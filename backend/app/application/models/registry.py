@@ -12,7 +12,7 @@ from app.adapters.llm.credentials import (
 )
 from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.providers import PROVIDER_CATALOG
-from app.adapters.llm.runtime import (
+from app.ports.llm import (
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,

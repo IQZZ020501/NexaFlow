@@ -22,6 +22,18 @@ if TYPE_CHECKING:
 
 VISION_MODEL_REQUIRED_MESSAGE = "Vision model is not configured for this workspace."
 
+MODEL_REQUEST_PARAMS_META_KEY = "request_params"
+DEFAULT_MODEL_REQUEST_PARAMS = {"max_tokens": 4_096}
+SUPPORTED_PROVIDER_TYPES = {
+    "openai_compatible",
+    "anthropic",
+    "bedrock",
+    "azure_openai",
+    "deepseek",
+    "google_genai",
+    "ollama",
+}
+
 
 class ModelProviderError(ExternalServiceError):
     pass
@@ -109,6 +121,24 @@ def extract_image_text(
     return extract_registered_image_text(model, settings, media_type, image_bytes)
 
 
+def test_model_connection(
+    provider_type: str,
+    credentials: dict[str, str],
+    model_name: str,
+    model_type: str,
+    request_params: dict[str, Any] | None = None,
+) -> dict[str, bool]:
+    from app.adapters.llm.runtime import test_model_connection as _test
+
+    return _test(
+        provider_type,
+        credentials,
+        model_name,
+        model_type,
+        request_params,
+    )
+
+
 __all__ = [
     "ChatProvider",
     "EmbeddingProvider",
@@ -118,10 +148,14 @@ __all__ = [
     "ModelProviderStatusError",
     "ModelProviderTimeoutError",
     "ModelToolCall",
+    "MODEL_REQUEST_PARAMS_META_KEY",
+    "DEFAULT_MODEL_REQUEST_PARAMS",
+    "SUPPORTED_PROVIDER_TYPES",
     "RerankProvider",
     "VISION_MODEL_REQUIRED_MESSAGE",
     "build_chat_model",
     "build_embeddings",
     "build_reranker",
+    "test_model_connection",
     "extract_image_text",
 ]

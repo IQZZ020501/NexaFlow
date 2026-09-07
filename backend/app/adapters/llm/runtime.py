@@ -52,7 +52,10 @@ if TYPE_CHECKING:
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import ExternalServiceError, log_error
 from app.ports.llm import (
+    DEFAULT_MODEL_REQUEST_PARAMS,
+    MODEL_REQUEST_PARAMS_META_KEY,
     ModelCompletion,
+    SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
     ModelProviderTimeoutError,
@@ -64,8 +67,6 @@ logger = get_logger(__name__)
 
 MODEL_REQUEST_TIMEOUT_SECONDS = 60
 STREAM_USAGE_SUPPORTED_META_KEY = "stream_usage_supported"
-MODEL_REQUEST_PARAMS_META_KEY = "request_params"
-DEFAULT_MODEL_REQUEST_PARAMS = {"max_tokens": 4_096}
 VISION_EXTRACTION_PROMPT = (
     "Extract all visible text from this image into Markdown. Preserve reading "
     "order, headings, lists, and tables. Return only the extracted content. "
@@ -74,15 +75,6 @@ VISION_EXTRACTION_PROMPT = (
 VISION_TEST_IMAGE = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
-SUPPORTED_PROVIDER_TYPES = {
-    "openai_compatible",
-    "anthropic",
-    "bedrock",
-    "azure_openai",
-    "deepseek",
-    "google_genai",
-    "ollama",
-}
 PROVIDER_EXCEPTIONS = (
     AnthropicError,
     BotoCoreError,

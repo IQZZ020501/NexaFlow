@@ -29,10 +29,7 @@ from app.application.models.registry import (
     validate_provider_type,
     validate_status,
 )
-from app.adapters.llm.runtime import (
-    DEFAULT_MODEL_REQUEST_PARAMS,
-    MODEL_REQUEST_PARAMS_META_KEY,
-)
+from app.ports.llm import DEFAULT_MODEL_REQUEST_PARAMS, MODEL_REQUEST_PARAMS_META_KEY
 from app.domain.platform.models import User
 from app.infra.config.settings import Settings
 from app.infra.runtime.validation import normalize_name
