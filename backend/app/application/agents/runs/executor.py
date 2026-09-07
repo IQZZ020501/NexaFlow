@@ -12,6 +12,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.models.registered import RegisteredModel
 from app.application.agents.runs.memory import (
     PreparedConversationMemory,
     prepare_conversation_memory,
@@ -41,7 +42,7 @@ from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory
 from app.infra.observability.system_log import record_system_log
-from app.ports.llm import RegisteredModel, build_chat_model
+from app.ports.llm import build_chat_model
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,

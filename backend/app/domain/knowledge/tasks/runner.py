@@ -71,7 +71,7 @@ from app.domain.knowledge.service import (
     get_default_knowledge_model,
     knowledge_object_storage,
 )
-from app.ports.llm import RegisteredModel, VISION_MODEL_REQUIRED_MESSAGE
+from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
 logger = get_logger(__name__)

@@ -897,7 +897,7 @@ def test_nodes_model_result_branches() -> None:
     from unittest.mock import patch
 
     from app.application.workflows.nodes.executor import _model_result
-    from app.ports.llm import RegisteredModel
+    from app.domain.models.registered import RegisteredModel
 
     async def run() -> None:
         try:

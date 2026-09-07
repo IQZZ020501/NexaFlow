@@ -10,9 +10,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.models.registered import RegisteredModel
 from app.ports import model_registry as model_repository
 from app.adapters.llm.credentials import legacy_credential_config
-from app.ports.llm import RegisteredModel
 from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.application.models.registry import (
     ACTIVE_STATUS,

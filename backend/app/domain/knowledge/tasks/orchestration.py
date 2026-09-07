@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.models.registered import RegisteredModel
 from app.domain.audit.services import record_audit_log
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
@@ -87,7 +88,7 @@ from app.domain.knowledge.service import (
     knowledge_document_path,
     knowledge_object_storage,
 )
-from app.ports.llm import RegisteredModel, extract_image_text
+from app.ports.llm import extract_image_text
 
 logger = get_logger(__name__)
 

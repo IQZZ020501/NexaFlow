@@ -77,6 +77,12 @@ def is_orm_module(path: Path) -> bool:
     return has_base_subclass
 
 
+def _is_type_checking_guard(node: ast.If) -> bool:
+    """True for ``if TYPE_CHECKING:`` blocks (annotations only, no runtime edge)."""
+    test = node.test
+    return isinstance(test, ast.Name) and test.id == "TYPE_CHECKING"
+
+
 def iter_modules() -> list[tuple[Path, str]]:
     out = []
     for path in sorted(APP.rglob("*.py")):
@@ -96,7 +102,9 @@ def analyze() -> dict:
             tree = ast.parse(path.read_text(errors="replace"))
         except SyntaxError:
             continue
-        for node in ast.walk(tree):
+        for node in tree.body:
+            if isinstance(node, ast.If) and _is_type_checking_guard(node):
+                node = None  # imports guarded by TYPE_CHECKING are not runtime edges
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     root = alias.name.split(".")[0]

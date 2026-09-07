@@ -29,12 +29,7 @@ ErrorSource = Literal["internal", "external"]
 _INTERNAL_MODULE_PREFIX = "app."
 
 
-class ExternalServiceError(Exception):
-    """Base class for errors caused by an upstream service.
-
-    Subclass this at service boundaries (LLM providers, MCP servers, vector
-    stores, ...) so `classify_error` tags those failures as `external`.
-    """
+from app.ports.errors import ExternalServiceError
 
 
 def classify_error(exc: BaseException | None) -> ErrorSource:

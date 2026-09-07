@@ -17,10 +17,10 @@ from app.ports import model_registry as model_repository
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderStatusError,
-    RegisteredModel,
     build_embeddings,
     build_reranker,
 )
+from app.domain.models.registered import RegisteredModel
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseListItemResponse,

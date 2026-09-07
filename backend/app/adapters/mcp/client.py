@@ -21,6 +21,14 @@ from mcp.client.streamable_http import streamable_http_client
 
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import ExternalServiceError, log_error
+from app.ports.mcp import (
+    MAX_MCP_TOOL_PAGES,
+    McpClientError,
+    McpConnection,
+    McpDiscovery,
+    McpTransport,
+    normalize_mcp_url,
+)
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.tools.mcp_stdio import (
     McpStdioConfig,
@@ -31,31 +39,9 @@ from app.infra.tools.mcp_stdio import (
 logger = get_logger(__name__)
 
 MAX_MCP_TOOLS = 64
-MAX_MCP_TOOL_PAGES = 32
 MAX_MCP_RESULT_CHARS = 20_000
 MAX_MCP_TOOL_DESCRIPTION_CHARS = 1_000
 MAX_MCP_TOOL_SCHEMA_CHARS = 20_000
-
-
-class McpClientError(ExternalServiceError):
-    pass
-
-
-McpTransport = Literal["streamable_http", "sse", "stdio"]
-
-
-@dataclass(frozen=True)
-class McpConnection:
-    transport: McpTransport
-    url: str | None = None
-    bearer_token: str | None = None
-    stdio_config: McpStdioConfig | None = None
-    network_policy: Literal["public_only", "deployment"] = "public_only"
-
-
-@dataclass(frozen=True)
-class McpDiscovery:
-    tools: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)

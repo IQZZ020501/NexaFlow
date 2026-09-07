@@ -12,40 +12,16 @@ from app.adapters.llm.runtime import build_registered_embeddings
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event
+from app.ports.vector_store import (
+    GraphProfileVector,
+    GraphProfileVectorHit,
+    VectorChunk,
+    VectorHit,
+)
 
 logger = get_logger(__name__)
 
 QDRANT_UPLOAD_BATCH_SIZE = 64
-
-
-@dataclass(frozen=True)
-class VectorChunk:
-    id: str
-    document_id: str
-    document_filename: str
-    chunk_index: int
-    content: str
-    document_metadata: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class VectorHit:
-    chunk_id: str
-    distance: float | None
-
-
-@dataclass(frozen=True)
-class GraphProfileVector:
-    entity_id: str
-    profile_hash: str
-    content: str
-
-
-@dataclass(frozen=True)
-class GraphProfileVectorHit:
-    entity_id: str
-    profile_hash: str
-    distance: float | None
 
 
 def vector_collection_name(knowledge_base_id: str) -> str:

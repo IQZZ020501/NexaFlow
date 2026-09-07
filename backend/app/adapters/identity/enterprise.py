@@ -6,6 +6,10 @@ from urllib.parse import urlencode
 import httpx2
 
 from app.entities.identity.enterprise import EnterpriseIdentityConnection
+from app.ports.enterprise_identity import (
+    EnterpriseProviderError,
+    ExternalPrincipal,
+)
 
 _FEISHU_AUTHORIZE_URL = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
 _FEISHU_TOKEN_URL = "https://accounts.feishu.cn/oauth/v3/token"
@@ -20,18 +24,6 @@ _WECOM_AUTHORIZE_URL = "https://login.work.weixin.qq.com/wwlogin/sso/login"
 _WECOM_TOKEN_URL = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
 _WECOM_USER_URL = "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo"
 _MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024
-
-
-class EnterpriseProviderError(Exception):
-    pass
-
-
-@dataclass(frozen=True)
-class ExternalPrincipal:
-    subject_id: str
-    tenant_id: str
-    display_name: str
-    email: str | None = None
 
 
 def build_authorization_url(

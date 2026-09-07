@@ -29,10 +29,10 @@ from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.ports.llm import (
     ModelToolCall,
-    RegisteredModel,
     build_chat_model,
     build_reranker,
 )
+from app.domain.models.registered import RegisteredModel
 from app.schemas.workflows.contracts import (
     ClassifierNodeConfig,
     ConditionNodeConfig,

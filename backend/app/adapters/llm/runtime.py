@@ -46,6 +46,13 @@ from app.adapters.llm.credentials import (
 from app.domain.models.registered import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import ExternalServiceError, log_error
+from app.ports.llm import (
+    ModelCompletion,
+    ModelProviderError,
+    ModelProviderStatusError,
+    ModelProviderTimeoutError,
+    ModelToolCall,
+)
 from app.infra.observability.logger import get_logger
 
 logger = get_logger(__name__)
@@ -80,24 +87,6 @@ PROVIDER_EXCEPTIONS = (
     OllamaResponseError,
     OpenAIError,
 )
-
-
-class ModelProviderError(ExternalServiceError):
-    pass
-
-
-class ModelProviderStatusError(ModelProviderError):
-    def __init__(self, status_code: int, message: str = "") -> None:
-        self.status_code = status_code
-        self.message = message
-        detail = f"Provider returned status {status_code}"
-        if message:
-            detail = f"{detail}: {message}"
-        super().__init__(detail)
-
-
-class ModelProviderTimeoutError(ModelProviderError):
-    pass
 
 
 class Reranker(Protocol):
@@ -139,20 +128,6 @@ def _model_provider_error(exc: Exception) -> ModelProviderError:
     if status_code is not None:
         return ModelProviderStatusError(status_code)
     return ModelProviderError("Model request failed.")
-
-
-@dataclass(frozen=True)
-class ModelToolCall:
-    id: str
-    name: str
-    arguments: str
-
-
-@dataclass(frozen=True)
-class ModelCompletion:
-    content: str
-    tool_calls: tuple[ModelToolCall, ...]
-    finish_reason: str
 
 
 def openai_compatible_base(api_base: str) -> str:

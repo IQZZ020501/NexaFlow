@@ -35,8 +35,8 @@ from app.infra.observability.system_log import record_system_log
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderTimeoutError,
-    RegisteredModel,
 )
+from app.domain.models.registered import RegisteredModel
 from app.ports.model_registry import get_registered_model_by_id
 from app.schemas.workflows.contracts import LlmNodeConfig, RerankerNodeConfig, WorkflowGraph
 from app.domain.agents.models import (
