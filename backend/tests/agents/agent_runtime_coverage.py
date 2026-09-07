@@ -43,7 +43,7 @@ from app.application.agents.runs import executor as agent_executor
 from app.application.agents.runs import memory as agent_memory
 from app.application.agents.runs import service as agent_runs
 from app.application.agents.tools import builder as agent_tools
-from app.adapters.tools import runtime as tool_adapters
+from app.application.tools.runtime.adapters import mcp as tool_adapters
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentRun, AgentToolCall
 from app.entities.knowledge import KnowledgeBase

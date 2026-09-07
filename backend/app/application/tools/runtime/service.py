@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.tools.runtime import build_tool_adapter
+from app.application.tools.runtime.adapters import build_tool_adapter
 from app.entities.tools import ToolInvocation, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.entities.defaults import utc_now

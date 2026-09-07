@@ -842,7 +842,7 @@ def test_pptx_argument_normalization_keeps_model_theme() -> None:
 
 
 def test_artifact_generator_preflight_is_actionable() -> None:
-    from app.adapters.tools.runtime import _artifact_code_preflight
+    from app.application.tools.runtime.adapters._common import _artifact_code_preflight
 
     reportlab = _artifact_code_preflight("import reportlab", "pdf")
     assert reportlab is not None
@@ -5269,7 +5269,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     from unittest.mock import AsyncMock, patch
     from zipfile import ZIP_DEFLATED, ZipFile
 
-    from app.adapters.tools.runtime import (
+    from app.application.tools.runtime.adapters import (
         BuiltinToolAdapter,
         McpToolAdapter,
         PythonToolAdapter,
@@ -5374,7 +5374,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     )
     artifact_content = b"<html><body>ready</body></html>"
     with patch(
-        "app.adapters.tools.runtime.execute_artifact_code",
+        "app.application.tools.runtime.adapters.builtin.execute_artifact_code",
         new=AsyncMock(
             return_value=ArtifactSandboxResult(
                 content=artifact_content,
@@ -5405,7 +5405,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert artifact_sandbox.await_count == 1
     assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
     assert artifact_sandbox.await_args.args[4] == ["documents"]
-    from app.adapters.tools.runtime import _redirect_legacy_artifact_path
+    from app.application.tools.runtime.adapters._common import _redirect_legacy_artifact_path
 
     legacy_code = 'document.save("/tmp/report.docx")'
     assert _redirect_legacy_artifact_path(legacy_code, "report.docx") == (
@@ -5423,7 +5423,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         execution_spec=skill_version.execution_spec,
     )
     with patch(
-        "app.adapters.tools.runtime.execute_skill_artifact",
+        "app.application.tools.runtime.adapters.builtin.execute_skill_artifact",
         new=AsyncMock(
             return_value=ArtifactSandboxResult(
                 content=docx_bytes.getvalue(),
@@ -5458,7 +5458,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         "skill-report.docx",
     )
     with patch(
-        "app.adapters.tools.runtime.execute_artifact_code",
+        "app.application.tools.runtime.adapters.builtin.execute_artifact_code",
         new=AsyncMock(
             return_value=ArtifactSandboxResult(
                 content=docx_bytes.getvalue(),
@@ -5487,7 +5487,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert docx_sandbox.await_args.args[1] == "document.save(output_path)"
     direct_content = "output_path = 'literal text'\n"
     with patch(
-        "app.adapters.tools.runtime.execute_artifact_code",
+        "app.application.tools.runtime.adapters.builtin.execute_artifact_code",
         new=AsyncMock(),
     ) as artifact_sandbox:
         direct_result = await builtin.invoke(
@@ -5525,7 +5525,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert "mime_type" not in legacy_result.data
     validate_tool_output(legacy_snapshot, legacy_result.data)
     with patch(
-        "app.adapters.tools.runtime.execute_artifact_code",
+        "app.application.tools.runtime.adapters.builtin.execute_artifact_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("NameError: missing value")),
     ):
         result = await builtin.invoke(
@@ -5559,7 +5559,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         execution_spec={"builtin": "inline_python"},
     )
     with patch(
-        "app.adapters.tools.runtime.execute_workflow_code",
+        "app.application.tools.runtime.adapters.builtin.execute_workflow_code",
         new=AsyncMock(
             return_value=WorkflowSandboxResult(
                 result={"result": 42},
@@ -5580,7 +5580,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert sandbox.await_count == 1
     # Inline Python busy (tool_adapters.py:55-56).
     with patch(
-        "app.adapters.tools.runtime.execute_workflow_code",
+        "app.application.tools.runtime.adapters.builtin.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
     ):
         try:
@@ -5595,7 +5595,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
             raise AssertionError("A busy sandbox must raise ToolAdapterBusy.")
     # Inline Python failure (tool_adapters.py:57-58).
     with patch(
-        "app.adapters.tools.runtime.execute_workflow_code",
+        "app.application.tools.runtime.adapters.builtin.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("failed")),
     ):
         result = await builtin.invoke(
@@ -5616,7 +5616,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.error_code == "invalid_python_tool"
     # Python adapter happy path (tool_adapters.py:86-87, 95-103).
     with patch(
-        "app.adapters.tools.runtime.execute_workflow_code",
+        "app.application.tools.runtime.adapters.python_tool.execute_workflow_code",
         new=AsyncMock(
             return_value=WorkflowSandboxResult(
                 result={"value": "NEXA"},
@@ -5632,7 +5632,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.usage == {"exit_code": 0}
     # Python adapter busy (tool_adapters.py:88-89).
     with patch(
-        "app.adapters.tools.runtime.execute_workflow_code",
+        "app.application.tools.runtime.adapters.python_tool.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
     ):
         try:
@@ -5643,7 +5643,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
             raise AssertionError("A busy sandbox must raise ToolAdapterBusy.")
     # Python adapter failure (tool_adapters.py:90-94).
     with patch(
-        "app.adapters.tools.runtime.execute_workflow_code",
+        "app.application.tools.runtime.adapters.python_tool.execute_workflow_code",
         new=AsyncMock(side_effect=WorkflowSandboxError("failed")),
     ):
         result = await python.invoke(python_snapshot, {"value": "nexa"}, context)
@@ -5660,7 +5660,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.error_code == "invalid_mcp_tool"
     # MCP adapter happy path (tool_adapters.py:123-129, 141-145, 145-153).
     with patch(
-        "app.adapters.tools.runtime.call_mcp_tool",
+        "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
         new=AsyncMock(return_value=('{"ok": true}', False)),
     ) as call:
         result = await mcp.invoke(mcp_snapshot, {}, context)
@@ -5669,7 +5669,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert call.await_count == 1
     # MCP adapter non-JSON error content (tool_adapters.py:142-144, 147-150).
     with patch(
-        "app.adapters.tools.runtime.call_mcp_tool",
+        "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
         new=AsyncMock(return_value=("plain failure", True)),
     ):
         result = await mcp.invoke(mcp_snapshot, {}, context)
@@ -5678,7 +5678,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert result.data == "plain failure"
     # MCP adapter client error, confirmed outcome (tool_adapters.py:130-140).
     with patch(
-        "app.adapters.tools.runtime.call_mcp_tool",
+        "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
         new=AsyncMock(side_effect=McpClientError("boom")),
     ):
         result = await mcp.invoke(mcp_snapshot, {}, context)
@@ -5688,7 +5688,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     # MCP adapter client error, uncertain outcome (tool_adapters.py:131, 138).
     uncertain_mcp = dataclasses.replace(mcp_snapshot, effect="external_write")
     with patch(
-        "app.adapters.tools.runtime.call_mcp_tool",
+        "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
         new=AsyncMock(side_effect=McpClientError("boom")),
     ):
         result = await mcp.invoke(uncertain_mcp, {}, context)
@@ -5752,7 +5752,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert "syntax error" in result.error_message
     # Artifact sandbox busy (tool_adapters.py:240-241).
     with patch(
-        "app.adapters.tools.runtime.execute_artifact_code",
+        "app.application.tools.runtime.adapters.builtin.execute_artifact_code",
         new=AsyncMock(side_effect=WorkflowSandboxBusyError("busy")),
     ):
         try:

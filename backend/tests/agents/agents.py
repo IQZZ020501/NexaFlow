@@ -33,7 +33,7 @@ from app.application.agents.runs import memory as agent_memory
 from app.application.agents.runs import service as agent_runs
 from app.application.agents.tools import builder as agent_tools
 from app.application import agents as agent_application
-from app.adapters.tools import runtime as tool_adapters
+from app.application.tools.runtime.adapters import mcp as tool_adapters
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
