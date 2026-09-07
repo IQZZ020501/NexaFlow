@@ -21,12 +21,7 @@ from app.infra.storage.object_storage import (
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.ports.parsing import (
-    ImageTextExtractor,
-    KnowledgePipelineError,
-    PLAIN_TEXT_DOCUMENT_EXTENSIONS,
-    build_document_parser,
-)
+
 from app.ports.llm import (
     VISION_MODEL_REQUIRED_MESSAGE,
     extract_image_text,
@@ -46,6 +41,12 @@ if TYPE_CHECKING:
     from app.application.agents.access.service import PublishedAgentContext
 
 UPLOAD_CHUNK_BYTES = 1024 * 1024
+from app.domain.knowledge.documents.parsing import (
+    ImageTextExtractor,
+    KnowledgePipelineError,
+    PLAIN_TEXT_DOCUMENT_EXTENSIONS,
+    extract_document,
+)
 MAX_WORKFLOW_UPLOAD_BYTES = MAX_DOCUMENT_UPLOAD_BYTES
 MAX_WORKFLOW_UPLOAD_FILES = 10
 UPLOAD_EXTENSIONS = {
@@ -436,7 +437,6 @@ async def _resolve_workflow_files(
     contents: dict[str, str] = {}
     if extract_text:
         storage = create_object_storage(settings.knowledge_storage_dir)
-        parser = build_document_parser()
         image_text_extractor = (
             await _vision_text_extractor(db, agent.workspace_id, settings)
             if any(item.category == "image" for item in ordered)
@@ -448,7 +448,7 @@ async def _resolve_workflow_files(
         try:
             for item in ordered:
                 extracted, _assets = await asyncio.to_thread(
-                    parser.extract,
+                    extract_document,
                     item.filename,
                     item.content_type,
                     storage.path(item.object_key),
@@ -547,7 +547,6 @@ async def _resolve_agent_file_text(
     _validate_upload_policy(ordered, config, "agent")
 
     storage = create_object_storage(settings.knowledge_storage_dir)
-    parser = build_document_parser()
     image_text_extractor = (
         await _vision_text_extractor(db, agent.workspace_id, settings)
         if any(item.category == "image" for item in ordered)
@@ -558,7 +557,7 @@ async def _resolve_agent_file_text(
     try:
         for item in ordered:
             extracted, _assets = await asyncio.to_thread(
-                parser.extract,
+                extract_document,
                 item.filename,
                 item.content_type,
                 storage.path(item.object_key),

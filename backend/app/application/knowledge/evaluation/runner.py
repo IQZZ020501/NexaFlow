@@ -27,7 +27,6 @@ from app.infra.db.repositories.knowledge import repository as knowledge_reposito
 from app.infra.db.repositories.knowledge import (
     evaluation as evaluation_repository,
 )
-from app.ports.parsing import KnowledgePipelineError
 from app.schemas.knowledge import (
     KnowledgeEvaluationResultResponse,
     KnowledgeEvaluationRunRequest,
@@ -50,6 +49,9 @@ from app.domain.knowledge.tasks.runner import (
 )
 
 
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
+)
 async def _persist_owned_progress(
     db: AsyncSession,
     task: KnowledgeTask,

@@ -32,7 +32,7 @@ from app.application.models.registry import (
     normalize_url_credential,
     validate_status,
 )
-from app.adapters.rag.retrieval import (
+from app.domain.knowledge.retrieval import (
     MAX_PARENT_CONTEXT_CHARS,
     RankedHit,
     bounded_text_chunks,
@@ -108,6 +108,9 @@ from app.entities.resource_folders.models import ResourceFolder
 
 
 
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
+)
 def expect_http_error(callback, status_code: int) -> None:
     try:
         callback()
@@ -1176,7 +1179,7 @@ def test_parse_task_options_validates_boundaries() -> None:
     )
 
 def test_markdown_tables_split_only_between_rows_and_repeat_headers() -> None:
-    from app.adapters.parsing.pipeline import split_text
+    from app.domain.knowledge.documents.parsing import split_text
 
     header = "| Name | Description |"
     alignment = "| --- | --- |"
@@ -1195,7 +1198,7 @@ def test_markdown_tables_split_only_between_rows_and_repeat_headers() -> None:
     assert all(row not in "\n".join(chunks[index + 1 :]) for index, row in enumerate(rows))
 
 def test_markdown_table_keeps_single_overlong_row_intact() -> None:
-    from app.adapters.parsing.pipeline import split_text
+    from app.domain.knowledge.documents.parsing import split_text
 
     long_cell = "word " * 30
     row = f"| 1 | {long_cell.strip()} |"
@@ -1207,7 +1210,7 @@ def test_markdown_table_keeps_single_overlong_row_intact() -> None:
     assert row in chunks[0]
 
 def test_markdown_table_rules_apply_to_parent_and_child_chunks() -> None:
-    from app.adapters.parsing.pipeline import (
+    from app.domain.knowledge.documents.parsing import (
         build_hierarchical_chunks,
         split_parent_chunks,
     )
@@ -1232,7 +1235,7 @@ def test_markdown_table_rules_apply_to_parent_and_child_chunks() -> None:
     )
 
 def test_plain_legal_headings_keep_chapters_in_separate_parents() -> None:
-    from app.adapters.parsing.pipeline import split_parent_chunks
+    from app.domain.knowledge.documents.parsing import split_parent_chunks
 
     text = (
         "第一章 总则\n第一条 说明。\n"
@@ -1386,7 +1389,7 @@ def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.adapters.parsing import pipeline
+    from app.domain.knowledge.documents import parsing as pipeline
 
     images = [
         SimpleNamespace(
@@ -1448,7 +1451,7 @@ def test_docx_image_mime_cannot_shape_asset_paths() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.adapters.parsing import pipeline
+    from app.domain.knowledge.documents import parsing as pipeline
 
     image = SimpleNamespace(
         content_type="image/../../../../other-document/asset",
@@ -1490,7 +1493,7 @@ def test_archive_limits_run_before_document_conversion() -> None:
     from unittest.mock import patch
     from zipfile import ZIP_DEFLATED, ZipFile
 
-    from app.adapters.parsing import pipeline
+    from app.domain.knowledge.documents import parsing as pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "expanded.zip"
@@ -1515,7 +1518,7 @@ def test_supported_document_formats_are_accepted() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.adapters.parsing import pipeline
+    from app.domain.knowledge.documents import parsing as pipeline
 
     expected_extensions = {
         ".c",
@@ -1611,7 +1614,7 @@ def test_pdf_documents_extract_only_the_text_layer() -> None:
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    from app.adapters.parsing import pipeline
+    from app.domain.knowledge.documents import parsing as pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.pdf"
@@ -1649,7 +1652,7 @@ def test_image_documents_use_the_configured_vision_extractor() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
 
-    from app.adapters.parsing import pipeline
+    from app.domain.knowledge.documents import parsing as pipeline
 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "通知.png"
@@ -1948,7 +1951,6 @@ def test_retrieval_evaluation_metrics_are_deterministic() -> None:
 def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None:
     from app.application.knowledge.evaluation import runner as evaluation_application
     from app.entities.knowledge import KnowledgeTask
-    from app.ports.parsing import KnowledgePipelineError
     from app.schemas.knowledge import KnowledgeEvaluationRunRequest
     from app.domain.knowledge.evaluation import service as evaluation_service
 
@@ -2693,8 +2695,8 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
     from openpyxl import Workbook
     from openpyxl.chart import BarChart, Reference
 
-    from app.adapters.parsing.pipeline import KnowledgePipelineError
-    from app.adapters.parsing.qa_import import (
+    from app.domain.knowledge.documents.parsing import KnowledgePipelineError
+    from app.domain.knowledge.documents.qa_import import (
         QaRow,
         extract_qa_rows,
         validate_qa_rows,
@@ -2745,7 +2747,7 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
 
         empty_workbook = SimpleNamespace(worksheets=[], close=lambda: None)
         with patch(
-            "app.adapters.parsing.qa_import.load_workbook",
+            "app.domain.knowledge.documents.qa_import.load_workbook",
             return_value=empty_workbook,
         ):
             try:

@@ -37,7 +37,7 @@ from app.ports.llm import (
     ModelProviderTimeoutError,
 )
 from app.domain.models.registered import RegisteredModel
-from app.ports.model_registry import get_registered_model_by_id
+from app.infra.db.repositories.models.registry import get_registered_model_by_id
 from app.schemas.workflows.contracts import LlmNodeConfig, RerankerNodeConfig, WorkflowGraph
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,

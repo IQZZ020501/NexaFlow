@@ -6,9 +6,9 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 
 from app.domain.models.registered import RegisteredModel
-from app.adapters.llm.runtime import ModelProviderError, build_registered_reranker
+from app.ports.llm import ModelProviderError, build_reranker
 from app.infra.config.settings import Settings
-from app.adapters.rag.vector_store import VectorHit
+from app.ports.vector_store import VectorHit
 
 QUERY_OVERFETCH_FACTOR = 5
 RRF_K = 60
@@ -238,7 +238,7 @@ async def rerank_child_hits(
     candidates = hits[:MAX_RERANK_CHILDREN]
     try:
         results = await asyncio.to_thread(
-            build_registered_reranker(reranker_model, settings).rerank,
+            build_reranker(settings, reranker_model).rerank,
             query,
             [chunk.content for chunk, _ in candidates],
         )

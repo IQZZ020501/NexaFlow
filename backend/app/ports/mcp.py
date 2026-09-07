@@ -87,16 +87,8 @@ def build_mcp_client(settings: Settings) -> McpClient:
 async def discover_mcp_tools(
     connection: McpConnection,
     settings: Settings,
-    *,
-    mcp_allowed_private_networks: bool = False,
 ) -> McpDiscovery:
-    from app.adapters.mcp.client import discover_mcp_tools as _discover
-
-    return await _discover(
-        connection,
-        settings,
-        mcp_allowed_private_networks=mcp_allowed_private_networks,
-    )
+    return await build_mcp_client(settings).discover_mcp_tools(connection)
 
 
 async def call_mcp_tool(
@@ -104,17 +96,13 @@ async def call_mcp_tool(
     settings: Settings,
     tool_name: str,
     arguments: dict[str, Any],
-    *,
     idempotency_key: str | None = None,
 ) -> tuple[str, bool]:
-    from app.adapters.mcp.client import call_mcp_tool as _call
-
-    return await _call(
+    return await build_mcp_client(settings).call_mcp_tool(
         connection,
-        settings,
         tool_name,
         arguments,
-        idempotency_key=idempotency_key,
+        idempotency_key,
     )
 
 

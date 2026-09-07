@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import json
 from collections.abc import AsyncIterator, Iterator
@@ -43,7 +45,10 @@ from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     legacy_credential_config,
 )
-from app.domain.models.registered import RegisteredModel
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.domain.models.registered import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import ExternalServiceError, log_error
 from app.ports.llm import (

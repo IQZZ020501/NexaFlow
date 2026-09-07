@@ -23,7 +23,7 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.ports import model_registry
+from app.infra.db.repositories.models import registry as model_registry
 from app.domain.knowledge.service import delete_workspace_knowledge_bases
 from app.domain.tools.catalog.service import (
     ensure_workspace_system_catalog,

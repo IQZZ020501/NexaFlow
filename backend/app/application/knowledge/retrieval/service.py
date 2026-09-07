@@ -8,7 +8,7 @@ from typing import Literal, cast
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.rag.retrieval import (
+from app.domain.knowledge.retrieval import (
     MAX_EVIDENCE_CONTENT_CHARS,
     MAX_RERANK_CHILDREN,
     QUERY_OVERFETCH_FACTOR,

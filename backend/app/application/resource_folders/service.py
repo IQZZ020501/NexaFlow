@@ -6,7 +6,7 @@ from app.entities.resource_folders.models import ResourceFolder
 from app.entities.identity.user import User
 from app.infra.db.repositories.resource_folders import repository as repository
 from app.infra.runtime.validation import normalize_name
-from app.ports import model_registry
+from app.infra.db.repositories.models import registry as model_registry
 from app.schemas.resource_folders.contracts import (
     ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,

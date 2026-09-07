@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.registered import RegisteredModel
-from app.ports import model_registry as model_repository
+from app.infra.db.repositories.models import registry as model_repository
 from app.adapters.llm.credentials import legacy_credential_config
 from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.application.models.registry import (

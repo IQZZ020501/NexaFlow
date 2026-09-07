@@ -18,7 +18,7 @@ from app.infra.config.settings import Settings
 from app.entities.defaults import APP_TIMEZONE, utc_now
 from app.infra.db.session import get_session_factory
 from app.ports.mcp import McpClientError, call_mcp_tool
-from app.ports.tool_runtime import (
+from app.application.tools.runtime.contracts import (
     ToolAdapter,
     ToolAdapterBusy,
     ToolInvocationContext,

@@ -43,12 +43,7 @@ from app.entities.knowledge import (
     KnowledgeDocument,
     KnowledgeTask,
 )
-from app.ports.parsing import (
-    EMBED_BATCH_SIZE,
-    IMAGE_DOCUMENT_EXTENSIONS,
-    KnowledgePipelineError,
-    SEGMENTATION_VERSION,
-)
+
 from app.ports.vector_store import (
     VectorChunk,
     delete_vectors,
@@ -74,6 +69,12 @@ from app.domain.knowledge.service import (
 from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
+from app.domain.knowledge.documents.parsing import (
+    EMBED_BATCH_SIZE,
+    IMAGE_DOCUMENT_EXTENSIONS,
+    KnowledgePipelineError,
+    SEGMENTATION_VERSION,
+)
 logger = get_logger(__name__)
 
 TASK_LEASE_SECONDS = 300

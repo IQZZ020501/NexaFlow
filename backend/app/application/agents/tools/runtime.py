@@ -17,7 +17,7 @@ from app.entities.tools import ToolSnapshot
 from app.infra.config.settings import Settings
 from app.entities.defaults import utc_now
 from app.infra.db.session import get_session_factory
-from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
+from app.application.tools.runtime.contracts import ToolInvocationContext, ToolRuntimeResult
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,

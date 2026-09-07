@@ -70,9 +70,9 @@ from app.api.v1.knowledge import lifecycle as knowledge_lifecycle_api
 from app.api.v1.knowledge import retrieval as knowledge_retrieval_api
 from app.application.knowledge.documents import service as knowledge_application
 from app.application.knowledge.retrieval import service as knowledge_retrieval_application
-from app.adapters.rag import retrieval as knowledge_retrieval
+from app.domain.knowledge import retrieval as knowledge_retrieval
 from app.adapters.rag import vector_store as knowledge_vector_store
-from app.adapters.parsing import pipeline as knowledge_pipeline
+from app.domain.knowledge.documents import parsing as knowledge_pipeline
 from app.adapters.llm.runtime import ModelProviderError
 from app.adapters.rag.vector_store import VectorChunk, VectorHit
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
@@ -1062,7 +1062,7 @@ def test_rerank_child_hits_edge_paths() -> None:
 
         with patch.object(
             knowledge_retrieval,
-            "build_registered_reranker",
+            "build_reranker",
             return_value=ExplodingReranker(),
         ):
             assert (
@@ -1086,7 +1086,7 @@ def test_rerank_child_hits_edge_paths() -> None:
 
         with patch.object(
             knowledge_retrieval,
-            "build_registered_reranker",
+            "build_reranker",
             return_value=MixedReranker(),
         ):
             ordered = await knowledge_retrieval.rerank_child_hits(
@@ -1107,7 +1107,7 @@ def test_rerank_child_hits_edge_paths() -> None:
 
         with patch.object(
             knowledge_retrieval,
-            "build_registered_reranker",
+            "build_reranker",
             return_value=GarbageReranker(),
         ):
             assert (

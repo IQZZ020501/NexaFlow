@@ -13,7 +13,7 @@ from app.infra.config.settings import Settings
 from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.tools.dispatch import enqueue_tool_invocation
-from app.ports.tool_runtime import ToolInvocationContext
+from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.schemas.tools.mcp import McpServerCreateRequest, McpServerResponse
 from app.schemas.tools.contracts import (
     PythonToolCreateRequest,

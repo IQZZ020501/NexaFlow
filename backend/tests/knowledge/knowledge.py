@@ -37,9 +37,9 @@ from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
 from app.application.knowledge.documents import service as knowledge_application
 from app.application.knowledge.evaluation import runner as knowledge_evaluation_application
 from app.application.knowledge.retrieval import service as knowledge_retrieval_application
-from app.adapters.rag import retrieval as knowledge_retrieval
+from app.domain.knowledge import retrieval as knowledge_retrieval
 from app.adapters.rag import vector_store as knowledge_vector_store
-from app.adapters.parsing.pipeline import (
+from app.domain.knowledge.documents.parsing import (
     KnowledgePipelineError,
     build_hierarchical_chunks,
     clean_text,

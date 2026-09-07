@@ -38,6 +38,9 @@ WORKFLOW_DEFINITION_ID = ""
 # ---------------------------------------------------------------------------
 
 
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
+)
 class _FakeLlmMessage:
     def __init__(
         self,
@@ -2237,7 +2240,6 @@ def test_workflow_uploads_resolve_branches() -> None:
             image_text_extractor=None,
         ):
             if self.error:
-                from app.ports.parsing import KnowledgePipelineError
 
                 raise KnowledgePipelineError("cannot parse")
             return self.text, []

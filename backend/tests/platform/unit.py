@@ -32,7 +32,7 @@ from app.application.models.registry import (
     normalize_url_credential,
     validate_status,
 )
-from app.adapters.rag.retrieval import (
+from app.domain.knowledge.retrieval import (
     MAX_PARENT_CONTEXT_CHARS,
     RankedHit,
     bounded_text_chunks,

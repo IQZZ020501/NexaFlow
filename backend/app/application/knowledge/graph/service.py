@@ -35,7 +35,6 @@ from app.infra.observability.logger import get_logger
 from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
-from app.ports.parsing import chunk_token_count
 from app.schemas.knowledge import KnowledgeQueryRequest, KnowledgeTaskResponse
 from app.schemas.knowledge.graph import (
     KnowledgeGraphClaimResponse,
@@ -79,6 +78,9 @@ from app.domain.knowledge.graph.schema import (
 )
 from app.domain.knowledge.graph.services import create_graph_schema
 
+from app.domain.knowledge.documents.parsing import (
+    chunk_token_count,
+)
 MAX_GRAPH_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_GRAPH_IMPORT_RECORDS = 5_000
 # ponytail: render a bounded overview; add server-side clustering when larger graphs need it.

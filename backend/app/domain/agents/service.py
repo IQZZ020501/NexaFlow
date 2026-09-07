@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.registered import RegisteredModel
-from app.ports import model_registry as model_repository
+from app.infra.db.repositories.models import registry as model_repository
 from app.entities.agents import Agent, AgentPublicationVersion
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.workflows import WorkflowDefinition

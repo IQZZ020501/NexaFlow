@@ -12,7 +12,7 @@ from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.ports.model_registry import get_registered_model_by_id
+from app.infra.db.repositories.models.registry import get_registered_model_by_id
 from app.schemas.workflows.contracts import (
     KnowledgeNodeConfig,
     LlmNodeConfig,

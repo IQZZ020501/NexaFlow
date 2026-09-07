@@ -16,7 +16,7 @@ from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.db.session import get_session_factory
-from app.ports.tool_runtime import (
+from app.application.tools.runtime.contracts import (
     ToolAdapter,
     ToolAdapterBusy,
     ToolInvocationContext,

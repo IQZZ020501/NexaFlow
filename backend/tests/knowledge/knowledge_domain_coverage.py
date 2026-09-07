@@ -92,7 +92,7 @@ from app.schemas.knowledge import (
     KnowledgeDocumentParseRequest,
     KnowledgeModelTestRequest,
 )
-from app.adapters.parsing.pipeline import (
+from app.domain.knowledge.documents.parsing import (
     ChildChunkDraft,
     DocumentAssetDraft,
     DocumentChunkDrafts,

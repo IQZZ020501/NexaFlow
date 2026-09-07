@@ -5057,7 +5057,7 @@ async def assert_agent_tool_runtime_paths(
     import dataclasses as dc
 
     from app.application.agents.tools import runtime as atr
-    from app.ports.tool_runtime import ToolRuntimeResult
+    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.domain.agents.runtime import (
         AgentExecutionPaused,
         AgentRunnerError,

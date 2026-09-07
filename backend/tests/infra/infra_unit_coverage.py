@@ -68,7 +68,7 @@ from app.infra.db.repositories.workspaces import resource_permissions as rp_repo
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infra.db.session import get_session_factory
 from app.ports import mcp as ports_mcp
-from app.ports import model_registry as ports_model_registry
+from app.infra.db.repositories.models import registry as ports_model_registry
 from app.schemas.tools.mcp import McpServerCreateRequest
 from app.schemas.models.contracts import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
 from app.schemas.teams.contracts import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
@@ -3184,12 +3184,6 @@ def test_ports_mcp() -> None:
         fake.call_mcp_tool.assert_awaited_once_with(connection, "echo", {}, "idem")
 
 
-def test_ports_model_registry_build() -> None:
-    assert ports_model_registry.build_model_registry() is llm_registry_repository
-
-
-# ================================================================ tools/services
-
 
 def _mcp_tool_dict(name="echo", description="Echo tool", schema=None):
     return {
@@ -5084,7 +5078,6 @@ def main() -> None:
 
     test_deps()
     test_ports_mcp()
-    test_ports_model_registry_build()
 
     test_mcp_tool_hash_and_policy_mode()
     test_mcp_server_to_response()

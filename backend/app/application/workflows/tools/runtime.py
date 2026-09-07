@@ -18,7 +18,7 @@ from app.entities.workflows import WorkflowRunDetail
 from app.infra.config.settings import Settings
 from app.entities.defaults import utc_now
 from app.infra.db.session import get_session_factory
-from app.ports.tool_runtime import ToolInvocationContext
+from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.domain.agents.runtime import AgentToolResult
 from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
 

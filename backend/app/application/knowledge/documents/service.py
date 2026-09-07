@@ -27,7 +27,6 @@ from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
-from app.ports.parsing import IMAGE_DOCUMENT_EXTENSIONS
 from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
 from app.domain.knowledge.documents.lifecycle import (
     delete_knowledge_document as delete_knowledge_document_record,
@@ -87,6 +86,9 @@ from app.domain.knowledge.service import (
 
 import asyncio
 
+from app.domain.knowledge.documents.parsing import (
+    IMAGE_DOCUMENT_EXTENSIONS,
+)
 logger = get_logger(__name__)
 
 from app.domain.knowledge.storage.cleanup import run_knowledge_storage_cleanup

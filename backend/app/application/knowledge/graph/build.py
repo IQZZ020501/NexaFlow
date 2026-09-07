@@ -46,7 +46,6 @@ from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.knowledge import references as reference_repository
-from app.ports.parsing import KnowledgePipelineError
 from app.ports.vector_store import (
     GraphProfileVector,
     delete_graph_profile_collection,
@@ -103,6 +102,9 @@ GRAPH_BUILD_STAGES = (
     "publish",
 )
 
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
+)
 logger = get_logger(__name__)
 
 

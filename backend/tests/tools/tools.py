@@ -3199,7 +3199,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
     from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.ports.tool_runtime import (
+    from app.application.tools.runtime.contracts import (
         ToolAdapterBusy,
         ToolInvocationContext,
         ToolRuntimeResult,
@@ -3601,7 +3601,7 @@ async def assert_python_tool_lifecycle(workspace_id: str) -> None:
     from app.entities.defaults import utc_now
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
+    from app.application.tools.runtime.contracts import ToolInvocationContext, ToolRuntimeResult
     from app.domain.tools.python.service import (
         build_python_test_snapshot,
         create_python_tool,
@@ -3741,7 +3741,7 @@ async def assert_tool_runtime_edge_branches(
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.ports.tool_runtime import ToolInvocationContext, ToolRuntimeResult
+    from app.application.tools.runtime.contracts import ToolInvocationContext, ToolRuntimeResult
     from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
     from app.domain.tools.runtime import (
         TOOL_APPROVAL_EACH_CALL,
@@ -4857,7 +4857,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
-    from app.ports.tool_runtime import ToolRuntimeResult
+    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.domain.tools.runtime import (
         TOOL_APPROVAL_EACH_CALL,
         build_tool_snapshot,
@@ -5288,7 +5288,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.ports.mcp import McpClientError
-    from app.ports.tool_runtime import ToolAdapterBusy, ToolInvocationContext
+    from app.application.tools.runtime.contracts import ToolAdapterBusy, ToolInvocationContext
     from app.domain.tools.catalog.service import (
         build_artifact_tool,
         build_skill_artifact_tool,

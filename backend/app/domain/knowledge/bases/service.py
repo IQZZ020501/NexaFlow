@@ -13,7 +13,7 @@ from app.infra.db.repositories.knowledge import repository as knowledge_base_rep
 from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.runtime.validation import normalize_name
-from app.ports import model_registry as model_repository
+from app.infra.db.repositories.models import registry as model_repository
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderStatusError,

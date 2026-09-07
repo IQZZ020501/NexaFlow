@@ -55,22 +55,7 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.knowledge.graph import GRAPH_REVISION_FAILED
-from app.ports.parsing import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
-    ChildChunkDraft,
-    DocumentChunkDrafts,
-    KnowledgePipelineError,
-    NORMALIZED_TEXT_VERSION,
-    SPLIT_SEPARATORS,
-    build_flat_chunks,
-    build_hierarchical_chunks,
-    chunk_token_count,
-    clean_text,
-    extract_document,
-    extract_qa_rows,
-    split_text,
-)
+
 from app.ports.vector_store import delete_vectors
 from app.schemas.knowledge import (
     KnowledgeAssetResponse,
@@ -90,6 +75,24 @@ from app.domain.knowledge.service import (
 )
 from app.ports.llm import extract_image_text
 
+from app.domain.knowledge.documents.parsing import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    ChildChunkDraft,
+    DocumentChunkDrafts,
+    KnowledgePipelineError,
+    NORMALIZED_TEXT_VERSION,
+    SPLIT_SEPARATORS,
+    build_flat_chunks,
+    build_hierarchical_chunks,
+    chunk_token_count,
+    clean_text,
+    extract_document,
+    split_text,
+)
+from app.domain.knowledge.documents.qa_import import (
+    extract_qa_rows,
+)
 logger = get_logger(__name__)
 
 MAX_TASK_ATTEMPTS = 3

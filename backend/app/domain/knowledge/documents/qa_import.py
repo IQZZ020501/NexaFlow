@@ -7,7 +7,7 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from app.adapters.parsing.pipeline import KnowledgePipelineError
+from app.domain.knowledge.documents.parsing import KnowledgePipelineError
 
 MAX_QA_ROWS = 5_000
 MAX_QA_QUESTION_CHARS = 2_000

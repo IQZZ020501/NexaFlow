@@ -32,7 +32,7 @@ from app.application.models.registry import (
     normalize_url_credential,
     validate_status,
 )
-from app.adapters.rag.retrieval import (
+from app.domain.knowledge.retrieval import (
     MAX_PARENT_CONTEXT_CHARS,
     RankedHit,
     bounded_text_chunks,
@@ -371,7 +371,7 @@ def test_tool_contracts_deep_freeze_nested_json() -> None:
     from operator import setitem
 
     from app.entities.tools import ToolSnapshot, validate_tool_json_schema
-    from app.ports.tool_runtime import ToolRuntimeResult
+    from app.application.tools.runtime.contracts import ToolRuntimeResult
 
     input_schema = {
         "type": "object",
@@ -517,7 +517,7 @@ def test_tool_adapter_contract_is_provider_neutral() -> None:
     from datetime import datetime, timezone
 
     from app.entities.tools import ToolSnapshot
-    from app.ports.tool_runtime import (
+    from app.application.tools.runtime.contracts import (
         ToolAdapter,
         ToolInvocationContext,
         ToolRuntimeResult,
@@ -635,7 +635,7 @@ def test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope() -> No
         agent_tool_invocation_identity,
         tool_runtime_result_to_agent_result,
     )
-    from app.ports.tool_runtime import ToolRuntimeResult
+    from app.application.tools.runtime.contracts import ToolRuntimeResult
 
     invocation_id, idempotency_key = agent_tool_invocation_identity(
         "run-1",
