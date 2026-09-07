@@ -45,7 +45,8 @@ from app.application.agents.runs import service as agent_runs
 from app.application.agents.tools import builder as agent_tools
 from app.application.tools.runtime.adapters import mcp as tool_adapters
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
-from app.entities.agents import Agent, AgentRun, AgentToolCall
+from app.entities.agents import Agent, AgentToolCall
+from app.entities.runs import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
 from app.infra.agents import live_stream as live_stream_module

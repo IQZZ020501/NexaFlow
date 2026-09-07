@@ -23,7 +23,7 @@ from app.application.agents.tools.builder import (
     build_unified_agent_tool,
 )
 from app.application.workflows.tools.runtime import WorkflowToolRuntime
-from app.entities.agents import AgentRun
+from app.entities.runs import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings

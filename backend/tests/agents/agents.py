@@ -59,7 +59,8 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphPathStepResponse,
     KnowledgeGraphQueryResultResponse,
 )
-from app.entities.agents import AgentRun, AgentToolCall
+from app.entities.agents import AgentToolCall
+from app.entities.runs import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import ToolInvocation
 from app.entities.workflows import WorkflowUpload

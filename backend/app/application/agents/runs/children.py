@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agents.runs.service import prepare_agent_run
 from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.workspaces.service import build_workspace_context
-from app.entities.agents import AgentPublicationVersion, AgentRun
+from app.entities.agents import AgentPublicationVersion
+from app.entities.runs import AgentRun
 from app.entities.tools import ToolSnapshot
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings

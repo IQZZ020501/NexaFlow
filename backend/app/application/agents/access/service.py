@@ -31,6 +31,8 @@ from app.entities.agents import (
     Agent,
     AgentApiCredential,
     AgentPublicationVersion,
+)
+from app.entities.runs import (
     AgentRun,
 )
 from app.entities.identity.user import User

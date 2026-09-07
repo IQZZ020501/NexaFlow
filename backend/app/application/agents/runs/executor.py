@@ -28,7 +28,8 @@ from app.application.agents.tools.builder import (
 )
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.workspaces.service import build_workspace_context
-from app.entities.agents import AgentRun, AgentToolCall
+from app.entities.agents import AgentToolCall
+from app.entities.runs import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import McpToolPolicy, ToolSnapshot
 from app.entities.identity.user import User

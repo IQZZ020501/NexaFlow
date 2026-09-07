@@ -14,8 +14,8 @@ from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
 from app.entities.agents import (
     AgentPublicationVersion as AgentPublicationVersionEntity,
 )
-from app.entities.agents import AgentRun as AgentRunEntity
-from app.entities.agents import AgentRunEvent as AgentRunEventEntity
+from app.entities.runs import AgentRun as AgentRunEntity
+from app.entities.runs import AgentRunEvent as AgentRunEventEntity
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
 from app.entities.tools import ToolInvocation as ToolInvocationEntity
 from app.entities.defaults import utc_now

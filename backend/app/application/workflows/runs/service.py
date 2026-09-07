@@ -13,7 +13,7 @@ from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.agents.runs.children import preflight_workflow_agent_snapshots
 from app.application.agents.runs.service import cancel_run_tree, update_run_feedback
 from app.application.workflows.uploads.service import resolve_workspace_workflow_files
-from app.entities.agents import AgentRun
+from app.entities.runs import AgentRun
 from app.entities.identity.user import User
 from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
 from app.infra.agents.live_stream import (

@@ -4850,7 +4850,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     )
     from app.domain.models.registered import RegisteredModel
     from app.entities.agents import Agent as AgentEntity
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.config.settings import Settings
     from app.entities.defaults import utc_now

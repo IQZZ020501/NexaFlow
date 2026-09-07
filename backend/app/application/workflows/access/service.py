@@ -22,7 +22,7 @@ from app.application.workflows.uploads.service import (
     published_interaction_config,
     resolve_public_workflow_files,
 )
-from app.entities.agents import AgentRun
+from app.entities.runs import AgentRun
 from app.entities.identity.user import User
 from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,

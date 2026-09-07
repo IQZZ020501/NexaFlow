@@ -12,7 +12,7 @@ from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
 )
-from app.entities.agents import AgentRun
+from app.entities.runs import AgentRun
 from app.entities.tools import ToolSnapshot
 from app.entities.workflows import WorkflowRunDetail
 from app.infra.config.settings import Settings

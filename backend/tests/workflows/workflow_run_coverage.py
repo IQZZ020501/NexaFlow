@@ -853,7 +853,7 @@ def test_create_workflow_run_external_and_conflicts() -> None:
     from fastapi import HTTPException
 
     from app.application.workflows.runs.service import create_workflow_run
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
@@ -998,7 +998,7 @@ def test_resume_workflow_form_error_branches() -> None:
     from fastapi import HTTPException
 
     from app.application.workflows.runs.service import resume_workflow_form
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
@@ -1167,7 +1167,7 @@ def _collect_stream(
 
 
 def test_workflow_stream_branches() -> None:
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
@@ -2157,7 +2157,7 @@ def test_workflow_run_direct_api_functions() -> None:
         resume_workflow_form,
         submit_workflow_form,
     )
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository

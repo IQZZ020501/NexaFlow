@@ -167,7 +167,8 @@ def test_tool_ref_requires_stable_ids() -> None:
         raise AssertionError("ToolRef must be immutable.")
 
 def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
-    from app.entities.agents import AgentPublicationVersion, AgentRun
+    from app.entities.agents import AgentPublicationVersion
+    from app.entities.runs import AgentRun
     from app.entities.tools import ToolSnapshot
     from app.domain.agents.service import agent_publication_from_version
     from app.domain.agents.access.publications import (
@@ -1008,7 +1009,7 @@ def test_agent_event_replay_reads_every_page() -> None:
 
 def test_stale_mcp_policy_requires_approval() -> None:
     from app.application.agents.runs import executor as agent_executor
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.tools import McpToolPolicy
     from app.domain.agents.runtime import AgentExecutionPaused
 
@@ -1174,7 +1175,7 @@ def test_external_mcp_policy_public_reconciles_like_console() -> None:
 
 def test_external_mcp_policy_drift_requires_public_approval_but_blocks_api() -> None:
     from app.application.agents.runs import executor as agent_executor
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.tools import McpToolPolicy
 
     created_calls = []
@@ -1728,7 +1729,7 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
 def test_run_to_response_maps_run_fields() -> None:
     from app.application.agents.tools.builder import knowledge_source_ref, run_to_response
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
 
     run = AgentRun(
         id="run-1",
@@ -1808,7 +1809,7 @@ def test_run_to_response_maps_run_fields() -> None:
 
 def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
     from app.application.agents.runs.service import build_regenerated_agent_run
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
 
     source = AgentRun(
         id="run-source",
@@ -1854,7 +1855,7 @@ def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
 
 def test_edit_regeneration_rejects_a_non_latest_run() -> None:
     from app.application.agents.runs.service import regenerate_agent_run_from_source
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
 
     source = AgentRun(
         id="run-source",
@@ -1893,7 +1894,7 @@ def test_repeated_run_feedback_write_is_idempotent() -> None:
     from unittest.mock import AsyncMock, patch
 
     from app.application.agents.runs.service import update_run_feedback
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.defaults import utc_now
 
     feedback_updated_at = utc_now()
@@ -1977,7 +1978,7 @@ def test_agent_memory_compacts_old_turns() -> None:
     from langchain_core.messages import AIMessage
 
     from app.application.agents.runs import memory as agent_memory
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
 
     history = [
         AgentRun(
@@ -2070,7 +2071,7 @@ def test_agent_memory_compacts_old_turns() -> None:
     ) == 0
 
 def test_agent_memory_query_is_bounded_and_projected() -> None:
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.infra.db.repositories.agents import repository as agent_repository
     from sqlalchemy.dialects import postgresql
 

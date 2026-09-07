@@ -35,9 +35,11 @@ from app.adapters.mcp.client import McpDiscovery
 from app.entities.agents import (
     Agent,
     AgentApiCredential,
+    AgentToolCall,
+)
+from app.entities.runs import (
     AgentRun,
     AgentRunEvent,
-    AgentToolCall,
 )
 from app.entities.identity.user import User
 from app.entities.defaults import new_id, utc_now
@@ -1881,16 +1883,18 @@ def exercise_tasks() -> None:
         ]
 
         # enqueue_agent_run: eager settings execute the run inline
+        from app.application.runs import dispatch as run_dispatch
+
         eager_settings = test_settings()
         eager_calls: list[tuple] = []
 
         async def eager_run(run_id, settings, **kwargs):
             eager_calls.append((run_id, settings, kwargs))
 
-        agent_tasks.run_durable_application_run = eager_run
-        asyncio.run(agent_tasks.enqueue_agent_run("run-eager", eager_settings))
+        run_dispatch.run_durable_application_run = eager_run
+        asyncio.run(run_dispatch.enqueue_agent_run("run-eager", eager_settings))
         asyncio.run(
-            agent_tasks.enqueue_agent_run(
+            run_dispatch.enqueue_agent_run(
                 "run-v2-eager",
                 eager_settings,
                 generation="unified",
@@ -1905,6 +1909,9 @@ def exercise_tasks() -> None:
         non_eager = dataclasses.replace(
             eager_settings, celery_task_always_eager=False
         )
+        from app.infra.queue.celery import celery_app
+        from unittest.mock import patch
+
         legacy_queued: list[dict] = []
         unified_queued: list[dict] = []
         agent_tasks.run_agent_job.apply_async = (
@@ -1913,27 +1920,44 @@ def exercise_tasks() -> None:
         agent_tasks.run_unified_agent_job.apply_async = (
             lambda **kwargs: unified_queued.append(kwargs)
         )
-        asyncio.run(agent_tasks.enqueue_agent_run("run-queued", non_eager))
-        asyncio.run(
-            agent_tasks.enqueue_agent_run(
-                "run-v2-queued",
-                non_eager,
-                generation="unified",
+        with patch.object(
+            celery_app, "send_task", side_effect=lambda name, **kwargs: {
+                "app.agents.run": legacy_queued,
+                "app.agents.run_v2": unified_queued,
+            }[name].append(kwargs)
+        ):
+            asyncio.run(run_dispatch.enqueue_agent_run("run-queued", non_eager))
+            asyncio.run(
+                run_dispatch.enqueue_agent_run(
+                    "run-v2-queued",
+                    non_eager,
+                    generation="unified",
+                )
             )
-        )
-        assert legacy_queued == [
+        legacy_keys = [
+            {k: v for k, v in entry.items() if k in ("args", "queue")}
+            for entry in legacy_queued
+        ]
+        unified_keys = [
+            {k: v for k, v in entry.items() if k in ("args", "queue")}
+            for entry in unified_queued
+        ]
+        assert legacy_keys == [
             {"args": ("run-queued",), "queue": "agents-legacy"}
         ]
-        assert unified_queued == [
+        assert unified_keys == [
             {"args": ("run-v2-queued",), "queue": "agents-v2"}
         ]
 
         # enqueue_agent_run: dispatch failure is logged, not raised
-        def raise_apply(**kwargs):
+        def raise_send(*_args, **_kwargs):
             raise OSError("broker unavailable")
 
-        agent_tasks.run_agent_job.apply_async = raise_apply
-        asyncio.run(agent_tasks.enqueue_agent_run("run-queued", non_eager))
+        with patch.object(
+            celery_app, "send_task", side_effect=raise_send
+        ), patch.object(run_dispatch, "log_error") as dispatch_log_error:
+            asyncio.run(run_dispatch.enqueue_agent_run("run-queued", non_eager))
+        assert dispatch_log_error.call_count == 1
     finally:
         agent_tasks.configure_task_worker = original_configure
         agent_tasks.run_durable_application_run = original_run_durable

@@ -215,7 +215,7 @@ async def seed_agent_run_binder_audit(
     bound_by_user_id: str,
     created_by_user_id: str,
 ) -> None:
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.infra.db.repositories.agents import repository as agent_repository
 
     agent_id = await seed_agent_publication_audit(

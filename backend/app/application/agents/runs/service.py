@@ -19,7 +19,8 @@ from app.application.agents.tools.builder import (
     run_to_response,
 )
 from app.application.tools.runtime.service import preflight_tool_snapshot
-from app.entities.agents import Agent, AgentPublicationVersion, AgentRun
+from app.entities.agents import Agent, AgentPublicationVersion
+from app.entities.runs import AgentRun
 from app.entities.identity.user import User
 from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,

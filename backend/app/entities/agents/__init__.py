@@ -4,7 +4,9 @@ from app.entities.agents.models import (
     AgentKnowledgeBase,
     AgentMcpTool,
     AgentApiCredential,
+    AgentToolCall,
+)
+from app.entities.runs import (
     AgentRun,
     AgentRunEvent,
-    AgentToolCall,
 )

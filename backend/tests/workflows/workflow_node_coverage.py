@@ -12,7 +12,7 @@ import io
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import tests.support  # noqa: F401
 
@@ -1700,7 +1700,7 @@ def test_executor_workflow_context_branches() -> None:
 
 def test_executor_load_scope_branches() -> None:
     from app.application.workflows.runs import executor as executor_module
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
@@ -2320,8 +2320,8 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.workflows.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads(three)),
         ), patch(
-            "app.application.workflows.uploads.service.build_document_parser",
-            return_value=FakeParser("x" * 60000),
+            "app.application.workflows.uploads.service.extract_document",
+            new=lambda filename, content_type, path, **kwargs: ("x" * 60000, []),
         ), patch(
             "app.application.workflows.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2343,8 +2343,8 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.workflows.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.build_document_parser",
-            return_value=FakeParser("", error=True),
+            "app.application.workflows.uploads.service.extract_document",
+            new=Mock(side_effect=KnowledgePipelineError("cannot parse")),
         ), patch(
             "app.application.workflows.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2390,8 +2390,8 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.workflows.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.build_document_parser",
-            return_value=FakeParser("agent text"),
+            "app.application.workflows.uploads.service.extract_document",
+            new=lambda filename, content_type, path, **kwargs: ("agent text", []),
         ), patch(
             "app.application.workflows.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2415,8 +2415,8 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.workflows.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.build_document_parser",
-            return_value=FakeParser("", error=True),
+            "app.application.workflows.uploads.service.extract_document",
+            new=Mock(side_effect=KnowledgePipelineError("cannot parse")),
         ), patch(
             "app.application.workflows.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2614,7 +2614,7 @@ def test_workflow_access_external_run_branches() -> None:
         _external_run,
         create_external_workflow_run,
     )
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.schemas.workflows.contracts import ExternalWorkflowRunCreateRequest
@@ -2809,7 +2809,7 @@ def test_workflow_access_conversations_and_run_listing() -> None:
         get_external_workflow_run,
         list_public_workflow_conversations,
     )
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
 
     async def run() -> None:
@@ -2914,7 +2914,7 @@ def _graph_node(node_id: str, node_type: str, config: dict) -> dict:
 
 
 def _make_running_run(graph: dict) -> str:
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.entities.defaults import utc_now
     from app.infra.db.repositories.agents import repository as agent_repository
@@ -3174,7 +3174,7 @@ def test_executor_manual_run_scenarios() -> None:
 
         # checkpoint with form submissions: a non-form node finishing while
         # submissions remain persists them into the checkpoint payload
-        from app.entities.agents import AgentRun as AgentRunEntity
+        from app.entities.runs import AgentRun as AgentRunEntity
         from app.entities.workflows import WorkflowRunDetail as RunDetailEntity
 
         checkpoint_graph = _simple_graph(
@@ -3279,7 +3279,7 @@ def test_executor_manual_run_scenarios() -> None:
         assert asyncio.run(fail_missing()) == "finished"
 
         # run_durable_workflow_run: claim held by another worker
-        from app.entities.agents import AgentRun
+        from app.entities.runs import AgentRun
         from app.entities.defaults import utc_now
         from app.infra.db.session import get_session_factory
         from app.application.workflows.runs.executor import run_durable_workflow_run
@@ -3982,7 +3982,7 @@ def test_workflow_access_application_functions_direct() -> None:
         list_external_workflow_runs,
         submit_external_workflow_form,
     )
-    from app.entities.agents import AgentRun
+    from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
