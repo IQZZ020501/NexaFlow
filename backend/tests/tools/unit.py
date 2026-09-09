@@ -479,17 +479,47 @@ def test_documents_skill_formal_legal_contract_is_versioned() -> None:
 
     tool, version, _policy = build_skill_artifact_tool("workspace-1", "documents")
     rebuilt = build_skill_artifact_tool("workspace-1", "documents")[1]
-    assert version.input_schema["properties"]["style"] == {
-        "type": "string",
-        "enum": ["report", "formal_legal"],
-        "default": "report",
-        "description": version.input_schema["properties"]["style"]["description"],
-    }
+    assert version.input_schema["properties"]["style"]["type"] == "string"
+    assert version.input_schema["properties"]["style"]["enum"] == [
+        "report",
+        "formal_legal",
+    ]
+    assert "default" not in version.input_schema["properties"]["style"]
     assert "formal_legal" in version.description
     assert "`> `" in version.description
     assert "`---`" in version.description
     assert tool.current_version_id == version.id == rebuilt.id
     assert version.definition_hash == rebuilt.definition_hash
+
+
+def test_documents_skill_reference_input_uses_bounded_large_payload_limit() -> None:
+    from types import SimpleNamespace
+
+    from app.domain.tools.runtime import (
+        MAX_DOCUMENT_TOOL_INPUT_BYTES,
+        MAX_TOOL_INPUT_BYTES,
+        tool_input_size_limit,
+        validate_tool_arguments,
+    )
+
+    snapshot = SimpleNamespace(
+        function_name="documents_skill",
+        input_schema={
+            "type": "object",
+            "properties": {"reference_docx_base64": {"type": "string"}},
+        },
+    )
+    assert tool_input_size_limit(snapshot) == MAX_DOCUMENT_TOOL_INPUT_BYTES
+    validate_tool_arguments(
+        snapshot,
+        {"reference_docx_base64": "x" * (MAX_TOOL_INPUT_BYTES + 1)},
+    )
+
+    ordinary_snapshot = SimpleNamespace(
+        function_name="custom_tool",
+        input_schema={"type": "object", "properties": {}},
+    )
+    assert tool_input_size_limit(ordinary_snapshot) == MAX_TOOL_INPUT_BYTES
 
 def test_normalize_mcp_url() -> None:
     from app.ports.mcp import McpClientError, normalize_mcp_url

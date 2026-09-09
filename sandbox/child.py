@@ -36,6 +36,7 @@ def main() -> None:
         "NEXAFLOW_OUTPUT_PATH",
         "NEXAFLOW_SKILL_NAME",
         "NEXAFLOW_SKILLS_DIR",
+        "NEXAFLOW_CJK_FONT",
         "NEXAFLOW_PACKAGES_DIR",
         "NEXAFLOW_ALLOW_SITE_PACKAGES",
         "HTTP_PROXY",

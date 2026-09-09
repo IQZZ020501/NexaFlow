@@ -1054,6 +1054,7 @@ def check_builtin_skill_quality_guards() -> None:
     formal_bytes = base64.b64decode(formal["artifact"]["content_base64"])
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
 
     formal_document = Document(BytesIO(formal_bytes))
     paragraphs = {paragraph.text: paragraph for paragraph in formal_document.paragraphs}
@@ -1088,7 +1089,9 @@ def check_builtin_skill_quality_guards() -> None:
             for name in archive.namelist()
             if name.startswith("word/footer")
         )
-    formal_cjk_font = "Noto Serif CJK SC" if sys.platform == "linux" else "STFangsong"
+    formal_cjk_font = os.environ.get("NEXAFLOW_CJK_FONT") or (
+        "Noto Serif CJK SC" if sys.platform == "linux" else "Songti SC"
+    )
     assert formal_cjk_font in formal_styles_xml
     assert "---" not in formal_document_xml
     assert "&gt;" not in formal_document_xml
@@ -1114,6 +1117,99 @@ def check_builtin_skill_quality_guards() -> None:
     )
     assert conflicting["ok"] is False
     assert "conflicting arbitration fee statements" in conflicting["stderr"]
+
+    automatic = execute_request(
+        {
+            "skill": "documents",
+            "stdin": json.dumps(
+                {
+                    "content": (
+                        "# 劳动仲裁申请书\n\n"
+                        "## 一、仲裁请求\n\n"
+                        "申请人请求支付拖欠工资。"
+                    )
+                },
+                ensure_ascii=False,
+            ),
+            "artifact": {"format": "docx", "filename": "automatic-legal.docx"},
+        }
+    )
+    assert automatic["ok"] is True, automatic
+    automatic_document = Document(
+        BytesIO(base64.b64decode(automatic["artifact"]["content_base64"]))
+    )
+    assert automatic_document.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert automatic_document.styles["Normal"].font.size.pt == 12
+
+    reference = Document()
+    reference.sections[0].top_margin = Pt(3 * 72 / 2.54)
+    reference_header = reference.sections[0].header.paragraphs[0]
+    reference_header.text = "参考模板页眉"
+    reference_footer = reference.sections[0].footer.paragraphs[0]
+    reference_footer.text = "参考模板页脚"
+    reference_title = reference.add_paragraph()
+    reference_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    reference_title_run = reference_title.add_run("参考标题")
+    reference_title_run.font.name = "Courier New"
+    reference_title_run.font.size = Pt(20)
+    reference_body = reference.add_paragraph()
+    reference_body.paragraph_format.first_line_indent = Pt(36)
+    reference_body.paragraph_format.line_spacing = 1.5
+    reference_body_run = reference_body.add_run("参考正文")
+    reference_body_run.font.name = "Courier New"
+    reference_body_run.font.size = Pt(13)
+    reference_signature = reference.add_paragraph()
+    reference_signature.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    reference_signature.add_run("参考落款")
+    reference_stream = BytesIO()
+    reference.save(reference_stream)
+    templated = execute_request(
+        {
+            "skill": "documents",
+            "stdin": json.dumps(
+                {
+                    "content": (
+                        "# 劳动仲裁申请书\n\n"
+                        "正文内容。\n\n"
+                        "> 申请人：张三"
+                    ),
+                    "reference_docx_base64": base64.b64encode(
+                        reference_stream.getvalue()
+                    ).decode("ascii"),
+                },
+                ensure_ascii=False,
+            ),
+            "artifact": {"format": "docx", "filename": "templated-legal.docx"},
+        }
+    )
+    assert templated["ok"] is True, templated
+    templated_document = Document(
+        BytesIO(base64.b64decode(templated["artifact"]["content_base64"]))
+    )
+    assert templated_document.sections[0].top_margin == reference.sections[0].top_margin
+    assert templated_document.sections[0].header.paragraphs[0].text == "参考模板页眉"
+    assert templated_document.sections[0].footer.paragraphs[0].text == "参考模板页脚"
+    assert templated_document.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert templated_document.paragraphs[0].runs[0].font.name == "Courier New"
+    assert templated_document.paragraphs[1].paragraph_format.first_line_indent.pt == 36
+    assert templated_document.paragraphs[1].runs[0].font.size.pt == 13
+    assert templated_document.paragraphs[2].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+
+    invalid_reference = execute_request(
+        {
+            "skill": "documents",
+            "stdin": json.dumps(
+                {
+                    "content": "# 文档\n\n正文",
+                    "reference_docx_base64": "not-base64",
+                },
+                ensure_ascii=False,
+            ),
+            "artifact": {"format": "docx", "filename": "invalid-reference.docx"},
+        }
+    )
+    assert invalid_reference["ok"] is False
+    assert "valid base64" in invalid_reference["stderr"]
 
     pdf = execute_request(
         {
