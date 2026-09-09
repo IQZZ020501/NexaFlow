@@ -40,10 +40,15 @@ function endpoint(scope: AnnouncementScope, workspaceId: string | null) {
 export function listAnnouncements(
   token: string,
   scope: AnnouncementScope,
-  workspaceId: string | null
+  workspaceId: string | null,
+  options: { limit?: number; offset?: number } = {}
 ) {
+  const query = new URLSearchParams({
+    limit: String(options.limit ?? 20),
+    offset: String(options.offset ?? 0),
+  })
   return requestPage<Announcement>(
-    `${endpoint(scope, workspaceId)}?limit=100`,
+    `${endpoint(scope, workspaceId)}?${query.toString()}`,
     {
       token,
     }

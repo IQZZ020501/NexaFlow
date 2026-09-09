@@ -66,6 +66,9 @@ describe("MessageCenter", () => {
     fireEvent.pointerDown(screen.getByLabelText("打开消息中心"))
     const menu = await screen.findByRole("menu")
     expect(within(menu).queryByText("预计持续 30 分钟。")).toBeNull()
+    expect(
+      within(menu).getByText("未读消息").classList.contains("sr-only")
+    ).toBe(true)
     fireEvent.click(within(menu).getByText("系统维护公告"))
 
     const dialog = await screen.findByRole("dialog")

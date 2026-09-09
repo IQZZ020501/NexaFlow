@@ -94,10 +94,13 @@ function MessagePreview({
         <span className="flex items-center gap-2">
           <span className="truncate font-medium">{message.title}</span>
           {!message.is_read ? (
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-primary"
-              aria-label={t("未读消息")}
-            />
+            <>
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-primary"
+                aria-hidden="true"
+              />
+              <span className="sr-only">{t("未读消息")}</span>
+            </>
           ) : null}
         </span>
       </span>
@@ -135,8 +138,8 @@ function MessageDetailsDialog({
                   <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge variant="outline">
                       {message.scope_type === "global"
-                        ? t("全局公告")
-                        : t("工作空间公告")}
+                        ? t("单条全局公告")
+                        : t("单条工作空间公告")}
                     </Badge>
                     <Badge variant="secondary">
                       {t(

@@ -145,6 +145,17 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
         )
         assert unread.json() == {"count": 0}
 
+        for path, payload in (
+            (f"/api/v1/admin/announcements/{global_id}", {"title": None}),
+            (
+                f"/api/v1/workspaces/{workspace_id}/announcements/"
+                f"{workspace_id_notice}",
+                {"body": None},
+            ),
+        ):
+            invalid_update = client.patch(path, headers=headers, json=payload)
+            assert invalid_update.status_code == 422, invalid_update.text
+
         updated = client.patch(
             f"/api/v1/admin/announcements/{global_id}",
             headers=headers,

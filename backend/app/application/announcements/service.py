@@ -81,11 +81,15 @@ async def _publish_live_event(
     item: Announcement,
     event_type: str,
 ) -> None:
-    await AnnouncementLiveStreamPublisher(settings).publish(
-        scope_type=item.scope_type,
-        workspace_id=item.workspace_id,
-        event=_event(item, event_type),
-    )
+    publisher = AnnouncementLiveStreamPublisher(settings)
+    try:
+        await publisher.publish(
+            scope_type=item.scope_type,
+            workspace_id=item.workspace_id,
+            event=_event(item, event_type),
+        )
+    finally:
+        await publisher.close()
 
 
 def _validate_expiry(
@@ -369,14 +373,11 @@ async def mark_all_messages_read(
     now = utc_now()
     announcement_ids = await repository.list_visible_ids(db, workspace_id, now)
     existing_ids = await repository.list_read_ids(db, user.id, announcement_ids)
-    for announcement_id in announcement_ids:
-        if announcement_id not in existing_ids:
-            await repository.save_read(
-                db,
-                AnnouncementRead(
-                    announcement_id=announcement_id,
-                    user_id=user.id,
-                ),
-            )
-    if announcement_ids:
+    missing_reads = [
+        AnnouncementRead(announcement_id=announcement_id, user_id=user.id)
+        for announcement_id in announcement_ids
+        if announcement_id not in existing_ids
+    ]
+    if missing_reads:
+        await repository.create_reads(db, missing_reads)
         await db.commit()

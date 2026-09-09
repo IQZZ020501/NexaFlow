@@ -7,7 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 AnnouncementSeverity = Literal["info", "warning", "critical"]
 
 
-def _trim_required(value: str) -> str:
+def _trim_required(value: str | None) -> str:
+    if value is None:
+        raise ValueError("Value must not be null.")
     value = value.strip()
     if not value:
         raise ValueError("Value must not be empty.")

@@ -73,8 +73,6 @@ class AnnouncementLiveStreamPublisher:
                 scope_type=scope_type,
                 workspace_id=workspace_id,
             )
-        finally:
-            await self.close()
 
     async def close(self) -> None:
         with suppress(Exception):

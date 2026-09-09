@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.announcements.models import (
@@ -249,6 +251,26 @@ async def save_read(
         row.dismissed_at = read.dismissed_at
     await db.flush()
     return mapping.to_entity(AnnouncementRead, row)
+
+
+async def create_reads(
+    db: AsyncSession,
+    reads: list[AnnouncementRead],
+) -> None:
+    if not reads:
+        return
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = postgresql_insert(AnnouncementReadOrm)
+    elif dialect == "sqlite":
+        statement = sqlite_insert(AnnouncementReadOrm)
+    else:
+        raise RuntimeError(f"Unsupported announcement read dialect: {dialect}")
+    await db.execute(
+        statement.values([read.__dict__ for read in reads]).on_conflict_do_nothing(
+            index_elements=("announcement_id", "user_id")
+        )
+    )
 
 
 async def list_read_ids(

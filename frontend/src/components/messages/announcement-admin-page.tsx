@@ -46,6 +46,10 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  SystemPagination,
+  type SystemPageSize,
+} from "@/components/system/pagination-footer"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
@@ -133,6 +137,9 @@ export function AnnouncementAdminPage() {
     session.selectedWorkspaceId
   )
   const [items, setItems] = React.useState<Announcement[]>([])
+  const [page, setPage] = React.useState(1)
+  const [pageSize, setPageSize] = React.useState<SystemPageSize>(20)
+  const [total, setTotal] = React.useState(0)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -201,9 +208,14 @@ export function AnnouncementAdminPage() {
       const result = await listAnnouncements(
         session.token,
         scope,
-        effectiveWorkspaceId
+        effectiveWorkspaceId,
+        {
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+        }
       )
       setItems(result.items)
+      setTotal(result.total)
     } catch (cause) {
       setError(getErrorMessage(cause, t))
     } finally {
@@ -213,6 +225,8 @@ export function AnnouncementAdminPage() {
     effectiveWorkspaceId,
     isGlobalAdmin,
     isWorkspaceAdmin,
+    page,
+    pageSize,
     scope,
     session.token,
     t,
@@ -377,6 +391,7 @@ export function AnnouncementAdminPage() {
               options={scopeOptions}
               onChange={(value) => {
                 setRequestedScope(value as AnnouncementScope)
+                setPage(1)
                 resetForm()
               }}
             />
@@ -388,6 +403,7 @@ export function AnnouncementAdminPage() {
               options={workspaceOptions}
               onChange={(value) => {
                 setWorkspaceId(value)
+                setPage(1)
                 resetForm()
               }}
             />
@@ -617,6 +633,18 @@ export function AnnouncementAdminPage() {
                 </CardContent>
               </Card>
             ))}
+            <SystemPagination
+              page={page}
+              pageSize={pageSize}
+              itemCount={items.length}
+              total={total}
+              hasNext={page * pageSize < total}
+              onPageChange={setPage}
+              onPageSizeChange={(nextPageSize) => {
+                setPageSize(nextPageSize)
+                setPage(1)
+              }}
+            />
           </div>
         ) : (
           <div className="rounded-xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">

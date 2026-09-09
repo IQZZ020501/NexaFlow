@@ -74,7 +74,13 @@ describe("announcement administration API", () => {
     install([announcement], 1)
     const listed = await listAnnouncements(TOKEN, "global", null)
     expect(listed).toEqual({ items: [announcement], total: 1 })
-    expect(lastCall().url).toBe("/api/v1/admin/announcements?limit=100")
+    expect(lastCall().url).toBe("/api/v1/admin/announcements?limit=20&offset=0")
+
+    install([announcement], 101)
+    await listAnnouncements(TOKEN, "global", null, { limit: 50, offset: 50 })
+    expect(lastCall().url).toBe(
+      "/api/v1/admin/announcements?limit=50&offset=50"
+    )
 
     install(announcement)
     await createAnnouncement(TOKEN, "global", null, {
@@ -116,7 +122,7 @@ describe("announcement administration API", () => {
     install([announcement], 1)
     await listAnnouncements(TOKEN, "workspace", "workspace-1")
     expect(lastCall().url).toBe(
-      "/api/v1/workspaces/workspace-1/announcements?limit=100"
+      "/api/v1/workspaces/workspace-1/announcements?limit=20&offset=0"
     )
   })
 })

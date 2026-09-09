@@ -150,6 +150,8 @@ export const en = {
   标记为已读: "Mark as read",
   全局公告: "Global announcements",
   工作空间公告: "Workspace announcements",
+  单条全局公告: "Global announcement",
+  单条工作空间公告: "Workspace announcement",
   切换公告范围: "Switch announcement scope",
   新建公告: "New announcement",
   添加公告: "Add announcement",
