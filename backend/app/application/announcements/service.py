@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,15 +10,17 @@ from app.domain.audit.services import record_audit_log
 from app.entities.announcements.models import Announcement, AnnouncementRead
 from app.entities.defaults import utc_now
 from app.entities.identity.user import User
-from app.infra.announcements.live_stream import AnnouncementLiveStreamPublisher
-from app.infra.config.settings import Settings
 from app.infra.db.repositories.announcements import repository
+from app.ports.announcements import build_announcement_live_stream_publisher
 from app.schemas.announcements.contracts import (
     AnnouncementCreateRequest,
     AnnouncementMessageResponse,
     AnnouncementResponse,
     AnnouncementUpdateRequest,
 )
+
+if TYPE_CHECKING:
+    from app.infra.config.settings import Settings
 
 AnnouncementScope = Literal["global", "workspace"]
 
@@ -81,7 +85,7 @@ async def _publish_live_event(
     item: Announcement,
     event_type: str,
 ) -> None:
-    publisher = AnnouncementLiveStreamPublisher(settings)
+    publisher = build_announcement_live_stream_publisher(settings)
     try:
         await publisher.publish(
             scope_type=item.scope_type,
@@ -322,18 +326,19 @@ async def list_messages(
     return ([_message_response(item, read) for item, read in rows], total)
 
 
-async def get_unread_message_count(
+async def get_message_summary(
     db: AsyncSession,
     *,
     user: User,
     workspace_id: str | None,
-) -> int:
-    return await repository.count_unread_messages(
+) -> tuple[int, datetime | None]:
+    count, next_expiration_at = await repository.get_message_summary(
         db,
         user.id,
         workspace_id,
         utc_now(),
     )
+    return count, _as_utc(next_expiration_at)
 
 
 async def mark_message_read(

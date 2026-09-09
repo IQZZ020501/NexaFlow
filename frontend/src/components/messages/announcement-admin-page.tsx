@@ -68,6 +68,13 @@ import { cn } from "@/lib/utils"
 
 const severities: AnnouncementSeverity[] = ["info", "warning", "critical"]
 
+function toLocalDateTimeInput(value: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
 function statusVariant(status: Announcement["status"]) {
   if (status === "published") return "default" as const
   if (status === "archived") return "outline" as const
@@ -150,6 +157,7 @@ export function AnnouncementAdminPage() {
   const [body, setBody] = React.useState("")
   const [severity, setSeverity] = React.useState<AnnouncementSeverity>("info")
   const [pinned, setPinned] = React.useState(false)
+  const [expiresAt, setExpiresAt] = React.useState("")
 
   const scope: AnnouncementScope =
     requestedScope === "global" && isGlobalAdmin
@@ -259,6 +267,7 @@ export function AnnouncementAdminPage() {
     setBody("")
     setSeverity("info")
     setPinned(false)
+    setExpiresAt("")
   }
 
   const startAdding = () => {
@@ -276,6 +285,7 @@ export function AnnouncementAdminPage() {
     setBody(item.body)
     setSeverity(item.severity)
     setPinned(item.pinned)
+    setExpiresAt(toLocalDateTimeInput(item.expires_at))
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
@@ -295,6 +305,7 @@ export function AnnouncementAdminPage() {
         body: body.trim(),
         severity,
         pinned,
+        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       }
       if (editingId) {
         await updateAnnouncement(
@@ -468,6 +479,18 @@ export function AnnouncementAdminPage() {
                     setSeverity(value as AnnouncementSeverity)
                   }
                 />
+              </Field>
+              <Field className="min-w-56">
+                <FieldLabel htmlFor="announcement-expires-at">
+                  {t("公告过期时间")}
+                </FieldLabel>
+                <Input
+                  id="announcement-expires-at"
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(event) => setExpiresAt(event.target.value)}
+                />
+                <FieldDescription>{t("留空表示永不过期。")}</FieldDescription>
               </Field>
               <label className="flex h-9 items-center gap-2 text-sm">
                 <input

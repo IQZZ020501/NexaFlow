@@ -155,17 +155,17 @@ async def count_visible_messages(
     return int(await db.scalar(statement) or 0)
 
 
-async def count_unread_messages(
+async def get_message_summary(
     db: AsyncSession,
     user_id: str,
     workspace_id: str | None,
     now: datetime,
-) -> int:
+) -> tuple[int, datetime | None]:
     read_join = and_(
         AnnouncementReadOrm.announcement_id == AnnouncementOrm.id,
         AnnouncementReadOrm.user_id == user_id,
     )
-    statement = (
+    unread_count = (
         select(func.count())
         .select_from(AnnouncementOrm)
         .outerjoin(AnnouncementReadOrm, read_join)
@@ -173,8 +173,25 @@ async def count_unread_messages(
             *_visible_clauses(workspace_id=workspace_id, now=now),
             AnnouncementReadOrm.announcement_id.is_(None),
         )
+        .scalar_subquery()
     )
-    return int(await db.scalar(statement) or 0)
+    next_expiration = (
+        select(func.min(AnnouncementOrm.expires_at))
+        .where(
+            *_visible_clauses(workspace_id=workspace_id, now=now),
+            AnnouncementOrm.expires_at.is_not(None),
+        )
+        .scalar_subquery()
+    )
+    row = (
+        await db.execute(
+            select(
+                unread_count.label("unread_count"),
+                next_expiration.label("next_expiration_at"),
+            )
+        )
+    ).one()
+    return int(row.unread_count or 0), row.next_expiration_at
 
 
 async def get_visible_message(

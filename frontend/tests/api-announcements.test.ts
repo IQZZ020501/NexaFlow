@@ -133,15 +133,22 @@ describe("message center API", () => {
     const listed = await listMessages(TOKEN, "workspace-1")
     expect(listed).toEqual({ items: [], total: 0 })
     expect(lastCall().url).toBe(
-      "/api/v1/messages?limit=50&workspace_id=workspace-1"
+      "/api/v1/messages?limit=50&offset=0&workspace_id=workspace-1"
     )
 
-    install({ count: 3 })
+    install({ count: 3, next_expiration_at: "2026-09-08T00:00:00Z" })
     await expect(getUnreadMessageCount(TOKEN, "workspace-1")).resolves.toEqual({
       count: 3,
+      next_expiration_at: "2026-09-08T00:00:00Z",
     })
     expect(lastCall().url).toBe(
       "/api/v1/messages/unread-count?workspace_id=workspace-1"
+    )
+
+    install([], 101)
+    await listMessages(TOKEN, "workspace-1", { limit: 20, offset: 40 })
+    expect(lastCall().url).toBe(
+      "/api/v1/messages?limit=20&offset=40&workspace_id=workspace-1"
     )
   })
 

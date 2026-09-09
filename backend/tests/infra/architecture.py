@@ -105,9 +105,22 @@ def test_entities_and_ports_are_import_free() -> None:
             raise AssertionError(f"entities module {src} imports framework {dst}")
 
 
+def test_announcement_routes_use_application_boundaries() -> None:
+    analyzer = _analyzer()
+    data = analyzer.analyze()
+    route = "app.api.v1.announcements.routes"
+    forbidden = sorted(
+        dst
+        for src, dst in data["edges"]
+        if src == route and analyzer.layer_of(dst) in {"adapters", "domain", "entities", "infra"}
+    )
+    assert not forbidden, f"announcement routes bypass application boundaries: {forbidden}"
+
+
 def main() -> None:
     test_architecture_layer_rules()
     test_entities_and_ports_are_import_free()
+    test_announcement_routes_use_application_boundaries()
     print("ARCHITECTURE_SUITE_OK")
 
 

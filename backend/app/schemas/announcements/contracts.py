@@ -77,3 +77,4 @@ class AnnouncementMessageResponse(BaseModel):
 
 class MessageUnreadCountResponse(BaseModel):
     count: Annotated[int, Field(ge=0)]
+    next_expiration_at: datetime | None

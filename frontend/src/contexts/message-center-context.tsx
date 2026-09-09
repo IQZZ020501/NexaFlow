@@ -16,6 +16,7 @@ import { useSession } from "@/contexts/session-context"
 type MessageCenterContextValue = {
   messages: MessageItem[]
   unreadCount: number
+  refreshVersion: number
   isLoading: boolean
   error: ApiError | Error | null
   refresh: () => Promise<void>
@@ -35,6 +36,10 @@ export function MessageCenterProvider({
   const { token, selectedWorkspaceId, mustChangePassword } = useSession()
   const [messages, setMessages] = React.useState<MessageItem[]>([])
   const [unreadCount, setUnreadCount] = React.useState(0)
+  const [nextExpirationAt, setNextExpirationAt] = React.useState<string | null>(
+    null
+  )
+  const [refreshVersion, setRefreshVersion] = React.useState(0)
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<ApiError | Error | null>(null)
   const requestId = React.useRef(0)
@@ -44,6 +49,7 @@ export function MessageCenterProvider({
       requestId.current += 1
       setMessages([])
       setUnreadCount(0)
+      setNextExpirationAt(null)
       setError(null)
       setIsLoading(false)
       return
@@ -59,6 +65,8 @@ export function MessageCenterProvider({
       if (currentRequestId === requestId.current) {
         setMessages(messagePage.items)
         setUnreadCount(unread.count)
+        setNextExpirationAt(unread.next_expiration_at)
+        setRefreshVersion((version) => version + 1)
         setError(null)
       }
     } catch (nextError) {
@@ -78,6 +86,20 @@ export function MessageCenterProvider({
     }, 0)
     return () => window.clearTimeout(timer)
   }, [refresh])
+
+  React.useEffect(() => {
+    if (!nextExpirationAt) return
+    const expirationTime = Date.parse(nextExpirationAt)
+    if (!Number.isFinite(expirationTime)) return
+    const delay = Math.min(
+      Math.max(expirationTime - Date.now() + 250, 0),
+      2_147_000_000
+    )
+    const timer = window.setTimeout(() => {
+      void refresh()
+    }, delay)
+    return () => window.clearTimeout(timer)
+  }, [nextExpirationAt, refresh])
 
   React.useEffect(() => {
     if (!token || mustChangePassword) return
@@ -105,17 +127,20 @@ export function MessageCenterProvider({
     async (messageId: string) => {
       if (!token) return
       const current = messages.find((message) => message.id === messageId)
-      if (!current || current.is_read) return
-      setMessages((items) =>
-        items.map((message) =>
-          message.id === messageId
-            ? { ...message, is_read: true, read_at: new Date().toISOString() }
-            : message
+      if (current?.is_read) return
+      if (current) {
+        setMessages((items) =>
+          items.map((message) =>
+            message.id === messageId
+              ? { ...message, is_read: true, read_at: new Date().toISOString() }
+              : message
+          )
         )
-      )
-      setUnreadCount((count) => Math.max(0, count - 1))
+        setUnreadCount((count) => Math.max(0, count - 1))
+      }
       try {
         await markMessageRead(token, messageId, selectedWorkspaceId)
+        if (!current) await refresh()
       } catch (nextError) {
         void refresh()
         throw nextError
@@ -146,13 +171,23 @@ export function MessageCenterProvider({
     () => ({
       messages,
       unreadCount,
+      refreshVersion,
       isLoading,
       error,
       refresh,
       markRead,
       markAllRead,
     }),
-    [error, isLoading, markAllRead, markRead, messages, refresh, unreadCount]
+    [
+      error,
+      isLoading,
+      markAllRead,
+      markRead,
+      messages,
+      refresh,
+      refreshVersion,
+      unreadCount,
+    ]
   )
 
   return (

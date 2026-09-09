@@ -9,6 +9,7 @@ from redis.exceptions import RedisError
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
+from app.ports.announcements import AnnouncementStreamEntry
 
 logger = get_logger("announcement_live_stream")
 
@@ -39,7 +40,7 @@ def _redis_client(settings: Settings) -> Redis:
     )
 
 
-class AnnouncementLiveStreamPublisher:
+class RedisAnnouncementLiveStreamPublisher:
     def __init__(self, settings: Settings) -> None:
         self._redis = _redis_client(settings)
 
@@ -48,7 +49,7 @@ class AnnouncementLiveStreamPublisher:
         *,
         scope_type: str,
         workspace_id: str | None,
-        event: dict[str, Any],
+        event: dict[str, object],
     ) -> None:
         if event.get("type") not in ANNOUNCEMENT_EVENT_TYPES:
             return
@@ -79,7 +80,7 @@ class AnnouncementLiveStreamPublisher:
             await self._redis.aclose()
 
 
-class AnnouncementLiveStreamReader:
+class RedisAnnouncementLiveStreamReader:
     def __init__(
         self,
         settings: Settings,
@@ -88,10 +89,10 @@ class AnnouncementLiveStreamReader:
     ) -> None:
         self._redis = _redis_client(settings)
         self._streams = {
-            announcement_stream_key("global"): None,
+            announcement_stream_key("global"): "global",
         }
         if workspace_id is not None:
-            self._streams[announcement_stream_key("workspace", workspace_id)] = None
+            self._streams[announcement_stream_key("workspace", workspace_id)] = "workspace"
         self._available = True
 
     @property
@@ -103,18 +104,13 @@ class AnnouncementLiveStreamReader:
         *,
         global_after: str | None,
         workspace_after: str | None,
-    ) -> list[tuple[str, str, dict[str, Any]]]:
+    ) -> list[AnnouncementStreamEntry]:
         if not self._available:
             return []
-        stream_cursors = dict(self._streams)
-        global_key = announcement_stream_key("global")
-        stream_cursors[global_key] = global_after or "$"
-        workspace_key = next(
-            (key for key in stream_cursors if ":workspace:" in key),
-            None,
-        )
-        if workspace_key is not None:
-            stream_cursors[workspace_key] = workspace_after or "$"
+        stream_cursors = {
+            key: global_after or "$" if scope_type == "global" else workspace_after or "$"
+            for key, scope_type in self._streams.items()
+        }
         try:
             streams = await self._redis.xread(
                 stream_cursors,
@@ -130,8 +126,11 @@ class AnnouncementLiveStreamReader:
             )
             return []
 
-        entries: list[tuple[str, str, dict[str, Any]]] = []
+        entries: list[AnnouncementStreamEntry] = []
         for stream_name, stream_entries in streams:
+            scope_type = self._streams.get(str(stream_name))
+            if scope_type is None:
+                continue
             for entry_id, fields in stream_entries:
                 payload = fields.get("payload")
                 if not isinstance(payload, str):
@@ -141,7 +140,13 @@ class AnnouncementLiveStreamReader:
                 except json.JSONDecodeError:
                     continue
                 if isinstance(event, dict) and event.get("type") in ANNOUNCEMENT_EVENT_TYPES:
-                    entries.append((str(stream_name), str(entry_id), event))
+                    entries.append(
+                        AnnouncementStreamEntry(
+                            scope_type=scope_type,
+                            entry_id=str(entry_id),
+                            event=event,
+                        )
+                    )
         return entries
 
     async def close(self) -> None:

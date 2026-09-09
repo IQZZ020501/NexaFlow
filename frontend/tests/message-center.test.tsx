@@ -10,6 +10,7 @@ import {
   cleanup,
   fireEvent,
   mockNextNavigation,
+  mockUseSession,
   renderPage,
   screen,
   waitFor,
@@ -18,6 +19,8 @@ import {
 
 const pushCalls: string[] = []
 const markReadCalls: string[] = []
+const listMessageCalls: Array<{ limit?: number; offset?: number }> = []
+let listMessageTotal = 1
 
 const message: MessageItem = {
   id: "announcement-1",
@@ -38,6 +41,7 @@ const message: MessageItem = {
 const messageCenter = {
   messages: [message],
   unreadCount: 1,
+  refreshVersion: 0,
   isLoading: false,
   error: null,
   refresh: async () => undefined,
@@ -48,15 +52,28 @@ const messageCenter = {
 }
 
 mockNextNavigation({ push: (href) => pushCalls.push(href) })
+mockUseSession()
 mock.module("@/contexts/message-center-context", () => ({
   useMessageCenter: () => messageCenter,
   useOptionalMessageCenter: () => messageCenter,
+}))
+mock.module("@/lib/api/messages", () => ({
+  listMessages: async (
+    _token: string,
+    _workspaceId: string | null,
+    options: { limit?: number; offset?: number } = {}
+  ) => {
+    listMessageCalls.push(options)
+    return { items: [message], total: listMessageTotal }
+  },
 }))
 
 afterEach(() => {
   cleanup()
   pushCalls.length = 0
   markReadCalls.length = 0
+  listMessageCalls.length = 0
+  listMessageTotal = 1
 })
 
 describe("MessageCenter", () => {
@@ -97,9 +114,26 @@ describe("MessageCenter", () => {
     renderPage(<MessagesPage />)
 
     expect(screen.queryByText("预计持续 30 分钟。")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /系统维护公告/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /系统维护公告/ }))
 
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("预计持续 30 分钟。")).toBeTruthy()
+  })
+
+  test("pages through every message reported by the API", async () => {
+    listMessageTotal = 21
+    renderPage(<MessagesPage />)
+
+    await screen.findByRole("button", { name: /系统维护公告/ })
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
+
+    await waitFor(() =>
+      expect(listMessageCalls).toContainEqual({ limit: 20, offset: 20 })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "2" }).getAttribute("aria-current")
+      ).toBe("page")
+    )
   })
 })

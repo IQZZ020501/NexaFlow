@@ -161,6 +161,8 @@ export const en = {
   使用Markdown编写公告内容: "Write announcement content in Markdown",
   公告级别: "Severity",
   是否置顶: "Pin announcement",
+  公告过期时间: "Announcement expiration",
+  "留空表示永不过期。": "Leave empty for no expiration.",
   创建草稿: "Create draft",
   保存公告: "Save announcement",
   草稿: "Draft",

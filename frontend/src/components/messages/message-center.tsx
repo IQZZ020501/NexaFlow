@@ -12,6 +12,10 @@ import {
 import { useRouter } from "next/navigation"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
+import {
+  SystemPagination,
+  type SystemPageSize,
+} from "@/components/system/pagination-footer"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,8 +40,13 @@ import {
   useMessageCenter,
   useOptionalMessageCenter,
 } from "@/contexts/message-center-context"
+import { useSession } from "@/contexts/session-context"
 import { languageLocales } from "@/i18n"
-import type { MessageItem, MessageSeverity } from "@/lib/api/messages"
+import {
+  listMessages,
+  type MessageItem,
+  type MessageSeverity,
+} from "@/lib/api/messages"
 import { cn } from "@/lib/utils"
 
 function formatMessageTime(value: string, locale: string) {
@@ -279,17 +288,100 @@ export function MessageCenter() {
 
 export function MessagesPage() {
   const { t } = useLanguage()
+  const { token, selectedWorkspaceId, mustChangePassword } = useSession()
   const [selectedMessage, setSelectedMessage] =
     React.useState<MessageItem | null>(null)
+  const [pageMessages, setPageMessages] = React.useState<MessageItem[]>([])
+  const [page, setPage] = React.useState(1)
+  const [pageSize, setPageSize] = React.useState<SystemPageSize>(20)
+  const [total, setTotal] = React.useState(0)
+  const [isPageLoading, setIsPageLoading] = React.useState(true)
+  const [pageError, setPageError] = React.useState<Error | null>(null)
+  const requestId = React.useRef(0)
   const {
-    messages,
     unreadCount,
     isLoading,
     error,
     refresh,
+    refreshVersion,
     markRead,
     markAllRead,
   } = useMessageCenter()
+
+  const loadPage = React.useCallback(async () => {
+    if (!token || mustChangePassword) {
+      requestId.current += 1
+      setPageMessages([])
+      setTotal(0)
+      setIsPageLoading(false)
+      setPageError(null)
+      return
+    }
+    const currentRequestId = requestId.current + 1
+    requestId.current = currentRequestId
+    setIsPageLoading(true)
+    try {
+      const result = await listMessages(token, selectedWorkspaceId, {
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      })
+      if (currentRequestId !== requestId.current) return
+      const lastPage = Math.max(1, Math.ceil(result.total / pageSize))
+      if (page > lastPage) {
+        setPage(lastPage)
+        return
+      }
+      setPageMessages(result.items)
+      setTotal(result.total)
+      setPageError(null)
+    } catch (cause) {
+      if (currentRequestId === requestId.current) {
+        setPageError(cause instanceof Error ? cause : new Error(String(cause)))
+      }
+    } finally {
+      if (currentRequestId === requestId.current) setIsPageLoading(false)
+    }
+  }, [mustChangePassword, page, pageSize, selectedWorkspaceId, token])
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadPage()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadPage, refreshVersion])
+
+  const handleMessageSelect = (message: MessageItem) => {
+    setSelectedMessage(message)
+    if (message.is_read) return
+    const readAt = new Date().toISOString()
+    setPageMessages((items) =>
+      items.map((item) =>
+        item.id === message.id
+          ? { ...item, is_read: true, read_at: readAt }
+          : item
+      )
+    )
+    void markRead(message.id).catch(() => {
+      void loadPage()
+    })
+  }
+
+  const handleMarkAllRead = () => {
+    const readAt = new Date().toISOString()
+    setPageMessages((items) =>
+      items.map((message) =>
+        message.is_read
+          ? message
+          : { ...message, is_read: true, read_at: readAt }
+      )
+    )
+    void markAllRead().catch(() => {
+      void loadPage()
+    })
+  }
+
+  const loading = isLoading || isPageLoading
+  const loadError = error ?? pageError
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -305,15 +397,15 @@ export function MessagesPage() {
             type="button"
             variant="outline"
             onClick={() => void refresh()}
-            disabled={isLoading}
+            disabled={loading}
           >
             {t("刷新")}
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => void markAllRead().catch(() => undefined)}
-            disabled={unreadCount === 0 || isLoading}
+            onClick={handleMarkAllRead}
+            disabled={unreadCount === 0 || loading}
           >
             <CheckCheckIcon data-icon="inline-start" />
             {t("全部标为已读")}
@@ -321,15 +413,15 @@ export function MessagesPage() {
         </div>
       </div>
 
-      {error ? (
+      {loadError ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {t("消息加载失败，请稍后重试。")}
         </div>
       ) : null}
 
-      {messages.length ? (
+      {pageMessages.length ? (
         <div className="flex flex-col gap-2">
-          {messages.map((message) => (
+          {pageMessages.map((message) => (
             <article
               key={message.id}
               className={cn(
@@ -342,8 +434,7 @@ export function MessagesPage() {
                 aria-haspopup="dialog"
                 className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 onClick={() => {
-                  setSelectedMessage(message)
-                  void markRead(message.id).catch(() => undefined)
+                  handleMessageSelect(message)
                 }}
               >
                 <SeverityIcon
@@ -373,10 +464,22 @@ export function MessagesPage() {
               </button>
             </article>
           ))}
+          <SystemPagination
+            page={page}
+            pageSize={pageSize}
+            itemCount={pageMessages.length}
+            total={total}
+            hasNext={page * pageSize < total}
+            onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => {
+              setPageSize(nextPageSize)
+              setPage(1)
+            }}
+          />
         </div>
       ) : (
         <div className="rounded-lg border border-dashed px-6 py-16 text-center text-sm text-muted-foreground">
-          {isLoading ? t("正在加载消息") : t("暂无消息")}
+          {isPageLoading ? t("正在加载消息") : t("暂无消息")}
         </div>
       )}
       <MessageDetailsDialog
