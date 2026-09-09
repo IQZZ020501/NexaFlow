@@ -119,6 +119,43 @@ describe("system health", () => {
     await waitFor(() => expect(healthRequests).toBe(2))
   })
 
+  test("keeps the desktop navigation constrained while only the content scrolls", async () => {
+    withFetch((url) => {
+      if (url === "/api/v1/admin/governance/health") {
+        return jsonResponse(health)
+      }
+      if (url.startsWith("/api/v1/admin/system-logs")) {
+        return jsonResponse([])
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    renderPage(<SystemGovernancePage section="operations" />)
+
+    await waitFor(() =>
+      expect(healthCard("数据库").getByText("正常")).toBeTruthy()
+    )
+    const navigation = screen.getByRole("navigation", { name: "系统管理" })
+    const sidebar = navigation.parentElement
+    const layout = sidebar?.parentElement
+    const content = screen.getByRole("main")
+    if (!sidebar || !layout) throw new Error("Missing constrained system layout")
+
+    expect(sidebar.tagName).toBe("ASIDE")
+    expect(content.parentElement).toBe(layout)
+    expect(layout.classList.contains("lg:h-[calc(100svh-9.25rem)]")).toBe(
+      true
+    )
+    expect(layout.classList.contains("lg:min-h-0")).toBe(true)
+    expect(sidebar.classList.contains("lg:sticky")).toBe(true)
+    expect(sidebar.classList.contains("lg:h-full")).toBe(true)
+    expect(navigation.classList.contains("lg:h-full")).toBe(true)
+    expect(content.classList.contains("lg:h-full")).toBe(true)
+    expect(content.classList.contains("lg:min-h-0")).toBe(true)
+    expect(content.classList.contains("lg:overflow-y-auto")).toBe(true)
+    expect(content.classList.contains("lg:overscroll-contain")).toBe(true)
+  })
+
   test("clears stale health when a refresh cannot reach the endpoint", async () => {
     withFetch((url) => {
       if (url === "/api/v1/admin/governance/health") return jsonResponse(health)

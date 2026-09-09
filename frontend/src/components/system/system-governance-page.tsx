@@ -157,7 +157,9 @@ export function SystemGovernancePage({ section }: Props) {
   return (
     <div className="grid min-w-0 gap-4 lg:h-[calc(100svh-9.25rem)] lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)]">
       <SystemGovernanceNav section={section} me={session.me} />
-      <main className="min-w-0">
+      <main
+        className="min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1"
+      >
         {section === "operations" ? <OperationsPanel /> : null}
         {section === "governance" ? <GovernancePanel /> : null}
         {section === "security" ? <SecurityPanel /> : null}
