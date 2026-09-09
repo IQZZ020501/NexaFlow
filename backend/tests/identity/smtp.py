@@ -81,6 +81,10 @@ def test_transport_modes() -> None:
     message = client.send_message.call_args.args[0]
     assert message["Message-ID"] == "<delivery@nexaflow.local>"
     assert message.is_multipart()
+    assert [part.get_content_type() for part in message.iter_parts()] == [
+        "text/plain",
+        "text/html",
+    ]
 
     try:
         _send_smtp_message_sync(config, "to@example.com\nBcc:x@example.com", "subject", "body")
