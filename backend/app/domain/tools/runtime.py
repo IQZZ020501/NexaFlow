@@ -12,6 +12,8 @@ from app.entities.tools import Tool, ToolPolicy, ToolSnapshot, ToolSource, ToolV
 
 # Leave room for the JSON envelope around the sandbox's 256 KiB code limit.
 MAX_TOOL_INPUT_BYTES = 512 * 1024
+# Documents Skill reference DOCX input is bounded separately from ordinary tools.
+MAX_DOCUMENT_TOOL_INPUT_BYTES = 8 * 1024 * 1024
 MAX_TOOL_RESULT_BYTES = 32 * 1024
 TOOL_APPROVAL_AUTO = "auto"
 TOOL_APPROVAL_DISABLED = "disabled"
@@ -94,8 +96,21 @@ def tool_snapshot_from_payload(payload: Any) -> ToolSnapshot:
         raise ValueError("Tool invocation snapshot is invalid.") from exc
 
 
-def tool_arguments_hash(arguments: dict[str, Any]) -> str:
-    return hashlib.sha256(_encoded_json(arguments, MAX_TOOL_INPUT_BYTES)).hexdigest()
+def tool_arguments_hash(
+    arguments: dict[str, Any], *, max_bytes: int = MAX_TOOL_INPUT_BYTES
+) -> str:
+    return hashlib.sha256(_encoded_json(arguments, max_bytes)).hexdigest()
+
+
+def tool_input_size_limit(snapshot: ToolSnapshot) -> int:
+    properties = snapshot.input_schema.get("properties")
+    if (
+        snapshot.function_name == "documents_skill"
+        and isinstance(properties, dict)
+        and "reference_docx_base64" in properties
+    ):
+        return MAX_DOCUMENT_TOOL_INPUT_BYTES
+    return MAX_TOOL_INPUT_BYTES
 
 
 def normalize_tool_arguments(
@@ -184,7 +199,7 @@ def validate_tool_arguments(
 ) -> None:
     if not isinstance(arguments, dict):
         raise ValueError("Tool arguments must be an object.")
-    _encoded_json(arguments, MAX_TOOL_INPUT_BYTES)
+    _encoded_json(arguments, tool_input_size_limit(snapshot))
     _validate_schema(snapshot.input_schema, arguments, "Tool arguments are invalid.")
 
 
@@ -250,6 +265,7 @@ def _validate_schema(schema: dict[str, Any], value: Any, message: str) -> None:
 
 __all__ = [
     "MAX_TOOL_INPUT_BYTES",
+    "MAX_DOCUMENT_TOOL_INPUT_BYTES",
     "MAX_TOOL_RESULT_BYTES",
     "TOOL_APPROVAL_AUTO",
     "TOOL_APPROVAL_DISABLED",
@@ -269,6 +285,7 @@ __all__ = [
     "exhausted_tool_invocation_terminal_state",
     "normalize_tool_arguments",
     "tool_arguments_hash",
+    "tool_input_size_limit",
     "tool_snapshot_from_payload",
     "tool_snapshot_payload",
     "validate_tool_arguments",
