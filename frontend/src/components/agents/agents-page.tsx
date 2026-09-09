@@ -30,7 +30,10 @@ import { AgentConfigFields } from "@/components/agents/agent-config-fields"
 import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
 import { runAttachmentFromFile } from "@/components/agents/agent-attachment-list"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
-import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
+import {
+  ResourceBulkMoveBar,
+  toggleResourceSelection,
+} from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -2170,6 +2173,11 @@ export function AgentsPage({
                   key={agent.id}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={
+                    isBatchManaging && agent.can_edit
+                      ? selectedAgentIds.includes(agent.id)
+                      : undefined
+                  }
                   className={cn(
                     "flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
                     selectedAgentIds.includes(agent.id) &&
@@ -2177,12 +2185,24 @@ export function AgentsPage({
                   )}
                   onClick={(event) => {
                     if (isEventFromDropdownMenu(event)) return
+                    if (isBatchManaging && agent.can_edit) {
+                      setSelectedAgentIds((current) =>
+                        toggleResourceSelection(current, agent.id)
+                      )
+                      return
+                    }
                     openAgent(agent)
                   }}
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget) return
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault()
+                      if (isBatchManaging && agent.can_edit) {
+                        setSelectedAgentIds((current) =>
+                          toggleResourceSelection(current, agent.id)
+                        )
+                        return
+                      }
                       openAgent(agent)
                     }
                   }}

@@ -393,8 +393,22 @@ describe("KnowledgeBasePage list view", () => {
       screen.queryByRole("checkbox", { name: "选择 KB Alpha" })
     ).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "选择 KB Alpha" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "选择 KB Beta" }))
+    const alphaCard = cardElement("KB Alpha")
+    const alphaCheckbox = screen.getByRole("checkbox", {
+      name: "选择 KB Alpha",
+    }) as HTMLInputElement
+
+    fireEvent.click(alphaCard)
+    expect(alphaCheckbox.checked).toBe(true)
+    expect(screen.getByText("已选择 1 项")).toBeTruthy()
+
+    fireEvent.click(alphaCard)
+    expect(alphaCheckbox.checked).toBe(false)
+    expect(screen.getByText("已选择 0 项")).toBeTruthy()
+
+    fireEvent.click(alphaCard)
+    fireEvent.keyDown(cardElement("KB Beta"), { key: " " })
+    expect(screen.getByText("已选择 2 项")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
     const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
     fireEvent.click(within(dialog).getByRole("button", { name: "制度资料" }))
