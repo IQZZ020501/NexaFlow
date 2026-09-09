@@ -119,6 +119,29 @@ describe("system health", () => {
     await waitFor(() => expect(healthRequests).toBe(2))
   })
 
+  test("scrolls the operations content independently from the system navigation", async () => {
+    withFetch((url) => {
+      if (url === "/api/v1/admin/governance/health") {
+        return jsonResponse(health)
+      }
+      if (url.startsWith("/api/v1/admin/system-logs")) {
+        return jsonResponse([])
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    renderPage(<SystemGovernancePage section="operations" />)
+
+    await waitFor(() =>
+      expect(healthCard("数据库").getByText("正常")).toBeTruthy()
+    )
+    const content = screen.getByRole("main")
+    expect(content.classList.contains("lg:h-full")).toBe(true)
+    expect(content.classList.contains("lg:min-h-0")).toBe(true)
+    expect(content.classList.contains("lg:overflow-y-auto")).toBe(true)
+    expect(content.classList.contains("lg:overscroll-contain")).toBe(true)
+  })
+
   test("clears stale health when a refresh cannot reach the endpoint", async () => {
     withFetch((url) => {
       if (url === "/api/v1/admin/governance/health") return jsonResponse(health)
