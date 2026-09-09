@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 
 import { TopProgress } from "@/components/app/top-progress"
 import { LanguageProvider } from "@/contexts/language-provider"
+import { MessageCenterProvider } from "@/contexts/message-center-context"
 import { SessionProvider } from "@/contexts/session-context"
 import { ThemeProvider } from "@/contexts/theme-provider"
 
@@ -17,8 +18,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <LanguageProvider>
       <ThemeProvider>
         <SessionProvider>
-          {children}
-          <TopProgress />
+          <MessageCenterProvider>
+            {children}
+            <TopProgress />
+          </MessageCenterProvider>
         </SessionProvider>
       </ThemeProvider>
     </LanguageProvider>

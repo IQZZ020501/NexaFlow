@@ -5,6 +5,7 @@ from app.api.v1.admin.governance import routes as governance
 from app.api.v1.admin.smtp import routes as smtp
 from app.api.v1.admin.system_logs import routes as system_logs
 from app.api.v1.admin.users import routes as users
+from app.api.v1.announcements import routes as announcements
 from app.api.v1.artifacts import routes as artifacts
 from app.api.v1.workspaces import routes as workspaces
 from app.api.v1.teams import routes as teams
@@ -36,6 +37,9 @@ admin_router.include_router(enterprise_identity.admin_router)
 api_router.include_router(admin_router)
 
 api_router.include_router(auth.router)
+api_router.include_router(announcements.message_router)
+api_router.include_router(announcements.global_admin_router)
+api_router.include_router(announcements.workspace_router)
 api_router.include_router(enterprise_identity.public_router)
 api_router.include_router(artifacts.router)
 api_router.include_router(workspaces.router)
