@@ -12,6 +12,7 @@ SENSITIVE_FIELD_PARTS = (
     "secret",
     "token",
     "api_key",
+    "base64",
 )
 
 AgentEventHandler = Callable[[dict[str, Any]], Awaitable[None]]

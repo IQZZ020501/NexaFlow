@@ -39,11 +39,13 @@ BUILTIN_SKILL_DEFINITIONS = (
         "Documents Skill",
         (
             "Create a DOCX file from Markdown content using the Documents Skill "
-            "renderer. Omit style for the existing report layout, or use "
-            "formal_legal for a formal legal-document layout. In formal_legal, "
-            "prefix signature/date lines with `> ` and use `---` on its own line "
-            "for an explicit page break. The renderer creates a new DOCX and does "
-            "not preserve an uploaded Word binary or template."
+            "renderer. Omit style to recognize an obvious legal-document title, "
+            "use report to force the report layout, or use formal_legal for a "
+            "formal legal-document layout. In formal_legal, prefix signature/date "
+            "lines with `> ` and use `---` on its own line for an explicit page "
+            "break. Optionally provide reference_docx_base64 to inherit a reference "
+            "DOCX's page geometry, style, header/footer, and direct formatting; "
+            "its body content is replaced rather than edited in place."
         ),
     ),
     (
@@ -520,13 +522,24 @@ def _skill_input_schema(skill_name: str) -> dict[str, Any]:
             properties["style"] = {
                 "type": "string",
                 "enum": ["report", "formal_legal"],
-                "default": "report",
                 "description": (
-                    "Omit for the existing report layout. formal_legal uses the "
-                    "first H1 as a centered title, formal CJK body typography, "
-                    "literal list markers, and no page-number footer. Prefix "
-                    "signature/date lines with `> ` and put `---` on its own line "
-                    "for an explicit page break."
+                    "Omit to let the renderer recognize an obvious legal-document "
+                    "title, or use report to force the report layout. formal_legal "
+                    "uses the first H1 as a centered title, formal CJK body "
+                    "typography, literal list markers, and no page-number footer. "
+                    "Prefix signature/date lines with `> ` and put `---` on its "
+                    "own line for an explicit page break."
+                ),
+            }
+            properties["reference_docx_base64"] = {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 7_000_000,
+                "description": (
+                    "Optional base64-encoded reference DOCX (up to 5 MiB). The "
+                    "renderer preserves its page geometry and headers, "
+                    "footers, styles, and direct formatting while replacing the "
+                    "body with the supplied Markdown."
                 ),
             }
     elif skill_name == "spreadsheets":
