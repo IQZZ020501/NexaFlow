@@ -26,7 +26,10 @@ import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
-import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
+import {
+  ResourceBulkMoveBar,
+  toggleResourceSelection,
+} from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -785,6 +788,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         key={tool.id}
                         role="button"
                         tabIndex={0}
+                        aria-pressed={
+                          isBatchManaging && tool.can_manage
+                            ? selectedToolIds.includes(tool.id)
+                            : undefined
+                        }
                         className={cn(
                           "relative flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
                           selectedToolIds.includes(tool.id) &&
@@ -792,12 +800,24 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         )}
                         onClick={(event) => {
                           if (isEventFromDropdownMenu(event)) return
+                          if (isBatchManaging && tool.can_manage) {
+                            setSelectedToolIds((current) =>
+                              toggleResourceSelection(current, tool.id)
+                            )
+                            return
+                          }
                           void openDetail(tool)
                         }}
                         onKeyDown={(event) => {
                           if (event.target !== event.currentTarget) return
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault()
+                            if (isBatchManaging && tool.can_manage) {
+                              setSelectedToolIds((current) =>
+                                toggleResourceSelection(current, tool.id)
+                              )
+                              return
+                            }
                             void openDetail(tool)
                           }
                         }}

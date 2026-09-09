@@ -117,7 +117,10 @@ import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dial
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
 import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
-import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
+import {
+  ResourceBulkMoveBar,
+  toggleResourceSelection,
+} from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -3020,6 +3023,13 @@ function KnowledgeBasePageContent({
                         key={knowledgeBase.id}
                         role="button"
                         tabIndex={0}
+                        aria-pressed={
+                          isBatchManaging && knowledgeBase.permission === "edit"
+                            ? selectedKnowledgeBaseIds.includes(
+                                knowledgeBase.id
+                              )
+                            : undefined
+                        }
                         className={cn(
                           "flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
                           selectedKnowledgeBaseIds.includes(knowledgeBase.id) &&
@@ -3027,12 +3037,36 @@ function KnowledgeBasePageContent({
                         )}
                         onClick={(event) => {
                           if (isEventFromDropdownMenu(event)) return
+                          if (
+                            isBatchManaging &&
+                            knowledgeBase.permission === "edit"
+                          ) {
+                            setSelectedKnowledgeBaseIds((current) =>
+                              toggleResourceSelection(
+                                current,
+                                knowledgeBase.id
+                              )
+                            )
+                            return
+                          }
                           openKnowledgeBase(knowledgeBase)
                         }}
                         onKeyDown={(event) => {
                           if (event.target !== event.currentTarget) return
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault()
+                            if (
+                              isBatchManaging &&
+                              knowledgeBase.permission === "edit"
+                            ) {
+                              setSelectedKnowledgeBaseIds((current) =>
+                                toggleResourceSelection(
+                                  current,
+                                  knowledgeBase.id
+                                )
+                              )
+                              return
+                            }
                             openKnowledgeBase(knowledgeBase)
                           }
                         }}

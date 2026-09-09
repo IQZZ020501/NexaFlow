@@ -34,7 +34,10 @@ import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
-import { ResourceBulkMoveBar } from "@/components/resource-folders/resource-bulk-move-bar"
+import {
+  ResourceBulkMoveBar,
+  toggleResourceSelection,
+} from "@/components/resource-folders/resource-bulk-move-bar"
 import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
@@ -821,11 +824,40 @@ export function LlmPage() {
                   return (
                     <div
                       key={model.id}
+                      role={isBatchManaging && canManage ? "button" : undefined}
+                      tabIndex={isBatchManaging && canManage ? 0 : undefined}
+                      aria-pressed={
+                        isBatchManaging && canManage
+                          ? selectedModelIds.includes(model.id)
+                          : undefined
+                      }
                       className={cn(
                         "flex min-h-40 flex-col rounded-md border p-3",
+                        isBatchManaging &&
+                          canManage &&
+                          "cursor-pointer transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
                         selectedModelIds.includes(model.id) &&
                           "border-primary/50 bg-primary/[0.035]"
                       )}
+                      onClick={() => {
+                        if (!isBatchManaging || !canManage) return
+                        setSelectedModelIds((current) =>
+                          toggleResourceSelection(current, model.id)
+                        )
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return
+                        if (
+                          isBatchManaging &&
+                          canManage &&
+                          (event.key === "Enter" || event.key === " ")
+                        ) {
+                          event.preventDefault()
+                          setSelectedModelIds((current) =>
+                            toggleResourceSelection(current, model.id)
+                          )
+                        }
+                      }}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 gap-3">
@@ -885,6 +917,7 @@ export function LlmPage() {
                                   value: model.name,
                                 })}
                                 checked={selectedModelIds.includes(model.id)}
+                                onClick={(event) => event.stopPropagation()}
                                 onChange={(event) =>
                                   setSelectedModelIds((current) =>
                                     event.target.checked
@@ -896,7 +929,10 @@ export function LlmPage() {
                             ) : null}
                             <IconButton
                               label={t("编辑")}
-                              onClick={() => openEditModel(model)}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openEditModel(model)
+                              }}
                             >
                               <PencilIcon className="size-4" />
                             </IconButton>

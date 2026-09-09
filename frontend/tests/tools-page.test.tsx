@@ -209,8 +209,26 @@ describe("ToolsPage", () => {
     fireEvent.click(
       within(searchToolbar).getByRole("button", { name: "批量管理" })
     )
-    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Owned formatter" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Second formatter" }))
+    const ownedCard = screen.getByText("Owned formatter").closest("article")!
+    const ownedCheckbox = screen.getByRole("checkbox", {
+      name: "选择 Owned formatter",
+    }) as HTMLInputElement
+
+    fireEvent.click(ownedCard)
+    expect(ownedCheckbox.checked).toBe(true)
+    expect(screen.getByText("已选择 1 项")).toBeTruthy()
+
+    fireEvent.click(ownedCard)
+    expect(ownedCheckbox.checked).toBe(false)
+    expect(screen.getByText("已选择 0 项")).toBeTruthy()
+
+    fireEvent.click(ownedCard)
+    fireEvent.keyDown(
+      screen.getByText("Second formatter").closest("article")!,
+      {
+        key: "Enter",
+      }
+    )
     expect(screen.getByText("已选择 2 项")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
