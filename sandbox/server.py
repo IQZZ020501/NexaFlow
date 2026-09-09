@@ -16,7 +16,9 @@ from typing import Any
 
 from .runner import encode_response, execute_request
 
-MAX_REQUEST_BYTES = 768 * 1024
+# Skill inputs may carry a bounded base64 reference DOCX (up to 5 MiB), while
+# runner.py keeps ordinary code/stdin requests at their 256 KiB limits.
+MAX_REQUEST_BYTES = 8 * 1024 * 1024
 # Job concurrency is bounded so untrusted siblings stay apart. Each job runs
 # in its own child with per-job rlimits and temp dirs, but Linux launcher
 # children share the worker-level namespace/chroot, so same-UID siblings can

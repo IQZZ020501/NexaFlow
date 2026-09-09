@@ -38,6 +38,7 @@ from app.domain.tools.runtime import (
     TOOL_SAFE_EXTERNAL_EFFECTS,
     TOOL_UNCERTAIN_EFFECTS,
     tool_arguments_hash,
+    tool_input_size_limit,
     normalize_tool_arguments,
     tool_snapshot_from_payload,
     tool_snapshot_payload,
@@ -67,7 +68,9 @@ async def queue_tool_invocation(
         arguments,
     )
     validate_tool_arguments(snapshot, arguments)
-    arguments_hash = tool_arguments_hash(arguments)
+    arguments_hash = tool_arguments_hash(
+        arguments, max_bytes=tool_input_size_limit(snapshot)
+    )
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),
         "deadline_at": context.deadline_at.isoformat(),

@@ -17,7 +17,9 @@ available to the Worker without a separate download. Each bundle owns its
 renderer under `scripts/render.py` and is registered as a fixed Skill Tool, so
 it appears in the Tools page, Agent Tool picker, and Workflow node palette.
 
-- `documents_skill` accepts a DOCX filename and Markdown content.
+- `documents_skill` accepts a DOCX filename and Markdown content, recognizes
+  obvious legal-document titles when `style` is omitted, and can optionally
+  inherit formatting from a base64-encoded reference DOCX.
 - `pdf_skill` accepts a PDF filename and Markdown content.
 - `pptx_skill` accepts a PPTX filename and structured slides. It creates a new
   16:9 deck with built-in templates, optional brand colors, native icons,

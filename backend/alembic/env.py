@@ -16,6 +16,7 @@ from app.domain.agents.models import (  # noqa: F401
     AgentRunState,
 )
 from app.domain.audit.models import AuditLog  # noqa: F401
+from app.domain.announcements.models import Announcement, AnnouncementRead  # noqa: F401
 from app.domain.artifacts.models import GeneratedArtifact  # noqa: F401
 from app.infra.db.base import Base
 from app.domain.platform.models import RefreshSession, User  # noqa: F401

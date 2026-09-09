@@ -8,6 +8,7 @@ import {
   LanguagesIcon,
   LockIcon,
   LogOutIcon,
+  MegaphoneIcon,
   SettingsIcon,
 } from "lucide-react"
 import Image from "next/image"
@@ -16,6 +17,7 @@ import { usePathname, useRouter } from "next/navigation"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { MessageCenter } from "@/components/messages/message-center"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,6 +87,9 @@ export function TopBar() {
     me.user.is_global_admin ||
     me.user.workspaces.some((workspace) => workspace.role === "admin") ||
     me.user.teams.some((team) => team.role === "admin")
+  const canManageAnnouncements =
+    me.user.is_global_admin ||
+    me.user.workspaces.some((workspace) => workspace.role === "admin")
   const systemHref =
     me.user.is_global_admin ||
     me.user.workspaces.some((workspace) => workspace.role === "admin")
@@ -193,6 +198,7 @@ export function TopBar() {
             </Button>
           ) : null}
         </nav>
+        <MessageCenter />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -300,6 +306,14 @@ export function TopBar() {
                   <Link href={systemHref}>
                     <SettingsIcon />
                     {t("系统管理")}
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
+              {canManageAnnouncements ? (
+                <DropdownMenuItem asChild>
+                  <Link href="/system/announcements">
+                    <MegaphoneIcon />
+                    {t("公告管理")}
                   </Link>
                 </DropdownMenuItem>
               ) : null}

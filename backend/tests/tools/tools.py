@@ -396,6 +396,30 @@ def load_documents_formal_legal_migration():
     return module
 
 
+def load_documents_reference_migration():
+    path = (
+        Path(__file__).parents[2]
+        / "alembic/versions/202609090001_documents_reference_template.py"
+    )
+    spec = spec_from_file_location("documents_reference_template", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_documents_reference_migration_targets_current_catalog() -> None:
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
+
+    migration = load_documents_reference_migration()
+    desired_tool, desired_version, _desired_policy = build_skill_artifact_tool(
+        "workspace-documents-reference", "documents"
+    )
+    assert migration.down_revision == "202609070001"
+    assert desired_tool.current_version_id == desired_version.id
+    assert "reference_docx_base64" in desired_version.input_schema["properties"]
+
+
 def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
@@ -528,7 +552,7 @@ def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
         ).one()
         assert refreshed.revision == 2
         assert "formal_legal" in refreshed.description
-        assert refreshed.input_schema["properties"]["style"]["default"] == "report"
+        assert "default" not in refreshed.input_schema["properties"]["style"]
         assert connection.scalar(
             sa.select(policies.c.tool_version_id).where(
                 policies.c.id == "stale-policy-id"
@@ -1710,7 +1734,12 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             assert "skills" not in skill_properties
             assert "code" not in skill_properties
             if skill_name == "documents":
-                assert set(skill_properties) == {"filename", "content", "style"}
+                assert set(skill_properties) == {
+                    "filename",
+                    "content",
+                    "style",
+                    "reference_docx_base64",
+                }
             elif skill_name == "pdf":
                 assert set(skill_properties) == {"filename", "content"}
             elif skill_name == "spreadsheets":
@@ -6422,6 +6451,7 @@ def main() -> None:
     test_generic_artifact_migration_matches_catalog()
     test_artifact_contract_downgrade_rejects_durable_references()
     test_documents_formal_legal_migration_refreshes_stale_versions()
+    test_documents_reference_migration_targets_current_catalog()
     test_pptx_skill_schema_migration_refreshes_stale_versions()
     test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()
