@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, date, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 
@@ -53,6 +54,147 @@ def knowledge_url(workspace_id: str, suffix: str = "") -> str:
 
 def teams_url(workspace_id: str, suffix: str = "") -> str:
     return f"/api/v1/workspaces/{workspace_id}/teams{suffix}"
+
+
+def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
+    headers = auth_headers(admin_token)
+    member_id, member_token = create_active_user(
+        client,
+        admin_token,
+        "announcement-member",
+    )
+    added = client.post(
+        members_url(workspace_id),
+        headers=headers,
+        json={"user_id": member_id, "role": "member"},
+    )
+    assert added.status_code == 201, added.text
+
+    live_publisher = AsyncMock()
+    with patch(
+        "app.application.announcements.service."
+        "build_announcement_live_stream_publisher",
+        return_value=live_publisher,
+    ):
+        global_expiration = datetime.now(UTC) + timedelta(hours=1)
+        global_created = client.post(
+            "/api/v1/admin/announcements",
+            headers=headers,
+            json={
+                "title": "Global notice",
+                "body": "Global body",
+                "expires_at": global_expiration.isoformat(),
+            },
+        )
+        assert global_created.status_code == 201, global_created.text
+        global_id = global_created.json()["id"]
+
+        workspace_created = client.post(
+            f"/api/v1/workspaces/{workspace_id}/announcements",
+            headers=headers,
+            json={"title": "Workspace notice", "body": "Workspace body"},
+        )
+        assert workspace_created.status_code == 201, workspace_created.text
+        workspace_id_notice = workspace_created.json()["id"]
+
+        draft_messages = client.get(
+            f"/api/v1/messages?workspace_id={workspace_id}",
+            headers=auth_headers(member_token),
+        )
+        assert draft_messages.status_code == 200, draft_messages.text
+        assert draft_messages.json() == []
+
+        for path in (
+            f"/api/v1/admin/announcements/{global_id}/publish",
+            f"/api/v1/workspaces/{workspace_id}/announcements/"
+            f"{workspace_id_notice}/publish",
+        ):
+            published = client.post(path, headers=headers)
+            assert published.status_code == 200, published.text
+        assert live_publisher.publish.await_count == 2
+        assert live_publisher.close.await_count == 2
+
+        global_messages = client.get(
+            "/api/v1/messages",
+            headers=auth_headers(member_token),
+        )
+        assert global_messages.status_code == 200, global_messages.text
+        assert [item["id"] for item in global_messages.json()] == [global_id]
+
+        messages = client.get(
+            f"/api/v1/messages?workspace_id={workspace_id}",
+            headers=auth_headers(member_token),
+        )
+        assert messages.status_code == 200, messages.text
+        assert {item["id"] for item in messages.json()} == {
+            global_id,
+            workspace_id_notice,
+        }
+        unread = client.get(
+            f"/api/v1/messages/unread-count?workspace_id={workspace_id}",
+            headers=auth_headers(member_token),
+        )
+        assert unread.json() == {
+            "count": 2,
+            "next_expiration_at": global_created.json()["expires_at"],
+        }, unread.text
+
+        marked = client.post(
+            f"/api/v1/messages/{global_id}/read?workspace_id={workspace_id}",
+            headers=auth_headers(member_token),
+        )
+        assert marked.status_code == 204, marked.text
+        read_all = client.post(
+            f"/api/v1/messages/read-all?workspace_id={workspace_id}",
+            headers=auth_headers(member_token),
+        )
+        assert read_all.status_code == 204, read_all.text
+        unread = client.get(
+            f"/api/v1/messages/unread-count?workspace_id={workspace_id}",
+            headers=auth_headers(member_token),
+        )
+        assert unread.json() == {
+            "count": 0,
+            "next_expiration_at": global_created.json()["expires_at"],
+        }, unread.text
+
+        for path, payload in (
+            (f"/api/v1/admin/announcements/{global_id}", {"title": None}),
+            (
+                f"/api/v1/workspaces/{workspace_id}/announcements/"
+                f"{workspace_id_notice}",
+                {"body": None},
+            ),
+        ):
+            invalid_update = client.patch(path, headers=headers, json=payload)
+            assert invalid_update.status_code == 422, invalid_update.text
+
+        updated = client.patch(
+            f"/api/v1/admin/announcements/{global_id}",
+            headers=headers,
+            json={"title": "Updated global notice"},
+        )
+        assert updated.status_code == 200, updated.text
+        archived = client.post(
+            f"/api/v1/workspaces/{workspace_id}/announcements/"
+            f"{workspace_id_notice}/archive",
+            headers=headers,
+        )
+        assert archived.status_code == 200, archived.text
+        assert live_publisher.publish.await_count == 4
+        assert live_publisher.close.await_count == 4
+
+        denied_global = client.get(
+            "/api/v1/admin/announcements",
+            headers=auth_headers(member_token),
+        )
+        assert denied_global.status_code == 403, denied_global.text
+        denied_workspace = client.post(
+            f"/api/v1/workspaces/{workspace_id}/announcements",
+            headers=auth_headers(member_token),
+            json={"title": "Denied", "body": "Denied"},
+        )
+        assert denied_workspace.status_code == 403, denied_workspace.text
 
 
 async def assert_workspace_cascade_deleted(
@@ -847,6 +989,7 @@ def main() -> None:
     exercise_workspace_analytics()
     with test_client() as client:
         admin_token, default_workspace_id = activate_admin(client)
+        exercise_announcements(client, admin_token, default_workspace_id)
 
         workspaces = client.get("/api/v1/workspaces", headers=auth_headers(admin_token))
         assert workspaces.status_code == 200, workspaces.text

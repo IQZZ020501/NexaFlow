@@ -15,6 +15,15 @@ type Props = {
   onMove: () => void
 }
 
+export function toggleResourceSelection(
+  selectedIds: string[],
+  resourceId: string
+) {
+  return selectedIds.includes(resourceId)
+    ? selectedIds.filter((id) => id !== resourceId)
+    : [...selectedIds, resourceId]
+}
+
 export function ResourceBulkMoveBar({
   resourceIds,
   selectedIds,

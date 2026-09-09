@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
+from copy import deepcopy
+from io import BytesIO
 import json
 import os
 import re
@@ -22,6 +26,44 @@ NUMBERED = re.compile(r"^\d+[.)]\s+(.+)$")
 INLINE = re.compile(r"(\*\*.+?\*\*|`.+?`|\*.+?\*)")
 REPORT_STYLE = "report"
 FORMAL_LEGAL_STYLE = "formal_legal"
+MAX_REFERENCE_DOCX_BYTES = 5 * 1024 * 1024
+MAX_REFERENCE_DOCX_BASE64_CHARS = ((MAX_REFERENCE_DOCX_BYTES + 2) // 3) * 4
+MAX_CONTENT_CHARS = 200_000
+
+_LEGAL_TITLE_MARKERS = (
+    "申请书",
+    "起诉状",
+    "答辩状",
+    "上诉状",
+    "反诉状",
+    "仲裁申请",
+    "调解书",
+    "判决书",
+    "裁定书",
+    "授权委托书",
+    "公函",
+    "声明书",
+)
+_LEGAL_SECTION_MARKERS = (
+    "仲裁请求",
+    "诉讼请求",
+    "事实与理由",
+    "事实和理由",
+    "证据",
+    "申请人",
+    "被申请人",
+    "原告",
+    "被告",
+)
+_ARBITRATION_FEE_REQUEST = re.compile(
+    r"(?:仲裁(?:费用|费)|仲裁收费)[^\n。；]{0,120}"
+    r"(?:由|应由|要求[^\n。；]{0,30}由)[^\n。；]{0,40}"
+    r"被申请人[^\n。；]{0,20}承担"
+)
+_ARBITRATION_FEE_FREE = re.compile(
+    r"(?:劳动仲裁|仲裁)[^\n。；]{0,20}"
+    r"(?:不收费|无需收费|不需要收费|免收(?:费|费用)?)"
+)
 
 PAGE_WIDTH_CM = 21.0
 PAGE_HEIGHT_CM = 29.7
@@ -38,7 +80,7 @@ def _resolve_cjk_font(*, formal: bool = False) -> str | None:
     if formal:
         return {
             "linux": "Noto Serif CJK SC",
-            "darwin": "STFangsong",
+            "darwin": "Songti SC",
         }.get(sys.platform)
     return {
         "linux": "Noto Serif CJK SC",
@@ -57,26 +99,73 @@ def _display_units(value: str) -> int:
     )
 
 
-def _input() -> tuple[str, str]:
-    value = json.load(sys.stdin)
-    if not isinstance(value, dict) or not isinstance(value.get("content"), str):
-        raise ValueError("documents content must be a string")
-    style = value.get("style", REPORT_STYLE)
-    if not isinstance(style, str) or style not in {REPORT_STYLE, FORMAL_LEGAL_STYLE}:
-        raise ValueError("documents style must be report or formal_legal")
-    content = value["content"].strip()
-    if not content:
-        raise ValueError("documents content is empty")
-    if (
-        style == FORMAL_LEGAL_STYLE
-        and "劳动仲裁不收费" in content
-        and re.search(r"仲裁费用[^\n。；]{0,80}由被申请人承担", content)
+def _looks_formal_legal(content: str) -> bool:
+    """Recognize an unstyled legal document without changing ordinary reports."""
+    normalized = re.sub(r"\s+", "", content)
+    first_heading = next(
+        (
+            match.group(2)
+            for line in content.splitlines()
+            if (match := HEADING.match(line.strip())) and len(match.group(1)) == 1
+        ),
+        "",
+    )
+    if any(marker in first_heading for marker in _LEGAL_TITLE_MARKERS):
+        return True
+    matches = sum(marker in normalized for marker in _LEGAL_SECTION_MARKERS)
+    return matches >= 3 and any(marker in normalized for marker in _LEGAL_TITLE_MARKERS)
+
+
+def _validate_content_consistency(content: str) -> None:
+    if _ARBITRATION_FEE_REQUEST.search(content) and _ARBITRATION_FEE_FREE.search(
+        content
     ):
         raise ValueError(
             "formal_legal content contains conflicting arbitration fee statements: "
-            "'仲裁费用…由被申请人承担' and '劳动仲裁不收费'"
+            "an arbitration-fee payment request conflicts with a statement that "
+            "labor arbitration is free"
         )
-    return content, style
+
+
+def _decode_reference_docx(value: object) -> bytes | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError("reference_docx_base64 must be a non-empty base64 string")
+    if len(value) > MAX_REFERENCE_DOCX_BASE64_CHARS:
+        raise ValueError("reference DOCX exceeds the 5 MiB limit")
+    try:
+        content = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("reference_docx_base64 is not valid base64") from exc
+    if not content or len(content) > MAX_REFERENCE_DOCX_BYTES:
+        raise ValueError("reference DOCX exceeds the 5 MiB limit")
+    try:
+        Document(BytesIO(content))
+    except Exception as exc:
+        raise ValueError("reference_docx_base64 is not a valid DOCX") from exc
+    return content
+
+
+def _input() -> tuple[str, str, bytes | None]:
+    value = json.load(sys.stdin)
+    if not isinstance(value, dict) or not isinstance(value.get("content"), str):
+        raise ValueError("documents content must be a string")
+    content = value["content"].strip()
+    if not content:
+        raise ValueError("documents content is empty")
+    if len(content) > MAX_CONTENT_CHARS:
+        raise ValueError("documents content exceeds the 200000 character limit")
+    requested_style = value.get("style")
+    style = (
+        (FORMAL_LEGAL_STYLE if _looks_formal_legal(content) else REPORT_STYLE)
+        if requested_style is None
+        else requested_style
+    )
+    if not isinstance(style, str) or style not in {REPORT_STYLE, FORMAL_LEGAL_STYLE}:
+        raise ValueError("documents style must be report or formal_legal")
+    _validate_content_consistency(content)
+    return content, style, _decode_reference_docx(value.get("reference_docx_base64"))
 
 
 def _set_east_asia_font(target, font: str | None = CJK_FONT) -> None:
@@ -96,33 +185,50 @@ def _set_font(
     size: float | None = None,
     bold: bool | None = None,
     formal: bool = False,
+    template_run=None,
 ) -> None:
-    run.font.name = "Times New Roman" if formal else "Arial"
-    _set_east_asia_font(run, FORMAL_CJK_FONT if formal else CJK_FONT)
+    if template_run is not None:
+        if template_run._r.rPr is not None:
+            existing = run._r.rPr
+            if existing is not None:
+                run._r.remove(existing)
+            run._r.insert(0, deepcopy(template_run._r.rPr))
+    else:
+        run.font.name = "Times New Roman" if formal else "Arial"
+        _set_east_asia_font(run, FORMAL_CJK_FONT if formal else CJK_FONT)
     if size is not None:
         run.font.size = Pt(size)
     if bold is not None:
         run.bold = bold
 
 
-def _add_inline(paragraph, text: str, *, formal: bool = False) -> None:
+def _add_inline(
+    paragraph,
+    text: str,
+    *,
+    formal: bool = False,
+    template_run=None,
+) -> None:
     for part in INLINE.split(text):
         if not part:
             continue
         if part.startswith("**") and part.endswith("**"):
             run = paragraph.add_run(part[2:-2])
-            _set_font(run, bold=True, formal=formal)
+            _set_font(run, bold=True, formal=formal, template_run=template_run)
         elif part.startswith("`") and part.endswith("`"):
             run = paragraph.add_run(part[1:-1])
-            run.font.name = "Courier New"
-            _set_east_asia_font(run, FORMAL_CJK_FONT if formal else CJK_FONT)
+            if template_run is None:
+                run.font.name = "Courier New"
+                _set_east_asia_font(run, FORMAL_CJK_FONT if formal else CJK_FONT)
+            else:
+                _set_font(run, formal=formal, template_run=template_run)
         elif part.startswith("*") and part.endswith("*"):
             run = paragraph.add_run(part[1:-1])
-            _set_font(run, formal=formal)
+            _set_font(run, formal=formal, template_run=template_run)
             run.italic = True
         else:
             run = paragraph.add_run(part)
-            _set_font(run, formal=formal)
+            _set_font(run, formal=formal, template_run=template_run)
 
 
 def _cells(line: str) -> list[str]:
@@ -132,6 +238,56 @@ def _cells(line: str) -> list[str]:
 def _is_separator(line: str) -> bool:
     cells = _cells(line)
     return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
+
+
+def _copy_paragraph_format(target, source) -> None:
+    """Copy the layout-bearing paragraph properties from a reference DOCX."""
+    target.style = source.style.name
+    source_format = source.paragraph_format
+    target_format = target.paragraph_format
+    for name in (
+        "alignment",
+        "left_indent",
+        "right_indent",
+        "first_line_indent",
+        "space_before",
+        "space_after",
+        "line_spacing",
+        "keep_with_next",
+        "keep_together",
+        "page_break_before",
+        "widow_control",
+    ):
+        value = getattr(source_format, name)
+        if value is not None:
+            setattr(target_format, name, value)
+
+
+def _reference_templates(document: Document) -> dict[str, object]:
+    paragraphs = [
+        paragraph for paragraph in document.paragraphs if paragraph.text.strip()
+    ]
+    title = paragraphs[0] if paragraphs else None
+    body = paragraphs[1] if len(paragraphs) > 1 else title
+    signature = next(
+        (
+            paragraph
+            for paragraph in paragraphs
+            if paragraph.alignment == WD_ALIGN_PARAGRAPH.RIGHT
+            or any(
+                keyword in paragraph.text for keyword in ("申请人", "落款", "日期")
+            )
+        ),
+        body,
+    )
+    return {"title": title, "body": body, "signature": signature}
+
+
+def _clear_document_body(document: Document) -> None:
+    body = document._element.body
+    for child in list(body):
+        if child.tag != qn("w:sectPr"):
+            body.remove(child)
 
 
 def _shade(cell, fill: str) -> None:
@@ -225,6 +381,7 @@ def _add_table(
     rows: list[list[str]],
     *,
     formal: bool = False,
+    template_paragraph=None,
 ) -> None:
     width = max(len(row) for row in rows)
     table = document.add_table(rows=len(rows), cols=width)
@@ -234,7 +391,18 @@ def _add_table(
             text = values[column_index] if column_index < len(values) else ""
             cell = table.cell(row_index, column_index)
             cell.text = ""
-            _add_inline(cell.paragraphs[0], text, formal=formal)
+            if template_paragraph is not None:
+                _copy_paragraph_format(cell.paragraphs[0], template_paragraph)
+            _add_inline(
+                cell.paragraphs[0],
+                text,
+                formal=formal,
+                template_run=(
+                    template_paragraph.runs[0]
+                    if template_paragraph and template_paragraph.runs
+                    else None
+                ),
+            )
             if formal:
                 cell.paragraphs[0].paragraph_format.first_line_indent = Pt(0)
             if row_index == 0:
@@ -291,10 +459,19 @@ def _configure(document: Document, *, formal: bool = False) -> None:
         style.paragraph_format.keep_together = True
 
 
-def _render(content: str, output_path: Path, style: str = REPORT_STYLE) -> None:
+def _render(
+    content: str,
+    output_path: Path,
+    style: str = REPORT_STYLE,
+    reference_docx: bytes | None = None,
+) -> None:
     formal = style == FORMAL_LEGAL_STYLE
-    document = Document()
-    _configure(document, formal=formal)
+    document = Document(BytesIO(reference_docx)) if reference_docx else Document()
+    templates = _reference_templates(document) if reference_docx else {}
+    if reference_docx:
+        _clear_document_body(document)
+    else:
+        _configure(document, formal=formal)
     lines = content.splitlines()
     index = 0
     first_h1 = True
@@ -319,7 +496,12 @@ def _render(content: str, output_path: Path, style: str = REPORT_STYLE) -> None:
             while index < len(lines) and "|" in lines[index] and lines[index].strip():
                 rows.append(_cells(lines[index]))
                 index += 1
-            _add_table(document, rows, formal=formal)
+            _add_table(
+                document,
+                rows,
+                formal=formal,
+                template_paragraph=templates.get("body"),
+            )
             continue
         heading = HEADING.match(line)
         if heading:
@@ -329,56 +511,154 @@ def _render(content: str, output_path: Path, style: str = REPORT_STYLE) -> None:
                 if formal
                 else document.add_heading(level=level)
             )
-            _add_inline(paragraph, heading.group(2), formal=formal)
+            template = templates.get("title" if level == 1 and first_h1 else "body")
+            if template is not None:
+                _copy_paragraph_format(paragraph, template)
+            _add_inline(
+                paragraph,
+                heading.group(2),
+                formal=formal,
+                template_run=(template.runs[0] if template and template.runs else None),
+            )
             if formal:
-                paragraph.paragraph_format.first_line_indent = Pt(0)
-                paragraph.paragraph_format.keep_with_next = True
-                paragraph.paragraph_format.keep_together = True
-                for run in paragraph.runs:
-                    run.bold = True
-                    run.font.size = Pt({1: 18, 2: 14, 3: 12}[level])
-                    run.font.color.rgb = RGBColor(0, 0, 0)
+                if template is None:
+                    paragraph.paragraph_format.first_line_indent = Pt(0)
+                    paragraph.paragraph_format.keep_with_next = True
+                    paragraph.paragraph_format.keep_together = True
+                    for run in paragraph.runs:
+                        run.bold = True
+                        run.font.size = Pt({1: 18, 2: 14, 3: 12}[level])
+                        run.font.color.rgb = RGBColor(0, 0, 0)
                 if level == 1 and first_h1:
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if template is None:
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     first_h1 = False
         elif match := BULLET.match(line):
             paragraph = document.add_paragraph(
                 style="Normal" if formal else "List Bullet"
             )
-            _add_inline(paragraph, line if formal else match.group(1), formal=formal)
+            template = templates.get("body")
+            if template is not None:
+                _copy_paragraph_format(paragraph, template)
+            _add_inline(
+                paragraph,
+                line if formal else match.group(1),
+                formal=formal,
+                template_run=(template.runs[0] if template and template.runs else None),
+            )
             if formal:
-                paragraph.paragraph_format.first_line_indent = Pt(0)
+                if template is None:
+                    paragraph.paragraph_format.first_line_indent = Pt(0)
         elif match := NUMBERED.match(line):
             paragraph = document.add_paragraph(
                 style="Normal" if formal else "List Number"
             )
-            _add_inline(paragraph, line if formal else match.group(1), formal=formal)
+            template = templates.get("body")
+            if template is not None:
+                _copy_paragraph_format(paragraph, template)
+            _add_inline(
+                paragraph,
+                line if formal else match.group(1),
+                formal=formal,
+                template_run=(template.runs[0] if template and template.runs else None),
+            )
             if formal:
-                paragraph.paragraph_format.first_line_indent = Pt(0)
+                if template is None:
+                    paragraph.paragraph_format.first_line_indent = Pt(0)
         elif line.startswith("> "):
             paragraph = document.add_paragraph()
-            paragraph.paragraph_format.first_line_indent = Pt(0)
-            _add_inline(paragraph, line[2:], formal=formal)
+            template = templates.get("signature")
+            if template is not None:
+                _copy_paragraph_format(paragraph, template)
+            else:
+                paragraph.paragraph_format.first_line_indent = Pt(0)
+            _add_inline(
+                paragraph,
+                line[2:],
+                formal=formal,
+                template_run=(template.runs[0] if template and template.runs else None),
+            )
             if formal:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                if template is None:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             else:
                 paragraph.paragraph_format.left_indent = Cm(0.7)
                 for run in paragraph.runs:
                     run.italic = True
         else:
             paragraph = document.add_paragraph()
-            _add_inline(paragraph, line, formal=formal)
+            template = templates.get("body")
+            if template is not None:
+                _copy_paragraph_format(paragraph, template)
+            _add_inline(
+                paragraph,
+                line,
+                formal=formal,
+                template_run=(template.runs[0] if template and template.runs else None),
+            )
         index += 1
     document.save(output_path)
+
+
+def _verify_layout(
+    document: Document, content: str, style: str, has_reference: bool
+) -> None:
+    formal = style == FORMAL_LEGAL_STYLE
+    paragraphs = [
+        paragraph for paragraph in document.paragraphs if paragraph.text.strip()
+    ]
+    if not paragraphs:
+        raise ValueError("generated DOCX contains no non-empty paragraphs")
+    if formal:
+        if any(
+            paragraph.style.name.startswith(("Heading", "List"))
+            for paragraph in document.paragraphs
+        ):
+            raise ValueError(
+                "formal_legal output must use unified body paragraph styles"
+            )
+        title = paragraphs[0]
+        if not has_reference and title.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+            raise ValueError("formal_legal title must be centered")
+        if not has_reference and any(
+            run.font.color.rgb not in (None, RGBColor(0, 0, 0)) for run in title.runs
+        ):
+            raise ValueError("formal_legal title must be black")
+        signature_lines = [
+            line[2:]
+            for line in content.splitlines()
+            if line.startswith("> ")
+        ]
+        paragraph_map = {paragraph.text: paragraph for paragraph in document.paragraphs}
+        if any(
+            paragraph_map.get(line) is None
+            or paragraph_map[line].alignment != WD_ALIGN_PARAGRAPH.RIGHT
+            for line in signature_lines
+        ) and not has_reference:
+            raise ValueError("formal_legal signature/date lines must be right aligned")
+        expected_breaks = sum(line.strip() == "---" for line in content.splitlines())
+        actual_breaks = sum(
+            1
+            for paragraph in document.paragraphs
+            for run in paragraph.runs
+            for break_node in run._r.findall(qn("w:br"))
+            if break_node.get(qn("w:type")) == "page"
+        )
+        if actual_breaks != expected_breaks:
+            raise ValueError("formal_legal page-break markers were not preserved")
+    section = document.sections[0]
+    if section.page_width is None or section.page_height is None:
+        raise ValueError("generated DOCX has no usable page geometry")
 
 
 def main() -> None:
     output_path = Path(os.environ["NEXAFLOW_OUTPUT_PATH"])
     if output_path.suffix.lower() != ".docx":
         raise ValueError("documents Skill requires a .docx filename")
-    content, style = _input()
-    _render(content, output_path, style)
+    content, style, reference_docx = _input()
+    _render(content, output_path, style, reference_docx)
     verified = Document(output_path)
+    _verify_layout(verified, content, style, reference_docx is not None)
     text = "".join(paragraph.text for paragraph in verified.paragraphs).strip()
     table_text = "".join(
         cell.text for table in verified.tables for row in table.rows for cell in row.cells

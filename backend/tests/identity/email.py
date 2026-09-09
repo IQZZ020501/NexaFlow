@@ -157,9 +157,47 @@ def test_email_templates() -> None:
         assert rendered.recipient == payload["recipient"]
         assert "NexaFlow" in rendered.subject
         assert "NexaFlow" in rendered.html_body
+        assert '<meta name="viewport" content="width=device-width, initial-scale=1.0">' in (
+            rendered.html_body
+        )
+        assert 'role="presentation"' in rendered.html_body
+        assert "max-width:600px" in rendered.html_body
+        assert "background-color:#4f46e5" in rendered.html_body
+        if kind == "password_changed":
+            assert "<a " not in rendered.html_body
+        else:
+            assert "<a " in rendered.html_body
+            assert payload["url"] in rendered.text_body
+            assert "If the button does not work" in rendered.html_body
+            assert "word-break:break-word" in rendered.html_body
     assert "&lt;Invitee&gt;" in render_email(
         "workspace_invitation", cases["workspace_invitation"]
     ).html_body
+
+    malicious = {
+        "recipient": "member@example.com",
+        "name": '<img src=x onerror="alert(1)">',
+        "workspace": 'Workspace"><script>alert(1)</script>',
+        "inviter": '<svg onload="alert(1)">',
+        "role": "member",
+        "url": 'https://nexaflow.example/invite/token?next=" onmouseover="alert(1)',
+    }
+    malicious_rendered = render_email("workspace_invitation", malicious)
+    assert "<img" not in malicious_rendered.html_body
+    assert "<script" not in malicious_rendered.html_body
+    assert "<svg" not in malicious_rendered.html_body
+    assert 'onmouseover="' not in malicious_rendered.html_body
+    assert "&lt;img src=x onerror=" in malicious_rendered.html_body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in malicious_rendered.html_body
+    assert "&quot; onmouseover=&quot;alert(1)" in malicious_rendered.html_body
+
+    unsafe_url = dict(cases["password_reset"], url="javascript:alert(1)")
+    try:
+        render_email("password_reset", unsafe_url)
+    except EmailPayloadError:
+        pass
+    else:
+        raise AssertionError("Unsafe email action URL was accepted")
 
     for kind, payload in (("unsupported", {}), ("welcome", {"recipient": "x@y"})):
         try:
@@ -750,6 +788,10 @@ def main() -> None:
         with patch("app.application.email.delivery.send_smtp_message", new=sender):
             asyncio.run(run_email_delivery(password_delivery_id, test_settings()))
         sender.assert_awaited_once()
+        assert "NexaFlow 密码已修改" in sender.await_args.args[2]
+        assert "NexaFlow" in sender.await_args.args[3]
+        assert "html_body" in sender.await_args.kwargs
+        assert "<table" in sender.await_args.kwargs["html_body"]
         assert all(
             row.id != password_delivery_id for row in asyncio.run(delivery_rows())
         )

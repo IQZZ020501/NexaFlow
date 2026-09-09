@@ -678,12 +678,22 @@ describe("AgentsPage list view", () => {
       screen.queryByRole("checkbox", { name: "选择 Research Assistant" })
     ).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "选择 Research Assistant" })
-    )
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "选择 Weekly Digest" })
-    )
+    const researchCard = cardOf("Research Assistant")
+    const researchCheckbox = screen.getByRole("checkbox", {
+      name: "选择 Research Assistant",
+    }) as HTMLInputElement
+
+    fireEvent.click(researchCard)
+    expect(researchCheckbox.checked).toBe(true)
+    expect(screen.getByText("已选择 1 项")).toBeTruthy()
+
+    fireEvent.click(researchCard)
+    expect(researchCheckbox.checked).toBe(false)
+    expect(screen.getByText("已选择 0 项")).toBeTruthy()
+
+    fireEvent.click(researchCard)
+    fireEvent.keyDown(cardOf("Weekly Digest"), { key: "Enter" })
+    expect(screen.getByText("已选择 2 项")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
     const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
     fireEvent.click(within(dialog).getByRole("button", { name: "客服应用" }))

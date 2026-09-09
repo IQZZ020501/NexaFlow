@@ -10,6 +10,7 @@ import {
   mockUseSession,
   renderPage,
   screen,
+  within,
 } from "./helpers/dom"
 
 const session = makeSession()
@@ -138,5 +139,34 @@ describe("LlmPage", () => {
     expect(modelListUrls).toContain(
       "/api/v1/workspaces/ws-1/models?limit=50&offset=0&folder_id=folder-1&sort=name"
     )
+  })
+
+  test("toggles a model by clicking its card during bulk management", async () => {
+    renderPage(<LlmPage />)
+
+    const alphaHeading = await screen.findByText("Alpha")
+    expect(alphaHeading.closest("[role='button']")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+
+    const alphaCard = alphaHeading.closest<HTMLElement>("[role='button']")!
+    const alphaCheckbox = screen.getByRole("checkbox", {
+      name: "选择 Alpha",
+    }) as HTMLInputElement
+    fireEvent.click(alphaCard)
+
+    expect(alphaCheckbox.checked).toBe(true)
+    expect(screen.getByText("已选择 1 项")).toBeTruthy()
+
+    fireEvent.click(alphaCheckbox)
+    expect(alphaCheckbox.checked).toBe(false)
+    expect(screen.getByText("已选择 0 项")).toBeTruthy()
+
+    fireEvent.click(alphaCard)
+    globalThis.fetch = (() =>
+      new Promise<Response>(() => {})) as unknown as typeof fetch
+    fireEvent.click(within(alphaCard).getByRole("button", { name: "编辑" }))
+    expect(screen.getByRole("dialog", { name: "编辑模型" })).toBeTruthy()
+    expect(alphaCheckbox.checked).toBe(true)
+    expect(screen.getByText("已选择 1 项")).toBeTruthy()
   })
 })

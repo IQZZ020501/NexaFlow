@@ -29,6 +29,7 @@ RUNNER_UID = int(os.environ.get("SANDBOX_RUNNER_UID", "65532"))
 RUNNER_GID = int(os.environ.get("SANDBOX_RUNNER_GID", "65532"))
 MAX_CODE_BYTES = 256 * 1024
 MAX_STDIN_BYTES = 256 * 1024
+MAX_SKILL_STDIN_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 MAX_SKILLS = 8
 MAX_SKILL_FILES = 128
@@ -711,8 +712,10 @@ def run_code(
         raise ValueError("code and stdin must be valid UTF-8") from exc
     if code_size > MAX_CODE_BYTES:
         raise ValueError("code exceeds the 256 KiB limit")
-    if stdin_size > MAX_STDIN_BYTES:
-        raise ValueError("stdin exceeds the 256 KiB limit")
+    max_stdin_bytes = MAX_SKILL_STDIN_BYTES if skill is not None else MAX_STDIN_BYTES
+    if stdin_size > max_stdin_bytes:
+        limit_label = "8 MiB" if skill is not None else "256 KiB"
+        raise ValueError(f"stdin exceeds the {limit_label} limit")
     limits = limits or Limits()
     _enable_linux_subreaper()
     staged_skill_names = (skill,) if skill is not None else skills
