@@ -46,6 +46,10 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  SystemPagination,
+  type SystemPageSize,
+} from "@/components/system/pagination-footer"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
@@ -63,6 +67,13 @@ import { getErrorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
 const severities: AnnouncementSeverity[] = ["info", "warning", "critical"]
+
+function toLocalDateTimeInput(value: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
 
 function statusVariant(status: Announcement["status"]) {
   if (status === "published") return "default" as const
@@ -133,6 +144,9 @@ export function AnnouncementAdminPage() {
     session.selectedWorkspaceId
   )
   const [items, setItems] = React.useState<Announcement[]>([])
+  const [page, setPage] = React.useState(1)
+  const [pageSize, setPageSize] = React.useState<SystemPageSize>(20)
+  const [total, setTotal] = React.useState(0)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -143,6 +157,7 @@ export function AnnouncementAdminPage() {
   const [body, setBody] = React.useState("")
   const [severity, setSeverity] = React.useState<AnnouncementSeverity>("info")
   const [pinned, setPinned] = React.useState(false)
+  const [expiresAt, setExpiresAt] = React.useState("")
 
   const scope: AnnouncementScope =
     requestedScope === "global" && isGlobalAdmin
@@ -201,9 +216,14 @@ export function AnnouncementAdminPage() {
       const result = await listAnnouncements(
         session.token,
         scope,
-        effectiveWorkspaceId
+        effectiveWorkspaceId,
+        {
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+        }
       )
       setItems(result.items)
+      setTotal(result.total)
     } catch (cause) {
       setError(getErrorMessage(cause, t))
     } finally {
@@ -213,6 +233,8 @@ export function AnnouncementAdminPage() {
     effectiveWorkspaceId,
     isGlobalAdmin,
     isWorkspaceAdmin,
+    page,
+    pageSize,
     scope,
     session.token,
     t,
@@ -245,6 +267,7 @@ export function AnnouncementAdminPage() {
     setBody("")
     setSeverity("info")
     setPinned(false)
+    setExpiresAt("")
   }
 
   const startAdding = () => {
@@ -262,6 +285,7 @@ export function AnnouncementAdminPage() {
     setBody(item.body)
     setSeverity(item.severity)
     setPinned(item.pinned)
+    setExpiresAt(toLocalDateTimeInput(item.expires_at))
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
@@ -281,6 +305,7 @@ export function AnnouncementAdminPage() {
         body: body.trim(),
         severity,
         pinned,
+        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       }
       if (editingId) {
         await updateAnnouncement(
@@ -377,6 +402,7 @@ export function AnnouncementAdminPage() {
               options={scopeOptions}
               onChange={(value) => {
                 setRequestedScope(value as AnnouncementScope)
+                setPage(1)
                 resetForm()
               }}
             />
@@ -388,6 +414,7 @@ export function AnnouncementAdminPage() {
               options={workspaceOptions}
               onChange={(value) => {
                 setWorkspaceId(value)
+                setPage(1)
                 resetForm()
               }}
             />
@@ -452,6 +479,18 @@ export function AnnouncementAdminPage() {
                     setSeverity(value as AnnouncementSeverity)
                   }
                 />
+              </Field>
+              <Field className="min-w-56">
+                <FieldLabel htmlFor="announcement-expires-at">
+                  {t("公告过期时间")}
+                </FieldLabel>
+                <Input
+                  id="announcement-expires-at"
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(event) => setExpiresAt(event.target.value)}
+                />
+                <FieldDescription>{t("留空表示永不过期。")}</FieldDescription>
               </Field>
               <label className="flex h-9 items-center gap-2 text-sm">
                 <input
@@ -617,6 +656,18 @@ export function AnnouncementAdminPage() {
                 </CardContent>
               </Card>
             ))}
+            <SystemPagination
+              page={page}
+              pageSize={pageSize}
+              itemCount={items.length}
+              total={total}
+              hasNext={page * pageSize < total}
+              onPageChange={setPage}
+              onPageSizeChange={(nextPageSize) => {
+                setPageSize(nextPageSize)
+                setPage(1)
+              }}
+            />
           </div>
         ) : (
           <div className="rounded-xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">

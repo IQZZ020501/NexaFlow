@@ -114,3 +114,13 @@ async def require_team_admin_or_workspace_admin(
     if membership is not None and membership.role == "admin":
         return context
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Team admin role required.")
+
+
+AppSettingsDep = Annotated[Settings, Depends(get_settings)]
+DbSessionDep = Annotated[AsyncSession, Depends(get_db)]
+CurrentUserDep = Annotated[User, Depends(require_password_changed)]
+GlobalAdminDep = Annotated[User, Depends(require_global_admin)]
+WorkspaceAdminContextDep = Annotated[
+    WorkspaceContext,
+    Depends(require_workspace_path_role({"admin"})),
+]

@@ -70,15 +70,21 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
     )
     assert added.status_code == 201, added.text
 
+    live_publisher = AsyncMock()
     with patch(
         "app.application.announcements.service."
-        "AnnouncementLiveStreamPublisher.publish",
-        new_callable=AsyncMock,
-    ) as publish_live:
+        "build_announcement_live_stream_publisher",
+        return_value=live_publisher,
+    ):
+        global_expiration = datetime.now(UTC) + timedelta(hours=1)
         global_created = client.post(
             "/api/v1/admin/announcements",
             headers=headers,
-            json={"title": "Global notice", "body": "Global body"},
+            json={
+                "title": "Global notice",
+                "body": "Global body",
+                "expires_at": global_expiration.isoformat(),
+            },
         )
         assert global_created.status_code == 201, global_created.text
         global_id = global_created.json()["id"]
@@ -105,7 +111,8 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
         ):
             published = client.post(path, headers=headers)
             assert published.status_code == 200, published.text
-        assert publish_live.await_count == 2
+        assert live_publisher.publish.await_count == 2
+        assert live_publisher.close.await_count == 2
 
         global_messages = client.get(
             "/api/v1/messages",
@@ -127,7 +134,10 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
             f"/api/v1/messages/unread-count?workspace_id={workspace_id}",
             headers=auth_headers(member_token),
         )
-        assert unread.json() == {"count": 2}
+        assert unread.json() == {
+            "count": 2,
+            "next_expiration_at": global_created.json()["expires_at"],
+        }, unread.text
 
         marked = client.post(
             f"/api/v1/messages/{global_id}/read?workspace_id={workspace_id}",
@@ -143,7 +153,21 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
             f"/api/v1/messages/unread-count?workspace_id={workspace_id}",
             headers=auth_headers(member_token),
         )
-        assert unread.json() == {"count": 0}
+        assert unread.json() == {
+            "count": 0,
+            "next_expiration_at": global_created.json()["expires_at"],
+        }, unread.text
+
+        for path, payload in (
+            (f"/api/v1/admin/announcements/{global_id}", {"title": None}),
+            (
+                f"/api/v1/workspaces/{workspace_id}/announcements/"
+                f"{workspace_id_notice}",
+                {"body": None},
+            ),
+        ):
+            invalid_update = client.patch(path, headers=headers, json=payload)
+            assert invalid_update.status_code == 422, invalid_update.text
 
         updated = client.patch(
             f"/api/v1/admin/announcements/{global_id}",
@@ -157,7 +181,8 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
             headers=headers,
         )
         assert archived.status_code == 200, archived.text
-        assert publish_live.await_count == 4
+        assert live_publisher.publish.await_count == 4
+        assert live_publisher.close.await_count == 4
 
         denied_global = client.get(
             "/api/v1/admin/announcements",

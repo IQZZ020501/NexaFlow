@@ -74,7 +74,13 @@ describe("announcement administration API", () => {
     install([announcement], 1)
     const listed = await listAnnouncements(TOKEN, "global", null)
     expect(listed).toEqual({ items: [announcement], total: 1 })
-    expect(lastCall().url).toBe("/api/v1/admin/announcements?limit=100")
+    expect(lastCall().url).toBe("/api/v1/admin/announcements?limit=20&offset=0")
+
+    install([announcement], 101)
+    await listAnnouncements(TOKEN, "global", null, { limit: 50, offset: 50 })
+    expect(lastCall().url).toBe(
+      "/api/v1/admin/announcements?limit=50&offset=50"
+    )
 
     install(announcement)
     await createAnnouncement(TOKEN, "global", null, {
@@ -116,7 +122,7 @@ describe("announcement administration API", () => {
     install([announcement], 1)
     await listAnnouncements(TOKEN, "workspace", "workspace-1")
     expect(lastCall().url).toBe(
-      "/api/v1/workspaces/workspace-1/announcements?limit=100"
+      "/api/v1/workspaces/workspace-1/announcements?limit=20&offset=0"
     )
   })
 })
@@ -127,15 +133,22 @@ describe("message center API", () => {
     const listed = await listMessages(TOKEN, "workspace-1")
     expect(listed).toEqual({ items: [], total: 0 })
     expect(lastCall().url).toBe(
-      "/api/v1/messages?limit=50&workspace_id=workspace-1"
+      "/api/v1/messages?limit=50&offset=0&workspace_id=workspace-1"
     )
 
-    install({ count: 3 })
+    install({ count: 3, next_expiration_at: "2026-09-08T00:00:00Z" })
     await expect(getUnreadMessageCount(TOKEN, "workspace-1")).resolves.toEqual({
       count: 3,
+      next_expiration_at: "2026-09-08T00:00:00Z",
     })
     expect(lastCall().url).toBe(
       "/api/v1/messages/unread-count?workspace_id=workspace-1"
+    )
+
+    install([], 101)
+    await listMessages(TOKEN, "workspace-1", { limit: 20, offset: 40 })
+    expect(lastCall().url).toBe(
+      "/api/v1/messages?limit=20&offset=40&workspace_id=workspace-1"
     )
   })
 

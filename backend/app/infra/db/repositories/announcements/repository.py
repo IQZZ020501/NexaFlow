@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.announcements.models import (
@@ -153,17 +155,17 @@ async def count_visible_messages(
     return int(await db.scalar(statement) or 0)
 
 
-async def count_unread_messages(
+async def get_message_summary(
     db: AsyncSession,
     user_id: str,
     workspace_id: str | None,
     now: datetime,
-) -> int:
+) -> tuple[int, datetime | None]:
     read_join = and_(
         AnnouncementReadOrm.announcement_id == AnnouncementOrm.id,
         AnnouncementReadOrm.user_id == user_id,
     )
-    statement = (
+    unread_count = (
         select(func.count())
         .select_from(AnnouncementOrm)
         .outerjoin(AnnouncementReadOrm, read_join)
@@ -171,8 +173,25 @@ async def count_unread_messages(
             *_visible_clauses(workspace_id=workspace_id, now=now),
             AnnouncementReadOrm.announcement_id.is_(None),
         )
+        .scalar_subquery()
     )
-    return int(await db.scalar(statement) or 0)
+    next_expiration = (
+        select(func.min(AnnouncementOrm.expires_at))
+        .where(
+            *_visible_clauses(workspace_id=workspace_id, now=now),
+            AnnouncementOrm.expires_at.is_not(None),
+        )
+        .scalar_subquery()
+    )
+    row = (
+        await db.execute(
+            select(
+                unread_count.label("unread_count"),
+                next_expiration.label("next_expiration_at"),
+            )
+        )
+    ).one()
+    return int(row.unread_count or 0), row.next_expiration_at
 
 
 async def get_visible_message(
@@ -249,6 +268,26 @@ async def save_read(
         row.dismissed_at = read.dismissed_at
     await db.flush()
     return mapping.to_entity(AnnouncementRead, row)
+
+
+async def create_reads(
+    db: AsyncSession,
+    reads: list[AnnouncementRead],
+) -> None:
+    if not reads:
+        return
+    dialect = db.get_bind().dialect.name
+    if dialect == "postgresql":
+        statement = postgresql_insert(AnnouncementReadOrm)
+    elif dialect == "sqlite":
+        statement = sqlite_insert(AnnouncementReadOrm)
+    else:
+        raise RuntimeError(f"Unsupported announcement read dialect: {dialect}")
+    await db.execute(
+        statement.values([read.__dict__ for read in reads]).on_conflict_do_nothing(
+            index_elements=("announcement_id", "user_id")
+        )
+    )
 
 
 async def list_read_ids(

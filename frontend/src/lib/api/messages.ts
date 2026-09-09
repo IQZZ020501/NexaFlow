@@ -26,12 +26,24 @@ export type MessageStreamEvent = {
   workspace_id: string | null
 }
 
+export type MessageUnreadSummary = {
+  count: number
+  next_expiration_at: string | null
+}
+
 function workspaceQuery(workspaceId: string | null) {
   return workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ""
 }
 
-export function listMessages(token: string, workspaceId: string | null) {
-  const query = new URLSearchParams({ limit: "50" })
+export function listMessages(
+  token: string,
+  workspaceId: string | null,
+  options: { limit?: number; offset?: number } = {}
+) {
+  const query = new URLSearchParams({
+    limit: String(options.limit ?? 50),
+    offset: String(options.offset ?? 0),
+  })
   if (workspaceId) query.set("workspace_id", workspaceId)
   return requestPage<MessageItem>(`/api/v1/messages?${query.toString()}`, {
     token,
@@ -42,7 +54,7 @@ export function getUnreadMessageCount(
   token: string,
   workspaceId: string | null
 ) {
-  return request<{ count: number }>(
+  return request<MessageUnreadSummary>(
     `/api/v1/messages/unread-count${workspaceQuery(workspaceId)}`,
     { token }
   )
