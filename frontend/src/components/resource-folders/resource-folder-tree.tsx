@@ -214,7 +214,7 @@ export function ResourceFolderTree({
 
   return (
     <>
-      <aside className="flex min-w-0 flex-col rounded-lg border bg-background p-2 shadow-sm lg:min-h-[calc(100svh-11rem)] lg:w-56 lg:shrink-0">
+      <aside className="flex min-w-0 flex-col rounded-lg border bg-background p-2 shadow-sm lg:h-full lg:min-h-[calc(100svh-11rem)] lg:w-56 lg:shrink-0 lg:overflow-hidden">
         <div className="mb-1 flex items-center justify-between gap-2 px-1">
           <p className="text-xs font-medium text-muted-foreground">
             {t("目录")}

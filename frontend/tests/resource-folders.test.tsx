@@ -1,9 +1,9 @@
 /* @jsxImportSource react */
 import { expect, test } from "bun:test"
 
+import { ResourceFolderLayout } from "@/components/resource-folders/resource-folder-layout"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
 import { fireEvent, renderPage, screen } from "./helpers/dom"
-
 test("renders a full-height nested resource folder tree", () => {
   let selected: string | null = null
   const { container } = renderPage(
@@ -48,7 +48,25 @@ test("renders a full-height nested resource folder tree", () => {
   fireEvent.click(screen.getByLabelText("展开"))
   fireEvent.click(screen.getByText("人事制度"))
   expect(selected as string | null).toBe("hr")
+  expect(container.querySelector("aside")?.className).toContain("lg:h-full")
   expect(container.querySelector("aside")?.className).toContain(
     "lg:min-h-[calc(100svh-11rem)]"
   )
+  expect(container.querySelector("aside")?.className).toContain(
+    "lg:overflow-hidden"
+  )
+})
+
+test("scrolls only the resource pane beside a fixed folder tree", () => {
+  const { container } = renderPage(
+    <ResourceFolderLayout sidebar={<aside>目录</aside>}>
+      <p>内容</p>
+    </ResourceFolderLayout>
+  )
+  const layout = container.firstElementChild
+  const pane = layout?.lastElementChild
+  expect(layout?.className).toContain("lg:h-[calc(100svh-11rem)]")
+  expect(layout?.className).toContain("lg:overflow-hidden")
+  expect(pane?.className).toContain("lg:overflow-y-auto")
+  expect(pane?.className).toContain("lg:overscroll-contain")
 })

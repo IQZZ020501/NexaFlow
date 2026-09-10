@@ -1802,6 +1802,18 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(pushes).toContain("/app/knowledge")
   })
 
+  test("keeps the knowledge directory fixed while the detail pane scrolls", async () => {
+    const { container } = renderDetailPage({ documents: [] })
+    await waitFor(() => expect(screen.getByText("暂无文档")).toBeTruthy())
+    const aside = container.querySelector("aside")
+    const layout = aside?.parentElement
+    const content = aside?.nextElementSibling
+    expect(layout?.className).toContain("lg:h-[calc(100svh-6.5rem)]")
+    expect(aside?.className).toContain("lg:h-full")
+    expect(content?.className).toContain("lg:overflow-y-auto")
+    expect(content?.className).toContain("lg:overscroll-contain")
+  })
+
   test("navigates to the upload flow from the documents tab", async () => {
     renderDetailPage({ documents: [] })
     await waitFor(() => expect(screen.getByText("暂无文档")).toBeTruthy())

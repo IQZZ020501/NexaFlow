@@ -1819,7 +1819,7 @@ function KnowledgeBasePageContent({
             </nav>
           </aside>
 
-          <div className="min-w-0 overflow-hidden">
+          <div className="min-h-0 min-w-0 overflow-hidden lg:h-full lg:overflow-y-auto lg:overscroll-contain">
             {activeDetailTab === "documents" ? (
               <div className="min-w-0 p-3 sm:p-4 lg:p-5">
                 <section
