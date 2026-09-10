@@ -690,6 +690,40 @@ describe("ToolsPage", () => {
     expect(within(skillCard).getAllByText("内置").length).toBeGreaterThan(0)
   })
 
+  test("shows built-in Skill documentation instead of schemas", async () => {
+    const skillTool = tool({
+      id: "tool-skill-pdf",
+      kind: "builtin",
+      function_name: "pdf_skill",
+      display_name: "PDF Skill",
+      description: "Create PDF files",
+      source: {
+        id: "source-builtin",
+        name: "Builtin",
+        kind: "builtin",
+        transport: null,
+      },
+      created_by_user_id: null,
+      permission: "use",
+      can_manage: false,
+    })
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/tools/tool-skill-pdf"))
+        return jsonResponse(detail(skillTool))
+      if (url.includes("/tools?")) return jsonResponse([skillTool])
+      if (url.includes("/tool-sources?")) return jsonResponse([])
+      return jsonResponse([])
+    }) as typeof fetch
+
+    renderPage(<ToolsPage />)
+    fireEvent.click((await screen.findByText("PDF")).closest("article")!)
+    expect(await screen.findByRole("heading", { name: "PDF Skill" })).toBeTruthy()
+    expect(await screen.findByText("Runtime contract")).toBeTruthy()
+    expect(screen.queryByText("输入 Schema")).toBeNull()
+    expect(screen.queryByText("输出 Schema")).toBeNull()
+  })
+
   test("renders SSE and stdio sources with connection details and errors", async () => {
     const sseSource = source({
       id: "source-sse",
