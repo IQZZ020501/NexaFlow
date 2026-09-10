@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 VISION_MODEL_REQUIRED_MESSAGE = "Vision model is not configured for this workspace."
 
 MODEL_REQUEST_PARAMS_META_KEY = "request_params"
-DEFAULT_MODEL_REQUEST_PARAMS = {"max_tokens": 4_096}
+DEFAULT_MODEL_REQUEST_PARAMS = {"max_tokens": 16_384}
 SUPPORTED_PROVIDER_TYPES = {
     "openai_compatible",
     "anthropic",

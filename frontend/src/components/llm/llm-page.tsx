@@ -190,7 +190,7 @@ type ModelForm = {
 
 type ModelSortKey = "updated_at" | "created_at" | "name"
 
-const DEFAULT_LLM_REQUEST_PARAMS = '{\n  "max_tokens": 4096\n}'
+const DEFAULT_LLM_REQUEST_PARAMS = '{\n  "max_tokens": 16384\n}'
 
 const EMPTY_MODEL_FORM: ModelForm = {
   id: null,
