@@ -260,6 +260,21 @@ describe("ToolsPage", () => {
       },
       created_by_user_id: null,
     })
+    const timeTool = tool({
+      id: "tool-current-time",
+      kind: "python",
+      function_name: "current_time",
+      display_name: "Current time",
+      created_by_user_id: null,
+      permission: "use",
+      can_manage: false,
+      source: {
+        id: "source-python-system",
+        name: "Python",
+        kind: "python",
+        transport: null,
+      },
+    })
     const remoteTool = tool({
       id: "tool-mcp",
       kind: "mcp",
@@ -277,7 +292,7 @@ describe("ToolsPage", () => {
       if (url.includes("/tool-sources?"))
         return jsonResponse([source({ tool_count: 1 })])
       if (url.includes("/tools?"))
-        return jsonResponse([builtinTool, remoteTool, tool()])
+        return jsonResponse([builtinTool, timeTool, remoteTool, tool()])
       return jsonResponse([])
     }) as typeof fetch
 
@@ -290,6 +305,7 @@ describe("ToolsPage", () => {
     ).toBeTruthy()
     expect(screen.queryByText("Remote lookup")).toBeNull()
     expect(screen.queryByText("Owned formatter")).toBeNull()
+    expect(screen.queryByText("当前时间")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "MCP" }))
     await screen.findByText("Remote lookup")
@@ -298,6 +314,7 @@ describe("ToolsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Python" }))
     await screen.findByText("Owned formatter")
+    expect(screen.getByText("当前时间")).toBeTruthy()
     expect(screen.queryByText("Remote lookup")).toBeNull()
     expect(screen.queryByText("Remote tools")).toBeNull()
     expect(
@@ -625,11 +642,27 @@ describe("ToolsPage", () => {
   })
 
   test("shows builtin tools without a group heading", async () => {
-    const builtinTool = tool({
-      id: "tool-builtin",
-      kind: "builtin",
+    const timeTool = tool({
+      id: "tool-current-time",
+      kind: "python",
       function_name: "current_time",
       display_name: "Current time",
+      source: {
+        id: "source-python",
+        name: "Python",
+        kind: "python",
+        transport: null,
+      },
+      created_by_user_id: null,
+      permission: "use",
+      can_manage: false,
+    })
+    const skillTool = tool({
+      id: "tool-skill-pdf",
+      kind: "builtin",
+      function_name: "pdf_skill",
+      display_name: "PDF Skill",
+      description: "Create PDF files",
       source: {
         id: "source-builtin",
         name: "Builtin",
@@ -638,19 +671,10 @@ describe("ToolsPage", () => {
       },
       created_by_user_id: null,
     })
-    const skillTool = tool({
-      id: "tool-skill-pdf",
-      kind: "builtin",
-      function_name: "pdf_skill",
-      display_name: "PDF Skill",
-      description: "Create PDF files",
-      source: builtinTool.source,
-      created_by_user_id: null,
-    })
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes("/tools?"))
-        return jsonResponse([builtinTool, skillTool])
+        return jsonResponse([timeTool, skillTool])
       if (url.includes("/tool-sources?")) return jsonResponse([])
       return jsonResponse([])
     }) as typeof fetch
@@ -659,9 +683,11 @@ describe("ToolsPage", () => {
     await screen.findByText("当前时间")
     expect(screen.getByText("PDF")).toBeTruthy()
     expect(screen.queryByText("内置工具")).toBeNull()
-    const card = screen.getByText("当前时间").closest("article")!
-    expect(within(card).getAllByText("内置").length).toBeGreaterThan(0)
-    expect(within(card).getByText("可用")).toBeTruthy()
+    const timeCard = screen.getByText("当前时间").closest("article")!
+    expect(within(timeCard).getAllByText("Python").length).toBeGreaterThan(0)
+    expect(within(timeCard).getByText("可用")).toBeTruthy()
+    const skillCard = screen.getByText("PDF").closest("article")!
+    expect(within(skillCard).getAllByText("内置").length).toBeGreaterThan(0)
   })
 
   test("renders SSE and stdio sources with connection details and errors", async () => {

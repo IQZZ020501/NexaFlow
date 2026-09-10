@@ -78,7 +78,15 @@ async def list_visible_resource_folder_ids(
         )
         visible = [model.created_by_user_id == viewer_id, grant.id.is_not(None)]
         if resource_type == "tool":
-            visible.append(model.kind == "builtin")
+            visible.append(
+                or_(
+                    model.kind == "builtin",
+                    and_(
+                        model.kind == "python",
+                        model.created_by_user_id.is_(None),
+                    ),
+                )
+            )
             statement = statement.where(model.status != "archived")
     statement = statement.where(or_(*visible))
     return {folder_id for folder_id in await db.scalars(statement) if folder_id}

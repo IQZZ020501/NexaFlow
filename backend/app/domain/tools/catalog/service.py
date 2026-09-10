@@ -966,6 +966,14 @@ async def get_tool_catalog_detail(
     )
 
 
+# Runs in the Workflow sandbox, which cannot import app modules, so the fixed
+# offset mirrors APP_TIMEZONE (Asia/Shanghai, no DST) from entities.defaults.
+CURRENT_TIME_TOOL_CODE = (
+    "from datetime import datetime, timedelta, timezone\n"
+    "result = {'iso8601': datetime.now(timezone(timedelta(hours=8))).isoformat()}\n"
+)
+
+
 def build_workspace_system_catalog(
     workspace_id: str,
     created_at: datetime | None = None,
@@ -973,6 +981,8 @@ def build_workspace_system_catalog(
     timestamp = created_at or utc_now()
     builtin_source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
     python_source_id = stable_catalog_id(f"source:{workspace_id}:python")
+    # The id key predates the Python move; ids are opaque hashes and renaming
+    # the key would cascade a primary-key rewrite across tool tables.
     tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:current_time")
     input_schema = {
         "type": "object",
@@ -987,7 +997,7 @@ def build_workspace_system_catalog(
         "required": ["iso8601"],
         "additionalProperties": False,
     }
-    execution_spec = {"builtin": "current_time"}
+    execution_spec = {"code": CURRENT_TIME_TOOL_CODE}
     definition_hash = canonical_definition_hash(
         {
             "name": "current_time",
@@ -1020,8 +1030,8 @@ def build_workspace_system_catalog(
         tool=Tool(
             id=tool_id,
             workspace_id=workspace_id,
-            source_id=builtin_source_id,
-            kind="builtin",
+            source_id=python_source_id,
+            kind="python",
             stable_key="current_time",
             function_name="current_time",
             current_version_id=version_id,
@@ -1054,7 +1064,7 @@ def build_workspace_system_catalog(
             effect="pure",
             allowed_access_sources=["console", "public", "api"],
             workflow_callable=True,
-            parallel_safe=True,
+            parallel_safe=False,
             created_at=timestamp,
             updated_at=timestamp,
         ),

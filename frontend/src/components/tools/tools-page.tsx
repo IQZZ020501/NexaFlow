@@ -334,7 +334,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   }
 
   async function openDetail(tool: ToolSummary) {
-    if (tool.kind === "python") {
+    if (tool.kind === "python" && tool.created_by_user_id) {
       setPythonDialog({ open: true, tool })
       return
     }
