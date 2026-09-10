@@ -298,6 +298,9 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage initialKind="builtin" />)
     await screen.findByText("PDF")
+    expect(screen.getByRole("heading", { name: "内置 Skills" })).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "工作区 Skills" })).toBeTruthy()
+    expect(screen.getByText("还没有工作区 Skill")).toBeTruthy()
     const searchToolbar = screen.getByRole("search")
     expect(within(searchToolbar).getByRole("searchbox")).toBeTruthy()
     expect(
@@ -330,9 +333,13 @@ describe("ToolsPage", () => {
     fireEvent.click(trigger)
     expect(await screen.findByText("Python 工具")).toBeTruthy()
     expect(screen.getByText("MCP Server")).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: "Skills" }).getAttribute("href")).toBe(
-      "/app/tools/skills"
-    )
+    fireEvent.click(screen.getByRole("menuitem", { name: "Skills" }))
+    expect(await screen.findByRole("heading", { name: "Skills" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /新建 Skill/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /导入 Skill/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /新建 Skill/ }))
+    expect(await screen.findByRole("heading", { name: "创建 Skill" })).toBeTruthy()
+    expect(screen.getByLabelText("SKILL.md")).toBeTruthy()
   })
 
   test("shows an explicit retry state when the catalog fails", async () => {

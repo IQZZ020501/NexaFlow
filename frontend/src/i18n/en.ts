@@ -559,40 +559,27 @@ export const en = {
   "MCP Server": "MCP Server",
   Skills: "Skills",
   Skill: "Skill",
-  "四个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。":
-    "Each of the four built-in Skills owns its renderer and appears in the Tools page, Agent picker, and Workflow node palette.",
-  返回工具: "Back to tools",
+  "新建 Skill": "New Skill",
+  "导入 Skill": "Import Skill",
+  "创建 Skill": "Create Skill",
+  "写 SKILL.md，并声明参数。平台会生成 Tool。":
+    "Write SKILL.md and declare parameters. The platform generates the Tool.",
+  "新建 Skill，或导入 SKILL.md / zip。":
+    "Create a Skill, or import SKILL.md / a zip.",
+  "上传包含 SKILL.md 的 zip 包。": "Upload a zip that contains SKILL.md.",
+  "请上传 SKILL.md 或 zip。": "Upload SKILL.md or a zip.",
+  "请先解压 zip，上传其中的 SKILL.md。":
+    "Unzip first, then upload the SKILL.md inside.",
+  "无法读取该文件。": "Could not read that file.",
+  "选择 Skill 文件": "Choose a Skill file",
+  "SKILL.md": "SKILL.md",
+  "参数写在 frontmatter 或稍后在表单里补。":
+    "Declare parameters in front matter, or add them in the form later.",
   "内置 Skills": "Built-in Skills",
-  手动安装: "Manual installation",
-  "内置 Skill bundle 随 Worker 提供；自定义 bundle 仍由部署管理员写入 Worker 文件系统。":
-    "Built-in Skill bundles ship with the Worker; deployment administrators still place custom bundles on the Worker filesystem.",
-  "在 Worker 配置的目录下创建 Skill 文件夹。":
-    "Create a Skill directory under the path configured for the Worker.",
-  "在 SKILL.md 中声明 entrypoint 和 artifact-format，并提供对应的 Python 入口脚本。":
-    "Declare entrypoint and artifact-format in SKILL.md and provide the matching Python entrypoint.",
-  "需要额外 Python 包时再添加 requirements.txt。":
-    "Add requirements.txt only when the Skill needs extra Python packages.",
-  "重启 Worker，并注册匹配的 Tool 输入契约；仅复制目录不会自动出现在选择器中。":
-    "Restart the Worker and register a matching Tool input contract; copying the directory alone does not add it to a picker.",
-  运行方式: "Runtime flow",
-  "绑定到 Agent": "Bind to an Agent",
-  "在 Agent 工具选择器中授权 DOCX、PDF、PPTX 或 Excel 工具；运行时模型会根据用户目标和工具描述自主选择。":
-    "Authorize the DOCX, PDF, PPTX, or Excel tool in the Agent tool picker; at runtime the model chooses from those tools based on the request and tool descriptions.",
-  "Skill 自带执行": "Skill-owned execution",
-  "Agent 只提交 Markdown、结构化演示文稿或表格数据，Worker 运行 Skill bundle 内声明的入口脚本，不执行调用方提供的 Python。":
-    "The Agent submits Markdown, structured presentation data, or workbook data; the Worker runs the Skill bundle entrypoint and never executes caller-supplied Python.",
-  平台安全边界: "Platform security boundary",
-  "沙箱隔离、资源限额、文件校验、临时存储和下载链接仍由平台统一负责。":
-    "The platform still owns sandbox isolation, resource limits, file validation, temporary storage, and download links.",
-  "Word 与 Google Docs 文档": "Word and Google Docs documents",
-  "PDF 创建、检查与渲染": "PDF creation, inspection, and rendering",
-  "演示文稿、模板与品牌主题":
-    "Presentation creation, templates, and brand themes",
-  电子表格创建与分析: "Spreadsheet creation and analysis",
-  "DOCX · python-docx": "DOCX · python-docx",
-  "PDF · PyMuPDF": "PDF · PyMuPDF",
-  "PPTX · python-pptx": "PPTX · python-pptx",
-  "XLSX · openpyxl": "XLSX · openpyxl",
+  "工作区 Skills": "Workspace Skills",
+  "还没有工作区 Skill": "No workspace Skills yet",
+  "从添加工具新建或导入 Skill。":
+    "Create or import a Skill from Add tool.",
   我的工具: "My tools",
   共享给我的: "Shared with me",
   内置工具: "Built-in tools",
