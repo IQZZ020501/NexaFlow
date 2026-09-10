@@ -13,6 +13,7 @@ import {
 import { useRouter } from "next/navigation"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
+import { AnnouncementExpirationField } from "@/components/messages/announcement-expiration-field"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -86,11 +87,13 @@ function AnnouncementSelector({
   value,
   options,
   onChange,
+  className,
 }: {
   label: string
   value: string
   options: Array<{ value: string; label: string }>
   onChange: (value: string) => void
+  className?: string
 }) {
   const selected =
     options.find((option) => option.value === value) ?? options[0]
@@ -100,7 +103,7 @@ function AnnouncementSelector({
         <Button
           type="button"
           variant="outline"
-          className="min-w-44 justify-between"
+          className={cn("min-w-44 justify-between", className)}
           aria-label={label}
         >
           <span className="truncate">{selected?.label ?? label}</span>
@@ -468,31 +471,24 @@ export function AnnouncementAdminPage() {
                 </FieldDescription>
               </Field>
             </FieldGroup>
-            <div className="flex flex-wrap items-end gap-4">
-              <Field>
+            <div className="grid items-start gap-4 md:grid-cols-[11rem_14rem] lg:grid-cols-[11rem_14rem_auto_1fr]">
+              <Field className="min-w-0">
                 <FieldLabel>{t("公告级别")}</FieldLabel>
                 <AnnouncementSelector
                   label={t("公告级别")}
                   value={severity}
                   options={severityOptions}
+                  className="w-full min-w-0"
                   onChange={(value) =>
                     setSeverity(value as AnnouncementSeverity)
                   }
                 />
               </Field>
-              <Field className="min-w-56">
-                <FieldLabel htmlFor="announcement-expires-at">
-                  {t("公告过期时间")}
-                </FieldLabel>
-                <Input
-                  id="announcement-expires-at"
-                  type="datetime-local"
-                  value={expiresAt}
-                  onChange={(event) => setExpiresAt(event.target.value)}
-                />
-                <FieldDescription>{t("留空表示永不过期。")}</FieldDescription>
-              </Field>
-              <label className="flex h-9 items-center gap-2 text-sm">
+              <AnnouncementExpirationField
+                value={expiresAt}
+                onChange={setExpiresAt}
+              />
+              <label className="flex h-9 items-center gap-2 text-sm lg:mt-7">
                 <input
                   type="checkbox"
                   checked={pinned}
@@ -501,7 +497,7 @@ export function AnnouncementAdminPage() {
                 />
                 {t("是否置顶")}
               </label>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="flex items-center justify-end gap-2 lg:mt-7">
                 {editingId ? (
                   <Button type="button" variant="ghost" onClick={resetForm}>
                     {t("取消")}
