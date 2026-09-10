@@ -4,12 +4,14 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { TopBar } from "@/components/app/top-bar"
 import {
   WorkspaceAnalyticsPage,
+  formatTrendValue,
   getPresetAnalyticsRange,
 } from "@/components/system/workspace-analytics-page"
 import type { MeResponse } from "@/lib/api/auth"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import type { Workspace } from "@/lib/api/system"
 import { deriveAnalyticsKeyMetrics } from "@/components/system/workspace-analytics-metrics"
+import { formatTokenCount } from "@/lib/display"
 import {
   cleanup,
   fireEvent,
@@ -242,6 +244,9 @@ describe("workspace analytics", () => {
         /输入|应用运行|知识整理|上期|用量未完整上报/
       )
     ).toBeNull()
+    // Average run duration renders in seconds instead of milliseconds.
+    expect(screen.getByText("12.5 秒")).toBeTruthy()
+    expect(screen.queryByText(/毫秒/)).toBeNull()
     expect(screen.getByText("公开/API 调用")).toBeTruthy()
     expect(screen.getByText("How do I deploy?")).toBeTruthy()
     expect(screen.getByText("时段活跃曲线")).toBeTruthy()
@@ -365,6 +370,62 @@ describe("workspace analytics", () => {
     await waitFor(() =>
       expect(screen.getByText("所选范围内暂无运行数据")).toBeTruthy()
     )
+  })
+
+  test("renders token consumption with K/M/B units", async () => {
+    handler = () =>
+      jsonResponse({
+        ...analytics,
+        summary: {
+          ...analytics.summary,
+          runs: { value: 100, previous_value: 80, change_percent: 25 },
+          tokens: {
+            ...analytics.summary.tokens,
+            application_total: 2_500_000,
+            total: 1_234_567,
+          },
+        },
+        rankings: {
+          ...analytics.rankings,
+          applications: [
+            { ...analytics.rankings.applications[0], total_tokens: 2_500_000_000 },
+          ],
+          users: [{ ...analytics.rankings.users[0], total_tokens: 12_340 }],
+          anonymous: { run_count: 2, total_tokens: 250_000 },
+        },
+      })
+    renderPage(<WorkspaceAnalyticsPage />)
+
+    await waitFor(() => expect(screen.getByText("Support Agent")).toBeTruthy())
+    const tokenCard = screen
+      .getByText("Token 消耗")
+      .closest<HTMLElement>("[data-slot='card']")!
+    expect(within(tokenCard).getByText("1.23M")).toBeTruthy()
+    // Ranking rows reuse the same units for applications, users and匿名调用.
+    expect(screen.getByText("Tokens 2.5B")).toBeTruthy()
+    expect(screen.getByText("运行 2 次，Tokens 250K")).toBeTruthy()
+    // The per-run average keeps the same units (2,500,000 / 100 runs).
+    expect(screen.getByText("25K")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "用户" }))
+    expect(await screen.findByText("Tokens 12.3K")).toBeTruthy()
+  })
+
+  test("formats trend values with token units and plain run counts", () => {
+    expect(formatTrendValue(1_234_567, "total_tokens", "zh-CN")).toBe("1.23M")
+    expect(formatTrendValue(1_234, "total_tokens", "en-US")).toBe("1.23K")
+    expect(formatTrendValue(1_234, "runs", "en-US")).toBe("1,234")
+  })
+
+  test("formats token counts below one thousand without units", () => {
+    expect(formatTokenCount(0)).toBe("0")
+    expect(formatTokenCount(320)).toBe("320")
+    expect(formatTokenCount(1_500)).toBe("1.5K")
+    expect(formatTokenCount(12_340)).toBe("12.3K")
+    expect(formatTokenCount(123_456)).toBe("123K")
+    expect(formatTokenCount(1_234_567)).toBe("1.23M")
+    expect(formatTokenCount(2_500_000_000)).toBe("2.5B")
+    expect(formatTokenCount(Number.NaN)).toBe("0")
   })
 
   test("puts the analytics entry in the top navigation for authorized admins", () => {

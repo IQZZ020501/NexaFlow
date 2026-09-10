@@ -12,6 +12,7 @@ import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import {
   deriveAnalyticsKeyMetrics,
 } from "@/components/system/workspace-analytics-metrics"
+import { formatTokenCount } from "@/lib/display"
 
 /**
  * Formats a number according to locale-specific conventions.
@@ -185,8 +186,8 @@ export function AnalyticsKeyMetricsPanel({
           value={
             averageDuration === null
               ? "—"
-              : t("{value} 毫秒", {
-                  value: formatNumber(Math.round(averageDuration), locale),
+              : t("{value} 秒", {
+                  value: formatDecimal(averageDuration / 1000, locale),
                 })
           }
           comparison={data.summary.average_duration_ms.change_percent}
@@ -196,7 +197,7 @@ export function AnalyticsKeyMetricsPanel({
           value={
             derived.averageTokens === null
               ? "—"
-              : formatDecimal(derived.averageTokens, locale)
+              : formatTokenCount(derived.averageTokens)
           }
           detail={
             data.summary.tokens.unreported_runs ||
@@ -260,7 +261,7 @@ export function WorkspaceAnalyticsOverview({
         <CoreMetricCard
           icon={ActivityIcon}
           label={t("Token 消耗")}
-          value={formatNumber(data.summary.tokens.total, locale)}
+          value={formatTokenCount(data.summary.tokens.total)}
         />
         <CoreMetricCard
           icon={CheckCircle2Icon}

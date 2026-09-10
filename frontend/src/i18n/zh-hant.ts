@@ -1703,6 +1703,7 @@ export const zhHant = {
   已回退: "已回退",
   "{label}：{value}": "{label}：{value}",
   "{value} 毫秒": "{value} 毫秒",
+  "{value} 秒": "{value} 秒",
   "分段 ID": "分段 ID",
   "父分段 ID": "父分段 ID",
   引用跳数: "引用跳數",

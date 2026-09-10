@@ -1769,6 +1769,7 @@ export const en = {
   已回退: "Fallback",
   "{label}：{value}": "{label}: {value}",
   "{value} 毫秒": "{value} ms",
+  "{value} 秒": "{value} s",
   "分段 ID": "Chunk ID",
   "父分段 ID": "Parent chunk ID",
   引用跳数: "Reference hops",

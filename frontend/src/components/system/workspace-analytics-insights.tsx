@@ -24,7 +24,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
-import { APP_TIME_ZONE } from "@/lib/display"
+import { APP_TIME_ZONE, formatTokenCount } from "@/lib/display"
 import {
   distributionTotal,
 } from "@/components/system/workspace-analytics-metrics"
@@ -380,7 +380,7 @@ export function AnalyticsRankingPanel({
                 </span>
                 <span className="tabular-nums">
                   {t("Tokens {tokens}", {
-                    tokens: formatNumber(item.total_tokens, locale),
+                    tokens: formatTokenCount(item.total_tokens),
                   })}
                 </span>
                 <span className="tabular-nums text-muted-foreground">
@@ -393,7 +393,7 @@ export function AnalyticsRankingPanel({
               <span className="text-muted-foreground">
                 {t("运行 {runs} 次，Tokens {tokens}", {
                   runs: formatNumber(data.anonymous.run_count, locale),
-                  tokens: formatNumber(data.anonymous.total_tokens, locale),
+                  tokens: formatTokenCount(data.anonymous.total_tokens),
                 })}
               </span>
             </div>
@@ -412,7 +412,7 @@ export function AnalyticsRankingPanel({
                 </span>
                 <span className="tabular-nums">
                   {t("Tokens {tokens}", {
-                    tokens: formatNumber(item.total_tokens, locale),
+                    tokens: formatTokenCount(item.total_tokens),
                   })}
                 </span>
               </div>
