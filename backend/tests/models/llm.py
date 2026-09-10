@@ -62,7 +62,7 @@ def test_registered_chat_model_uses_configured_timeout() -> None:
     chat_model = build_registered_chat_model(model, runtime_settings)
 
     assert chat_model.request_timeout == 77
-    assert chat_model.max_tokens == 16_384
+    assert chat_model.max_tokens is None
     assert (
         build_registered_chat_model(model, runtime_settings, timeout=90).request_timeout
         == 90
@@ -728,6 +728,8 @@ def main() -> None:
         )
         assert same_base_model.status_code == 201, same_base_model.text
         same_base_model_id = same_base_model.json()["id"]
+        asyncio.run(assert_registered_model_runtime_call(same_base_model_id, "LLM"))
+        assert "max_tokens" not in ModelTestHandler.calls[-1]["body"]
 
         deleted_same_base_model = client.delete(
             models_url(workspace_id, f"/{same_base_model_id}"),

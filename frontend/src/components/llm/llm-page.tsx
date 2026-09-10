@@ -190,7 +190,7 @@ type ModelForm = {
 
 type ModelSortKey = "updated_at" | "created_at" | "name"
 
-const DEFAULT_LLM_REQUEST_PARAMS = '{\n  "max_tokens": 16384\n}'
+const DEFAULT_LLM_REQUEST_PARAMS = "{}"
 
 const EMPTY_MODEL_FORM: ModelForm = {
   id: null,
@@ -1496,7 +1496,7 @@ function ModelDialog({
                 />
                 <FieldDescription id="model-request-params-description">
                   {t(
-                    "以 JSON 对象传入模型接口参数，例如 max_tokens；供应商扩展参数可放在 extra_body 中。"
+                    "以 JSON 对象传入模型接口参数；供应商扩展参数可放在 extra_body 中。"
                   )}
                 </FieldDescription>
               </Field>
