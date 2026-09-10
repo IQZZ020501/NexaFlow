@@ -1,7 +1,7 @@
 """Durable continuation for Workflow Agent nodes."""
 
 import json
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -205,6 +205,10 @@ async def ensure_workflow_agent_child(
     child.parent_run_id = parent.id
     child.parent_node_id = parent_node_id
     child.depth = 1
+    child.execution_deadline_at = datetime.fromisoformat(deadline_at)
+    child.max_turns = MAX_CHILD_TURNS
+    child.max_tool_calls = MAX_CHILD_TOOL_CALLS
+    child.max_model_tokens = remaining_model_tokens
     child.application_snapshot = {
         **child.application_snapshot,
         "runtime_limits": {

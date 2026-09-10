@@ -149,6 +149,7 @@ export type AgentRun = {
     | "pending"
     | "verified"
     | "revised"
+    | "grounded"
     | "insufficient"
     | "unavailable"
     | "skipped"

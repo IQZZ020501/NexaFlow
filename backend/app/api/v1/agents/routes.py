@@ -586,6 +586,7 @@ async def stream_workspace_agent_run(
         conversation_id=payload.conversation_id,
         attachment_context=attachment_context,
         attachments=attachments,
+        settings=settings,
     )
     await enqueue_prepared_agent_run(
         run.id,

@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.application.tools.runtime.service import (
@@ -164,17 +164,23 @@ class UnifiedAgentToolRuntime:
         deadline = utc_now() + timedelta(
             seconds=self.settings.agent_tool_timeout_seconds
         )
-        if self.run.depth != 1:
-            return deadline
-        limits = self.run.application_snapshot.get("runtime_limits")
-        if not isinstance(limits, dict):
-            return deadline
-        value = limits.get("deadline_at")
-        try:
-            root_deadline = datetime.fromisoformat(str(value))
-        except ValueError:
-            return deadline
-        return min(deadline, root_deadline) if root_deadline.tzinfo else deadline
+        run_deadline = getattr(self.run, "execution_deadline_at", None)
+        if run_deadline is not None and run_deadline.tzinfo is None:
+            run_deadline = run_deadline.replace(tzinfo=UTC)
+        if run_deadline is not None:
+            return min(deadline, run_deadline)
+        if self.run.depth == 1:
+            limits = self.run.application_snapshot.get("runtime_limits")
+            if isinstance(limits, dict):
+                try:
+                    legacy_deadline = datetime.fromisoformat(
+                        str(limits.get("deadline_at"))
+                    )
+                except ValueError:
+                    legacy_deadline = None
+                if legacy_deadline is not None and legacy_deadline.tzinfo is not None:
+                    return min(deadline, legacy_deadline)
+        return deadline
 
 
 __all__ = [

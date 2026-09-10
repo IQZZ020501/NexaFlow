@@ -304,14 +304,22 @@ def external_progress_events(
                 "agent.grounding_check",
                 "agent.grounding_verified",
                 "agent.grounding_revised",
+                "agent.grounding_inline",
                 "agent.grounding_insufficient",
                 "agent.grounding_unavailable",
+                "agent.grounding_skipped",
             }:
                 grounding_stage = (
                     "reviewing"
                     if summary == "agent.grounding_check"
                     else "completed"
-                    if summary in {"agent.grounding_verified", "agent.grounding_revised"}
+                    if summary
+                    in {
+                        "agent.grounding_verified",
+                        "agent.grounding_revised",
+                        "agent.grounding_inline",
+                        "agent.grounding_skipped",
+                    }
                     else "failed"
                 )
                 upsert(
@@ -955,6 +963,7 @@ async def create_external_agent_run(
         publication_version=context.publication_version,
         attachment_context=attachment_context,
         attachments=attachments,
+        settings=settings,
     )
     await enqueue_prepared_agent_run(
         run.id,

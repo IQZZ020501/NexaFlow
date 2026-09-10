@@ -42,16 +42,25 @@ from tests.support import (  # noqa: F401  (sets required env before app imports
 from app.application.agents.runs import executor as agent_executor
 from app.application.agents.runs import memory as agent_memory
 from app.application.agents.runs import service as agent_runs
+from app.application.agents.runs.snapshots import (
+    build_knowledge_resource_snapshot,
+    require_knowledge_resource_snapshot,
+)
 from app.application.agents.tools import builder as agent_tools
 from app.application.tools.runtime.adapters import mcp as tool_adapters
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.entities.agents import Agent, AgentToolCall
 from app.entities.runs import AgentRun
-from app.entities.knowledge import KnowledgeBase
+from app.entities.knowledge import (
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
+)
 from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
 from app.infra.agents import live_stream as live_stream_module
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.identity import users as user_repository
@@ -315,7 +324,43 @@ class RuntimeModelStub:
                 ],
             )
         if completion.content:
-            yield AIMessageChunk(content=completion.content)
+            inline_grounding = any(
+                "Single-pass grounding protocol" in str(
+                    message.get("content", "")
+                    if isinstance(message, dict)
+                    else getattr(message, "content", "")
+                )
+                for message in messages
+            )
+            evidence_ids: list[str] = []
+            for message in messages:
+                if getattr(message, "type", "") != "tool":
+                    continue
+                try:
+                    output = json.loads(str(getattr(message, "content", "") or "{}"))
+                except ValueError:
+                    continue
+                evidence_ids.extend(
+                    str(hit["chunk_id"])
+                    for hit in output.get("hits", [])
+                    if isinstance(hit, dict) and hit.get("chunk_id")
+                )
+            if inline_grounding and not evidence_ids:
+                evidence_ids = ["chunk-happy"]
+            manifest = (
+                "<nexaflow-grounding>"
+                + json.dumps(
+                    {
+                        "status": "grounded" if evidence_ids else "skipped",
+                        "evidence_ids": evidence_ids,
+                        "reason_codes": [],
+                    }
+                )
+                + "</nexaflow-grounding>\n"
+                if inline_grounding
+                else ""
+            )
+            yield AIMessageChunk(content=f"{manifest}{completion.content}")
         yield AIMessageChunk(
             content="",
             response_metadata={"finish_reason": completion.finish_reason},
@@ -938,20 +983,10 @@ def assert_executor_checkpoint_paths() -> None:
 
     asyncio.run(run_resumed())
 
-    # A crash after drafting but before verification must resume the verifier
-    # without calling the primary Agent model a second time.
+    # A legacy crash after drafting but before the retired post-generation
+    # verifier is recovered without calling the primary model again.
     async def run_grounding_resume() -> None:
         provider = SequenceProvider([ok_completion()])
-        calls: list[tuple[str, list[dict[str, Any]]]] = []
-
-        async def ground(draft: str, evidence: list[dict[str, Any]]):
-            calls.append((draft, evidence))
-            return executor_module.AgentGroundingResult(
-                status="revised",
-                answer="verified answer",
-                meta={"evidence_ids": ["chunk-1"]},
-                model_usage={"model_calls": 1, "total_tokens": 3},
-            )
 
         result = await run_agent(
             provider,
@@ -963,13 +998,11 @@ def assert_executor_checkpoint_paths() -> None:
                 grounding_status="pending",
                 evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
             ),
-            grounding_handler=ground,
+            grounding_mode="agentic",
         )
-        assert result.content == "verified answer"
-        assert result.grounding_status == "revised"
-        assert calls == [
-            ("draft answer", [{"chunk_id": "chunk-1", "content": "evidence"}])
-        ]
+        assert result.content == "draft answer"
+        assert result.grounding_status == "unavailable"
+        assert result.grounding_meta["error"] == "legacy_post_generation_checkpoint"
         assert provider.requests == []
 
     asyncio.run(run_grounding_resume())
@@ -1531,6 +1564,7 @@ async def prepare_console_run(
     goal: str,
     *,
     persist: bool = True,
+    with_knowledge: bool = False,
 ) -> tuple[AgentRun, Any]:
     actor = await get_admin_actor()
     async with get_session_factory()() as db:
@@ -1543,6 +1577,9 @@ async def prepare_console_run(
             "admin",
             persist=persist,
         )
+        if not with_knowledge:
+            run.knowledge_base_ids = []
+            run.knowledge_resource_snapshot = build_knowledge_resource_snapshot([])
         if persist:
             await db.commit()
             run = await agent_repository.refresh_agent_run(db, run)
@@ -2062,6 +2099,75 @@ async def assert_knowledge_tool_paths(
         assert denied.is_error and denied.summary == "Knowledge search failed."
     finally:
         agent_tools.accessible_agent_knowledge_bases = original_accessible
+
+
+async def assert_knowledge_content_revision_paths(
+    workspace_id: str,
+    knowledge_base_id: str,
+    admin_user_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db,
+            knowledge_base_id,
+        )
+        assert knowledge_base is not None
+        document = KnowledgeDocument(
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            filename="runtime-revision.md",
+            content_type="text/markdown",
+            size_bytes=4,
+            storage_path="runtime-revision.md",
+            status="indexed",
+            created_by_user_id=admin_user_id,
+        )
+        document = await knowledge_repository.create_knowledge_document(
+            db,
+            document,
+        )
+        chunk = KnowledgeDocumentChunk(
+            workspace_id=workspace_id,
+            knowledge_base_id=knowledge_base_id,
+            document_id=document.id,
+            content="v1",
+            search_text="v1",
+            char_count=2,
+            token_count=1,
+            status="indexed",
+        )
+        await knowledge_repository.save_knowledge_document_chunk(db, chunk)
+        await db.commit()
+
+        revisions = await knowledge_repository.list_knowledge_content_revisions(
+            db,
+            workspace_id,
+            [knowledge_base_id],
+        )
+        assert revisions[0]["indexed_chunk_count"] == 1
+        snapshot = build_knowledge_resource_snapshot(
+            [knowledge_base],
+            revisions,
+        )
+
+        chunk.updated_at = chunk.updated_at + timedelta(seconds=1)
+        await knowledge_repository.save_knowledge_document_chunk(db, chunk)
+        await db.commit()
+        changed = await knowledge_repository.list_knowledge_content_revisions(
+            db,
+            workspace_id,
+            [knowledge_base_id],
+        )
+        try:
+            require_knowledge_resource_snapshot(
+                [knowledge_base],
+                snapshot,
+                changed,
+            )
+        except ValueError as exc:
+            assert "changed after run creation" in str(exc)
+        else:
+            raise AssertionError("Indexed knowledge content drift was accepted.")
 
 
 async def assert_mcp_tool_paths(
@@ -3509,7 +3615,11 @@ async def assert_durable_execution_paths(
 
     # -- happy path with required knowledge and MCP tools in scope --
     run, _ = await prepare_console_run(
-        workspace_id, agent_id, "Happy durable run", persist=False
+        workspace_id,
+        agent_id,
+        "Happy durable run",
+        persist=False,
+        with_knowledge=True,
     )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     async with get_session_factory()() as db:
@@ -3521,7 +3631,20 @@ async def assert_durable_execution_paths(
 
     async def fake_retrieve(_db, knowledge_base, payload, _settings):
         query_calls.append(payload.query)
-        return knowledge_inspect_result(knowledge_base, payload)
+        return knowledge_inspect_result(
+            knowledge_base,
+            payload,
+            [
+                KnowledgeQueryHitResponse(
+                    chunk_id="chunk-happy",
+                    document_id="doc-happy",
+                    document_filename="happy.md",
+                    chunk_index=0,
+                    content="Evidence supporting the happy answer.",
+                    distance=0.1,
+                )
+            ],
+        )
 
     agent_tools.retrieve_knowledge_base = fake_retrieve
     holder.model = RuntimeModelStub([ok_completion("Happy answer.")])
@@ -3541,11 +3664,12 @@ async def assert_durable_execution_paths(
     assert current is not None
     assert current.status == "succeeded"
     assert current.result == "Happy answer."
-    assert current.grounding_status == "skipped"
-    assert current.grounding_meta == {"reason": "no_grounding_source"}
+    assert current.grounding_status == "grounded"
+    assert current.grounding_meta["evidence_packet_count"] == 1
+    assert current.grounding_meta["mode"] == "inline"
     assert current.checkpoint_phase == "done"
     assert current.checkpoint.get("final_answer") == "Happy answer."
-    assert not any(
+    assert any(
         event.event.get("type") == "process"
         and str(event.event.get("event", {}).get("summary", "")).startswith(
             "agent.grounding_"
@@ -3570,6 +3694,7 @@ async def assert_durable_execution_paths(
         agent_id,
         "Search the knowledge base",
         persist=False,
+        with_knowledge=True,
     )
     run.mcp_tools = []
     run.knowledge_base_ids = [knowledge_base_id]
@@ -3940,6 +4065,7 @@ async def assert_durable_execution_paths(
     run, _ = await prepare_console_run(
         workspace_id, agent_id, "Timeout this run", persist=False
     )
+    run.max_runtime_seconds = short_settings.agent_run_timeout_seconds
     run.knowledge_base_ids = []
     run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
@@ -3968,6 +4094,7 @@ async def assert_durable_execution_paths(
         run, _ = await prepare_console_run(
             workspace_id, agent_id, "Log failure run", persist=False
         )
+        run.max_runtime_seconds = short_settings.agent_run_timeout_seconds
         run.knowledge_base_ids = []
         run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
@@ -4058,6 +4185,40 @@ async def assert_durable_execution_paths(
     finally:
         agent_executor.prepare_conversation_memory = original_prepare_memory
 
+    # -- preprocessing cannot refresh or overrun the persisted run deadline --
+    async def slow_prepare_memory(*_args, **_kwargs):
+        await asyncio.sleep(0.1)
+        return agent_executor.PreparedConversationMemory(
+            messages=[],
+            model_usage=empty_usage(),
+        )
+
+    agent_executor.prepare_conversation_memory = slow_prepare_memory
+    holder.model = RuntimeModelStub([ok_completion("Too late.")])
+    try:
+        run, _ = await prepare_console_run(
+            workspace_id, agent_id, "Preprocessing deadline", persist=False
+        )
+        run.max_runtime_seconds = 0.05
+        run.knowledge_base_ids = []
+        run.knowledge_query_mode = "agentic"
+        async with get_session_factory()() as db:
+            await agent_repository.save_agent_run(db, run)
+            await db.commit()
+        outcome = await agent_executor.run_durable_agent_run(
+            run.id,
+            settings,
+            worker_task_id="worker-preprocessing-deadline",
+        )
+        assert outcome == agent_executor.RUN_FINISHED
+        async with get_session_factory()() as db:
+            current = await agent_repository.get_agent_run_by_id(db, run.id)
+        assert current is not None and current.status == "failed"
+        assert current.last_error == "Agent execution deadline exceeded."
+        assert holder.model.requests == []
+    finally:
+        agent_executor.prepare_conversation_memory = original_prepare_memory
+
     # -- approval race: call approved before pause -> requeue (824) --
     original_run_agent = agent_executor.run_agent
     race_actor = await get_admin_actor()
@@ -4072,6 +4233,7 @@ async def assert_durable_execution_paths(
             persist=False,
         )
         race_run.knowledge_base_ids = []
+        race_run.knowledge_resource_snapshot = build_knowledge_resource_snapshot([])
         race_run.knowledge_query_mode = "agentic"
         race_run.status = agent_run_display_status(race_run.status)
         race_run.configuration_source = "legacy"
@@ -6235,6 +6397,13 @@ def main() -> None:
                     workspace_id,
                     resources["knowledge_base_id"],
                     resources["rerank_kb_id"],
+                )
+            )
+            asyncio.run(
+                assert_knowledge_content_revision_paths(
+                    workspace_id,
+                    resources["knowledge_base_id"],
+                    resources["admin_user_id"],
                 )
             )
             asyncio.run(

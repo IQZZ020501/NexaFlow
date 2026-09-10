@@ -2620,6 +2620,9 @@ def test_settings_defaults_and_validation() -> None:
     assert base.model_request_timeout_seconds == 60.0
     assert base.agent_tool_timeout_seconds == 30.0
     assert base.agent_run_timeout_seconds == 300.0
+    assert base.agent_max_turns == 8
+    assert base.agent_max_tool_calls == 12
+    assert base.agent_max_model_tokens == 100_000
     assert base.agent_executor_lease_seconds == 90
     assert base.agent_executor_heartbeat_seconds == 30
     assert base.agent_event_poll_seconds == 0.5
@@ -2656,6 +2659,12 @@ def test_settings_defaults_and_validation() -> None:
         (replace(base, agent_tool_timeout_seconds=301), "AGENT_TOOL_TIMEOUT_SECONDS"),
         (replace(base, agent_run_timeout_seconds=0), "AGENT_RUN_TIMEOUT_SECONDS"),
         (replace(base, agent_run_timeout_seconds=1801), "AGENT_RUN_TIMEOUT_SECONDS"),
+        (replace(base, agent_max_turns=0), "AGENT_MAX_TURNS"),
+        (replace(base, agent_max_turns=65), "AGENT_MAX_TURNS"),
+        (replace(base, agent_max_tool_calls=0), "AGENT_MAX_TOOL_CALLS"),
+        (replace(base, agent_max_tool_calls=129), "AGENT_MAX_TOOL_CALLS"),
+        (replace(base, agent_max_model_tokens=0), "AGENT_MAX_MODEL_TOKENS"),
+        (replace(base, agent_max_model_tokens=1_000_001), "AGENT_MAX_MODEL_TOKENS"),
         (replace(base, agent_executor_lease_seconds=29), "AGENT_EXECUTOR_LEASE_SECONDS"),
         (replace(base, agent_executor_heartbeat_seconds=0), "AGENT_EXECUTOR_HEARTBEAT_SECONDS"),
         (replace(base, agent_executor_heartbeat_seconds=60), "AGENT_EXECUTOR_HEARTBEAT_SECONDS"),

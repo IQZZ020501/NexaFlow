@@ -881,6 +881,7 @@ def _run_entity(
     max_attempts: int = 3,
     worker_task_id: str | None = None,
     lease_expires_at=None,
+    execution_deadline_at=None,
     configuration_source: str = "legacy",
 ) -> AgentRun:
     return AgentRun(
@@ -903,6 +904,7 @@ def _run_entity(
         max_attempts=max_attempts,
         worker_task_id=worker_task_id,
         lease_expires_at=lease_expires_at,
+        execution_deadline_at=execution_deadline_at,
         created_at=created_at or utc_now(),
     )
 
@@ -1248,8 +1250,14 @@ async def exercise_repository_runs(
         await db.commit()
 
         # claim / renew / checkpoint / finalize
+        execution_deadline = now + timedelta(seconds=300)
         claim = await agent_repository.claim_agent_run(
-            db, active.id, "worker-claim", now, now + timedelta(seconds=90)
+            db,
+            active.id,
+            "worker-claim",
+            now,
+            now + timedelta(seconds=90),
+            execution_deadline_at=execution_deadline,
         )
         assert claim is True
         assert (
@@ -1258,6 +1266,13 @@ async def exercise_repository_runs(
             )
             is False
         )
+        claimed_run = await agent_repository.get_agent_run_by_id(db, active.id)
+        assert claimed_run is not None
+        claimed_deadline = claimed_run.execution_deadline_at
+        assert claimed_deadline is not None
+        if claimed_deadline.tzinfo is None:
+            claimed_deadline = claimed_deadline.replace(tzinfo=now.tzinfo)
+        assert claimed_deadline == execution_deadline
 
         # Worker generations are a durable dispatch fence: an old task must
         # never claim a unified run, and the unified task must never claim a
@@ -1360,6 +1375,7 @@ async def exercise_repository_runs(
             _run_entity(
                 workspace_id, agent_id, admin_id, "conv-pause",
                 status="running", attempts=1, worker_task_id="worker-p",
+                execution_deadline_at=now + timedelta(seconds=300),
                 created_at=now,
             ),
         )
@@ -1373,6 +1389,12 @@ async def exercise_repository_runs(
         assert (
             await agent_repository.queue_agent_run(db, pause_me.id) is True
         )
+        resumed = await agent_repository.get_agent_run_by_id(db, pause_me.id)
+        assert resumed is not None and resumed.execution_deadline_at is not None
+        resumed_deadline = resumed.execution_deadline_at
+        if resumed_deadline.tzinfo is None:
+            resumed_deadline = resumed_deadline.replace(tzinfo=now.tzinfo)
+        assert resumed_deadline >= now + timedelta(seconds=300)
         assert (
             await agent_repository.queue_agent_run(db, pause_me.id) is False
         )
@@ -1381,7 +1403,9 @@ async def exercise_repository_runs(
             db,
             _run_entity(
                 workspace_id, agent_id, admin_id, "conv-input",
-                status="running", worker_task_id="worker-i", created_at=now,
+                status="running", worker_task_id="worker-i",
+                execution_deadline_at=now + timedelta(seconds=300),
+                created_at=now,
             ),
         )
         await db.commit()
@@ -1391,6 +1415,8 @@ async def exercise_repository_runs(
             )
             is True
         )
+        resumed = await agent_repository.get_agent_run_by_id(db, input_me.id)
+        assert resumed is not None and resumed.execution_deadline_at is not None
         assert (
             await agent_repository.queue_agent_run_from_input(
                 db, input_me.id, {"checkpoint": 1}

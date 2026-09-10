@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Float,
     Index,
     Integer,
     String,
@@ -564,6 +565,9 @@ class AgentRunState(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    execution_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     checkpoint: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
@@ -632,6 +636,22 @@ class AgentRunSnapshot(Base):
             name="ck_agent_run_snapshots_schema_version",
         ),
         CheckConstraint(
+            "max_runtime_seconds > 0 AND max_runtime_seconds <= 1800",
+            name="ck_agent_run_snapshots_runtime_seconds",
+        ),
+        CheckConstraint(
+            "max_turns > 0 AND max_turns <= 64",
+            name="ck_agent_run_snapshots_max_turns",
+        ),
+        CheckConstraint(
+            "max_tool_calls > 0 AND max_tool_calls <= 128",
+            name="ck_agent_run_snapshots_max_tool_calls",
+        ),
+        CheckConstraint(
+            "max_model_tokens > 0 AND max_model_tokens <= 1000000",
+            name="ck_agent_run_snapshots_max_model_tokens",
+        ),
+        CheckConstraint(
             "(configuration_source = 'published' AND agent_publication_version_id IS NOT NULL) "
             "OR (configuration_source IN ('draft', 'legacy') "
             "AND agent_publication_version_id IS NULL)",
@@ -666,6 +686,24 @@ class AgentRunSnapshot(Base):
     )
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    max_runtime_seconds: Mapped[float] = mapped_column(
+        Float, nullable=False, default=300.0, server_default="300"
+    )
+    max_turns: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=8, server_default="8"
+    )
+    max_tool_calls: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=12, server_default="12"
+    )
+    max_model_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100_000, server_default="100000"
+    )
+    model_runtime_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    knowledge_resource_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

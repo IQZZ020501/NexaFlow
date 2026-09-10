@@ -96,6 +96,7 @@ _RUN_STATE_FIELDS = (
     "max_attempts",
     "worker_task_id",
     "lease_expires_at",
+    "execution_deadline_at",
     "checkpoint",
     "checkpoint_phase",
     "grounding_status",
@@ -123,6 +124,12 @@ _RUN_SNAPSHOT_FIELDS = (
     "tool_snapshots",
     "model_id",
     "model_name",
+    "max_runtime_seconds",
+    "max_turns",
+    "max_tool_calls",
+    "max_model_tokens",
+    "model_runtime_snapshot",
+    "knowledge_resource_snapshot",
 )
 def _entity_values(entity: Any, names: tuple[str, ...]) -> dict[str, Any]:
     return {name: getattr(entity, name) for name in names}
@@ -472,4 +479,3 @@ async def pause_agent_run_for_child(
         )
     )
     return bool(updated.rowcount)
-

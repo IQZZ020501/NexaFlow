@@ -86,6 +86,9 @@ class Settings:
     model_request_timeout_seconds: float = 60.0
     agent_tool_timeout_seconds: float = 30.0
     agent_run_timeout_seconds: float = 300.0
+    agent_max_turns: int = 8
+    agent_max_tool_calls: int = 12
+    agent_max_model_tokens: int = 100_000
     agent_executor_lease_seconds: int = 90
     agent_executor_heartbeat_seconds: int = 30
     agent_event_poll_seconds: float = 0.5
@@ -143,6 +146,11 @@ class Settings:
             ),
             agent_run_timeout_seconds=float(
                 os.getenv("AGENT_RUN_TIMEOUT_SECONDS", "300")
+            ),
+            agent_max_turns=int(os.getenv("AGENT_MAX_TURNS", "8")),
+            agent_max_tool_calls=int(os.getenv("AGENT_MAX_TOOL_CALLS", "12")),
+            agent_max_model_tokens=int(
+                os.getenv("AGENT_MAX_MODEL_TOKENS", "100000")
             ),
             agent_executor_lease_seconds=int(
                 os.getenv("AGENT_EXECUTOR_LEASE_SECONDS", "90")
@@ -225,6 +233,14 @@ class Settings:
             raise RuntimeError("AGENT_RUN_TIMEOUT_SECONDS must be greater than zero.")
         if self.agent_run_timeout_seconds > 1800:
             raise RuntimeError("AGENT_RUN_TIMEOUT_SECONDS must not exceed 1800.")
+        if not 1 <= self.agent_max_turns <= 64:
+            raise RuntimeError("AGENT_MAX_TURNS must be between 1 and 64.")
+        if not 1 <= self.agent_max_tool_calls <= 128:
+            raise RuntimeError("AGENT_MAX_TOOL_CALLS must be between 1 and 128.")
+        if not 1 <= self.agent_max_model_tokens <= 1_000_000:
+            raise RuntimeError(
+                "AGENT_MAX_MODEL_TOKENS must be between 1 and 1000000."
+            )
         if self.agent_executor_lease_seconds < 30:
             raise RuntimeError("AGENT_EXECUTOR_LEASE_SECONDS must be at least 30.")
         if self.agent_executor_heartbeat_seconds <= 0:

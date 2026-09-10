@@ -66,6 +66,9 @@ jobs:
           uv run python -m tests.platform.unit
           uv run python -m tests.infra.unit
 
+      - name: Run Agent evaluation gate
+        run: uv run python -m tests.agents.evaluation
+
       - name: Run logger tests
         run: uv run python -m tests.infra.logger
 

@@ -743,9 +743,7 @@ describe("AgentsPage list view", () => {
 
     const workflowCard = cardOf("Weekly Digest")
     expect(within(workflowCard).getByText("工作流")).toBeTruthy()
-    expect(
-      within(workflowCard).getByText("创建者：Fuhua · Yang")
-    ).toBeTruthy()
+    expect(within(workflowCard).getByText("创建者：Fuhua · Yang")).toBeTruthy()
     expect(within(workflowCard).getAllByText("0").length).toBe(2)
 
     expect(screen.getByText("已加载全部")).toBeTruthy()
@@ -1385,9 +1383,7 @@ describe("AgentsPage detail view", () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
     }
-    testWindow.happyDOM.setURL(
-      "https://nexaflow.example/app/apps/agent-1"
-    )
+    testWindow.happyDOM.setURL("https://nexaflow.example/app/apps/agent-1")
     await renderDetail({
       extraRoutes: [
         {
@@ -1412,9 +1408,9 @@ describe("AgentsPage detail view", () => {
     expect(settingsNavButton).toBeTruthy()
     fireEvent.click(settingsNavButton!)
     await screen.findByLabelText("向 Agent 提问")
-    const firstConversationId = new URLSearchParams(
-      window.location.search
-    ).get("conversation_id")
+    const firstConversationId = new URLSearchParams(window.location.search).get(
+      "conversation_id"
+    )
     expect(firstConversationId).toBeTruthy()
 
     const logsNavButton = screen
@@ -2470,6 +2466,86 @@ describe("AgentsPage card menu: permissions and delete", () => {
 })
 
 describe("AgentsPage run flows", () => {
+  test("renders an agentic no-evidence grounding result as a neutral state", async () => {
+    const run = makeRun({
+      knowledge_query_mode: "agentic",
+      grounding_status: "skipped",
+      grounding_meta: { reason: "no_evidence" },
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.grounding_skipped",
+          call_id: "grounding-check",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: { reason: "no_evidence" },
+          duration_ms: 0,
+        },
+      ],
+    })
+    await renderDetail({
+      agent: makeAgent({ knowledge_query_mode: "agentic" }),
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([run]),
+        },
+      ],
+    })
+
+    expect(await screen.findByText("本次回答未使用知识依据")).toBeTruthy()
+    expect(screen.queryByText("暂时无法完成依据核验")).toBeNull()
+  })
+
+  test("renders inline grounding as completed before the answer", async () => {
+    const run = makeRun({
+      knowledge_query_mode: "agentic",
+      grounding_status: "grounded",
+      grounding_meta: { mode: "inline", evidence_ids: ["chunk-1"] },
+      events: [
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.grounding_inline",
+          call_id: "inline-grounding",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: { mode: "inline", evidence_ids: ["chunk-1"] },
+          duration_ms: 0,
+        },
+      ],
+    })
+    await renderDetail({
+      agent: makeAgent({ knowledge_query_mode: "agentic" }),
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([run]),
+        },
+      ],
+    })
+
+    expect(await screen.findByText("已基于知识依据生成回答")).toBeTruthy()
+    expect(screen.queryByText("正在核验回答依据")).toBeNull()
+  })
+
   test("asks a question and renders the streamed answer", async () => {
     const agent = makeAgent()
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
@@ -2614,9 +2690,7 @@ describe("AgentsPage run flows", () => {
       { target: { value: "Stop me please" } }
     )
     fireEvent.click(screen.getByLabelText("发送问题"))
-    await waitFor(() =>
-      expect(screen.getByLabelText("停止生成")).toBeTruthy()
-    )
+    await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
     fireEvent.click(screen.getByLabelText("停止生成"))
 
     await waitFor(() => expect(cancelCalled).toBe(true))
@@ -3322,7 +3396,9 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Original answer")).toBeTruthy()
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "重新生成" }))
     rendered.rerender(
@@ -3381,7 +3457,9 @@ describe("AgentsPage run flows", () => {
         },
       ],
     })
-    await waitFor(() => expect(screen.getByText("Original answer")).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText("Original answer")).toBeTruthy()
+    )
 
     fireEvent.click(screen.getByRole("button", { name: "点赞" }))
     fireEvent.click(screen.getByLabelText("新建对话"))
@@ -3389,7 +3467,9 @@ describe("AgentsPage run flows", () => {
       expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
     )
     resolveFeedback!(
-      jsonResponse(makeRun({ result: "Stale feedback run", feedback: "positive" }))
+      jsonResponse(
+        makeRun({ result: "Stale feedback run", feedback: "positive" })
+      )
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
 

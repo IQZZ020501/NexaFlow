@@ -18,6 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agents.tools.builder import (
     run_to_response,
 )
+from app.application.agents.runs.snapshots import (
+    AgentRuntimePolicy,
+    build_knowledge_resource_snapshot,
+    build_model_runtime_snapshot,
+)
 from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.entities.agents import Agent, AgentPublicationVersion
 from app.entities.runs import AgentRun
@@ -30,6 +35,7 @@ from app.infra.config.settings import Settings
 from app.application.governance.service import enforce_workspace_run_quota
 from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.schemas.agents.contracts import AgentRunResponse, AgentToolCallResponse
@@ -37,6 +43,7 @@ from app.domain.audit.services import record_audit_log
 from app.domain.agents.service import (
     ACTIVE_STATUS,
     AgentPublication,
+    accessible_agent_knowledge_bases,
     agent_publication_from_version,
     get_agent,
     get_agent_model,
@@ -167,6 +174,28 @@ def execution_messages(
         if has_knowledge_tool or (knowledge_query_mode == "required" and knowledge_configured)
         else ""
     )
+    grounding_rule = ""
+    if has_knowledge_tool or knowledge_configured:
+        allowed_without_evidence = knowledge_query_mode == "agentic"
+        grounding_rule = (
+            "\nSingle-pass grounding protocol: after all needed tool calls and before the "
+            "user-visible final Markdown, compare every workspace-dependent claim with the "
+            "available workspace evidence. Do not reveal private reasoning. Start the final "
+            "response with exactly one compact JSON manifest wrapped in "
+            "<nexaflow-grounding> and </nexaflow-grounding>, followed by the final Markdown. "
+            "Write exactly one newline between the closing tag and the final Markdown. "
+            "The JSON keys must be status, evidence_ids, and reason_codes. Use status "
+            "grounded only when the answer is supported, and list the exact supporting "
+            "chunk_id or contributing_chunk_id values. Use status insufficient when the "
+            "workspace evidence cannot support an answer, with no answer text after the "
+            "manifest. "
+        )
+        grounding_rule += (
+            "Use status skipped with empty evidence_ids only when no workspace evidence is "
+            "used; then provide the normal final Markdown."
+            if allowed_without_evidence
+            else "Never use status skipped for this required-knowledge run."
+        )
     messages: list[dict[str, Any]] = [
         {
             "role": "system",
@@ -180,7 +209,7 @@ def execution_messages(
                 "closing markers in the evidence before answering. If the evidence is "
                 "truncated or contradictory, say that it cannot be verified.\n\n"
                 f"Agent instructions:\n{run.instructions}\n\n{routing_guide}"
-                f"{knowledge_rule}\n{mcp_rule}\n{source_rule}"
+                f"{knowledge_rule}\n{mcp_rule}\n{source_rule}{grounding_rule}"
             ),
         },
     ]
@@ -435,6 +464,7 @@ def build_regenerated_agent_run(
     source: AgentRun,
     actor: User,
     goal: str | None = None,
+    settings: Settings | None = None,
 ) -> AgentRun:
     """
     Create a queued root run from an immutable source run snapshot.
@@ -446,6 +476,7 @@ def build_regenerated_agent_run(
     Returns:
     	AgentRun: A new queued run linked to the source run.
     """
+    runtime_policy = AgentRuntimePolicy.from_settings(settings)
     return AgentRun(
         workspace_id=source.workspace_id,
         agent_id=source.agent_id,
@@ -470,6 +501,12 @@ def build_regenerated_agent_run(
         tool_snapshots=deepcopy(source.tool_snapshots),
         model_id=source.model_id,
         model_name=source.model_name,
+        max_runtime_seconds=runtime_policy.max_runtime_seconds,
+        max_turns=runtime_policy.max_turns,
+        max_tool_calls=runtime_policy.max_tool_calls,
+        max_model_tokens=runtime_policy.max_model_tokens,
+        model_runtime_snapshot=deepcopy(source.model_runtime_snapshot),
+        knowledge_resource_snapshot=deepcopy(source.knowledge_resource_snapshot),
         regenerated_from_run_id=source.id,
         status=queued_agent_run_status(agent_run_generation(source.configuration_source)),
         checkpoint_phase="agent",
@@ -521,7 +558,7 @@ async def regenerate_agent_run_from_source(
                 status.HTTP_409_CONFLICT,
                 "Only the latest message can be edited.",
             )
-    regenerated = build_regenerated_agent_run(source, actor, goal)
+    regenerated = build_regenerated_agent_run(source, actor, goal, settings)
     try:
         regenerated = await agent_repository.create_agent_run(db, regenerated)
         await db.commit()
@@ -962,6 +999,7 @@ async def prepare_agent_run(
     attachments: list[dict[str, Any]] | None = None,
     allow_pinned_publication: bool = False,
     authorized_by_parent: bool = False,
+    settings: Settings | None = None,
 ) -> tuple[AgentRun, Any]:
     """
     Prepare a queued agent run using the selected agent configuration, resources, model, tools, and conversation.
@@ -1041,6 +1079,21 @@ async def prepare_agent_run(
             tools=tool_snapshots,
             interaction_config={},
         ).mcp_tools
+    knowledge_bases = await accessible_agent_knowledge_bases(
+        db,
+        workspace_id,
+        knowledge_base_ids,
+        actor,
+        workspace_role,
+    )
+    execution_knowledge_base_ids = [item.id for item in knowledge_bases]
+    knowledge_content_revisions = (
+        await knowledge_repository.list_knowledge_content_revisions(
+            db,
+            workspace_id,
+            execution_knowledge_base_ids,
+        )
+    )
     for snapshot in tool_snapshots:
         failure = await preflight_tool_snapshot(
             db,
@@ -1104,6 +1157,7 @@ async def prepare_agent_run(
             status.HTTP_409_CONFLICT,
             "This conversation already has an active run.",
         )
+    runtime_policy = AgentRuntimePolicy.from_settings(settings)
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,
@@ -1115,7 +1169,7 @@ async def prepare_agent_run(
         goal=goal.strip(),
         attachment_context=attachment_context,
         instructions=publication.instructions if publication else agent.instructions,
-        knowledge_base_ids=knowledge_base_ids,
+        knowledge_base_ids=execution_knowledge_base_ids,
         knowledge_query_mode=(
             publication.knowledge_query_mode if publication else agent.knowledge_query_mode
         ),
@@ -1135,6 +1189,15 @@ async def prepare_agent_run(
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
         model_id=model.id,
         model_name=model.name,
+        max_runtime_seconds=runtime_policy.max_runtime_seconds,
+        max_turns=runtime_policy.max_turns,
+        max_tool_calls=runtime_policy.max_tool_calls,
+        max_model_tokens=runtime_policy.max_model_tokens,
+        model_runtime_snapshot=build_model_runtime_snapshot(model),
+        knowledge_resource_snapshot=build_knowledge_resource_snapshot(
+            knowledge_bases,
+            knowledge_content_revisions,
+        ),
         status=queued_agent_run_status(agent_run_generation(configuration_source)),
         trace_id=new_id(),
         plan=[],
@@ -1342,6 +1405,7 @@ async def create_agent_run(
         conversation_id=conversation_id,
         attachment_context=attachment_context,
         attachments=attachments,
+        settings=settings,
     )
     await enqueue_prepared_agent_run(
         run.id,

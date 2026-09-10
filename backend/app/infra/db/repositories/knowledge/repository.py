@@ -64,6 +64,7 @@ from app.infra.db.repositories.knowledge.documents import _visible_document_cond
 from app.infra.db.repositories.knowledge.documents import list_knowledge_base_rows
 from app.infra.db.repositories.knowledge.documents import list_knowledge_documents
 from app.infra.db.repositories.knowledge.documents import has_indexed_knowledge_document
+from app.infra.db.repositories.knowledge.documents import list_knowledge_content_revisions
 from app.infra.db.repositories.knowledge.documents import get_knowledge_document_by_id
 from app.infra.db.repositories.knowledge.documents import create_knowledge_document
 from app.infra.db.repositories.knowledge.documents import save_knowledge_document

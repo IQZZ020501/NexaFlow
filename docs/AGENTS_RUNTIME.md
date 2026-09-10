@@ -11,7 +11,7 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
    → application/agents/__init__.py（用例门面，重导出 CRUD 与 Run/工具用例）
        → runs/service.py（提交/读取/审批/再生/反馈、可重放与实时事件订阅）
        → runs/executor.py（租约执行、checkpoint、工具账本与终态/恢复）
-       → runs/memory.py + children.py + grounding.py（记忆压缩、子运行续延、落地校验）
+       → runs/memory.py + children.py + snapshots.py（记忆压缩、子运行续延与执行快照）
        → tools/builder.py + runtime.py（ToolSnapshot → StructuredTool / durable Tool 运行时桥）
        → access/service.py（发布上下文、凭据、限流与外部投影）
        → domain/agents/service.py + models.py（CRUD/绑定/发布编排与 ORM）
@@ -30,13 +30,15 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
 
 - `backend/app/domain/agents/models.py` — Agent ORM 模型：`agents`、`agent_publication_versions`、`agent_knowledge_bases`、`agent_mcp_tools`、`agent_api_credentials`，以及 Run 四表 `agent_runs` / `agent_run_states` / `agent_run_snapshots` / `agent_run_events`（身份/谱系、可变状态与租约/checkpoint、创建时冻结快照、只追加事件）。纯 dataclass 实体集中在 `app/entities/agents/models.py`，仓储负责 ORM ↔ 实体映射。
 - `backend/app/domain/agents/service.py` — Agent 服务层（原 services.py）：CRUD、可用模型/知识库/工具解析（含 legacy MCP 引用兼容）、权限前置校验、发布状态机（应用发布、未发布变更检测）与运行参数编排。
+- `backend/app/domain/agents/evaluation.py` — 无副作用的 Agent 评测数据集契约、单样本断言与发布门禁聚合规则。
 - `backend/app/domain/agents/access/permissions.py` — Agent 资源权限规则：`AGENT_RESOURCE_TYPE`、view/edit 判定与授权/撤销用例。
 - `backend/app/domain/agents/access/publications.py` — 规范化不可变发布快照：schema 版本、定义哈希、配置/资源快照构造与从快照还原。
 
 ### domain/agents/runtime/（LangGraph 执行内核）
 
 - `backend/app/domain/agents/runtime/graph.py` — LangGraph 智能体状态图：多轮工具调用循环、模型文本流过滤（含 DSML 解析与增量清洗）、证据去重与终止条件。
-- `backend/app/domain/agents/runtime/executor.py` — LangGraph 执行入口 `run_agent`：可串行化 checkpoint 的保存/恢复、可选的 durable grounding handler 续延（`AgentGroundingResult`、`grounding_status`/`grounding_meta` 随 checkpoint 往返）。
+- `backend/app/domain/agents/runtime/executor.py` — LangGraph 执行入口 `run_agent`：可串行化 checkpoint 的保存/恢复，以及单次生成 grounding 状态与审计元数据的持久化。
+- `backend/app/domain/agents/runtime/grounding.py` — 单次生成 grounding 协议：在答案 Markdown 前解析并隐藏有界 manifest，确定性校验证据 ID，失败时在正文输出前关闭。
 - `backend/app/domain/agents/runtime/tools.py` — LangChain StructuredTool 通用适配、参数 schema 校验、暂停/uncertain/busy 信号与元数据读取。
 - `backend/app/domain/agents/runtime/callbacks.py` — 智能体事件总线（`AgentEventBus`/`NexaFlowCallback`）：事件订阅、敏感字段脱敏与 LLM 流式回调。
 - `backend/app/domain/agents/runtime/state.py` — 运行状态 TypedDict 定义（消息、事件、轮次、证据与待执行工具调用等）。
@@ -49,7 +51,7 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
 - `backend/app/application/agents/runs/executor.py` — durable Run 执行（原 agent_executor 职责）：Run 租约/心跳/接管（`maintain_agent_run_lease`）、节点 checkpoint 落库、工具幂等账本（`DurableToolLedger`）与终态/失败收尾，并导出 legacy/unified 恢复候选查询。
 - `backend/app/application/agents/runs/memory.py` — 会话记忆准备与压缩：按 `conversation_id` 读取历史成功 Run、token 预算估算、摘要消息与最近轮次保留。
 - `backend/app/application/agents/runs/children.py` — Workflow Agent 子运行的 durable 续延：子运行创建/恢复、等待父运行 reconcile、过期父运行失败收尾。
-- `backend/app/application/agents/runs/grounding.py` — 有界落地校验：`verify_grounding` 在超时预算内对照知识证据对草稿答案判定 `verified`/`revised`/`insufficient`，输出可持久化的 `grounding_status`/`grounding_meta` 与兜底答案。
+- `backend/app/application/agents/runs/snapshots.py` — 创建 Run 时冻结运行预算、非敏感模型配置指纹和知识资源版本信息（含可检索文档/分块内容指纹）；执行前检查模型或知识漂移。
 - `backend/app/application/agents/tools/builder.py` — 工具构造与纯映射（原 agent_tools 职责）：知识检索工具、统一 ToolSnapshot → StructuredTool 包装、MCP 工具构造、Run → response 与错误/输出脱敏。
 - `backend/app/application/agents/tools/runtime.py` — 通往 provider-neutral durable Tool 运行时的薄桥（`UnifiedAgentToolRuntime`）：固定幂等身份，并把 `ToolRuntimeResult` 映射回 `AgentToolResult`。
 - `backend/app/application/agents/access/service.py` — 公开/API 访问领域：发布上下文解析（Agent/Workflow/Application）、访客 Cookie 与 API 凭据（高熵 token、SHA-256 哈希、轮换/吊销）、外部 Run CRUD/流式投影与清洗、限流与工作区运行日志/会话用户查询。
@@ -77,16 +79,18 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - `tests/agents/agent_access.py` — 公开/API 访问域覆盖：`application/agents/access/service.py`、`api/v1/agents/access.py` 与限流 Lua（`infra/security/agent_rate_limit.py`）。
 - `tests/agents/agent_services_coverage.py` — Agent services/权限/发布/仓储/tasks 域覆盖。
 - `tests/agents/agent_runtime_coverage.py` — 执行内核覆盖：durable Run executor/runs service、记忆、domain runtime（executor/usage/tools/callbacks）与 Redis 实时流基础设施。
+- `tests/agents/evaluation.py` — 无网络的确定性生产门禁：直接回答、工具、grounding、usage 与必需用例聚合规则。
 
 ## 运行策略与生产边界
 
-- 知识策略显式分为 `required`（默认，用用户原始问题在首个模型节点前检索）和 `agentic`（模型生成查询并决定何时调用）；策略与绑定会快照到 Run，运行中修改 Agent 不改变已提交 Run。
+- 知识策略显式分为 `required`（默认，用用户原始问题在首个模型节点前检索）和 `agentic`（模型生成查询并决定何时调用）。不再在答案生成后追加第二次 LLM 核验。最终模型节点先在同一次生成中对照证据，输出一个不展示给用户的 grounding manifest，后端确定性校验其证据 ID 后才放行随后的 Markdown 流。`required` 的 manifest 缺失、证据 ID 非法或证据不足时在正文前 fail closed；`agentic` 没有使用知识证据时可标记 `skipped` 并继续普通回答。终态 `grounding_meta` 保存决定、证据 ID、包数量与截断标记；最终 Markdown 不再被第二个模型重写。
 - 每个 Run 都属于一个 `conversation_id`，并以 `access_source + consumer_id` 区分登录用户、公开访客和 API 凭据；同一工作区、Agent、来源主体、会话最多只有一个活动 Run。未传会话 ID 的旧登录客户端复用最近会话，前端把当前会话写入 URL，并可显式开始新会话。
 - 历史成功 Run 以真实 `user`/`assistant` 角色恢复。上下文在保守 token 预算内直接复用；超预算时用当前注册模型压缩较旧轮次，摘要持久化在最后被覆盖的成功 Run 上，同时保留最近 6 轮。摘要调用失败时回退到截断历史，不阻断当前问题，原始 Run 记录始终保留。
 - `model_usage` 累加 Agent loop 与摘要调用的实际供应商用量，并单列 compaction、cache read/create 与未上报调用数。系统不会为未返回 usage 的供应商猜测计费 token；服务端 prompt cache 的写法仍由各供应商 SDK 决定，不伪造跨供应商通用的 `cache_control`。
-- 每次工具调用与整次在线运行都有硬超时；达到最后一轮时不再向模型暴露工具。连续两轮没有新知识证据后停止继续检索，保留 MCP 外部能力供模型决定是否需要。
+- Run 创建时冻结整次执行时长、模型轮次、工具调用次数和模型 token 四项预算。总截止时间只在第一次成功 claim 时写入，worker 重试、租约接管和 checkpoint 恢复不会刷新；人工审批或输入等待时间会显式加回截止时间。每次工具调用仍有独立硬超时，达到最后一轮时不再向模型暴露工具；grounding 与最终答案共享同一次模型调用和 token 预算。连续两轮没有新知识证据后停止继续检索，保留 MCP 外部能力供模型决定是否需要。
 - HTTP 只提交/观察 Run；Celery worker（任务入口 `app/tasks/agents/jobs.py`，经 `app/application/runs/dispatch.py` 派发到 `app/application/agents/runs/executor.py`）用数据库租约执行，节点 checkpoint、过程事件游标和工具账本均持久化。答案与推理 delta 不写 PostgreSQL，而是进入按 Run 隔离、限长并带 15 分钟 TTL 的 Redis Stream；API 把 Redis 增量与数据库事件合并为同一 NDJSON。客户端分别用 `after` 和 `live_after` 恢复持久与实时游标，终态数据库快照负责最终校正；Redis 不可用时自动降级为过程事件加完整终态答案。断开 NDJSON 不会取消 Run。
-- Run 持久层按职责拆分：`agent_runs` 只保存身份、调用者、谱系、反馈和 trace；`agent_run_states` 保存状态、租约、checkpoint、结果与模型用量；`agent_run_snapshots` 保存创建时冻结的执行配置；`agent_run_events` 只追加事件。所有 Agent/Workflow/测试工具执行统一写入 `tool_invocations`，不再维护第二套工具调用账本。
+- Run 持久层按职责拆分：`agent_runs` 只保存身份、调用者、谱系、反馈和 trace；`agent_run_states` 保存状态、租约、总截止时间、checkpoint、结果与模型用量；`agent_run_snapshots` 保存创建时冻结的执行配置、四项预算、非敏感模型配置指纹和知识资源信息；`agent_run_events` 只追加事件。版本化 Run 若检测到模型端点、凭据版本或请求参数漂移，以及知识权限被撤销，会在执行前失败关闭。所有 Agent/Workflow/测试工具执行统一写入 `tool_invocations`，不再维护第二套工具调用账本。
+- 发布前真实质量门禁使用 `backend/scripts/agent_eval.py` 调用现有工作区 Run API，按答案、grounding、工具、证据数量、token、模型调用数和延迟断言；数据集与运行说明见 `docs/AGENT_EVALUATION.md`。报告不保存问题、答案、证据正文或令牌。
 - Agent 草稿保存稳定的 `ToolRef(tool_id, version_id)`；发布版本和 Run 再冻结完整 ToolSnapshot。Tool/Source 禁用、授权撤销、成员失效或策略漂移会在 dispatch 前 fail closed，不静默换到新版本。
 - 新发现的 MCP 工具默认逐次审批；只有管理员按当前定义哈希显式设置为 `read_only` 才会自动运行，远端 `readOnlyHint` 等注解不会单独改变审批策略。管理员可按当前定义哈希设置为只读、审批或禁用，工具定义变化后已有策略回落到逐次审批。副作用调用携带稳定幂等键；传输超时、worker 在外部调用后崩溃或结果未落账时标记 `uncertain`，禁止自动重试，只能人工确认后"不重试并继续"。远端 MCP 若不兑现幂等键，系统提供的是保守恢复而非跨系统 exactly-once。
 - 发布和 API 凭据写操作仅工作空间管理员可执行。发布固化当时的模型、知识库和 ToolSnapshot；后续草稿变化不撤销既有发布，公开/API 继续运行上一发布版本，直到重新发布、取消发布或停用应用。外部运行使用发布者快照身份受审计，但不冒充访问者；仅允许仍有效、无需逐次审批的只读工具，不开放外部审批路径。

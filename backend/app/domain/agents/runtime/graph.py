@@ -28,6 +28,10 @@ from app.ports.llm import (
     ModelToolCall,
 )
 from app.domain.agents.runtime.callbacks import NexaFlowCallback, safe_event_value
+from app.domain.agents.runtime.grounding import (
+    InlineGroundingMode,
+    InlineGroundingStreamFilter,
+)
 from app.domain.agents.runtime.state import AgentState, PendingToolCall
 from app.domain.agents.runtime.tools import (
     AgentExecutionPaused,
@@ -65,7 +69,7 @@ class AgentRuntimeContext:
     max_turns: int = MAX_AGENT_TURNS
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS
     max_model_tokens: int | None = None
-    defer_answer: bool = False
+    grounding_mode: InlineGroundingMode | None = None
 
 
 @dataclass(frozen=True)
@@ -430,6 +434,12 @@ async def agent_node(
     state: AgentState,
     runtime: Runtime[AgentRuntimeContext],
 ) -> dict[str, Any]:
+    if (
+        runtime.context.max_model_tokens is not None
+        and int(state["model_usage"].get("total_tokens") or 0)
+        >= runtime.context.max_model_tokens
+    ):
+        raise AgentRunnerError("Agent model token limit reached.")
     if state["turn"] >= runtime.context.max_turns:
         raise AgentRunnerError("Agent turn limit reached.")
 
@@ -442,6 +452,15 @@ async def agent_node(
     streamed_tool_calls: dict[int, dict[str, Any]] = {}
     reasoning = ""
     text_filter = ModelTextStreamFilter()
+    grounding_filter = (
+        InlineGroundingStreamFilter(
+            state["evidence_packets"],
+            runtime.context.grounding_mode,
+        )
+        if runtime.context.grounding_mode is not None
+        else None
+    )
+    grounding_announced = False
 
     async def emit_reasoning_delta(delta: str) -> None:
         nonlocal reasoning
@@ -459,10 +478,41 @@ async def agent_node(
             "reasoning": reasoning,
         }
 
+    async def announce_grounding() -> None:
+        nonlocal grounding_announced
+        if (
+            grounding_announced
+            or grounding_filter is None
+            or grounding_filter.outcome is None
+        ):
+            return
+        grounding_announced = True
+        outcome = grounding_filter.outcome
+        await callback.process(
+            {
+                **thought,
+                "call_id": "inline-grounding",
+                "status": (
+                    "succeeded"
+                    if outcome.status in {"grounded", "skipped"}
+                    else "failed"
+                ),
+                "summary": {
+                    "grounded": "agent.grounding_inline",
+                    "insufficient": "agent.grounding_insufficient",
+                    "unavailable": "agent.grounding_unavailable",
+                    "skipped": "agent.grounding_skipped",
+                }.get(outcome.status, "agent.grounding_unavailable"),
+                "output": outcome.meta,
+                "reasoning": reasoning,
+            }
+        )
+
     async def emit_answer_delta(delta: str) -> None:
         nonlocal answer_started
         if not delta:
             return
+        await announce_grounding()
         if not answer_started:
             answer_started = True
             await callback.process(completed_thought("agent.answer_ready"))
@@ -559,12 +609,14 @@ async def agent_node(
                             streamed["preview"] = preview
                     if chunk.text:
                         visible_text = text_filter.push(chunk.text)
-                        if visible_text and not runtime.context.defer_answer:
+                        if grounding_filter is not None:
+                            visible_text = grounding_filter.push(visible_text)
+                        if visible_text:
                             await emit_answer_delta(visible_text)
                     aggregate = chunk if aggregate is None else aggregate + chunk
                 trailing_text = text_filter.finish()
-                if trailing_text and not runtime.context.defer_answer:
-                    await emit_answer_delta(trailing_text)
+                if grounding_filter is not None:
+                    trailing_text = grounding_filter.push(trailing_text)
                 message = message_chunk_to_message(
                     aggregate or AIMessageChunk(content="")
                 )
@@ -577,6 +629,21 @@ async def agent_node(
     if not isinstance(message, AIMessage):
         raise AgentRunnerError("Agent model returned an invalid response message.")
     completion = model_completion(message)
+    if not completion.tool_calls:
+        if grounding_filter is not None:
+            if callback.enabled:
+                await emit_answer_delta(trailing_text)
+                await emit_answer_delta(grounding_filter.finish())
+            else:
+                grounding_filter.push(completion.content)
+                grounding_filter.finish()
+            completion = ModelCompletion(
+                content=grounding_filter.visible_content,
+                tool_calls=completion.tool_calls,
+                finish_reason=completion.finish_reason,
+            )
+        elif callback.enabled:
+            await emit_answer_delta(trailing_text)
     message = sanitized_model_message(message, completion)
 
     messages = [*state["messages"], message]
@@ -613,7 +680,7 @@ async def agent_node(
     if not completion.content.strip():
         raise AgentRunnerError("Agent returned an empty response.")
     draft_answer = completion.content
-    return {
+    result: dict[str, Any] = {
         "messages": messages,
         "turn": turn,
         "pending_tool_calls": [],
@@ -622,6 +689,10 @@ async def agent_node(
         "final_answer": draft_answer,
         "model_usage": model_usage,
     }
+    if grounding_filter is not None and grounding_filter.outcome is not None:
+        result["grounding_status"] = grounding_filter.outcome.status
+        result["grounding_meta"] = grounding_filter.outcome.meta
+    return result
 
 
 def invalid_arguments_result() -> AgentToolResult:

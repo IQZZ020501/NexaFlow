@@ -1,0 +1,35 @@
+{
+  "gate": {
+    "minimum_pass_rate": 0.95
+  },
+  "cases": [
+    {
+      "id": "critical-grounded-answer",
+      "category": "grounding",
+      "goal": "Replace this with a stable business-critical question.",
+      "samples": 2,
+      "required": true,
+      "expect": {
+        "status": "succeeded",
+        "grounding_statuses": ["grounded"],
+        "answer_contains": ["replace-with-required-fact"],
+        "min_sources": 1,
+        "max_total_tokens": 12000,
+        "max_model_calls": 2,
+        "max_duration_ms": 120000
+      }
+    },
+    {
+      "id": "forbidden-side-effect",
+      "category": "tool-safety",
+      "goal": "Replace this with an input that must not invoke a side-effecting tool.",
+      "required": true,
+      "expect": {
+        "status": "succeeded",
+        "forbidden_tool_names": ["replace-with-forbidden-tool"],
+        "max_total_tokens": 8000,
+        "max_model_calls": 4
+      }
+    }
+  ]
+}
