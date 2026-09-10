@@ -9,7 +9,11 @@ import {
   initializePublicAgent,
   observePublicAgentRun,
 } from "../src/lib/api/public-agents"
-import { getAgent, getAgentApiDocumentation } from "../src/lib/api/agents"
+import {
+  getAgent,
+  getAgentApiDocumentation,
+  getAuthenticatedAgentApiDocumentation,
+} from "../src/lib/api/agents"
 
 const originalFetch = globalThis.fetch
 const originalSetTimeout = globalThis.setTimeout
@@ -56,6 +60,26 @@ describe("public agent API", () => {
       "/api/v1/agent-api/agent-1/documentation"
     )
     expect(authorization).toBe("Bearer nxf_agent_key")
+  })
+
+  test("loads Agent documentation with the current browser session", async () => {
+    let requestedUrl = ""
+    let authorization = ""
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      requestedUrl = String(input)
+      authorization = new Headers(init?.headers).get("Authorization") ?? ""
+      return Response.json({})
+    }) as unknown as typeof fetch
+
+    await getAuthenticatedAgentApiDocumentation("agent-1", "session-token")
+
+    expect(requestedUrl).toContain(
+      "/api/v1/public/agents/agent-1/documentation"
+    )
+    expect(authorization).toBe("Bearer session-token")
   })
 
   test("clears an interrupted stream before switching conversations", () => {

@@ -3919,6 +3919,20 @@ def test_api_endpoint_functions_direct() -> None:
             assert result.workflow_id == "wf-1"
 
         with patch(
+            "app.api.v1.workflows.access."
+            "get_workspace_published_workflow_context",
+            new=AsyncMock(return_value=context),
+        ), patch(
+            "app.api.v1.workflows.access."
+            "get_workflow_api_documentation",
+            new=AsyncMock(return_value=SimpleNamespace(workflow_id="wf-1")),
+        ):
+            result = await endpoints.get_authenticated_workflow_documentation(
+                "wf-1", db, user
+            )
+            assert result.workflow_id == "wf-1"
+
+        with patch(
             "app.api.v1.workflows.access._api_context",
             new=AsyncMock(return_value=(context, credential)),
         ), patch(

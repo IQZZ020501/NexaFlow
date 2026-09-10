@@ -1347,6 +1347,63 @@ export const en = {
   认证方式: "Authentication",
   "每个请求都必须携带该请求头。": "Every request must include this header.",
   "更换 API Key": "Change API key",
+  "API Reference": "API Reference",
+  "稳定的 v1 Agent 运行接口": "Stable v1 Agent run API",
+  内容导航: "Contents",
+  基础地址: "Base URL",
+  复制地址: "Copy URL",
+  "通过 HTTP 创建 Agent 运行、查询执行状态，并使用 NDJSON 实时接收结果。":
+    "Create Agent runs over HTTP, check execution status, and receive live results over NDJSON.",
+  "所有 API 请求都使用 Bearer API Key 认证。":
+    "All API requests use Bearer API key authentication.",
+  请求头: "Request header",
+  安全提示: "Security",
+  "当前登录状态仅用于查看文档；调用接口时仍需使用 Agent API Key。":
+    "Your current browser session only unlocks this documentation. API calls still require an Agent API key.",
+  "请勿在浏览器前端代码或公开仓库中暴露 API Key。":
+    "Do not expose API keys in browser code or public repositories.",
+  位置: "Location",
+  说明: "Description",
+  参数: "Parameters",
+  请求体: "Request body",
+  请求示例: "Request example",
+  响应: "Responses",
+  状态码: "Status",
+  含义: "Meaning",
+  代码示例: "Code examples",
+  cURL: "cURL",
+  JavaScript: "JavaScript",
+  "请总结客户反馈中的主要问题。":
+    "Summarize the main issues in the customer feedback.",
+  "创建一个异步运行，并立即返回当前运行快照。":
+    "Create an asynchronous run and immediately return its current snapshot.",
+  "要交给 Agent 的任务，长度为 1–4000 个字符。":
+    "The task for the Agent, between 1 and 4,000 characters.",
+  "已有对话 ID；省略时创建新对话，最长 36 个字符。":
+    "An existing conversation ID. Omit it to start a new conversation. Maximum 36 characters.",
+  "运行已创建。": "Run created.",
+  "认证失败或 API Key 已撤销。":
+    "Authentication failed or the API key was revoked.",
+  "Agent 未发布，或运行不属于当前 API Key。":
+    "The Agent is unpublished, or the run does not belong to the current API key.",
+  "Agent 当前发布配置无法执行（例如 Tool 定义已变更）。":
+    "The Agent's current published configuration is not executable, for example because a Tool definition changed.",
+  "请求字段或查询参数无效。": "A request field or query parameter is invalid.",
+  "超过运行频率限制；请根据 Retry-After 重试。":
+    "The run rate limit was exceeded. Retry according to Retry-After.",
+  "运行服务暂时不可用。": "The run service is temporarily unavailable.",
+  "读取运行的当前状态、最终回答和安全执行进度。":
+    "Read the run's current status, final answer, and safe execution progress.",
+  "运行 ID，由创建运行接口返回。":
+    "The run ID returned by the create run endpoint.",
+  "请求成功。": "Request succeeded.",
+  "通过 NDJSON 持续接收进度、回答增量和最终状态。":
+    "Continuously receive progress, answer deltas, and the terminal state over NDJSON.",
+  "历史事件序号，从该序号之后继续读取。":
+    "Historical event sequence. Resume reading after this sequence.",
+  "实时流游标，格式为 partition-sequence。":
+    "Live stream cursor in partition-sequence format.",
+  "NDJSON 事件流已建立。": "The NDJSON event stream is open.",
   开始节点: "Start",
   结束节点: "End",
   问题分类器: "Classifier",

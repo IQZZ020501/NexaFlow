@@ -3004,6 +3004,7 @@ def assert_external_agent_access() -> None:
             assert {
                 "/api/v1/workspaces/{workspace_id}/agents/{agent_id}",
                 "/api/v1/public/agents/{agent_id}/profile",
+                "/api/v1/public/agents/{agent_id}/documentation",
                 "/api/v1/agent-api/{agent_id}/documentation",
                 "/api/v1/agent-api/{agent_id}/runs",
             }.issubset(openapi_payload["paths"])
