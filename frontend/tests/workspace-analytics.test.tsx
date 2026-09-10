@@ -277,9 +277,11 @@ describe("workspace analytics", () => {
     renderPage(<WorkspaceAnalyticsPage />)
     await waitFor(() => expect(requests).toHaveLength(1))
 
-    fireEvent.pointerDown(screen.getByLabelText("选择统计周期"))
+    fireEvent.click(screen.getByLabelText("选择统计周期"))
     fireEvent.click(
-      within(await screen.findByRole("menu")).getByRole("menuitem", {
+      within(
+        await screen.findByRole("dialog", { name: "选择统计周期" })
+      ).getByRole("button", {
         name: "最近 7 天",
       })
     )
@@ -291,23 +293,34 @@ describe("workspace analytics", () => {
         86_400_000
     ).toBe(7)
 
-    fireEvent.pointerDown(screen.getByLabelText("选择统计周期"))
+    fireEvent.click(screen.getByLabelText("选择统计周期"))
     fireEvent.click(
-      within(await screen.findByRole("menu")).getByRole("menuitem", {
+      within(
+        await screen.findByRole("dialog", { name: "选择统计周期" })
+      ).getByRole("button", {
         name: "自定义",
       })
     )
-    fireEvent.change(screen.getByLabelText("开始日期"), {
-      target: { value: "2026-08-01" },
-    })
-    fireEvent.change(screen.getByLabelText("结束日期"), {
-      target: { value: "2026-08-07" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "确认" }))
+    const calendar = await screen.findByRole("dialog", { name: "自定义" })
+    expect(calendar.querySelector("input[type='date']")).toBeNull()
+    const dates = within(calendar)
+      .getAllByRole("button")
+      .filter(
+        (button) => button.dataset.date && button.dataset.outside !== "true"
+      )
+    const from = dates[0].dataset.date!
+    const to = dates[6].dataset.date!
+    fireEvent.click(dates[0])
+    fireEvent.click(dates[6])
+    fireEvent.click(within(calendar).getByRole("button", { name: "确认" }))
     await waitFor(() => expect(requests).toHaveLength(3))
     url = new URL(requests[2], "http://app.local")
-    expect(url.searchParams.get("from")).toBe("2026-08-01")
-    expect(url.searchParams.get("to")).toBe("2026-08-08")
+    expect(url.searchParams.get("from")).toBe(from)
+    const expectedExclusiveTo = new Date(`${to}T00:00:00Z`)
+    expectedExclusiveTo.setUTCDate(expectedExclusiveTo.getUTCDate() + 1)
+    expect(url.searchParams.get("to")).toBe(
+      expectedExclusiveTo.toISOString().slice(0, 10)
+    )
   })
 
   test("shows only workspaces where a non-global user is a workspace admin", async () => {
