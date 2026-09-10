@@ -7,6 +7,21 @@ export type ModelProviderCatalog = {
   icon: string
   model_types: string[]
   default_api_base: string
+  integration: {
+    adapter: string
+    runtime_sdk: string
+    provider_sdk: string | null
+    api_protocol: string
+    model_catalog:
+      | "static_recommendations"
+      | "account_or_region"
+      | "deployment_defined"
+      | "runtime_discovered"
+      | "user_defined"
+    docs_url: string
+    models_url: string
+    verified_at: string
+  }
 }
 
 export type BaseModelOption = {

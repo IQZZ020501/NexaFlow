@@ -70,6 +70,16 @@ beforeEach(() => {
             icon: "",
             model_types: ["LLM"],
             default_api_base: "",
+            integration: {
+              adapter: "langchain-openai",
+              runtime_sdk: "openai",
+              provider_sdk: null,
+              api_protocol: "openai_compatible",
+              model_catalog: "user_defined",
+              docs_url: "https://platform.openai.com/docs/api-reference/chat",
+              models_url: "https://platform.openai.com/docs/api-reference/chat",
+              verified_at: "2026-09-10",
+            },
           },
         ])
       )

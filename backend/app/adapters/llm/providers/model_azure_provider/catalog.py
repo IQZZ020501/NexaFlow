@@ -29,24 +29,52 @@ CATALOG = {
     ],
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING"
     ],
     "models": {
         "LLM": [
             {
-                "name": "gpt-4o",
-                "desc": "Azure OpenAI GPT-4o deployment",
+                "name": "gpt-6-astra",
+                "desc": "Azure OpenAI GPT-6 Astra deployment",
                 "model_type": "LLM"
             },
             {
-                "name": "gpt-4o-mini",
-                "desc": "Azure OpenAI GPT-4o mini deployment",
+                "name": "gpt-5.6-sol",
+                "desc": "Azure OpenAI GPT-5.6 Sol deployment",
                 "model_type": "LLM"
             },
             {
-                "name": "gpt-4",
-                "desc": "Azure OpenAI GPT-4 deployment",
+                "name": "gpt-5.6-terra",
+                "desc": "Azure OpenAI GPT-5.6 Terra deployment",
                 "model_type": "LLM"
+            },
+            {
+                "name": "gpt-5.6-luna",
+                "desc": "Azure OpenAI GPT-5.6 Luna deployment",
+                "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "gpt-6-astra",
+                "desc": "Azure OpenAI GPT-6 Astra vision deployment",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gpt-5.6-sol",
+                "desc": "Azure OpenAI GPT-5.6 Sol vision deployment",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gpt-5.6-terra",
+                "desc": "Azure OpenAI GPT-5.6 Terra vision deployment",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gpt-5.6-luna",
+                "desc": "Azure OpenAI GPT-5.6 Luna vision deployment",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [

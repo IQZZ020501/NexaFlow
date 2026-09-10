@@ -12,15 +12,15 @@ CATALOG = {
     "models": {
         "EMBEDDING": [
             {
-                "name": "shibing624/text2vec-base-chinese",
-                "desc": "Local text2vec embedding",
+                "name": "Qwen/Qwen3-Embedding-8B",
+                "desc": "Local Qwen3 embedding",
                 "model_type": "EMBEDDING"
             }
         ],
         "RERANKER": [
             {
-                "name": "BAAI/bge-reranker-v2-m3",
-                "desc": "Local BGE reranker",
+                "name": "Qwen/Qwen3-Reranker-4B",
+                "desc": "Local Qwen3 reranker",
                 "model_type": "RERANKER"
             }
         ]

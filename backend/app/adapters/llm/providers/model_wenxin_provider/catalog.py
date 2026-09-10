@@ -6,32 +6,45 @@ CATALOG = {
     "default_api_base": "https://qianfan.baidubce.com/v2",
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING"
     ],
     "models": {
         "LLM": [
             {
-                "name": "ERNIE-Bot-4",
-                "desc": "ERNIE Bot 4",
+                "name": "ernie-5.1",
+                "desc": "ERNIE 5.1",
                 "model_type": "LLM"
             },
             {
-                "name": "ernie-4.5-turbo-32k",
-                "desc": "ERNIE 4.5 Turbo",
+                "name": "ernie-5.0",
+                "desc": "ERNIE 5.0",
                 "model_type": "LLM"
             },
             {
-                "name": "ernie-speed-8k",
-                "desc": "ERNIE Speed",
+                "name": "ernie-4.5-turbo-128k",
+                "desc": "ERNIE 4.5 Turbo 128K",
+                "model_type": "LLM"
+            },
+            {
+                "name": "deepseek-v4-pro",
+                "desc": "DeepSeek V4 Pro on Qianfan",
                 "model_type": "LLM"
             }
         ],
-        "EMBEDDING": [
+        "VISION": [
             {
-                "name": "Embedding-V1",
-                "desc": "Qianfan embedding model",
-                "model_type": "EMBEDDING"
+                "name": "ernie-5.1",
+                "desc": "ERNIE 5.1 multimodal",
+                "model_type": "VISION"
             },
+            {
+                "name": "ernie-5.0",
+                "desc": "ERNIE 5.0 multimodal",
+                "model_type": "VISION"
+            }
+        ],
+        "EMBEDDING": [
             {
                 "name": "bge-large-zh",
                 "desc": "Qianfan BGE embedding",

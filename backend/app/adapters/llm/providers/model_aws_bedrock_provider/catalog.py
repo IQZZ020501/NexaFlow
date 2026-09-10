@@ -43,31 +43,44 @@ CATALOG = {
     ],
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING",
         "RERANKER"
     ],
     "models": {
         "LLM": [
             {
-                "name": "anthropic.claude-3-5-sonnet-20240620-v1:0",
-                "desc": "Claude 3.5 Sonnet on Bedrock",
+                "name": "amazon.nova-2-lite-v1:0",
+                "desc": "Amazon Nova 2 Lite",
                 "model_type": "LLM"
             },
             {
-                "name": "amazon.titan-text-express-v1",
-                "desc": "Amazon Titan Text Express",
+                "name": "amazon.nova-premier-v1:0",
+                "desc": "Amazon Nova Premier",
                 "model_type": "LLM"
             },
             {
-                "name": "meta.llama3-70b-instruct-v1:0",
-                "desc": "Meta Llama 3 70B",
+                "name": "amazon.nova-pro-v1:0",
+                "desc": "Amazon Nova Pro",
                 "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "amazon.nova-2-lite-v1:0",
+                "desc": "Amazon Nova 2 Lite vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "amazon.nova-premier-v1:0",
+                "desc": "Amazon Nova Premier vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "amazon.titan-embed-text-v1",
-                "desc": "Amazon Titan Embed Text",
+                "name": "amazon.titan-embed-text-v2:0",
+                "desc": "Amazon Titan Text Embeddings V2",
                 "model_type": "EMBEDDING"
             }
         ],

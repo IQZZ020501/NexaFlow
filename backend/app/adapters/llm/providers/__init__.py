@@ -1,5 +1,7 @@
 from importlib import import_module
 
+from .integrations import PROVIDER_INTEGRATIONS
+
 PROVIDER_MODULES = [
     "aliyun_bai_lian_model_provider",
     "model_anthropic_provider",
@@ -25,9 +27,14 @@ PROVIDER_MODULES = [
     "model_custom_provider",
 ]
 
-PROVIDER_CATALOG = [
-    import_module(f"{__name__}.{provider}.catalog").CATALOG
-    for provider in PROVIDER_MODULES
-]
+PROVIDER_CATALOG = []
+for provider_module in PROVIDER_MODULES:
+    catalog = import_module(f"{__name__}.{provider_module}.catalog").CATALOG
+    PROVIDER_CATALOG.append(
+        {
+            **catalog,
+            "integration": PROVIDER_INTEGRATIONS[catalog["provider"]],
+        }
+    )
 
 __all__ = ["PROVIDER_CATALOG"]

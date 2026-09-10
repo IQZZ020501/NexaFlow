@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +9,23 @@ class ModelTypeOptionResponse(BaseModel):
     value: str
 
 
+class ModelProviderIntegrationResponse(BaseModel):
+    adapter: str
+    runtime_sdk: str
+    provider_sdk: str | None
+    api_protocol: str
+    model_catalog: Literal[
+        "static_recommendations",
+        "account_or_region",
+        "deployment_defined",
+        "runtime_discovered",
+        "user_defined",
+    ]
+    docs_url: str
+    models_url: str
+    verified_at: date
+
+
 class ModelProviderCatalogResponse(BaseModel):
     provider: str
     name: str
@@ -16,6 +33,7 @@ class ModelProviderCatalogResponse(BaseModel):
     icon: str = ""
     model_types: list[str]
     default_api_base: str
+    integration: ModelProviderIntegrationResponse
 
 
 class BaseModelOptionResponse(BaseModel):

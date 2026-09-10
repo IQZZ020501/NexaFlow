@@ -15,30 +15,53 @@ CATALOG = {
     ],
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING"
     ],
     "models": {
         "LLM": [
             {
-                "name": "deepseek-r1:7b",
+                "name": "gemma4:12b",
                 "desc": "Local Ollama model",
                 "model_type": "LLM"
             },
             {
-                "name": "llama3:8b",
+                "name": "qwen3.8:27b",
                 "desc": "Local Ollama model",
                 "model_type": "LLM"
             },
             {
-                "name": "qwen2.5:7b-instruct",
+                "name": "qwen3.5:9b",
                 "desc": "Local Ollama model",
                 "model_type": "LLM"
             }
         ],
+        "VISION": [
+            {
+                "name": "gemma4:12b",
+                "desc": "Local Ollama vision model",
+                "model_type": "VISION"
+            },
+            {
+                "name": "qwen3.8:27b",
+                "desc": "Local Ollama vision model",
+                "model_type": "VISION"
+            },
+            {
+                "name": "qwen3.5:9b",
+                "desc": "Local Ollama vision model",
+                "model_type": "VISION"
+            }
+        ],
         "EMBEDDING": [
             {
-                "name": "nomic-embed-text",
-                "desc": "Local Ollama embedding model",
+                "name": "qwen3-embedding:8b",
+                "desc": "Local Ollama Qwen3 embedding model",
+                "model_type": "EMBEDDING"
+            },
+            {
+                "name": "embeddinggemma",
+                "desc": "Local Ollama EmbeddingGemma model",
                 "model_type": "EMBEDDING"
             }
         ]

@@ -21,24 +21,47 @@ CATALOG = {
         },
     ],
     "model_types": [
-        "LLM"
+        "LLM",
+        "VISION"
     ],
     "models": {
         "LLM": [
             {
-                "name": "claude-3-5-sonnet-20241022",
-                "desc": "Claude 3.5 Sonnet",
+                "name": "claude-fable-5-1",
+                "desc": "Claude Fable 5.1",
                 "model_type": "LLM"
             },
             {
-                "name": "claude-3-5-haiku-20241022",
-                "desc": "Claude 3.5 Haiku",
+                "name": "claude-opus-5",
+                "desc": "Claude Opus 5",
                 "model_type": "LLM"
             },
             {
-                "name": "claude-3-opus-20240229",
-                "desc": "Claude 3 Opus",
+                "name": "claude-sonnet-5",
+                "desc": "Claude Sonnet 5",
                 "model_type": "LLM"
+            },
+            {
+                "name": "claude-haiku-4-5-20251001",
+                "desc": "Claude Haiku 4.5",
+                "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "claude-fable-5-1",
+                "desc": "Claude Fable 5.1 vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "claude-opus-5",
+                "desc": "Claude Opus 5 vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "claude-sonnet-5",
+                "desc": "Claude Sonnet 5 vision",
+                "model_type": "VISION"
             }
         ]
     }

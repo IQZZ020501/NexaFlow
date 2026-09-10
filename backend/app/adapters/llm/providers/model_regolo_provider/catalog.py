@@ -6,31 +6,52 @@ CATALOG = {
     "default_api_base": "https://api.regolo.ai/v1",
     "model_types": [
         "LLM",
-        "EMBEDDING"
+        "VISION",
+        "EMBEDDING",
+        "RERANKER"
     ],
     "models": {
         "LLM": [
             {
-                "name": "Phi-4",
-                "desc": "Regolo Phi-4",
+                "name": "qwen3.8-27b",
+                "desc": "Regolo Qwen 3.8 27B",
                 "model_type": "LLM"
             },
             {
-                "name": "DeepSeek-R1-Distill-Qwen-32B",
-                "desc": "Regolo DeepSeek R1 Distill",
+                "name": "qwen3.5-122b",
+                "desc": "Regolo Qwen 3.5 122B",
                 "model_type": "LLM"
             },
             {
-                "name": "Llama-3.3-70B-Instruct",
-                "desc": "Regolo Llama 3.3",
+                "name": "mistral-small-4-119b",
+                "desc": "Regolo Mistral Small 4",
                 "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "gemma4-31b",
+                "desc": "Regolo Gemma 4 vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "qwen3.8-27b",
+                "desc": "Regolo Qwen 3.8 vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "gte-Qwen2",
-                "desc": "Regolo embedding model",
+                "name": "Qwen3-Embedding-8B",
+                "desc": "Regolo Qwen3 embedding",
                 "model_type": "EMBEDDING"
+            }
+        ],
+        "RERANKER": [
+            {
+                "name": "Qwen3-Reranker-4B",
+                "desc": "Regolo Qwen3 reranker",
+                "model_type": "RERANKER"
             }
         ]
     }

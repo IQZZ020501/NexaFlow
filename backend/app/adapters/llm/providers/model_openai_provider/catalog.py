@@ -6,19 +6,52 @@ CATALOG = {
     "default_api_base": "https://api.openai.com/v1",
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING"
     ],
     "models": {
         "LLM": [
             {
-                "name": "gpt-4o",
-                "desc": "OpenAI GPT-4o",
+                "name": "gpt-6-astra",
+                "desc": "OpenAI GPT-6 Astra",
                 "model_type": "LLM"
             },
             {
-                "name": "gpt-4o-mini",
-                "desc": "OpenAI GPT-4o mini",
+                "name": "gpt-5.6-sol",
+                "desc": "OpenAI GPT-5.6 Sol",
                 "model_type": "LLM"
+            },
+            {
+                "name": "gpt-5.6-terra",
+                "desc": "OpenAI GPT-5.6 Terra",
+                "model_type": "LLM"
+            },
+            {
+                "name": "gpt-5.6-luna",
+                "desc": "OpenAI GPT-5.6 Luna",
+                "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "gpt-6-astra",
+                "desc": "OpenAI GPT-6 Astra vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gpt-5.6-sol",
+                "desc": "OpenAI GPT-5.6 Sol vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gpt-5.6-terra",
+                "desc": "OpenAI GPT-5.6 Terra vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gpt-5.6-luna",
+                "desc": "OpenAI GPT-5.6 Luna vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [

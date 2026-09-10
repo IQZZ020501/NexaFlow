@@ -6,20 +6,38 @@ CATALOG = {
     "default_api_base": "https://ark.cn-beijing.volces.com/api/v3",
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING"
     ],
     "models": {
         "LLM": [
             {
-                "name": "ep-xxxxxxxxxx-yyyy",
-                "desc": "Volcengine Ark endpoint",
+                "name": "doubao-seed-2.0-pro",
+                "desc": "Doubao Seed 2.0 Pro",
                 "model_type": "LLM"
+            },
+            {
+                "name": "doubao-seed-2.0-lite",
+                "desc": "Doubao Seed 2.0 Lite",
+                "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "doubao-seed-2.0-pro",
+                "desc": "Doubao Seed 2.0 Pro vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "doubao-seed-2.0-lite",
+                "desc": "Doubao Seed 2.0 Lite vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "ep-xxxxxxxxxx-yyyy",
-                "desc": "Volcengine Ark embedding endpoint",
+                "name": "doubao-embedding-text-240515",
+                "desc": "Doubao text embedding",
                 "model_type": "EMBEDDING"
             }
         ]

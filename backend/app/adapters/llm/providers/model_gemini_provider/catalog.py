@@ -29,35 +29,53 @@ CATALOG = {
     ],
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING"
     ],
     "models": {
         "LLM": [
             {
-                "name": "gemini-1.5-flash",
-                "desc": "Gemini 1.5 Flash",
+                "name": "gemini-3.7-flash",
+                "desc": "Gemini 3.7 Flash",
                 "model_type": "LLM"
             },
             {
-                "name": "gemini-1.5-pro",
-                "desc": "Gemini 1.5 Pro",
+                "name": "gemini-3.6-flash",
+                "desc": "Gemini 3.6 Flash",
                 "model_type": "LLM"
             },
             {
-                "name": "gemini-1.0-pro",
-                "desc": "Gemini 1.0 Pro",
+                "name": "gemini-3.5-flash-lite",
+                "desc": "Gemini 3.5 Flash Lite",
                 "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "gemini-3.7-flash",
+                "desc": "Gemini 3.7 Flash vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gemini-3.6-flash",
+                "desc": "Gemini 3.6 Flash vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "gemini-3.5-flash-lite",
+                "desc": "Gemini 3.5 Flash Lite vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "models/text-embedding-004",
-                "desc": "Gemini embedding model",
+                "name": "models/gemini-embedding-001",
+                "desc": "Gemini Embedding",
                 "model_type": "EMBEDDING"
             },
             {
-                "name": "models/embedding-001",
-                "desc": "Gemini embedding model",
+                "name": "models/gemini-embedding-2-preview",
+                "desc": "Gemini Embedding 2 preview",
                 "model_type": "EMBEDDING"
             }
         ]

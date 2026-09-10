@@ -7,11 +7,13 @@ CATALOG = {
     "api_key_required": False,
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING",
         "RERANKER"
     ],
     "models": {
         "LLM": [],
+        "VISION": [],
         "EMBEDDING": [],
         "RERANKER": []
     }

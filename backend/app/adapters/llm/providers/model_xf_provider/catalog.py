@@ -5,32 +5,24 @@ CATALOG = {
     "icon": "/model-providers/model_xf_provider/icon.svg",
     "default_api_base": "https://spark-api-open.xf-yun.com/v1",
     "model_types": [
-        "LLM",
-        "EMBEDDING"
+        "LLM"
     ],
     "models": {
         "LLM": [
             {
-                "name": "generalv3.5",
-                "desc": "Spark general v3.5",
+                "name": "4.0Ultra",
+                "desc": "Spark 4.0 Ultra with X1.5 fast thinking",
                 "model_type": "LLM"
             },
             {
-                "name": "generalv3",
-                "desc": "Spark general v3",
+                "name": "pro-128k",
+                "desc": "Spark Pro 128K",
                 "model_type": "LLM"
             },
             {
-                "name": "generalv2",
-                "desc": "Spark general v2",
+                "name": "lite",
+                "desc": "Spark Lite",
                 "model_type": "LLM"
-            }
-        ],
-        "EMBEDDING": [
-            {
-                "name": "embedding",
-                "desc": "Spark embedding model",
-                "model_type": "EMBEDDING"
             }
         ]
     }
