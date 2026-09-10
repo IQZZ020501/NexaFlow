@@ -130,20 +130,17 @@ def test_effective_permission_matrix() -> None:
     )
     owner = User(id="owner-1", username="owner")
     other = User(id="other-1", username="other")
+    global_admin = User(id="super-1", username="super", is_global_admin=True)
 
-    # workspace admin and owner always get edit
-    assert effective_permission(knowledge_base, owner, "admin") == "edit"
-    assert effective_permission(knowledge_base, owner, None) == "edit"
-    assert effective_permission(knowledge_base, other, "admin") == "edit"
-    # no grant, no admin -> none
-    assert effective_permission(knowledge_base, other, None) == "none"
-    assert effective_permission(knowledge_base, other, "member") == "none"
-    # explicit grant wins for non-owner members
+    # the owner always gets edit
+    assert effective_permission(knowledge_base, owner) == "edit"
+    # roles never widen resource access, not even for system admins
+    assert effective_permission(knowledge_base, other) == "none"
+    assert effective_permission(knowledge_base, global_admin) == "none"
+    # explicit grants are the only sharing path
     grant = SimpleNamespace(permission="view")
-    assert (
-        effective_permission(knowledge_base, other, "member", grant=grant)
-        == "view"
-    )
+    assert effective_permission(knowledge_base, other, grant=grant) == "view"
+    assert effective_permission(knowledge_base, global_admin, grant=grant) == "view"
 
 def test_validate_permission_rejects_unknown() -> None:
     expect_http_error(lambda: validate_permission("delete"), 422)

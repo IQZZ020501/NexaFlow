@@ -420,9 +420,9 @@ async def create_workflow_run(
     await enforce_workspace_run_quota(db, workspace_id)
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     if payload.source == "draft" and access_source == "console":
-        require_agent_edit(agent, actor, workspace_role)
+        require_agent_edit(agent, actor)
     else:
-        await require_agent_view(db, agent, actor, workspace_role)
+        await require_agent_view(db, agent, actor)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Workflow is disabled.")
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
@@ -611,7 +611,7 @@ async def get_workflow_run(
     workspace_role: str | None,
 ) -> WorkflowRunResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     detail = await workflow_repository.get_run_detail(db, run_id)
     if (
@@ -753,7 +753,7 @@ async def list_workflow_runs(
     	list[WorkflowRunResponse]: Workflow run responses with available details.
     """
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     runs = await agent_repository.list_agent_runs(
         db,
         agent_id,

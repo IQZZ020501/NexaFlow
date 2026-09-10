@@ -56,7 +56,6 @@ async def _authorized_knowledge_base(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         permissions,
     )
     return knowledge_base

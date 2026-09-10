@@ -303,7 +303,7 @@ async def exercise_services_http_paths(
 
         # accessible_agent_knowledge_bases: active KB appended
         accessible = await agent_services.accessible_agent_knowledge_bases(
-            db, workspace_id, [kb_id], actor, "admin"
+            db, workspace_id, [kb_id], actor
         )
         assert [kb.id for kb in accessible] == [kb_id]
 
@@ -370,13 +370,13 @@ async def exercise_services_http_paths(
 
         # list_agents + get_agent_response direct
         listed = await agent_services.list_agents(
-            db, workspace_id, actor, "admin", limit=10, offset=0
+            db, workspace_id, actor, limit=10, offset=0
         )
         listed_created = next(item for item in listed if item.id == created.id)
         assert listed_created.created_by_name
         assert listed_created.created_by_username
         response = await agent_services.get_agent_response(
-            db, created_agent, actor, "admin"
+            db, created_agent, actor
         )
         assert response.id == created.id
 
@@ -424,14 +424,12 @@ async def exercise_services_http_paths(
         # require_agent_view: admin edit / member view / member denied
         assert (
             await agent_permissions.require_agent_view(
-                db, created_agent, actor, "admin"
-            )
+                db, created_agent, actor)
             == "edit"
         )
         assert (
             await agent_permissions.require_agent_view(
-                db, created_agent, member, "member"
-            )
+                db, created_agent, member)
             == "view"
         )
         denied = await agent_repository.get_agent_by_id(db, created.id)
@@ -447,8 +445,7 @@ async def exercise_services_http_paths(
         )
         try:
             await agent_permissions.require_agent_view(
-                db, denied_agent, member, "member"
-            )
+                db, denied_agent, member)
             raise AssertionError("expected HTTPException")
         except HTTPException as exc:
             assert exc.status_code == 403
@@ -770,8 +767,7 @@ async def exercise_services_direct(
         agent_services.get_knowledge_base = not_found
         try:
             result = await agent_services.accessible_agent_knowledge_bases(
-                db, workspace_id, [kb_id], actor, "admin"
-            )
+                db, workspace_id, [kb_id], actor)
             assert result == []
         finally:
             agent_services.get_knowledge_base = original_get
@@ -782,8 +778,7 @@ async def exercise_services_direct(
         agent_services.require_knowledge_base_permission = denied
         try:
             result = await agent_services.accessible_agent_knowledge_bases(
-                db, workspace_id, [kb_id], actor, "admin"
-            )
+                db, workspace_id, [kb_id], actor)
             assert result == []
         finally:
             agent_services.require_knowledge_base_permission = original_require
@@ -796,8 +791,7 @@ async def exercise_services_direct(
         try:
             try:
                 await agent_services.accessible_agent_knowledge_bases(
-                    db, workspace_id, [kb_id], actor, "admin"
-                )
+                    db, workspace_id, [kb_id], actor)
                 raise AssertionError("expected HTTPException")
             except HTTPException as exc:
                 assert exc.status_code == 500

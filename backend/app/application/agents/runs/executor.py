@@ -551,7 +551,6 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             run.workspace_id,
             run.knowledge_base_ids,
             actor,
-            context.membership_role,
         )
         if {item.id for item in knowledge_bases} != set(run.knowledge_base_ids):
             raise AgentRunnerError(
@@ -631,7 +630,6 @@ async def _require_current_knowledge_snapshot(scope: ExecutionScope) -> None:
             scope.run.workspace_id,
             scope.run.knowledge_base_ids,
             scope.actor,
-            scope.workspace_role,
         )
         if {item.id for item in knowledge_bases} != set(
             scope.run.knowledge_base_ids

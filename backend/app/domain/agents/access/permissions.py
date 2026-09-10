@@ -26,32 +26,42 @@ def validate_agent_permission(permission: str) -> None:
 def effective_agent_permission(
     agent: Agent,
     actor: User,
-    workspace_role: str | None,
     grant: ResourcePermission | None = None,
 ) -> str:
-    if workspace_role == "admin" or agent.created_by_user_id == actor.id:
+    """Owner or explicit grant only; workspace roles no longer widen access."""
+    if agent.created_by_user_id == actor.id:
         return "edit"
     if grant is not None and grant.permission == AGENT_VIEW_PERMISSION:
         return AGENT_VIEW_PERMISSION
     return "none"
 
 
-def can_edit_agent(
-    agent: Agent,
-    actor: User,
-    workspace_role: str | None,
-) -> bool:
-    return effective_agent_permission(agent, actor, workspace_role) == "edit"
+def can_edit_agent(agent: Agent, actor: User) -> bool:
+    return effective_agent_permission(agent, actor) == "edit"
 
 
-def require_agent_edit(
+def require_agent_edit(agent: Agent, actor: User) -> None:
+    if can_edit_agent(agent, actor):
+        return
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Agent owner required.")
+
+
+def require_agent_ops(
     agent: Agent,
     actor: User,
     workspace_role: str | None,
 ) -> None:
-    if can_edit_agent(agent, actor, workspace_role):
+    """Run telemetry stays available to the owner and workspace operators."""
+    if (
+        agent.created_by_user_id == actor.id
+        or actor.is_global_admin
+        or workspace_role == "admin"
+    ):
         return
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "Agent owner required.")
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        "Agent owner or workspace admin required.",
+    )
 
 
 async def get_agent_grant(
@@ -72,14 +82,12 @@ async def require_agent_view(
     db: AsyncSession,
     agent: Agent,
     actor: User,
-    workspace_role: str | None,
 ) -> str:
-    if can_edit_agent(agent, actor, workspace_role):
+    if can_edit_agent(agent, actor):
         return "edit"
     permission = effective_agent_permission(
         agent,
         actor,
-        workspace_role,
         await get_agent_grant(db, agent, actor.id),
     )
     if permission == AGENT_VIEW_PERMISSION:

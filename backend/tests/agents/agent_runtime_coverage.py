@@ -2082,7 +2082,7 @@ async def assert_knowledge_tool_paths(
         agent_tools.KnowledgeSearchInput = original_input
 
     # no accessible knowledge bases (154): member user without KB access
-    async def no_access(_db, _workspace_id, _knowledge_base_ids, _actor, _role):
+    async def no_access(_db, _workspace_id, _knowledge_base_ids, _actor):
         return []
 
     original_accessible = agent_tools.accessible_agent_knowledge_bases

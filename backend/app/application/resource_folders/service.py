@@ -41,15 +41,57 @@ def descendant_folder_ids(
     return descendants
 
 
+def ancestor_folder_ids(
+    folders: list[ResourceFolder],
+    folder_ids: set[str],
+) -> set[str]:
+    """The given folder ids plus every ancestor folder."""
+    parents = {folder.id: folder.parent_id for folder in folders}
+    result = set(folder_ids)
+    pending = list(folder_ids)
+    while pending:
+        parent_id = parents.get(pending.pop())
+        if parent_id is not None and parent_id not in result:
+            result.add(parent_id)
+            pending.append(parent_id)
+    return result
+
+
+async def _visible_folder_ids(
+    db: AsyncSession,
+    workspace_id: str,
+    resource_type: ResourceFolderType,
+    folders: list[ResourceFolder],
+    viewer: User,
+) -> set[str]:
+    """Own folders plus folders reached through the viewer's own or granted resources."""
+    visible = await repository.list_visible_resource_folder_ids(
+        db,
+        workspace_id,
+        resource_type,
+        viewer.id,
+    )
+    visible.update(
+        folder.id for folder in folders if folder.created_by_user_id == viewer.id
+    )
+    return ancestor_folder_ids(folders, visible)
+
+
 async def list_resource_folders(
     db: AsyncSession,
     workspace_id: str,
     resource_type: ResourceFolderType,
+    viewer: User,
 ) -> list[ResourceFolderResponse]:
-    return [
-        _response(folder)
-        for folder in await repository.list_folders(db, workspace_id, resource_type)
-    ]
+    folders = await repository.list_folders(db, workspace_id, resource_type)
+    visible = await _visible_folder_ids(
+        db,
+        workspace_id,
+        resource_type,
+        folders,
+        viewer,
+    )
+    return [_response(folder) for folder in folders if folder.id in visible]
 
 
 async def _require_parent(
@@ -68,13 +110,61 @@ async def _require_parent(
     return parent
 
 
+def can_manage_folder(folder: ResourceFolder, actor: User) -> bool:
+    """Only the creator owns the folder tree; global admins keep an escape hatch."""
+    return folder.created_by_user_id == actor.id or actor.is_global_admin
+
+
+def require_manage_folder(folder: ResourceFolder, actor: User) -> None:
+    if can_manage_folder(folder, actor):
+        return
+    raise HTTPException(
+        status.HTTP_403_FORBIDDEN,
+        "Folder owner required.",
+    )
+
+
+async def _require_visible_parent(
+    db: AsyncSession,
+    workspace_id: str,
+    resource_type: ResourceFolderType,
+    parent: ResourceFolder | None,
+    actor: User,
+) -> None:
+    """Nesting is limited to folders the actor can already see."""
+    if parent is None:
+        return
+    folders = await repository.list_folders(db, workspace_id, resource_type)
+    visible = await _visible_folder_ids(
+        db,
+        workspace_id,
+        resource_type,
+        folders,
+        actor,
+    )
+    if parent.id not in visible:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found.")
+
+
 async def create_resource_folder(
     db: AsyncSession,
     workspace_id: str,
     payload: ResourceFolderCreateRequest,
     actor: User,
 ) -> ResourceFolderResponse:
-    await _require_parent(db, workspace_id, payload.resource_type, payload.parent_id)
+    parent = await _require_parent(
+        db,
+        workspace_id,
+        payload.resource_type,
+        payload.parent_id,
+    )
+    await _require_visible_parent(
+        db,
+        workspace_id,
+        payload.resource_type,
+        parent,
+        actor,
+    )
     folder = ResourceFolder(
         workspace_id=workspace_id,
         resource_type=payload.resource_type,
@@ -96,17 +186,31 @@ async def update_resource_folder(
     workspace_id: str,
     folder_id: str,
     payload: ResourceFolderUpdateRequest,
+    actor: User,
 ) -> ResourceFolderResponse:
     folder = await repository.get_folder(db, workspace_id, folder_id, lock=True)
     if folder is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found.")
+    require_manage_folder(folder, actor)
     details = payload.model_dump(exclude_unset=True)
     if "name" in details:
         folder.name = normalize_name(payload.name or "")
     if "parent_id" in details:
         if payload.parent_id == folder.id:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Folder cannot contain itself.")
-        await _require_parent(db, workspace_id, folder.resource_type, payload.parent_id)
+        parent = await _require_parent(
+            db,
+            workspace_id,
+            folder.resource_type,
+            payload.parent_id,
+        )
+        await _require_visible_parent(
+            db,
+            workspace_id,
+            folder.resource_type,
+            parent,
+            actor,
+        )
         descendants = descendant_folder_ids(
             await repository.list_folders(db, workspace_id, folder.resource_type),
             folder.id,
@@ -127,10 +231,12 @@ async def delete_resource_folder(
     db: AsyncSession,
     workspace_id: str,
     folder_id: str,
+    actor: User,
 ) -> None:
     folder = await repository.get_folder(db, workspace_id, folder_id, lock=True)
     if folder is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Folder not found.")
+    require_manage_folder(folder, actor)
     try:
         await repository.delete_folder(
             db,
@@ -190,7 +296,14 @@ async def _move_resources(
     actor: User,
     workspace_role: str | None,
 ) -> None:
-    await _require_parent(db, workspace_id, resource_type, folder_id)
+    parent = await _require_parent(db, workspace_id, resource_type, folder_id)
+    await _require_visible_parent(
+        db,
+        workspace_id,
+        resource_type,
+        parent,
+        actor,
+    )
     for resource_id in resource_ids:
         if resource_type == "knowledge":
             resource = await get_knowledge_base(db, workspace_id, resource_id)
@@ -198,12 +311,11 @@ async def _move_resources(
                 db,
                 resource,
                 actor,
-                workspace_role,
                 {"edit"},
             )
         elif resource_type == "application":
             resource = await get_agent(db, workspace_id, resource_id)
-            require_agent_edit(resource, actor, workspace_role)
+            require_agent_edit(resource, actor)
         elif resource_type == "model":
             if workspace_role != "admin" and not actor.is_global_admin:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace admin required.")

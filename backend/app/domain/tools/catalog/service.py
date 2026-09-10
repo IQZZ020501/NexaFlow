@@ -909,7 +909,7 @@ async def list_tool_catalog(
         db,
         workspace_id,
         actor.id,
-        workspace_role == "admin" or actor.is_global_admin,
+        False,
         limit,
         offset,
         excluded_builtin_function_names=INTERNAL_BUILTIN_FUNCTION_NAMES,

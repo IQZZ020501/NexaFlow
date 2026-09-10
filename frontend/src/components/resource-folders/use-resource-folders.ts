@@ -115,11 +115,30 @@ export function useResourceFolders(resourceType: FolderResourceType) {
     notify("success", t("已移动到文件夹"))
   }
 
+  /**
+   * Root also lists resources filed under folders the viewer cannot see, so a
+   * shared resource never disappears from the list.
+   */
+  const knownFolderIds = React.useMemo(
+    () => new Set(folders.map((folder) => folder.id)),
+    [folders]
+  )
+  const isInSelectedFolder = React.useCallback(
+    (rawFolderId: string | null | undefined) => {
+      const folderId = rawFolderId ?? null
+      return selectedFolderId === null
+        ? folderId === null || !knownFolderIds.has(folderId)
+        : folderId === selectedFolderId
+    },
+    [knownFolderIds, selectedFolderId]
+  )
+
   return {
     folders,
     selectedFolderId,
     setSelectedFolderId,
     isLoading,
+    isInSelectedFolder,
     create,
     rename,
     remove,

@@ -36,7 +36,9 @@ from app.domain.analytics.services import resolve_analytics_period
 from app.domain.tools.models import McpServer, ToolSource
 from app.domain.workflows.models import WorkflowDefinition, WorkflowRunDetail
 from tests.support import (
+    RESEARCH_PASSWORD,
     activate_admin,
+    activate_user,
     auth_headers,
     create_active_user,
     settings,
@@ -195,6 +197,28 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
             json={"title": "Denied", "body": "Denied"},
         )
         assert denied_workspace.status_code == 403, denied_workspace.text
+
+
+async def seed_member_model(workspace_id: str, actor_id: str) -> str:
+    async with get_session_factory()() as db:
+        model = RegisteredModel(
+            workspace_id=workspace_id,
+            name="成员模型",
+            provider="model_custom_provider",
+            provider_type="openai_compatible",
+            api_base="https://models.example.com/v1",
+            credential_config={},
+            credential_secret_hints={},
+            model_type="LLM",
+            model_name="research-member-model",
+            status="active",
+            meta={},
+            created_by_user_id=actor_id,
+        )
+        db.add(model)
+        await db.commit()
+        await db.refresh(model)
+        return model.id
 
 
 async def assert_workspace_cascade_deleted(
@@ -1114,6 +1138,119 @@ def main() -> None:
         assert user_workspace["name"] == "Research Workspace"
         assert user_workspace["is_default"] is False
         assert user_workspace["role"] == "member"
+
+        # Knowledge bases and applications are user-scoped: only the owner and
+        # explicitly granted users see them, not other members or admins.
+        research_member_token = activate_user(
+            client,
+            "research-member",
+            workspace_user_payload["initial_password"],
+            RESEARCH_PASSWORD,
+        )
+        member_model_id = asyncio.run(
+            seed_member_model(
+                research_workspace_id,
+                workspace_user_payload["user"]["id"],
+            )
+        )
+        member_knowledge = client.post(
+            knowledge_url(research_workspace_id),
+            headers=auth_headers(research_member_token),
+            json={"name": "成员私有知识库", "description": ""},
+        )
+        assert member_knowledge.status_code == 201, member_knowledge.text
+        member_agent = client.post(
+            f"/api/v1/workspaces/{research_workspace_id}/agents",
+            headers=auth_headers(research_member_token),
+            json={
+                "name": "成员私有应用",
+                "app_type": "agent",
+                "model_id": member_model_id,
+            },
+        )
+        assert member_agent.status_code == 201, member_agent.text
+        admin_knowledge = client.post(
+            knowledge_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"name": "管理员私有知识库", "description": ""},
+        )
+        assert admin_knowledge.status_code == 201, admin_knowledge.text
+
+        super_admin_id = client.get(
+            "/api/v1/auth/me",
+            headers=auth_headers(admin_token),
+        ).json()["user"]["id"]
+        super_joined = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"user_id": super_admin_id, "role": "member"},
+        )
+        assert super_joined.status_code == 201, super_joined.text
+
+        member_knowledge_list = client.get(
+            knowledge_url(research_workspace_id),
+            headers=auth_headers(research_member_token),
+        )
+        assert member_knowledge_list.status_code == 200, member_knowledge_list.text
+        assert {item["name"] for item in member_knowledge_list.json()} == {
+            "成员私有知识库"
+        }
+
+        super_knowledge_list = client.get(
+            knowledge_url(research_workspace_id),
+            headers=auth_headers(admin_token),
+        )
+        assert super_knowledge_list.status_code == 200, super_knowledge_list.text
+        assert super_knowledge_list.json() == []
+        super_knowledge_detail = client.get(
+            knowledge_url(
+                research_workspace_id,
+                f"/{member_knowledge.json()['id']}",
+            ),
+            headers=auth_headers(admin_token),
+        )
+        assert super_knowledge_detail.status_code == 403, super_knowledge_detail.text
+
+        super_agent_list = client.get(
+            f"/api/v1/workspaces/{research_workspace_id}/agents",
+            headers=auth_headers(admin_token),
+        )
+        assert super_agent_list.status_code == 200, super_agent_list.text
+        assert super_agent_list.json() == []
+        super_agent_detail = client.get(
+            f"/api/v1/workspaces/{research_workspace_id}/agents/"
+            f"{member_agent.json()['id']}",
+            headers=auth_headers(admin_token),
+        )
+        assert super_agent_detail.status_code == 403, super_agent_detail.text
+
+        # An explicit grant is the only sharing path.
+        shared = client.put(
+            knowledge_url(
+                research_workspace_id,
+                f"/{member_knowledge.json()['id']}/permissions/"
+                f"{super_admin_id}",
+            ),
+            headers=auth_headers(research_member_token),
+            json={"permission": "view"},
+        )
+        assert shared.status_code == 200, shared.text
+        shared_list = client.get(
+            knowledge_url(research_workspace_id),
+            headers=auth_headers(admin_token),
+        )
+        assert shared_list.status_code == 200, shared_list.text
+        assert [
+            (item["name"], item["permission"]) for item in shared_list.json()
+        ] == [("成员私有知识库", "view")]
+
+        # Drop the membership again so the member-management assertions below
+        # keep their original "system admin is not a member" precondition.
+        super_left = client.delete(
+            members_url(research_workspace_id, f"/{super_admin_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert super_left.status_code == 204, super_left.text
 
         disable_last_admin = client.patch(
             f"/api/v1/admin/users/{research_admin_id}",

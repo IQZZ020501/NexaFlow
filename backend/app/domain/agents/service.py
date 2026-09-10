@@ -77,7 +77,6 @@ def agent_to_response(
     tools: list[ToolRef],
     legacy_mcp_tools: list[dict[str, str]],
     actor: User,
-    workspace_role: str | None,
     *,
     has_unpublished_changes: bool,
     creator: User | None = None,
@@ -105,7 +104,7 @@ def agent_to_response(
         created_by_user_id=agent.created_by_user_id,
         created_by_name=creator.name if creator else None,
         created_by_username=creator.username if creator else None,
-        can_edit=can_edit_agent(agent, actor, workspace_role),
+        can_edit=can_edit_agent(agent, actor),
         created_at=agent.created_at,
         updated_at=agent.updated_at,
     )
@@ -289,7 +288,6 @@ async def accessible_agent_knowledge_bases(
     workspace_id: str,
     knowledge_base_ids: list[str],
     actor: User,
-    workspace_role: str | None,
 ) -> list[KnowledgeBase]:
     knowledge_bases: list[KnowledgeBase] = []
     for knowledge_base_id in knowledge_base_ids:
@@ -303,7 +301,6 @@ async def accessible_agent_knowledge_bases(
                 db,
                 knowledge_base,
                 actor,
-                workspace_role,
                 {"view", "edit"},
             )
         except HTTPException as exc:
@@ -365,7 +362,6 @@ async def resolve_agent_knowledge_bases(
             db,
             knowledge_base,
             actor,
-            workspace_role,
             {"view", "edit"},
         )
         if knowledge_base.status != ACTIVE_STATUS:
@@ -381,7 +377,6 @@ async def list_agents(
     db: AsyncSession,
     workspace_id: str,
     actor: User,
-    workspace_role: str | None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[AgentResponse]:
@@ -390,7 +385,7 @@ async def list_agents(
         workspace_id,
         actor.id,
         AGENT_RESOURCE_TYPE,
-        workspace_role == "admin",
+        False,
         limit,
         offset,
     )
@@ -430,7 +425,6 @@ async def list_agents(
             workspace_id,
             bindings[agent.id],
             actor,
-            workspace_role,
         )
         responses.append(
             agent_to_response(
@@ -439,7 +433,6 @@ async def list_agents(
                 tool_bindings[agent.id],
                 legacy_mcp_bindings[agent.id],
                 actor,
-                workspace_role,
                 creator=creators.get(agent.created_by_user_id),
                 has_unpublished_changes=_agent_has_unpublished_changes(
                     agent,
@@ -456,9 +449,8 @@ async def get_agent_response(
     db: AsyncSession,
     agent: Agent,
     actor: User,
-    workspace_role: str | None,
 ) -> AgentResponse:
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     bindings = await agent_repository.list_binding_map(db, [agent.id])
     tool_bindings = await tools_repository.list_application_tool_reference_map(
         db, [agent.id]
@@ -471,7 +463,6 @@ async def get_agent_response(
         agent.workspace_id,
         bindings[agent.id],
         actor,
-        workspace_role,
     )
     return agent_to_response(
         agent,
@@ -479,7 +470,6 @@ async def get_agent_response(
         tool_bindings[agent.id],
         legacy_mcp_bindings[agent.id],
         actor,
-        workspace_role,
         has_unpublished_changes=await agent_has_unpublished_changes(
             db,
             agent,
@@ -579,7 +569,6 @@ async def create_agent(
         [ToolRef(tool_id=item.tool_id, version_id=item.version_id) for item in tool_snapshots],
         legacy_mcp_references(tool_snapshots),
         actor,
-        workspace_role,
         has_unpublished_changes=False,
     )
 
@@ -675,7 +664,7 @@ async def update_agent(
     actor: User,
     workspace_role: str | None,
 ) -> AgentResponse:
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     locked = await agent_repository.lock_agent(db, agent.id)
     if locked is None or locked.workspace_id != agent.workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")
@@ -849,7 +838,7 @@ async def update_agent(
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent name already exists.") from exc
 
     agent = await agent_repository.refresh_agent(db, agent)
-    return await get_agent_response(db, agent, actor, workspace_role)
+    return await get_agent_response(db, agent, actor)
 
 
 async def delete_agent(
@@ -858,7 +847,7 @@ async def delete_agent(
     actor: User,
     workspace_role: str | None,
 ) -> None:
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     agent = await agent_repository.lock_agent(db, agent.id)
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")

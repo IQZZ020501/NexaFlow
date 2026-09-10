@@ -277,7 +277,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const filteredTools = sortToolResources(
     catalogTools.filter(
       (tool) =>
-        (tool.folder_id ?? null) === resourceFolders.selectedFolderId &&
+        resourceFolders.isInSelectedFolder(tool.folder_id) &&
         (!query ||
           `${displayToolName(tool)} ${displayToolDescription(tool)} ${displaySourceName(tool)}`
             .toLowerCase()
@@ -564,7 +564,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           <ResourceFolderTree
             folders={resourceFolders.folders}
             selectedFolderId={resourceFolders.selectedFolderId}
-            canManage={membershipRole === "admin"}
+            canManageAllFolders={me?.user.is_global_admin ?? false}
+            currentUserId={me?.user.id ?? null}
             isLoading={resourceFolders.isLoading}
             onSelect={resourceFolders.setSelectedFolderId}
             onCreate={resourceFolders.create}

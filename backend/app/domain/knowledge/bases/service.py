@@ -126,9 +126,9 @@ async def get_default_knowledge_model(
 def require_can_manage_permissions(
     knowledge_base: KnowledgeBase,
     actor: User,
-    workspace_role: str | None,
 ) -> None:
-    if workspace_role == "admin" or knowledge_base.created_by_user_id == actor.id:
+    """Resource grants stay with the owner; workspace roles grant nothing here."""
+    if knowledge_base.created_by_user_id == actor.id:
         return
     raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base owner required.")
 
@@ -137,7 +137,6 @@ async def list_knowledge_bases(
     db: AsyncSession,
     workspace_id: str,
     actor: User,
-    workspace_role: str | None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[KnowledgeBaseListItemResponse]:
@@ -146,7 +145,7 @@ async def list_knowledge_bases(
         workspace_id,
         actor.id,
         RESOURCE_TYPE,
-        workspace_role == "admin",
+        False,
         limit,
         offset,
     )
@@ -168,7 +167,6 @@ async def list_knowledge_bases(
         permission = effective_permission(
             knowledge_base,
             actor,
-            workspace_role,
             grant,
         )
         responses.append(
@@ -275,13 +273,12 @@ async def update_knowledge_base(
     if knowledge_base.status == ARCHIVED_STATUS:
         if details != {"status": ACTIVE_STATUS}:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
-        require_can_manage_permissions(knowledge_base, actor, workspace_role)
+        require_can_manage_permissions(knowledge_base, actor)
     else:
         await require_knowledge_base_permission(
             db,
             knowledge_base,
             actor,
-            workspace_role,
             {"edit"},
         )
 
@@ -416,7 +413,7 @@ async def delete_knowledge_base_permanently(
     if knowledge_base is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
     require_knowledge_base_active(knowledge_base)
-    require_can_manage_permissions(knowledge_base, actor, workspace_role)
+    require_can_manage_permissions(knowledge_base, actor)
     if await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
 
@@ -453,7 +450,7 @@ async def transfer_knowledge_base_owner(
     )
     if knowledge_base is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
-    require_can_manage_permissions(knowledge_base, actor, workspace_role)
+    require_can_manage_permissions(knowledge_base, actor)
     if knowledge_base.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
 
@@ -489,7 +486,6 @@ async def transfer_knowledge_base_owner(
     permission = effective_permission(
         knowledge_base,
         actor,
-        workspace_role,
         await get_user_grant(db, knowledge_base, actor.id),
     )
     return knowledge_base_to_response(knowledge_base, permission)

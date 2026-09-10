@@ -2076,11 +2076,12 @@ def test_private_catalog_filters_before_pagination_for_every_role() -> None:
                 assert owner_tool.id in owner_ids
                 assert owner_tool.id in grantee_ids
                 assert owner_tool.id not in stranger_page
-                # Workspace and global admins see every catalog row (admin
-                # management surfaces), matching get_tool_catalog_detail below.
-                assert owner_tool.id in workspace_admin_ids
-                assert owner_tool.id in global_admin_ids
+                # Tools are user-scoped: workspace roles never widen visibility,
+                # so admins only see their own tools plus builtin ones.
+                assert owner_tool.id not in workspace_admin_ids
+                assert owner_tool.id not in global_admin_ids
                 assert workspace_admin_tool.id in workspace_admin_ids
+                assert workspace_admin_tool.id not in owner_ids
                 for ids in (
                     owner_ids,
                     grantee_ids,
@@ -2148,15 +2149,27 @@ def test_private_catalog_filters_before_pagination_for_every_role() -> None:
                     (workspace_admin, "admin"),
                     (global_admin, "member"),
                 ):
-                    admin_detail = await get_tool_catalog_detail(
+                    try:
+                        await get_tool_catalog_detail(
+                            db,
+                            workspace_id,
+                            owner_tool.id,
+                            admin_actor,
+                            role,
+                        )
+                    except HTTPException as exc:
+                        assert exc.status_code == 404
+                    else:
+                        raise AssertionError("Admins must not see private Tools.")
+                    admin_own_detail = await get_tool_catalog_detail(
                         db,
                         workspace_id,
-                        owner_tool.id,
-                        admin_actor,
-                        role,
+                        workspace_admin_tool.id,
+                        workspace_admin,
+                        "admin",
                     )
-                    assert admin_detail.permission == "admin"
-                    require_tool_manage(admin_detail.authorization)
+                    assert admin_own_detail.permission == "owner"
+                    require_tool_manage(admin_own_detail.authorization)
 
                 builtin_detail = await get_tool_catalog_detail(
                     db,
@@ -2174,6 +2187,8 @@ def test_private_catalog_filters_before_pagination_for_every_role() -> None:
                     workspace_admin,
                     "admin",
                 )
+                # Builtin tools belong to the workspace: operators keep managing them.
+                assert builtin_admin_detail.permission == "admin"
                 require_tool_manage(builtin_admin_detail.authorization)
 
         run(assert_catalog_scope())
@@ -2314,28 +2329,25 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
                     owner,
                     "member",
                 )
-                listed_by_workspace_admin = await list_tool_permissions(
-                    db,
-                    workspace_id,
-                    tool.id,
-                    workspace_admin,
-                    "admin",
-                )
-                listed_by_global_admin = await list_tool_permissions(
-                    db,
-                    workspace_id,
-                    tool.id,
-                    global_admin,
-                    "member",
-                )
-                for entries in (
-                    listed_by_owner,
-                    listed_by_workspace_admin,
-                    listed_by_global_admin,
+                assert [
+                    (entry.user.id, entry.grant.permission)
+                    for entry in listed_by_owner
+                ] == [(grantee_id, "view")]
+                # Tool grants stay with the owner: workspace roles see nothing.
+                for admin_actor, role in (
+                    (workspace_admin, "admin"),
+                    (global_admin, "member"),
                 ):
-                    assert [(entry.user.id, entry.grant.permission) for entry in entries] == [
-                        (grantee_id, "view")
-                    ]
+                    await expect_status(
+                        404,
+                        lambda admin_actor=admin_actor, role=role: list_tool_permissions(
+                            db,
+                            workspace_id,
+                            tool.id,
+                            admin_actor,
+                            role,
+                        ),
+                    )
 
                 await expect_status(
                     403,
@@ -2370,14 +2382,30 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
                     ),
                 )
 
+                for admin_actor, role in (
+                    (workspace_admin, "admin"),
+                    (global_admin, "member"),
+                ):
+                    await expect_status(
+                        404,
+                        lambda admin_actor=admin_actor, role=role: upsert_tool_permission(
+                            db,
+                            workspace_id,
+                            tool.id,
+                            grantee_id,
+                            "use",
+                            admin_actor,
+                            role,
+                        ),
+                    )
                 upgraded = await upsert_tool_permission(
                     db,
                     workspace_id,
                     tool.id,
                     grantee_id,
                     "use",
-                    workspace_admin,
-                    "admin",
+                    owner,
+                    "member",
                 )
                 repeated = await upsert_tool_permission(
                     db,
@@ -2385,7 +2413,7 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
                     tool.id,
                     grantee_id,
                     "use",
-                    global_admin,
+                    owner,
                     "member",
                 )
                 for entry in (upgraded, repeated):
@@ -2467,12 +2495,27 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
                 else:
                     raise AssertionError("A downgraded grant must not permit use.")
 
+                for admin_actor, role in (
+                    (workspace_admin, "admin"),
+                    (global_admin, "member"),
+                ):
+                    await expect_status(
+                        404,
+                        lambda admin_actor=admin_actor, role=role: revoke_tool_permission(
+                            db,
+                            workspace_id,
+                            tool.id,
+                            grantee_id,
+                            admin_actor,
+                            role,
+                        ),
+                    )
                 await revoke_tool_permission(
                     db,
                     workspace_id,
                     tool.id,
                     grantee_id,
-                    global_admin,
+                    owner,
                     "member",
                 )
                 assert (
@@ -2530,7 +2573,7 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
                     ),
                 )
                 await expect_status(
-                    422,
+                    404,
                     lambda: upsert_tool_permission(
                         db,
                         workspace_id,

@@ -85,7 +85,7 @@ async def _workflow_agent_snapshots(
                 "Agent publication version not found.",
             )
         target = await get_agent(db, workspace_id, version.agent_id)
-        await require_agent_view(db, target, actor, workspace_role)
+        await require_agent_view(db, target, actor)
         if (
             target.id != expected_agent_id
             or version.agent_id != expected_agent_id
@@ -367,12 +367,14 @@ async def validate_workflow_resources(
                 "Knowledge base not found.",
             )
         knowledge_base, grant = row
-        if effective_permission(
-            knowledge_base,
-            actor,
-            workspace_role,
-            grant,
-        ) not in {"view", "edit"}:
+        if (
+            effective_permission(
+                knowledge_base,
+                actor,
+                grant,
+            )
+            not in {"view", "edit"}
+        ):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 "Knowledge base access denied.",
@@ -446,13 +448,13 @@ async def get_or_create_definition(
     actor: User,
     workspace_role: str | None,
 ) -> WorkflowDefinition:
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     definition = await workflow_repository.get_definition(
         db, agent.workspace_id, agent.id
     )
     if definition is not None:
         return definition
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     graph = default_workflow_graph()
     definition = WorkflowDefinition(
         workspace_id=agent.workspace_id,

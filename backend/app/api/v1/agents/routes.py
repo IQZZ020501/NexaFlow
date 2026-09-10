@@ -228,7 +228,6 @@ async def list_workspace_agents(
         db,
         context.workspace.id,
         context.user,
-        context.membership_role,
         limit,
         offset,
     )
@@ -260,7 +259,6 @@ async def get_workspace_agent(
         db,
         agent,
         context.user,
-        context.membership_role,
     )
 
 
@@ -276,7 +274,7 @@ async def generate_workspace_agent_instructions(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AgentInstructionsGenerateResponse:
     agent = await get_agent(db, context.workspace.id, agent_id)
-    require_agent_edit(agent, context.user, context.membership_role)
+    require_agent_edit(agent, context.user)
     return await generate_agent_instructions(
         db,
         context.workspace.id,
@@ -297,7 +295,7 @@ async def list_workspace_agent_permissions(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[AgentPermissionResponse]:
     agent = await get_agent(db, context.workspace.id, agent_id)
-    require_agent_edit(agent, context.user, context.membership_role)
+    require_agent_edit(agent, context.user)
     return await list_agent_permissions(db, agent, limit, offset)
 
 
@@ -313,7 +311,7 @@ async def grant_workspace_agent_permission(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AgentPermissionResponse:
     agent = await get_agent(db, context.workspace.id, agent_id)
-    require_agent_edit(agent, context.user, context.membership_role)
+    require_agent_edit(agent, context.user)
     return await upsert_agent_permission(
         db,
         agent,
@@ -334,7 +332,7 @@ async def revoke_workspace_agent_permission(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     agent = await get_agent(db, context.workspace.id, agent_id)
-    require_agent_edit(agent, context.user, context.membership_role)
+    require_agent_edit(agent, context.user)
     await revoke_agent_permission(db, agent, user_id, context.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

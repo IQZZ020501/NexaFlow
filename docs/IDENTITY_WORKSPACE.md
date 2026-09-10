@@ -100,12 +100,13 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 ## 关键约定
 
 - 系统管理员（`is_global_admin`）是平台级治理者：可创建、管理和审计所有工作空间，并治理跨工作空间的成员、团队、运行与安全策略；工作空间管理员负责本空间成员、全部团队及空间级策略。资源级授权仍按工作空间隔离并记录审计。
-- 角色只有 `admin`/`member` 两级；资源级授权通过 `ResourcePermission`。知识库使用 `view/edit`，Agent 使用 `view`，Tool 使用不可转授的 `view/use`。
+- 角色只有 `admin`/`member` 两级，且**不参与资源可见性**：知识库、Agent、Tool 都按「创建者 + `ResourcePermission` 显式授权」判定（知识库 `view/edit`，Agent `view`，Tool 不可转授的 `view/use`），工作空间管理员与系统管理员都不能看到或管理别人的资源。授权管理（`require_can_manage_permissions`）与归档恢复也只限创建者；唯一例外是工作区公共的 builtin 工具，管理员仍可治理其策略与测试。运行遥测（`/logs`、`/conversation-users`、`/monitoring`）保留管理员只读入口，用于工作区运营。
+- 资源文件夹是「谁的目录谁管」的私有结构：任何成员都可创建目录（根目录，或自己可见的目录下），可见范围只有创建者本人，以及通过 `ResourcePermission` 授权或自己拥有的知识库/应用/工具所揭示的目录链（含祖先）；系统管理员与工作空间管理员都不再看到别人的目录。改名、移动、删除仅限创建者（系统管理员保留平台级兜底）。资源本身仍按 `view/edit` 授权判定；前端把「归入不可见目录」的资源显示在根目录，避免列表丢项。
 - 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需工作区管理员），不参与资源授权；团队成员必须是工作区成员。
-- 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；创建者与工作区管理员可管理资源权限。
+- 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；资源权限只有创建者本人可管理（工作空间管理员不再代管别人的知识库）。
 - 删除工作区会在同一事务内级联删除知识库、Agent/运行记录、MCP、模型、团队/成员及资源授权；存在 queued/running 知识任务时返回 409。向量集合和对象存储文件由持久清理记录交给 Celery 异步删除，失败后自动重试。
 - 敏感写操作（创建/修改/删除）一律 `record_audit_log`。
-- Tool 默认 owner 私有；工作空间管理员具有治理权限。`view` 只能查看脱敏详情，`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
+- Tool 默认 owner 私有：只有创建者或被授权者能查看、使用和管理；builtin 工具属工作区公共资源（所有成员可用、管理员可治理），MCP 服务器与工具策略治理仍限工作空间管理员。`view` 只能查看脱敏详情，`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
 - 普通成员可创建 Python Tool 与公网 HTTP/SSE MCP Source；stdio 和私网地址只允许工作空间管理员。Bearer token、stdio 参数/工作目录/环境值加密保存且不返回明文；stdio 具备后端进程级执行能力，因此部署必须信任 MCP 管理员。
 - Agent、Workflow 与 Python 测试都固定 Tool/Version 快照并写 `tool_invocations`；builtin/Python/MCP 只在 application adapter 内分流。
 
@@ -118,7 +119,7 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 - `tests.identity.email` / `tests.identity.smtp` — 邮件与密码重置、SMTP 设置与传输回归
 - `tests.platform.workspaces` — 工作区端到端：CRUD、成员管理、跨工作区访问隔离、全资源级联与外部存储清理重试
 - `tests.platform.teams` — 团队端到端：CRUD、管理员成员管理与跨工作区团队成员约束
-- `tests.platform.resource_folders` — 资源文件夹 CRUD、层级与资源移动
+- `tests.platform.resource_folders` — 资源文件夹 CRUD、层级、资源移动与成员可见性
 - `tests.platform.system_governance` — 治理设置、健康探测与空间清点/系统日志入口
 - `tests.platform.workspace_admin_coverage` — 工作区/身份/团队/admin 域覆盖套件（纯脚本，逐块独立内存库）
 - `tests.platform.unit` — 平台域单元测试片段

@@ -2273,7 +2273,11 @@ def test_workflow_run_direct_api_functions() -> None:
                     assert exc.status_code == 404
                     assert "Workflow run not found." in str(exc.detail)
                 # 338: no permission -> 403
-                no_grant_actor = SimpleNamespace(id="no-grant-user", is_active=True)
+                no_grant_actor = SimpleNamespace(
+                    id="no-grant-user",
+                    is_active=True,
+                    is_global_admin=False,
+                )
                 try:
                     await get_workflow_run(
                         db, workspace_id, agent_id, run_id, no_grant_actor, None

@@ -266,7 +266,7 @@ async def list_agent_runs(
     	list[AgentRunResponse]: The actor's accessible agent runs.
     """
     agent = await get_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     _require_agent_run_application(agent)
     return [
         run_to_response(run)
@@ -349,7 +349,7 @@ async def get_agent_run_entity(
         HTTPException: If the run is inaccessible or does not belong to the specified agent, workspace, or actor.
     """
     agent = await get_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     _require_agent_run_application(agent)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     if (
@@ -1031,7 +1031,7 @@ async def prepare_agent_run(
     if agent is None or agent.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent not found.")
     if access_source == "console" and not authorized_by_parent:
-        await require_agent_view(db, agent, actor, workspace_role)
+        await require_agent_view(db, agent, actor)
     _require_agent_run_application(agent)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent is disabled.")
@@ -1084,7 +1084,6 @@ async def prepare_agent_run(
         workspace_id,
         knowledge_base_ids,
         actor,
-        workspace_role,
     )
     execution_knowledge_base_ids = [item.id for item in knowledge_bases]
     knowledge_content_revisions = (

@@ -69,7 +69,7 @@ async def _require_snapshot_binder(
     ):
         raise ValueError("Workflow Agent is unavailable.")
     try:
-        await require_agent_view(db, target, binder, context.membership_role)
+        await require_agent_view(db, target, binder)
     except HTTPException as exc:
         raise ValueError("Workflow Agent access was revoked.") from exc
 

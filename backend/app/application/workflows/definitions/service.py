@@ -104,7 +104,7 @@ async def validate_workflow_definition(
     workspace_role: str | None,
 ) -> WorkflowValidationResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     parsed = await validate_workflow_resources(
         db, agent, graph, actor, workspace_role
     )
@@ -120,7 +120,7 @@ async def update_workflow_definition(
     workspace_role: str | None,
 ) -> WorkflowDefinitionResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
     updated = await save_definition(
         db,
@@ -142,7 +142,7 @@ async def publish_workflow_definition(
     workspace_role: str | None,
 ) -> WorkflowVersionResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     if workspace_role != "admin":
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -162,7 +162,7 @@ async def list_workflow_versions(
     workspace_role: str | None,
 ) -> WorkflowVersionListResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     items = await workflow_repository.list_versions(db, workspace_id, agent_id)
     return WorkflowVersionListResponse(
         items=[version_to_response(item) for item in items]
@@ -179,7 +179,7 @@ async def restore_workflow_version(
     workspace_role: str | None,
 ) -> WorkflowDefinitionResponse:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_edit(agent, actor)
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
     version = await workflow_repository.get_version(
         db, workspace_id, agent_id, version_number

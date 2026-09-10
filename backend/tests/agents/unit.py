@@ -127,6 +127,7 @@ def test_effective_agent_permission_matrix() -> None:
     )
     owner = User(id="owner-1", username="owner")
     member = User(id="member-1", username="member")
+    global_admin = User(id="super-1", username="super", is_global_admin=True)
     grant = ResourcePermission(
         workspace_id="ws-1",
         resource_type="agent",
@@ -135,10 +136,11 @@ def test_effective_agent_permission_matrix() -> None:
         permission="view",
     )
 
-    assert effective_agent_permission(agent, owner, "member") == "edit"
-    assert effective_agent_permission(agent, member, "admin") == "edit"
-    assert effective_agent_permission(agent, member, "member") == "none"
-    assert effective_agent_permission(agent, member, "member", grant) == "view"
+    assert effective_agent_permission(agent, owner) == "edit"
+    # roles never widen resource access, not even for system admins
+    assert effective_agent_permission(agent, member) == "none"
+    assert effective_agent_permission(agent, global_admin) == "none"
+    assert effective_agent_permission(agent, member, grant) == "view"
 
 def test_tool_ref_requires_stable_ids() -> None:
     from app.entities.tools import ToolRef

@@ -135,7 +135,6 @@ async def require_graph_knowledge_base(
         db,
         knowledge_base,
         actor,
-        workspace_role,
         permissions,
     )
     return knowledge_base
