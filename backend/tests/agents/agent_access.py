@@ -1553,6 +1553,13 @@ async def assert_direct_endpoint_calls(
         )
         assert docs.agent_id == agent_id
         assert docs.agent_name == "Access Coverage Agent"
+        authenticated_docs = (
+            await endpoints_module.get_authenticated_agent_documentation(
+                agent_id, db, user
+            )
+        )
+        assert authenticated_docs.agent_id == agent_id
+        assert authenticated_docs.agent_name == "Access Coverage Agent"
 
         # 333-336: API run lookup.
         api_run = await endpoints_module.get_api_agent_run(
@@ -1759,6 +1766,13 @@ def assert_http_external_access() -> None:
             )
             assert profile.status_code == 200, profile.text
             assert profile.json()["name"] == "Access Coverage Agent"
+            assert client.get(f"{public_base}/documentation").status_code == 401
+            authenticated_docs = client.get(
+                f"{public_base}/documentation",
+                headers=auth_headers(admin_token),
+            )
+            assert authenticated_docs.status_code == 200, authenticated_docs.text
+            assert authenticated_docs.json()["agent_name"] == "Access Coverage Agent"
             # Unknown agent → 404 (449).
             missing_profile = client.get(
                 "/api/v1/public/agents/does-not-exist/profile",
@@ -1789,6 +1803,11 @@ def assert_http_external_access() -> None:
                 headers=auth_headers(member_token),
             )
             assert member_logs.status_code == 403, member_logs.text
+            member_docs = client.get(
+                f"{public_base}/documentation",
+                headers=auth_headers(member_token),
+            )
+            assert member_docs.status_code == 200, member_docs.text
 
             # ---- credentials: create/list ----
             key_a = client.post(
@@ -1968,6 +1987,11 @@ def assert_http_external_access() -> None:
                 headers=auth_headers(foreign_token),
             )
             assert foreign_profile.status_code == 404, foreign_profile.text
+            foreign_docs = client.get(
+                f"{public_base}/documentation",
+                headers=auth_headers(foreign_token),
+            )
+            assert foreign_docs.status_code == 404, foreign_docs.text
 
             # ---- API runs: create / get / stream ----
             api_run = client.post(

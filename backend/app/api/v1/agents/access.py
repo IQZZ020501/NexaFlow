@@ -81,6 +81,31 @@ async def public_agent_profile(
     return await get_public_agent_profile(db, agent_id, user)
 
 
+def _agent_api_documentation(
+    context: PublishedAgentContext,
+) -> AgentApiDocumentationResponse:
+    if context.publication is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
+    return AgentApiDocumentationResponse(
+        agent_id=context.agent.id,
+        agent_name=context.publication.name,
+        base_path=f"/api/v1/agent-api/{context.agent.id}",
+    )
+
+
+@public_router.get(
+    "/documentation",
+    response_model=AgentApiDocumentationResponse,
+)
+async def get_authenticated_agent_documentation(
+    agent_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> AgentApiDocumentationResponse:
+    context = await get_workspace_published_agent_context(db, agent_id, user)
+    return _agent_api_documentation(context)
+
+
 @public_router.get(
     "/conversations",
     response_model=PublicAgentConversationListResponse,
@@ -413,13 +438,7 @@ async def get_api_agent_documentation(
     ],
 ) -> AgentApiDocumentationResponse:
     context, _ = await _api_context(db, agent_id, credentials)
-    if context.publication is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
-    return AgentApiDocumentationResponse(
-        agent_id=context.agent.id,
-        agent_name=context.publication.name,
-        base_path=f"/api/v1/agent-api/{context.agent.id}",
-    )
+    return _agent_api_documentation(context)
 
 
 @api_router.post(

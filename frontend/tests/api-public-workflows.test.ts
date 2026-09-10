@@ -7,6 +7,7 @@ import {
   deletePublicWorkflowConversation,
   getPublicWorkflowProfile,
   getWorkflowApiDocumentation,
+  getAuthenticatedWorkflowApiDocumentation,
   initializePublicWorkflow,
   listPublicWorkflowConversations,
   listPublicWorkflowRuns,
@@ -246,6 +247,21 @@ describe("public workflow API", () => {
     expect(url).toBe("/api/v1/workflow-api/wf-1/documentation")
     expect(result).toEqual(documentation)
     expect(authorization as string | null).toBe("Bearer nxf_key")
+  })
+
+  test("fetches workflow API documentation with the browser session", async () => {
+    let url = ""
+    let authorization: string | null = null
+    withFetch((requestUrl, init) => {
+      url = requestUrl
+      authorization = new Headers(init?.headers).get("Authorization")
+      return jsonResponse({})
+    })
+
+    await getAuthenticatedWorkflowApiDocumentation("wf-1", "session-token")
+
+    expect(url).toBe("/api/v1/public/workflows/wf-1/documentation")
+    expect(authorization as string | null).toBe("Bearer session-token")
   })
 
   test("surfaces non-2xx public workflow responses as API errors", async () => {

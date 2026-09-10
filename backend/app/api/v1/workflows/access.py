@@ -83,6 +83,19 @@ async def public_workflow_profile(
 
 
 @public_router.get(
+    "/documentation",
+    response_model=WorkflowApiDocumentationResponse,
+)
+async def get_authenticated_workflow_documentation(
+    workflow_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> WorkflowApiDocumentationResponse:
+    context = await get_workspace_published_workflow_context(db, workflow_id, user)
+    return await get_workflow_api_documentation(db, context)
+
+
+@public_router.get(
     "/conversations", response_model=PublicWorkflowConversationListResponse
 )
 async def public_workflow_conversations(

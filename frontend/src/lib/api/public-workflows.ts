@@ -329,3 +329,20 @@ export function getWorkflowApiDocumentation(
     { token: apiKey }
   )
 }
+
+/**
+ * Fetches workflow API documentation with the current browser session.
+ *
+ * @param workflowId - The identifier of the workflow
+ * @param token - The current user's access token
+ * @returns The workflow's API documentation
+ */
+export function getAuthenticatedWorkflowApiDocumentation(
+  workflowId: string,
+  token: string
+) {
+  return request<WorkflowApiDocumentation>(
+    `/api/v1/public/workflows/${workflowId}/documentation`,
+    { token }
+  )
+}

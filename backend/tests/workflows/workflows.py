@@ -2037,6 +2037,20 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
             },
             "user_input_title": "Release options",
         }
+        assert (
+            client.get(
+                f"/api/v1/public/workflows/{workflow_id}/documentation"
+            ).status_code
+            == 401
+        )
+        authenticated_documentation = client.get(
+            f"/api/v1/public/workflows/{workflow_id}/documentation",
+            headers=member_headers,
+        )
+        assert authenticated_documentation.status_code == 200, (
+            authenticated_documentation.text
+        )
+        assert authenticated_documentation.json()["workflow_id"] == workflow_id
         wrong_public_runtime = client.get(
             f"/api/v1/public/agents/{workflow_id}/profile",
             headers=member_headers,

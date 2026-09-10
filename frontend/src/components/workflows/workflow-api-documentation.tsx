@@ -13,7 +13,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
+import { useSession } from "@/contexts/session-context"
 import {
+  getAuthenticatedWorkflowApiDocumentation,
   getWorkflowApiDocumentation,
   type WorkflowApiDocumentation as Documentation,
 } from "@/lib/api/public-workflows"
@@ -27,12 +29,41 @@ export function WorkflowApiDocumentation({
   workflowId: string
 }) {
   const { t } = useLanguage()
+  const { token, isSessionRestored } = useSession()
   const [key, setKey] = React.useState("")
   const [visible, setVisible] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [documentation, setDocumentation] =
     React.useState<Documentation | null>(null)
+  const [checkedSessionToken, setCheckedSessionToken] = React.useState<
+    string | null
+  >(null)
   const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (
+      !isSessionRestored ||
+      !token ||
+      documentation ||
+      checkedSessionToken === token
+    ) {
+      return
+    }
+
+    let isCurrent = true
+    getAuthenticatedWorkflowApiDocumentation(workflowId, token)
+      .then((response) => {
+        if (isCurrent) setDocumentation(response)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (isCurrent) setCheckedSessionToken(token)
+      })
+
+    return () => {
+      isCurrent = false
+    }
+  }, [checkedSessionToken, documentation, isSessionRestored, token, workflowId])
 
   async function unlock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -52,6 +83,9 @@ export function WorkflowApiDocumentation({
     }
   }
 
+  const isCheckingSession =
+    !isSessionRestored ||
+    Boolean(token && !documentation && checkedSessionToken !== token)
   const base = documentation?.base_path ?? ""
   const runExample = documentation
     ? JSON.stringify(
@@ -111,7 +145,15 @@ export function WorkflowApiDocumentation({
         </div>
       </header>
       <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-        {!documentation ? (
+        {isCheckingSession ? (
+          <div
+            className="flex min-h-48 items-center justify-center"
+            role="status"
+          >
+            <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
+            <span className="sr-only">{t("正在加载")}</span>
+          </div>
+        ) : !documentation ? (
           <section className="mx-auto max-w-md rounded-lg border bg-background p-6 shadow-xs">
             <h2 className="text-base font-semibold">
               {t("使用 API Key 查看文档")}

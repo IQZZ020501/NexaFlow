@@ -501,6 +501,16 @@ export function getAgentApiDocumentation(agentId: string, apiKey: string) {
   )
 }
 
+export function getAuthenticatedAgentApiDocumentation(
+  agentId: string,
+  token: string
+) {
+  return request<AgentApiDocumentation>(
+    `/api/v1/public/agents/${agentId}/documentation`,
+    { token }
+  )
+}
+
 export function listAgentLogs(
   token: string,
   workspaceId: string,
