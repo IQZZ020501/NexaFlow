@@ -49,11 +49,16 @@ def evaluate_tool_authorization(
     grant_permission: ToolGrant | None = None
     if grant is not None and grant.permission in TOOL_GRANT_PERMISSIONS:
         grant_permission = cast(ToolGrant, grant.permission)
-    if tool.kind == "builtin":
+    is_system_tool = tool.created_by_user_id is None and tool.kind in {
+        "builtin",
+        "python",
+    }
+    if is_system_tool:
         grant_permission = "use"
 
-    # Builtin tools belong to the workspace, so operators keep governing them;
-    # user-created tools stay owner plus explicit grants only.
+    # System tools belong to the workspace. Operators keep governing builtin
+    # tools; system Python tools stay immutable (no manage), and user-created
+    # tools stay owner plus explicit grants only.
     is_admin = tool.kind == "builtin" and (
         actor.is_global_admin or workspace_role == "admin"
     )
