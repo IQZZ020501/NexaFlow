@@ -632,6 +632,32 @@ describe("MarkdownContent", () => {
     }
   })
 
+  test("highlights Dockerfile and Nginx fences", async () => {
+    renderPage(
+      <MarkdownContent
+        content={[
+          "```dockerfile",
+          "FROM node:22",
+          "WORKDIR /app",
+          "```",
+          "",
+          "```nginx",
+          "server { listen 80; }",
+          "```",
+        ].join("\n")}
+      />
+    )
+
+    await waitFor(() => expect(document.querySelectorAll(".shiki")).toHaveLength(2))
+    expect(screen.getByText("dockerfile")).toBeTruthy()
+    expect(screen.getByText("nginx")).toBeTruthy()
+    const highlighted = [...document.querySelectorAll(".shiki")].map(
+      (element) => element.textContent,
+    )
+    expect(highlighted.some((text) => text?.includes("FROM node:22"))).toBe(true)
+    expect(highlighted.some((text) => text?.includes("listen 80"))).toBe(true)
+  })
+
   test("falls back to source and reports clipboard failures", async () => {
     const originalClipboard = navigator.clipboard
     Object.defineProperty(navigator, "clipboard", {
