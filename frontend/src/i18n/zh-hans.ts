@@ -521,6 +521,7 @@ export const zhHans = {
   "Python 工具": "Python 工具",
   "MCP Server": "MCP Server",
   Skills: "Skills",
+  Skill: "Skill",
   "四个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。":
     "四个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。",
   返回工具: "返回工具",

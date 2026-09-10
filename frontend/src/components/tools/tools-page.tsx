@@ -22,10 +22,7 @@ import Link from "next/link"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
-import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
-import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
-import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
-import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
+import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
   ResourceBulkMoveBar,
   toggleResourceSelection,
@@ -34,6 +31,10 @@ import { ResourceFolderLayout } from "@/components/resource-folders/resource-fol
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
 import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
+import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
+import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
+import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -72,15 +73,16 @@ import {
   type ToolSourceDetail,
   type ToolSummary,
 } from "@/lib/api/tools"
+import { builtinSkillMarkdown } from "@/lib/builtin-skill-docs"
 import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { getErrorMessage } from "@/lib/errors"
-import { cn } from "@/lib/utils"
 import {
   toolDisplayDescription,
   toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
+import { cn } from "@/lib/utils"
 
 const catalogTabs = [
   { kind: "builtin", label: "Skills" },
@@ -520,6 +522,12 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       setBusyId(null)
     }
   }
+
+  const detailFunctionName =
+    detailTool?.function_name ?? detailTarget?.function_name
+  const skillMarkdown = detailFunctionName
+    ? builtinSkillMarkdown(detailFunctionName)
+    : null
 
   return (
     <main className="min-w-0 space-y-6">
@@ -1137,22 +1145,59 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           setDetailError(null)
         }}
       >
-        <DialogContent className="max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogContent
+          className={cn(
+            "max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto",
+            skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl",
+          )}
+        >
           <DialogHeader>
-            <DialogTitle>
-              {detailTool
-                ? displayToolName(detailTool)
-                : detailTarget
-                  ? displayToolName(detailTarget)
-                  : t("工具详情")}
-            </DialogTitle>
-            <DialogDescription>
-              {detailTool
-                ? displayToolDescription(detailTool)
-                : detailTarget
-                  ? displayToolDescription(detailTarget)
-                  : ""}
-            </DialogDescription>
+            {skillMarkdown ? (
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/70">
+                  <BuiltinToolIcon
+                    functionName={detailFunctionName}
+                    className="size-6"
+                  />
+                </span>
+                <div className="min-w-0">
+                  <DialogTitle>
+                    {detailTool
+                      ? displayToolName(detailTool)
+                      : detailTarget
+                        ? displayToolName(detailTarget)
+                        : t("工具详情")}{" "}
+                    <span className="font-normal text-muted-foreground">
+                      {t("Skill")}
+                    </span>
+                  </DialogTitle>
+                  <DialogDescription className="mt-1">
+                    {detailTool
+                      ? displayToolDescription(detailTool)
+                      : detailTarget
+                        ? displayToolDescription(detailTarget)
+                        : ""}
+                  </DialogDescription>
+                </div>
+              </div>
+            ) : (
+              <>
+                <DialogTitle>
+                  {detailTool
+                    ? displayToolName(detailTool)
+                    : detailTarget
+                      ? displayToolName(detailTarget)
+                      : t("工具详情")}
+                </DialogTitle>
+                <DialogDescription>
+                  {detailTool
+                    ? displayToolDescription(detailTool)
+                    : detailTarget
+                      ? displayToolDescription(detailTarget)
+                      : ""}
+                </DialogDescription>
+              </>
+            )}
           </DialogHeader>
           {isDetailLoading ? (
             <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -1176,6 +1221,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 <RefreshCwIcon />
                 {t("重试")}
               </Button>
+            </div>
+          ) : detailTool && skillMarkdown ? (
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <MarkdownContent content={skillMarkdown} />
             </div>
           ) : detailTool ? (
             <div className="space-y-4">
