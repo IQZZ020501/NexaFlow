@@ -1,5 +1,12 @@
 /* @jsxImportSource react */
-import { afterEach, describe, expect, mock, test } from "bun:test"
+import {
+  afterEach,
+  describe,
+  expect,
+  mock,
+  setSystemTime,
+  test,
+} from "bun:test"
 import { act } from "@testing-library/react"
 
 import { AnnouncementAdminPage } from "@/components/messages/announcement-admin-page"
@@ -81,6 +88,7 @@ mock.module("@/lib/api/announcements", () => ({
 
 afterEach(() => {
   cleanup()
+  setSystemTime()
   listAnnouncementCalls.length = 0
   listAnnouncementTotal = 1
   createAnnouncementCalls.length = 0
@@ -128,6 +136,7 @@ describe("AnnouncementAdminPage", () => {
   })
 
   test("creates announcements with an expiration and allows clearing it", async () => {
+    setSystemTime(new Date(2031, 2, 1, 10, 0))
     renderPage(<AnnouncementAdminPage />)
 
     await screen.findByText("Maintenance")
@@ -137,9 +146,21 @@ describe("AnnouncementAdminPage", () => {
     fireEvent.change(screen.getByLabelText("公告正文"), {
       target: { value: "Expires soon" },
     })
-    fireEvent.change(screen.getByLabelText("公告过期时间"), {
-      target: { value: "2031-03-02T14:45" },
-    })
+    expect(document.querySelector('input[type="datetime-local"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "公告过期时间" }))
+    const datePicker = await screen.findByRole("dialog")
+    expect(datePicker.className).toContain("bg-popover")
+    fireEvent.click(
+      within(datePicker).getByRole("button", { name: /2031年3月2日/ })
+    )
+    const hourInput = within(datePicker).getByLabelText("小时")
+    const minuteInput = within(datePicker).getByLabelText("分钟")
+    fireEvent.change(hourInput, { target: { value: "14" } })
+    fireEvent.blur(hourInput)
+    fireEvent.change(minuteInput, { target: { value: "45" } })
+    fireEvent.blur(minuteInput)
+    fireEvent.click(within(datePicker).getByRole("button", { name: "完成" }))
     fireEvent.click(screen.getByRole("button", { name: "创建草稿" }))
 
     await waitFor(() => expect(createAnnouncementCalls).toHaveLength(1))
@@ -148,9 +169,18 @@ describe("AnnouncementAdminPage", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "编辑" }))
-    const expiration = screen.getByLabelText("公告过期时间") as HTMLInputElement
-    expect(expiration.value).not.toBe("")
-    fireEvent.change(expiration, { target: { value: "" } })
+    const expiration = screen.getByRole("button", {
+      name: "公告过期时间",
+    })
+    expect(expiration.textContent).toContain("2030")
+    fireEvent.click(expiration)
+    const editingDatePicker = await screen.findByRole("dialog")
+    fireEvent.click(
+      within(editingDatePicker).getByRole("button", { name: "清除" })
+    )
+    fireEvent.click(
+      within(editingDatePicker).getByRole("button", { name: "完成" })
+    )
     fireEvent.click(screen.getByRole("button", { name: "保存公告" }))
 
     await waitFor(() => expect(updateAnnouncementCalls).toHaveLength(1))
