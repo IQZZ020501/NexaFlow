@@ -522,39 +522,26 @@ export const zhHans = {
   "MCP Server": "MCP Server",
   Skills: "Skills",
   Skill: "Skill",
-  "四个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。":
-    "四个内置 Skills 都有自己的生成脚本，并作为工具出现在工具中心、Agent 选择器和 Workflow 节点库。",
-  返回工具: "返回工具",
+  "新建 Skill": "新建 Skill",
+  "导入 Skill": "导入 Skill",
+  "创建 Skill": "创建 Skill",
+  "写 SKILL.md，并声明参数。平台会生成 Tool。":
+    "写 SKILL.md，并声明参数。平台会生成 Tool。",
+  "新建 Skill，或导入 SKILL.md / zip。":
+    "新建 Skill，或导入 SKILL.md / zip。",
+  "上传包含 SKILL.md 的 zip 包。": "上传包含 SKILL.md 的 zip 包。",
+  "请上传 SKILL.md 或 zip。": "请上传 SKILL.md 或 zip。",
+  "请先解压 zip，上传其中的 SKILL.md。":
+    "请先解压 zip，上传其中的 SKILL.md。",
+  "无法读取该文件。": "无法读取该文件。",
+  "选择 Skill 文件": "选择 Skill 文件",
+  "SKILL.md": "SKILL.md",
+  "参数写在 frontmatter 或稍后在表单里补。":
+    "参数写在 frontmatter 或稍后在表单里补。",
   "内置 Skills": "内置 Skills",
-  手动安装: "手动安装",
-  "内置 Skill bundle 随 Worker 提供；自定义 bundle 仍由部署管理员写入 Worker 文件系统。":
-    "内置 Skill bundle 随 Worker 提供；自定义 bundle 仍由部署管理员写入 Worker 文件系统。",
-  "在 Worker 配置的目录下创建 Skill 文件夹。":
-    "在 Worker 配置的目录下创建 Skill 文件夹。",
-  "在 SKILL.md 中声明 entrypoint 和 artifact-format，并提供对应的 Python 入口脚本。":
-    "在 SKILL.md 中声明 entrypoint 和 artifact-format，并提供对应的 Python 入口脚本。",
-  "需要额外 Python 包时再添加 requirements.txt。":
-    "需要额外 Python 包时再添加 requirements.txt。",
-  "重启 Worker，并注册匹配的 Tool 输入契约；仅复制目录不会自动出现在选择器中。":
-    "重启 Worker，并注册匹配的 Tool 输入契约；仅复制目录不会自动出现在选择器中。",
-  运行方式: "运行方式",
-  "绑定到 Agent": "绑定到 Agent",
-  "在 Agent 工具选择器中授权 DOCX、PDF、PPTX 或 Excel 工具；运行时模型会根据用户目标和工具描述自主选择。":
-    "在 Agent 工具选择器中授权 DOCX、PDF、PPTX 或 Excel 工具；运行时模型会根据用户目标和工具描述自主选择。",
-  "Skill 自带执行": "Skill 自带执行",
-  "Agent 只提交 Markdown、结构化演示文稿或表格数据，Worker 运行 Skill bundle 内声明的入口脚本，不执行调用方提供的 Python。":
-    "Agent 只提交 Markdown、结构化演示文稿或表格数据，Worker 运行 Skill bundle 内声明的入口脚本，不执行调用方提供的 Python。",
-  平台安全边界: "平台安全边界",
-  "沙箱隔离、资源限额、文件校验、临时存储和下载链接仍由平台统一负责。":
-    "沙箱隔离、资源限额、文件校验、临时存储和下载链接仍由平台统一负责。",
-  "Word 与 Google Docs 文档": "Word 与 Google Docs 文档",
-  "PDF 创建、检查与渲染": "PDF 创建、检查与渲染",
-  "演示文稿、模板与品牌主题": "演示文稿、模板与品牌主题",
-  电子表格创建与分析: "电子表格创建与分析",
-  "DOCX · python-docx": "DOCX · python-docx",
-  "PDF · PyMuPDF": "PDF · PyMuPDF",
-  "PPTX · python-pptx": "PPTX · python-pptx",
-  "XLSX · openpyxl": "XLSX · openpyxl",
+  "工作区 Skills": "工作区 Skills",
+  "还没有工作区 Skill": "还没有工作区 Skill",
+  "从添加工具新建或导入 Skill。": "从添加工具新建或导入 Skill。",
   我的工具: "我的工具",
   共享给我的: "共享给我的",
   内置工具: "内置工具",
