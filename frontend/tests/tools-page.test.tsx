@@ -729,6 +729,9 @@ describe("ToolsPage", () => {
     expect(await screen.findByText("Runtime contract")).toBeTruthy()
     expect(screen.queryByText("输入 Schema")).toBeNull()
     expect(screen.queryByText("输出 Schema")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }))
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   test("renders SSE and stdio sources with connection details and errors", async () => {

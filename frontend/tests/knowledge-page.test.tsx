@@ -1883,6 +1883,8 @@ describe("KnowledgeBasePage documents tab", () => {
     const aside = container.querySelector("aside")
     const layout = aside?.parentElement
     const content = aside?.nextElementSibling
+    expect(layout?.className).toContain("content-start")
+    expect(layout?.className).toContain("lg:content-stretch")
     expect(layout?.className).toContain("lg:h-[calc(100svh-6.5rem)]")
     expect(aside?.className).toContain("lg:h-full")
     expect(content?.className).toContain("lg:overflow-y-auto")
