@@ -19,6 +19,10 @@ const SOURCE_LINK_PATTERN =
 const INCOMPLETE_SOURCE_LINK_PATTERN =
   /[ \t]*\[(?:source|来源)\]\s*\(\s*(?:<\s*)?(?:[^)\r\n]*#nex(?:aflow|faow)-source-[^)\r\n]*)?(?=$|\r?\n)/gi
 const BARE_SOURCE_LABEL_PATTERN = /[ \t]*\[(?:source|来源)\](?!\s*\()/gi
+const SOURCE_LINK_BEFORE_SENTENCE_PUNCTUATION_PATTERN = new RegExp(
+  `(${SOURCE_LINK_PATTERN.source})([。！？.!?]+)`,
+  "gi"
+)
 
 function normalizeSourceRef(value: string) {
   let decoded = value.trim()
@@ -59,6 +63,14 @@ function normalizeAgentSourceLinks(
     if (!sourceByRef.has(sourceRef)) return _link
     return `[source](#nexaflow-source-${sourceRef})`
   })
+}
+
+function normalizeAgentSourcePlacement(content: string) {
+  return content.replace(
+    SOURCE_LINK_BEFORE_SENTENCE_PUNCTUATION_PATTERN,
+    (_match, link: string, _sourceRef: string, punctuation: string) =>
+      `${punctuation} ${link.trim()}`
+  )
 }
 
 function deduplicateAgentSourceLinks(
@@ -184,7 +196,11 @@ export function AgentAnswer({
     [sources]
   )
   const normalizedContent = React.useMemo(
-    () => normalizeAgentSourceLinks(content, sourceByRef),
+    () =>
+      normalizeAgentSourceLinks(
+        normalizeAgentSourcePlacement(content),
+        sourceByRef
+      ),
     [content, sourceByRef]
   )
   const deduplicatedContent = React.useMemo(

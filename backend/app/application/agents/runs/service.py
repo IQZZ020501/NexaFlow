@@ -170,9 +170,20 @@ def execution_messages(
         "on a knowledge hit, append one or more Markdown links to that same paragraph or "
         "item using the exact matching source_ref: "
         "[source](#nexaflow-source-SOURCE_REF). Never invent or alter a source_ref, never "
-        "cite a hit that does not support the claim, and do not add a separate source list."
+        "cite a hit that does not support the claim, and do not add a separate source list. "
+        "Place each source link after the sentence-final punctuation, separated by one "
+        "space; never put the link between the sentence and its punctuation."
         if has_knowledge_tool or (knowledge_query_mode == "required" and knowledge_configured)
         else ""
+    )
+    answer_format_rule = (
+        "Answer format: write clean Markdown optimized for scanning. Keep paragraphs "
+        "concise. When an answer contains categories, steps, comparisons, or three or "
+        "more parallel items, use short descriptive headings without manual section numbers "
+        "unless order matters, and put each item on its own list line; use nested lists for "
+        "subitems. Never pack multiple numbered items into one bullet or paragraph, and do "
+        "not combine Markdown bullets with inline outline numbering. Use emphasis selectively "
+        "and do not add sections that do not help the answer.\n"
     )
     grounding_rule = ""
     if has_knowledge_tool or knowledge_configured:
@@ -207,7 +218,8 @@ def execution_messages(
                 "boundaries and article order; never infer a chapter from proximity alone. "
                 "For counts, ranges, or boundary questions, locate both the opening and "
                 "closing markers in the evidence before answering. If the evidence is "
-                "truncated or contradictory, say that it cannot be verified.\n\n"
+                "truncated or contradictory, say that it cannot be verified.\n"
+                f"{answer_format_rule}\n"
                 f"Agent instructions:\n{run.instructions}\n\n{routing_guide}"
                 f"{knowledge_rule}\n{mcp_rule}\n{source_rule}{grounding_rule}"
             ),

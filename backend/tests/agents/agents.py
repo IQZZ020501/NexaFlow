@@ -1441,6 +1441,9 @@ def assert_tool_routing_context_is_explicit() -> None:
     assert "MCP tools: use only for current or external data" in system
     assert "Release Docs" in system
     assert "[source](#nexaflow-source-SOURCE_REF)" in system
+    assert "without manual section numbers" in system
+    assert "own list line" in system
+    assert "after the sentence-final punctuation" in system
     assert "Single-pass grounding protocol" in system
     assert "<nexaflow-grounding>" in system
     assert "answer immediately without tools" not in system

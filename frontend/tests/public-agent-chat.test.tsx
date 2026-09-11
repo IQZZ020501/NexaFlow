@@ -1657,6 +1657,33 @@ describe("PublicAgentChat", () => {
     expect(screen.queryByText("source")).toBeNull()
   })
 
+  test("moves an inline source after sentence-final punctuation", () => {
+    renderPage(
+      <AgentAnswer
+        content="婚后工资属于共同财产[source](#nexaflow-source-law-key)。"
+        sources={[
+          {
+            source_ref: "law-key",
+            knowledge_base: "法律法规",
+            document: "中华人民共和国民法典.pdf",
+            parent_title: "夫妻关系",
+            section_path: [],
+            chunk_index: 1,
+            content: "婚姻关系存续期间所得的工资属于夫妻共同财产。",
+          },
+        ]}
+        t={t}
+      />
+    )
+
+    const source = screen.getByRole("button", {
+      name: "来源：中华人民共和国民法典.pdf · 夫妻关系",
+    })
+    expect(source.closest("p")?.textContent).toBe(
+      "婚后工资属于共同财产。中华人民共和国民法典.pdf"
+    )
+  })
+
   test("does not expose an unresolvable internal source link", () => {
     renderPage(
       <AgentAnswer
