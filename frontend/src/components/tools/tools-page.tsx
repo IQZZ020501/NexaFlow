@@ -18,14 +18,10 @@ import {
   Trash2Icon,
   WrenchIcon,
 } from "lucide-react"
-import Link from "next/link"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
-import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
-import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
-import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
-import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
+import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
   ResourceBulkMoveBar,
   toggleResourceSelection,
@@ -34,6 +30,11 @@ import { ResourceFolderLayout } from "@/components/resource-folders/resource-fol
 import { ResourceFolderPickerDialog } from "@/components/resource-folders/resource-folder-picker-dialog"
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
 import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
+import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
+import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
+import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
+import { SkillDialog } from "@/components/tools/skill-dialog"
+import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
@@ -72,15 +73,16 @@ import {
   type ToolSourceDetail,
   type ToolSummary,
 } from "@/lib/api/tools"
+import { builtinSkillMarkdown, isBuiltinSkillTool } from "@/lib/builtin-skill-docs"
 import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { getErrorMessage } from "@/lib/errors"
-import { cn } from "@/lib/utils"
 import {
   toolDisplayDescription,
   toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
+import { cn } from "@/lib/utils"
 
 const catalogTabs = [
   { kind: "builtin", label: "Skills" },
@@ -200,6 +202,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     tool: ToolSummary | null
   }>({ open: false, tool: null })
   const [mcpDialogOpen, setMcpDialogOpen] = React.useState(false)
+  const [skillDialogOpen, setSkillDialogOpen] = React.useState(false)
   const [permissionTool, setPermissionTool] =
     React.useState<ToolSummary | null>(null)
   const [moveToolTarget, setMoveToolTarget] =
@@ -287,6 +290,20 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     locale,
     displayToolName
   )
+  const isSkillsTab = Boolean(initialKind) && activeKind === "builtin"
+  const builtinSkillTools = sortToolResources(
+    tools.filter(
+      (tool) =>
+        isBuiltinSkillTool(tool.function_name) &&
+        (!query ||
+          `${displayToolName(tool)} ${displayToolDescription(tool)}`
+            .toLowerCase()
+            .includes(query))
+    ),
+    toolSortKey,
+    locale,
+    displayToolName
+  )
   const movableToolIds = filteredTools
     .filter((tool) => tool.can_manage)
     .map((tool) => tool.id)
@@ -334,7 +351,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   }
 
   async function openDetail(tool: ToolSummary) {
-    if (tool.kind === "python") {
+    if (tool.kind === "python" && tool.created_by_user_id) {
       setPythonDialog({ open: true, tool })
       return
     }
@@ -521,6 +538,12 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     }
   }
 
+  const detailFunctionName =
+    detailTool?.function_name ?? detailTarget?.function_name
+  const skillMarkdown = detailFunctionName
+    ? builtinSkillMarkdown(detailFunctionName)
+    : null
+
   return (
     <main className="min-w-0 space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -549,11 +572,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
               {t("MCP Server")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/app/tools/skills">
-                <SparklesIcon />
-                {t("Skills")}
-              </Link>
+            <DropdownMenuItem onSelect={() => setSkillDialogOpen(true)}>
+              <SparklesIcon />
+              {t("Skills")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -760,6 +781,95 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             {t("重试")}
           </Button>
         </div>
+      ) : isSkillsTab ? (
+        query && builtinSkillTools.length === 0 ? (
+          <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
+            {t("没有匹配的工具")}
+          </div>
+        ) : (
+          <div className="space-y-8">
+            <section aria-labelledby="builtin-skills-heading">
+              <div className="mb-3 flex items-center gap-2">
+                <h2
+                  id="builtin-skills-heading"
+                  className="text-sm font-semibold"
+                >
+                  {t("内置 Skills")}
+                </h2>
+                <Badge variant="secondary">{builtinSkillTools.length}</Badge>
+              </div>
+              {builtinSkillTools.length ? (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                  {builtinSkillTools.map((tool) => (
+                    <article
+                      key={tool.id}
+                      role="button"
+                      tabIndex={0}
+                      className="relative flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => void openDetail(tool)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault()
+                          void openDetail(tool)
+                        }
+                      }}
+                    >
+                      <div className="flex min-w-0 gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted/70">
+                          <BuiltinToolIcon
+                            functionName={tool.function_name}
+                            className="size-5"
+                          />
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-semibold">
+                            {displayToolName(tool)}{" "}
+                            <span className="font-normal text-muted-foreground">
+                              {t("Skill")}
+                            </span>
+                          </h3>
+                        </div>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                        {displayToolDescription(tool) || t("暂无描述")}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex min-h-24 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
+                  {t("没有匹配的工具")}
+                </div>
+              )}
+            </section>
+            <section aria-labelledby="workspace-skills-heading">
+              <div className="mb-3 flex items-center gap-2">
+                <h2
+                  id="workspace-skills-heading"
+                  className="text-sm font-semibold"
+                >
+                  {t("工作区 Skills")}
+                </h2>
+                <Badge variant="secondary">0</Badge>
+              </div>
+              <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
+                <p className="font-medium">{t("还没有工作区 Skill")}</p>
+                <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                  {t("从添加工具新建或导入 Skill。")}
+                </p>
+                <Button
+                  className="mt-4"
+                  type="button"
+                  onClick={() => setSkillDialogOpen(true)}
+                >
+                  <SparklesIcon />
+                  {t("新建 Skill")}
+                </Button>
+              </div>
+            </section>
+          </div>
+        )
       ) : catalogTools.length === 0 && catalogSources.length === 0 ? (
         <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
           <span className="flex size-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
@@ -1119,6 +1229,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         }}
         onError={(value) => message("error", value)}
       />
+      <SkillDialog
+        open={skillDialogOpen}
+        onOpenChange={setSkillDialogOpen}
+        returnFocusRef={addToolTriggerRef}
+      />
       <ToolPermissionsDialog
         open={Boolean(permissionTool)}
         onOpenChange={(open) => !open && setPermissionTool(null)}
@@ -1137,22 +1252,59 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           setDetailError(null)
         }}
       >
-        <DialogContent className="max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogContent
+          className={cn(
+            "max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto",
+            skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl",
+          )}
+        >
           <DialogHeader>
-            <DialogTitle>
-              {detailTool
-                ? displayToolName(detailTool)
-                : detailTarget
-                  ? displayToolName(detailTarget)
-                  : t("工具详情")}
-            </DialogTitle>
-            <DialogDescription>
-              {detailTool
-                ? displayToolDescription(detailTool)
-                : detailTarget
-                  ? displayToolDescription(detailTarget)
-                  : ""}
-            </DialogDescription>
+            {skillMarkdown ? (
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/70">
+                  <BuiltinToolIcon
+                    functionName={detailFunctionName}
+                    className="size-6"
+                  />
+                </span>
+                <div className="min-w-0">
+                  <DialogTitle>
+                    {detailTool
+                      ? displayToolName(detailTool)
+                      : detailTarget
+                        ? displayToolName(detailTarget)
+                        : t("工具详情")}{" "}
+                    <span className="font-normal text-muted-foreground">
+                      {t("Skill")}
+                    </span>
+                  </DialogTitle>
+                  <DialogDescription className="mt-1">
+                    {detailTool
+                      ? displayToolDescription(detailTool)
+                      : detailTarget
+                        ? displayToolDescription(detailTarget)
+                        : ""}
+                  </DialogDescription>
+                </div>
+              </div>
+            ) : (
+              <>
+                <DialogTitle>
+                  {detailTool
+                    ? displayToolName(detailTool)
+                    : detailTarget
+                      ? displayToolName(detailTarget)
+                      : t("工具详情")}
+                </DialogTitle>
+                <DialogDescription>
+                  {detailTool
+                    ? displayToolDescription(detailTool)
+                    : detailTarget
+                      ? displayToolDescription(detailTarget)
+                      : ""}
+                </DialogDescription>
+              </>
+            )}
           </DialogHeader>
           {isDetailLoading ? (
             <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -1176,6 +1328,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 <RefreshCwIcon />
                 {t("重试")}
               </Button>
+            </div>
+          ) : detailTool && skillMarkdown ? (
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <MarkdownContent content={skillMarkdown} />
             </div>
           ) : detailTool ? (
             <div className="space-y-4">

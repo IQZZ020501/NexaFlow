@@ -301,7 +301,11 @@ async def _validate_live_state(
         invocation.workspace_id,
         snapshot.version_id,
     )
-    is_python_test = invocation.origin == "test" and snapshot.kind == "python"
+    is_python_test = (
+        invocation.origin == "test"
+        and snapshot.kind == "python"
+        and tool.created_by_user_id is not None
+    )
     if (
         version is None
         or tool.source_id != source.id
@@ -386,13 +390,10 @@ async def _validate_live_state(
         if actor is not None
         else None
     )
-    allowed = (
-        authorization is not None
-        and (
-            authorization.access.can_manage
-            if invocation.origin == "test"
-            else authorization.access.can_use
-        )
+    allowed = authorization is not None and (
+        authorization.access.can_manage
+        if invocation.origin == "test" and tool.created_by_user_id is not None
+        else authorization.access.can_use
     )
     if not allowed:
         return _failure("tool_access_revoked", "Tool access was revoked."), None

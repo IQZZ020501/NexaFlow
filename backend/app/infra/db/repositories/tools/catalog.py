@@ -299,6 +299,10 @@ async def list_tool_catalog_rows(
         statement = statement.where(
             or_(
                 ToolOrm.kind == "builtin",
+                and_(
+                    ToolOrm.kind == "python",
+                    ToolOrm.created_by_user_id.is_(None),
+                ),
                 ToolOrm.created_by_user_id == actor_id,
                 grant.id.is_not(None),
             )

@@ -985,6 +985,7 @@ def unique_columns(table) -> set[tuple[str, ...]]:
 
 def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
     from app.domain.tools.catalog.service import (
+        CURRENT_TIME_TOOL_CODE,
         build_workspace_system_catalog,
         mcp_definition_hash,
         mcp_function_name,
@@ -1038,34 +1039,39 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
     # The resource-folder column was added after the seed migration; seeded rows are unassigned.
     tool_row["folder_id"] = None
     assert source_rows == [asdict(source) for source in catalog.sources]
+    assert tool_row["id"] == catalog.tool.id
+    assert catalog.tool.kind == "python"
+    assert catalog.tool.source_id == catalog.sources[1].id
     assert {
         key: value
         for key, value in tool_row.items()
-        if key != "current_version_id"
+        if key not in {"current_version_id", "kind", "source_id"}
     } == {
         key: value
         for key, value in asdict(catalog.tool).items()
-        if key != "current_version_id"
+        if key not in {"current_version_id", "kind", "source_id"}
     }
     assert version_row["description"] == "Return the current UTC time."
     assert catalog.version.description == "Return the current time."
+    assert catalog.version.execution_spec == {"code": CURRENT_TIME_TOOL_CODE}
     assert {
         key: value
         for key, value in version_row.items()
-        if key not in {"id", "description", "definition_hash"}
+        if key not in {"id", "description", "definition_hash", "execution_spec"}
     } == {
         key: value
         for key, value in asdict(catalog.version).items()
-        if key not in {"id", "description", "definition_hash"}
+        if key not in {"id", "description", "definition_hash", "execution_spec"}
     }
+    assert catalog.policy.parallel_safe is False
     assert {
         key: value
         for key, value in policy_row.items()
-        if key not in {"tool_version_id", "definition_hash"}
+        if key not in {"tool_version_id", "definition_hash", "parallel_safe"}
     } == {
         key: value
         for key, value in asdict(catalog.policy).items()
-        if key not in {"tool_version_id", "definition_hash"}
+        if key not in {"tool_version_id", "definition_hash", "parallel_safe"}
     }
 
 
@@ -1678,7 +1684,10 @@ def test_migration_reference_scanner_keeps_historical_mcp_tuples() -> None:
 
 async def assert_workspace_system_catalog(workspace_id: str) -> None:
     from app.infra.db.repositories.tools import repository as repository
-    from app.domain.tools.catalog.service import build_artifact_tool
+    from app.domain.tools.catalog.service import (
+        CURRENT_TIME_TOOL_CODE,
+        build_artifact_tool,
+    )
 
     async with get_session_factory()() as db:
         sources = await repository.list_tool_sources(db, workspace_id)
@@ -1696,7 +1705,9 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             "skill_spreadsheets",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
-        assert tool.stable_key == "current_time"
+        python_source = next(source for source in sources if source.kind == "python")
+        assert tool.kind == "python"
+        assert tool.source_id == python_source.id
         assert tool.availability == "available"
         assert tool.current_version_id is not None
         version = await repository.get_tool_version(
@@ -1705,10 +1716,12 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         policy = await repository.get_tool_policy(db, workspace_id, tool.id)
         assert version is not None
         assert policy is not None
+        assert version.execution_spec == {"code": CURRENT_TIME_TOOL_CODE}
         assert policy.tool_version_id == version.id
         assert policy.definition_hash == version.definition_hash
         assert policy.approval == "auto"
         assert policy.effect == "pure"
+        assert policy.parallel_safe is False
 
         for skill_name in ("documents", "pdf", "pptx", "spreadsheets"):
             skill_tool = next(
@@ -3337,7 +3350,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         await db.commit()
 
     class FakeAdapter:
-        kind = "builtin"
+        kind = "python"
 
         def __init__(self, data: dict[str, str]) -> None:
             self.data = data
@@ -3363,7 +3376,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         worker_task_id="runtime-worker-1",
         adapter=adapter,
     )
-    assert first.ok is True
+    assert first.ok is True, (first.error_code, first.error_message)
     assert adapter.calls == 1
 
     async with get_session_factory()() as db:
@@ -3512,7 +3525,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         await db.commit()
 
     class BusyAdapter:
-        kind = "builtin"
+        kind = "python"
 
         async def invoke(self, snapshot, arguments, context):
             raise ToolAdapterBusy("busy")
@@ -4127,7 +4140,7 @@ async def assert_tool_runtime_edge_branches(
     mismatch_invocation = await queue_invocation(make_context("edge-mismatch"))
 
     class MismatchAdapter:
-        kind = "python"
+        kind = "builtin"
 
         async def invoke(self, snapshot, arguments, context):
             raise AssertionError("A mismatched adapter must not run.")
@@ -4144,7 +4157,7 @@ async def assert_tool_runtime_edge_branches(
     timeout_invocation = await queue_invocation(make_context("edge-timeout"))
 
     class TimeoutAdapter:
-        kind = "builtin"
+        kind = "python"
 
         async def invoke(self, snapshot, arguments, context):
             raise TimeoutError("timed out")
@@ -4161,7 +4174,7 @@ async def assert_tool_runtime_edge_branches(
     boom_invocation = await queue_invocation(make_context("edge-boom"))
 
     class ExplodingAdapter:
-        kind = "builtin"
+        kind = "python"
 
         async def invoke(self, snapshot, arguments, context):
             raise RuntimeError("boom")
@@ -4178,7 +4191,7 @@ async def assert_tool_runtime_edge_branches(
     deleted_invocation = await queue_invocation(make_context("edge-deleted"))
 
     class DeletingAdapter:
-        kind = "builtin"
+        kind = "python"
 
         async def invoke(self, snapshot, arguments, context):
             async with get_session_factory()() as other:
@@ -4209,7 +4222,7 @@ async def assert_tool_runtime_edge_branches(
     mutated_invocation = await queue_invocation(make_context("edge-mutated"))
 
     class MutatingAdapter:
-        kind = "builtin"
+        kind = "python"
 
         async def invoke(self, snapshot, arguments, context):
             async with get_session_factory()() as other:
@@ -4735,9 +4748,9 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
                 "admin",
             )
         except HTTPException as exc:
-            assert exc.status_code == 422
+            assert exc.status_code == 403
         else:
-            raise AssertionError("Non-MCP Tool policy changes must 422.")
+            raise AssertionError("System Python Tool policy changes must 403.")
         await delete_source(db, workspace_id, source_id, actor, "admin")
         remaining = await tool_repository.list_tool_sources(db, workspace_id)
         assert source_id not in {
@@ -4913,7 +4926,8 @@ async def assert_tool_management_branches(
 async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     import dataclasses
     from datetime import datetime, timedelta
-    from unittest.mock import patch
+    from unittest.mock import AsyncMock, patch
+
 
     from app.application.tools.runtime.service import ToolInvocationBusy
     from app.application.workflows.tools.runtime import (
@@ -4934,8 +4948,22 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         TOOL_APPROVAL_EACH_CALL,
         build_tool_snapshot,
     )
+    from app.infra.sandbox.client import WorkflowSandboxResult
+
 
     settings = Settings.from_env(require_bootstrap=False)
+    time_code = patch(
+        "app.application.tools.runtime.adapters.python_tool.execute_workflow_code",
+        new=AsyncMock(
+            return_value=WorkflowSandboxResult(
+                result={"iso8601": "2026-09-11T12:00:00+08:00"},
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    )
+
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -5115,18 +5143,19 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     assert "Tool parameters are invalid" in invalid.content
 
 # Happy path through the real runtime (workflow_tool_runtime.py:94-154).
-    completed = await runtime.invoke(snapshot, "node-ok", "call-ok", {})
-    assert completed.is_error is False
-    assert "iso8601" in completed.content
+    with time_code:
+        completed = await runtime.invoke(snapshot, "node-ok", "call-ok", {})
+        assert completed.is_error is False
+        assert "iso8601" in completed.content
 
 # Reused identity with drifted stored data conflicts
     # (workflow_tool_runtime.py:124-125).
-    _node_id, drifted_key = workflow_tool_invocation_identity(
-        run.id,
-        "node-replay",
-        "call-replay",
-    )
-    await runtime.invoke(snapshot, "node-replay", "call-replay", {})
+        _node_id, drifted_key = workflow_tool_invocation_identity(
+            run.id,
+            "node-replay",
+            "call-replay",
+        )
+        await runtime.invoke(snapshot, "node-replay", "call-replay", {})
     async with get_session_factory()() as db:
         stored = await tool_repository.get_tool_invocation_by_idempotency_key(
             db,
@@ -5324,13 +5353,14 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
             actor_id,
         )
         await db.commit()
-    serialized = await runtime.invoke(
-        serial_snapshot,
-        "node-serial",
-        "call-serial",
-        {},
-    )
-    assert serialized.is_error is False
+    with time_code:
+        serialized = await runtime.invoke(
+            serial_snapshot,
+            "node-serial",
+            "call-serial",
+            {},
+        )
+        assert serialized.is_error is False
 
 
 async def assert_tool_adapters(workspace_id: str) -> None:
@@ -5411,7 +5441,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     )
 
     # Factory selection (tool_adapters.py:161-167).
-    assert isinstance(build_tool_adapter(snapshot, settings), BuiltinToolAdapter)
+    assert isinstance(build_tool_adapter(snapshot, settings), PythonToolAdapter)
     python_snapshot = dataclasses.replace(
         snapshot,
         kind="python",
@@ -5434,9 +5464,19 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     else:
         raise AssertionError("An unknown Tool kind must raise.")
 
-    # Builtin current_time (tool_adapters.py:36-46).
     builtin = BuiltinToolAdapter(settings)
-    result = await builtin.invoke(snapshot, {}, context)
+    with patch(
+        "app.application.tools.runtime.adapters.python_tool.execute_workflow_code",
+        new=AsyncMock(
+            return_value=WorkflowSandboxResult(
+                result={"iso8601": "2026-09-11T12:00:00+08:00"},
+                stdout="",
+                stderr="",
+                exit_code=0,
+            )
+        ),
+    ):
+        result = await PythonToolAdapter(settings).invoke(snapshot, {}, context)
     assert result.ok is True
     assert result.data["iso8601"].endswith("+08:00")
     artifact_snapshot = dataclasses.replace(

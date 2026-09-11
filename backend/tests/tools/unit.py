@@ -222,6 +222,20 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
         can_manage=False,
     )
     assert builtin_authorization.permission == "use"
+    system_python = Tool(id="time-1", kind="python")
+    system_python_authorization = evaluate_tool_authorization(
+        system_python,
+        member,
+        "member",
+        None,
+    )
+    assert system_python_authorization.access == ToolAccess(
+        can_view=True,
+        can_use=True,
+        can_manage=False,
+    )
+    assert system_python_authorization.permission == "use"
+
     outside_workspace = evaluate_tool_authorization(
         builtin,
         member,

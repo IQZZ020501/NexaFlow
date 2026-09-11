@@ -15,7 +15,6 @@ from app.infra.sandbox.client import (
     execute_workflow_code,
 )
 from app.infra.config.settings import Settings
-from app.entities.defaults import APP_TIMEZONE, utc_now
 from app.infra.db.session import get_session_factory
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.application.tools.runtime.contracts import (
@@ -49,16 +48,6 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
-        if builtin == "current_time":
-            return ToolRuntimeResult(
-                ok=True,
-                data={"iso8601": utc_now().astimezone(APP_TIMEZONE).isoformat()},
-                summary="Current time returned.",
-                error_code=None,
-                error_message=None,
-                outcome="confirmed",
-                usage={},
-            )
         if builtin in {"artifact", "python_artifact", "skill"}:
             failure_code = {
                 "artifact": "artifact_failed",
