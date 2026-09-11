@@ -125,7 +125,7 @@ export function WorkflowApiDocumentation({
     : []
 
   return (
-    <main className="min-h-svh bg-muted/20">
+    <main className="min-h-dvh bg-muted/20">
       <header className="border-b bg-background">
         <div className="mx-auto flex min-h-16 max-w-5xl items-center gap-3 px-4 sm:px-6">
           <span className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -207,7 +207,7 @@ export function WorkflowApiDocumentation({
         ) : (
           <>
             <section className="border-b pb-7">
-              <code className="text-sm">
+              <code className="text-sm break-all">
                 Authorization: Bearer &lt;API_KEY&gt;
               </code>
             </section>

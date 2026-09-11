@@ -17,6 +17,7 @@ import {
 import type { Workspace, WorkspaceMember } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
 import { displayWorkspaceName, formatDateTime } from "@/lib/display"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type WorkspaceUsersPanelProps = {
   selectedWorkspace: Workspace | null
@@ -43,6 +44,7 @@ export function WorkspaceUsersPanel({
   handleOpenWorkspaceMembers,
 }: WorkspaceUsersPanelProps) {
   const { t } = useLanguage()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
 
   return (
     <div
@@ -52,7 +54,7 @@ export function WorkspaceUsersPanel({
       className="grid min-w-0 gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
     >
       <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:min-h-full">
-        <CardHeader className="flex-row items-start justify-between gap-4 px-4">
+        <CardHeader className="flex-row items-start justify-between gap-4 px-4 max-sm:flex-wrap">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
               <UserCogIcon className="size-4" />
@@ -66,7 +68,7 @@ export function WorkspaceUsersPanel({
               </CardDescription>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 max-sm:w-full">
             <Button
               type="button"
               size="sm"
@@ -94,86 +96,131 @@ export function WorkspaceUsersPanel({
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>
           ) : workspaceMembers.length ? (
-            <div className="min-w-0 overflow-x-auto rounded-lg border bg-background">
-              <div
-                role="table"
-                aria-label={t("工作空间用户列表")}
-                className="min-w-[980px] text-sm"
-              >
-                <div
-                  role="row"
-                  className="grid grid-cols-[160px_150px_280px_120px_120px_150px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
-                >
-                  <span role="columnheader">{t("用户名")}</span>
-                  <span role="columnheader">{t("账号")}</span>
-                  <span role="columnheader">{t("邮箱")}</span>
-                  <span role="columnheader">{t("空间角色")}</span>
-                  <span role="columnheader">{t("状态")}</span>
-                  <span role="columnheader">{t("创建时间")}</span>
-                </div>
-                {workspaceMembers.map((member, index) => {
-                  const roleLabel =
-                    member.role === "admin" ? t("管理员") : t("成员")
-
-                  return (
-                    <div
-                      key={member.user.id}
-                      role="row"
-                      className={cn(
-                        "grid grid-cols-[160px_150px_280px_120px_120px_150px] items-center border-b px-4 py-4 last:border-b-0 hover:bg-muted/40",
-                        index % 2 === 1 && "bg-muted/20"
-                      )}
-                    >
+            <>
+              {/* phones: card list instead of the 980px grid */}
+              {isPhoneListLayout ? (
+                <ul className="flex flex-col gap-2">
+                {workspaceMembers.map((member) => (
+                  <li
+                    key={member.user.id}
+                    className="rounded-xl border bg-background p-3 shadow-xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
                       <span
-                        role="cell"
-                        className="truncate font-medium"
+                        className="min-w-0 flex-1 truncate font-medium"
                         title={member.user.name}
                       >
                         {member.user.name}
                       </span>
-                      <span
-                        role="cell"
-                        className="truncate text-muted-foreground"
-                        title={member.user.username}
-                      >
-                        {member.user.username}
-                      </span>
-                      <span
-                        role="cell"
-                        className="truncate text-muted-foreground"
-                        title={member.user.email}
-                      >
-                        {member.user.email}
-                      </span>
-                      <span role="cell">
-                        <span className="inline-flex rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium whitespace-nowrap">
-                          {roleLabel}
-                        </span>
-                      </span>
-                      <span
-                        role="cell"
-                        className="flex items-center gap-2 whitespace-nowrap"
-                      >
-                        {member.user.is_active ? (
-                          <CircleCheckIcon className="size-4 text-green-600" />
-                        ) : (
-                          <CircleOffIcon className="size-4 text-muted-foreground" />
-                        )}
-                        <span>
-                          {member.user.is_active ? t("已启用") : t("已停用")}
-                        </span>
-                      </span>
-                      <span
-                        role="cell"
-                        className="whitespace-nowrap text-muted-foreground"
-                      >
-                        {formatDateTime(member.user.created_at, locale)}
+                      <span className="inline-flex shrink-0 rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+                        {member.role === "admin" ? t("管理员") : t("成员")}
                       </span>
                     </div>
-                  )
-                })}
+                    <dl className="mt-2 grid gap-1 text-sm">
+                      <WorkspaceMemberCardField
+                        label={t("账号")}
+                        value={member.user.username}
+                      />
+                      <WorkspaceMemberCardField
+                        breakAll
+                        label={t("邮箱")}
+                        value={member.user.email}
+                      />
+                      <WorkspaceMemberCardField
+                        label={t("状态")}
+                        value={member.user.is_active ? t("已启用") : t("已停用")}
+                      />
+                      <WorkspaceMemberCardField
+                        label={t("创建时间")}
+                        value={formatDateTime(member.user.created_at, locale)}
+                      />
+                    </dl>
+                  </li>
+                ))}
+                </ul>
+              ) : null}
+
+              <div className="hidden min-w-0 overflow-x-auto rounded-lg border bg-background md:block">
+                <div
+                  role="table"
+                  aria-label={t("工作空间用户列表")}
+                  className="min-w-[980px] text-sm"
+                >
+                  <div
+                    role="row"
+                    className="grid grid-cols-[160px_150px_280px_120px_120px_150px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
+                  >
+                    <span role="columnheader">{t("用户名")}</span>
+                    <span role="columnheader">{t("账号")}</span>
+                    <span role="columnheader">{t("邮箱")}</span>
+                    <span role="columnheader">{t("空间角色")}</span>
+                    <span role="columnheader">{t("状态")}</span>
+                    <span role="columnheader">{t("创建时间")}</span>
+                  </div>
+                  {workspaceMembers.map((member, index) => {
+                    const roleLabel =
+                      member.role === "admin" ? t("管理员") : t("成员")
+
+                    return (
+                      <div
+                        key={member.user.id}
+                        role="row"
+                        className={cn(
+                          "grid grid-cols-[160px_150px_280px_120px_120px_150px] items-center border-b px-4 py-4 last:border-b-0 hover:bg-muted/40",
+                          index % 2 === 1 && "bg-muted/20"
+                        )}
+                      >
+                        <span
+                          role="cell"
+                          className="truncate font-medium"
+                          title={member.user.name}
+                        >
+                          {member.user.name}
+                        </span>
+                        <span
+                          role="cell"
+                          className="truncate text-muted-foreground"
+                          title={member.user.username}
+                        >
+                          {member.user.username}
+                        </span>
+                        <span
+                          role="cell"
+                          className="truncate text-muted-foreground"
+                          title={member.user.email}
+                        >
+                          {member.user.email}
+                        </span>
+                        <span role="cell">
+                          <span className="inline-flex rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+                            {roleLabel}
+                          </span>
+                        </span>
+                        <span
+                          role="cell"
+                          className="flex items-center gap-2 whitespace-nowrap"
+                        >
+                          {member.user.is_active ? (
+                            <CircleCheckIcon className="size-4 text-green-600" />
+                          ) : (
+                            <CircleOffIcon className="size-4 text-muted-foreground" />
+                          )}
+                          <span>
+                            {member.user.is_active ? t("已启用") : t("已停用")}
+                          </span>
+                        </span>
+                        <span
+                          role="cell"
+                          className="whitespace-nowrap text-muted-foreground"
+                        >
+                          {formatDateTime(member.user.created_at, locale)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
+            </>
           ) : (
             <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
               <p className="text-sm text-muted-foreground">{t("暂无用户")}</p>
@@ -181,6 +228,35 @@ export function WorkspaceUsersPanel({
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/**
+ * Renders one `label: value` line of a phone workspace-member card.
+ *
+ * @param label - Localized field label.
+ * @param value - Field value; truncated unless `breakAll` is set.
+ * @param breakAll - Wraps long unbroken values such as email addresses.
+ */
+function WorkspaceMemberCardField({
+  label,
+  value,
+  breakAll = false,
+}: {
+  label: string
+  value: string
+  breakAll?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-1.5">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd
+        className={cn("min-w-0 flex-1", breakAll ? "break-all" : "truncate")}
+        title={value}
+      >
+        {value}
+      </dd>
     </div>
   )
 }

@@ -400,7 +400,7 @@ function SchemaFieldsEditor({
             parsed.fields.map((field, index) => (
               <div
                 key={`${field.name}-${index}`}
-                className="grid gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1.4fr)_auto] md:items-center"
+                className="grid grid-cols-1 gap-2 rounded-lg border bg-background p-3 md:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1.4fr)_auto] md:items-center"
               >
                 <Input
                   aria-label={`${t("参数名称")} ${index + 1}`}
@@ -887,7 +887,7 @@ export function PythonToolDialog({
                   <Code2Icon className="size-4 text-sky-700 dark:text-sky-300" />
                   {t("这个工具怎么被调用")}
                 </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="rounded-lg border border-sky-200/70 bg-background/80 p-3 dark:border-sky-900/60">
                     <div className="flex items-center gap-2 text-xs font-medium">
                       <BotIcon className="size-4 text-sky-700 dark:text-sky-300" />
@@ -1070,7 +1070,7 @@ export function PythonToolDialog({
             </div>
           )}
 
-          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between max-sm:sticky max-sm:bottom-0 max-sm:-mx-6 max-sm:-mb-6 max-sm:border-t max-sm:bg-background max-sm:px-6 max-sm:py-4">
             <div className="flex flex-wrap gap-2">
               {detail?.can_manage ? (
                 <>
@@ -1096,7 +1096,7 @@ export function PythonToolDialog({
                 </>
               ) : null}
             </div>
-            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row max-sm:flex-row max-sm:flex-wrap max-sm:justify-end">
               <Button
                 type="button"
                 variant="outline"

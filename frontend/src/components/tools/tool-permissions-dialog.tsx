@@ -216,7 +216,7 @@ export function ToolPermissionsDialog({
                   return (
                     <div
                       key={member.user.id}
-                      className="flex items-center gap-3 p-3"
+                      className="flex flex-wrap items-center gap-3 p-3 max-sm:flex-col max-sm:items-stretch max-sm:gap-2"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">
@@ -239,7 +239,7 @@ export function ToolPermissionsDialog({
                         value={value}
                         disabled={Boolean(busyUserId)}
                         modal={false}
-                        className="w-32"
+                        className="w-32 max-sm:w-full"
                         options={[
                           { value: "none", label: t("无权限") },
                           { value: "view", label: t("查看") },

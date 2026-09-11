@@ -231,7 +231,8 @@ export function MessageCenter() {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="w-80 max-w-[calc(100vw-2rem)]"
+          collisionPadding={8}
+          className="w-[min(20rem,calc(100vw-1.5rem))] max-h-[min(24rem,calc(100svh-9rem))]"
         >
           <DropdownMenuLabel className="flex items-center justify-between">
             <span className="flex items-center gap-2">
@@ -392,10 +393,11 @@ export function MessagesPage() {
             {t("查看全局和当前工作空间的公告。")}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <Button
             type="button"
             variant="outline"
+            className="max-sm:flex-1"
             onClick={() => void refresh()}
             disabled={loading}
           >
@@ -404,6 +406,7 @@ export function MessagesPage() {
           <Button
             type="button"
             variant="outline"
+            className="max-sm:flex-1"
             onClick={handleMarkAllRead}
             disabled={unreadCount === 0 || loading}
           >
@@ -432,7 +435,7 @@ export function MessagesPage() {
               <button
                 type="button"
                 aria-haspopup="dialog"
-                className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                className="flex w-full items-center gap-3 px-4 py-4 text-left transition-colors outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:px-5"
                 onClick={() => {
                   handleMessageSelect(message)
                 }}

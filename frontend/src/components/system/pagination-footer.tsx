@@ -49,8 +49,8 @@ export function SystemPagination({
   if (!itemCount && !hasPrevious && !hasNext) return null
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-1 pt-3 text-sm">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t px-1 pt-3 text-sm">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="text-muted-foreground">
           {total === undefined
             ? t("显示 {from}-{to}，共 {total} 条", {
@@ -81,11 +81,14 @@ export function SystemPagination({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="outline" size="sm" disabled={!hasPrevious} onClick={() => onPageChange(currentPage - 1)}>
           {t("上一页")}
         </Button>
-        <div className="flex items-center gap-1">
+        <span className="text-muted-foreground tabular-nums sm:hidden">
+          {total === undefined ? currentPage : `${currentPage} / ${totalPages}`}
+        </span>
+        <div className="hidden items-center gap-1 sm:flex">
           {pages.map((candidate, index) => (
             <div key={candidate} className="flex items-center gap-1">
               {index > 0 && candidate - pages[index - 1] > 1 ? (

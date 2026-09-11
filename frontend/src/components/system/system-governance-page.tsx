@@ -80,6 +80,7 @@ import {
 } from "@/components/system/pagination-footer"
 import { ResourcePermissionNavGroup } from "@/components/system/resource-permissions-page"
 import { EnterpriseIdentityPage } from "@/components/system/enterprise-identity-page"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 export type SystemGovernanceSection = "operations" | "governance" | "security" | "email" | "identity"
 
@@ -204,7 +205,7 @@ function SystemGovernanceNav({
     <aside className="min-w-0 lg:sticky lg:top-20 lg:h-full lg:self-start">
       <nav
         aria-label={t("系统管理")}
-        className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 shadow-sm lg:h-full lg:flex-col lg:overflow-visible"
+        className="flex gap-1 overflow-x-auto overscroll-x-contain rounded-lg border bg-background p-1 shadow-sm max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-p-1 lg:h-full lg:flex-col lg:overflow-visible"
       >
         {visible.map((item, index) => {
           const Icon = item.icon
@@ -232,7 +233,7 @@ function SystemGovernanceNav({
               <Link
                 href={item.href}
                 className={cn(
-                  "flex min-w-32 items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0",
+                  "flex min-w-32 items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0",
                   active && "bg-foreground text-background hover:bg-foreground hover:text-background"
                 )}
               >
@@ -302,6 +303,7 @@ const healthComponents = [
 function OperationsPanel() {
   const { t, language } = useLanguage()
   const { session, reportError } = useGovernanceContext()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
   const [health, setHealth] = React.useState<AdminHealth | null>(null)
   const [logs, setLogs] = React.useState<SystemLog[]>([])
   const [level, setLevel] = React.useState("")
@@ -503,10 +505,28 @@ function OperationsPanel() {
         </CardHeader>
         <CardContent>
           {loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : logs.length ? (
-            <div className="overflow-auto rounded-lg border"><div className="min-w-[900px] text-sm">
-              <div className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] gap-x-6 border-b bg-muted/40 px-3 py-2 font-medium"><span>{t("时间")}</span><span>{t("级别")}</span><span>{t("事件")}</span><span>{t("消息")}</span><span>{t("状态")}</span></div>
-              {logs.map((log) => <div key={log.id} className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] items-center gap-x-6 border-b px-3 py-3 last:border-b-0"><span className="text-muted-foreground">{formatDateTime(log.created_at, languageLocales[language])}</span><span><Badge variant={log.level === "error" || log.level === "critical" ? "destructive" : "outline"}>{systemLogLevelLabel(log.level, t)}</Badge></span><span className="truncate" title={systemLogEventLabel(log.event, t)}>{systemLogEventLabel(log.event, t)}</span><span className="min-w-0 truncate text-muted-foreground" title={log.message || systemLogEventLabel(log.event, t)}>{log.message || systemLogEventLabel(log.event, t)}</span><span>{log.status_code ?? "—"}</span></div>)}
-            </div></div>
+            <div className="grid gap-2">
+              {isPhoneListLayout ? (
+                <ul className="flex flex-col gap-2">
+                {logs.map((log) => <li key={log.id} className="rounded-xl border bg-background p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Badge variant={log.level === "error" || log.level === "critical" ? "destructive" : "outline"}>{systemLogLevelLabel(log.level, t)}</Badge>
+                    <span className="text-xs text-muted-foreground">{formatDateTime(log.created_at, languageLocales[language])}</span>
+                  </div>
+                  <p className="mt-2 min-w-0 break-words font-medium">{systemLogEventLabel(log.event, t)}</p>
+                  <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">{log.message || systemLogEventLabel(log.event, t)}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{t("状态码")}</span>
+                    <span className="text-xs font-medium tabular-nums">{log.status_code ?? "—"}</span>
+                  </div>
+                </li>)}
+                </ul>
+              ) : null}
+              <div className="hidden overflow-auto rounded-lg border md:block"><div className="min-w-[900px] text-sm">
+                <div className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] gap-x-6 border-b bg-muted/40 px-3 py-2 font-medium"><span>{t("时间")}</span><span>{t("级别")}</span><span>{t("事件")}</span><span>{t("消息")}</span><span>{t("状态")}</span></div>
+                {logs.map((log) => <div key={log.id} className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] items-center gap-x-6 border-b px-3 py-3 last:border-b-0"><span className="text-muted-foreground">{formatDateTime(log.created_at, languageLocales[language])}</span><span><Badge variant={log.level === "error" || log.level === "critical" ? "destructive" : "outline"}>{systemLogLevelLabel(log.level, t)}</Badge></span><span className="truncate" title={systemLogEventLabel(log.event, t)}>{systemLogEventLabel(log.event, t)}</span><span className="min-w-0 truncate text-muted-foreground" title={log.message || systemLogEventLabel(log.event, t)}>{log.message || systemLogEventLabel(log.event, t)}</span><span>{log.status_code ?? "—"}</span></div>)}
+              </div></div>
+            </div>
           ) : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无运行日志")}</div>}
           <SystemPagination
             page={Math.floor(logsOffset / logsPageSize) + 1}
@@ -809,7 +829,7 @@ function SecurityPanel() {
     try { if (isGlobal && targetUserId !== session.me?.user.id) await revokeAllUserSessions(session.token, targetUserId); else await revokeOtherSessions(session.token); await load(); session.notify("success", t("其他会话已撤销")) } catch (error) { reportError(error) }
   }
 
-  return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2"><div className={cn("grid gap-2", isGlobal && "grid-cols-2")}>{isGlobal ? <FilterDropdown className="h-7 min-w-0" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: user.username }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button></div><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid gap-2">{visibleSessions.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex size-9 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0"><div className="truncate text-sm font-medium" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}<SystemPagination page={page} pageSize={pageSize} itemCount={visibleSessions.length} total={sessions.length} hasNext={page * pageSize < sessions.length} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1) }} /></CardContent></Card>{confirmDialog}</>
+  return <><Card><CardHeader className="flex-row flex-wrap items-end justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><KeyRoundIcon className="size-4" />{t("会话安全")}</CardTitle><CardDescription>{t("查看登录设备并及时撤销异常会话")}</CardDescription></div><div className="flex flex-wrap gap-2"><div className={cn("grid gap-2", isGlobal && "grid-cols-2")}>{isGlobal ? <FilterDropdown className="h-7 min-w-0" value={targetUserId} onChange={setTargetUserId} ariaLabel={t("选择用户")} options={users.map((user) => ({ value: user.id, label: user.username }))} /> : null}<Button variant="outline" size="sm" onClick={() => void revokeAll()} disabled={loading}><XCircleIcon className="size-4" />{t("撤销其他会话")}</Button></div><Button variant="outline" size="icon" onClick={() => void load()} disabled={loading} aria-label={t("刷新")}><RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /></Button></div></CardHeader><CardContent>{loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : sessions.length ? <div className="grid min-w-0 gap-2">{visibleSessions.map((item) => <div key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border p-3 max-sm:flex-col max-sm:items-stretch"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted"><KeyRoundIcon className="size-4" /></div><div className="min-w-0 flex-1"><div className="truncate text-sm font-medium max-sm:line-clamp-2 max-sm:break-all max-sm:whitespace-normal" title={item.user_agent || item.ip_address || t("未知设备")}>{item.user_agent || item.ip_address || t("未知设备")}</div><div className="text-xs text-muted-foreground max-sm:break-words">{item.user_agent ? item.ip_address || "—" : "—"} · {t("最近使用")} {formatDateTime(item.last_used_at, dateLocale)}</div></div></div><div className="flex items-center gap-2 max-sm:w-full max-sm:justify-between">{item.is_current ? <Badge><CheckCircle2Icon className="mr-1 size-3" />{t("当前会话")}</Badge> : null}<Button variant="destructive" size="sm" onClick={() => void revoke(item)}>{t("撤销")}</Button></div></div>)}</div> : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无会话")}</div>}<SystemPagination page={page} pageSize={pageSize} itemCount={visibleSessions.length} total={sessions.length} hasNext={page * pageSize < sessions.length} onPageChange={setPage} onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(1) }} /></CardContent></Card>{confirmDialog}</>
 }
 
 /**

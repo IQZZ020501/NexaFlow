@@ -480,7 +480,7 @@ export function FrequentQuestionsPanel({
       <CardContent
         role="region"
         aria-label={t("高频问题")}
-        className="max-h-[37.5rem] min-w-0 overflow-y-auto px-5"
+        className="max-h-[37.5rem] min-w-0 overflow-y-auto px-5 overscroll-contain max-sm:max-h-[60svh]"
         onScroll={(event) => {
           const target = event.currentTarget
           if (

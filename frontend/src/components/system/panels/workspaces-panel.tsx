@@ -62,7 +62,7 @@ export function WorkspacesPanel({
       className="grid gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
     >
       <Card className="min-w-0 gap-3 border-border/70 py-4 shadow-sm lg:min-h-full">
-        <CardHeader className="flex-row items-start justify-between gap-4 px-4">
+        <CardHeader className="flex-row items-start justify-between gap-4 px-4 max-sm:flex-wrap">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
               <Building2Icon className="size-4" />
@@ -99,7 +99,7 @@ export function WorkspacesPanel({
                   <div
                     key={workspace.id}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-lg border bg-background px-4 py-2.5 text-left text-sm shadow-xs transition-colors hover:border-foreground/30 hover:bg-muted/50",
+                      "flex w-full items-center justify-between gap-3 rounded-lg border bg-background px-4 py-2.5 text-left text-sm shadow-xs transition-colors hover:border-foreground/30 hover:bg-muted/50 max-sm:flex-col max-sm:items-stretch max-sm:gap-2",
                       isSelected && "border-foreground bg-muted/60 shadow-sm"
                     )}
                   >
@@ -121,7 +121,7 @@ export function WorkspacesPanel({
                         {workspace.description || "-"}
                       </span>
                     </button>
-                    <span className="flex shrink-0 items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-2 max-sm:flex-wrap max-sm:justify-end">
                       {workspace.is_default ? (
                         <Badge variant="outline">{t("默认")}</Badge>
                       ) : null}

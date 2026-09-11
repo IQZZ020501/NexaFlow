@@ -110,7 +110,7 @@ export function CreateUserDialog({
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={handleCreateUser}
         >
-          <FieldGroup>
+          <FieldGroup className="max-sm:min-h-0 max-sm:flex-1 max-sm:overflow-y-auto max-sm:overscroll-contain">
             <div className="space-y-1">
               <h3 className="text-sm font-semibold">{t("基本信息")}</h3>
             </div>
@@ -246,7 +246,7 @@ export function CreateUserDialog({
                     <LoaderCircleIcon className="animate-spin text-muted-foreground" />
                   </div>
                 ) : userCreateTeams.length ? (
-                  <div className="grid gap-2 rounded-lg border p-2">
+                  <div className="grid gap-2 rounded-lg border p-2 max-sm:max-h-56 max-sm:overflow-y-auto max-sm:overscroll-contain">
                     {userCreateTeams.map((team) => (
                       <label
                         key={team.id}
@@ -281,7 +281,7 @@ export function CreateUserDialog({
               </Field>
             ) : null}
           </FieldGroup>
-          <DialogFooter className="mt-auto pt-5">
+          <DialogFooter className="mt-auto pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <Button
               type="button"
               variant="outline"
@@ -420,7 +420,7 @@ export function EditUserDialog({
                 </label>
               ) : null}
             </FieldGroup>
-            <DialogFooter className="pt-5">
+            <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
               <Button
                 type="button"
                 variant="outline"
@@ -525,7 +525,7 @@ export function UserPasswordDialog({
                 />
               </Field>
             </FieldGroup>
-            <DialogFooter className="pt-5">
+            <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
               <Button
                 type="button"
                 variant="outline"

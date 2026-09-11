@@ -91,10 +91,13 @@ export function ResourcePermissionNavGroup({
   const { t } = useLanguage()
 
   return (
-    <details className="group" open={Boolean(activeType)}>
+    <details
+      className="group max-sm:flex max-sm:min-w-0 max-sm:items-center max-sm:gap-1"
+      open={Boolean(activeType)}
+    >
       <summary
         className={cn(
-          "flex min-w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0 [&::-webkit-details-marker]:hidden",
+          "flex min-w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:w-auto max-sm:shrink-0 max-sm:snap-start max-sm:whitespace-nowrap lg:min-w-0 [&::-webkit-details-marker]:hidden",
           activeType &&
             "bg-foreground text-background hover:bg-foreground hover:text-background"
         )}
@@ -105,7 +108,7 @@ export function ResourcePermissionNavGroup({
         </span>
         <ChevronDownIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="mt-1 space-y-0.5 border-l pl-3 lg:ml-3">
+      <div className="mt-1 space-y-0.5 border-l pl-3 max-sm:mt-0 max-sm:flex max-sm:min-w-0 max-sm:shrink-0 max-sm:gap-1 max-sm:space-y-0 max-sm:border-l-0 max-sm:pl-0 lg:ml-3">
         {RESOURCE_PERMISSION_TYPES.map((type) => {
           const config = PAGE_CONFIG[type]
           const Icon = config.icon
@@ -115,7 +118,7 @@ export function ResourcePermissionNavGroup({
               type="button"
               onClick={() => onSelect(type)}
               className={cn(
-                "flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                "flex w-full items-center justify-start gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:w-auto max-sm:shrink-0 max-sm:snap-start max-sm:whitespace-nowrap",
                 activeType === type && "bg-primary/10 text-primary"
               )}
             >
@@ -577,7 +580,7 @@ export function ResourcePermissionsPage({
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="grid gap-2 border-b bg-muted/30 px-5 py-3 text-sm font-medium text-muted-foreground lg:grid-cols-[minmax(0,1fr)_minmax(250px,0.8fr)]">
+              <div className="hidden gap-2 border-b bg-muted/30 px-5 py-3 text-sm font-medium text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_minmax(250px,0.8fr)]">
                 <span>{t("名称")}</span>
                 <span>{t("权限")}</span>
               </div>
@@ -596,7 +599,7 @@ export function ResourcePermissionsPage({
                   return (
                     <div
                       key={resource.id}
-                      className="grid items-center gap-4 border-b px-5 py-4 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_minmax(250px,0.8fr)]"
+                      className="grid items-center gap-4 px-5 py-4 max-md:mx-3 max-md:mt-3 max-md:rounded-xl max-md:border max-md:bg-background max-md:p-3 max-md:last:mb-3 md:border-b md:last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(250px,0.8fr)]"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
@@ -615,7 +618,7 @@ export function ResourcePermissionsPage({
                             <label
                               key={permission}
                               className={cn(
-                                "inline-flex items-center gap-2",
+                                "inline-flex items-center gap-2 max-sm:min-h-11",
                                 locked ||
                                   busy ||
                                   (type === "apps" && permission === "manage")

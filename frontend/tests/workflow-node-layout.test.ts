@@ -300,7 +300,7 @@ test("condition node uses ordered branches and stable branch handles", () => {
   expect(canvasSource).toContain(
     'nextHandles.has(String(edge.sourceHandle ?? ""))'
   )
-  expect(source).toMatch(/node\.type === "condition"\s*\?\s*"w-80"/)
+  expect(source).toMatch(/node\.type === "condition"\s*\?\s*"w-80\b/)
   expect(conditionEditor).toContain(
     "rounded-lg border border-border/70 bg-muted/20 p-2"
   )

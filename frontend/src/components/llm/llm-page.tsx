@@ -742,7 +742,7 @@ export function LlmPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-9 w-36 justify-between px-3 font-normal"
+                      className="h-9 w-36 justify-between px-3 font-normal max-sm:w-full"
                     >
                       <span className="min-w-0 flex-1 truncate text-left">
                         {selectedProvider
@@ -795,7 +795,7 @@ export function LlmPage() {
                   }
                 />
                 {isCatalogLoading ? (
-                  <LoaderCircleIcon className="size-4 animate-spin self-center text-muted-foreground" />
+                  <LoaderCircleIcon className="size-4 animate-spin self-center text-muted-foreground max-sm:self-start" />
                 ) : null}
               </div>
               <ResourceBulkMoveBar
@@ -815,7 +815,7 @@ export function LlmPage() {
                 <LoaderCircleIcon className="animate-spin text-muted-foreground" />
               </div>
             ) : visibleModels.length > 0 ? (
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {visibleModels.map((model) => {
                   const provider = providerCatalog.find(
                     (item) => item.provider === model.provider
@@ -941,7 +941,7 @@ export function LlmPage() {
                       </div>
 
                       <div className="mt-auto flex items-end justify-between gap-2 pt-4">
-                        <dl className="grid min-w-0 flex-1 gap-3 text-sm sm:grid-cols-2">
+                        <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                           <Spec
                             label={t("连接地址")}
                             value={model.api_base || t("默认连接")}
@@ -1122,7 +1122,7 @@ function ProviderPickerDialog({
               <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : providers.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {providers.map((provider) => (
                 <button
                   key={provider.provider}
@@ -1295,7 +1295,7 @@ function ModelDialog({
               <FieldDescription>{t("应用内显示的模型名称。")}</FieldDescription>
             </Field>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="model-provider">{t("供应商")}</FieldLabel>
                 <DropdownMenu modal={false}>

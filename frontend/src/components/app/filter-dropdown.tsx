@@ -65,7 +65,7 @@ export function FilterDropdown({
         align="start"
         sideOffset={6}
         collisionPadding={8}
-        className="max-h-80 min-w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto overscroll-contain"
+        className="max-h-80 max-w-[calc(100vw-1rem)] min-w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto overscroll-contain"
       >
         <DropdownMenuGroup>
           {options.map((option) => (

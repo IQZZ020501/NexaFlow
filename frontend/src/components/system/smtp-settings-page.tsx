@@ -392,7 +392,7 @@ export function SmtpSettingsPage() {
                       </FieldDescription>
                     ) : null}
                     {settings?.has_password ? (
-                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <label className="flex items-center gap-2 text-sm text-muted-foreground max-sm:min-h-11">
                         <input
                           type="checkbox"
                           checked={form.clearPassword}
@@ -494,7 +494,7 @@ export function SmtpSettingsPage() {
                     aria-label={t("启用 SMTP")}
                     onClick={() => updateForm("enabled", !form.enabled)}
                     disabled={isSaving}
-                    className="inline-flex items-center gap-2 rounded-md text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-md text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-11 max-sm:py-2"
                   >
                     <span
                       className={cn(

@@ -101,7 +101,10 @@ export function InteractionConfigFields({
         />
       </label>
 
-      <div className="flex items-center justify-between gap-3 text-sm font-medium">
+      <label
+        htmlFor={`${idPrefix}-tts`}
+        className="flex min-h-10 cursor-pointer items-center justify-between gap-3 text-sm font-medium sm:min-h-0"
+      >
         <span>{t("文字转语音")}</span>
         <button
           type="button"
@@ -123,7 +126,7 @@ export function InteractionConfigFields({
             }`}
           />
         </button>
-      </div>
+      </label>
 
       <fieldset
         className={
@@ -134,8 +137,13 @@ export function InteractionConfigFields({
         disabled={readOnly}
       >
         <div className="flex items-center justify-between gap-3 text-sm font-medium sm:col-span-2">
-          <span>{t("文件上传")}</span>
-          <span className="flex items-center gap-1.5">
+          <label
+            htmlFor={`${idPrefix}-file-upload`}
+            className="min-w-0 flex-1 cursor-pointer py-2 sm:py-0"
+          >
+            {t("文件上传")}
+          </label>
+          <span className="flex shrink-0 items-center gap-1.5">
             <IconButton
               label={t("文件上传设置")}
               className="size-7"

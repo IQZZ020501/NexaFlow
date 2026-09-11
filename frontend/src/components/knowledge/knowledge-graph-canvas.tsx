@@ -242,16 +242,19 @@ export function KnowledgeGraphCanvas({
 
   return (
     <div
-      className="relative h-[calc(100vh-18rem)] min-h-[38rem] w-full bg-muted/20"
+      className="relative h-[calc(100vh-18rem)] min-h-[38rem] w-full bg-muted/20 max-sm:h-[62svh] max-sm:min-h-[20rem]"
       data-testid="knowledge-graph-canvas"
     >
-      <div className="pointer-events-none absolute top-3 left-3 z-10 flex gap-3 rounded-md border bg-background/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur">
-        <span>
-          {t("实体数")} {entities.length}
+      <div className="pointer-events-none absolute top-3 left-3 z-10 flex gap-3 rounded-md border bg-background/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur max-sm:inset-x-2 max-sm:flex-col max-sm:items-center max-sm:gap-1">
+        <span className="flex gap-3">
+          <span>
+            {t("实体数")} {entities.length}
+          </span>
+          <span>
+            {t("关系数")} {claims.length}
+          </span>
         </span>
-        <span>
-          {t("关系数")} {claims.length}
-        </span>
+        <span className="sm:hidden">{t("拖动平移 · 双指缩放")}</span>
       </div>
       <ReactFlow
         nodes={nodes}
@@ -263,6 +266,11 @@ export function KnowledgeGraphCanvas({
         maxZoom={2}
         nodesDraggable
         nodesConnectable={false}
+        panOnDrag
+        panOnScroll={false}
+        zoomOnPinch
+        zoomOnDoubleClick
+        preventScrolling
         onlyRenderVisibleElements
         proOptions={{ hideAttribution: true }}
         aria-label={t("知识关联画布")}
@@ -275,7 +283,7 @@ export function KnowledgeGraphCanvas({
       >
         <Controls
           showInteractive={false}
-          className="!border-border !bg-background [&>button]:!border-border [&>button]:!bg-background [&>button]:!fill-foreground [&>button:hover]:!bg-muted"
+          className="!border-border !bg-background max-sm:[&>button]:!w-10 [&>button]:!border-border [&>button]:!bg-background [&>button]:!fill-foreground [&>button:hover]:!bg-muted"
           aria-label={t("知识关联画布控制")}
         />
       </ReactFlow>

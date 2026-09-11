@@ -33,7 +33,7 @@ export function PlaceholderPage({ page }: { page: FeaturePageConfig }) {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold">{page.label}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+          <p className="mt-1 max-w-2xl text-sm break-words text-muted-foreground">
             {page.description}
           </p>
         </div>
@@ -69,8 +69,10 @@ export function PlaceholderPage({ page }: { page: FeaturePageConfig }) {
             <Icon className="size-5 text-muted-foreground" />
           </span>
           <div className="flex flex-col gap-2">
-            <p className="text-base font-semibold">{page.emptyTitle}</p>
-            <p className="text-sm leading-6 text-muted-foreground">
+            <p className="text-base font-semibold break-words">
+              {page.emptyTitle}
+            </p>
+            <p className="text-sm leading-6 text-muted-foreground break-words">
               {page.emptyDescription}
             </p>
           </div>

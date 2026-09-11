@@ -258,7 +258,7 @@ export function KnowledgeHitTest({
                 }
               />
             </label>
-            <label className="flex min-h-9 items-center gap-2 self-end text-sm font-medium">
+            <label className="flex min-h-11 items-center gap-2 text-sm font-medium sm:min-h-9 sm:self-end">
               <input
                 type="checkbox"
                 className="size-4"
@@ -289,7 +289,7 @@ export function KnowledgeHitTest({
       {trace ? (
         <section className="mt-4 rounded-lg border bg-background p-4">
           <h2 className="text-sm font-semibold">{t("检索追踪")}</h2>
-          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-3 grid gap-2 text-sm [&>span]:min-w-0 [&>span]:break-words sm:grid-cols-2 lg:grid-cols-3">
             <span>
               {t("{label}：{value}", {
                 label: t("追踪 ID"),
@@ -443,7 +443,7 @@ export function KnowledgeHitTest({
         >
           {selectedHit ? (
             <>
-              <DialogHeader className="border-b px-6 py-5">
+              <DialogHeader className="border-b px-4 py-5 sm:px-6">
                 <DialogTitle className="break-words">
                   {selectedHit.document_filename} / #
                   {selectedHit.chunk_index + 1}
@@ -470,7 +470,7 @@ export function KnowledgeHitTest({
                     : null}
                 </DialogDescription>
               </DialogHeader>
-              <div className="min-h-0 overflow-y-auto px-6 py-5">
+              <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
                 <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
                   <div className="min-w-0">
                     <dt className="text-xs text-muted-foreground">
@@ -545,7 +545,7 @@ export function KnowledgeHitTest({
                   />
                 </div>
               </div>
-              <DialogFooter className="border-t px-6 py-4">
+              <DialogFooter className="border-t px-4 py-4 sm:px-6">
                 <Button
                   type="button"
                   variant="outline"

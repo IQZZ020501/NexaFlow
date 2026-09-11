@@ -397,12 +397,13 @@ export function AnnouncementAdminPage() {
             {t("管理全局和工作空间公告。")}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           {isGlobalAdmin ? (
             <AnnouncementSelector
               label={t("切换公告范围")}
               value={scope}
               options={scopeOptions}
+              className="max-sm:w-full"
               onChange={(value) => {
                 setRequestedScope(value as AnnouncementScope)
                 setPage(1)
@@ -415,6 +416,7 @@ export function AnnouncementAdminPage() {
               label={t("工作空间")}
               value={effectiveWorkspaceId ?? ""}
               options={workspaceOptions}
+              className="max-sm:w-full"
               onChange={(value) => {
                 setWorkspaceId(value)
                 setPage(1)
@@ -471,7 +473,7 @@ export function AnnouncementAdminPage() {
                 </FieldDescription>
               </Field>
             </FieldGroup>
-            <div className="grid items-start gap-4 md:grid-cols-[11rem_14rem] lg:grid-cols-[11rem_14rem_auto_1fr]">
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[11rem_14rem] lg:grid-cols-[11rem_14rem_auto_1fr]">
               <Field className="min-w-0">
                 <FieldLabel>{t("公告级别")}</FieldLabel>
                 <AnnouncementSelector
@@ -488,7 +490,7 @@ export function AnnouncementAdminPage() {
                 value={expiresAt}
                 onChange={setExpiresAt}
               />
-              <label className="flex h-9 items-center gap-2 text-sm lg:mt-7">
+              <label className="flex h-9 items-center gap-2 text-sm max-sm:min-h-11 lg:mt-7">
                 <input
                   type="checkbox"
                   checked={pinned}
@@ -497,14 +499,20 @@ export function AnnouncementAdminPage() {
                 />
                 {t("是否置顶")}
               </label>
-              <div className="flex items-center justify-end gap-2 lg:mt-7">
+              <div className="flex items-center justify-end gap-2 max-sm:w-full lg:mt-7">
                 {editingId ? (
-                  <Button type="button" variant="ghost" onClick={resetForm}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="max-sm:flex-1"
+                    onClick={resetForm}
+                  >
                     {t("取消")}
                   </Button>
                 ) : null}
                 <Button
                   type="submit"
+                  className="max-sm:flex-1"
                   disabled={isSaving || !title.trim() || !body.trim()}
                 >
                   {editingId ? (
@@ -521,7 +529,7 @@ export function AnnouncementAdminPage() {
       </Card>
 
       <section className="flex w-full max-w-6xl flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">
             {scope === "global"
               ? t("全局公告")
@@ -529,8 +537,8 @@ export function AnnouncementAdminPage() {
                 ? displayWorkspaceName(selectedWorkspace, t)
                 : t("工作空间公告")}
           </h2>
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" onClick={startAdding}>
+          <div className="flex flex-wrap items-center gap-2 max-sm:w-full sm:w-auto">
+            <Button type="button" size="sm" className="max-sm:flex-1" onClick={startAdding}>
               <PlusIcon data-icon="inline-start" />
               {t("添加公告")}
             </Button>
@@ -538,7 +546,7 @@ export function AnnouncementAdminPage() {
               type="button"
               variant="outline"
               size="sm"
-              className="h-9"
+              className="h-9 max-sm:flex-1"
               onClick={() => void loadAnnouncements()}
               disabled={isLoading}
             >
@@ -561,7 +569,7 @@ export function AnnouncementAdminPage() {
                 )}
               >
                 <CardContent className="p-0">
-                  <div className="flex items-center gap-4 px-5 py-4 sm:px-6">
+                  <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-6">
                     <button
                       type="button"
                       aria-haspopup="dialog"
@@ -610,14 +618,14 @@ export function AnnouncementAdminPage() {
                         </span>
                       </span>
                     </button>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1 max-sm:justify-end sm:shrink-0">
                       {item.status !== "archived" ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           onClick={() => startEditing(item)}
-                          className="h-8 px-2"
+                          className="h-8 px-2 max-sm:flex-1"
                         >
                           <PencilIcon data-icon="inline-start" />
                           {t("编辑")}
@@ -629,7 +637,7 @@ export function AnnouncementAdminPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => void handleAction("publish", item)}
-                          className="h-8 px-2.5"
+                          className="h-8 px-2.5 max-sm:flex-1"
                         >
                           <SendIcon data-icon="inline-start" />
                           {t("发布")}
@@ -641,7 +649,7 @@ export function AnnouncementAdminPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => void handleAction("archive", item)}
-                          className="h-8 px-2"
+                          className="h-8 px-2 max-sm:flex-1"
                         >
                           <ArchiveIcon data-icon="inline-start" />
                           {t("归档")}

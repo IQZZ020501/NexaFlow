@@ -75,7 +75,7 @@ export function TeamsPanel({
       className="grid gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
     >
       <Card className="min-w-0 gap-4 border-border/70 py-5 shadow-sm lg:min-h-full">
-        <CardHeader className="flex-row items-start justify-between gap-4 px-5">
+        <CardHeader className="flex-row items-start justify-between gap-4 px-5 max-sm:flex-wrap">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
               <UsersIcon className="size-4" />
@@ -109,7 +109,7 @@ export function TeamsPanel({
                 return (
                   <div
                     key={team.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-background px-4 py-2.5 text-sm shadow-xs"
+                    className="flex items-center justify-between gap-3 rounded-lg border bg-background px-4 py-2.5 text-sm shadow-xs max-sm:flex-col max-sm:items-stretch max-sm:gap-2"
                   >
                     <span className="flex min-w-0 flex-col gap-1">
                       <span className="truncate font-medium">
@@ -119,7 +119,7 @@ export function TeamsPanel({
                         {team.description || "-"}
                       </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-2 max-sm:flex-wrap max-sm:justify-end">
                       {team.is_default ? (
                         <Badge variant="outline">{t("默认")}</Badge>
                       ) : null}

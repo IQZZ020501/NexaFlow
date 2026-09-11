@@ -610,7 +610,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           />
         </div>
         {movableToolIds.length || initialKind ? (
-          <div className="flex flex-wrap items-center justify-end gap-3 self-end sm:self-auto">
+          <div className="flex flex-wrap items-center justify-end gap-2 max-sm:w-full max-sm:justify-between sm:gap-3">
             <ResourceBulkMoveBar
               resourceIds={movableToolIds}
               selectedIds={selectedToolIds}
@@ -623,7 +623,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
               <div
                 role="group"
                 aria-label={t("工具")}
-                className="grid w-fit shrink-0 grid-cols-3 rounded-md bg-muted p-0.5"
+                className="grid w-fit shrink-0 grid-cols-3 rounded-md bg-muted p-0.5 max-sm:w-full"
               >
                 {catalogTabs.map((tab) => {
                   const isActive = activeKind === tab.kind
@@ -633,7 +633,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                       key={tab.kind}
                       type="button"
                       aria-pressed={isActive}
-                      className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-11 ${
                         isActive
                           ? "bg-background text-foreground shadow-xs"
                           : "text-muted-foreground hover:text-foreground"
@@ -658,7 +658,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </h2>
             <Badge variant="secondary">{filteredSources.length}</Badge>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {filteredSources.map((source) => {
               const active = source.status === "active"
               return (
@@ -776,7 +776,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           {t("没有匹配的工具")}
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   {filteredTools.map((tool) => {
                     const Icon = kindIcon(tool.kind)
                     const available = toolIsAvailable(tool)
