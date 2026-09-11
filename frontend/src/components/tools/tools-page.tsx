@@ -17,6 +17,7 @@ import {
   SparklesIcon,
   Trash2Icon,
   WrenchIcon,
+  XIcon,
 } from "lucide-react"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
@@ -54,6 +55,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { IconButton } from "@/components/ui/icon-button"
 import { Spec } from "@/components/ui/spec"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
@@ -799,7 +801,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 <Badge variant="secondary">{builtinSkillTools.length}</Badge>
               </div>
               {builtinSkillTools.length ? (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   {builtinSkillTools.map((tool) => (
                     <article
                       key={tool.id}
@@ -1258,7 +1260,18 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl",
           )}
         >
-          <DialogHeader>
+          <IconButton
+            label={t("关闭")}
+            className="absolute top-3 right-3 z-20 bg-background/90 shadow-sm backdrop-blur"
+            onClick={() => {
+              setDetailTarget(null)
+              setDetailTool(null)
+              setDetailError(null)
+            }}
+          >
+            <XIcon />
+          </IconButton>
+          <DialogHeader className="pr-10">
             {skillMarkdown ? (
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/70">

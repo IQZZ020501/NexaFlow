@@ -222,7 +222,7 @@ export function WorkspaceAnalyticsDateRangePicker({
           collisionPadding={16}
           aria-label={view === "calendar" ? t("自定义") : t("选择统计周期")}
           className={cn(
-            "z-50 rounded-xl border bg-popover text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+            "z-50 max-h-[min(var(--radix-popover-content-available-height,36rem),36rem)] overflow-y-auto overscroll-contain rounded-xl border bg-popover text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
             view === "calendar"
               ? "w-[min(22rem,calc(100vw-2rem))] p-3"
               : "min-w-44 p-1"
