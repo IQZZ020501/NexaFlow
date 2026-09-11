@@ -4,7 +4,6 @@ import * as React from "react"
 import {
   ActivityIcon,
   Building2Icon,
-  CalendarDaysIcon,
   ChevronDownIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
@@ -37,11 +36,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
-import { languageLocales, type TranslationKey } from "@/i18n"
+import { languageLocales } from "@/i18n"
 import type { MeResponse } from "@/lib/api/auth"
 import {
   getWorkspaceAnalytics,
@@ -49,13 +47,18 @@ import {
 } from "@/lib/api/analytics"
 import type { Workspace } from "@/lib/api/system"
 import {
-  APP_TIME_ZONE,
   displayWorkspaceName,
   formatTokenCount,
   getMembershipRole,
 } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { canAccessWorkspaceAnalytics } from "@/components/system/system-utils"
+import {
+  getPresetAnalyticsRange,
+  WorkspaceAnalyticsDateRangePicker,
+  type AnalyticsRange,
+  type RangePreset,
+} from "@/components/system/workspace-analytics-date-range-picker"
 import {
   formatAnalyticsHour,
 } from "@/components/system/workspace-analytics-metrics"
@@ -66,66 +69,7 @@ import {
   RunDistributionPanel,
 } from "@/components/system/workspace-analytics-insights"
 
-type AnalyticsRange = { from: string; to: string }
-type RangePreset = 7 | 30 | 90 | "custom"
-
-const PRESET_OPTIONS: Array<{
-  value: Exclude<RangePreset, "custom">
-  label: TranslationKey
-}> = [
-  { value: 7, label: "最近 7 天" },
-  { value: 30, label: "最近 30 天" },
-  { value: 90, label: "最近 90 天" },
-]
-
-/**
- * Formats a date as a calendar date.
- *
- * @param value - The date to format
- * @returns The date in `YYYY-MM-DD` format
- */
-function calendarDate(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
-
-/**
- * Shifts a calendar date by the specified number of days.
- *
- * @param value - The date to shift in `YYYY-MM-DD` format
- * @param days - The number of days to add; negative values shift the date earlier
- * @returns The shifted date in `YYYY-MM-DD` format
- */
-function shiftCalendarDate(value: string, days: number) {
-  const date = new Date(`${value}T00:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return calendarDate(date)
-}
-
-/**
- * Creates a preset analytics date range ending on the next calendar day.
- *
- * @param days - The number of preceding days to include.
- * @param now - The date used to determine the current day.
- * @returns An analytics range with date strings for the start and exclusive end dates.
- */
-export function getPresetAnalyticsRange(
-  days: 7 | 30 | 90,
-  now = new Date()
-): AnalyticsRange {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en", {
-      timeZone: APP_TIME_ZONE,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    })
-      .formatToParts(now)
-      .map(({ type, value }) => [type, value])
-  )
-  const today = `${parts.year}-${parts.month}-${parts.day}`
-  const to = shiftCalendarDate(today, 1)
-  return { from: shiftCalendarDate(to, -days), to }
-}
+export { getPresetAnalyticsRange } from "@/components/system/workspace-analytics-date-range-picker"
 
 /**
  * Selects active workspaces that the user can administer for analytics.
@@ -400,8 +344,6 @@ export function WorkspaceAnalyticsPage() {
   const [range, setRange] = React.useState<AnalyticsRange>(() =>
     getPresetAnalyticsRange(30)
   )
-  const [customFrom, setCustomFrom] = React.useState(range.from)
-  const [customTo, setCustomTo] = React.useState(() => shiftCalendarDate(range.to, -1))
   const [data, setData] = React.useState<WorkspaceAnalytics | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -465,27 +407,6 @@ export function WorkspaceAnalyticsPage() {
 
   if (!session.me || !canAccess) return null
 
-  const selectPreset = (days: 7 | 30 | 90) => {
-    const nextRange = getPresetAnalyticsRange(days)
-    setPreset(days)
-    setRange(nextRange)
-    setCustomFrom(nextRange.from)
-    setCustomTo(shiftCalendarDate(nextRange.to, -1))
-  }
-  const customRangeValid = Boolean(
-    customFrom && customTo && customFrom <= customTo
-  )
-  const applyCustomRange = () => {
-    if (!customRangeValid) return
-    setRange({ from: customFrom, to: shiftCalendarDate(customTo, 1) })
-  }
-  const presetLabel =
-    preset === "custom"
-      ? t("自定义")
-      : t(
-          PRESET_OPTIONS.find((option) => option.value === preset)?.label ??
-            "最近 30 天"
-        )
   const chartVars = {
     "--analytics-hourly": "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 190))",
     "--analytics-runs": "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 245))",
@@ -541,66 +462,17 @@ export function WorkspaceAnalyticsPage() {
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
             <Label className="shrink-0">{t("统计周期")}</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="min-w-0 flex-1 justify-between sm:w-auto sm:flex-none"
-                  aria-label={t("选择统计周期")}
-                >
-                  <span>{presetLabel}</span>
-                  <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-44">
-                {PRESET_OPTIONS.map((option) => (
-                  <DropdownMenuItem
-                    key={option.value}
-                    onSelect={() => selectPreset(option.value)}
-                  >
-                    <CalendarDaysIcon aria-hidden="true" />
-                    {t(option.label)}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem onSelect={() => setPreset("custom")}>
-                  <CalendarDaysIcon aria-hidden="true" />
-                  {t("自定义")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <WorkspaceAnalyticsDateRangePicker
+              preset={preset}
+              range={range}
+              onChange={(nextPreset, nextRange) => {
+                setPreset(nextPreset)
+                setRange(nextRange)
+              }}
+            />
           </div>
         </div>
       </div>
-
-      {preset === "custom" ? (
-        <Card className="gap-4 py-4 shadow-none">
-          <CardContent className="flex flex-col gap-3 px-4 sm:flex-row sm:items-end">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label htmlFor="analytics-from">{t("开始日期")}</Label>
-              <Input
-                id="analytics-from"
-                type="date"
-                value={customFrom}
-                max={customTo}
-                onChange={(event) => setCustomFrom(event.target.value)}
-              />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label htmlFor="analytics-to">{t("结束日期")}</Label>
-              <Input
-                id="analytics-to"
-                type="date"
-                value={customTo}
-                min={customFrom}
-                onChange={(event) => setCustomTo(event.target.value)}
-              />
-            </div>
-            <Button disabled={!customRangeValid} onClick={applyCustomRange}>
-              {t("确认")}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
 
       {!workspaceId ? (
         <Card className="border-dashed py-12 shadow-none">
