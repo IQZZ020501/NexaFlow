@@ -82,13 +82,15 @@ export function SkillDialog({
   const [importError, setImportError] = React.useState<string | null>(null)
   const [isReading, setIsReading] = React.useState(false)
 
-  React.useEffect(() => {
-    if (open) return
-    setMode("choose")
-    setForm(EMPTY_FORM)
-    setImportError(null)
-    setIsReading(false)
-  }, [open])
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setMode("choose")
+      setForm(EMPTY_FORM)
+      setImportError(null)
+      setIsReading(false)
+    }
+    onOpenChange(nextOpen)
+  }
 
   function applyImportedMarkdown(markdown: string) {
     const parsed = parseSkillFrontMatter(markdown)
@@ -122,7 +124,7 @@ export function SkillDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="sm:max-w-2xl"
         onCloseAutoFocus={(event) => {
