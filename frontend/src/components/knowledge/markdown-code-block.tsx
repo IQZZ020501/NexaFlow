@@ -10,6 +10,76 @@ import { cn } from "@/lib/utils"
 
 // ponytail: skip rich rendering above 50 KB; move it off-thread if larger blocks matter.
 const MAX_RICH_CODE_CHARS = 50_000
+const HIGHLIGHT_THEMES = {
+  light: "github-light",
+  dark: "github-dark",
+} as const
+const EXTRA_HIGHLIGHT_LANGUAGES: Record<string, true> = {
+  docker: true,
+  dockerfile: true,
+  nginx: true,
+}
+
+type ExtraCodeHighlighter = {
+  codeToHtml: (
+    code: string,
+    options: {
+      lang: never
+      themes: typeof HIGHLIGHT_THEMES
+      defaultColor: false
+    },
+  ) => string
+}
+
+let extraHighlighterPromise: Promise<ExtraCodeHighlighter> | null = null
+
+/**
+ * Loads a highlighter that includes Dockerfile and Nginx grammars.
+ *
+ * @returns A highlighter that can render the extra languages
+ */
+async function createExtraHighlighter() {
+  // Shiki stays an async chunk; a static import would pull the web bundle into chat render.
+  const { createHighlighter } = await import("shiki/bundle/web")
+  return createHighlighter({
+    langs: [
+      () => import("@shikijs/langs/docker"),
+      () => import("@shikijs/langs/nginx"),
+    ],
+    themes: ["github-light", "github-dark"],
+    langAlias: { dockerfile: "docker" },
+  }) as Promise<ExtraCodeHighlighter>
+}
+
+function getExtraHighlighter() {
+  extraHighlighterPromise ??= createExtraHighlighter()
+  return extraHighlighterPromise
+}
+
+/**
+ * Highlights fenced source with the web language bundle, plus Dockerfile and Nginx.
+ *
+ * @param code - Source text to highlight
+ * @param language - Fence language id
+ * @returns Highlighted HTML
+ */
+async function highlightCode(code: string, language: string) {
+  if (EXTRA_HIGHLIGHT_LANGUAGES[language]) {
+    const highlighter = await getExtraHighlighter()
+    return highlighter.codeToHtml(code, {
+      lang: language as never,
+      themes: HIGHLIGHT_THEMES,
+      defaultColor: false,
+    })
+  }
+  // Same async-chunk boundary as getExtraHighlighter.
+  const { codeToHtml } = await import("shiki/bundle/web")
+  return codeToHtml(code, {
+    lang: language as never,
+    themes: HIGHLIGHT_THEMES,
+    defaultColor: false,
+  })
+}
 
 type CopyState = "idle" | "copied" | "failed"
 type HighlightedCode = { code: string; language: string; html: string }
@@ -121,14 +191,7 @@ function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   React.useEffect(() => {
     if (!language || code.length > MAX_RICH_CODE_CHARS) return
     let active = true
-    void import("shiki/bundle/web")
-      .then(({ codeToHtml }) =>
-        codeToHtml(code, {
-          lang: language as never,
-          themes: { light: "github-light", dark: "github-dark" },
-          defaultColor: false,
-        })
-      )
+    void highlightCode(code, language)
       .then((html) => {
         if (active) setHighlighted({ code, language, html })
       })
