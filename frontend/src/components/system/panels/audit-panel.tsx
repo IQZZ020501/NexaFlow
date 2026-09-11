@@ -19,6 +19,7 @@ import {
   SystemPagination,
   type SystemPageSize,
 } from "@/components/system/pagination-footer"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type AuditPanelProps = {
   auditLogs: AuditLog[]
@@ -65,6 +66,7 @@ export function AuditPanel({
   loadAll,
 }: AuditPanelProps) {
   const { t } = useLanguage()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
 
   async function exportLogs() {
     const allLogs = loadAll ? await loadAll() : auditLogs
@@ -108,16 +110,16 @@ export function AuditPanel({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {workspaceScope ? <span className="text-xs text-muted-foreground">{t("工作空间范围")}: {workspaceScope}</span> : null}
+            {workspaceScope ? <span className="min-w-0 text-xs break-all text-muted-foreground">{t("工作空间范围")}: {workspaceScope}</span> : null}
             <Input
-              className="w-44"
+              className="w-44 max-sm:w-full"
               value={auditSearch}
               onChange={(event) => setAuditSearch(event.target.value)}
               placeholder={t("搜索审计")}
               aria-label={t("搜索审计")}
             />
             <FilterDropdown
-              className="h-9 w-44"
+              className="h-9 w-44 max-sm:w-full"
               value={auditAction}
               onChange={setAuditAction}
               ariaLabel={t("筛选动作")}
@@ -142,61 +144,101 @@ export function AuditPanel({
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>
           ) : auditLogs.length ? (
-            <div
-              role="region"
-              aria-label={t("审计日志")}
-              tabIndex={0}
-              className="min-w-0 overflow-auto rounded-lg border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0 lg:flex-1"
-            >
-              <div
-                role="table"
-                aria-label={t("审计日志")}
-                className="w-max min-w-[1700px] text-sm"
-              >
-                <div className="grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] border-b bg-muted/40 px-4 py-3 font-semibold text-muted-foreground">
-                  <span role="columnheader">{t("时间")}</span>
-                  <span role="columnheader">{t("操作者")}</span>
-                  <span role="columnheader">{t("动作")}</span>
-                  <span role="columnheader">{t("对象")}</span>
-                  <span role="columnheader">{t("详情")}</span>
-                </div>
-                {auditLogs.map((log, index) => (
-                  <div
+            <>
+              {/* phones: card list instead of the 1700px grid */}
+              {isPhoneListLayout ? (
+                <ul className="flex flex-col gap-2">
+                {auditLogs.map((log) => (
+                  <li
                     key={log.id}
-                    role="row"
-                    className={cn(
-                      "grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] items-center border-b px-4 py-4 last:border-b-0 hover:bg-muted/40",
-                      index % 2 === 1 && "bg-muted/20"
-                    )}
+                    className="rounded-xl border bg-background p-3 shadow-xs"
                   >
-                    <span className="whitespace-nowrap text-muted-foreground">
-                      {formatDateTime(log.created_at, locale)}
-                    </span>
-                    <span
-                      className="truncate"
-                      title={`${log.actor_name} (${log.actor_username})`}
-                    >
-                      {log.actor_name}
-                    </span>
-                  <span
-                    className="truncate"
-                      title={auditActionLabel(log.action, t)}
-                    >
+                    <div className="flex items-start justify-between gap-2">
+                      <span
+                        className="min-w-0 flex-1 break-all font-medium"
+                        title={log.resource_name}
+                      >
+                        {log.resource_name}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                        {formatDateTime(log.created_at, locale)}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm font-medium">
                       {auditActionLabel(log.action, t)}
-                    </span>
-                    <span className="truncate" title={log.resource_name}>
-                      {log.resource_name}
-                    </span>
-                    <span
-                      className="whitespace-nowrap text-muted-foreground"
-                      title={formatAuditDetails(log.details, t)}
-                    >
-                      {formatAuditDetails(log.details, t)}
-                    </span>
-                  </div>
+                    </div>
+                    <dl className="mt-2 grid gap-1 text-sm">
+                      <AuditCardField
+                        label={t("操作者")}
+                        value={`${log.actor_name} (${log.actor_username})`}
+                      />
+                      <AuditCardField
+                        breakAll
+                        label={t("详情")}
+                        value={formatAuditDetails(log.details, t)}
+                      />
+                    </dl>
+                  </li>
                 ))}
+                </ul>
+              ) : null}
+
+              <div
+                role="region"
+                aria-label={t("审计日志")}
+                tabIndex={0}
+                className="hidden min-w-0 overflow-auto rounded-lg border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:block lg:min-h-0 lg:flex-1"
+              >
+                <div
+                  role="table"
+                  aria-label={t("审计日志")}
+                  className="w-max min-w-[1700px] text-sm"
+                >
+                  <div className="grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] border-b bg-muted/40 px-4 py-3 font-semibold text-muted-foreground">
+                    <span role="columnheader">{t("时间")}</span>
+                    <span role="columnheader">{t("操作者")}</span>
+                    <span role="columnheader">{t("动作")}</span>
+                    <span role="columnheader">{t("对象")}</span>
+                    <span role="columnheader">{t("详情")}</span>
+                  </div>
+                  {auditLogs.map((log, index) => (
+                    <div
+                      key={log.id}
+                      role="row"
+                      className={cn(
+                        "grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] items-center border-b px-4 py-4 last:border-b-0 hover:bg-muted/40",
+                        index % 2 === 1 && "bg-muted/20"
+                      )}
+                    >
+                      <span className="whitespace-nowrap text-muted-foreground">
+                        {formatDateTime(log.created_at, locale)}
+                      </span>
+                      <span
+                        className="truncate"
+                        title={`${log.actor_name} (${log.actor_username})`}
+                      >
+                        {log.actor_name}
+                      </span>
+                      <span
+                        className="truncate"
+                        title={auditActionLabel(log.action, t)}
+                      >
+                        {auditActionLabel(log.action, t)}
+                      </span>
+                      <span className="truncate" title={log.resource_name}>
+                        {log.resource_name}
+                      </span>
+                      <span
+                        className="whitespace-nowrap text-muted-foreground"
+                        title={formatAuditDetails(log.details, t)}
+                      >
+                        {formatAuditDetails(log.details, t)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            </>
           ) : (
             <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
               <p className="text-sm text-muted-foreground">
@@ -215,6 +257,35 @@ export function AuditPanel({
           />
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/**
+ * Renders one `label: value` line of a phone audit card.
+ *
+ * @param label - Localized field label.
+ * @param value - Field value; truncated unless `breakAll` is set.
+ * @param breakAll - Wraps long unbroken values such as identifiers.
+ */
+function AuditCardField({
+  label,
+  value,
+  breakAll = false,
+}: {
+  label: string
+  value: string
+  breakAll?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-1.5">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd
+        className={cn("min-w-0 flex-1", breakAll ? "break-all" : "truncate")}
+        title={value}
+      >
+        {value}
+      </dd>
     </div>
   )
 }

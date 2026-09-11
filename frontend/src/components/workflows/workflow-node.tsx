@@ -963,10 +963,10 @@ function NumberStepper({
     onChange(Math.min(max, Math.max(min, Number(next.toFixed(10)))))
 
   return (
-    <div className="grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem] overflow-hidden rounded-lg border border-input bg-transparent shadow-xs dark:bg-input/30">
+    <div className="grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem] overflow-hidden rounded-lg border border-input bg-transparent shadow-xs max-sm:h-10 max-sm:w-40 max-sm:grid-cols-[minmax(0,1fr)_5rem] dark:bg-input/30">
       <input
         id={id}
-        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none focus-visible:bg-accent/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none max-sm:text-base focus-visible:bg-accent/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         type="number"
         min={min}
         max={max}
@@ -975,7 +975,7 @@ function NumberStepper({
         readOnly={readOnly}
         onChange={(event) => updateValue(Number(event.target.value))}
       />
-      <div className="grid grid-rows-2 border-l border-input">
+      <div className="grid grid-rows-2 border-l border-input max-sm:grid-cols-2 max-sm:grid-rows-1">
         <button
           type="button"
           className="grid place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
@@ -983,16 +983,16 @@ function NumberStepper({
           disabled={readOnly || value >= max}
           onClick={() => updateValue(value + step)}
         >
-          <PlusIcon className="size-2.5" />
+          <PlusIcon className="size-2.5 max-sm:size-4" />
         </button>
         <button
           type="button"
-          className="grid place-items-center border-t border-input text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+          className="grid place-items-center border-t border-input text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 max-sm:border-t-0 max-sm:border-l"
           aria-label={t("减少数值")}
           disabled={readOnly || value <= min}
           onClick={() => updateValue(value - step)}
         >
-          <MinusIcon className="size-2.5" />
+          <MinusIcon className="size-2.5 max-sm:size-4" />
         </button>
       </div>
     </div>
@@ -1141,14 +1141,14 @@ function LlmSettingsDialog({
                 },
               })
             }
-            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
               reasoningContentEnabled ? "bg-primary" : "bg-muted-foreground/40"
             }`}
           >
             <span
               className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
                 reasoningContentEnabled
-                  ? "translate-x-[18px]"
+                  ? "translate-x-[18px] max-sm:translate-x-[26px]"
                   : "translate-x-0.5"
               }`}
             />
@@ -2157,14 +2157,14 @@ function NodeConfigFields({
                       mcp_servers: config.mcp_enable ? [] : selectedMcpRefs,
                     })
                   }
-                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
                     config.mcp_enable ? "bg-primary" : "bg-muted-foreground/40"
                   }`}
                 >
                   <span
                     className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
                       config.mcp_enable
-                        ? "translate-x-[18px]"
+                        ? "translate-x-[18px] max-sm:translate-x-[26px]"
                         : "translate-x-0.5"
                     }`}
                   />
@@ -2211,13 +2211,15 @@ function NodeConfigFields({
               aria-label={t("返回内容")}
               disabled={readOnly}
               onClick={() => updateConfig({ is_result: !isResult })}
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
                 isResult ? "bg-primary" : "bg-muted-foreground/40"
               }`}
             >
               <span
                 className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
-                  isResult ? "translate-x-[18px]" : "translate-x-0.5"
+                  isResult
+                    ? "translate-x-[18px] max-sm:translate-x-[26px]"
+                    : "translate-x-0.5"
                 }`}
               />
             </button>
@@ -2317,13 +2319,15 @@ function NodeConfigFields({
               aria-label={t("返回内容")}
               disabled={readOnly}
               onClick={() => updateConfig({ is_result: !isResult })}
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
                 isResult ? "bg-primary" : "bg-muted-foreground/40"
               }`}
             >
               <span
                 className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
-                  isResult ? "translate-x-[18px]" : "translate-x-0.5"
+                  isResult
+                    ? "translate-x-[18px] max-sm:translate-x-[26px]"
+                    : "translate-x-0.5"
                 }`}
               />
             </button>
@@ -3365,7 +3369,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
       className={cn(
         "group relative min-h-24 rounded-xl border bg-card px-3.5 py-3 shadow-md transition-[border-color,box-shadow,opacity] hover:shadow-lg",
         node.type === "condition"
-          ? "w-80"
+          ? "w-80 max-sm:w-[min(20rem,calc(100vw-3.5rem))]"
           : [
                 "llm",
                 "knowledge",
@@ -3374,8 +3378,8 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
                 "form-node",
                 "agent",
               ].includes(node.type)
-            ? "w-80"
-            : "w-64",
+            ? "w-80 max-sm:w-[min(20rem,calc(100vw-3.5rem))]"
+            : "w-64 max-sm:w-[min(16rem,calc(100vw-3.5rem))]",
         selected && "border-foreground shadow-lg ring-2 ring-foreground/10",
         status && STATUS_STYLES[status]
       )}

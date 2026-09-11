@@ -54,7 +54,7 @@ export function InvitationPage({ token, generic = false }: { token: string; gene
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-muted/20 p-4">
+    <main className="flex min-h-svh items-start justify-center bg-muted/20 p-4 py-8 sm:items-center sm:py-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><UserPlusIcon className="size-4" />{t("接受工作空间邀请")}</CardTitle>

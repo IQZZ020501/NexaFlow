@@ -17,6 +17,7 @@ import { useLanguage } from "@/contexts/language-provider"
 import { apiUrl } from "@/lib/api-client"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type AccessMode = "session" | "api_key"
 type HttpMethod = "GET" | "POST"
@@ -127,66 +128,112 @@ function ParameterTable({
   showLocation?: boolean
 }) {
   const { t } = useLanguage()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[640px] text-left text-sm">
-        <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-          <tr>
-            <th scope="col" className="px-4 py-2.5 font-medium">
-              {t("名称")}
-            </th>
-            {showLocation ? (
-              <th scope="col" className="px-4 py-2.5 font-medium">
-                {t("位置")}
-              </th>
-            ) : null}
-            <th scope="col" className="px-4 py-2.5 font-medium">
-              {t("类型")}
-            </th>
-            <th scope="col" className="px-4 py-2.5 font-medium">
-              {t("必填")}
-            </th>
-            <th scope="col" className="px-4 py-2.5 font-medium">
-              {t("默认值")}
-            </th>
-            <th scope="col" className="px-4 py-2.5 font-medium">
-              {t("说明")}
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {parameters.map((parameter) => (
-            <tr key={`${parameter.location ?? "body"}-${parameter.name}`}>
-              <td className="px-4 py-3 align-top">
-                <code className="text-xs font-medium">{parameter.name}</code>
-              </td>
-              {showLocation ? (
-                <td className="px-4 py-3 align-top text-xs text-muted-foreground">
+    <>
+      {/* Phones: one card per parameter, so nothing needs sideways scrolling. */}
+      {isPhoneListLayout ? (
+        <ul className="flex flex-col gap-2">
+        {parameters.map((parameter) => (
+          <li
+            key={`${parameter.location ?? "body"}-${parameter.name}`}
+            className="rounded-lg border bg-background p-3"
+          >
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <code className="text-xs font-medium break-all">
+                {parameter.name}
+              </code>
+              {showLocation && parameter.location ? (
+                <Badge
+                  variant="outline"
+                  className="h-5 rounded px-1.5 font-mono text-[10px] font-normal"
+                >
                   {parameter.location}
-                </td>
+                </Badge>
               ) : null}
-              <td className="px-4 py-3 align-top">
-                <code className="text-xs text-muted-foreground">
-                  {parameter.type}
-                </code>
-              </td>
-              <td className="px-4 py-3 align-top text-xs">
-                {t(parameter.required ? "是" : "否")}
-              </td>
-              <td className="px-4 py-3 align-top">
-                <code className="text-xs text-muted-foreground">
+              <code className="text-xs text-muted-foreground">
+                {parameter.type}
+              </code>
+            </div>
+            <p className="mt-2 text-xs leading-5 break-words text-muted-foreground">
+              {parameter.description}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span>
+                {t("必填")}: {t(parameter.required ? "是" : "否")}
+              </span>
+              <span>
+                {t("默认值")}:{" "}
+                <code className="break-all">
                   {parameter.defaultValue ?? "—"}
                 </code>
-              </td>
-              <td className="px-4 py-3 leading-5 text-muted-foreground">
-                {parameter.description}
-              </td>
+              </span>
+            </div>
+          </li>
+        ))}
+        </ul>
+      ) : null}
+
+      <div className="hidden overflow-x-auto rounded-lg border md:block">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-4 py-2.5 font-medium">
+                {t("名称")}
+              </th>
+              {showLocation ? (
+                <th scope="col" className="px-4 py-2.5 font-medium">
+                  {t("位置")}
+                </th>
+              ) : null}
+              <th scope="col" className="px-4 py-2.5 font-medium">
+                {t("类型")}
+              </th>
+              <th scope="col" className="px-4 py-2.5 font-medium">
+                {t("必填")}
+              </th>
+              <th scope="col" className="px-4 py-2.5 font-medium">
+                {t("默认值")}
+              </th>
+              <th scope="col" className="px-4 py-2.5 font-medium">
+                {t("说明")}
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y">
+            {parameters.map((parameter) => (
+              <tr key={`${parameter.location ?? "body"}-${parameter.name}`}>
+                <td className="px-4 py-3 align-top">
+                  <code className="text-xs font-medium">{parameter.name}</code>
+                </td>
+                {showLocation ? (
+                  <td className="px-4 py-3 align-top text-xs text-muted-foreground">
+                    {parameter.location}
+                  </td>
+                ) : null}
+                <td className="px-4 py-3 align-top">
+                  <code className="text-xs text-muted-foreground">
+                    {parameter.type}
+                  </code>
+                </td>
+                <td className="px-4 py-3 align-top text-xs">
+                  {t(parameter.required ? "是" : "否")}
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <code className="text-xs text-muted-foreground">
+                    {parameter.defaultValue ?? "—"}
+                  </code>
+                </td>
+                <td className="px-4 py-3 leading-5 text-muted-foreground">
+                  {parameter.description}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
@@ -295,7 +342,7 @@ function EndpointSection({ endpoint }: { endpoint: EndpointDocumentation }) {
   const { t } = useLanguage()
 
   return (
-    <section id={endpoint.id} className="scroll-mt-24 border-t py-10 sm:py-12">
+    <section id={endpoint.id} className="scroll-mt-32 lg:scroll-mt-24 border-t py-10 sm:py-12">
       <div className="flex flex-wrap items-center gap-2.5">
         <Badge
           variant={endpoint.method === "POST" ? "default" : "secondary"}
@@ -756,13 +803,13 @@ export function AgentApiReference({
         <div className="min-w-0 px-4 py-8 sm:px-8 sm:py-12 lg:px-12 xl:px-16">
           <nav
             aria-label={t("内容导航")}
-            className="mb-8 flex gap-2 overflow-x-auto border-b pb-3 lg:hidden"
+            className="sticky top-16 z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b bg-background/95 px-4 py-3 backdrop-blur sm:-mx-8 sm:px-8 lg:hidden"
           >
             {navigation.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
-                className="shrink-0 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                className="shrink-0 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground max-sm:inline-flex max-sm:min-h-10 max-sm:items-center"
               >
                 {item.method ? `${item.method} ` : ""}
                 {item.label}
@@ -771,7 +818,7 @@ export function AgentApiReference({
           </nav>
 
           <div className="mx-auto max-w-5xl">
-            <section id="overview" className="scroll-mt-24 pb-10 sm:pb-12">
+            <section id="overview" className="scroll-mt-32 lg:scroll-mt-24 pb-10 sm:pb-12">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs font-semibold tracking-wider text-sky-600 uppercase dark:text-sky-400">
                   {t("API Reference")}
@@ -809,7 +856,7 @@ export function AgentApiReference({
 
             <section
               id="authentication"
-              className="scroll-mt-24 border-t py-10 sm:py-12"
+              className="scroll-mt-32 lg:scroll-mt-24 border-t py-10 sm:py-12"
             >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">

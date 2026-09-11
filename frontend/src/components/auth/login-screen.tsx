@@ -285,7 +285,7 @@ export function LoginScreen({
 
   return (
     <>
-      <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
+      <main className="flex min-h-svh items-start justify-center bg-muted/30 p-6 py-8 sm:items-center sm:py-6">
         <Card className="w-full max-w-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -337,7 +337,7 @@ export function LoginScreen({
                   <div className="flex justify-end">
                     <Link
                       href="/forgot-password"
-                      className="rounded-sm text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                      className="rounded-sm text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none max-sm:-mr-2 max-sm:inline-flex max-sm:min-h-10 max-sm:items-center max-sm:px-2"
                     >
                       {t("忘记密码")}
                     </Link>

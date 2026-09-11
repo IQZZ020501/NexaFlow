@@ -397,7 +397,7 @@ export function EnterpriseIdentityPage() {
                 <ExternalLinkIcon data-icon="inline-end" />
               </a>
             </Button>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground max-sm:min-h-11">
               <input
                 type="checkbox"
                 checked={form.enabled}
@@ -413,7 +413,7 @@ export function EnterpriseIdentityPage() {
               <div className="font-medium">{t("回调地址")}</div>
               <div className="flex min-w-0 items-center gap-2">
                 <code
-                  className="min-w-0 flex-1 truncate"
+                  className="min-w-0 flex-1 truncate max-sm:break-all max-sm:whitespace-normal"
                   title={current.callback_url}
                 >
                   {current.callback_url}
@@ -430,7 +430,7 @@ export function EnterpriseIdentityPage() {
               <div className="font-medium">{t("工作空间登录地址")}</div>
               <div className="flex min-w-0 items-center gap-2">
                 <code
-                  className="min-w-0 flex-1 truncate"
+                  className="min-w-0 flex-1 truncate max-sm:break-all max-sm:whitespace-normal"
                   title={current.login_url}
                 >
                   {current.login_url}

@@ -62,8 +62,8 @@ export function ResourceBulkMoveBar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground max-sm:min-h-11">
         <input
           ref={selectAllRef}
           type="checkbox"
@@ -75,7 +75,7 @@ export function ResourceBulkMoveBar({
         />
         {t("全选")}
       </label>
-      <span className="text-sm text-muted-foreground">
+      <span className="text-sm whitespace-nowrap text-muted-foreground">
         {t("已选择 {count} 项", { count: selectedCount })}
       </span>
       <Button

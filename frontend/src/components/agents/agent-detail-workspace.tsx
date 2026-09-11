@@ -857,6 +857,8 @@ export function AgentDetailWorkspace({
   const previewScrollRef = React.useRef<HTMLDivElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const shouldFollowPreviewRef = React.useRef(true)
+  const tabStripRef = React.useRef<HTMLElement>(null)
+  const activeTabRef = React.useRef<HTMLButtonElement | null>(null)
 
   React.useEffect(() => {
     const scrollContainer = previewScrollRef.current
@@ -921,20 +923,40 @@ export function AgentDetailWorkspace({
     navigationItems.find((item) => item.view === visibleActiveView)?.label ??
     t("概览")
   const publicationAction = agentPublicationAction(agent)
-  const renderNavItems = (itemClassName: string) =>
-    navigationItems.map(({ view, label, icon: Icon }) => (
-      <Button
-        key={view}
-        type="button"
-        variant={visibleActiveView === view ? "secondary" : "ghost"}
-        className={itemClassName}
-        aria-current={visibleActiveView === view ? "page" : undefined}
-        onClick={() => onViewChange(view)}
-      >
-        <Icon data-icon="inline-start" />
-        {label}
-      </Button>
-    ))
+  const renderNavItems = (
+    itemClassName: string,
+    activeRef?: React.RefObject<HTMLButtonElement | null>
+  ) =>
+    navigationItems.map(({ view, label, icon: Icon }) => {
+      const isActive = visibleActiveView === view
+      return (
+        <Button
+          key={view}
+          ref={activeRef && isActive ? activeRef : undefined}
+          type="button"
+          variant={isActive ? "secondary" : "ghost"}
+          className={itemClassName}
+          aria-current={isActive ? "page" : undefined}
+          onClick={() => onViewChange(view)}
+        >
+          {/* Phones drop the icon so all five labels fit without sideways scrolling. */}
+          <Icon data-icon="inline-start" className="hidden sm:block" />
+          <span className="whitespace-nowrap">{label}</span>
+        </Button>
+      )
+    })
+
+  // Keep the active tab visible inside the horizontally scrolling phone strip.
+  React.useEffect(() => {
+    const strip = tabStripRef.current
+    const tab = activeTabRef.current
+    if (!strip || !tab) return
+    const stripBox = strip.getBoundingClientRect()
+    const tabBox = tab.getBoundingClientRect()
+    if (tabBox.left < stripBox.left || tabBox.right > stripBox.right) {
+      tab.scrollIntoView({ block: "nearest", inline: "center" })
+    }
+  }, [visibleActiveView])
 
   return (
     <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
@@ -1089,10 +1111,11 @@ export function AgentDetailWorkspace({
 
         <div className="flex min-w-0 flex-1 flex-col">
           <nav
-            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden"
+            ref={tabStripRef}
+            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden"
             aria-label={t("Agent 详情导航")}
           >
-            {renderNavItems("shrink-0")}
+            {renderNavItems("shrink-0 max-sm:min-h-10 max-sm:px-2.5", activeTabRef)}
           </nav>
 
           {visibleActiveView === "settings" ? (

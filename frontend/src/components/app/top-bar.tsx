@@ -17,6 +17,7 @@ import { usePathname, useRouter } from "next/navigation"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { MobileTabBar } from "@/components/app/mobile-tab-bar"
 import { MessageCenter } from "@/components/messages/message-center"
 import {
   DropdownMenu,
@@ -47,13 +48,87 @@ const PAGE_LINKS: Record<string, string> = {
 }
 
 /**
+ * Renders the language choices as dropdown menu items.
+ *
+ * Shared by the dedicated language menu and the phone-sized account menu, which
+ * folds secondary preferences into a single sheet.
+ */
+function LanguageMenuItems() {
+  const { language, setLanguage, t } = useLanguage()
+
+  return (
+    <>
+      <DropdownMenuLabel>{t("语言")}</DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        {languageOptions.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            className="justify-between"
+            onSelect={() => setLanguage(option.value)}
+          >
+            <span>{option.label}</span>
+            {option.value === language ? (
+              <CircleCheckIcon className="size-3.5 text-primary" />
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuGroup>
+    </>
+  )
+}
+
+/**
+ * Renders the theme choices as dropdown menu items.
+ *
+ * Shared by the dedicated theme menu and the phone-sized account menu.
+ */
+function ThemeMenuItems() {
+  const { theme, setTheme } = useTheme()
+  const { t } = useLanguage()
+
+  return (
+    <>
+      <DropdownMenuLabel>{t("主题")}</DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuGroup>
+        {themeOptions.map((option) => {
+          const Icon = option.icon
+          const isActive = theme === option.value
+
+          return (
+            <DropdownMenuItem
+              key={option.value}
+              className="justify-between"
+              onSelect={() => setTheme(option.value)}
+            >
+              <span className="flex items-center gap-2">
+                <Icon />
+                {t(option.labelKey)}
+              </span>
+              {isActive ? (
+                <CircleCheckIcon className="size-3.5 text-primary" />
+              ) : null}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuGroup>
+    </>
+  )
+}
+
+/**
  * Renders the authenticated user's application navigation bar.
  *
- * @returns The top navigation bar, or `null` when no authenticated user is available.
+ * The bar is a single responsive header: phones get identity, workspace
+ * switching, messages, and the account menu, with primary destinations moved
+ * to {@link MobileTabBar}; `sm` and wider keep the inline feature navigation.
+ *
+ * @returns The top navigation bar and mobile tab bar, or `null` when no authenticated user is available.
  */
 export function TopBar() {
-  const { language, setLanguage, t } = useLanguage()
-  const { theme, setTheme } = useTheme()
+  const { language, t } = useLanguage()
+  const { theme } = useTheme()
   const pathname = usePathname()
   const router = useRouter()
   const {
@@ -70,16 +145,15 @@ export function TopBar() {
     return null
   }
 
+  const otherWorkspaces = workspaceOptions.filter(
+    (workspace) => workspace.id !== selectedWorkspaceId
+  )
   const activeThemeOption =
     themeOptions.find((option) => option.value === theme) ?? themeOptions[0]
-  const activeThemeLabel = t(activeThemeOption.labelKey)
   const ActiveThemeIcon = activeThemeOption.icon
   const activeLanguageOption =
     languageOptions.find((option) => option.value === language) ??
     languageOptions[0]
-  const otherWorkspaces = workspaceOptions.filter(
-    (workspace) => workspace.id !== selectedWorkspaceId
-  )
   const featurePages = getPages(t)
   const isAnalyticsActive = pathname.startsWith("/system/analytics")
   const canAccessAnalytics = canAccessWorkspaceAnalytics(me)
@@ -96,235 +170,232 @@ export function TopBar() {
       ? "/system/workspaces"
       : "/system/teams"
 
+  const featureNavItems = [
+    ...featurePages.map((page) => ({
+      key: page.key,
+      href: PAGE_LINKS[page.key],
+      label: page.label,
+      icon: page.icon,
+    })),
+    ...(canAccessAnalytics
+      ? [
+          {
+            key: "analytics",
+            href: "/system/analytics",
+            label: t("数据大屏"),
+            icon: BarChart3Icon,
+          },
+        ]
+      : []),
+  ]
+
   return (
-    <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-      <div className="flex h-14 w-full items-center gap-3 px-4 sm:px-6 lg:px-8">
-        <div className="flex min-w-0 shrink-0 items-center gap-2">
-          <Link
-            href="/app/apps"
-            className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          >
-            <Image
-              src="/NexaFlow-logo.png"
-              alt="NexaFlow"
-              width={32}
-              height={32}
-              priority
-              className="size-8 rounded-full dark:invert"
-            />
-          </Link>
-          <span className="text-sm text-muted-foreground" aria-hidden="true">
-            ｜
-          </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex min-h-9 max-w-[32vw] min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground sm:max-w-52"
-                title={currentWorkspaceName}
-                aria-label={t("切换工作空间，当前为 {workspace}", {
-                  workspace: currentWorkspaceName,
-                })}
-              >
-                <span className="truncate">{currentWorkspaceName}</span>
-                <ChevronDownIcon className="size-3.5 shrink-0" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              side="bottom"
-              sideOffset={6}
-              collisionPadding={8}
-              className="max-h-72 min-w-56 overflow-y-auto"
+    <>
+      <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur">
+        <div className="flex h-14 w-full items-center gap-3 px-4 sm:px-6 lg:px-8">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+            <Link
+              href="/app/apps"
+              className="flex size-10 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
             >
-              <DropdownMenuLabel>{t("其他工作空间")}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                {otherWorkspaces.length ? (
-                  otherWorkspaces.map((workspace) => (
-                    <DropdownMenuItem
-                      key={workspace.id}
-                      onSelect={() => {
-                        switchWorkspace(workspace.id)
-                        router.replace("/app/apps")
-                      }}
-                    >
-                      <Building2Icon />
-                      <span className="truncate">
-                        {displayWorkspaceName(workspace, t)}
-                      </span>
-                    </DropdownMenuItem>
-                  ))
-                ) : (
-                  <DropdownMenuItem disabled>
-                    {t("暂无其他工作空间")}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <nav className="flex min-w-0 flex-1 justify-start gap-2 overflow-x-auto overflow-y-hidden sm:justify-center">
-          {featurePages.map((page) => {
-            const Icon = page.icon
-            const isActive = pathname.startsWith(PAGE_LINKS[page.key])
-
-            return (
-              <Button
-                key={page.key}
-                type="button"
-                variant={isActive ? "secondary" : "ghost"}
-                asChild
-                className="h-10 min-w-10 px-0 text-sm has-data-[icon=inline-start]:pl-0 sm:min-w-28 sm:px-4 sm:has-data-[icon=inline-start]:pl-2"
-              >
-                <Link href={PAGE_LINKS[page.key]} aria-label={page.label}>
-                  <Icon data-icon="inline-start" />
-                  <span className="hidden sm:inline">{page.label}</span>
-                </Link>
-              </Button>
-            )
-          })}
-          {canAccessAnalytics ? (
-            <Button
-              type="button"
-              variant={isAnalyticsActive ? "secondary" : "ghost"}
-              asChild
-              className="h-10 min-w-10 px-0 text-sm has-data-[icon=inline-start]:pl-0 sm:min-w-28 sm:px-4 sm:has-data-[icon=inline-start]:pl-2"
+              <Image
+                src="/NexaFlow-logo.png"
+                alt="NexaFlow"
+                width={32}
+                height={32}
+                priority
+                className="size-8 rounded-full dark:invert"
+              />
+            </Link>
+            <span
+              className="hidden text-sm text-muted-foreground sm:inline"
+              aria-hidden="true"
             >
-              <Link href="/system/analytics" aria-label={t("数据大屏")}>
-                <BarChart3Icon data-icon="inline-start" />
-                <span className="hidden sm:inline">{t("数据大屏")}</span>
-              </Link>
-            </Button>
-          ) : null}
-        </nav>
-        <MessageCenter />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
-              aria-label={t("切换语言，当前为 {language}", {
-                language: activeLanguageOption.label,
-              })}
-            >
-              <LanguagesIcon className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuLabel>{t("语言")}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {languageOptions.map((option) => (
-                <DropdownMenuItem
-                  key={option.value}
-                  className="justify-between"
-                  onSelect={() => setLanguage(option.value)}
+              ｜
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground sm:max-w-52"
+                  title={currentWorkspaceName}
+                  aria-label={t("切换工作空间，当前为 {workspace}", {
+                    workspace: currentWorkspaceName,
+                  })}
                 >
-                  <span>{option.label}</span>
-                  {option.value === language ? (
-                    <CircleCheckIcon className="size-3.5 text-primary" />
-                  ) : null}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
-              aria-label={t("切换主题，当前为 {theme}", {
-                theme: activeThemeLabel,
-              })}
-            >
-              <ActiveThemeIcon className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuLabel>{t("主题")}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {themeOptions.map((option) => {
-                const Icon = option.icon
-                const isActive = theme === option.value
+                  <span className="truncate">{currentWorkspaceName}</span>
+                  <ChevronDownIcon className="size-3.5 shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                side="bottom"
+                sideOffset={6}
+                collisionPadding={8}
+                className="max-h-72 min-w-56 overflow-y-auto overscroll-contain"
+              >
+                <DropdownMenuLabel>{t("其他工作空间")}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  {otherWorkspaces.length ? (
+                    otherWorkspaces.map((workspace) => (
+                      <DropdownMenuItem
+                        key={workspace.id}
+                        onSelect={() => {
+                          switchWorkspace(workspace.id)
+                          router.replace("/app/apps")
+                        }}
+                      >
+                        <Building2Icon />
+                        <span className="truncate">
+                          {displayWorkspaceName(workspace, t)}
+                        </span>
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>
+                      {t("暂无其他工作空间")}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <nav className="hidden min-w-0 flex-1 justify-center gap-2 overflow-x-auto overflow-y-hidden sm:flex">
+            {featureNavItems.map((item) => {
+              const Icon = item.icon
+              const isActive =
+                item.key === "analytics"
+                  ? isAnalyticsActive
+                  : pathname.startsWith(item.href)
 
-                return (
-                  <DropdownMenuItem
-                    key={option.value}
-                    className="justify-between"
-                    onSelect={() => setTheme(option.value)}
+              return (
+                <Button
+                  key={item.key}
+                  type="button"
+                  variant={isActive ? "secondary" : "ghost"}
+                  asChild
+                  className="h-10 min-w-28 px-4 text-sm has-data-[icon=inline-start]:pl-2"
+                >
+                  <Link href={item.href}>
+                    <Icon data-icon="inline-start" />
+                    {item.label}
+                  </Link>
+                </Button>
+              )
+            })}
+          </nav>
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+            <MessageCenter />
+            <div className="hidden items-center gap-1 sm:flex sm:gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-lg"
+                    className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+                    aria-label={t("切换语言，当前为 {language}", {
+                      language: activeLanguageOption.label,
+                    })}
                   >
-                    <span className="flex items-center gap-2">
-                      <Icon />
-                      {t(option.labelKey)}
+                    <LanguagesIcon className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 overflow-y-auto overscroll-contain"
+                >
+                  <LanguageMenuItems />
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-lg"
+                    className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+                    aria-label={t("切换主题，当前为 {theme}", {
+                      theme: t(activeThemeOption.labelKey),
+                    })}
+                  >
+                    <ActiveThemeIcon className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 overflow-y-auto overscroll-contain"
+                >
+                  <ThemeMenuItems />
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-lg"
+                  aria-label={t("打开用户菜单")}
+                >
+                  <Avatar>
+                    <AvatarFallback>{initials(me.user.name)}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-56 overflow-y-auto overscroll-contain"
+              >
+                <DropdownMenuLabel>
+                  <div className="flex flex-col gap-1">
+                    <span>{me.user.name}</span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {me.user.username} / {getUserRoleLabel(me.user, t)}
                     </span>
-                    {isActive ? (
-                      <CircleCheckIcon className="size-3.5 text-primary" />
-                    ) : null}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {me.user.email}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={openPasswordDialog}>
+                    <LockIcon />
+                    {t("修改密码")}
                   </DropdownMenuItem>
-                )
-              })}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              aria-label={t("打开用户菜单")}
-            >
-              <Avatar>
-                <AvatarFallback>{initials(me.user.name)}</AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>
-              <div className="flex flex-col gap-1">
-                <span>{me.user.name}</span>
-                <span className="text-xs font-normal text-muted-foreground">
-                  {me.user.username} / {getUserRoleLabel(me.user, t)}
-                </span>
-                <span className="text-xs font-normal text-muted-foreground">
-                  {me.user.email}
-                </span>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem onSelect={openPasswordDialog}>
-                <LockIcon />
-                {t("修改密码")}
-              </DropdownMenuItem>
-              {canAccessSystem ? (
-                <DropdownMenuItem asChild>
-                  <Link href={systemHref}>
-                    <SettingsIcon />
-                    {t("系统管理")}
-                  </Link>
-                </DropdownMenuItem>
-              ) : null}
-              {canManageAnnouncements ? (
-                <DropdownMenuItem asChild>
-                  <Link href="/system/announcements">
-                    <MegaphoneIcon />
-                    {t("公告管理")}
-                  </Link>
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem onSelect={logout}>
-                <LogOutIcon />
-                {t("退出登录")}
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </header>
+                  {canAccessSystem ? (
+                    <DropdownMenuItem asChild>
+                      <Link href={systemHref}>
+                        <SettingsIcon />
+                        {t("系统管理")}
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
+                  {canManageAnnouncements ? (
+                    <DropdownMenuItem asChild>
+                      <Link href="/system/announcements">
+                        <MegaphoneIcon />
+                        {t("公告管理")}
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem onSelect={logout}>
+                    <LogOutIcon />
+                    {t("退出登录")}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                {/* Phones have no room for dedicated language/theme buttons. */}
+                <div className="sm:hidden">
+                  <DropdownMenuSeparator />
+                  <LanguageMenuItems />
+                  <DropdownMenuSeparator />
+                  <ThemeMenuItems />
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </header>
+      <MobileTabBar />
+    </>
   )
 }

@@ -820,8 +820,8 @@ export function WorkflowDetailWorkspace({
     <div
       className={
         standalone
-          ? "flex h-svh flex-col overflow-hidden bg-background"
-          : "-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0"
+          ? "flex h-dvh max-h-full flex-col overflow-hidden bg-background sm:h-svh"
+          : "-mx-4 -my-6 flex min-h-[calc(100dvh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 sm:min-h-[calc(100svh-3.5rem)] lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0"
       }
     >
       <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
@@ -832,7 +832,7 @@ export function WorkflowDetailWorkspace({
           aria-label={t("返回")}
           title={t("返回")}
           onClick={() => {
-            if (visibleActiveView === "settings") {
+            if (!standalone && visibleActiveView === "settings") {
               void changeView("overview")
               return
             }
@@ -841,20 +841,20 @@ export function WorkflowDetailWorkspace({
         >
           <ArrowLeftIcon />
         </Button>
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-sm">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-sm max-sm:hidden">
           <WorkflowIcon className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="max-w-52 truncate text-base font-semibold sm:max-w-none">
+            <h1 className="min-w-0 max-w-52 truncate text-base font-semibold sm:max-w-none">
               {form.name || agent.name}
             </h1>
             <Badge
               variant="outline"
               className={
                 agent.status === "active"
-                  ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "text-muted-foreground"
+                  ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 max-sm:hidden dark:text-emerald-400"
+                  : "text-muted-foreground max-sm:hidden"
               }
             >
               <span
@@ -865,7 +865,7 @@ export function WorkflowDetailWorkspace({
             {agent.published ? (
               <Badge
                 variant="outline"
-                className="border-blue-600/20 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                className="border-blue-600/20 bg-blue-500/10 text-blue-700 max-sm:hidden dark:text-blue-400"
               >
                 {t("已发布")}
               </Badge>
@@ -881,6 +881,7 @@ export function WorkflowDetailWorkspace({
         {visibleActiveView === "settings" ? (
           <IconButton
             label={t("版本历史")}
+            className="max-sm:hidden"
             onClick={() => setHistoryOpen(true)}
           >
             <HistoryIcon />
@@ -889,6 +890,7 @@ export function WorkflowDetailWorkspace({
         {visibleActiveView === "settings" && agent.can_edit ? (
           <IconButton
             label={t("应用设置")}
+            className="max-sm:hidden"
             onClick={() => setSettingsOpen(true)}
           >
             <SettingsIcon />
@@ -953,6 +955,7 @@ export function WorkflowDetailWorkspace({
           <Button
             type="button"
             aria-label={t("发布版本")}
+            className="max-sm:hidden"
             disabled={isPublishing || agent.status !== "active" || isAppDirty}
             title={isAppDirty ? t("请先保存更改后再发布。") : undefined}
             onClick={() => void handlePublish()}
@@ -983,6 +986,36 @@ export function WorkflowDetailWorkspace({
               align="start"
               className="min-w-40"
             >
+              {visibleActiveView === "settings" ? (
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  onSelect={() => setHistoryOpen(true)}
+                >
+                  <HistoryIcon />
+                  {t("版本历史")}
+                </DropdownMenuItem>
+              ) : null}
+              {visibleActiveView === "settings" && agent.can_edit ? (
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  onSelect={() => setSettingsOpen(true)}
+                >
+                  <SettingsIcon />
+                  {t("应用设置")}
+                </DropdownMenuItem>
+              ) : null}
+              {canManagePublishing ? (
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  disabled={
+                    isPublishing || agent.status !== "active" || isAppDirty
+                  }
+                  onSelect={() => void handlePublish()}
+                >
+                  <UploadIcon />
+                  {t("发布版本")}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem variant="destructive" onSelect={onDelete}>
                 <Trash2Icon />
                 {t("删除工作流")}
@@ -1067,8 +1100,8 @@ export function WorkflowDetailWorkspace({
                   className={cn(
                     "absolute z-40 flex min-h-0 overflow-hidden rounded-2xl border border-border/80 bg-background/98 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-[inset,width] duration-200",
                     runExpanded
-                      ? "inset-2 sm:inset-y-3 sm:right-3 sm:left-auto sm:w-2/3 lg:w-1/3 lg:min-w-96"
-                      : "inset-2 sm:inset-y-4 sm:right-4 sm:left-auto sm:w-96"
+                      ? "inset-x-2 top-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] sm:inset-y-3 sm:right-3 sm:left-auto sm:w-2/3 lg:w-1/3 lg:min-w-96"
+                      : "inset-x-2 top-2 bottom-[calc(0.5rem+env(safe-area-inset-bottom))] sm:inset-y-4 sm:right-4 sm:left-auto sm:w-96"
                   )}
                 >
                   <form
@@ -1089,7 +1122,7 @@ export function WorkflowDetailWorkspace({
                       </span>
                       <IconButton
                         label={t(runExpanded ? "收起" : "展开")}
-                        className="size-8 text-muted-foreground hover:text-foreground"
+                        className="size-8 text-muted-foreground hover:text-foreground max-sm:hidden"
                         onClick={() => setRunExpanded((current) => !current)}
                       >
                         {runExpanded ? (

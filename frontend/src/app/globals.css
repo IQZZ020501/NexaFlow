@@ -155,7 +155,115 @@
     }
   html {
     @apply font-sans;
+    -webkit-text-size-adjust: 100%;
     }
+}
+
+/*
+ * Mobile adaptation layer.
+ *
+ * Phones need bigger touch targets, no 300ms tap delay, no accidental
+ * pull-to-refresh from horizontally scrolling tables, and browser-provided
+ * safe areas. Everything here is scoped to viewports narrower than Tailwind's
+ * `sm` breakpoint, so tablet and desktop rendering is untouched.
+ */
+@layer base {
+  a,
+  button,
+  input,
+  label,
+  select,
+  summary,
+  textarea,
+  [role="button"],
+  [role="checkbox"],
+  [role="link"],
+  [role="menuitem"],
+  [role="radio"],
+  [role="switch"],
+  [role="tab"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Horizontal scroll regions must not chain into the browser history gesture. */
+  .overflow-x-auto,
+  .overflow-x-scroll,
+  .overflow-auto {
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (width < 40rem) {
+  /*
+   * Touch-target floor. `min-*` is used instead of `height` so layout sizes
+   * that are intentionally denser still grow their hit area instead of
+   * fighting the utility classes with specificity.
+   *
+   * `[data-size]` is the marker every `Button` writes, including instances
+   * rendered through `asChild`, where Radix replaces `data-slot` with its own.
+   * Painted controls whose geometry carries meaning (`role="switch"`,
+   * `role="radio"`, `role="checkbox"`) are deliberately excluded and get their
+   * hit area from the surrounding row instead.
+   */
+  button,
+  [data-size],
+  [role="button"],
+  [role="tab"] {
+    min-height: 2.5rem;
+  }
+
+  [data-size^="icon"] {
+    min-width: 2.5rem;
+  }
+
+  [data-slot="input"],
+  select,
+  textarea {
+    min-height: 2.5rem;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-width: 1.25rem;
+    min-height: 1.25rem;
+  }
+
+  /* Menu rows are full width, so only the vertical target needs a floor. */
+  [data-slot="dropdown-menu-item"],
+  [data-slot="dropdown-menu-label"] {
+    min-height: 2.75rem;
+  }
+
+  /*
+   * iOS Safari zooms the whole page when a focused control renders below 16px.
+   * Keep the visual scale but raise the computed size on phones.
+   */
+  [data-slot="input"],
+  select,
+  textarea {
+    font-size: 1rem;
+  }
+}
+
+@layer utilities {
+  /* Browser safe areas; require `viewport-fit=cover` from the root layout. */
+  .pb-safe {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+
+  .pt-safe {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+
+  .px-safe {
+    padding-inline: max(0.75rem, env(safe-area-inset-left), env(safe-area-inset-right));
+  }
+
+  .h-safe-bottom {
+    height: env(safe-area-inset-bottom);
+  }
 }
 
 @layer base {

@@ -35,6 +35,7 @@ import {
 import type {
   KnowledgeDocument,
   KnowledgeEvaluationCase,
+  KnowledgeEvaluationResult,
   KnowledgeEvaluationSummary,
   KnowledgeGraphEvaluationExpectation,
   KnowledgeGraphMode,
@@ -46,6 +47,7 @@ import { languageLocales, type TranslationKey } from "@/i18n"
 import { formatDateTime } from "@/lib/display"
 import { taskStatusLabel } from "@/components/knowledge/status-labels"
 import { KnowledgeHitTest } from "@/components/knowledge/knowledge-hit-test"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type KnowledgeEvaluationProps = {
   token: string
@@ -81,6 +83,49 @@ function graphRevisionId(trace: Record<string, unknown>) {
 }
 
 /**
+ * Renders the graph-specific metrics reported for a single evaluation result.
+ *
+ * @param result - The evaluation result whose graph metrics should be displayed
+ * @returns An expandable list of graph metrics, or `null` when the result has none
+ */
+function GraphMetricDetails({ result }: { result: KnowledgeEvaluationResult }) {
+  const { t } = useLanguage()
+  const metrics = result.graph_metrics
+  if (!metrics) return null
+  const revisionId = graphRevisionId(result.trace)
+  return (
+    <details className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
+      <summary className="cursor-pointer font-medium">
+        {t("知识关联指标")}
+      </summary>
+      {revisionId ? (
+        <p className="mt-2 break-all text-muted-foreground">
+          {t("图谱修订：{value}", { value: revisionId })}
+        </p>
+      ) : null}
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+        {(
+          [
+            ["实体精确率", metrics.entity_precision],
+            ["实体召回率", metrics.entity_recall],
+            ["关系精确率", metrics.claim_precision],
+            ["关系召回率", metrics.claim_recall],
+            ["路径完全匹配", metrics.path_exact_match],
+            ["路径边准确率", metrics.path_edge_accuracy],
+            ["引用覆盖率", metrics.citation_coverage],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-muted-foreground">{t(label)}</dt>
+            <dd>{metric(value)}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  )
+}
+
+/**
  * Provides an interface for creating, running, and reviewing knowledge-base retrieval evaluations.
  *
  * @param token - Authentication token used for evaluation API requests
@@ -101,6 +146,7 @@ export function KnowledgeEvaluation({
 }: KnowledgeEvaluationProps) {
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
   const activeDocuments = React.useMemo(
     () => documents.filter((document) => document.is_active),
     [documents],
@@ -707,66 +753,82 @@ export function KnowledgeEvaluation({
                     </div>
                   ))}
                 </dl>
-                <div className="overflow-x-auto border-t">
+                <div className="hidden overflow-x-auto border-t md:block">
                   <div className="min-w-[760px]">
                     <div className="grid grid-cols-[minmax(260px,1fr)_90px_90px_90px_90px_120px] border-b px-4 py-2 text-xs font-medium text-muted-foreground">
                       <span>{t("问题 / 错误")}</span><span>{t("Hit@K")}</span><span>{t("Recall@K")}</span><span>{t("MRR")}</span><span>{t("nDCG@K")}</span><span>{t("延迟")}</span>
                     </div>
-                    {summary.results.map((result) => {
-                      const revisionId = graphRevisionId(result.trace)
-                      return (
-                        <div
-                          key={result.id}
-                          className="grid grid-cols-[minmax(260px,1fr)_90px_90px_90px_90px_120px] border-b px-4 py-3 text-sm last:border-b-0"
-                        >
-                          <span className="min-w-0 break-words pr-3">
-                            {result.question}
-                            {result.error ? (
-                              <small className="mt-1 block text-destructive">
-                                {result.error}
-                              </small>
-                            ) : null}
-                            {result.graph_metrics ? (
-                              <details className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
-                                <summary className="cursor-pointer font-medium">
-                                  {t("知识关联指标")}
-                                </summary>
-                                {revisionId ? (
-                                  <p className="mt-2 break-all text-muted-foreground">
-                                    {t("图谱修订：{value}", { value: revisionId })}
-                                  </p>
-                                ) : null}
-                                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-                                  {([
-                                    ["实体精确率", result.graph_metrics.entity_precision],
-                                    ["实体召回率", result.graph_metrics.entity_recall],
-                                    ["关系精确率", result.graph_metrics.claim_precision],
-                                    ["关系召回率", result.graph_metrics.claim_recall],
-                                    ["路径完全匹配", result.graph_metrics.path_exact_match],
-                                    ["路径边准确率", result.graph_metrics.path_edge_accuracy],
-                                    ["引用覆盖率", result.graph_metrics.citation_coverage],
-                                  ] as const).map(([label, value]) => (
-                                    <div key={label}>
-                                      <dt className="text-muted-foreground">
-                                        {t(label)}
-                                      </dt>
-                                      <dd>{metric(value)}</dd>
-                                    </div>
-                                  ))}
-                                </dl>
-                              </details>
-                            ) : null}
-                          </span>
-                          <span>{metric(result.hit_at_k)}</span>
-                          <span>{metric(result.recall_at_k)}</span>
-                          <span>{metric(result.reciprocal_rank)}</span>
-                          <span>{metric(result.ndcg_at_k)}</span>
-                          <span>{t("{value} 毫秒", { value: metric(result.latency_ms) })}</span>
-                        </div>
-                      )
-                    })}
+                    {summary.results.map((result) => (
+                      <div
+                        key={result.id}
+                        className="grid grid-cols-[minmax(260px,1fr)_90px_90px_90px_90px_120px] border-b px-4 py-3 text-sm last:border-b-0"
+                      >
+                        <span className="min-w-0 break-words pr-3">
+                          {result.question}
+                          {result.error ? (
+                            <small className="mt-1 block text-destructive">
+                              {result.error}
+                            </small>
+                          ) : null}
+                          <GraphMetricDetails result={result} />
+                        </span>
+                        <span>{metric(result.hit_at_k)}</span>
+                        <span>{metric(result.recall_at_k)}</span>
+                        <span>{metric(result.reciprocal_rank)}</span>
+                        <span>{metric(result.ndcg_at_k)}</span>
+                        <span>{t("{value} 毫秒", { value: metric(result.latency_ms) })}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
+
+                {/* phones */}
+                {isPhoneListLayout ? (
+                  <ul className="divide-y border-t">
+                  {summary.results.map((result) => (
+                    <li key={result.id} className="p-4 text-sm">
+                      <p className="break-words font-medium">
+                        {result.question}
+                      </p>
+                      {result.error ? (
+                        <p className="mt-1 text-xs text-destructive">
+                          {result.error}
+                        </p>
+                      ) : null}
+                      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                        {[
+                          ["Hit@K" as TranslationKey, metric(result.hit_at_k)],
+                          [
+                            "Recall@K" as TranslationKey,
+                            metric(result.recall_at_k),
+                          ],
+                          ["MRR" as TranslationKey, metric(result.reciprocal_rank)],
+                          [
+                            "nDCG@K" as TranslationKey,
+                            metric(result.ndcg_at_k),
+                          ],
+                          [
+                            "延迟" as TranslationKey,
+                            t("{value} 毫秒", {
+                              value: metric(result.latency_ms),
+                            }),
+                          ],
+                        ].map(([label, value]) => (
+                          <div key={label} className="min-w-0">
+                            <dt className="text-muted-foreground">
+                              {t(label as TranslationKey)}
+                            </dt>
+                            <dd className="mt-0.5 font-medium tabular-nums">
+                              {value}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                      <GraphMetricDetails result={result} />
+                    </li>
+                  ))}
+                  </ul>
+                ) : null}
               </div>
             ) : (
               <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">

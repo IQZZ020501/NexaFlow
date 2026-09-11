@@ -83,7 +83,12 @@ function MarkdownPre(
     }>(child)
   ) {
     const { className, ...restProps } = omitMarkdownNode(props)
-    return <pre className={className} {...restProps} />
+    return (
+      <pre
+        className={cn("overflow-x-auto break-normal", className)}
+        {...restProps}
+      />
+    )
   }
   const language =
     /(?:^|\s)language-([^\s]+)/.exec(child.props.className ?? "")?.[1]
@@ -151,7 +156,7 @@ function ArtifactDownloadLink({
   return (
     <a
       className={cn(
-        "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300",
+        "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 max-sm:break-all dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300",
         isDownloading && "cursor-wait opacity-70",
         className
       )}
@@ -182,8 +187,8 @@ export function MarkdownLink(
     <a
       className={cn(
         isArtifact
-          ? "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300"
-          : "font-medium text-primary underline-offset-4 hover:underline",
+          ? "font-medium text-sky-600 underline decoration-sky-600/40 underline-offset-4 hover:text-sky-700 max-sm:break-all dark:text-sky-400 dark:decoration-sky-400/50 dark:hover:text-sky-300"
+          : "font-medium text-primary underline-offset-4 hover:underline max-sm:break-all",
         className
       )}
       href={href}
@@ -258,7 +263,7 @@ const markdownComponents: Components = {
     return (
       <code
         className={cn(
-          "rounded bg-muted px-1 py-0.5 font-mono text-[0.9em]",
+          "rounded bg-muted px-1 py-0.5 font-mono text-[0.9em] max-sm:break-all",
           className
         )}
         {...restProps}
@@ -269,9 +274,12 @@ const markdownComponents: Components = {
   table(props) {
     const { className, ...restProps } = omitMarkdownNode(props)
     return (
-      <div className="my-3 overflow-x-auto">
+      <div className="my-3 max-w-full overflow-x-auto">
         <table
-          className={cn("w-full border-collapse text-left text-sm", className)}
+          className={cn(
+            "w-full border-collapse text-left text-sm",
+            className
+          )}
           {...restProps}
         />
       </div>
@@ -328,7 +336,12 @@ export function MarkdownContent({
   }
 
   return (
-    <div className={cn("min-w-0 text-sm leading-6 text-foreground", className)}>
+    <div
+      className={cn(
+        "min-w-0 max-w-full text-sm leading-6 text-foreground",
+        className
+      )}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkCjkFriendly]}
         components={components}

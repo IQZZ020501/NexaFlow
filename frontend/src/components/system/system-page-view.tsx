@@ -292,14 +292,37 @@ export function SystemPageView({
   teamMembersDialogProps,
 }: SystemPageViewProps) {
   const { t } = useLanguage()
+  const navRef = React.useRef<HTMLDivElement | null>(null)
+
+  React.useEffect(() => {
+    const nav = navRef.current
+    if (!nav || !window.matchMedia("(max-width: 639px)").matches) {
+      return
+    }
+    const active = nav.querySelector<HTMLElement>(
+      '[aria-selected="true"], details[open] > summary'
+    )
+    if (!active) {
+      return
+    }
+    const navRect = nav.getBoundingClientRect()
+    const activeRect = active.getBoundingClientRect()
+    const centered =
+      activeRect.left - navRect.left - (navRect.width - activeRect.width) / 2
+    nav.scrollTo({
+      left: Math.max(0, nav.scrollLeft + centered),
+      behavior: "smooth",
+    })
+  }, [activeSystemTab])
 
   return (
     <div className="grid min-w-0 gap-4 lg:h-[calc(100svh-9.25rem)] lg:min-h-0 lg:grid-cols-[240px_minmax(0,1fr)]">
       <aside className="min-w-0 lg:sticky lg:top-20 lg:h-full lg:self-start">
         <div
+          ref={navRef}
           role="tablist"
           aria-label={t("系统管理")}
-          className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 shadow-sm lg:h-full lg:flex-col lg:overflow-visible"
+          className="flex gap-1 overflow-x-auto overscroll-x-contain rounded-lg border bg-background p-1 shadow-sm max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-p-1 lg:h-full lg:flex-col lg:overflow-visible"
         >
           {systemTabs.map((tab) => {
             const Icon = tab.icon
@@ -314,7 +337,7 @@ export function SystemPageView({
                 aria-selected={isActive}
                 aria-controls={`system-panel-${tab.key}`}
                 className={cn(
-                  "flex min-w-32 items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0",
+                  "flex min-w-32 items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0",
                   isActive &&
                     "bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background"
                 )}
@@ -344,7 +367,7 @@ export function SystemPageView({
           {me.user.is_global_admin ? (
             <Link
               href="/system/operations"
-              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
             >
               <ActivityIcon className="size-4 shrink-0" />
               <span>{t("系统运行")}</span>
@@ -353,7 +376,7 @@ export function SystemPageView({
           {me.user.is_global_admin ? (
             <Link
               href="/system/email"
-              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
             >
               <MailIcon className="size-4 shrink-0" />
               <span>{t("SMTP 邮件")}</span>
@@ -362,7 +385,7 @@ export function SystemPageView({
           {me.user.is_global_admin ? (
             <Link
               href="/system/identity"
-              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
             >
               <LogInIcon className="size-4 shrink-0" />
               <span>{t("企业登录")}</span>
@@ -371,7 +394,7 @@ export function SystemPageView({
           {canManageAnyWorkspace(me, selectedWorkspaceId) ? (
             <Link
               href="/system/governance"
-              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
             >
               <ShieldCheckIcon className="size-4 shrink-0" />
               <span>{t("工作空间治理")}</span>
@@ -379,7 +402,7 @@ export function SystemPageView({
           ) : null}
           <Link
             href="/system/security"
-            className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:min-w-0"
+            className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
           >
             <KeyRoundIcon className="size-4 shrink-0" />
             <span>{t("会话安全")}</span>

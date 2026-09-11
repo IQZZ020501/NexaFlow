@@ -65,6 +65,31 @@ const nodeTypes = { workflow: WorkflowNodeCard }
 const edgeTypes = { workflow: WorkflowEdgeCard }
 const reactFlowProOptions = { hideAttribution: true }
 
+/** Matches the phone breakpoint (`max-sm`) used across the mobile adaptation. */
+const PHONE_VIEWPORT_QUERY = "(max-width: 639px)"
+
+/** Smallest canvas zoom at which a phone user can read a node without pinching in. */
+const PHONE_MIN_VIEWPORT_ZOOM = 0.75
+
+/**
+ * Subscribes to the phone breakpoint, updating when the viewport is resized or rotated.
+ *
+ * @returns `true` while the viewport is narrower than the `sm` breakpoint
+ */
+function usePhoneViewport() {
+  const [isPhone, setIsPhone] = React.useState(
+    () => window.matchMedia(PHONE_VIEWPORT_QUERY).matches
+  )
+  React.useEffect(() => {
+    const query = window.matchMedia(PHONE_VIEWPORT_QUERY)
+    const update = () => setIsPhone(query.matches)
+    update()
+    query.addEventListener("change", update)
+    return () => query.removeEventListener("change", update)
+  }, [])
+  return isPhone
+}
+
 type WorkflowCanvasProps = {
   agent: Agent
   graph: WorkflowGraph
@@ -98,13 +123,21 @@ function CanvasInner(props: WorkflowCanvasProps) {
   )
   const [nodes, setNodes] = React.useState<WorkflowNode[]>(initialGraph.nodes)
   const [edges, setEdges] = React.useState<WorkflowEdge[]>(initialGraph.edges)
+  const isPhone = usePhoneViewport()
   const startNodeId =
     nodes.find((node) => node.data.type === "start")?.id ?? "start"
-  const [viewport, setViewport] = React.useState(props.graph.viewport)
+  // A viewport saved on desktop while zoomed far out would open a phone on
+  // unreadable nodes, so phones start no further out than a legible zoom.
+  const [defaultViewport] = React.useState(() =>
+    isPhone && props.graph.viewport.zoom < PHONE_MIN_VIEWPORT_ZOOM
+      ? { ...props.graph.viewport, zoom: PHONE_MIN_VIEWPORT_ZOOM }
+      : props.graph.viewport
+  )
+  const [viewport, setViewport] = React.useState(defaultViewport)
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(
     null
   )
-  const [infoOpen, setInfoOpen] = React.useState(true)
+  const [infoOpen, setInfoOpen] = React.useState(!isPhone)
   const [infoPosition, setInfoPosition] = React.useState({ x: 16, y: 16 })
   const infoCardRef = React.useRef<HTMLDivElement | null>(null)
   const infoPositionInitializedRef = React.useRef(false)
@@ -521,23 +554,112 @@ function CanvasInner(props: WorkflowCanvasProps) {
     }
   }, [t])
 
+  const basicInfoTitle = (
+    <>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400">
+        <FileTextIcon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+        {t("基本信息")}
+      </span>
+    </>
+  )
+  const basicInfoToggle = (
+    <IconButton
+      label={infoOpen ? t("收起") : t("展开")}
+      className="size-6"
+      aria-expanded={infoOpen}
+      onClick={toggleInfoOpen}
+    >
+      {infoOpen ? (
+        <ChevronUpIcon className="size-3.5" />
+      ) : (
+        <ChevronDownIcon className="size-3.5" />
+      )}
+    </IconButton>
+  )
+  const basicInfoFields = (
+    <>
+      <label
+        className="grid gap-1.5 text-xs font-medium"
+        htmlFor="basic-info-name"
+      >
+        <span>{t("名称")}</span>
+        <Input
+          id="basic-info-name"
+          className="focus-visible:border-ring focus-visible:ring-0"
+          value={props.form.name}
+          maxLength={120}
+          onChange={(event) =>
+            props.setForm((current) => ({
+              ...current,
+              name: event.target.value,
+            }))
+          }
+        />
+        <span className="text-right text-[10px] text-muted-foreground">
+          {props.form.name.length} / 120
+        </span>
+      </label>
+      <label
+        className="grid gap-1.5 text-xs font-medium"
+        htmlFor="basic-info-description"
+      >
+        <span>{t("描述")}</span>
+        <textarea
+          id="basic-info-description"
+          rows={3}
+          maxLength={500}
+          value={props.form.description}
+          onChange={(event) =>
+            props.setForm((current) => ({
+              ...current,
+              description: event.target.value,
+            }))
+          }
+          className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:border-ring"
+        />
+        <span className="text-right text-[10px] text-muted-foreground">
+          {props.form.description.length} / 500
+        </span>
+      </label>
+      <InteractionConfigFields
+        appType="workflow"
+        value={props.form.interactionConfig}
+        onChange={(interactionConfig) =>
+          props.setForm((current) => ({
+            ...current,
+            interactionConfig,
+          }))
+        }
+        t={t}
+        idPrefix="basic-info"
+        readOnly={props.readOnly}
+        compact
+      />
+    </>
+  )
+
   return (
     <div className="flex min-h-0 flex-1 border-t bg-background">
       <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <div
           ref={flowPaneRef}
-          className="relative h-[56vh] min-h-[440px] lg:h-full"
+          className="relative h-[56vh] min-h-[440px] max-sm:flex-1 lg:h-full"
         >
           <ReactFlow
             nodes={renderedNodes}
             edges={renderedEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
-            defaultViewport={props.graph.viewport}
+            defaultViewport={defaultViewport}
             ariaLabelConfig={ariaLabelConfig}
             proOptions={reactFlowProOptions}
             minZoom={0.2}
             maxZoom={2}
+            panOnDrag
+            zoomOnPinch
+            zoomOnDoubleClick
             nodesDraggable={!props.readOnly}
             nodesConnectable={!props.readOnly}
             elementsSelectable
@@ -626,7 +748,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
               )
             }}
           >
-            {!props.readOnly ? (
+            {!props.readOnly && !isPhone ? (
               <ViewportPortal>
                 <div
                   ref={infoCardRef}
@@ -649,85 +771,13 @@ function CanvasInner(props: WorkflowCanvasProps) {
                       }}
                       onKeyDown={handleInfoDragKeyDown}
                     >
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10 text-orange-600 dark:text-orange-400">
-                        <FileTextIcon className="size-4" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                        {t("基本信息")}
-                      </span>
+                      {basicInfoTitle}
                     </button>
-                    <IconButton
-                      label={infoOpen ? t("收起") : t("展开")}
-                      className="size-6"
-                      aria-expanded={infoOpen}
-                      onClick={toggleInfoOpen}
-                    >
-                      {infoOpen ? (
-                        <ChevronUpIcon className="size-3.5" />
-                      ) : (
-                        <ChevronDownIcon className="size-3.5" />
-                      )}
-                    </IconButton>
+                    {basicInfoToggle}
                   </div>
                   {infoOpen ? (
                     <div className="mt-3 grid max-h-[70vh] gap-4 overflow-y-auto pr-1">
-                      <label
-                        className="grid gap-1.5 text-xs font-medium"
-                        htmlFor="basic-info-name"
-                      >
-                        <span>{t("名称")}</span>
-                        <Input
-                          id="basic-info-name"
-                          className="focus-visible:border-ring focus-visible:ring-0"
-                          value={props.form.name}
-                          maxLength={120}
-                          onChange={(event) =>
-                            props.setForm((current) => ({
-                              ...current,
-                              name: event.target.value,
-                            }))
-                          }
-                        />
-                        <span className="text-right text-[10px] text-muted-foreground">
-                          {props.form.name.length} / 120
-                        </span>
-                      </label>
-                      <label
-                        className="grid gap-1.5 text-xs font-medium"
-                        htmlFor="basic-info-description"
-                      >
-                        <span>{t("描述")}</span>
-                        <textarea
-                          id="basic-info-description"
-                          rows={3}
-                          maxLength={500}
-                          value={props.form.description}
-                          onChange={(event) =>
-                            props.setForm((current) => ({
-                              ...current,
-                              description: event.target.value,
-                            }))
-                          }
-                          className="resize-y rounded-md border bg-background px-2.5 py-2 text-sm leading-5 outline-none focus-visible:border-ring"
-                        />
-                        <span className="text-right text-[10px] text-muted-foreground">
-                          {props.form.description.length} / 500
-                        </span>
-                      </label>
-                      <InteractionConfigFields
-                        appType="workflow"
-                        value={props.form.interactionConfig}
-                        onChange={(interactionConfig) =>
-                          props.setForm((current) => ({
-                            ...current,
-                            interactionConfig,
-                          }))
-                        }
-                        t={t}
-                        idPrefix="basic-info"
-                        readOnly={props.readOnly}
-                        compact
-                      />
+                      {basicInfoFields}
                     </div>
                   ) : null}
                 </div>
@@ -736,7 +786,8 @@ function CanvasInner(props: WorkflowCanvasProps) {
             <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
             <Controls
               showInteractive={false}
-              className="overflow-hidden rounded-md !border !border-border !shadow-sm [--xy-controls-button-background-color-hover:var(--muted)] [--xy-controls-button-background-color:var(--card)] [--xy-controls-button-border-color:var(--border)] [--xy-controls-button-color-hover:var(--foreground)] [--xy-controls-button-color:var(--card-foreground)]"
+              position="bottom-left"
+              className="overflow-hidden rounded-md !border !border-border !shadow-sm [--xy-controls-button-background-color-hover:var(--muted)] [--xy-controls-button-background-color:var(--card)] [--xy-controls-button-border-color:var(--border)] [--xy-controls-button-color-hover:var(--foreground)] [--xy-controls-button-color:var(--card-foreground)] max-sm:!mb-[calc(env(safe-area-inset-bottom)+0.375rem)] max-sm:[&>button]:!w-10"
             />
             <MiniMap
               pannable
@@ -746,6 +797,19 @@ function CanvasInner(props: WorkflowCanvasProps) {
               maskColor="color-mix(in oklch, var(--background) 75%, transparent)"
             />
           </ReactFlow>
+          {!props.readOnly && isPhone ? (
+            <div className="absolute inset-x-2 top-2 z-30 rounded-lg border bg-card/95 p-3 shadow-md backdrop-blur">
+              <div className="flex items-center gap-2">
+                {basicInfoTitle}
+                {basicInfoToggle}
+              </div>
+              {infoOpen ? (
+                <div className="mt-3 grid max-h-[45svh] gap-4 overflow-y-auto pr-1">
+                  {basicInfoFields}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

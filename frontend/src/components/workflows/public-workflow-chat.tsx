@@ -15,6 +15,7 @@ import {
   PlayIcon,
   SearchIcon,
   WorkflowIcon,
+  XIcon,
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
@@ -42,6 +43,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { IconButton } from "@/components/ui/icon-button"
 import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-form"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
@@ -138,6 +140,7 @@ function updateRun(
  * @param conversationId - The currently selected conversation ID
  * @param onNew - Called when a new conversation is requested
  * @param onSelect - Called with the ID of the selected conversation
+ * @param onClose - Called when the panel is dismissed; omitted when the panel is always visible
  */
 function ConversationHistory({
   profile,
@@ -146,6 +149,7 @@ function ConversationHistory({
   onNew,
   onSelect,
   onDelete,
+  onClose,
   deletingConversationId,
   onExport,
   exportingConversationId,
@@ -156,6 +160,7 @@ function ConversationHistory({
   onNew: () => void
   onSelect: (conversationId: string) => void
   onDelete: (conversationId: string) => void
+  onClose?: () => void
   deletingConversationId: string | null
   onExport: (conversationId: string) => void
   exportingConversationId: string | null
@@ -177,7 +182,14 @@ function ConversationHistory({
         <span className="flex size-9 items-center justify-center rounded-lg bg-foreground text-background">
           <WorkflowIcon className="size-4" />
         </span>
-        <p className="truncate text-sm font-semibold">{profile.name}</p>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {profile.name}
+        </p>
+        {onClose ? (
+          <IconButton label={t("关闭")} onClick={onClose}>
+            <XIcon />
+          </IconButton>
+        ) : null}
       </div>
       <div className="p-3">
         <Button
@@ -694,7 +706,7 @@ export function PublicWorkflowChat({
 
   if (loading || !profile) {
     return (
-      <main className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
+      <main className="flex min-h-dvh items-center justify-center p-6 text-sm text-muted-foreground">
         {error ?? (
           <>
             <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -705,23 +717,23 @@ export function PublicWorkflowChat({
     )
   }
 
-  const history = (
-    <ConversationHistory
-      profile={profile}
-      conversations={conversations}
-      conversationId={conversationId}
-      onNew={() => selectConversation(null)}
-      onSelect={selectConversation}
-      onDelete={handleDeleteConversation}
-      deletingConversationId={deletingConversationId}
-      onExport={handleExportConversation}
-      exportingConversationId={exportingConversationId}
-    />
-  )
+  const historyProps = {
+    profile,
+    conversations,
+    conversationId,
+    onNew: () => selectConversation(null),
+    onSelect: selectConversation,
+    onDelete: handleDeleteConversation,
+    deletingConversationId,
+    onExport: handleExportConversation,
+    exportingConversationId,
+  }
 
   return (
-    <main className="grid h-svh min-h-0 bg-muted/20 md:grid-cols-[16rem_minmax(0,1fr)]">
-      <aside className="hidden min-h-0 border-r md:block">{history}</aside>
+    <main className="grid h-dvh min-h-0 bg-muted/20 md:h-svh md:grid-cols-[16rem_minmax(0,1fr)]">
+      <aside className="hidden min-h-0 border-r md:block">
+        <ConversationHistory {...historyProps} />
+      </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col">
         <header className="flex min-h-16 items-center gap-3 border-b bg-background px-4 sm:px-6">
@@ -736,7 +748,7 @@ export function PublicWorkflowChat({
           >
             <MenuIcon />
           </Button>
-          <span className="flex size-9 items-center justify-center rounded-lg bg-foreground text-background md:hidden">
+          <span className="hidden size-9 items-center justify-center rounded-lg bg-foreground text-background sm:flex md:hidden">
             <WorkflowIcon className="size-4" />
           </span>
           <div className="min-w-0 flex-1">
@@ -761,7 +773,7 @@ export function PublicWorkflowChat({
           ref={conversationScrollRef}
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-8 sm:px-8">
+          <div className="mx-auto w-full max-w-3xl space-y-6 px-4 pt-8 pb-[calc(2rem+env(safe-area-inset-bottom))] sm:px-8">
             {runsLoading ? (
               <p className="flex items-center justify-center py-12 text-sm text-muted-foreground">
                 <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -994,7 +1006,10 @@ export function PublicWorkflowChat({
             <DialogTitle>{t("历史记录")}</DialogTitle>
             <DialogDescription>{t("选择或新建对话")}</DialogDescription>
           </DialogHeader>
-          {history}
+          <ConversationHistory
+            {...historyProps}
+            onClose={() => setHistoryOpen(false)}
+          />
         </DialogContent>
       </Dialog>
       {confirmDialog}

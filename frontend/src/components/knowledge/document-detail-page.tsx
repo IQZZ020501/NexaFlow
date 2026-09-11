@@ -207,11 +207,12 @@ function DocumentDetailPageContent({
     <main className="min-h-[calc(100svh-6.5rem)] bg-background">
       <div className="border-b px-4 py-4 lg:px-8">
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex min-w-0 items-center gap-2 text-sm">
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
+              className="shrink-0"
               aria-label={t("返回知识库")}
               onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
             >
@@ -219,22 +220,27 @@ function DocumentDetailPageContent({
             </Button>
             <button
               type="button"
-              className="max-w-48 truncate text-muted-foreground outline-none hover:text-foreground"
+              className="max-w-28 truncate text-muted-foreground outline-none hover:text-foreground sm:max-w-48"
               title={knowledgeBase.name}
               onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
             >
               {knowledgeBase.name}
             </button>
-            <span className="text-muted-foreground" aria-hidden="true">
+            <span className="shrink-0 text-muted-foreground" aria-hidden="true">
               /
             </span>
-            <span className="truncate font-medium">{document.filename}</span>
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {document.filename}
+            </span>
           </div>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-xl font-semibold">
+                <h1
+                  className="truncate text-xl font-semibold max-sm:whitespace-normal max-sm:break-words"
+                  title={document.filename}
+                >
                   {document.filename}
                 </h1>
                 <span
@@ -277,7 +283,9 @@ function DocumentDetailPageContent({
         {isFailed ? (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-8 text-center text-sm text-destructive">
             <AlertCircleIcon className="size-5" />
-            <p>{document.last_error ?? t("解析失败")}</p>
+            <p className="break-words">
+              {document.last_error ?? t("解析失败")}
+            </p>
           </div>
         ) : chunks.length ? (
           <ChunkPreviewList
@@ -314,7 +322,7 @@ function DocumentDetailPageContent({
               {tasks.map((task) => (
                 <div
                   key={task.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3 text-sm"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="font-medium">

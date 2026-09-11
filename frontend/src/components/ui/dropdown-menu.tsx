@@ -49,7 +49,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-56 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden rounded-lg border bg-popover p-1 text-popover-foreground shadow-md",
+          "z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] max-w-[calc(100vw-0.5rem)] min-w-56 origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border bg-popover p-1 text-popover-foreground shadow-md",
           className
         )}
         onWheelCapture={(event) => {

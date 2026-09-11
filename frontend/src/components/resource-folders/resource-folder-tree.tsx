@@ -135,7 +135,7 @@ export function ResourceFolderTree({
           {children.length ? (
             <button
               type="button"
-              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background"
+              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background max-sm:h-11 max-sm:w-11"
               aria-label={t(collapsed ? "展开" : "收起")}
               onClick={() =>
                 setCollapsedFolderIds((current) => {
@@ -149,11 +149,11 @@ export function ResourceFolderTree({
               {collapsed ? <ChevronRightIcon /> : <ChevronDownIcon />}
             </button>
           ) : (
-            <span className="size-6 shrink-0" />
+            <span className="size-6 shrink-0 max-sm:h-11 max-sm:w-11" />
           )}
           <button
             type="button"
-            className="flex h-8 min-w-0 flex-1 items-center gap-2 text-left text-sm"
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 text-left text-sm max-sm:h-11"
             onClick={() => onSelect(folder.id)}
           >
             {selected ? (
@@ -220,7 +220,7 @@ export function ResourceFolderTree({
 
   return (
     <>
-      <aside className="flex min-w-0 flex-col rounded-lg border bg-background p-2 shadow-sm lg:min-h-[calc(100svh-11rem)] lg:w-56 lg:shrink-0">
+      <aside className="flex min-w-0 flex-col rounded-lg border bg-background p-2 shadow-sm lg:h-full lg:min-h-[calc(100svh-11rem)] lg:w-56 lg:shrink-0 lg:overflow-hidden">
         <div className="mb-1 flex items-center justify-between gap-2 px-1">
           <p className="text-xs font-medium text-muted-foreground">
             {t("目录")}
@@ -244,7 +244,7 @@ export function ResourceFolderTree({
         <button
           type="button"
           className={cn(
-            "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm",
+            "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm max-sm:h-11",
             selectedFolderId === null ? "bg-muted" : "hover:bg-muted/60"
           )}
           onClick={() => onSelect(null)}

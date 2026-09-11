@@ -205,14 +205,17 @@ export function ChunkPreviewList({
             key={chunk.id}
             className="overflow-hidden rounded-lg border bg-background"
           >
-            <div className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
-              <h3 className="text-sm font-semibold text-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b bg-muted/20 px-4 py-2">
+              <h3 className="min-w-0 text-sm font-semibold text-foreground">
                 {t("行 {value}", {
                   value: chunk.row_number ?? chunk.chunk_index + 1,
                 })}
               </h3>
               {chunk.source ? (
-                <Badge variant="outline">
+                <Badge
+                  variant="outline"
+                  className="max-w-full whitespace-normal break-words"
+                >
                   {t("来源")}：{chunk.source}
                 </Badge>
               ) : null}
@@ -222,7 +225,7 @@ export function ChunkPreviewList({
                 <dt className="text-xs font-medium text-muted-foreground">
                   {t("问题")}
                 </dt>
-                <dd className="mt-1 whitespace-pre-wrap text-sm font-medium text-foreground">
+                <dd className="mt-1 text-sm font-medium text-foreground break-words whitespace-pre-wrap">
                   {chunk.question}
                 </dd>
               </div>
@@ -233,7 +236,7 @@ export function ChunkPreviewList({
                 <dd className="mt-1">
                   <MarkdownContent
                     content={chunk.content}
-                    className="text-[15px] leading-7"
+                    className="text-[15px] leading-7 break-words"
                   />
                 </dd>
               </div>
@@ -255,14 +258,14 @@ export function ChunkPreviewList({
         key={chunk.id}
         className="overflow-hidden rounded-lg border bg-background"
       >
-        <div className="flex items-center justify-between gap-3 border-b bg-muted/20 px-4 py-2">
+        <div className="flex flex-col gap-1 border-b bg-muted/20 px-4 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-x-3">
           <h3
-            className="truncate text-sm font-semibold text-foreground"
+            className="min-w-0 truncate text-sm font-semibold text-foreground"
             title={title}
           >
             {title}
           </h3>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 sm:justify-end">
             {overlapLength ? (
               <Badge variant="secondary">
                 {t("重叠 {value} 字符", { value: overlapLength })}
@@ -276,10 +279,10 @@ export function ChunkPreviewList({
             </span>
           </div>
         </div>
-        <div data-overlap-chunk={index}>
+        <div data-overlap-chunk={index} className="min-w-0">
           <MarkdownContent
             content={chunk.content}
-            className="px-4 py-3 text-[15px] leading-7"
+            className="px-4 py-3 text-[15px] leading-7 break-words"
           />
           {chunk.images.length ? (
             <div className="flex flex-wrap gap-3 border-t px-4 py-3">

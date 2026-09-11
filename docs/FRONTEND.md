@@ -95,7 +95,8 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/auth/change-password-dialog.tsx` — 修改密码对话框
 
 **app/**（平台壳）
-- `frontend/src/components/app/top-bar.tsx` — 顶栏：导航、工作空间/语言/主题切换、用户菜单
+- `frontend/src/components/app/top-bar.tsx` — 顶栏：桌面导航、工作空间/语言/主题切换、用户菜单；`sm` 以下只保留标识、工作空间、消息与用户菜单
+- `frontend/src/components/app/mobile-tab-bar.tsx` — 手机底部标签栏（`sm` 以下由 `useMediaQuery(PHONE_NAV_QUERY)` 挂载）：应用/知识库/模型/工具/数据大屏
 - `frontend/src/components/app/session-gate.tsx` — 会话门禁：未登录跳转、强制改密
 - `frontend/src/components/app/top-progress.tsx` — 路由切换进度条
 - `frontend/src/components/app/operation-notification.tsx` — 成功/错误通知条
@@ -136,6 +137,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/lib/constants.ts` — 默认密码、状态/审计标签键映射
 - `frontend/src/lib/display.ts` — 展示格式化工具
 - `frontend/src/lib/theme-options.ts` — 主题选项定义
+- `frontend/src/lib/use-media-query.ts` — `useMediaQuery()` 与 `PHONE_LIST_QUERY`（`< md`）/`PHONE_NAV_QUERY`（`< sm`）：按断点选择手机或桌面版式
 
 **lib/api/**（按域划分的 API 客户端）
 - `frontend/src/lib/api/auth.ts` — 认证 API：登录/登出/me/刷新/改密
@@ -165,9 +167,12 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/tests/tool-picker.test.tsx` — Tool picker 搜索、键盘、焦点与固定版本行为
 - `frontend/tests/tool-permissions-dialog.test.tsx` — 成员搜索、授权切换、撤销与失败重试
 - `frontend/tests/workflow-node-card.test.tsx` — Workflow Tool/Agent 节点、只读与失效绑定状态
+- `frontend/tests/mobile-layout.test.tsx` — `useMediaQuery` 断点跟随，以及列表在手机卡片/桌面表格间的切换
 
 ## 关键约定
 
 - 用户可见文案一律走 `t()`（`@/i18n`），新文案须同时加三语词典（类型校验强制同步）。
 - API 调用统一走 `lib/api/*`，不直接散落 fetch。
 - 新资源详情页复用 `[id]` 深路由模式（刷新/前进后退可恢复）。
+- 移动端断点：`< sm`(640px) 用底部标签栏导航，`< md`(768px) 宽表改用卡片列表。两套版式文案相同，因此同一屏只渲染其中一套：组件用 `useMediaQuery(PHONE_LIST_QUERY)` 条件渲染，不要用 `hidden` 属性配合响应式工具类隐藏其中一套（Tailwind preflight 的 `[hidden]` 带 `!important`，会把手机版式也一起隐藏）。
+- 手机版式必须保证：整页无横向滚动（`documentElement.scrollWidth === clientWidth`）、可点元素不小于约 40px、固定底栏留出安全区（`pb-safe`，页面级固定操作条用 `bottom-[calc(4.5rem+env(safe-area-inset-bottom))]` 避开底部标签栏）。

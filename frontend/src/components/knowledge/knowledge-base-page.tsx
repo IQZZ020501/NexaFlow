@@ -146,6 +146,7 @@ import type {
   KnowledgeBaseForm,
   KnowledgeBasePermissionForm,
 } from "@/lib/api/knowledge"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type DocumentSortKey =
   "name" | "size_bytes" | "chunk_count" | "created_at" | "updated_at"
@@ -443,6 +444,7 @@ function KnowledgeBasePageContent({
   const activeKnowledgeBaseId = params.id ?? null
   const Icon = DatabaseIcon
   const { language, t } = useLanguage()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
   const resourceFolders = useResourceFolders("knowledge")
   const { isInSelectedFolder } = resourceFolders
   const [confirmAction, confirmDialog] = useConfirmDialog()
@@ -1619,6 +1621,130 @@ function KnowledgeBasePageContent({
     { key: "settings", label: t("设置"), icon: SettingsIcon },
   ]
 
+  function renderDocumentActionMenu(document: KnowledgeDocument) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-foreground"
+            disabled={!canEditDocuments || isSubmittingDocumentTask}
+            aria-label={t("操作 {value}", {
+              value: document.filename,
+            })}
+            title={t("操作 {value}", {
+              value: document.filename,
+            })}
+          >
+            <MoreHorizontalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="end" className="min-w-40">
+          <DropdownMenuItem
+            onSelect={() => void handleDownloadDocument(document)}
+          >
+            <DownloadIcon />
+            {t("下载原文")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() =>
+              router.push(
+                `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
+              )
+            }
+          >
+            <FileTextIcon />
+            {t("预览切片")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void handleIndexDocuments([document])}
+          >
+            <SlidersHorizontalIcon />
+            {t("向量化")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={() => void handleDeleteDocument(document)}
+          >
+            <Trash2Icon />
+            {t("删除")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
+  function renderKnowledgeTaskActions(task: KnowledgeTask) {
+    const isTaskActionDisabled =
+      !canEditDocuments || isKnowledgeTaskMutationBusy
+
+    return (
+      <>
+        <IconButton
+          label={t("停止")}
+          disabled={
+            isTaskActionDisabled ||
+            !["queued", "running"].includes(task.status)
+          }
+          onClick={() => void handleStopKnowledgeTask(task)}
+        >
+          <SquareIcon className="size-4 fill-current" />
+        </IconButton>
+        {["graph_sync", "graph_rebuild"].includes(task.task_type) ? (
+          <>
+            <IconButton
+              label={t("重试未完成分片")}
+              disabled={
+                isTaskActionDisabled ||
+                !["failed", "cancelled"].includes(task.status) ||
+                task.processed_items <= 0 ||
+                task.processed_items >= task.total_items
+              }
+              onClick={() => void handleRetryKnowledgeTask(task, "unfinished")}
+            >
+              <PlayIcon className="size-4" />
+            </IconButton>
+            <IconButton
+              label={t("重试全部分片")}
+              disabled={
+                isTaskActionDisabled ||
+                !["failed", "cancelled"].includes(task.status)
+              }
+              onClick={() => void handleRetryKnowledgeTask(task, "all")}
+            >
+              <RotateCcwIcon className="size-4" />
+            </IconButton>
+          </>
+        ) : (
+          <IconButton
+            label={t("重试")}
+            disabled={
+              isTaskActionDisabled ||
+              !["failed", "cancelled"].includes(task.status)
+            }
+            onClick={() => void handleRetryKnowledgeTask(task)}
+          >
+            <RotateCcwIcon className="size-4" />
+          </IconButton>
+        )}
+        <IconButton
+          label={t("删除任务")}
+          disabled={
+            isTaskActionDisabled ||
+            ["queued", "running", "cancelling"].includes(task.status)
+          }
+          onClick={() => void handleDeleteKnowledgeTask(task)}
+        >
+          <Trash2Icon className="size-4" />
+        </IconButton>
+      </>
+    )
+  }
+
   if (selectedKnowledgeBase && uploadStep && selectedWorkspaceId) {
     if (!canEditDocuments) {
       return null
@@ -1647,8 +1773,8 @@ function KnowledgeBasePageContent({
   if (selectedKnowledgeBase) {
     return (
       <>
-        <div className="-mx-4 grid min-h-[calc(100svh-6.5rem)] grid-cols-1 overflow-hidden border-y bg-background sm:-mx-6 lg:-mx-8 lg:grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="border-b bg-muted/30 p-3 lg:border-r lg:border-b-0 lg:p-4">
+        <div className="-mx-4 grid min-h-[calc(100svh-6.5rem)] grid-cols-1 content-start overflow-hidden border-y bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-6.5rem)] lg:min-h-0 lg:grid-cols-[220px_minmax(0,1fr)] lg:content-stretch">
+          <aside className="border-b bg-muted/30 p-3 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:p-4">
             <div className="mb-6 flex items-center gap-2">
               <Button
                 type="button"
@@ -1666,7 +1792,7 @@ function KnowledgeBasePageContent({
                 {selectedKnowledgeBase.name}
               </span>
             </div>
-            <nav className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+            <nav className="flex flex-wrap gap-2 lg:flex-col lg:flex-nowrap lg:overflow-visible">
               {detailTabs.map((tab) => {
                 const TabIcon = tab.icon
                 const isActive = activeDetailTab === tab.key
@@ -1690,7 +1816,7 @@ function KnowledgeBasePageContent({
             </nav>
           </aside>
 
-          <div className="min-w-0 overflow-hidden">
+          <div className="min-h-0 min-w-0 overflow-hidden lg:h-full lg:overflow-y-auto lg:overscroll-contain">
             {activeDetailTab === "documents" ? (
               <div className="min-w-0 p-3 sm:p-4 lg:p-5">
                 <section
@@ -1877,7 +2003,216 @@ function KnowledgeBasePageContent({
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
+                  {isPhoneListLayout ? (
+                    <ul className="flex flex-col gap-2 p-3">
+                    {isDocumentLoading ? (
+                      <li className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
+                        <LoaderCircleIcon className="animate-spin" />
+                      </li>
+                    ) : visibleDocuments.length ? (
+                      visibleDocuments.map((document) => {
+                        const isSelected = selectedDocumentIds.includes(
+                          document.id
+                        )
+                        const isDocumentActionDisabled =
+                          !canEditDocuments || isSubmittingDocumentTask
+
+                        return (
+                          <li
+                            key={document.id}
+                            className={cn(
+                              "rounded-xl border bg-background p-3",
+                              isSelected &&
+                                "border-primary/50 bg-primary/[0.035]"
+                            )}
+                          >
+                            <div className="flex items-start gap-3">
+                              <label className="flex size-10 shrink-0 items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-primary"
+                                  aria-label={t("选择 {value}", {
+                                    value: document.filename,
+                                  })}
+                                  checked={isSelected}
+                                  onChange={(event) =>
+                                    toggleDocumentSelection(
+                                      document.id,
+                                      event.target.checked
+                                    )
+                                  }
+                                />
+                              </label>
+                              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted/70">
+                                {React.createElement(
+                                  getDocumentFileIcon(document.filename),
+                                  {
+                                    "aria-hidden": true,
+                                    className: cn(
+                                      "size-4 text-base leading-none",
+                                      getDocumentFileIconColor(document.filename)
+                                    ),
+                                  }
+                                )}
+                              </span>
+                              <button
+                                type="button"
+                                className="min-w-0 flex-1 text-left text-sm font-medium break-words outline-none hover:text-primary focus-visible:underline"
+                                title={document.filename}
+                                onClick={() =>
+                                  router.push(
+                                    `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
+                                  )
+                                }
+                              >
+                                {document.filename}
+                              </button>
+                            </div>
+
+                            <dl className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                              <div className="min-w-0">
+                                <dt className="sr-only">{t("文件状态")}</dt>
+                                <dd className="inline-flex w-fit max-w-full items-center gap-1.5 rounded-full border bg-background px-2.5 py-1 font-medium text-foreground">
+                                  {PROCESSING_DOCUMENT_STATUSES[
+                                    document.status
+                                  ] ? (
+                                    <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-primary" />
+                                  ) : (
+                                    <span
+                                      className={cn(
+                                        "size-2 shrink-0 rounded-full",
+                                        documentStatusDotClassName(
+                                          document.status
+                                        )
+                                      )}
+                                    />
+                                  )}
+                                  <span className="truncate">
+                                    {documentStatusText(
+                                      document,
+                                      knowledgeTasks,
+                                      t
+                                    )}
+                                  </span>
+                                </dd>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <dt>{t("大小")}</dt>
+                                <dd className="font-medium text-foreground">
+                                  {formatBytes(document.size_bytes)}
+                                </dd>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <dt>{t("分段")}</dt>
+                                <dd className="font-semibold text-foreground">
+                                  {document.chunk_count}
+                                </dd>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <dt>{t("启用状态")}</dt>
+                                <dd className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={document.is_active}
+                                    aria-label={t(
+                                      document.is_active
+                                        ? "停用 {value}"
+                                        : "启用 {value}",
+                                      { value: document.filename }
+                                    )}
+                                    disabled={isDocumentActionDisabled}
+                                    onClick={() =>
+                                      void handleToggleDocumentActive(document)
+                                    }
+                                    className={cn(
+                                      "relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors outline-none after:absolute after:-inset-2 after:content-[''] focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                                      document.is_active
+                                        ? "bg-primary"
+                                        : "bg-muted-foreground/35"
+                                    )}
+                                  >
+                                    <span
+                                      className={cn(
+                                        "block size-4 rounded-full bg-background shadow-sm transition-transform",
+                                        document.is_active
+                                          ? "translate-x-[18px]"
+                                          : "translate-x-0.5"
+                                      )}
+                                    />
+                                  </button>
+                                  <span>
+                                    {t(
+                                      document.is_active ? "已启用" : "已停用"
+                                    )}
+                                  </span>
+                                </dd>
+                              </div>
+                              <div className="flex w-full items-center gap-1">
+                                <dt className="shrink-0">{t("更新时间")}</dt>
+                                <dd className="min-w-0 truncate">
+                                  {formatDateTime(document.updated_at, locale)}
+                                </dd>
+                              </div>
+                            </dl>
+
+                            {document.last_error ? (
+                              <p className="mt-2 text-xs break-words text-destructive">
+                                {document.last_error}
+                              </p>
+                            ) : null}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5"
+                                disabled={isDocumentActionDisabled}
+                                onClick={() => {
+                                  setChunkSize(SMART_CHUNK_SIZE)
+                                  setChunkOverlap(SMART_CHUNK_OVERLAP)
+                                  setSplitSeparator(SMART_SPLIT_SEPARATOR)
+                                  setCleaningRules(SMART_CLEANING_RULES)
+                                  setSegmentMode("smart")
+                                  setSegmentDialogDocument(document)
+                                }}
+                              >
+                                <RotateCcwIcon />
+                                {t("重新分段")}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5"
+                                disabled={isDocumentActionDisabled}
+                                onClick={() =>
+                                  void handleIndexDocuments([document])
+                                }
+                              >
+                                <SlidersHorizontalIcon />
+                                {t("向量化")}
+                              </Button>
+                              <div className="ml-auto">
+                                {renderDocumentActionMenu(document)}
+                              </div>
+                            </div>
+                          </li>
+                        )
+                      })
+                    ) : (
+                      <li className="flex min-h-40 flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground">
+                        <span className="flex size-10 items-center justify-center rounded-lg bg-muted/60">
+                          <FileTextIcon className="size-4" />
+                        </span>
+                        {t(documents.length ? "没有匹配的文档" : "暂无文档")}
+                      </li>
+                    )}
+                    </ul>
+                  ) : null}
+
+                  <div className="hidden overflow-x-auto md:block">
                     <div className="min-w-[1040px]">
                       <div className="grid grid-cols-[44px_minmax(280px,1fr)_140px_92px_84px_124px_164px_132px] items-center border-b bg-muted/30 px-3 py-3 text-xs font-medium text-muted-foreground">
                         <label className="flex items-center justify-center">
@@ -2153,71 +2488,7 @@ function KnowledgeBasePageContent({
                                 >
                                   <SlidersHorizontalIcon />
                                 </Button>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      className="text-muted-foreground hover:text-foreground"
-                                      disabled={
-                                        !canEditDocuments ||
-                                        isSubmittingDocumentTask
-                                      }
-                                      aria-label={t("操作 {value}", {
-                                        value: document.filename,
-                                      })}
-                                      title={t("操作 {value}", {
-                                        value: document.filename,
-                                      })}
-                                    >
-                                      <MoreHorizontalIcon />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent
-                                    side="bottom"
-                                    align="end"
-                                    className="min-w-40"
-                                  >
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        void handleDownloadDocument(document)
-                                      }
-                                    >
-                                      <DownloadIcon />
-                                      {t("下载原文")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        router.push(
-                                          `/app/knowledge/${selectedKnowledgeBaseId}/documents/${document.id}`
-                                        )
-                                      }
-                                    >
-                                      <FileTextIcon />
-                                      {t("预览切片")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        void handleIndexDocuments([document])
-                                      }
-                                    >
-                                      <SlidersHorizontalIcon />
-                                      {t("向量化")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      variant="destructive"
-                                      onSelect={() =>
-                                        void handleDeleteDocument(document)
-                                      }
-                                    >
-                                      <Trash2Icon />
-                                      {t("删除")}
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
+                                {renderDocumentActionMenu(document)}
                               </span>
                             </div>
                           )
@@ -2526,7 +2797,110 @@ function KnowledgeBasePageContent({
                 </div>
 
                 <div className="mt-4 overflow-x-auto rounded-lg border bg-background">
-                  <div className="min-w-[920px]">
+                  {isPhoneListLayout ? (
+                    <ul className="flex flex-col gap-2 p-3">
+                    {isKnowledgeTaskLoading ? (
+                      <li className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
+                        <LoaderCircleIcon className="animate-spin" />
+                      </li>
+                    ) : visibleKnowledgeTasks.length ? (
+                      visibleKnowledgeTasks.map((task) => {
+                        const isSelected = selectedKnowledgeTaskIds.includes(
+                          task.id
+                        )
+
+                        return (
+                          <li
+                            key={task.id}
+                            className={cn(
+                              "rounded-xl border bg-background p-3",
+                              isSelected &&
+                                "border-primary/50 bg-primary/[0.035]"
+                            )}
+                          >
+                            <div className="flex items-start gap-3">
+                              <label className="flex size-10 shrink-0 items-center justify-center">
+                                <input
+                                  type="checkbox"
+                                  className="size-4 accent-primary"
+                                  aria-label={t("选择任务 {value}", {
+                                    value: task.id,
+                                  })}
+                                  checked={isSelected}
+                                  disabled={
+                                    !canEditDocuments ||
+                                    Boolean(
+                                      PROCESSING_TASK_STATUSES[task.status]
+                                    ) ||
+                                    isKnowledgeTaskMutationBusy
+                                  }
+                                  onChange={(event) =>
+                                    toggleKnowledgeTaskSelection(
+                                      task.id,
+                                      event.target.checked
+                                    )
+                                  }
+                                />
+                              </label>
+                              <div className="min-w-0 flex-1">
+                                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                                  {taskTypeLabel(task.task_type, t)}
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                                    <span
+                                      className={cn(
+                                        "size-2.5 shrink-0 rounded-full",
+                                        taskStatusDotClassName(task.status)
+                                      )}
+                                    />
+                                    {taskStatusLabel(task.status, t)}
+                                  </span>
+                                </p>
+                                <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                  <div className="flex items-center gap-1">
+                                    <dt>{t("进度")}</dt>
+                                    <dd className="font-semibold text-foreground">
+                                      {task.processed_items}/{task.total_items}
+                                    </dd>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <dt>{t("尝试次数")}</dt>
+                                    <dd className="font-semibold text-foreground">
+                                      {task.attempts}/{task.max_attempts}
+                                    </dd>
+                                  </div>
+                                  <div className="flex w-full items-center gap-1">
+                                    <dt className="shrink-0">
+                                      {t("更新时间")}
+                                    </dt>
+                                    <dd className="min-w-0 truncate">
+                                      {formatDateTime(
+                                        task.updated_at,
+                                        locale
+                                      )}
+                                    </dd>
+                                  </div>
+                                </dl>
+                                {task.last_error ? (
+                                  <p className="mt-2 text-xs break-words text-destructive">
+                                    {task.last_error}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center justify-end gap-1 border-t pt-3">
+                              {renderKnowledgeTaskActions(task)}
+                            </div>
+                          </li>
+                        )
+                      })
+                    ) : (
+                      <li className="flex min-h-40 items-center justify-center p-3 text-sm text-muted-foreground">
+                        {t("暂无任务")}
+                      </li>
+                    )}
+                    </ul>
+                  ) : null}
+                  <div className="min-w-[920px] max-md:hidden">
                     <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
                       <label className="flex items-center justify-center">
                         <input
@@ -2618,87 +2992,7 @@ function KnowledgeBasePageContent({
                             ) : null}
                           </span>
                           <span className="flex items-center gap-1">
-                            <IconButton
-                              label={t("停止")}
-                              disabled={
-                                !canEditDocuments ||
-                                isKnowledgeTaskMutationBusy ||
-                                !["queued", "running"].includes(task.status)
-                              }
-                              onClick={() => void handleStopKnowledgeTask(task)}
-                            >
-                              <SquareIcon className="size-4 fill-current" />
-                            </IconButton>
-                            {["graph_sync", "graph_rebuild"].includes(
-                              task.task_type
-                            ) ? (
-                              <>
-                                <IconButton
-                                  label={t("重试未完成分片")}
-                                  disabled={
-                                    !canEditDocuments ||
-                                    isKnowledgeTaskMutationBusy ||
-                                    !["failed", "cancelled"].includes(
-                                      task.status
-                                    ) ||
-                                    task.processed_items <= 0 ||
-                                    task.processed_items >= task.total_items
-                                  }
-                                  onClick={() =>
-                                    void handleRetryKnowledgeTask(
-                                      task,
-                                      "unfinished"
-                                    )
-                                  }
-                                >
-                                  <PlayIcon className="size-4" />
-                                </IconButton>
-                                <IconButton
-                                  label={t("重试全部分片")}
-                                  disabled={
-                                    !canEditDocuments ||
-                                    isKnowledgeTaskMutationBusy ||
-                                    !["failed", "cancelled"].includes(
-                                      task.status
-                                    )
-                                  }
-                                  onClick={() =>
-                                    void handleRetryKnowledgeTask(task, "all")
-                                  }
-                                >
-                                  <RotateCcwIcon className="size-4" />
-                                </IconButton>
-                              </>
-                            ) : (
-                              <IconButton
-                                label={t("重试")}
-                                disabled={
-                                  !canEditDocuments ||
-                                  isKnowledgeTaskMutationBusy ||
-                                  !["failed", "cancelled"].includes(task.status)
-                                }
-                                onClick={() =>
-                                  void handleRetryKnowledgeTask(task)
-                                }
-                              >
-                                <RotateCcwIcon className="size-4" />
-                              </IconButton>
-                            )}
-                            <IconButton
-                              label={t("删除任务")}
-                              disabled={
-                                !canEditDocuments ||
-                                isKnowledgeTaskMutationBusy ||
-                                ["queued", "running", "cancelling"].includes(
-                                  task.status
-                                )
-                              }
-                              onClick={() =>
-                                void handleDeleteKnowledgeTask(task)
-                              }
-                            >
-                              <Trash2Icon className="size-4" />
-                            </IconButton>
+                            {renderKnowledgeTaskActions(task)}
                           </span>
                         </div>
                       ))
@@ -3070,13 +3364,16 @@ function KnowledgeBasePageContent({
                         }}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex min-w-0 gap-3">
+                          <div className="flex min-w-0 gap-3 max-sm:flex-1">
                             <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-[#4D6BFE]/10 text-[#4D6BFE]">
                               <BookOpenTextIcon className="size-5" />
                             </span>
-                            <div className="min-w-0">
+                            <div className="min-w-0 max-sm:flex-1">
                               <div className="flex flex-wrap items-center gap-2">
-                                <h2 className="truncate text-sm font-semibold">
+                                <h2
+                                  className="truncate text-sm font-semibold max-sm:w-full"
+                                  title={knowledgeBase.name}
+                                >
                                   {knowledgeBase.name}
                                 </h2>
                                 <StatusBadge status={knowledgeBase.status} />

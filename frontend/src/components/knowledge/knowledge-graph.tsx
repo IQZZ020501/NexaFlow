@@ -911,7 +911,7 @@ export function KnowledgeGraph({
                   <p className="mt-2 text-xs text-muted-foreground">
                     {t("共 {value} 个实体", { value: entityTotal })}
                   </p>
-                  <div className="mt-3 max-h-[34rem] overflow-y-auto border">
+                  <div className="mt-3 max-h-[34rem] overflow-y-auto border max-sm:max-h-72">
                     {entities.length ? (
                       entities.map((entity) => (
                         <button
@@ -979,7 +979,7 @@ export function KnowledgeGraph({
                             }
                           />
                         </label>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             type="submit"
                             disabled={isQuerying || !sourceEntity.trim()}
@@ -1192,7 +1192,11 @@ export function KnowledgeGraph({
                       </section>
 
                       {showGraphDetail ? (
-                        <aside className="relative min-w-0 border-t p-4 lg:border-t-0 lg:border-l">
+                        <aside className="relative min-w-0 border-t p-4 max-sm:fixed max-sm:inset-x-0 max-sm:bottom-[calc(4.5rem+env(safe-area-inset-bottom))] max-sm:z-20 max-sm:max-h-[70svh] max-sm:overflow-y-auto max-sm:rounded-t-2xl max-sm:bg-background max-sm:pb-5 max-sm:shadow-2xl lg:border-t-0 lg:border-l">
+                          <span
+                            className="mx-auto mb-3 block h-1 w-10 rounded-full bg-border sm:hidden"
+                            aria-hidden="true"
+                          />
                           <Button
                             type="button"
                             variant="ghost"
@@ -1232,7 +1236,7 @@ export function KnowledgeGraph({
                                       <p className="whitespace-pre-wrap">
                                         {evidence.quote}
                                       </p>
-                                      <footer className="mt-2 text-xs text-muted-foreground">
+                                      <footer className="mt-2 text-xs break-all text-muted-foreground">
                                         {t(
                                           "{document} · 分段 {chunk} · 字符 {start}-{end}",
                                           {
@@ -1302,7 +1306,7 @@ export function KnowledgeGraph({
 
       {view === "reviews" ? (
         <div className="grid min-w-0 lg:grid-cols-[18rem_minmax(0,1fr)]">
-          <section className="border-b lg:border-r lg:border-b-0">
+          <section className="border-b max-sm:max-h-72 max-sm:overflow-y-auto lg:border-r lg:border-b-0">
             <div className="border-b p-4 text-sm font-medium">
               {t("待审核 {value} 条", { value: reviewTotal })}
             </div>

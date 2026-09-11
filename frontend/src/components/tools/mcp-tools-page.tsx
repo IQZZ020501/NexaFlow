@@ -346,7 +346,7 @@ export function McpToolsPage() {
 
               {server.tools.length > 0 ? (
                 <details className="mt-3 border-t pt-3 text-sm">
-                  <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground">
+                  <summary className="cursor-pointer text-muted-foreground select-none hover:text-foreground max-sm:py-2.5">
                     {t("查看工具列表")}
                   </summary>
                   <div className="mt-2 divide-y rounded-md border">

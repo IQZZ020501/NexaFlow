@@ -108,7 +108,7 @@ export function EditWorkspaceDialog({
                 />
               </Field>
             </FieldGroup>
-            <DialogFooter className="pt-5">
+            <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
               <Button
                 type="button"
                 variant="outline"
@@ -212,7 +212,7 @@ export function EditTeamDialog({
                 />
               </Field>
             </FieldGroup>
-            <DialogFooter className="pt-5">
+            <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
               <Button
                 type="button"
                 variant="outline"
@@ -289,7 +289,7 @@ export function CreateWorkspaceDialog({
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={handleCreateWorkspace}
         >
-          <FieldGroup>
+          <FieldGroup className="max-sm:min-h-0 max-sm:flex-1 max-sm:overflow-y-auto max-sm:overscroll-contain">
             <Field>
               <FieldLabel htmlFor="workspaceName">{t("名称")}</FieldLabel>
               <Input
@@ -384,7 +384,7 @@ export function CreateWorkspaceDialog({
               </DropdownMenu>
             </Field>
           </FieldGroup>
-          <DialogFooter className="mt-auto pt-5">
+          <DialogFooter className="mt-auto pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <Button
               type="button"
               variant="outline"
@@ -471,8 +471,11 @@ export function CreateTeamDialog({
               : t("先选择工作空间")}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleCreateTeam}>
-          <FieldGroup>
+        <form
+          className="max-sm:flex max-sm:min-h-0 max-sm:max-h-full max-sm:flex-1 max-sm:flex-col"
+          onSubmit={handleCreateTeam}
+        >
+          <FieldGroup className="max-sm:min-h-0 max-sm:flex-1 max-sm:overflow-y-auto max-sm:overscroll-contain">
             <Field>
               <FieldLabel id="teamWorkspaceLabel">{t("工作空间")}</FieldLabel>
               <DropdownMenu modal={false}>
@@ -615,7 +618,7 @@ export function CreateTeamDialog({
               </DropdownMenu>
             </Field>
           </FieldGroup>
-          <DialogFooter className="pt-5">
+          <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:mt-auto max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <Button
               type="button"
               variant="outline"

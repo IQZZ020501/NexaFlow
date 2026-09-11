@@ -161,11 +161,11 @@ function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
     >
       {highlightedHtml ? (
         <div
-          className="markdown-shiki overflow-x-auto [&_.shiki]:m-0 [&_.shiki]:min-w-max [&_.shiki]:bg-transparent [&_.shiki]:p-3 [&_.shiki]:text-xs [&_.shiki]:leading-5"
+          className="markdown-shiki overflow-x-auto break-normal [&_.shiki]:m-0 [&_.shiki]:min-w-max [&_.shiki]:bg-transparent [&_.shiki]:whitespace-pre [&_.shiki]:p-3 [&_.shiki]:text-xs [&_.shiki]:leading-5"
           dangerouslySetInnerHTML={{ __html: highlightedHtml }}
         />
       ) : (
-        <pre className="overflow-x-auto p-3 text-xs leading-5">
+        <pre className="overflow-x-auto whitespace-pre break-normal p-3 text-xs leading-5">
           <code>{code}</code>
         </pre>
       )}
@@ -260,7 +260,7 @@ function MermaidCodeBlock({ code }: MarkdownCodeBlockProps) {
             {t("图表渲染失败")}
           </p>
         ) : null}
-        <pre className="overflow-x-auto p-3 text-xs leading-5">
+        <pre className="overflow-x-auto whitespace-pre break-normal p-3 text-xs leading-5">
           <code>{code}</code>
         </pre>
       </CodeFrame>
@@ -303,7 +303,7 @@ function MermaidCodeBlock({ code }: MarkdownCodeBlockProps) {
       }
     >
       {showSource ? (
-        <pre className="overflow-x-auto p-3 text-xs leading-5">
+        <pre className="overflow-x-auto whitespace-pre break-normal p-3 text-xs leading-5">
           <code>{code}</code>
         </pre>
       ) : (

@@ -242,7 +242,7 @@ export function WorkspaceMembersDialog({
               </section>
             ) : null}
 
-            <section className="min-h-0 flex-1 overflow-y-auto">
+            <section className="min-h-0 flex-1 overflow-y-auto overscroll-contain max-sm:max-h-[45svh]">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold">{t("工作空间成员")}</h3>
                 <Badge variant="outline">{members.length}</Badge>

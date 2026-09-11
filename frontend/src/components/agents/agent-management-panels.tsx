@@ -64,6 +64,7 @@ import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { withArtifactDownloadLinksInContent } from "@/lib/tool-display"
 import type { TFunction } from "@/i18n"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type PanelProps = {
   agent: Agent
@@ -748,6 +749,7 @@ export function AgentLogsPanel({
 }: PanelProps) {
   const { language } = useLanguage()
   const [selectedLog, setSelectedLog] = React.useState<AgentLog | null>(null)
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
   const handleError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
     [notify, t]
@@ -777,79 +779,121 @@ export function AgentLogsPanel({
           {t("刷新")}
         </Button>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-background">
+      <div>
         {loading ? (
-          <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
+          <div className="flex min-h-40 items-center justify-center rounded-xl border bg-background text-sm text-muted-foreground">
             <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
             {t("正在加载")}
           </div>
         ) : items.length === 0 ? (
-          <p className="p-8 text-center text-sm text-muted-foreground">
+          <p className="rounded-xl border bg-background p-8 text-center text-sm text-muted-foreground">
             {t("暂无对话日志")}
           </p>
         ) : (
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b bg-muted/30 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">{t("问题")}</th>
-                <th className="px-4 py-3 font-medium">{t("来源")}</th>
-                <th className="px-4 py-3 font-medium">{t("用户")}</th>
-                <th className="px-4 py-3 font-medium">{t("状态")}</th>
-                <th className="px-4 py-3 font-medium">{t("反馈")}</th>
-                <th className="px-4 py-3 font-medium">{t("时间")}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+          <>
+            {isPhoneListLayout ? (
+              <ul className="flex flex-col gap-2">
               {items.map((item) => (
-                <tr
-                  key={item.id}
-                  className="cursor-pointer align-top hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t("查看日志详情")}
-                  onClick={() => setSelectedLog(item)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      setSelectedLog(item)
-                    }
-                  }}
-                >
-                  <td className="max-w-[360px] px-4 py-3">
-                    <p className="truncate" title={item.question}>
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className="w-full rounded-xl border bg-background p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setSelectedLog(item)}
+                  >
+                    <p className="line-clamp-2 text-sm font-medium break-words">
                       {item.question || t("未提供问题")}
                     </p>
                     {item.last_error ? (
-                      <p
-                        className="mt-1 truncate text-xs text-destructive"
-                        title={item.last_error}
-                      >
+                      <p className="mt-1 line-clamp-2 text-xs break-words text-destructive">
                         {item.last_error}
                       </p>
                     ) : null}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant="outline">
-                      {sourceLabel(item.access_source, t)}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    {item.display_name || item.consumer_id}
-                  </td>
-                  <td className="px-4 py-3">{statusLabel(item.status, t)}</td>
-                  <td className="px-4 py-3">
-                    <FeedbackIndicator value={item.feedback} t={t} />
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                      <Badge variant="outline">
+                        {sourceLabel(item.access_source, t)}
+                      </Badge>
+                      <span className="min-w-0 flex-1 truncate">
+                        {item.display_name || item.consumer_id}
+                      </span>
+                      <span>{statusLabel(item.status, t)}</span>
+                      <FeedbackIndicator value={item.feedback} t={t} />
+                    </div>
+                    <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                       {formatDateTime(item.created_at, localeFor(language))}
                       <EyeIcon className="size-3.5" />
-                    </span>
-                  </td>
-                </tr>
+                    </p>
+                  </button>
+                </li>
               ))}
-            </tbody>
-          </table>
+              </ul>
+            ) : null}
+            <div className="hidden overflow-x-auto rounded-xl border bg-background md:block">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="border-b bg-muted/30 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">{t("问题")}</th>
+                    <th className="px-4 py-3 font-medium">{t("来源")}</th>
+                    <th className="px-4 py-3 font-medium">{t("用户")}</th>
+                    <th className="px-4 py-3 font-medium">{t("状态")}</th>
+                    <th className="px-4 py-3 font-medium">{t("反馈")}</th>
+                    <th className="px-4 py-3 font-medium">{t("时间")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {items.map((item) => (
+                    <tr
+                      key={item.id}
+                      className="cursor-pointer align-top hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t("查看日志详情")}
+                      onClick={() => setSelectedLog(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault()
+                          setSelectedLog(item)
+                        }
+                      }}
+                    >
+                      <td className="max-w-[360px] px-4 py-3">
+                        <p className="truncate" title={item.question}>
+                          {item.question || t("未提供问题")}
+                        </p>
+                        {item.last_error ? (
+                          <p
+                            className="mt-1 truncate text-xs text-destructive"
+                            title={item.last_error}
+                          >
+                            {item.last_error}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline">
+                          {sourceLabel(item.access_source, t)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        {item.display_name || item.consumer_id}
+                      </td>
+                      <td className="px-4 py-3">
+                        {statusLabel(item.status, t)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <FeedbackIndicator value={item.feedback} t={t} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-2">
+                          {formatDateTime(item.created_at, localeFor(language))}
+                          <EyeIcon className="size-3.5" />
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
       <Pagination
@@ -1148,6 +1192,7 @@ export function AgentConversationUsersPanel({
   notify,
 }: PanelProps) {
   const { language } = useLanguage()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
   const handleError = React.useCallback(
     (error: unknown) => notify("error", getErrorMessage(error, t)),
     [notify, t]
@@ -1178,56 +1223,113 @@ export function AgentConversationUsersPanel({
           {t("刷新")}
         </Button>
       </div>
-      <div className="overflow-x-auto rounded-xl border bg-background">
+      <div>
         {loading ? (
-          <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
+          <div className="flex min-h-40 items-center justify-center rounded-xl border bg-background text-sm text-muted-foreground">
             <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
             {t("正在加载")}
           </div>
         ) : items.length === 0 ? (
-          <p className="p-8 text-center text-sm text-muted-foreground">
+          <p className="rounded-xl border bg-background p-8 text-center text-sm text-muted-foreground">
             {t("暂无对话用户")}
           </p>
         ) : (
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b bg-muted/30 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">{t("用户")}</th>
-                <th className="px-4 py-3 font-medium">{t("来源")}</th>
-                <th className="px-4 py-3 font-medium">{t("首次访问")}</th>
-                <th className="px-4 py-3 font-medium">{t("最近访问")}</th>
-                <th className="px-4 py-3 font-medium">{t("对话 / 运行")}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+          <>
+            {isPhoneListLayout ? (
+              <ul className="flex flex-col gap-2">
               {items.map((item) => (
-                <tr key={`${item.access_source}:${item.consumer_id}`}>
-                  <td className="px-4 py-3">
-                    <p className="font-medium">
-                      {item.display_name || t("匿名用户")}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {item.consumer_id}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3">
+                <li
+                  key={`${item.access_source}:${item.consumer_id}`}
+                  className="rounded-xl border bg-background p-3"
+                >
+                  <p className="truncate text-sm font-medium">
+                    {item.display_name || t("匿名用户")}
+                  </p>
+                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                    {item.consumer_id}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <Badge variant="outline">
                       {sourceLabel(item.access_source, t)}
                     </Badge>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                    {formatDateTime(item.first_seen_at, localeFor(language))}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                    {formatDateTime(item.last_seen_at, localeFor(language))}
-                  </td>
-                  <td className="px-4 py-3 tabular-nums">
-                    {item.conversation_count} / {item.run_count}
-                  </td>
-                </tr>
+                    <span>
+                      {t("对话 / 运行")}:{" "}
+                      <span className="tabular-nums">
+                        {item.conversation_count} / {item.run_count}
+                      </span>
+                    </span>
+                  </div>
+                  <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-2">
+                      <dt>{t("首次访问")}</dt>
+                      <dd className="text-foreground/80">
+                        {formatDateTime(
+                          item.first_seen_at,
+                          localeFor(language)
+                        )}
+                      </dd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <dt>{t("最近访问")}</dt>
+                      <dd className="text-foreground/80">
+                        {formatDateTime(item.last_seen_at, localeFor(language))}
+                      </dd>
+                    </div>
+                  </dl>
+                </li>
               ))}
-            </tbody>
-          </table>
+              </ul>
+            ) : null}
+            <div className="hidden overflow-x-auto rounded-xl border bg-background md:block">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="border-b bg-muted/30 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">{t("用户")}</th>
+                    <th className="px-4 py-3 font-medium">{t("来源")}</th>
+                    <th className="px-4 py-3 font-medium">{t("首次访问")}</th>
+                    <th className="px-4 py-3 font-medium">{t("最近访问")}</th>
+                    <th className="px-4 py-3 font-medium">
+                      {t("对话 / 运行")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {items.map((item) => (
+                    <tr key={`${item.access_source}:${item.consumer_id}`}>
+                      <td className="px-4 py-3">
+                        <p className="font-medium">
+                          {item.display_name || t("匿名用户")}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {item.consumer_id}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline">
+                          {sourceLabel(item.access_source, t)}
+                        </Badge>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        {formatDateTime(
+                          item.first_seen_at,
+                          localeFor(language)
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                        {formatDateTime(
+                          item.last_seen_at,
+                          localeFor(language)
+                        )}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {item.conversation_count} / {item.run_count}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
       <Pagination

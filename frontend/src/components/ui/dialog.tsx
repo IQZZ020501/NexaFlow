@@ -66,8 +66,8 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           side === "right"
-            ? "fixed inset-y-0 right-0 z-50 grid h-svh w-full max-w-md gap-4 overflow-y-auto border-l bg-background p-6 shadow-lg sm:max-w-lg"
-            : "fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg",
+            ? "fixed inset-y-0 right-0 z-50 grid h-dvh w-full max-w-md gap-4 overflow-y-auto overscroll-contain border-l bg-background p-6 shadow-lg pb-safe sm:max-w-lg"
+            : "fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-lg border bg-background p-6 shadow-lg",
           className
         )}
         {...props}

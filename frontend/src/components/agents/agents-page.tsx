@@ -2181,7 +2181,7 @@ export function AgentsPage({
                       : undefined
                   }
                   className={cn(
-                    "flex min-h-40 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
                     selectedAgentIds.includes(agent.id) &&
                       "border-primary/50 bg-primary/[0.035]"
                   )}

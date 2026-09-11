@@ -341,7 +341,7 @@ export function McpConnectionDialog({
               </>
             )}
           </FieldGroup>
-          <DialogFooter className="pt-5">
+          <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:-mx-6 max-sm:-mb-6 max-sm:flex-row max-sm:flex-wrap max-sm:justify-end max-sm:border-t max-sm:bg-background max-sm:px-6 max-sm:py-4">
             <Button
               type="button"
               variant="outline"

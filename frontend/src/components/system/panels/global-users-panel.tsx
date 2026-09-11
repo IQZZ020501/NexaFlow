@@ -40,6 +40,7 @@ import {
   getUserRoleClass,
   getUserRoleLabel,
 } from "@/components/system/system-utils"
+import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
 type GlobalUsersPanelProps = {
   me: MeResponse
@@ -108,6 +109,7 @@ export function GlobalUsersPanel({
   handleDeleteUser,
 }: GlobalUsersPanelProps) {
   const { t } = useLanguage()
+  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
 
   return (
     <div
@@ -117,7 +119,7 @@ export function GlobalUsersPanel({
       className="grid min-w-0 gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
     >
       <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:min-h-full">
-        <CardHeader className="flex-row items-start justify-between gap-4 px-4">
+        <CardHeader className="flex-row items-start justify-between gap-4 px-4 max-sm:flex-wrap">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
               <UserCogIcon className="size-4" />
@@ -191,7 +193,85 @@ export function GlobalUsersPanel({
                   ]}
                 />
               </div>
-              <div className="min-w-0 overflow-x-auto rounded-lg border bg-background">
+
+              {/* phones: card list instead of the 1700px grid */}
+              {isPhoneListLayout ? (
+                <ul className="flex flex-col gap-2">
+                {filteredUsers.length ? (
+                  filteredUsers.map((user) => (
+                    <li
+                      key={user.id}
+                      className="rounded-xl border bg-background p-3 shadow-xs"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span
+                          className="min-w-0 flex-1 truncate font-medium"
+                          title={user.name}
+                        >
+                          {user.name}
+                        </span>
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+                            getUserRoleClass(user)
+                          )}
+                        >
+                          {getUserRoleLabel(user, t)}
+                        </span>
+                      </div>
+                      <dl className="mt-2 grid gap-1 text-sm">
+                        <UserCardField label={t("账号")} value={user.username} />
+                        <UserCardField
+                          breakAll
+                          label={t("邮箱")}
+                          value={user.email}
+                        />
+                        <UserCardField
+                          label={t("所属工作空间")}
+                          value={formatUserWorkspaces(user, t)}
+                        />
+                        <UserCardField
+                          label={t("所属团队")}
+                          value={formatUserTeams(user, t)}
+                        />
+                        <UserCardField
+                          label={t("创建时间")}
+                          value={formatDateTime(user.created_at, locale)}
+                        />
+                      </dl>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+                        <span className="flex items-center gap-2 text-sm">
+                          {user.is_active ? (
+                            <CircleCheckIcon className="size-4 text-green-600" />
+                          ) : (
+                            <CircleOffIcon className="size-4 text-muted-foreground" />
+                          )}
+                          <span>
+                            {user.is_active ? t("已启用") : t("已停用")}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <UserRowActions
+                            currentUserId={me.user.id}
+                            onDelete={handleDeleteUser}
+                            onEdit={handleOpenEditUser}
+                            onPassword={handleOpenUserPasswordDialog}
+                            onToggle={handleToggleUser}
+                            user={user}
+                          />
+                        </span>
+                      </div>
+                    </li>
+                  ))
+                ) : (
+                  <li className="rounded-xl border border-dashed bg-muted/20 p-4 text-center text-sm text-muted-foreground">
+                    {t("没有匹配的用户")}
+                  </li>
+                )}
+                </ul>
+              ) : null}
+
+              <div className="hidden min-w-0 overflow-x-auto rounded-lg border bg-background md:block">
                 <div
                   role="table"
                   aria-label={t("用户列表")}
@@ -303,67 +383,14 @@ export function GlobalUsersPanel({
                               "bg-[color-mix(in_oklch,var(--muted)_20%,var(--background))]"
                           )}
                         >
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => handleOpenEditUser(user)}
-                            title={t("编辑用户")}
-                            aria-label={t("编辑用户")}
-                          >
-                            <PencilIcon />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={() => handleOpenUserPasswordDialog(user)}
-                            title={t("修改密码")}
-                            aria-label={t("修改密码")}
-                          >
-                            <LockIcon />
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={t("操作 {value}", {
-                                  value: user.name,
-                                })}
-                                title={t("操作 {value}", { value: user.name })}
-                              >
-                                <MoreHorizontalIcon />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              side="bottom"
-                              align="start"
-                              className="min-w-40"
-                            >
-                              <DropdownMenuItem
-                                disabled={user.id === me.user.id}
-                                onSelect={() => void handleToggleUser(user)}
-                              >
-                                {user.is_active ? (
-                                  <CircleOffIcon />
-                                ) : (
-                                  <CircleCheckIcon />
-                                )}
-                                {t(user.is_active ? "停用" : "启用")}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                variant="destructive"
-                                disabled={user.id === me.user.id}
-                                onSelect={() => void handleDeleteUser(user)}
-                              >
-                                <Trash2Icon />
-                                {t("删除")}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <UserRowActions
+                            currentUserId={me.user.id}
+                            onDelete={handleDeleteUser}
+                            onEdit={handleOpenEditUser}
+                            onPassword={handleOpenUserPasswordDialog}
+                            onToggle={handleToggleUser}
+                            user={user}
+                          />
                         </span>
                       </div>
                     )
@@ -384,5 +411,119 @@ export function GlobalUsersPanel({
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/**
+ * Renders one `label: value` line of a phone user card.
+ *
+ * @param label - Localized field label.
+ * @param value - Field value; truncated unless `breakAll` is set.
+ * @param breakAll - Wraps long unbroken values such as email addresses.
+ */
+function UserCardField({
+  label,
+  value,
+  breakAll = false,
+}: {
+  label: string
+  value: string
+  breakAll?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-1.5">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd
+        className={cn("min-w-0 flex-1", breakAll ? "break-all" : "truncate")}
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
+  )
+}
+
+/**
+ * Renders the edit, password, and overflow actions shared by the user table row and the phone user card.
+ *
+ * @param user - User the actions apply to.
+ * @param currentUserId - Identifier of the signed-in user, who cannot disable or delete themselves.
+ * @param onEdit - Opens the edit form for the user.
+ * @param onPassword - Opens the password-change dialog for the user.
+ * @param onToggle - Enables or disables the user.
+ * @param onDelete - Deletes the user.
+ */
+function UserRowActions({
+  user,
+  currentUserId,
+  onEdit,
+  onPassword,
+  onToggle,
+  onDelete,
+}: {
+  user: User
+  currentUserId: string
+  onEdit: (user: User) => void
+  onPassword: (user: User) => void
+  onToggle: (user: User) => void | Promise<void>
+  onDelete: (user: User) => void | Promise<void>
+}) {
+  const { t } = useLanguage()
+  const isSelf = user.id === currentUserId
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => onEdit(user)}
+        title={t("编辑用户")}
+        aria-label={t("编辑用户")}
+      >
+        <PencilIcon />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => onPassword(user)}
+        title={t("修改密码")}
+        aria-label={t("修改密码")}
+      >
+        <LockIcon />
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("操作 {value}", { value: user.name })}
+            title={t("操作 {value}", { value: user.name })}
+          >
+            <MoreHorizontalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="start" className="min-w-40">
+          <DropdownMenuItem
+            disabled={isSelf}
+            onSelect={() => void onToggle(user)}
+          >
+            {user.is_active ? <CircleOffIcon /> : <CircleCheckIcon />}
+            {t(user.is_active ? "停用" : "启用")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={isSelf}
+            onSelect={() => void onDelete(user)}
+          >
+            <Trash2Icon />
+            {t("删除")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   )
 }

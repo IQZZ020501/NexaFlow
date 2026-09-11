@@ -66,24 +66,26 @@ export function WorkflowEdgeCard({
       />
       {showDelete ? (
         <foreignObject
-          x={labelX - 13}
-          y={labelY - 13}
-          width={26}
-          height={26}
+          x={labelX - 22}
+          y={labelY - 22}
+          width={44}
+          height={44}
           className="overflow-visible"
         >
-          <button
-            type="button"
-            className="nodrag nopan flex size-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-md transition-[color,background-color,transform] hover:scale-110 hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={data?.deleteLabel}
-            title={data?.deleteLabel}
-            onClick={(event) => {
-              event.stopPropagation()
-              data?.onDelete(id)
-            }}
-          >
-            <XIcon className="size-3.5" />
-          </button>
+          <div className="pointer-events-none flex size-full items-center justify-center">
+            <button
+              type="button"
+              className="nodrag nopan pointer-events-auto flex size-6 items-center justify-center rounded-full border bg-background text-muted-foreground shadow-md transition-[color,background-color,transform] hover:scale-110 hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:size-10"
+              aria-label={data?.deleteLabel}
+              title={data?.deleteLabel}
+              onClick={(event) => {
+                event.stopPropagation()
+                data?.onDelete(id)
+              }}
+            >
+              <XIcon className="size-3.5 max-sm:size-4" />
+            </button>
+          </div>
         </foreignObject>
       ) : null}
     </g>

@@ -71,11 +71,11 @@ export function ResourceFolderPickerDialog({
           <DialogTitle>{t("移动到文件夹")}</DialogTitle>
           <DialogDescription>{t("选择资源要归入的目录。")}</DialogDescription>
         </DialogHeader>
-        <div className="max-h-80 space-y-1 overflow-y-auto">
+        <div className="max-h-80 max-sm:max-h-[50svh] space-y-1 overflow-y-auto overscroll-contain">
           <Button
             type="button"
             variant={currentFolderId === null ? "secondary" : "ghost"}
-            className="w-full justify-start"
+            className="w-full justify-start max-sm:h-11"
             disabled={currentFolderId === null || busyFolderId !== undefined}
             onClick={() => void move(null)}
           >
@@ -93,7 +93,7 @@ export function ResourceFolderPickerDialog({
               key={folder.id}
               type="button"
               variant={currentFolderId === folder.id ? "secondary" : "ghost"}
-              className="w-full justify-start"
+              className="w-full justify-start max-sm:h-11"
               style={{ paddingLeft: `${10 + depth * 16}px` }}
               disabled={
                 currentFolderId === folder.id || busyFolderId !== undefined

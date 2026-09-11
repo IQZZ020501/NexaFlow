@@ -1126,7 +1126,12 @@ export function KnowledgeUploadFlow({
                     <UploadIcon className="size-6 text-primary" />
                   </span>
                   <div className="mt-5 space-y-2">
-                    <p className="text-lg font-semibold text-foreground">
+                    <p className="text-lg font-semibold text-foreground sm:hidden">
+                      {importMode === "qa"
+                        ? t("选择 CSV 或 XLSX 文件")
+                        : t("选择文件或文件夹")}
+                    </p>
+                    <p className="hidden text-lg font-semibold text-foreground sm:block">
                       {importMode === "qa"
                         ? t("拖入 CSV 或 XLSX 文件")
                         : t("拖入文件或文件夹")}
@@ -1149,6 +1154,7 @@ export function KnowledgeUploadFlow({
                   <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
                     <Button
                       type="button"
+                      className="w-full sm:w-auto"
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <FilesIcon data-icon="inline-start" />
@@ -1158,6 +1164,7 @@ export function KnowledgeUploadFlow({
                       <Button
                         type="button"
                         variant="outline"
+                        className="w-full sm:w-auto"
                         onClick={() => folderInputRef.current?.click()}
                       >
                         <FolderOpenIcon data-icon="inline-start" />
@@ -1172,7 +1179,7 @@ export function KnowledgeUploadFlow({
             </main>
           </div>
 
-          <div className="sticky bottom-4 z-10 mt-auto">
+          <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 mt-auto sm:bottom-4">
             <div className="mx-auto w-full max-w-[90rem] px-4 sm:px-6 lg:px-8">
               <div className="flex flex-col gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
@@ -1243,7 +1250,7 @@ export function KnowledgeUploadFlow({
 
                 {importMode === "document" && segmentMode === "advanced" ? (
                   <FieldGroup className="mt-5">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <Field>
                         <FieldLabel htmlFor="knowledge-chunk-size">
                           {t("片段字符")}
@@ -1301,7 +1308,7 @@ export function KnowledgeUploadFlow({
                         {cleaningRuleOptions.map((rule) => (
                           <label
                             key={rule.value}
-                            className="flex min-h-9 items-center gap-2 text-sm"
+                            className="flex min-h-11 items-center gap-2 text-sm sm:min-h-9"
                           >
                             <input
                               type="checkbox"
@@ -1436,7 +1443,7 @@ export function KnowledgeUploadFlow({
                           variant="ghost"
                           size="icon-xs"
                           className={cn(
-                            "mr-1 rounded-sm text-muted-foreground/60 opacity-0 transition-[color,background-color,opacity] hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/document-tab:opacity-100 group-focus-within/document-tab:opacity-100",
+                            "mr-1 rounded-sm text-muted-foreground/60 opacity-0 transition-[color,background-color,opacity] hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/document-tab:opacity-100 group-focus-within/document-tab:opacity-100 max-sm:opacity-100",
                             selectedDocument?.id === document.id && "opacity-100",
                             deletingDocumentId === document.id &&
                               "bg-destructive/10 text-destructive opacity-100",
@@ -1469,7 +1476,7 @@ export function KnowledgeUploadFlow({
             </main>
           </div>
 
-          <div className="sticky bottom-4 z-10 mt-auto">
+          <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 mt-auto sm:bottom-4">
             <div className="mx-auto w-full max-w-[90rem] px-4 sm:px-6 lg:px-8">
               <div className="flex flex-col gap-3 rounded-lg border bg-background/95 px-4 py-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
@@ -1660,7 +1667,7 @@ function FileList({
         {files.map((file, index) => (
           <div
             key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-            className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-2 text-sm"
+            className="grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-4 py-2 text-sm max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-y-1 max-sm:py-3"
           >
             <div className="flex min-w-0 items-center gap-3">
               <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
@@ -1670,11 +1677,17 @@ function FileList({
                 {file.name}
               </span>
             </div>
-            <Badge variant="outline">{formatBytes(file.size)}</Badge>
+            <Badge
+              variant="outline"
+              className="max-sm:col-start-1 max-sm:row-start-2 max-sm:w-fit"
+            >
+              {formatBytes(file.size)}
+            </Badge>
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
+              className="max-sm:col-start-2 max-sm:row-span-2 max-sm:self-center"
               aria-label={t("移除 {value}", { value: file.name })}
               onClick={() => onRemove(index)}
             >

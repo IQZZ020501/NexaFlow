@@ -218,7 +218,7 @@ export function AnnouncementExpirationField({
             aria-label={t("公告过期时间")}
             aria-describedby="announcement-expires-at-description"
             className={cn(
-              "h-9 w-full min-w-0 justify-start px-3 font-normal",
+              "h-9 w-full min-w-0 justify-start px-3 font-normal max-sm:h-11",
               !selectedDate && "text-muted-foreground"
             )}
           >
@@ -236,7 +236,7 @@ export function AnnouncementExpirationField({
             align="start"
             sideOffset={8}
             collisionPadding={16}
-            className="z-50 w-[min(22rem,calc(100vw-2rem))] rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+            className="z-50 max-h-[calc(100svh-2rem)] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain rounded-xl border bg-popover p-3 text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
           >
             <div className="flex items-center justify-between gap-2 px-1 pb-3">
               <Button
@@ -306,7 +306,7 @@ export function AnnouncementExpirationField({
                     aria-current={dateKey === todayKey ? "date" : undefined}
                     onClick={() => selectDate(date)}
                     className={cn(
-                      "flex size-9 items-center justify-center rounded-lg text-sm transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                      "flex size-9 items-center justify-center rounded-lg text-sm transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 max-sm:size-10",
                       isOutside && "text-muted-foreground/50",
                       dateKey === todayKey && "ring-1 ring-border",
                       isSelected &&
