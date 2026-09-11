@@ -519,7 +519,20 @@ async def agent_node(
         await callback.answer_delta(delta)
 
     model = runtime.context.model
-    allow_tools = turn < runtime.context.max_turns
+    tool_budget_exhausted = (
+        state["tool_call_count"] >= runtime.context.max_tool_calls
+    )
+    completed_tool_kinds = {
+        str(event.get("tool_kind") or "")
+        for event in state["events"]
+        if event.get("type") == "tool" and event.get("status") != "running"
+    }
+    finalize_from_knowledge = (
+        tool_budget_exhausted
+        and bool(state["evidence_packets"])
+        and completed_tool_kinds == {"knowledge"}
+    )
+    allow_tools = turn < runtime.context.max_turns and not finalize_from_knowledge
     available_tools = runtime.context.tools
     if state["no_new_evidence_rounds"] >= 2:
         available_tools = [
@@ -527,12 +540,27 @@ async def agent_node(
             for tool in available_tools
             if agent_tool_metadata(tool)["kind"] != "knowledge"
         ]
+    model_messages = state["messages"]
+    if finalize_from_knowledge:
+        # A read-only knowledge search may legitimately use the whole tool
+        # budget before the model has written its answer.  Remove tool schemas
+        # and give the model one explicit finalisation turn instead of failing
+        # the run after the budget has already been respected.
+        model_messages = [
+            *model_messages,
+            HumanMessage(
+                content=(
+                    "The tool-call budget is exhausted. Stop calling tools and "
+                    "answer now using the evidence already retrieved."
+                )
+            ),
+        ]
     bound_model = (
         model.bind_tools(available_tools) if allow_tools and available_tools else model
     )
     try:
         if callback.enabled:
-            async with aclosing(bound_model.astream(state["messages"])) as stream:
+            async with aclosing(bound_model.astream(model_messages)) as stream:
                 aggregate: AIMessageChunk | None = None
                 while True:
                     try:
@@ -622,7 +650,7 @@ async def agent_node(
                 )
         else:
             async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
-                message = await bound_model.ainvoke(state["messages"])
+                message = await bound_model.ainvoke(model_messages)
     except TimeoutError as exc:
         raise AgentRunnerError("Agent model response timed out.") from exc
 
@@ -646,7 +674,7 @@ async def agent_node(
             await emit_answer_delta(trailing_text)
     message = sanitized_model_message(message, completion)
 
-    messages = [*state["messages"], message]
+    messages = [*model_messages, message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
     model_usage = merge_usage(state["model_usage"], usage_from_message(message))
     if (
@@ -665,7 +693,11 @@ async def agent_node(
         ):
             raise AgentRunnerError("Agent model returned invalid tool call identifiers.")
         if not allow_tools:
-            raise AgentRunnerError("Agent turn limit reached.")
+            raise AgentRunnerError(
+                "Agent tool call limit reached."
+                if finalize_from_knowledge
+                else "Agent turn limit reached."
+            )
         await callback.process(completed_thought("agent.tools_selected"))
         return {
             "messages": messages,
@@ -809,10 +841,28 @@ async def tool_node(
 ) -> dict[str, Any]:
     calls = state["pending_tool_calls"]
     tool_call_count = state["tool_call_count"] + len(calls)
-    if tool_call_count > runtime.context.max_tool_calls:
-        raise AgentRunnerError("Agent tool call limit reached.")
-
     tools = {tool.name: tool for tool in runtime.context.tools}
+    pending_tool_kinds = [
+        agent_tool_metadata(tools[call["name"]])["kind"]
+        for call in calls
+        if call["name"] in tools
+    ]
+    all_pending_tools_known = len(pending_tool_kinds) == len(calls)
+    knowledge_budget_overflow = (
+        tool_call_count > runtime.context.max_tool_calls
+        and bool(state["evidence_packets"])
+        and all_pending_tools_known
+        and set(pending_tool_kinds) == {"knowledge"}
+    )
+    if (
+        tool_call_count > runtime.context.max_tool_calls
+        and not knowledge_budget_overflow
+    ):
+        raise AgentRunnerError("Agent tool call limit reached.")
+    persisted_tool_call_count = min(
+        tool_call_count,
+        runtime.context.max_tool_calls,
+    )
     callback = runtime.context.callback
     prepared_calls: list[PreparedToolCall] = []
     for call in calls:
@@ -831,10 +881,20 @@ async def tool_node(
         except (json.JSONDecodeError, TypeError):
             parsed_arguments = None
 
-        if state["finish_reason"] == "length":
+        if knowledge_budget_overflow:
             blocked_result = AgentToolResult(
                 content=(
-                    "Tool call was not executed because the model response was truncated."
+                    "Knowledge search was not executed because the tool-call "
+                    "budget is exhausted. Answer using the evidence already retrieved."
+                ),
+                summary="Knowledge search stopped at the tool-call budget.",
+                is_error=True,
+            )
+        elif state["finish_reason"] == "length":
+            blocked_result = AgentToolResult(
+                content=(
+                    "Tool call was not executed because the model response was "
+                    "truncated."
                 ),
                 summary="Truncated tool call rejected.",
                 is_error=True,
@@ -969,7 +1029,7 @@ async def tool_node(
     return {
         "messages": messages,
         "events": events,
-        "tool_call_count": tool_call_count,
+        "tool_call_count": persisted_tool_call_count,
         "seen_evidence_ids": sorted(seen_evidence_ids),
         "evidence_packets": evidence_packets[:32],
         "no_new_evidence_rounds": no_new_evidence_rounds,

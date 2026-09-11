@@ -769,6 +769,76 @@ def assert_graph_error_branches() -> None:
     else:
         raise AssertionError("Tool call on final turn was accepted.")
 
+    async def run_tool_budget_finalization() -> None:
+        async def retrieve(_arguments: str) -> AgentToolResult:
+            raise AssertionError(
+                "knowledge tool must not execute after budget exhaustion"
+            )
+
+        knowledge_tool = create_agent_tool(
+            name="search_knowledge",
+            description="Search",
+            parameters={"type": "object", "properties": {}},
+            execute=retrieve,
+            kind="knowledge",
+        )
+        provider = SequenceProvider(
+            [ok_completion("Answer with the evidence already retrieved.")]
+        )
+        result = await run_agent(
+            provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=5,
+                tool_call_count=12,
+                events=[
+                    {
+                        "type": "tool",
+                        "tool_kind": "knowledge",
+                        "status": "succeeded",
+                    }
+                ],
+                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+            ),
+            max_tool_calls=12,
+        )
+        assert result.content == "Answer with the evidence already retrieved."
+        assert "tool-call budget is exhausted" in provider.requests[0][-1].content
+
+        overflow_provider = SequenceProvider(
+            [ok_completion("Answer after stopping the extra searches.")]
+        )
+        overflow_result = await run_agent(
+            overflow_provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=1,
+                tool_call_count=11,
+                pending_tool_calls=[
+                    {"id": "call-1", "name": "search_knowledge", "arguments": "{}"},
+                    {"id": "call-2", "name": "search_knowledge", "arguments": "{}"},
+                ],
+                events=[
+                    {
+                        "type": "tool",
+                        "tool_kind": "knowledge",
+                        "status": "succeeded",
+                    }
+                ],
+                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+            ),
+            max_tool_calls=12,
+        )
+        assert overflow_result.content == "Answer after stopping the extra searches."
+        assert (
+            "tool-call budget is exhausted"
+            in overflow_provider.requests[0][-1].content
+        )
+
+    asyncio.run(run_tool_budget_finalization())
+
     async def run_truncated() -> None:
         await run_agent(
             SequenceProvider(

@@ -22,6 +22,7 @@ import {
   mergePublicRunEvent,
   publicToolName,
 } from "@/components/agents/public-agent-chat"
+import { AgentAnswer } from "@/components/agents/agent-source-references"
 import { PublicWorkflowChat } from "@/components/workflows/public-workflow-chat"
 import { ApiError } from "@/lib/api-client"
 import { copyText } from "@/lib/clipboard"
@@ -1617,6 +1618,100 @@ describe("PublicAgentChat", () => {
       "可以按规定补缴。社保制度.pdf"
     )
     expect(screen.queryByText("source")).toBeNull()
+  })
+
+  test("renders legacy source refs and markdown links with spacing", () => {
+    renderPage(
+      <AgentAnswer
+        content={
+          "依据该规定处理。[source] (#nexaflow-source-legacy-source-key)" +
+          "[source](https://example.test/#nexaflow-source-legacy-source-key)"
+        }
+        sources={[
+          {
+            source_ref: "legacy-source-key",
+            knowledge_base: "制度库",
+            document: "劳动制度.pdf",
+            parent_title: "处理流程",
+            section_path: [],
+            chunk_index: 1,
+            content: "依据该规定处理。",
+          },
+        ]}
+        t={t}
+      />
+    )
+
+    const source = screen.getByRole("button", {
+      name: "来源：劳动制度.pdf · 处理流程",
+    })
+    expect(
+      screen.getAllByRole("button", {
+        name: "来源：劳动制度.pdf · 处理流程",
+      })
+    ).toHaveLength(1)
+    expect(source.textContent).toBe("劳动制度.pdf")
+    expect(source.closest("p")?.textContent).toBe(
+      "依据该规定处理。劳动制度.pdf"
+    )
+    expect(screen.queryByText("source")).toBeNull()
+  })
+
+  test("does not expose an unresolvable internal source link", () => {
+    renderPage(
+      <AgentAnswer
+        content={
+          "依据该规定处理。[source](#nexaflow-source-550e8400-e29b-41d4-a716-446655440000)"
+            + "[source](https://example.test/#nexaflow-source-550e8400-e29b-41d4-a716-446655440000)"
+        }
+        sources={[
+          {
+            source_ref: "legacy-source-key",
+            knowledge_base: "制度库",
+            document: "劳动制度.pdf",
+            parent_title: "处理流程",
+            section_path: [],
+            chunk_index: 1,
+            content: "依据该规定处理。",
+          },
+        ]}
+        t={t}
+      />
+    )
+
+    expect(screen.queryByRole("link", { name: "source" })).toBeNull()
+    expect(
+      screen.getByRole("button", {
+        name: "来源：劳动制度.pdf · 处理流程",
+      })
+    ).toBeTruthy()
+  })
+
+  test("does not flash an incomplete source marker during streaming", () => {
+    renderPage(
+      <AgentAnswer
+        content="依据该规定处理。[source](#nexaflow-source-legacy-source-key"
+        sources={[
+          {
+            source_ref: "legacy-source-key",
+            knowledge_base: "制度库",
+            document: "劳动制度.pdf",
+            parent_title: "处理流程",
+            section_path: [],
+            chunk_index: 1,
+            content: "依据该规定处理。",
+          },
+        ]}
+        t={t}
+      />
+    )
+
+    expect(screen.queryByText("source")).toBeNull()
+    expect(
+      screen.getByRole("button", {
+        name: "来源：劳动制度.pdf · 处理流程",
+      })
+    ).toBeTruthy()
   })
 
   test("edits and resends only the latest user message", async () => {

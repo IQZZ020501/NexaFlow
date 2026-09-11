@@ -24,6 +24,7 @@ from app.application.agents.runs.service import (
 )
 from app.application.agents.tools.builder import (
     knowledge_sources_from_events,
+    normalize_agent_source_links,
     safe_agent_run_error,
 )
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
@@ -430,7 +431,10 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
         question=str(value.get("goal") or value.get("question") or ""),
         attachments=attachments or [],
         status=run_status,
-        result=clean_model_text(str(value.get("result") or "")),
+        result=normalize_agent_source_links(
+            clean_model_text(str(value.get("result") or "")),
+            value.get("events") or [],
+        ),
         sources=knowledge_sources_from_events(
             value.get("events") or [],
             value.get("grounding_meta"),
