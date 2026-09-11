@@ -52,7 +52,6 @@ async def download_workspace_knowledge_base_document(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
@@ -90,7 +89,6 @@ async def read_workspace_knowledge_document_asset(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     await get_knowledge_document(db, knowledge_base, document_id)
@@ -129,7 +127,6 @@ async def delete_workspace_knowledge_base_document(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
@@ -164,7 +161,6 @@ async def update_workspace_knowledge_base_document_status(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)

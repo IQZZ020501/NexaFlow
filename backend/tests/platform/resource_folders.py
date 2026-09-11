@@ -293,16 +293,315 @@ def main() -> None:
             member.json()["initial_password"],
             MEMBER_PASSWORD,
         )
+        member_headers = auth_headers(member_token)
+
+        # Folder visibility mirrors the resources a member may list: the
+        # administrator's folders stay hidden until a resource inside them is
+        # shared, and a shared resource reveals its whole folder chain.
+        hidden_knowledge_folders = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=member_headers,
+        )
+        assert hidden_knowledge_folders.status_code == 200, hidden_knowledge_folders.text
+        assert hidden_knowledge_folders.json() == []
+        hidden_tool_folders = client.get(
+            f"{base}/resource-folders?resource_type=tool",
+            headers=member_headers,
+        )
+        assert hidden_tool_folders.status_code == 200, hidden_tool_folders.text
+        assert hidden_tool_folders.json() == []
+
+        # Members own their own tree: they create folders, may only nest inside
+        # folders they can already see, and only manage folders they created.
+        member_root = client.post(
+            f"{base}/resource-folders",
+            headers=member_headers,
+            json={"name": "成员目录", "resource_type": "knowledge", "parent_id": None},
+        )
+        assert member_root.status_code == 201, member_root.text
+        member_root_id = member_root.json()["id"]
+        member_child = client.post(
+            f"{base}/resource-folders",
+            headers=member_headers,
+            json={
+                "name": "成员子目录",
+                "resource_type": "knowledge",
+                "parent_id": member_root_id,
+            },
+        )
+        assert member_child.status_code == 201, member_child.text
+        member_child_id = member_child.json()["id"]
+
+        own_folders = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=member_headers,
+        )
+        assert own_folders.status_code == 200, own_folders.text
+        assert {item["name"] for item in own_folders.json()} == {
+            "成员目录",
+            "成员子目录",
+        }
+
+        hidden_parent = client.post(
+            f"{base}/resource-folders",
+            headers=member_headers,
+            json={
+                "name": "越权目录",
+                "resource_type": "knowledge",
+                "parent_id": sibling_id,
+            },
+        )
+        assert hidden_parent.status_code == 404, hidden_parent.text
+        denied_rename = client.patch(
+            f"{base}/resource-folders/{sibling_id}",
+            headers=member_headers,
+            json={"name": "越权改名"},
+        )
+        assert denied_rename.status_code == 403, denied_rename.text
+        denied_delete = client.delete(
+            f"{base}/resource-folders/{sibling_id}",
+            headers=member_headers,
+        )
+        assert denied_delete.status_code == 403, denied_delete.text
+
+        renamed_own = client.patch(
+            f"{base}/resource-folders/{member_child_id}",
+            headers=member_headers,
+            json={"name": "成员子目录二"},
+        )
+        assert renamed_own.status_code == 200, renamed_own.text
+        assert renamed_own.json()["name"] == "成员子目录二"
+
+        peer = client.post(
+            f"{base}/members/users",
+            headers=headers,
+            json={
+                "username": "folder-peer",
+                "email": "folder-peer@example.com",
+                "name": "Folder Peer",
+            },
+        )
+        assert peer.status_code == 201, peer.text
+        peer_token = activate_user(
+            client,
+            "folder-peer",
+            peer.json()["initial_password"],
+            MEMBER_PASSWORD,
+        )
+        peer_folders = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=auth_headers(peer_token),
+        )
+        assert peer_folders.status_code == 200, peer_folders.text
+        assert peer_folders.json() == []
+
+        member_tool = client.post(
+            f"{base}/tools/python",
+            headers=member_headers,
+            json={
+                "display_name": "成员工具",
+                "description": "Member owned tool.",
+                "input_schema": {"type": "object", "properties": {}},
+                "output_schema": {"type": "object", "properties": {}},
+                "code": "result = {'value': inputs['value']}",
+            },
+        )
+        assert member_tool.status_code == 201, member_tool.text
+        member_tool_folder = client.post(
+            f"{base}/resource-folders",
+            headers=member_headers,
+            json={"name": "成员工具目录", "resource_type": "tool", "parent_id": None},
+        )
+        assert member_tool_folder.status_code == 201, member_tool_folder.text
+        member_tool_move = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=member_headers,
+            json={
+                "resource_type": "tool",
+                "resource_id": member_tool.json()["id"],
+                "folder_id": member_tool_folder.json()["id"],
+            },
+        )
+        assert member_tool_move.status_code == 204, member_tool_move.text
+        member_tool_folders = client.get(
+            f"{base}/resource-folders?resource_type=tool",
+            headers=member_headers,
+        )
+        assert [
+            item["name"] for item in member_tool_folders.json()
+        ] == ["成员工具目录"]
+        # The administrator's own tool folder is still out of reach.
+        hidden_tool_move = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=member_headers,
+            json={
+                "resource_type": "tool",
+                "resource_id": member_tool.json()["id"],
+                "folder_id": tool_folder.json()["id"],
+            },
+        )
+        assert hidden_tool_move.status_code == 404, hidden_tool_move.text
+
+        shared_folder = client.post(
+            f"{base}/resource-folders",
+            headers=headers,
+            json={"name": "共享目录", "resource_type": "knowledge", "parent_id": None},
+        )
+        assert shared_folder.status_code == 201, shared_folder.text
+        shared_child = client.post(
+            f"{base}/resource-folders",
+            headers=headers,
+            json={
+                "name": "共享子目录",
+                "resource_type": "knowledge",
+                "parent_id": shared_folder.json()["id"],
+            },
+        )
+        assert shared_child.status_code == 201, shared_child.text
+        shared_knowledge = client.post(
+            f"{base}/knowledge-bases",
+            headers=headers,
+            json={"name": "共享知识", "description": ""},
+        )
+        assert shared_knowledge.status_code == 201, shared_knowledge.text
+        moved_shared = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=headers,
+            json={
+                "resource_type": "knowledge",
+                "resource_id": shared_knowledge.json()["id"],
+                "folder_id": shared_child.json()["id"],
+            },
+        )
+        assert moved_shared.status_code == 204, moved_shared.text
+        still_hidden = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=member_headers,
+        )
+        assert {item["name"] for item in still_hidden.json()} == {
+            "成员目录",
+            "成员子目录二",
+        }
+
+        granted = client.put(
+            f"{base}/knowledge-bases/{shared_knowledge.json()['id']}/permissions/"
+            f"{member.json()['user']['id']}",
+            headers=headers,
+            json={"permission": "view"},
+        )
+        assert granted.status_code == 200, granted.text
+        revealed = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=member_headers,
+        )
+        assert revealed.status_code == 200, revealed.text
+        assert {item["name"] for item in revealed.json()} == {
+            "成员目录",
+            "成员子目录二",
+            "共享目录",
+            "共享子目录",
+        }
+
+        # Folder trees are private to their creator: an administrator sees only
+        # the folders they created, and someone else's tree stays hidden.
+        workspace_admin = client.post(
+            f"{base}/members/users",
+            headers=headers,
+            json={
+                "username": "folder-admin",
+                "email": "folder-admin@example.com",
+                "name": "Folder Admin",
+            },
+        )
+        assert workspace_admin.status_code == 201, workspace_admin.text
+        workspace_admin_token = activate_user(
+            client,
+            "folder-admin",
+            workspace_admin.json()["initial_password"],
+            MEMBER_PASSWORD,
+        )
+        promoted = client.patch(
+            f"{base}/members/{workspace_admin.json()['user']['id']}",
+            headers=headers,
+            json={"role": "admin"},
+        )
+        assert promoted.status_code == 200, promoted.text
+        admin_folder = client.post(
+            f"{base}/resource-folders",
+            headers=auth_headers(workspace_admin_token),
+            json={"name": "管理员目录", "resource_type": "knowledge", "parent_id": None},
+        )
+        assert admin_folder.status_code == 201, admin_folder.text
+        admin_folders = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=auth_headers(workspace_admin_token),
+        )
+        assert admin_folders.status_code == 200, admin_folders.text
+        assert [item["name"] for item in admin_folders.json()] == ["管理员目录"]
+        denied_admin_rename = client.patch(
+            f"{base}/resource-folders/{member_root_id}",
+            headers=auth_headers(workspace_admin_token),
+            json={"name": "越权改名"},
+        )
+        assert denied_admin_rename.status_code == 403, denied_admin_rename.text
+
+        # The creator keeps the whole tree, and grants reveal a shared chain.
+        creator_folders = client.get(
+            f"{base}/resource-folders?resource_type=knowledge",
+            headers=headers,
+        )
+        assert creator_folders.status_code == 200, creator_folders.text
+        assert {item["name"] for item in creator_folders.json()} == {
+            "甲目录",
+            "乙目录",
+            "共享目录",
+            "共享子目录",
+        }
+
+        # Filing a knowledge base into a nested folder never hides it from its
+        # owner; other users stay isolated from the row entirely.
+        owner_knowledge = client.get(f"{base}/knowledge-bases", headers=headers)
+        assert owner_knowledge.status_code == 200, owner_knowledge.text
+        filed_row = next(
+            item
+            for item in owner_knowledge.json()
+            if item["id"] == shared_knowledge.json()["id"]
+        )
+        assert filed_row["folder_id"] == shared_child.json()["id"]
+        assert filed_row["permission"] == "edit"
+        admin_knowledge = client.get(
+            f"{base}/knowledge-bases",
+            headers=auth_headers(workspace_admin_token),
+        )
+        assert admin_knowledge.status_code == 200, admin_knowledge.text
+        assert admin_knowledge.json() == []
+
+        member_model_folder = client.post(
+            f"{base}/resource-folders",
+            headers=member_headers,
+            json={"name": "成员模型目录", "resource_type": "model", "parent_id": None},
+        )
+        assert member_model_folder.status_code == 201, member_model_folder.text
         denied_model_move = client.put(
             f"{base}/resource-folders/resources/move",
-            headers=auth_headers(member_token),
+            headers=member_headers,
+            json={
+                "resource_type": "model",
+                "resource_id": model_id,
+                "folder_id": member_model_folder.json()["id"],
+            },
+        )
+        assert denied_model_move.status_code == 403, denied_model_move.text
+        hidden_model_move = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=member_headers,
             json={
                 "resource_type": "model",
                 "resource_id": model_id,
                 "folder_id": model_folder_id,
             },
         )
-        assert denied_model_move.status_code == 403, denied_model_move.text
+        assert hidden_model_move.status_code == 404, hidden_model_move.text
         moved_model = client.put(
             f"{base}/resource-folders/resources/move",
             headers=headers,
@@ -316,6 +615,16 @@ def main() -> None:
         listed_models = client.get(f"{base}/models", headers=headers)
         assert listed_models.status_code == 200, listed_models.text
         assert listed_models.json()[0]["folder_id"] == model_folder_id
+
+        # Model folders are private to their creator too.
+        member_model_folders = client.get(
+            f"{base}/resource-folders?resource_type=model",
+            headers=member_headers,
+        )
+        assert member_model_folders.status_code == 200, member_model_folders.text
+        assert [
+            item["name"] for item in member_model_folders.json()
+        ] == ["成员模型目录"]
 
         deleted_model_folder = client.delete(
             f"{base}/resource-folders/{model_folder_id}",

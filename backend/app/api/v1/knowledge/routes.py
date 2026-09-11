@@ -86,7 +86,6 @@ async def list_workspace_knowledge_bases(
         db,
         context.workspace.id,
         context.user,
-        context.membership_role,
         limit,
         offset,
     )
@@ -112,7 +111,6 @@ async def get_workspace_knowledge_base(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     return KnowledgeBaseResponse(
@@ -183,7 +181,6 @@ async def list_workspace_knowledge_base_documents(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"} if include_staged else {"view", "edit"},
     )
     return await list_knowledge_documents_with_counts(
@@ -212,7 +209,6 @@ async def upload_workspace_knowledge_attachment(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     return await upload_knowledge_attachment(
@@ -240,7 +236,6 @@ async def delete_workspace_knowledge_attachment(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     await delete_knowledge_attachment(
@@ -269,7 +264,6 @@ async def create_workspace_knowledge_base_documents(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     return await create_knowledge_documents_from_attachments(
@@ -297,7 +291,6 @@ async def list_workspace_knowledge_document_chunks(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
@@ -321,7 +314,6 @@ async def list_workspace_knowledge_document_tasks(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
@@ -348,7 +340,6 @@ async def parse_workspace_knowledge_base_document(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
@@ -374,7 +365,6 @@ async def index_workspace_knowledge_base_document(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     document = await get_knowledge_document(db, knowledge_base, document_id)
@@ -403,7 +393,6 @@ async def test_workspace_knowledge_base_models(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     return await test_knowledge_base_models(db, knowledge_base, payload, settings)
@@ -422,7 +411,6 @@ async def list_workspace_knowledge_base_tasks(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     return await list_knowledge_tasks(db, knowledge_base, limit=limit, offset=offset)
@@ -446,7 +434,6 @@ async def retry_workspace_knowledge_task(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     task = await retry_knowledge_task(
@@ -475,7 +462,6 @@ async def stop_workspace_knowledge_task(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     return await stop_knowledge_task(db, knowledge_base, task_id, context.user)
@@ -496,7 +482,6 @@ async def bulk_delete_workspace_knowledge_tasks(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     deleted_task_ids = await delete_knowledge_tasks(
@@ -523,7 +508,6 @@ async def delete_workspace_knowledge_task(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     await delete_knowledge_task(db, knowledge_base, task_id, context.user)
@@ -545,7 +529,6 @@ async def rebuild_workspace_knowledge_base_index(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"edit"},
     )
     task = await enqueue_rebuild_knowledge_index(db, knowledge_base, context.user)
@@ -579,7 +562,7 @@ async def list_workspace_knowledge_base_permissions(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ResourcePermissionResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    require_can_manage_permissions(knowledge_base, context.user, context.membership_role)
+    require_can_manage_permissions(knowledge_base, context.user)
     return await list_resource_permissions(db, knowledge_base, limit, offset)
 
 
@@ -592,7 +575,7 @@ async def grant_workspace_knowledge_base_permission(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ResourcePermissionResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    require_can_manage_permissions(knowledge_base, context.user, context.membership_role)
+    require_can_manage_permissions(knowledge_base, context.user)
     return await upsert_resource_permission(
         db,
         knowledge_base,
@@ -610,6 +593,6 @@ async def revoke_workspace_knowledge_base_permission(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    require_can_manage_permissions(knowledge_base, context.user, context.membership_role)
+    require_can_manage_permissions(knowledge_base, context.user)
     await revoke_resource_permission(db, knowledge_base, user_id, context.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

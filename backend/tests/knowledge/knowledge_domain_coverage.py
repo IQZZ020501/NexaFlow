@@ -4180,22 +4180,21 @@ async def run_direct_shareddomain_tests(
         direct_kb = await knowledge_repository.create_knowledge_base(db, direct_kb)
         await db.commit()
 
-        kb_service.require_can_manage_permissions(direct_kb, alice, "member")
+        kb_service.require_can_manage_permissions(direct_kb, alice)
         other = SimpleNamespace(id="00000000-0000-0000-0000-000000000051")
-        try:
-            kb_service.require_can_manage_permissions(direct_kb, other, "member")
-        except HTTPException as exc:
-            assert exc.status_code == 403
-        else:
-            raise AssertionError("non-owner must 403")
-        kb_service.require_can_manage_permissions(direct_kb, other, "admin")
+        for role in ("member", "admin", None):
+            try:
+                kb_service.require_can_manage_permissions(direct_kb, other)
+            except HTTPException as exc:
+                assert exc.status_code == 403
+            else:
+                raise AssertionError("only the owner may manage knowledge base grants")
 
         # ---- kb.list_knowledge_bases ----
         listed = await kb_service.list_knowledge_bases(
             db,
             workspace_id,
             alice,
-            "member",
             limit=10,
             offset=0,
         )
@@ -4420,7 +4419,6 @@ async def run_direct_shareddomain_tests(
             db,
             direct_kb,
             bob,
-            "member",
             {"edit"},
         )
         assert permission == "edit"
@@ -4428,15 +4426,14 @@ async def run_direct_shareddomain_tests(
             id="00000000-0000-0000-0000-000000000054",
             username="stranger",
             name="Stranger",
+            is_global_admin=False,
         )
         try:
             await require_knowledge_base_permission(
                 db,
                 direct_kb,
                 stranger,
-                "member",
-                {"view"},
-            )
+                {"view"})
         except HTTPException as exc:
             assert exc.status_code == 403
         else:

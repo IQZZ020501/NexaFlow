@@ -6,7 +6,7 @@ import time
 import traceback
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -17,12 +17,17 @@ from app.application.agents.runs.memory import (
     PreparedConversationMemory,
     prepare_conversation_memory,
 )
+from app.application.agents.runs.snapshots import (
+    require_knowledge_resource_snapshot,
+    require_model_runtime_snapshot,
+)
 from app.application.agents.tools.builder import (
     bounded_knowledge_context,
     build_knowledge_search_tool,
     build_mcp_agent_tool,
     build_unified_agent_tool,
     describe_knowledge_sources,
+    knowledge_packets_from_output,
     safe_agent_error,
     set_agent_tool_idempotency_key,
 )
@@ -39,6 +44,7 @@ from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory
@@ -62,10 +68,6 @@ from app.domain.agents.runtime import (
     safe_event_value,
 )
 from app.domain.agents.runtime.state import PendingToolCall
-from app.domain.agents.runtime.graph import (
-    MAX_AGENT_TOOL_CALLS,
-    MAX_AGENT_TURNS,
-)
 from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
     get_agent_model,
@@ -90,42 +92,63 @@ AGENT_EVENT_REPLAY_PAGE_SIZE = 500
 def _run_limits(
     run: AgentRun,
     settings: Settings,
-) -> tuple[float, int, int, int | None]:
-    if run.depth == 0:
-        return (
-            float(settings.agent_run_timeout_seconds),
-            MAX_AGENT_TURNS,
-            MAX_AGENT_TOOL_CALLS,
-            None,
+) -> tuple[datetime, int, int, int]:
+    max_runtime_seconds = float(run.max_runtime_seconds)
+    max_turns = run.max_turns
+    max_tool_calls = run.max_tool_calls
+    max_model_tokens = run.max_model_tokens
+    deadline = run.execution_deadline_at
+    if deadline is not None and deadline.tzinfo is None:
+        # SQLite-based tests discard timezone metadata; production PostgreSQL
+        # stores this as timestamptz. All persisted run timestamps are UTC.
+        deadline = deadline.replace(tzinfo=UTC)
+    if run.depth == 1:
+        limits = run.application_snapshot.get("runtime_limits")
+        if not isinstance(limits, dict):
+            raise AgentRunnerError("Nested Agent runtime limits are invalid.")
+        deadline_value = limits.get("deadline_at")
+        try:
+            legacy_deadline = datetime.fromisoformat(str(deadline_value))
+        except ValueError as exc:
+            raise AgentRunnerError("Nested Agent deadline is invalid.") from exc
+        if legacy_deadline.tzinfo is None:
+            raise AgentRunnerError("Nested Agent deadline is invalid.")
+        deadline = deadline or legacy_deadline
+        values = (
+            limits.get("max_turns"),
+            limits.get("max_tool_calls"),
+            limits.get("max_model_tokens"),
         )
-    limits = run.application_snapshot.get("runtime_limits")
-    if run.depth != 1 or not isinstance(limits, dict):
-        raise AgentRunnerError("Nested Agent runtime limits are invalid.")
-    deadline_value = limits.get("deadline_at")
-    try:
-        deadline = datetime.fromisoformat(str(deadline_value))
-    except ValueError as exc:
-        raise AgentRunnerError("Nested Agent deadline is invalid.") from exc
-    if deadline.tzinfo is None:
-        raise AgentRunnerError("Nested Agent deadline is invalid.")
-    timeout_seconds = min(
-        float(settings.agent_run_timeout_seconds),
-        (deadline - utc_now()).total_seconds(),
-    )
-    if timeout_seconds <= 0:
-        raise AgentRunnerError("Nested Agent deadline exceeded.")
-    values = (
-        limits.get("max_turns"),
-        limits.get("max_tool_calls"),
-        limits.get("max_model_tokens"),
-    )
-    if any(
-        not isinstance(value, int) or isinstance(value, bool) or value <= 0
-        for value in values
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            for value in values
+        ):
+            raise AgentRunnerError("Nested Agent runtime limits are invalid.")
+        max_turns, max_tool_calls, max_model_tokens = values
+    elif run.depth != 0:
+        raise AgentRunnerError("Agent runtime depth is invalid.")
+    if (
+        max_runtime_seconds <= 0
+        or max_turns <= 0
+        or max_tool_calls <= 0
+        or max_model_tokens <= 0
     ):
-        raise AgentRunnerError("Nested Agent runtime limits are invalid.")
-    max_turns, max_tool_calls, max_model_tokens = values
-    return timeout_seconds, max_turns, max_tool_calls, max_model_tokens
+        raise AgentRunnerError("Agent runtime limits are invalid.")
+    deadline = deadline or (
+        utc_now() + timedelta(seconds=max_runtime_seconds)
+    )
+    if deadline.tzinfo is None:
+        raise AgentRunnerError("Agent execution deadline is invalid.")
+    if (deadline - utc_now()).total_seconds() <= 0:
+        raise AgentRunnerError("Agent execution deadline exceeded.")
+    return deadline, max_turns, max_tool_calls, max_model_tokens
+
+
+def _remaining_run_seconds(deadline: datetime) -> float:
+    remaining = (deadline - utc_now()).total_seconds()
+    if remaining <= 0:
+        raise AgentRunnerError("Agent execution deadline exceeded.")
+    return remaining
 
 
 @dataclass(frozen=True)
@@ -519,13 +542,35 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             raise AgentRunnerError("Agent run user is unavailable.")
         context = await build_workspace_context(db, actor, run.workspace_id)
         model = await get_agent_model(db, run.workspace_id, run.model_id)
+        try:
+            require_model_runtime_snapshot(model, run.model_runtime_snapshot)
+        except ValueError as exc:
+            raise AgentRunnerError(str(exc)) from exc
         knowledge_bases = await accessible_agent_knowledge_bases(
             db,
             run.workspace_id,
             run.knowledge_base_ids,
             actor,
-            context.membership_role,
         )
+        if {item.id for item in knowledge_bases} != set(run.knowledge_base_ids):
+            raise AgentRunnerError(
+                "Agent knowledge access changed after run creation."
+            )
+        knowledge_content_revisions = (
+            await knowledge_repository.list_knowledge_content_revisions(
+                db,
+                run.workspace_id,
+                run.knowledge_base_ids,
+            )
+        )
+        try:
+            require_knowledge_resource_snapshot(
+                knowledge_bases,
+                run.knowledge_resource_snapshot,
+                knowledge_content_revisions,
+            )
+        except ValueError as exc:
+            raise AgentRunnerError(str(exc)) from exc
         tool_snapshots = (
             [tool_snapshot_from_payload(item) for item in run.tool_snapshots]
             if run.configuration_source in {"draft", "published"}
@@ -574,6 +619,39 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         tool_snapshots=tool_snapshots,
         mcp_tools=mcp_tools,
     )
+
+
+async def _require_current_knowledge_snapshot(scope: ExecutionScope) -> None:
+    if not scope.run.knowledge_base_ids:
+        return
+    async with get_session_factory()() as db:
+        knowledge_bases = await accessible_agent_knowledge_bases(
+            db,
+            scope.run.workspace_id,
+            scope.run.knowledge_base_ids,
+            scope.actor,
+        )
+        if {item.id for item in knowledge_bases} != set(
+            scope.run.knowledge_base_ids
+        ):
+            raise AgentRunnerError(
+                "Agent knowledge access changed after run creation."
+            )
+        content_revisions = (
+            await knowledge_repository.list_knowledge_content_revisions(
+                db,
+                scope.run.workspace_id,
+                scope.run.knowledge_base_ids,
+            )
+        )
+    try:
+        require_knowledge_resource_snapshot(
+            knowledge_bases,
+            scope.run.knowledge_resource_snapshot,
+            content_revisions,
+        )
+    except ValueError as exc:
+        raise AgentRunnerError(str(exc)) from exc
 
 
 async def _append_event(
@@ -705,7 +783,7 @@ async def _execute_claimed_agent_run(
     """
     scope = await _load_execution_scope(run_id)
     run = scope.run
-    run_timeout, max_turns, max_tool_calls, max_model_tokens = _run_limits(
+    run_deadline, max_turns, max_tool_calls, max_model_tokens = _run_limits(
         run,
         settings,
     )
@@ -731,6 +809,7 @@ async def _execute_claimed_agent_run(
         else None
     )
     knowledge_context = ""
+    initial_evidence: list[dict[str, Any]] = []
     if not run.checkpoint and knowledge_tool is not None and run.knowledge_query_mode == "required":
         eager_call_id = f"eager-knowledge-{run.id}"
         # The persisted event is deliberately redacted/bounded for UI replay;
@@ -741,7 +820,10 @@ async def _execute_claimed_agent_run(
         eager_result = await _invoke_required_knowledge(
             knowledge_tool,
             run.goal,
-            settings.agent_tool_timeout_seconds,
+            min(
+                settings.agent_tool_timeout_seconds,
+                _remaining_run_seconds(run_deadline),
+            ),
         )
         eager_output = eager_result.output
         eager_event = {
@@ -778,6 +860,8 @@ async def _execute_claimed_agent_run(
                 ),
             }
         )
+        initial_evidence = knowledge_packets_from_output(eager_output)
+        await _require_current_knowledge_snapshot(scope)
 
     tools: list[StructuredTool] = []
     if knowledge_tool is not None and run.knowledge_query_mode == "agentic":
@@ -805,6 +889,7 @@ async def _execute_claimed_agent_run(
     )
     memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
     if not run.checkpoint:
+        memory_timeout = min(60.0, _remaining_run_seconds(run_deadline))
         try:
             async with get_session_factory()() as memory_db:
                 memory = await prepare_conversation_memory(
@@ -814,10 +899,7 @@ async def _execute_claimed_agent_run(
                     chat_model,
                     base_messages,
                     tools,
-                    timeout_seconds=min(
-                        60.0,
-                        run_timeout,
-                    ),
+                    timeout_seconds=memory_timeout,
                 )
                 await memory_db.commit()
         except Exception as exc:
@@ -844,6 +926,8 @@ async def _execute_claimed_agent_run(
         knowledge_context=knowledge_context,
         context_messages=memory.messages,
     )
+    grounding_mode = run.knowledge_query_mode if knowledge_tool is not None else None
+
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
             run,
@@ -878,10 +962,29 @@ async def _execute_claimed_agent_run(
                     arguments,
                     result,
                 )
+                await _require_current_knowledge_snapshot(scope)
+                return
+            await unified_runtime.after(
+                turn,
+                call,
+                metadata,
+                arguments,
+                result,
+            )
     else:
         legacy_ledger = DurableToolLedger(run, worker_task_id, settings, lease_lost)
         before_tool_call = legacy_ledger.before
-        after_tool_call = legacy_ledger.after
+
+        async def after_tool_call(turn, call, metadata, arguments, result):
+            await legacy_ledger.after(
+                turn,
+                call,
+                metadata,
+                arguments,
+                result,
+            )
+            if metadata.get("kind") == "knowledge":
+                await _require_current_knowledge_snapshot(scope)
     live_stream = AgentLiveStreamPublisher(settings, run.id)
 
     async def record_event(event: dict[str, Any]) -> None:
@@ -918,7 +1021,7 @@ async def _execute_claimed_agent_run(
 
     try:
         try:
-            async with asyncio.timeout(run_timeout):
+            async with asyncio.timeout(_remaining_run_seconds(run_deadline)):
                 result = await run_agent(
                     chat_model,
                     messages,
@@ -933,6 +1036,8 @@ async def _execute_claimed_agent_run(
                     max_turns=max_turns,
                     max_tool_calls=max_tool_calls,
                     max_model_tokens=max_model_tokens,
+                    grounding_mode=grounding_mode,
+                    initial_evidence=initial_evidence,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
@@ -1141,6 +1246,7 @@ async def _run_durable_agent_run(
     worker_task_id = worker_task_id or new_id()
     now = utc_now()
     async with get_session_factory()() as db:
+        pending = await agent_repository.get_agent_run_by_id(db, run_id)
         claimed = await agent_repository.claim_agent_run(
             db,
             run_id,
@@ -1148,6 +1254,11 @@ async def _run_durable_agent_run(
             now,
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
             generation=generation,
+            execution_deadline_at=(
+                now + timedelta(seconds=pending.max_runtime_seconds)
+                if pending is not None
+                else None
+            ),
         )
         if claimed:
             if generation == "legacy":

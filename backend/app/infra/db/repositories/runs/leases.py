@@ -1,5 +1,5 @@
 from dataclasses import fields
-from datetime import datetime
+from datetime import UTC, datetime
 import hashlib
 import json
 from typing import Any
@@ -69,6 +69,7 @@ async def claim_agent_run(
     lease_expires_at: datetime,
     *,
     generation: str = "legacy",
+    execution_deadline_at: datetime | None = None,
 ) -> bool:
     claimable_statuses = (
         AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
@@ -80,6 +81,21 @@ async def claim_agent_run(
         if generation == "unified"
         else AGENT_RUN_RUNNING_STATUS
     )
+    values: dict[str, Any] = {
+        "status": running_status,
+        "attempts": AgentRunState.attempts + 1,
+        "state_version": AgentRunState.state_version + 1,
+        "worker_task_id": worker_task_id,
+        "lease_expires_at": lease_expires_at,
+        "started_at": func.coalesce(AgentRunState.started_at, started_at),
+        "finished_at": None,
+        "updated_at": started_at,
+    }
+    if execution_deadline_at is not None:
+        values["execution_deadline_at"] = func.coalesce(
+            AgentRunState.execution_deadline_at,
+            execution_deadline_at,
+        )
     result = await db.execute(
         update(AgentRunState)
         .where(
@@ -97,16 +113,7 @@ async def claim_agent_run(
                 ),
             ),
         )
-        .values(
-            status=running_status,
-            attempts=AgentRunState.attempts + 1,
-            state_version=AgentRunState.state_version + 1,
-            worker_task_id=worker_task_id,
-            lease_expires_at=lease_expires_at,
-            started_at=func.coalesce(AgentRunState.started_at, started_at),
-            finished_at=None,
-            updated_at=started_at,
-        )
+        .values(**values)
     )
     return bool(result.rowcount)
 
@@ -193,10 +200,48 @@ async def requeue_owned_agent_run(
     )
     return bool(updated.rowcount)
 
+
+async def _resumed_execution_deadline(
+    db: AsyncSession,
+    run_id: str,
+    statuses: tuple[str, ...],
+    resumed_at: datetime,
+) -> datetime | None:
+    paused = (
+        await db.execute(
+            select(
+                AgentRunState.execution_deadline_at,
+                AgentRunState.updated_at,
+            )
+            .where(
+                AgentRunState.run_id == run_id,
+                AgentRunState.status.in_(statuses),
+            )
+            .with_for_update()
+        )
+    ).first()
+    if paused is None or paused.execution_deadline_at is None:
+        return None
+    paused_at = paused.updated_at
+    deadline = paused.execution_deadline_at
+    if paused_at.tzinfo is None:
+        paused_at = paused_at.replace(tzinfo=UTC)
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=UTC)
+    return deadline + (resumed_at - paused_at)
+
+
 async def queue_agent_run(
     db: AsyncSession,
     run_id: str,
 ) -> bool:
+    resumed_at = utc_now()
+    execution_deadline_at = await _resumed_execution_deadline(
+        db,
+        run_id,
+        AGENT_RUN_AWAITING_APPROVAL_STATUSES,
+        resumed_at,
+    )
     updated = await db.execute(
         update(AgentRunState)
         .where(
@@ -215,7 +260,8 @@ async def queue_agent_run(
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
-            updated_at=func.now(),
+            execution_deadline_at=execution_deadline_at,
+            updated_at=resumed_at,
         )
     )
     return bool(updated.rowcount)
@@ -225,6 +271,13 @@ async def queue_agent_run_from_input(
     run_id: str,
     checkpoint: dict,
 ) -> bool:
+    resumed_at = utc_now()
+    execution_deadline_at = await _resumed_execution_deadline(
+        db,
+        run_id,
+        AGENT_RUN_AWAITING_INPUT_STATUSES,
+        resumed_at,
+    )
     updated = await db.execute(
         update(AgentRunState)
         .where(
@@ -244,7 +297,8 @@ async def queue_agent_run_from_input(
             last_error=None,
             worker_task_id=None,
             lease_expires_at=None,
-            updated_at=func.now(),
+            execution_deadline_at=execution_deadline_at,
+            updated_at=resumed_at,
         )
     )
     return bool(updated.rowcount)
@@ -453,4 +507,3 @@ async def fail_exhausted_agent_run_ids(
 
 async def fail_exhausted_agent_runs(db: AsyncSession, now: datetime) -> int:
     return len(await fail_exhausted_agent_run_ids(db, now))
-

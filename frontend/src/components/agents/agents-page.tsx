@@ -574,6 +574,7 @@ export function AgentsPage({
   const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const resourceFolders = useResourceFolders("application")
+  const { isInSelectedFolder } = resourceFolders
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const [agents, setAgents] = React.useState<Agent[]>([])
   const [models, setModels] = React.useState<RegisteredModel[]>([])
@@ -670,8 +671,8 @@ export function AgentsPage({
   )
   const filteredAgents = React.useMemo(() => {
     const search = agentSearch.trim().toLowerCase()
-    const inFolder = agents.filter(
-      (agent) => (agent.folder_id ?? null) === resourceFolders.selectedFolderId
+    const inFolder = agents.filter((agent) =>
+      isInSelectedFolder(agent.folder_id)
     )
     const matched = search
       ? inFolder.filter((agent) => {
@@ -688,7 +689,7 @@ export function AgentsPage({
     agents,
     language,
     models,
-    resourceFolders.selectedFolderId,
+    isInSelectedFolder,
   ])
   const movableAgentIds = filteredAgents
     .filter((agent) => agent.can_edit)
@@ -2089,7 +2090,8 @@ export function AgentsPage({
           <ResourceFolderTree
             folders={resourceFolders.folders}
             selectedFolderId={resourceFolders.selectedFolderId}
-            canManage={workspaceRole === "admin"}
+            canManageAllFolders={me?.user.is_global_admin ?? false}
+            currentUserId={me?.user.id ?? null}
             isLoading={resourceFolders.isLoading}
             onSelect={resourceFolders.setSelectedFolderId}
             onCreate={resourceFolders.create}

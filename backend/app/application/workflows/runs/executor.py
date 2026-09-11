@@ -241,7 +241,6 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             run.workspace_id,
             knowledge_base_ids,
             actor,
-            context.membership_role,
         )
         child_runs = {}
         if agent_snapshots:

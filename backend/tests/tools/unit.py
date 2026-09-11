@@ -177,14 +177,7 @@ def test_effective_tool_access_matrix() -> None:
     from app.entities.tools import ToolAccess, effective_tool_access
 
     full_access = ToolAccess(can_view=True, can_use=True, can_manage=True)
-    assert (
-        effective_tool_access(
-            is_owner=True,
-            is_workspace_admin=False,
-            grant=None,
-        )
-        == full_access
-    )
+    assert effective_tool_access(is_owner=True, is_workspace_admin=False, grant=None) == full_access
     assert (
         effective_tool_access(
             is_owner=False,
@@ -209,7 +202,7 @@ def test_effective_tool_access_matrix() -> None:
         grant=None,
     ) == ToolAccess(can_view=False, can_use=False, can_manage=False)
 
-def test_tool_authorization_applies_builtin_and_global_admin_rules() -> None:
+def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
     from app.application.tools import evaluate_tool_authorization
     from app.entities.workspaces.resource_permissions import ResourcePermission
     from app.entities.tools import Tool, ToolAccess
@@ -256,12 +249,13 @@ def test_tool_authorization_applies_builtin_and_global_admin_rules() -> None:
         "member",
         None,
     )
+    # Workspace roles no longer widen tool access: only the owner or a grant.
     assert admin_authorization.access == ToolAccess(
-        can_view=True,
-        can_use=True,
-        can_manage=True,
+        can_view=False,
+        can_use=False,
+        can_manage=False,
     )
-    assert admin_authorization.permission == "admin"
+    assert admin_authorization.permission is None
 
     former_owner = User(id="owner-1")
     former_owner_authorization = evaluate_tool_authorization(
@@ -548,7 +542,7 @@ def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
-    test_tool_authorization_applies_builtin_and_global_admin_rules()
+    test_tool_authorization_applies_builtin_and_grant_rules()
     test_python_tool_schema_validation_closes_objects()
     test_python_tool_schema_validation_enforces_limits()
     test_python_tool_schema_rejects_defs_depth_bypass()

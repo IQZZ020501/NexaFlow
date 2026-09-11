@@ -212,6 +212,7 @@ export function LlmPage() {
   const { language, t } = useLanguage()
   const { token, me, selectedWorkspaceId, notify } = useSession()
   const resourceFolders = useResourceFolders("model")
+  const { isInSelectedFolder } = resourceFolders
   const [confirmAction, confirmDialog] = useConfirmDialog()
 
   const [providerCatalog, setProviderCatalog] = React.useState<
@@ -298,7 +299,7 @@ export function LlmPage() {
       const batch = await listRegisteredModels(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
         offset: 0,
-        folderId: resourceFolders.selectedFolderId,
+        folderId: resourceFolders.selectedFolderId ?? undefined,
         sort: modelSortKey,
       })
       setModels(batch)
@@ -331,7 +332,7 @@ export function LlmPage() {
       const batch = await listRegisteredModels(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
         offset: models.length,
-        folderId: resourceFolders.selectedFolderId,
+        folderId: resourceFolders.selectedFolderId ?? undefined,
         sort: modelSortKey,
       })
       setModels((current) => [...current, ...batch])
@@ -463,6 +464,9 @@ export function LlmPage() {
   const visibleModels = React.useMemo(() => {
     const query = search.trim().toLowerCase()
     return models.filter((model) => {
+      if (!isInSelectedFolder(model.folder_id)) {
+        return false
+      }
       if (selectedProvider && model.provider !== selectedProvider) {
         return false
       }
@@ -479,7 +483,13 @@ export function LlmPage() {
         .toLowerCase()
         .includes(query)
     })
-  }, [models, providerCatalog, search, selectedProvider])
+  }, [
+    models,
+    providerCatalog,
+    isInSelectedFolder,
+    search,
+    selectedProvider,
+  ])
   const movableModelIds = canManage
     ? visibleModels.map((model) => model.id)
     : []
@@ -707,7 +717,8 @@ export function LlmPage() {
             <ResourceFolderTree
               folders={resourceFolders.folders}
               selectedFolderId={resourceFolders.selectedFolderId}
-              canManage={canManage}
+              canManageAllFolders={me?.user.is_global_admin ?? false}
+              currentUserId={me?.user.id ?? null}
               isLoading={resourceFolders.isLoading}
               onSelect={resourceFolders.setSelectedFolderId}
               onCreate={resourceFolders.create}

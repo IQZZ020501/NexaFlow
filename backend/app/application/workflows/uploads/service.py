@@ -136,7 +136,7 @@ async def upload_workspace_workflow_files(
     settings: Settings,
 ) -> list[WorkflowUploadResponse]:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     stored = await _upload_files(
         db,
         agent,
@@ -197,7 +197,7 @@ async def upload_workspace_agent_files(
     settings: Settings,
 ) -> list[AgentUploadResponse]:
     agent = await get_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     stored = await _upload_files(
         db,
         agent,
@@ -394,7 +394,7 @@ async def resolve_workspace_workflow_files(
     extract_text: bool = False,
 ) -> list[dict[str, object]]:
     agent = await get_workflow_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     return await _resolve_workflow_files(
         db,
         agent,
@@ -510,7 +510,7 @@ async def resolve_workspace_agent_files(
     settings: Settings,
 ) -> tuple[str, list[dict[str, object]]]:
     agent = await get_agent(db, workspace_id, agent_id)
-    await require_agent_view(db, agent, actor, workspace_role)
+    await require_agent_view(db, agent, actor)
     return await _resolve_agent_file_text(
         db,
         agent,

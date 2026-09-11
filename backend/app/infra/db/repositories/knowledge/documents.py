@@ -182,6 +182,70 @@ async def has_indexed_knowledge_document(
     )
     return bool(count)
 
+
+async def list_knowledge_content_revisions(
+    db: AsyncSession,
+    workspace_id: str,
+    knowledge_base_ids: list[str],
+) -> list[dict[str, object]]:
+    """Return bounded metadata that changes with retrievable document content."""
+    if not knowledge_base_ids:
+        return []
+    rows = await db.execute(
+        select(
+            KnowledgeDocumentORM.knowledge_base_id,
+            KnowledgeDocumentORM.id,
+            KnowledgeDocumentORM.updated_at,
+            func.count(KnowledgeDocumentChunkORM.id).label("chunk_count"),
+            func.max(KnowledgeDocumentChunkORM.updated_at).label(
+                "latest_chunk_updated_at"
+            ),
+        )
+        .outerjoin(
+            KnowledgeDocumentChunkORM,
+            (
+                (
+                    KnowledgeDocumentChunkORM.workspace_id
+                    == KnowledgeDocumentORM.workspace_id
+                )
+                & (
+                    KnowledgeDocumentChunkORM.knowledge_base_id
+                    == KnowledgeDocumentORM.knowledge_base_id
+                )
+                & (
+                    KnowledgeDocumentChunkORM.document_id
+                    == KnowledgeDocumentORM.id
+                )
+                & (KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS)
+            ),
+        )
+        .where(
+            KnowledgeDocumentORM.workspace_id == workspace_id,
+            KnowledgeDocumentORM.knowledge_base_id.in_(knowledge_base_ids),
+            KnowledgeDocumentORM.status == DOCUMENT_INDEXED_STATUS,
+            KnowledgeDocumentORM.is_active.is_(True),
+        )
+        .group_by(
+            KnowledgeDocumentORM.knowledge_base_id,
+            KnowledgeDocumentORM.id,
+            KnowledgeDocumentORM.updated_at,
+        )
+        .order_by(
+            KnowledgeDocumentORM.knowledge_base_id,
+            KnowledgeDocumentORM.id,
+        )
+    )
+    return [
+        {
+            "knowledge_base_id": row.knowledge_base_id,
+            "document_id": row.id,
+            "document_updated_at": row.updated_at,
+            "indexed_chunk_count": int(row.chunk_count),
+            "latest_chunk_updated_at": row.latest_chunk_updated_at,
+        }
+        for row in rows.all()
+    ]
+
 async def get_knowledge_document_by_id(
     db: AsyncSession,
     document_id: str,
@@ -669,4 +733,3 @@ _QUERY_KEYWORD_CHUNK_IDS = text(
         / "query_keyword_chunk_ids.sql"
     ).read_text(encoding="utf-8")
 )
-

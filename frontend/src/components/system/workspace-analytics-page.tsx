@@ -51,6 +51,7 @@ import type { Workspace } from "@/lib/api/system"
 import {
   APP_TIME_ZONE,
   displayWorkspaceName,
+  formatTokenCount,
   getMembershipRole,
 } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
@@ -180,6 +181,24 @@ function formatCompactNumber(value: number, locale: string) {
  * @param locale - The locale used to format axis and tooltip values
  * @param color - The chart's stroke and gradient color
  */
+/**
+ * Formats a trend chart value: token series use K/M/B units, run counts stay numeric.
+ *
+ * @param value - The raw data point value
+ * @param dataKey - The plotted metric
+ * @param locale - Locale used for non-token values
+ * @returns The display label for axes and tooltips
+ */
+export function formatTrendValue(
+  value: number,
+  dataKey: "runs" | "total_tokens",
+  locale: string
+) {
+  return dataKey === "total_tokens"
+    ? formatTokenCount(value)
+    : formatNumber(value, locale)
+}
+
 function TrendChart({
   title,
   description,
@@ -195,6 +214,11 @@ function TrendChart({
   locale: string
   color: string
 }) {
+  const formatValue = (value: number) => formatTrendValue(value, dataKey, locale)
+  const formatAxisValue = (value: number) =>
+    dataKey === "total_tokens"
+      ? formatTokenCount(value)
+      : formatCompactNumber(value, locale)
   return (
     <Card className="min-w-0 gap-4 py-5 shadow-none">
       <CardHeader className="px-5">
@@ -233,9 +257,7 @@ function TrendChart({
               axisLine={false}
               tickLine={false}
               width={46}
-              tickFormatter={(value: number) =>
-                formatCompactNumber(Number(value), locale)
-              }
+              tickFormatter={(value: number) => formatAxisValue(Number(value))}
               tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             />
             <Tooltip
@@ -250,7 +272,7 @@ function TrendChart({
                 backgroundColor: "var(--popover)",
                 color: "var(--popover-foreground)",
               }}
-              formatter={(value) => formatNumber(Number(value ?? 0), locale)}
+              formatter={(value) => formatValue(Number(value ?? 0))}
             />
             <Area
               type="monotone"

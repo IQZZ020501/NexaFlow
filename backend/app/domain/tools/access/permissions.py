@@ -46,13 +46,17 @@ def evaluate_tool_authorization(
             permission=None,
         )
     is_owner = tool.created_by_user_id == actor.id
-    is_admin = actor.is_global_admin or workspace_role == "admin"
     grant_permission: ToolGrant | None = None
     if grant is not None and grant.permission in TOOL_GRANT_PERMISSIONS:
         grant_permission = cast(ToolGrant, grant.permission)
     if tool.kind == "builtin":
         grant_permission = "use"
 
+    # Builtin tools belong to the workspace, so operators keep governing them;
+    # user-created tools stay owner plus explicit grants only.
+    is_admin = tool.kind == "builtin" and (
+        actor.is_global_admin or workspace_role == "admin"
+    )
     access = effective_tool_access(
         is_owner=is_owner,
         is_workspace_admin=is_admin,

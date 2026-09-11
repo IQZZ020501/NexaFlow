@@ -756,7 +756,7 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
         },
     }
     agent = SimpleNamespace(workspace_id="workspace-1", model_id="model-1")
-    actor = SimpleNamespace(id="user-1")
+    actor = SimpleNamespace(id="user-1", is_global_admin=False)
 
     def rows(*, owner: str = "user-1", status: str = "active") -> list[tuple]:
         return [

@@ -54,6 +54,29 @@ export function formatUserIdentity(
   return name || username || fallback
 }
 
+const TOKEN_UNITS = [
+  { suffix: "B", divisor: 1_000_000_000 },
+  { suffix: "M", divisor: 1_000_000 },
+  { suffix: "K", divisor: 1_000 },
+] as const
+
+/**
+ * Formats a token count with K/M/B suffixes (for example `1.2K`, `12.3M`, `1.23B`).
+ *
+ * @param value - The token count to format
+ * @returns The compact token label, keeping one decimal below one thousand
+ */
+export function formatTokenCount(value: number) {
+  const tokens = Number.isFinite(value) ? Math.max(0, value) : 0
+  const unit = TOKEN_UNITS.find((candidate) => tokens >= candidate.divisor)
+  if (!unit) {
+    return Number(tokens.toFixed(1)).toString()
+  }
+  const scaled = tokens / unit.divisor
+  const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2
+  return `${Number(scaled.toFixed(digits)).toString()}${unit.suffix}`
+}
+
 type DefaultNamedScope = {
   name: string
   is_default: boolean

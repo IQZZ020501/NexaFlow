@@ -42,7 +42,8 @@ type FolderDialogState =
 type Props = {
   folders: ResourceFolder[]
   selectedFolderId: string | null
-  canManage: boolean
+  canManageAllFolders: boolean
+  currentUserId: string | null
   isLoading?: boolean
   onSelect: (folderId: string | null) => void
   onCreate: (name: string, parentId: string | null) => Promise<void>
@@ -60,7 +61,8 @@ function childFolders(folders: ResourceFolder[], parentId: string | null) {
 export function ResourceFolderTree({
   folders,
   selectedFolderId,
-  canManage,
+  canManageAllFolders,
+  currentUserId,
   isLoading,
   onSelect,
   onCreate,
@@ -120,6 +122,8 @@ export function ResourceFolderTree({
     const selected = selectedFolderId === folder.id
     const children = childFolders(folders, folder.id)
     const collapsed = collapsedFolderIds.has(folder.id)
+    const canEditFolder =
+      canManageAllFolders || folder.created_by_user_id === currentUserId
     return (
       <div key={folder.id}>
         <div
@@ -159,49 +163,51 @@ export function ResourceFolderTree({
             )}
             <span className="truncate">{folder.name}</span>
           </button>
-          {canManage ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("管理文件夹 {name}", { name: folder.name })}
-                >
-                  <MoreHorizontalIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem
-                  onSelect={() =>
-                    setDialog({ mode: "create", parentId: folder.id, name: "" })
-                  }
-                >
-                  <PlusIcon />
-                  {t("新建子文件夹")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() =>
-                    setDialog({
-                      mode: "rename",
-                      folderId: folder.id,
-                      name: folder.name,
-                    })
-                  }
-                >
-                  <PencilIcon />
-                  {t("重命名")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => void remove(folder)}
-                >
-                  <Trash2Icon />
-                  {t("删除")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("管理文件夹 {name}", { name: folder.name })}
+              >
+                <MoreHorizontalIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem
+                onSelect={() =>
+                  setDialog({ mode: "create", parentId: folder.id, name: "" })
+                }
+              >
+                <PlusIcon />
+                {t("新建子文件夹")}
+              </DropdownMenuItem>
+              {canEditFolder ? (
+                <>
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      setDialog({
+                        mode: "rename",
+                        folderId: folder.id,
+                        name: folder.name,
+                      })
+                    }
+                  >
+                    <PencilIcon />
+                    {t("重命名")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => void remove(folder)}
+                  >
+                    <Trash2Icon />
+                    {t("删除")}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {!collapsed && children.length ? (
           <div className="ml-4 border-l border-border/70 pl-2">
@@ -219,23 +225,21 @@ export function ResourceFolderTree({
           <p className="text-xs font-medium text-muted-foreground">
             {t("目录")}
           </p>
-          {canManage ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("新建子文件夹")}
-              onClick={() =>
-                setDialog({
-                  mode: "create",
-                  parentId: selectedFolderId,
-                  name: "",
-                })
-              }
-            >
-              <PlusIcon />
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("新建子文件夹")}
+            onClick={() =>
+              setDialog({
+                mode: "create",
+                parentId: selectedFolderId,
+                name: "",
+              })
+            }
+          >
+            <PlusIcon />
+          </Button>
         </div>
         <button
           type="button"

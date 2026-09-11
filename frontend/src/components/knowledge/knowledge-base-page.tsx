@@ -102,7 +102,6 @@ import { cn } from "@/lib/utils"
 import {
   formatDateTime,
   formatUserIdentity,
-  getMembershipRole,
   modelLabel,
 } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
@@ -445,6 +444,7 @@ function KnowledgeBasePageContent({
   const Icon = DatabaseIcon
   const { language, t } = useLanguage()
   const resourceFolders = useResourceFolders("knowledge")
+  const { isInSelectedFolder } = resourceFolders
   const [confirmAction, confirmDialog] = useConfirmDialog()
   const locale = languageLocales[language]
   const [knowledgeBases, setKnowledgeBases] = React.useState<
@@ -538,7 +538,6 @@ function KnowledgeBasePageContent({
   const selectAllDocumentsRef = React.useRef<HTMLInputElement>(null)
   const selectAllKnowledgeTasksRef = React.useRef<HTMLInputElement>(null)
 
-  const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const selectedKnowledgeBaseId = activeKnowledgeBaseId
   const selectedKnowledgeBase =
     knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId) ?? null
@@ -554,9 +553,8 @@ function KnowledgeBasePageContent({
   const filteredKnowledgeBases = React.useMemo(() => {
     const search = knowledgeSearch.trim().toLowerCase()
 
-    const inFolder = knowledgeBases.filter(
-      (knowledgeBase) =>
-        (knowledgeBase.folder_id ?? null) === resourceFolders.selectedFolderId
+    const inFolder = knowledgeBases.filter((knowledgeBase) =>
+      isInSelectedFolder(knowledgeBase.folder_id)
     )
     const matched = search
       ? inFolder.filter((knowledgeBase) =>
@@ -575,7 +573,7 @@ function KnowledgeBasePageContent({
     knowledgeBaseSortKey,
     knowledgeSearch,
     language,
-    resourceFolders.selectedFolderId,
+    isInSelectedFolder,
   ])
   const movableKnowledgeBaseIds = filteredKnowledgeBases
     .filter((knowledgeBase) => knowledgeBase.permission === "edit")
@@ -987,10 +985,9 @@ function KnowledgeBasePageContent({
   }
 
   function canManagePermissions(knowledgeBase: KnowledgeBase) {
-    return (
-      workspaceRole === "admin" ||
-      knowledgeBase.created_by_user_id === me.user.id
-    )
+    // Grants stay with the owner: other users, admins included, never see or
+    // manage someone else's knowledge base.
+    return knowledgeBase.created_by_user_id === me.user.id
   }
 
   function resetForm() {
@@ -2956,7 +2953,8 @@ function KnowledgeBasePageContent({
             <ResourceFolderTree
               folders={resourceFolders.folders}
               selectedFolderId={resourceFolders.selectedFolderId}
-              canManage={workspaceRole === "admin"}
+              canManageAllFolders={me?.user.is_global_admin ?? false}
+              currentUserId={me?.user.id ?? null}
               isLoading={resourceFolders.isLoading}
               onSelect={resourceFolders.setSelectedFolderId}
               onCreate={resourceFolders.create}

@@ -41,11 +41,18 @@ class AgentRun:
     tool_snapshots: list[dict[str, Any]] = field(default_factory=list)
     model_id: str = ""
     model_name: str = ""
+    max_runtime_seconds: float = 300.0
+    max_turns: int = 8
+    max_tool_calls: int = 12
+    max_model_tokens: int = 100_000
+    model_runtime_snapshot: dict[str, Any] = field(default_factory=dict)
+    knowledge_resource_snapshot: dict[str, Any] = field(default_factory=dict)
     status: str = "queued"
     attempts: int = 0
     max_attempts: int = 3
     worker_task_id: str | None = None
     lease_expires_at: datetime | None = None
+    execution_deadline_at: datetime | None = None
     checkpoint: dict[str, Any] = field(default_factory=dict)
     checkpoint_phase: str = "agent"
     grounding_status: str = "not_started"

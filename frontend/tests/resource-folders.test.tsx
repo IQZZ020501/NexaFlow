@@ -31,7 +31,8 @@ test("renders a full-height nested resource folder tree", () => {
         },
       ]}
       selectedFolderId={selected}
-      canManage={false}
+      canManageAllFolders={false}
+      currentUserId="u-2"
       onSelect={(folderId) => {
         selected = folderId
       }}

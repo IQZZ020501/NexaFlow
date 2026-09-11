@@ -356,6 +356,81 @@ describe("KnowledgeBasePage list view", () => {
     expect(visibleKnowledgeBaseNames()).toEqual(["Alpha", "Bravo", "Charlie"])
   })
 
+  test("keeps knowledge bases from folders the viewer cannot see under the root", async () => {
+    session.me = {
+      user: memberUser,
+      memberships: [{ workspace_id: WS, role: "member" }],
+    }
+    fetchHandler = (url) => {
+      if (url.includes("/resource-folders")) return jsonResponse([])
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) {
+        return jsonResponse([
+          makeKnowledgeBase({
+            id: "kb-filed-elsewhere",
+            name: "Filed Elsewhere",
+            folder_id: "folder-of-another-user",
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    renderPage(<KnowledgeBasePage />)
+
+    await screen.findByText("Filed Elsewhere")
+    expect(visibleKnowledgeBaseNames()).toEqual(["Filed Elsewhere"])
+  })
+
+  test("lets a plain member create a folder from the tree", async () => {
+    const created: Array<Record<string, unknown>> = []
+    session.me = {
+      user: memberUser,
+      memberships: [{ workspace_id: WS, role: "member" }],
+    }
+    fetchHandler = (url, init) => {
+      if (url.includes("/resource-folders") && init?.method === "POST") {
+        created.push(JSON.parse(String(init.body)) as Record<string, unknown>)
+        return jsonResponse({
+          id: "folder-member",
+          workspace_id: WS,
+          resource_type: "knowledge",
+          parent_id: null,
+          name: "我的目录",
+          created_by_user_id: memberUser.id,
+          created_at: "2026-09-10T00:00:00Z",
+          updated_at: "2026-09-10T00:00:00Z",
+        })
+      }
+      if (url.includes("/resource-folders")) return jsonResponse([])
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) {
+        return jsonResponse([makeKnowledgeBase()])
+      }
+      return jsonResponse([])
+    }
+    renderPage(<KnowledgeBasePage />)
+
+    await screen.findByText("KB Alpha")
+    fireEvent.click(screen.getByLabelText("新建子文件夹"))
+    fireEvent.change(screen.getByPlaceholderText("文件夹名称"), {
+      target: { value: "我的目录" },
+    })
+    fireEvent.submit(
+      screen.getByPlaceholderText("文件夹名称").closest("form")!
+    )
+
+    await waitFor(() =>
+      expect(created).toEqual([
+        {
+          name: "我的目录",
+          resource_type: "knowledge",
+          parent_id: null,
+        },
+      ])
+    )
+    expect(await screen.findByText("我的目录")).toBeTruthy()
+  })
+
   test("batch moves selected knowledge bases into a folder", async () => {
     const moves: unknown[] = []
     fetchHandler = (url, init) => {

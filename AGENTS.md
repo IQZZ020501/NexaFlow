@@ -96,6 +96,11 @@ not trigger unrelated cleanup.
   in `agent_run_events`. All Agent, Workflow, and test Tool executions use
   `tool_invocations`; do not recreate an `agent_tool_calls` table or dual-write
   ledger.
+- Agent Run execution budgets, non-secret model configuration fingerprints, and
+  knowledge resource metadata are frozen in `agent_run_snapshots`; the overall
+  execution deadline is initialized on first claim in `agent_run_states` and
+  is not reset by worker retries. Knowledge-backed answers run the durable
+  post-draft grounding verifier and record an evidence-input digest.
 - Pure unit suites (no DB, no HTTP, no network) for business rules and
   services with mocked ports/repositories live per feature under
   `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run
@@ -398,7 +403,7 @@ examples.
   Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
 - `backend/` Python changes: use the project's Python tooling. Run `compileall`
   over the touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.agent_access,
+  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.agent_access,
   agents.agent_services_coverage, agents.agent_runtime_coverage, workflows.workflows,
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
   knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,

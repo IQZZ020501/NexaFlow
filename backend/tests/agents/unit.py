@@ -127,6 +127,7 @@ def test_effective_agent_permission_matrix() -> None:
     )
     owner = User(id="owner-1", username="owner")
     member = User(id="member-1", username="member")
+    global_admin = User(id="super-1", username="super", is_global_admin=True)
     grant = ResourcePermission(
         workspace_id="ws-1",
         resource_type="agent",
@@ -135,10 +136,11 @@ def test_effective_agent_permission_matrix() -> None:
         permission="view",
     )
 
-    assert effective_agent_permission(agent, owner, "member") == "edit"
-    assert effective_agent_permission(agent, member, "admin") == "edit"
-    assert effective_agent_permission(agent, member, "member") == "none"
-    assert effective_agent_permission(agent, member, "member", grant) == "view"
+    assert effective_agent_permission(agent, owner) == "edit"
+    # roles never widen resource access, not even for system admins
+    assert effective_agent_permission(agent, member) == "none"
+    assert effective_agent_permission(agent, global_admin) == "none"
+    assert effective_agent_permission(agent, member, grant) == "view"
 
 def test_tool_ref_requires_stable_ids() -> None:
     from app.entities.tools import ToolRef
@@ -275,6 +277,128 @@ def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
         pass
     else:
         raise AssertionError("A drifted Agent publication version was accepted.")
+
+
+def test_agent_runtime_snapshots_are_versioned_and_fail_closed() -> None:
+    from app.application.agents.runs.snapshots import (
+        AgentRuntimePolicy,
+        build_knowledge_resource_snapshot,
+        build_model_runtime_snapshot,
+        require_knowledge_resource_snapshot,
+        require_model_runtime_snapshot,
+    )
+    from app.domain.models.registered import RegisteredModel
+    from app.entities.defaults import utc_now
+
+    now = utc_now()
+    model = RegisteredModel(
+        id="model-1",
+        workspace_id="ws-1",
+        name="Primary",
+        provider="openai",
+        provider_type="openai_compatible",
+        api_base="https://models.example/v1",
+        api_key_updated_at=now,
+        credential_config={"api_base": "https://models.example/v1"},
+        model_type="LLM",
+        model_name="model-v1",
+        status="active",
+        meta={"request_params": {"max_tokens": 2048}},
+        created_by_user_id="user-1",
+        created_at=now,
+        updated_at=now,
+    )
+    snapshot = build_model_runtime_snapshot(model)
+    assert snapshot["schema_version"] == 1
+    assert len(snapshot["fingerprint"]) == 64
+    assert "api_key_ciphertext" not in snapshot
+    require_model_runtime_snapshot(model, snapshot)
+
+    model.model_name = "model-v2"
+    try:
+        require_model_runtime_snapshot(model, snapshot)
+    except ValueError as exc:
+        assert "changed after run creation" in str(exc)
+    else:
+        raise AssertionError("Model runtime drift was accepted.")
+    require_model_runtime_snapshot(model, {"schema_version": 0, "legacy": True})
+
+    knowledge_bases = [
+        KnowledgeBase(
+            id="kb-b",
+            workspace_id="ws-1",
+            name="B",
+            updated_at=now,
+        ),
+        KnowledgeBase(
+            id="kb-a",
+            workspace_id="ws-1",
+            name="A",
+            active_graph_revision_id="revision-1",
+            updated_at=now,
+        ),
+    ]
+    content_revisions = [
+        {
+            "knowledge_base_id": "kb-a",
+            "document_id": "document-1",
+            "document_updated_at": now,
+            "indexed_chunk_count": 2,
+            "latest_chunk_updated_at": now,
+        }
+    ]
+    knowledge_snapshot = build_knowledge_resource_snapshot(
+        knowledge_bases,
+        content_revisions,
+    )
+    assert [
+        item["knowledge_base_id"] for item in knowledge_snapshot["resources"]
+    ] == ["kb-a", "kb-b"]
+    assert len(knowledge_snapshot["fingerprint"]) == 64
+    require_knowledge_resource_snapshot(
+        knowledge_bases,
+        knowledge_snapshot,
+        content_revisions,
+    )
+    changed_content_revisions = [
+        {**content_revisions[0], "indexed_chunk_count": 3}
+    ]
+    try:
+        require_knowledge_resource_snapshot(
+            knowledge_bases,
+            knowledge_snapshot,
+            changed_content_revisions,
+        )
+    except ValueError as exc:
+        assert "changed after run creation" in str(exc)
+    else:
+        raise AssertionError("Knowledge content drift was accepted.")
+    knowledge_bases[0].status = "archived"
+    try:
+        require_knowledge_resource_snapshot(
+            knowledge_bases,
+            knowledge_snapshot,
+            content_revisions,
+        )
+    except ValueError as exc:
+        assert "changed after run creation" in str(exc)
+    else:
+        raise AssertionError("Knowledge resource drift was accepted.")
+    require_knowledge_resource_snapshot(
+        knowledge_bases,
+        {"schema_version": 0, "legacy": True},
+    )
+
+    policy = AgentRuntimePolicy.from_settings(
+        SimpleNamespace(
+            agent_run_timeout_seconds=45,
+            agent_max_turns=3,
+            agent_max_tool_calls=4,
+            agent_max_model_tokens=5000,
+        )
+    )
+    assert policy == AgentRuntimePolicy(45.0, 3, 4, 5000)
+
 
 def test_agent_tool_binding_requires_current_available_policy() -> None:
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
@@ -1609,15 +1733,8 @@ def test_external_progress_events_include_grounding_stage() -> None:
             {
                 "type": "thought",
                 "turn": 1,
-                "status": "running",
-                "summary": "agent.grounding_check",
-                "call_id": "grounding-1",
-            },
-            {
-                "type": "thought",
-                "turn": 1,
                 "status": "succeeded",
-                "summary": "agent.grounding_revised",
+                "summary": "agent.grounding_inline",
                 "call_id": "grounding-1",
             },
         ],
@@ -1627,6 +1744,22 @@ def test_external_progress_events_include_grounding_stage() -> None:
     assert progress[0].type == "analysis"
     assert progress[0].status == "succeeded"
     assert progress[0].stage == "completed"
+
+    skipped = external_progress_events(
+        [
+            {
+                "type": "thought",
+                "turn": 1,
+                "status": "succeeded",
+                "summary": "agent.grounding_skipped",
+                "call_id": "grounding-2",
+            }
+        ],
+        "succeeded",
+    )
+    assert len(skipped) == 1
+    assert skipped[0].status == "succeeded"
+    assert skipped[0].stage == "completed"
 
 def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
@@ -2563,6 +2696,7 @@ def main() -> None:
     test_effective_agent_permission_matrix()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
+    test_agent_runtime_snapshots_are_versioned_and_fail_closed()
     test_agent_tool_binding_requires_current_available_policy()
     test_tool_snapshot_is_an_immutable_internal_contract()
     test_tool_contracts_deep_freeze_nested_json()

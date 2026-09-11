@@ -48,7 +48,6 @@ async def query_workspace_knowledge_base(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     return await query_knowledge_base(db, knowledge_base, payload, settings)
@@ -74,7 +73,6 @@ async def inspect_workspace_knowledge_base(
         db,
         knowledge_base,
         context.user,
-        context.membership_role,
         {"view", "edit"},
     )
     return await retrieve_knowledge_base(db, knowledge_base, payload, settings)

@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     WorkspaceContext,
     get_workspace_context_from_path,
-    require_workspace_path_role,
 )
 from app.application.resource_folders.service import (
     create_resource_folder,
@@ -38,35 +37,56 @@ async def list_workspace_resource_folders(
     db: Annotated[AsyncSession, Depends(get_db)],
     resource_type: Annotated[ResourceFolderType, Query()],
 ) -> list[ResourceFolderResponse]:
-    return await list_resource_folders(db, context.workspace.id, resource_type)
+    return await list_resource_folders(
+        db,
+        context.workspace.id,
+        resource_type,
+        context.user,
+    )
 
 
 @router.post("", response_model=ResourceFolderResponse, status_code=status.HTTP_201_CREATED)
 async def create_workspace_resource_folder(
     payload: ResourceFolderCreateRequest,
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ResourceFolderResponse:
-    return await create_resource_folder(db, context.workspace.id, payload, context.user)
+    return await create_resource_folder(
+        db,
+        context.workspace.id,
+        payload,
+        context.user,
+    )
 
 
 @router.patch("/{folder_id}", response_model=ResourceFolderResponse)
 async def update_workspace_resource_folder(
     folder_id: str,
     payload: ResourceFolderUpdateRequest,
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ResourceFolderResponse:
-    return await update_resource_folder(db, context.workspace.id, folder_id, payload)
+    return await update_resource_folder(
+        db,
+        context.workspace.id,
+        folder_id,
+        payload,
+        context.user,
+    )
 
 
 @router.delete("/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace_resource_folder(
     folder_id: str,
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    await delete_resource_folder(db, context.workspace.id, folder_id)
+    await delete_resource_folder(
+        db,
+        context.workspace.id,
+        folder_id,
+        context.user,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

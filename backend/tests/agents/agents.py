@@ -280,25 +280,12 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             (name for name in tool_names if name.startswith("mcp_")),
             None,
         )
-        grounding_call = any(
+        inline_grounding = any(
             item.get("role") == "system"
-            and "final evidence verifier" in item.get("content", "")
+            and "Single-pass grounding protocol" in item.get("content", "")
             for item in body.get("messages", [])
         )
-        if grounding_call:
-            message = {
-                "role": "assistant",
-                "content": json.dumps(
-                    {
-                        "status": "verified",
-                        "answer": "Completed.",
-                        "evidence_ids": [],
-                        "reason_codes": [],
-                    }
-                ),
-            }
-            finish_reason = "stop"
-        elif "search_knowledge" in tool_names and not any(
+        if "search_knowledge" in tool_names and not any(
             item.get("role") == "tool" for item in body.get("messages", [])
         ):
             message = {
@@ -335,7 +322,46 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             }
             finish_reason = "tool_calls"
         else:
-            message = {"role": "assistant", "content": "Completed."}
+            evidence_ids = []
+            for item in body.get("messages", []):
+                if item.get("role") != "tool":
+                    continue
+                try:
+                    output = json.loads(item.get("content") or "{}")
+                except (TypeError, ValueError):
+                    continue
+                evidence_ids.extend(
+                    hit.get("chunk_id")
+                    for hit in output.get("hits", [])
+                    if isinstance(hit, dict) and hit.get("chunk_id")
+                )
+            for item in body.get("messages", []):
+                content = item.get("content")
+                if not isinstance(content, str) or "Pre-retrieved workspace evidence" not in content:
+                    continue
+                try:
+                    output = json.loads(content.split("\n", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                evidence_ids.extend(
+                    hit.get("chunk_id")
+                    for hit in output.get("hits", [])
+                    if isinstance(hit, dict) and hit.get("chunk_id")
+                )
+            manifest = (
+                "<nexaflow-grounding>"
+                + json.dumps(
+                    {
+                        "status": "grounded" if evidence_ids else "skipped",
+                        "evidence_ids": evidence_ids,
+                        "reason_codes": [],
+                    }
+                )
+                + "</nexaflow-grounding>\n"
+                if inline_grounding
+                else ""
+            )
+            message = {"role": "assistant", "content": f"{manifest}Completed."}
             finish_reason = "stop"
 
         if body.get("stream"):
@@ -1415,6 +1441,8 @@ def assert_tool_routing_context_is_explicit() -> None:
     assert "MCP tools: use only for current or external data" in system
     assert "Release Docs" in system
     assert "[source](#nexaflow-source-SOURCE_REF)" in system
+    assert "Single-pass grounding protocol" in system
+    assert "<nexaflow-grounding>" in system
     assert "answer immediately without tools" not in system
     assert [message["role"] for message in messages[1:]] == [
         "user",
@@ -4011,19 +4039,29 @@ def main() -> None:
             assert executed["status"] == "succeeded"
             assert executed["conversation_id"] == member_run["conversation_id"]
             assert executed["result"] == "Completed."
-            assert executed["grounding_status"] == "skipped"
-            assert not any(
+            assert executed["grounding_status"] == "grounded"
+            assert executed["grounding_meta"]["evidence_packet_count"] == 1
+            assert executed["grounding_meta"]["mode"] == "inline"
+            assert any(
                 str(event.get("summary", "")).startswith("agent.grounding_")
                 for event in executed["events"]
             )
-            assert not any(
+            assert any(
                 any(
                     item.get("role") == "system"
-                    and "final evidence verifier" in item.get("content", "")
+                    and "Single-pass grounding protocol" in item.get("content", "")
                     for item in call.get("messages", [])
                 )
                 for call in AgentModelHandler.calls
             )
+            assert sum(
+                any(
+                    item.get("role") == "system"
+                    and "Single-pass grounding protocol" in item.get("content", "")
+                    for item in call.get("messages", [])
+                )
+                for call in AgentModelHandler.calls
+            ) == 1
             assert executed["events"][0]["tool_name"] == "search_knowledge"
             assert "citations" not in executed
             assert query_calls == [

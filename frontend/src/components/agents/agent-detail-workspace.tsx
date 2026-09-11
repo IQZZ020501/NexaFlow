@@ -61,10 +61,7 @@ import {
   transferredFiles,
 } from "./agent-attachment-list"
 import { MessageTimestamp } from "./message-timestamp"
-import {
-  AgentAnswer,
-  stripAgentSourceLinks,
-} from "./agent-source-references"
+import { AgentAnswer, stripAgentSourceLinks } from "./agent-source-references"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -167,10 +164,14 @@ function processSummary(
   if (event.summary === "agent.grounding_verified") return t("已完成依据核验")
   if (event.summary === "agent.grounding_revised")
     return t("已根据依据修正回答")
+  if (event.summary === "agent.grounding_inline")
+    return t("已基于知识依据生成回答")
   if (event.summary === "agent.grounding_insufficient")
     return t("依据不足，已停止未经核实的回答")
   if (event.summary === "agent.grounding_unavailable")
     return t("暂时无法完成依据核验")
+  if (event.summary === "agent.grounding_skipped")
+    return t("本次回答未使用知识依据")
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready")
@@ -529,7 +530,9 @@ function RunExchange({
   const timeline = processTimeline(run)
   const approvalCallIds = new Set(
     toolCalls
-      .filter((call) => ["awaiting_approval", "uncertain"].includes(call.status))
+      .filter((call) =>
+        ["awaiting_approval", "uncertain"].includes(call.status)
+      )
       .map((call) => call.call_id)
   )
   const visibleTimeline = timeline.filter(

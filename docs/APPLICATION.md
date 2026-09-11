@@ -27,7 +27,7 @@ app/application/
 ├── agents/                 # Agent 用例（门面 + 子包）
 │   ├── __init__.py         # 门面：重导出 CRUD/Run/访问/工具/提示词用例
 │   ├── prompts.py
-│   ├── runs/{service,executor,children,memory,grounding}.py
+│   ├── runs/{service,executor,children,memory,grounding,snapshots}.py
 │   ├── access/service.py
 │   └── tools/{builder,runtime}.py
 ├── workflows/              # Workflow 用例（公开用例面在 definitions/service）
@@ -70,7 +70,8 @@ app/application/
 - `agents/runs/executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布（对应旧 `agent_executor.py`）。
 - `agents/runs/children.py` — Workflow Agent 节点的固定发布版本、durable child Run 的创建/恢复/取消编排（对应旧 `agent_child_runs.py`）。
 - `agents/runs/memory.py` — Agent 对话记忆：按会话恢复角色消息，并在模型上下文预算内压缩旧轮次、持久化摘要（对应旧 `agent_memory.py`）。
-- `agents/runs/grounding.py` — 知识支撑的草稿后置 grounding：有界地生成候选问题、检索并修订草稿。
+- `agents/runs/grounding.py` — 知识支撑的草稿后置 grounding：对本次 Run 已取得的有界证据执行最终校验或修订，并记录证据摘要哈希。
+- `agents/runs/snapshots.py` — Run 创建时冻结执行预算、非敏感模型运行配置指纹和知识资源/可检索内容指纹，并提供执行前漂移校验。
 - `agents/access/service.py` — Agent 外部访问用例：发布资料、HttpOnly 访客会话、Agent 级 API Key 创建/轮换/撤销、公开/API 流安全投影（`sanitize_external_agent_stream`）与 Redis 成本限流；跨来源日志/用户/监控聚合（对应旧 `agent_access.py`）。
 - `agents/tools/builder.py` — 把 Agent 固定 `ToolRef` 解析为 `ToolSnapshot`，构造模型可调用工具，并提供 run→response 纯映射（对应旧 `agent_tools.py`）。
 - `agents/tools/runtime.py` — Agent 侧对接统一 durable Tool Runtime 的薄桥接：幂等身份、审批状态与结果映射（对应旧 `agent_tool_runtime.py`）。

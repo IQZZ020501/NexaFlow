@@ -35,13 +35,15 @@ const folders = [
 ]
 
 function Harness({
-  canManage = true,
+  canManageAllFolders = true,
+  currentUserId = "u-2",
   onCreate = async () => undefined,
   onRename = async () => undefined,
   onDelete = async () => null,
   onFolderDeleted = () => undefined,
 }: {
-  canManage?: boolean
+  canManageAllFolders?: boolean
+  currentUserId?: string
   onCreate?: (name: string, parentId: string | null) => Promise<void>
   onRename?: (folderId: string, name: string) => Promise<void>
   onDelete?: (folderId: string) => Promise<string | null | undefined>
@@ -52,7 +54,8 @@ function Harness({
       <ResourceFolderTree
         folders={folders}
         selectedFolderId={null}
-        canManage={canManage}
+        canManageAllFolders={canManageAllFolders}
+        currentUserId={currentUserId}
         onSelect={() => undefined}
         onCreate={onCreate}
         onRename={onRename}
@@ -67,7 +70,7 @@ afterEach(() => {
   cleanup()
 })
 
-test("renders the sorted hierarchy and hides management without permission", () => {
+test("keeps creation open to members and owner-scopes rename and delete", async () => {
   const view = renderPage(<Harness />)
   expect(screen.getByText("规章制度")).toBeTruthy()
   expect(screen.getByText("人事制度")).toBeTruthy()
@@ -78,10 +81,27 @@ test("renders the sorted hierarchy and hides management without permission", () 
     .filter((name) => ["人事制度", "员工手册"].includes(name ?? ""))
   expect(children).toEqual(["人事制度", "员工手册"])
 
+  // A member who owns nothing can still create folders and nest them.
   cleanup()
-  renderPage(<Harness canManage={false} />)
-  expect(screen.queryByLabelText("管理文件夹 规章制度")).toBeNull()
-  expect(screen.queryByLabelText("新建子文件夹")).toBeNull()
+  renderPage(<Harness canManageAllFolders={false} />)
+  expect(screen.getByLabelText("新建子文件夹")).toBeTruthy()
+  const manageRules = screen.getByLabelText("管理文件夹 规章制度")
+  fireEvent.pointerDown(manageRules)
+  fireEvent.click(manageRules)
+  expect(
+    await screen.findByRole("menuitem", { name: "新建子文件夹" })
+  ).toBeTruthy()
+  expect(screen.queryByRole("menuitem", { name: "重命名" })).toBeNull()
+  expect(screen.queryByRole("menuitem", { name: "删除" })).toBeNull()
+
+  // The folder owner keeps rename and delete without a global admin role.
+  cleanup()
+  renderPage(<Harness canManageAllFolders={false} currentUserId="u-1" />)
+  const manageOwned = screen.getByLabelText("管理文件夹 人事制度")
+  fireEvent.pointerDown(manageOwned)
+  fireEvent.click(manageOwned)
+  expect(await screen.findByRole("menuitem", { name: "重命名" })).toBeTruthy()
+  expect(screen.getByRole("menuitem", { name: "删除" })).toBeTruthy()
 })
 
 test("creates and renames folders through the dialog", async () => {

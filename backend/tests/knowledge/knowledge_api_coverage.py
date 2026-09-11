@@ -517,12 +517,22 @@ def exercise_direct_endpoint_calls(
 
         alice_ctx = SimpleNamespace(
             workspace=SimpleNamespace(id=workspace_id),
-            user=SimpleNamespace(id=alice_id, username="alice", name="Alice"),
+            user=SimpleNamespace(
+                id=alice_id,
+                username="alice",
+                name="Alice",
+                is_global_admin=False,
+            ),
             membership_role=None,
         )
         bob_ctx = SimpleNamespace(
             workspace=SimpleNamespace(id=workspace_id),
-            user=SimpleNamespace(id=bob_id, username="bob", name="Bob"),
+            user=SimpleNamespace(
+                id=bob_id,
+                username="bob",
+                name="Bob",
+                is_global_admin=False,
+            ),
             membership_role=None,
         )
         try:

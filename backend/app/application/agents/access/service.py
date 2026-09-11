@@ -75,6 +75,7 @@ from app.domain.agents.service import (
     get_agent,
     require_agent_edit,
 )
+from app.domain.agents.access.permissions import require_agent_ops
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
 from app.domain.audit.services import record_audit_log
@@ -304,14 +305,22 @@ def external_progress_events(
                 "agent.grounding_check",
                 "agent.grounding_verified",
                 "agent.grounding_revised",
+                "agent.grounding_inline",
                 "agent.grounding_insufficient",
                 "agent.grounding_unavailable",
+                "agent.grounding_skipped",
             }:
                 grounding_stage = (
                     "reviewing"
                     if summary == "agent.grounding_check"
                     else "completed"
-                    if summary in {"agent.grounding_verified", "agent.grounding_revised"}
+                    if summary
+                    in {
+                        "agent.grounding_verified",
+                        "agent.grounding_revised",
+                        "agent.grounding_inline",
+                        "agent.grounding_skipped",
+                    }
                     else "failed"
                 )
                 upsert(
@@ -955,6 +964,7 @@ async def create_external_agent_run(
         publication_version=context.publication_version,
         attachment_context=attachment_context,
         attachments=attachments,
+        settings=settings,
     )
     await enqueue_prepared_agent_run(
         run.id,
@@ -1327,7 +1337,7 @@ async def list_agent_logs(
         AgentLogListResponse: Paginated agent logs with execution details, consumer display names, feedback, and total count.
     """
     agent = await get_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_ops(agent, actor, workspace_role)
     runs = await agent_repository.list_agent_runs_for_management(
         db, workspace_id, agent_id, limit, offset
     )
@@ -1377,7 +1387,7 @@ async def list_agent_conversation_users(
     offset: int,
 ) -> AgentConversationUserListResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_ops(agent, actor, workspace_role)
     rows, total = await agent_repository.list_agent_consumer_stats(
         db, workspace_id, agent_id, limit, offset
     )
@@ -1424,7 +1434,7 @@ async def get_agent_monitoring(
             "Monitoring days must be 7, 30, or 90.",
         )
     agent = await get_agent(db, workspace_id, agent_id)
-    require_agent_edit(agent, actor, workspace_role)
+    require_agent_ops(agent, actor, workspace_role)
     today = utc_now().astimezone(APP_TIMEZONE).date()
     first_day = today - timedelta(days=days - 1)
     since = datetime.combine(

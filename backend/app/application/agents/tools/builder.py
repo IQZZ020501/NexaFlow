@@ -371,7 +371,6 @@ def build_knowledge_search_tool(
                 workspace_id,
                 knowledge_base_ids,
                 actor,
-                workspace_role,
             )
             if not available_knowledge_bases:
                 return AgentToolResult(

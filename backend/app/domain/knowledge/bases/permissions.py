@@ -32,10 +32,10 @@ def require_knowledge_base_active(knowledge_base: KnowledgeBase) -> None:
 def effective_permission(
     knowledge_base: KnowledgeBase,
     user: User,
-    workspace_role: str | None,
     grant: ResourcePermission | None = None,
 ) -> str:
-    if workspace_role == "admin" or knowledge_base.created_by_user_id == user.id:
+    """Owner or explicit grant only; workspace roles no longer widen access."""
+    if knowledge_base.created_by_user_id == user.id:
         return "edit"
     if grant is None:
         return "none"
@@ -60,9 +60,9 @@ async def require_knowledge_base_permission(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     actor: User,
-    workspace_role: str | None,
     permissions: set[str],
 ) -> str:
+    """Knowledge base access is owner plus explicit grants only."""
     if (
         knowledge_base.status == ARCHIVED_STATUS
         and "edit" in permissions
@@ -72,7 +72,6 @@ async def require_knowledge_base_permission(
     permission = effective_permission(
         knowledge_base,
         actor,
-        workspace_role,
         await get_user_grant(db, knowledge_base, actor.id),
     )
     if permission == "edit" or permission in permissions:
