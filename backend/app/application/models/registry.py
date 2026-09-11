@@ -207,10 +207,7 @@ def is_masked_secret(value: str, hint: str | None) -> bool:
 
 
 def provider_model_types(entry: dict[str, Any]) -> list[str]:
-    model_types = list(entry["model_types"])
-    if "LLM" in model_types and "VISION" not in model_types:
-        model_types.append("VISION")
-    return model_types
+    return list(entry["model_types"])
 
 
 def validate_provider_support(entry: dict[str, Any], model_type: str) -> None:

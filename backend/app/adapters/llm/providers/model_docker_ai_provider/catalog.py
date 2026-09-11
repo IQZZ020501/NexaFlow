@@ -7,6 +7,7 @@ CATALOG = {
     "api_key_required": False,
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING",
         "RERANKER"
     ],
@@ -18,9 +19,21 @@ CATALOG = {
                 "model_type": "LLM"
             },
             {
-                "name": "gpt-3.5-turbo",
-                "desc": "Docker AI compatible chat model",
+                "name": "ai/qwen3.5:9B",
+                "desc": "Docker AI Qwen 3.5",
                 "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "ai/qwen3-vl:8B",
+                "desc": "Docker AI Qwen3 VL",
+                "model_type": "VISION"
+            },
+            {
+                "name": "ai/qwen3.5:9B",
+                "desc": "Docker AI Qwen 3.5 vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [

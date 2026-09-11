@@ -6,48 +6,61 @@ CATALOG = {
     "default_api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING",
         "RERANKER"
     ],
     "models": {
         "LLM": [
             {
-                "name": "qwen-plus",
-                "desc": "Qwen Plus",
+                "name": "qwen3.8-max",
+                "desc": "Qwen 3.8 Max",
                 "model_type": "LLM"
             },
             {
-                "name": "qwen-turbo",
-                "desc": "Qwen Turbo",
+                "name": "qwen3.7-plus",
+                "desc": "Qwen 3.7 Plus",
                 "model_type": "LLM"
             },
             {
-                "name": "qwen-max",
-                "desc": "Qwen Max",
+                "name": "qwen3.8-flash",
+                "desc": "Qwen 3.8 Flash",
                 "model_type": "LLM"
             },
+        ],
+        "VISION": [
             {
-                "name": "qwen3-32b",
-                "desc": "Qwen3 32B",
-                "model_type": "LLM"
+                "name": "qwen3.8-max",
+                "desc": "Qwen 3.8 Max multimodal",
+                "model_type": "VISION"
+            },
+            {
+                "name": "qwen3.7-plus",
+                "desc": "Qwen 3.7 Plus multimodal",
+                "model_type": "VISION"
+            },
+            {
+                "name": "qwen3.5-omni-plus",
+                "desc": "Qwen 3.5 Omni Plus",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "text-embedding-v4",
-                "desc": "Qwen embedding model",
+                "name": "qwen3.7-text-embedding",
+                "desc": "Qwen 3.7 text embedding",
                 "model_type": "EMBEDDING"
             },
             {
-                "name": "text-embedding-v1",
-                "desc": "Aliyun text embedding",
+                "name": "text-embedding-v4",
+                "desc": "Qwen text embedding v4",
                 "model_type": "EMBEDDING"
             }
         ],
         "RERANKER": [
             {
-                "name": "gte-rerank-v2",
-                "desc": "GTE reranker",
+                "name": "qwen3-rerank",
+                "desc": "Qwen 3 reranker",
                 "model_type": "RERANKER"
             }
         ]

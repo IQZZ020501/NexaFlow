@@ -7,43 +7,56 @@ CATALOG = {
     "api_key_required": False,
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING",
         "RERANKER"
     ],
     "models": {
         "LLM": [
             {
-                "name": "qwen2.5-7b-instruct",
-                "desc": "Xinference Qwen2.5",
+                "name": "qwen3.8-27b",
+                "desc": "Xinference Qwen 3.8",
                 "model_type": "LLM"
             },
             {
-                "name": "deepseek-chat",
-                "desc": "Xinference DeepSeek",
+                "name": "deepseek-v4-flash",
+                "desc": "Xinference DeepSeek V4 Flash",
                 "model_type": "LLM"
             },
             {
-                "name": "phi3",
-                "desc": "Xinference Phi3",
+                "name": "qwen3.5-9b",
+                "desc": "Xinference Qwen 3.5",
                 "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "qwen3.8-27b",
+                "desc": "Xinference Qwen 3.8 vision",
+                "model_type": "VISION"
+            },
+            {
+                "name": "qwen3.5-9b",
+                "desc": "Xinference Qwen 3.5 vision",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "bge-m3",
-                "desc": "Xinference BGE M3",
+                "name": "qwen3-embedding-8b",
+                "desc": "Xinference Qwen3 embedding",
                 "model_type": "EMBEDDING"
             },
             {
-                "name": "bce-embedding-base_v1",
-                "desc": "Xinference BCE embedding",
+                "name": "bge-m3",
+                "desc": "Xinference BGE M3",
                 "model_type": "EMBEDDING"
             }
         ],
         "RERANKER": [
             {
-                "name": "bce-reranker-base_v1",
-                "desc": "Xinference BCE reranker",
+                "name": "qwen3-reranker-4b",
+                "desc": "Xinference Qwen3 reranker",
                 "model_type": "RERANKER"
             }
         ]

@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,6 +15,8 @@ from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     encrypt_credential_secrets,
 )
+from app.adapters.llm.providers import PROVIDER_CATALOG
+from app.adapters.llm.providers.integrations import PROVIDER_INTEGRATIONS
 from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.runtime import (
     build_chat_model,
@@ -59,7 +62,7 @@ def test_registered_chat_model_uses_configured_timeout() -> None:
     chat_model = build_registered_chat_model(model, runtime_settings)
 
     assert chat_model.request_timeout == 77
-    assert chat_model.max_tokens == 4096
+    assert chat_model.max_tokens is None
     assert (
         build_registered_chat_model(model, runtime_settings, timeout=90).request_timeout
         == 90
@@ -357,7 +360,7 @@ def assert_provider_factories() -> None:
         (
             "anthropic",
             {"api_base": "https://api.anthropic.com", "api_key": "test"},
-            "claude-test",
+            "claude-sonnet-5",
             "AnthropicChatModel",
         ),
         (
@@ -367,7 +370,7 @@ def assert_provider_factories() -> None:
                 "aws_access_key_id": "test",
                 "aws_secret_access_key": "secret",
             },
-            "amazon.nova-test-v1:0",
+            "amazon.nova-2-lite-v1:0",
             "BedrockChatModel",
         ),
         (
@@ -383,19 +386,19 @@ def assert_provider_factories() -> None:
         (
             "deepseek",
             {"api_base": "https://api.deepseek.com", "api_key": "test"},
-            "deepseek-chat",
+            "deepseek-flash",
             "DeepSeekChatModel",
         ),
         (
             "google_genai",
             {"api_key": "test"},
-            "gemini-test",
+            "gemini-3.7-flash",
             "GoogleChatModel",
         ),
         (
             "ollama",
             {"api_base": "http://localhost:11434"},
-            "llama3",
+            "qwen3.5:9b",
             "OllamaChatModel",
         ),
     ]
@@ -413,7 +416,7 @@ def assert_provider_factories() -> None:
                 "aws_access_key_id": "test",
                 "aws_secret_access_key": "secret",
             },
-            "amazon.titan-embed-text-v1",
+            "amazon.titan-embed-text-v2:0",
         ),
         (
             "azure_openai",
@@ -424,8 +427,8 @@ def assert_provider_factories() -> None:
             },
             "embedding-deployment",
         ),
-        ("google_genai", {"api_key": "test"}, "models/embedding-001"),
-        ("ollama", {"api_base": "http://localhost:11434"}, "nomic-embed-text"),
+        ("google_genai", {"api_key": "test"}, "models/gemini-embedding-001"),
+        ("ollama", {"api_base": "http://localhost:11434"}, "qwen3-embedding:8b"),
     ]
     for provider_type, credential, model_name in embedding_cases:
         assert isinstance(
@@ -449,8 +452,54 @@ def assert_provider_factories() -> None:
     )
 
 
+def assert_provider_catalog_contract() -> None:
+    providers = {entry["provider"] for entry in PROVIDER_CATALOG}
+    assert len(providers) == len(PROVIDER_CATALOG) == 22
+    assert providers == set(PROVIDER_INTEGRATIONS)
+
+    runtime_imports = {
+        "anthropic": "anthropic",
+        "boto3": "boto3",
+        "google-genai": "google.genai",
+        "ollama": "ollama",
+        "openai": "openai",
+    }
+    for module_name in runtime_imports.values():
+        assert importlib.import_module(module_name)
+
+    for entry in PROVIDER_CATALOG:
+        model_types = entry["model_types"]
+        assert len(model_types) == len(set(model_types))
+        assert set(entry["models"]) == set(model_types)
+        assert entry["integration"]["runtime_sdk"] in runtime_imports
+        assert entry["integration"]["verified_at"] == "2026-09-10"
+        assert entry["integration"]["docs_url"].startswith("https://")
+        assert entry["integration"]["models_url"].startswith("https://")
+        for model_type, models in entry["models"].items():
+            names = [model["name"] for model in models]
+            assert len(names) == len(set(names))
+            assert all(model["model_type"] == model_type for model in models)
+            assert not any("xxxxxxxx" in name for name in names)
+
+    models_by_provider = {
+        entry["provider"]: {
+            model_type: {model["name"] for model in models}
+            for model_type, models in entry["models"].items()
+        }
+        for entry in PROVIDER_CATALOG
+    }
+    assert "gpt-6-astra" in models_by_provider["model_openai_provider"]["LLM"]
+    assert "claude-fable-5-1" in models_by_provider["model_anthropic_provider"]["LLM"]
+    assert "gemini-3.7-flash" in models_by_provider["model_gemini_provider"]["LLM"]
+    assert "deepseek-flash" in models_by_provider["model_deepseek_provider"]["LLM"]
+    assert "kimi-k3" in models_by_provider["model_kimi_provider"]["LLM"]
+    assert "qwen3.8-max" in models_by_provider["aliyun_bai_lian_model_provider"]["LLM"]
+    assert "glm-5.3" in models_by_provider["model_zhipu_provider"]["LLM"]
+
+
 def main() -> None:
     assert_provider_factories()
+    assert_provider_catalog_contract()
     with test_client() as client, model_test_server() as model_base_url:
         admin_token, workspace_id = activate_admin(client)
         asyncio.run(assert_openai_compatible_runtime(model_base_url))
@@ -469,6 +518,16 @@ def main() -> None:
         assert catalog_by_provider["model_gemini_provider"]["provider_type"] == "google_genai"
         assert catalog_by_provider["model_ollama_provider"]["provider_type"] == "ollama"
         assert "VISION" in catalog_by_provider["model_deepseek_provider"]["model_types"]
+        assert catalog_by_provider["model_openai_provider"]["integration"] == {
+            "adapter": "langchain-openai",
+            "runtime_sdk": "openai",
+            "provider_sdk": "openai",
+            "api_protocol": "openai_chat_completions",
+            "model_catalog": "static_recommendations",
+            "docs_url": "https://developers.openai.com/api/docs/libraries",
+            "models_url": "https://developers.openai.com/api/docs/models",
+            "verified_at": "2026-09-10",
+        }
 
         provider_model_types = client.get(
             "/api/v1/model-providers/model-types",
@@ -669,6 +728,8 @@ def main() -> None:
         )
         assert same_base_model.status_code == 201, same_base_model.text
         same_base_model_id = same_base_model.json()["id"]
+        asyncio.run(assert_registered_model_runtime_call(same_base_model_id, "LLM"))
+        assert "max_tokens" not in ModelTestHandler.calls[-1]["body"]
 
         deleted_same_base_model = client.delete(
             models_url(workspace_id, f"/{same_base_model_id}"),

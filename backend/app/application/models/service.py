@@ -94,6 +94,7 @@ def list_provider_catalog(model_type: str | None = None) -> list[ModelProviderCa
             icon=entry.get("icon", ""),
             model_types=provider_model_types(entry),
             default_api_base=entry["default_api_base"],
+            integration=entry["integration"],
         )
         for entry in entries
     ]

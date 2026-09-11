@@ -4595,7 +4595,7 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
         assert created.name == "Unit Created Model"
         assert created.api_base == "https://api.deepseek.com"
         assert created.credential["api_key"] == "****5678"
-        assert created.request_params == {"max_tokens": 4096}
+        assert created.request_params == {}
         assert created.meta["stream_usage_supported"] is False
         created_id = created.id
 

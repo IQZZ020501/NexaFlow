@@ -6,48 +6,56 @@ CATALOG = {
     "default_api_base": "https://api.siliconflow.cn/v1",
     "model_types": [
         "LLM",
+        "VISION",
         "EMBEDDING",
         "RERANKER"
     ],
     "models": {
         "LLM": [
             {
-                "name": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-                "desc": "DeepSeek R1 Distill on SiliconFlow",
+                "name": "deepseek-ai/DeepSeek-V4-Flash",
+                "desc": "DeepSeek V4 Flash on SiliconFlow",
                 "model_type": "LLM"
             },
             {
-                "name": "Qwen/Qwen2.5-7B-Instruct",
-                "desc": "Qwen2.5 on SiliconFlow",
+                "name": "Pro/deepseek-ai/DeepSeek-V4",
+                "desc": "DeepSeek V4 on SiliconFlow",
                 "model_type": "LLM"
             },
             {
-                "name": "THUDM/glm-4-9b-chat",
-                "desc": "GLM 4 on SiliconFlow",
+                "name": "Pro/zai-org/GLM-5.2",
+                "desc": "GLM 5.2 on SiliconFlow",
                 "model_type": "LLM"
+            }
+        ],
+        "VISION": [
+            {
+                "name": "deepseek-ai/DeepSeek-V4-Flash",
+                "desc": "DeepSeek V4 Flash vision on SiliconFlow",
+                "model_type": "VISION"
             }
         ],
         "EMBEDDING": [
             {
-                "name": "BAAI/bge-m3",
-                "desc": "BGE-M3 embedding model",
+                "name": "Qwen/Qwen3-Embedding-8B",
+                "desc": "Qwen3 8B embedding model",
                 "model_type": "EMBEDDING"
             },
             {
-                "name": "netease-youdao/bce-embedding-base_v1",
-                "desc": "BCE embedding model",
+                "name": "Qwen/Qwen3-Embedding-4B",
+                "desc": "Qwen3 4B embedding model",
                 "model_type": "EMBEDDING"
             }
         ],
         "RERANKER": [
             {
-                "name": "BAAI/bge-reranker-v2-m3",
-                "desc": "BGE reranker model",
+                "name": "Qwen/Qwen3-Reranker-8B",
+                "desc": "Qwen3 8B reranker model",
                 "model_type": "RERANKER"
             },
             {
-                "name": "netease-youdao/bce-reranker-base_v1",
-                "desc": "BCE reranker model",
+                "name": "Qwen/Qwen3-Reranker-4B",
+                "desc": "Qwen3 4B reranker model",
                 "model_type": "RERANKER"
             }
         ]
