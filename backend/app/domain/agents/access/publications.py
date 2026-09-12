@@ -23,7 +23,6 @@ class AgentPublication:
     description: str
     instructions: str
     model_id: str
-    knowledge_query_mode: str
     knowledge_base_ids: list[str]
     tools: list[ToolSnapshot]
     interaction_config: dict[str, Any]
@@ -54,7 +53,6 @@ def build_agent_configuration_snapshot(agent: Agent) -> dict[str, Any]:
         "description": agent.description,
         "instructions": agent.instructions,
         "model_id": agent.model_id,
-        "knowledge_query_mode": agent.knowledge_query_mode,
         "interaction_config": normalized_interaction_config(agent.interaction_config),
     }
 
@@ -108,7 +106,6 @@ def publication_from_snapshots(
             description=str(configuration_snapshot.get("description", "")),
             instructions=str(configuration_snapshot["instructions"]),
             model_id=str(configuration_snapshot["model_id"]),
-            knowledge_query_mode=str(configuration_snapshot["knowledge_query_mode"]),
             knowledge_base_ids=[
                 str(item) for item in resource_snapshot.get("knowledge_base_ids", [])
             ],

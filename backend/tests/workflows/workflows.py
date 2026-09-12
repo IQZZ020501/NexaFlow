@@ -2654,6 +2654,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             assert isinstance(limits, dict)
             assert limits.get("max_turns") == 4
             assert limits.get("max_tool_calls") == 6
+            assert limits.get("max_knowledge_calls") == 4
+            assert limits.get("max_knowledge_rounds") == 2
             assert limits.get("max_model_tokens", 0) >= 1
             deadline = datetime.fromisoformat(limits["deadline_at"])
             assert deadline.tzinfo is not None

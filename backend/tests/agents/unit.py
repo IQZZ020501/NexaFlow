@@ -188,7 +188,6 @@ def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
         interaction_config={"prologue": "Hello"},
         instructions="Use tools when needed.",
         model_id="model-1",
-        knowledge_query_mode="required",
     )
     first = ToolSnapshot(
         schema_version=1,
@@ -394,10 +393,12 @@ def test_agent_runtime_snapshots_are_versioned_and_fail_closed() -> None:
             agent_run_timeout_seconds=45,
             agent_max_turns=3,
             agent_max_tool_calls=4,
+            agent_max_knowledge_calls=3,
+            agent_max_knowledge_rounds=2,
             agent_max_model_tokens=5000,
         )
     )
-    assert policy == AgentRuntimePolicy(45.0, 3, 4, 5000)
+    assert policy == AgentRuntimePolicy(45.0, 3, 4, 3, 2, 5000)
 
 
 def test_agent_tool_binding_requires_current_available_policy() -> None:
@@ -1940,6 +1941,63 @@ def test_run_to_response_maps_run_fields() -> None:
     assert response.sources[0].content == "不足十五年时可以补缴。"
     assert response.trace_id == "trace-1"
 
+
+def test_run_response_normalizes_legacy_source_links() -> None:
+    from app.application.agents.tools.builder import (
+        knowledge_source_ref,
+        normalize_agent_source_links,
+        run_to_response,
+    )
+    from app.entities.runs import AgentRun
+
+    chunk_id = "550e8400-e29b-41d4-a716-446655440000"
+    source_ref = knowledge_source_ref(chunk_id)
+    events = [
+        {
+            "type": "tool",
+            "turn": 1,
+            "tool_name": "search_knowledge",
+            "tool_kind": "knowledge",
+            "status": "succeeded",
+            "summary": "agent.knowledge_chunks_returned:1",
+            "call_id": "call-1",
+            "tool_label": "knowledge",
+            "server_name": "",
+            "input": {},
+            "duration_ms": 0,
+            "output": {
+                "hits": [
+                    {
+                        "chunk_id": chunk_id,
+                        "source_ref": source_ref,
+                        "contributing_chunk_ids": [chunk_id],
+                    }
+                ]
+            },
+        }
+    ]
+    content = (
+        f"第一处 [source] (#nexfaow-source-{chunk_id})。"
+        f"第二处 [source](#nexaflow-source-{source_ref.upper()})。"
+        f"第三处 [source](https://example.test/#nexaflow-source-{chunk_id})。"
+    )
+    normalized = normalize_agent_source_links(content, events)
+    expected = f"[source](#nexaflow-source-{source_ref})"
+    assert normalized == f"第一处 {expected}。第二处 {expected}。第三处 {expected}。"
+
+    run = AgentRun(
+        id="run-legacy-citation",
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        goal="goal",
+        model_id="model-1",
+        model_name="model",
+        status="succeeded",
+        result=content,
+        events=events,
+    )
+    assert run_to_response(run).result == normalized
+
 def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
     from app.application.agents.runs.service import build_regenerated_agent_run
     from app.entities.runs import AgentRun
@@ -2106,6 +2164,48 @@ def test_agent_usage_normalizes_provider_metadata() -> None:
     compacted = add_compaction_usage(None, standard)
     assert compacted["model_calls"] == 1
     assert compacted["compaction"]["total_tokens"] == 13
+
+
+def test_knowledge_context_is_compact_for_repeated_model_turns() -> None:
+    from app.application.agents.tools.builder import (
+        MAX_KNOWLEDGE_CONTEXT_CHARS,
+        MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS,
+        bounded_knowledge_context,
+    )
+
+    payload = {
+        "query": "company wage dispute",
+        "evidence_status": "found",
+        "retrieval_stats": [{"knowledge_base_name": "Labor law"}],
+        "hits": [
+            {
+                "knowledge_base": "Labor law",
+                "document": "labor-law.md",
+                "source_ref": "source-ref",
+                "chunk_id": "chunk-1",
+                "document_id": "document-1",
+                "content": "evidence " * 2_000,
+                "distance": 0.2,
+                "similarity": 0.9,
+                "trace_id": "trace-id",
+                "graph_claim_ids": [f"claim-{index}" for index in range(400)],
+                "sources": ["keywords", "vector"],
+            }
+        ],
+    }
+
+    context = bounded_knowledge_context(payload)
+    assert len(context) <= MAX_KNOWLEDGE_CONTEXT_CHARS
+    compact = json.loads(context)
+    hit = compact["hits"][0]
+    assert len(hit["content"]) <= MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS
+    assert hit["content_truncated"] is True
+    assert "distance" not in hit
+    assert "similarity" not in hit
+    assert "trace_id" not in hit
+    assert len(hit["graph_claim_ids"]) <= 20
+    assert compact["context_truncated"] is True
+
 
 def test_agent_memory_compacts_old_turns() -> None:
     from langchain_core.messages import AIMessage
@@ -2724,10 +2824,12 @@ def main() -> None:
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()
+    test_run_response_normalizes_legacy_source_links()
     test_regenerated_agent_run_starts_from_a_fresh_checkpoint()
     test_edit_regeneration_rejects_a_non_latest_run()
     test_repeated_run_feedback_write_is_idempotent()
     test_agent_usage_normalizes_provider_metadata()
+    test_knowledge_context_is_compact_for_repeated_model_turns()
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()

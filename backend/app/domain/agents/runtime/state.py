@@ -14,6 +14,8 @@ class AgentState(TypedDict):
     events: list[dict[str, Any]]
     turn: int
     tool_call_count: int
+    knowledge_call_count: int
+    knowledge_round_count: int
     seen_evidence_ids: list[str]
     no_new_evidence_rounds: int
     pending_tool_calls: list[PendingToolCall]

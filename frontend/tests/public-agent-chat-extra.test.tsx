@@ -109,6 +109,7 @@ function ndjsonResponse(events: unknown[]): Response {
 
 const session = makeSession()
 mockUseSession(session)
+const notificationCalls: Array<[string, string]> = []
 const replaced: string[] = []
 mockNextNavigation({ replace: (href: string) => replaced.push(href) })
 
@@ -120,7 +121,13 @@ afterEach(() => {
   cleanup()
 })
 beforeEach(() => {
-  Object.assign(session, { token: "test-token", isSessionRestored: true })
+  notificationCalls.length = 0
+  Object.assign(session, {
+    token: "test-token",
+    isSessionRestored: true,
+    notify: (kind: string, message: string) =>
+      notificationCalls.push([kind, message]),
+  })
   replaced.length = 0
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
@@ -614,9 +621,7 @@ describe("PublicAgentChat timestamps", () => {
     const timestamps = article.querySelectorAll("time")
 
     expect(timestamps).toHaveLength(1)
-    expect(timestamps[0]?.getAttribute("datetime")).toBe(
-      "2026-08-10T00:00:01Z"
-    )
+    expect(timestamps[0]?.getAttribute("datetime")).toBe("2026-08-10T00:00:01Z")
   })
 })
 
@@ -938,6 +943,7 @@ describe("PublicAgentChat feedback", () => {
         "POST /api/v1/public/agents/agent-1/runs/run-1/feedback"
       )
     ).toBe(true)
+    expect(notificationCalls).toContainEqual(["success", "已点赞"])
   })
 
   test("toggles to negative feedback", async () => {

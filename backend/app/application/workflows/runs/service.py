@@ -205,7 +205,6 @@ async def regenerate_workflow_run_from_source(
         goal=source.goal,
         instructions=source.instructions,
         knowledge_base_ids=deepcopy(source.knowledge_base_ids),
-        knowledge_query_mode=source.knowledge_query_mode,
         mcp_tools=deepcopy(source.mcp_tools),
         application_snapshot=deepcopy(source.application_snapshot),
         application_snapshot_hash=source.application_snapshot_hash,
@@ -540,7 +539,6 @@ async def create_workflow_run(
         goal=payload.question,
         instructions=agent.instructions,
         knowledge_base_ids=knowledge_base_ids,
-        knowledge_query_mode=agent.knowledge_query_mode,
         mcp_tools=[],
         application_snapshot={
             "schema_version": 1,

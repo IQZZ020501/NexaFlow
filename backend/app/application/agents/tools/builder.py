@@ -8,6 +8,7 @@ responses lives here, separate from run orchestration.
 from contextvars import ContextVar
 import hashlib
 import json
+import re
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -47,12 +48,62 @@ from app.domain.tools.mcp.service import (
 
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 12_000
-MAX_KNOWLEDGE_CONTEXT_CHARS = 48_000
+# Model-facing tool messages are deliberately smaller than the durable
+# evidence payload.  A full retrieval response is replayed in every later
+# model turn, so a 48K-character response can consume most of the cumulative
+# run budget after only a couple of searches.
+MAX_KNOWLEDGE_CONTEXT_CHARS = 6_000
+MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS = 1_800
 MAX_KNOWLEDGE_SOURCE_METADATA_CHARS = 240
 MAX_KNOWLEDGE_TOOL_DESCRIPTION_CHARS = 1800
 MAX_AGENT_SOURCE_REFERENCES = 12
 AGENT_SOURCE_REF_LENGTH = 16
 _PROVIDER_STATUS_ERROR_PREFIX = "Provider returned status "
+_AGENT_SOURCE_LINK_RE = re.compile(
+    r"(?P<label>\[[^\]\r\n]*\])\s*\(\s*(?:<\s*)?"
+    r"(?:[^\s<>()#\"']*)?#nex(?:aflow|faow)-source-(?P<source_ref>[^\s)>'\"]+)"
+    r"\s*(?:>\s*)?(?:[\"'][^)]*[\"'])?\s*\)",
+    re.IGNORECASE,
+)
+
+_MODEL_KNOWLEDGE_HIT_FIELDS = (
+    "knowledge_base",
+    "document",
+    "source_ref",
+    "chunk_id",
+    "document_id",
+    "parent_id",
+    "parent_title",
+    "section_path",
+    "chunk_index",
+    "content",
+    "content_truncated",
+    "contributing_chunk_ids",
+    "kind",
+    "question",
+    "source",
+    "sources",
+    "graph_claim_ids",
+    "graph_hops",
+)
+_MODEL_KNOWLEDGE_STRING_FIELDS = {
+    "knowledge_base",
+    "document",
+    "source_ref",
+    "chunk_id",
+    "document_id",
+    "parent_id",
+    "parent_title",
+    "question",
+    "source",
+}
+_MODEL_KNOWLEDGE_LIST_FIELDS = {
+    "section_path",
+    "contributing_chunk_ids",
+    "sources",
+    "graph_claim_ids",
+}
+_MODEL_KNOWLEDGE_TRUNCATION_MARKER = "\n[… model context truncated …]"
 
 _tool_idempotency_key: ContextVar[str | None] = ContextVar(
     "agent_tool_idempotency_key", default=None
@@ -152,10 +203,74 @@ def bounded_knowledge_output(
     return result
 
 
+def _model_knowledge_hit(hit: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    compact: dict[str, Any] = {}
+    truncated = False
+    for key in _MODEL_KNOWLEDGE_HIT_FIELDS:
+        if key not in hit:
+            continue
+        value = hit[key]
+        if key == "content":
+            if not isinstance(value, str):
+                continue
+            if len(value) > MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS:
+                content_limit = max(
+                    0,
+                    MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS
+                    - len(_MODEL_KNOWLEDGE_TRUNCATION_MARKER),
+                )
+                value = value[:content_limit] + _MODEL_KNOWLEDGE_TRUNCATION_MARKER
+                truncated = True
+            compact[key] = value
+            continue
+        if key in _MODEL_KNOWLEDGE_STRING_FIELDS:
+            compact[key] = (
+                None
+                if value is None
+                else str(value)[:MAX_KNOWLEDGE_SOURCE_METADATA_CHARS]
+            )
+            continue
+        if key in _MODEL_KNOWLEDGE_LIST_FIELDS and isinstance(value, list):
+            item_limit = 12 if key == "section_path" else 20
+            value_limit = 240 if key == "section_path" else 80
+            compact[key] = [str(item)[:value_limit] for item in value[:item_limit]]
+            if len(value) > item_limit:
+                truncated = True
+            continue
+        compact[key] = value
+    if truncated:
+        compact["content_truncated"] = True
+    return compact, truncated
+
+
+def _model_knowledge_context_output(payload: dict[str, Any]) -> dict[str, Any]:
+    hits = payload.get("hits")
+    if not isinstance(hits, list):
+        return payload
+    result: dict[str, Any] = {
+        key: value
+        for key, value in payload.items()
+        if key != "hits"
+    }
+    compact_hits: list[dict[str, Any]] = []
+    truncated = bool(payload.get("context_truncated"))
+    for hit in hits:
+        if not isinstance(hit, dict):
+            truncated = True
+            continue
+        compact_hit, hit_truncated = _model_knowledge_hit(hit)
+        compact_hits.append(compact_hit)
+        truncated = truncated or hit_truncated
+    result["hits"] = compact_hits
+    result["context_truncated"] = truncated
+    return result
+
+
 def bounded_knowledge_context(
     payload: dict[str, Any],
     max_chars: int = MAX_KNOWLEDGE_CONTEXT_CHARS,
 ) -> str:
+    payload = _model_knowledge_context_output(payload)
     return json.dumps(
         bounded_knowledge_output(payload, max_chars),
         ensure_ascii=False,
@@ -264,6 +379,60 @@ def knowledge_source_ref(chunk_id: str) -> str:
     return hashlib.sha256(chunk_id.encode()).hexdigest()[:AGENT_SOURCE_REF_LENGTH]
 
 
+def normalize_agent_source_links(
+    content: str,
+    events: list[dict[str, Any]],
+) -> str:
+    """Canonicalize source links, including links that cite a raw chunk ID.
+
+    The model is shown both ``source_ref`` and ``chunk_id`` in retrieval hits.
+    ``source_ref`` is the public, short citation key, but older or imperfect
+    answers sometimes put the raw chunk ID in the link instead.  Resolve both
+    aliases at the response boundary so every client receives one stable
+    source-link format without exposing chunk IDs in the public response.
+    """
+
+    aliases: dict[str, str] = {}
+    for event in events:
+        if (
+            event.get("type") != "tool"
+            or event.get("tool_kind") != "knowledge"
+            or event.get("status") != "succeeded"
+        ):
+            continue
+        output = event.get("output")
+        if not isinstance(output, dict) or not isinstance(output.get("hits"), list):
+            continue
+        for hit in output["hits"]:
+            if not isinstance(hit, dict):
+                continue
+            chunk_id = hit.get("chunk_id")
+            if not isinstance(chunk_id, str) or not chunk_id:
+                continue
+            canonical = knowledge_source_ref(chunk_id)
+            aliases[canonical.casefold()] = canonical
+            aliases[chunk_id.casefold()] = canonical
+            source_ref = hit.get("source_ref")
+            if isinstance(source_ref, str) and source_ref:
+                aliases[source_ref.casefold()] = canonical
+            contributing_ids = hit.get("contributing_chunk_ids")
+            if isinstance(contributing_ids, list):
+                for contributing_id in contributing_ids:
+                    if isinstance(contributing_id, str) and contributing_id:
+                        aliases[contributing_id.casefold()] = canonical
+
+    if not aliases:
+        return content
+
+    def replace(match: re.Match[str]) -> str:
+        canonical = aliases.get(match.group("source_ref").casefold())
+        if canonical is None:
+            return match.group(0)
+        return f"{match.group('label')}(#nexaflow-source-{canonical})"
+
+    return _AGENT_SOURCE_LINK_RE.sub(replace, content)
+
+
 def describe_knowledge_sources(knowledge_bases: list[KnowledgeBase]) -> str:
     """Return bounded, data-only metadata for the model's routing context."""
     if not knowledge_bases:
@@ -306,11 +475,13 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         attachments=run.application_snapshot.get("attachments", []),
         model_id=run.model_id,
         model_name=run.model_name,
-        knowledge_query_mode=run.knowledge_query_mode,
         status=agent_run_display_status(run.status),
         plan=run.plan,
         events=run.events,
-        result=clean_model_text(str(run.result or "")),
+        result=normalize_agent_source_links(
+            clean_model_text(str(run.result or "")),
+            run.events,
+        ),
         sources=knowledge_sources_from_events(run.events, run.grounding_meta),
         model_usage=run.model_usage,
         grounding_status=run.grounding_status,

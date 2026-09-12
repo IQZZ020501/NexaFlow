@@ -27,7 +27,10 @@ import {
 } from "lucide-react"
 
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
-import { RunActionBar } from "@/components/app/run-action-bar"
+import {
+  feedbackConfirmationLabel,
+  RunActionBar,
+} from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import {
   appendAttachmentFiles,
@@ -707,6 +710,7 @@ export function WorkflowDetailWorkspace({
         value
       )
       setCurrentRun(updated)
+      notify("success", feedbackConfirmationLabel(value, t))
     } catch (error) {
       setCurrentRun((run) => (run ? { ...run, feedback: previous } : run))
       reportError(error)
@@ -846,7 +850,7 @@ export function WorkflowDetailWorkspace({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="min-w-0 max-w-52 truncate text-base font-semibold sm:max-w-none">
+            <h1 className="max-w-52 min-w-0 truncate text-base font-semibold sm:max-w-none">
               {form.name || agent.name}
             </h1>
             <Badge
@@ -1606,8 +1610,8 @@ export function WorkflowDetailWorkspace({
                     <p className="truncate text-xs text-muted-foreground">
                       {new Date(version.created_at).toLocaleString(undefined, {
                         timeZone: APP_TIME_ZONE,
-                      })} ·{" "}
-                      {version.graph_hash.slice(0, 12)}
+                      })}{" "}
+                      · {version.graph_hash.slice(0, 12)}
                     </p>
                   </div>
                   <Button

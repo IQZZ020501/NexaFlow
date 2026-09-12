@@ -42,7 +42,6 @@ function runSnapshot(status: AgentRun["status"]): AgentRun {
     goal: "question",
     model_id: "model-1",
     model_name: "deepseek-chat",
-    knowledge_query_mode: "required",
     status,
     plan: [],
     events: [],

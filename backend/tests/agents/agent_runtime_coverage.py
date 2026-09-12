@@ -345,8 +345,6 @@ class RuntimeModelStub:
                     for hit in output.get("hits", [])
                     if isinstance(hit, dict) and hit.get("chunk_id")
                 )
-            if inline_grounding and not evidence_ids:
-                evidence_ids = ["chunk-happy"]
             manifest = (
                 "<nexaflow-grounding>"
                 + json.dumps(
@@ -718,6 +716,8 @@ async def checkpoint_state(**overrides: Any) -> dict[str, Any]:
         "events": [],
         "turn": 0,
         "tool_call_count": 0,
+        "knowledge_call_count": 0,
+        "knowledge_round_count": 0,
         "seen_evidence_ids": [],
         "no_new_evidence_rounds": 0,
         "pending_tool_calls": [],
@@ -768,6 +768,200 @@ def assert_graph_error_branches() -> None:
         assert "turn limit" in str(exc)
     else:
         raise AssertionError("Tool call on final turn was accepted.")
+
+    async def run_tool_budget_finalization() -> None:
+        async def retrieve(_arguments: str) -> AgentToolResult:
+            raise AssertionError(
+                "knowledge tool must not execute after budget exhaustion"
+            )
+
+        knowledge_tool = create_agent_tool(
+            name="search_knowledge",
+            description="Search",
+            parameters={"type": "object", "properties": {}},
+            execute=retrieve,
+            kind="knowledge",
+        )
+        provider = SequenceProvider(
+            [ok_completion("Answer with the evidence already retrieved.")]
+        )
+        result = await run_agent(
+            provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=5,
+                tool_call_count=12,
+                events=[
+                    {
+                        "type": "tool",
+                        "tool_kind": "knowledge",
+                        "status": "succeeded",
+                    }
+                ],
+                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+            ),
+            max_tool_calls=12,
+        )
+        assert result.content == "Answer with the evidence already retrieved."
+        assert "tool-call budget is exhausted" in provider.requests[0][-1].content
+
+        overflow_provider = SequenceProvider(
+            [ok_completion("Answer after stopping the extra searches.")]
+        )
+        overflow_result = await run_agent(
+            overflow_provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=1,
+                tool_call_count=11,
+                pending_tool_calls=[
+                    {"id": "call-1", "name": "search_knowledge", "arguments": "{}"},
+                    {"id": "call-2", "name": "search_knowledge", "arguments": "{}"},
+                ],
+                events=[
+                    {
+                        "type": "tool",
+                        "tool_kind": "knowledge",
+                        "status": "succeeded",
+                    }
+                ],
+                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+            ),
+            max_tool_calls=12,
+        )
+        assert overflow_result.content == "Answer after stopping the extra searches."
+        assert (
+            "tool-call budget is exhausted"
+            in overflow_provider.requests[0][-1].content
+        )
+
+    asyncio.run(run_tool_budget_finalization())
+
+    async def run_knowledge_budget_finalization() -> None:
+        executed_calls: list[str] = []
+
+        async def retrieve(arguments: str) -> AgentToolResult:
+            query = str(json.loads(arguments).get("query") or "")
+            executed_calls.append(query)
+            chunk_id = f"chunk-{len(executed_calls)}"
+            return AgentToolResult(
+                content=f"Evidence for {query}",
+                summary="Knowledge returned one chunk.",
+                output={"hits": [{"chunk_id": chunk_id, "content": query}]},
+                evidence_ids=frozenset({chunk_id}),
+            )
+
+        knowledge_tool = create_agent_tool(
+            name="search_knowledge",
+            description="Search",
+            parameters={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            execute=retrieve,
+            kind="knowledge",
+            parallel_safe=True,
+        )
+
+        class BudgetSeekingProvider:
+            def __init__(self) -> None:
+                self.round = 0
+                self.requests: list[list[BaseMessage]] = []
+
+            def bind_tools(self, *_args, **_kwargs):
+                parent = self
+
+                class BoundProvider:
+                    async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
+                        parent.requests.append(list(messages))
+                        parent.round += 1
+                        calls = tuple(
+                            ModelToolCall(
+                                f"knowledge-{parent.round}-{index}",
+                                "search_knowledge",
+                                json.dumps(
+                                    {"query": f"query-{parent.round}-{index}"}
+                                ),
+                            )
+                            for index in range(2)
+                        )
+                        return completion_message(
+                            ModelCompletion(
+                                content="",
+                                tool_calls=calls,
+                                finish_reason="tool_calls",
+                            )
+                        )
+
+                return BoundProvider()
+
+            async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
+                self.requests.append(list(messages))
+                return completion_message(
+                    ok_completion("Answer after the knowledge budget is reached.")
+                )
+
+        provider = BudgetSeekingProvider()
+        result = await run_agent(
+            provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            max_tool_calls=24,
+        )
+        assert result.content == "Answer after the knowledge budget is reached."
+        assert len(executed_calls) == 6, executed_calls
+        assert provider.round == 3
+        assert "knowledge search budget is exhausted" in str(
+            provider.requests[-1][-1].content
+        ).lower()
+
+        executed_before_resume = len(executed_calls)
+        resumed_provider = SequenceProvider(
+            [ok_completion("Answer after truncating the resumed batch.")]
+        )
+        resumed_result = await run_agent(
+            resumed_provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=2,
+                tool_call_count=5,
+                knowledge_call_count=5,
+                knowledge_round_count=2,
+                pending_tool_calls=[
+                    {
+                        "id": "resumed-1",
+                        "name": "search_knowledge",
+                        "arguments": json.dumps({"query": "remaining-slot"}),
+                    },
+                    {
+                        "id": "resumed-2",
+                        "name": "search_knowledge",
+                        "arguments": json.dumps({"query": "over-budget"}),
+                    },
+                ],
+                finish_reason="tool_calls",
+                evidence_packets=[{"chunk_id": "existing", "content": "evidence"}],
+            ),
+            max_tool_calls=24,
+        )
+        assert resumed_result.content == "Answer after truncating the resumed batch."
+        assert len(executed_calls) == executed_before_resume + 1
+        assert [event["status"] for event in resumed_result.events] == [
+            "succeeded",
+            "failed",
+        ]
+        assert resumed_result.events[-1]["summary"] == (
+            "Knowledge search stopped at its dedicated budget."
+        )
+        assert "knowledge search budget is exhausted" in str(
+            resumed_provider.requests[-1][-1].content
+        ).lower()
+
+    asyncio.run(run_knowledge_budget_finalization())
 
     async def run_truncated() -> None:
         await run_agent(
@@ -2372,7 +2566,6 @@ async def assert_run_orchestration_paths(
             persist=False,
         )
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         run.mcp_tools = []
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -2529,7 +2722,6 @@ async def assert_run_orchestration_paths(
             knowledge_base_ids=[],
             mcp_tools=[],
             instructions="Published instructions.",
-            knowledge_query_mode="agentic",
         )
         published_run, _ = await agent_runs.prepare_agent_run(
             db,
@@ -3613,7 +3805,7 @@ async def assert_durable_execution_paths(
     """
     settings = test_settings()
 
-    # -- happy path with required knowledge and MCP tools in scope --
+    # -- a direct answer does not force knowledge retrieval --
     run, _ = await prepare_console_run(
         workspace_id,
         agent_id,
@@ -3657,15 +3849,15 @@ async def assert_durable_execution_paths(
     finally:
         agent_tools.retrieve_knowledge_base = original_retrieve
     assert outcome == agent_executor.RUN_FINISHED
-    assert query_calls == ["Happy durable run"]
+    assert query_calls == []
     async with get_session_factory()() as db:
         current = await agent_repository.get_agent_run_by_id(db, run.id)
         events = await agent_repository.list_agent_run_events(db, run.id)
     assert current is not None
     assert current.status == "succeeded"
     assert current.result == "Happy answer."
-    assert current.grounding_status == "grounded"
-    assert current.grounding_meta["evidence_packet_count"] == 1
+    assert current.grounding_status == "skipped"
+    assert current.grounding_meta["evidence_packet_count"] == 0
     assert current.grounding_meta["mode"] == "inline"
     assert current.checkpoint_phase == "done"
     assert current.checkpoint.get("final_answer") == "Happy answer."
@@ -3698,7 +3890,6 @@ async def assert_durable_execution_paths(
     )
     run.mcp_tools = []
     run.knowledge_base_ids = [knowledge_base_id]
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -3713,6 +3904,7 @@ async def assert_durable_execution_paths(
     finally:
         agent_tools.retrieve_knowledge_base = original_retrieve
     assert outcome == agent_executor.RUN_FINISHED
+    assert query_calls == ["release notes"]
     async with get_session_factory()() as db:
         stored_knowledge_calls = await tool_repository.list_tool_invocations(
             db,
@@ -3747,7 +3939,6 @@ async def assert_durable_execution_paths(
     )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -3953,7 +4144,6 @@ async def assert_durable_execution_paths(
     )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -4067,7 +4257,6 @@ async def assert_durable_execution_paths(
     )
     run.max_runtime_seconds = short_settings.agent_run_timeout_seconds
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -4096,7 +4285,6 @@ async def assert_durable_execution_paths(
         )
         run.max_runtime_seconds = short_settings.agent_run_timeout_seconds
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
@@ -4121,7 +4309,6 @@ async def assert_durable_execution_paths(
             workspace_id, agent_id, "Finalize race", persist=False
         )
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
@@ -4146,7 +4333,6 @@ async def assert_durable_execution_paths(
             workspace_id, agent_id, "Checkpoint race", persist=False
         )
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
@@ -4168,7 +4354,6 @@ async def assert_durable_execution_paths(
             workspace_id, agent_id, "Memory failure", persist=False
         )
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
@@ -4201,7 +4386,6 @@ async def assert_durable_execution_paths(
         )
         run.max_runtime_seconds = 0.05
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
@@ -4234,7 +4418,6 @@ async def assert_durable_execution_paths(
         )
         race_run.knowledge_base_ids = []
         race_run.knowledge_resource_snapshot = build_knowledge_resource_snapshot([])
-        race_run.knowledge_query_mode = "agentic"
         race_run.status = agent_run_display_status(race_run.status)
         race_run.configuration_source = "legacy"
         await agent_repository.save_agent_run(db, race_run)
@@ -4280,7 +4463,6 @@ async def assert_durable_execution_paths(
             workspace_id, agent_id, "Pause failure", persist=False
         )
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             await agent_repository.save_agent_run(db, run)
             await db.commit()
@@ -4302,7 +4484,6 @@ async def assert_durable_execution_paths(
         workspace_id, agent_id, "Lost lease run", persist=False
     )
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -4331,7 +4512,6 @@ async def assert_durable_execution_paths(
     # exhausted run -> failed -> RUN_FINISHED (985)
     run, _ = await prepare_console_run(workspace_id, agent_id, "Exhausted claim")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         current = await agent_repository.get_agent_run_by_id(db, run.id)
         assert current is not None
@@ -4354,7 +4534,6 @@ async def assert_durable_execution_paths(
     # live run owned by another worker -> RUN_BUSY (984)
     run, _ = await prepare_console_run(workspace_id, agent_id, "Busy claim")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         now = utc_now()
         assert await agent_repository.claim_agent_run(
@@ -4392,7 +4571,6 @@ async def assert_durable_execution_paths(
         workspace_id, agent_id, "Delete mid-flight", persist=False
     )
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
 
     async def raise_after_delete(_run_id, _worker, _settings, _lease_lost):
         raise RuntimeError("run vanished")
@@ -4422,7 +4600,6 @@ async def assert_durable_execution_paths(
         workspace_id, agent_id, "Unhandled failure", persist=False
     )
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
 
     async def append_then_raise(_run_id, _worker, _settings, _lease_lost):
         async with get_session_factory()() as db:
@@ -4481,7 +4658,6 @@ async def assert_durable_execution_paths(
         workspace_id, agent_id, "Unhandled finalize", persist=False
     )
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
 
     async def raise_boom(_run_id, _worker, _settings, _lease_lost):
         raise RuntimeError("boom")
@@ -4504,7 +4680,6 @@ async def assert_durable_execution_paths(
     # -- maintain_agent_run_lease: renewed (583-592) --
     run, _ = await prepare_console_run(workspace_id, agent_id, "Heartbeat renew")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     heartbeat_settings = dataclasses.replace(
         settings,
         agent_executor_heartbeat_seconds=1,
@@ -4544,7 +4719,6 @@ async def assert_durable_execution_paths(
     # -- maintain_agent_run_lease: lease taken over (593-595) --
     run, _ = await prepare_console_run(workspace_id, agent_id, "Heartbeat takeover")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         now = utc_now()
         assert await agent_repository.claim_agent_run(
@@ -4583,7 +4757,6 @@ async def assert_durable_execution_paths(
     try:
         run, _ = await prepare_console_run(workspace_id, agent_id, "Heartbeat error")
         run.knowledge_base_ids = []
-        run.knowledge_query_mode = "agentic"
         async with get_session_factory()() as db:
             now = utc_now()
             assert await agent_repository.claim_agent_run(
@@ -4611,7 +4784,6 @@ async def assert_durable_execution_paths(
         workspace_id, agent_id, "Scope queued", persist=False
     )
     queued_run.knowledge_base_ids = []
-    queued_run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, queued_run)
         await db.commit()
@@ -4627,7 +4799,6 @@ async def assert_durable_execution_paths(
         workspace_id, agent_id, "Scope actor gone", persist=False
     )
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -4660,7 +4831,6 @@ async def assert_durable_execution_paths(
     # -- _pause_agent_run_for_tool: no matching call -> approval_required event (559-561) --
     run, _ = await prepare_console_run(workspace_id, agent_id, "Pause without call")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         now = utc_now()
         assert await agent_repository.claim_agent_run(
@@ -4693,7 +4863,6 @@ async def assert_durable_execution_paths(
     # -- _append_event loses the run lease (530) --
     run, _ = await prepare_console_run(workspace_id, agent_id, "Append lease lost")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         now = utc_now()
         assert await agent_repository.claim_agent_run(
@@ -4734,7 +4903,6 @@ async def assert_durable_execution_paths(
     # -- list_recoverable_agent_run_ids (1017-1023) --
     run, _ = await prepare_console_run(workspace_id, agent_id, "Recoverable run")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         now = utc_now()
         assert await agent_repository.claim_agent_run(
@@ -4787,7 +4955,6 @@ async def assert_ledger_db_paths(
     # lease lost (238)
     run, _ = await prepare_console_run(workspace_id, agent_id, "Ledger lease lost")
     run.knowledge_base_ids = []
-    run.knowledge_query_mode = "agentic"
     lost = asyncio.Event()
     lost.set()
     ledger = await new_ledger(run, lost)
@@ -5019,7 +5186,6 @@ async def assert_ledger_db_paths(
     # after() success path (419-438)
     claim_run, _ = await prepare_console_run(workspace_id, agent_id, "Ledger after")
     claim_run.knowledge_base_ids = []
-    claim_run.knowledge_query_mode = "agentic"
     async with get_session_factory()() as db:
         now = utc_now()
         call = await agent_repository.create_agent_tool_call(

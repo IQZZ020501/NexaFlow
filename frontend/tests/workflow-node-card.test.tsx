@@ -69,7 +69,6 @@ function agent(id: string, name: string): Agent {
       message_word_limit: 100,
     },
     instructions: "Answer directly.",
-    knowledge_query_mode: "required",
     knowledge_base_ids: [],
     tools: [],
     created_by_user_id: "u-1",

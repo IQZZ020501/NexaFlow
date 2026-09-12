@@ -45,7 +45,6 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     },
     instructions: "Cite the sources you use.",
     model_id: "model-1",
-    knowledge_query_mode: "required",
     knowledge_base_ids: ["knowledge-1"],
     tools: [{ tool_id: "tool-1", version_id: "version-1" }],
     status: "active",
@@ -84,7 +83,6 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
     goal: "Summarize the latest releases",
     model_id: "model-1",
     model_name: "DeepSeek Chat",
-    knowledge_query_mode: "required",
     status: "succeeded",
     plan: [],
     events: [],
@@ -128,7 +126,6 @@ function formFromAgentFixture(agent: Agent): AgentFormState {
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
     instructions: agent.instructions,
-    knowledgeQueryMode: agent.knowledge_query_mode,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
     status: agent.status,
@@ -563,9 +560,6 @@ describe("isAgentFormDirty", () => {
     ).toBe(true)
     expect(isAgentFormDirty({ ...base, modelId: "model-2" }, agent)).toBe(true)
     expect(isAgentFormDirty({ ...base, instructions: " " }, agent)).toBe(true)
-    expect(
-      isAgentFormDirty({ ...base, knowledgeQueryMode: "agentic" }, agent)
-    ).toBe(true)
     expect(isAgentFormDirty({ ...base, status: "disabled" }, agent)).toBe(true)
     expect(
       isAgentFormDirty({ ...base, knowledgeBaseIds: ["knowledge-2"] }, agent)

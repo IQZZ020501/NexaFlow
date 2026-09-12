@@ -469,7 +469,7 @@ async def exercise_services_http_paths(
             assert exc.status_code == 404
 
         # update_agent: full-field change (name/desc/interaction/instructions/
-        # model/knowledge mode/status), bindings replacement, mcp replacement
+        # model/status), bindings replacement, mcp replacement
         second_llm_id = await insert_registered_model(
             workspace_id, admin_id, "Direct Second LLM", "LLM"
         )
@@ -482,7 +482,6 @@ async def exercise_services_http_paths(
                 interaction_config=AgentInteractionConfig(prologue="direct hi"),
                 instructions="changed instructions",
                 model_id=second_llm_id,
-                knowledge_query_mode="agentic",
                 status="active",
                 knowledge_base_ids=[],
                 mcp_tools=[],
@@ -493,7 +492,6 @@ async def exercise_services_http_paths(
         assert updated.name == "Direct Updated"
         assert updated.knowledge_base_ids == []
         assert updated.mcp_tools == []
-        assert updated.knowledge_query_mode == "agentic"
         assert updated.model_id == second_llm_id
 
         # app_type conflict -> 409
@@ -2077,7 +2075,7 @@ def exercise_http(client, admin_token: str, workspace_id: str, model_base_url: s
     agent_id = agent["id"]
     assert agent["can_edit"] is True
     assert agent["knowledge_base_ids"] == [kb_id]
-    assert agent["knowledge_query_mode"] == "required"
+    assert "knowledge_query_mode" not in agent
     assert agent["app_type"] == "agent"
     assert agent["published"] is False
     assert agent["has_unpublished_changes"] is False
@@ -2436,7 +2434,6 @@ def exercise_http(client, admin_token: str, workspace_id: str, model_base_url: s
             },
             "instructions": "New instructions.",
             "model_id": second_model_id,
-            "knowledge_query_mode": "agentic",
             "status": "active",
         },
     )
@@ -2444,7 +2441,7 @@ def exercise_http(client, admin_token: str, workspace_id: str, model_base_url: s
     updated_body = updated.json()
     assert updated_body["name"] == "Update Target Renamed"
     assert updated_body["model_id"] == second_model_id
-    assert updated_body["knowledge_query_mode"] == "agentic"
+    assert "knowledge_query_mode" not in updated_body
     assert updated_body["interaction_config"]["prologue"] == "Hello from coverage"
 
     # knowledge base binding replacement

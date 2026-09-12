@@ -91,7 +91,6 @@ def agent_to_response(
         interaction_config=normalized_interaction_config(agent.interaction_config),
         instructions=agent.instructions,
         model_id=agent.model_id,
-        knowledge_query_mode=agent.knowledge_query_mode,
         knowledge_base_ids=knowledge_base_ids,
         tools=[{"tool_id": item.tool_id, "version_id": item.version_id} for item in tools],
         mcp_tools=legacy_mcp_tools,
@@ -120,7 +119,6 @@ def agent_publication(
         description=agent.description,
         instructions=agent.instructions,
         model_id=agent.model_id,
-        knowledge_query_mode=agent.knowledge_query_mode,
         knowledge_base_ids=sorted(knowledge_base_ids),
         tools=[],
         legacy_mcp_tools=sorted(
@@ -142,7 +140,6 @@ def agent_publication_snapshot(
         "description": publication.description,
         "instructions": publication.instructions,
         "model_id": publication.model_id,
-        "knowledge_query_mode": publication.knowledge_query_mode,
         "knowledge_base_ids": publication.knowledge_base_ids,
         "mcp_tools": publication.mcp_tools,
         "interaction_config": publication.interaction_config,
@@ -158,7 +155,6 @@ def agent_publication_from_snapshot(agent: Agent) -> AgentPublication | None:
         description=str(snapshot.get("description", "")),
         instructions=str(snapshot["instructions"]),
         model_id=str(snapshot["model_id"]),
-        knowledge_query_mode=str(snapshot["knowledge_query_mode"]),
         knowledge_base_ids=list(snapshot.get("knowledge_base_ids", [])),
         tools=[],
         legacy_mcp_tools=list(snapshot.get("mcp_tools", [])),
@@ -234,7 +230,6 @@ def legacy_mcp_references(tools: list[ToolSnapshot]) -> list[dict[str, str]]:
         description="",
         instructions="",
         model_id="",
-        knowledge_query_mode="required",
         knowledge_base_ids=[],
         tools=tools,
         interaction_config={},
@@ -509,7 +504,6 @@ async def create_agent(
         interaction_config=payload.interaction_config.model_dump(mode="json"),
         instructions=payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS,
         model_id=model.id,
-        knowledge_query_mode=payload.knowledge_query_mode,
         status=ACTIVE_STATUS,
         created_by_user_id=actor.id,
     )
@@ -724,12 +718,6 @@ async def update_agent(
     if payload.model_id is not None and payload.model_id != agent.model_id:
         agent.model_id = (await get_agent_model(db, agent.workspace_id, payload.model_id)).id
         configuration_changed = True
-    if payload.knowledge_query_mode is not None:
-        configuration_changed = (
-            configuration_changed
-            or payload.knowledge_query_mode != agent.knowledge_query_mode
-        )
-        agent.knowledge_query_mode = payload.knowledge_query_mode
     if payload.status is not None:
         next_status = validate_agent_status(payload.status)
         configuration_changed = configuration_changed or next_status != agent.status

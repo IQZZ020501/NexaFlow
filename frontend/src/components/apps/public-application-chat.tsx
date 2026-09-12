@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { LoaderCircleIcon, RotateCcwIcon } from "lucide-react"
 
 import { PublicAgentChat } from "@/components/agents/public-agent-chat"
+import { OperationNotification } from "@/components/app/operation-notification"
 import { PublicWorkflowChat } from "@/components/workflows/public-workflow-chat"
 import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
@@ -28,7 +29,8 @@ export function PublicApplicationChat({
 }) {
   const router = useRouter()
   const { t } = useLanguage()
-  const { token, isSessionRestored } = useSession()
+  const { token, isSessionRestored, notification, dismissNotification } =
+    useSession()
   const [kind, setKind] = React.useState<
     "agent" | "workflow" | "missing" | "error" | null
   >(null)
@@ -55,7 +57,11 @@ export function PublicApplicationChat({
       })
       .catch((error: unknown) => {
         if (!active) return
-        setKind(error instanceof ApiError && error.status === 404 ? "missing" : "error")
+        setKind(
+          error instanceof ApiError && error.status === 404
+            ? "missing"
+            : "error"
+        )
       })
     return () => {
       active = false
@@ -64,18 +70,30 @@ export function PublicApplicationChat({
 
   if (kind === "agent") {
     return (
-      <PublicAgentChat
-        agentId={applicationId}
-        initialConversationId={initialConversationId}
-      />
+      <>
+        <PublicAgentChat
+          agentId={applicationId}
+          initialConversationId={initialConversationId}
+        />
+        <OperationNotification
+          notification={notification}
+          onDismiss={dismissNotification}
+        />
+      </>
     )
   }
   if (kind === "workflow") {
     return (
-      <PublicWorkflowChat
-        workflowId={applicationId}
-        initialConversationId={initialConversationId}
-      />
+      <>
+        <PublicWorkflowChat
+          workflowId={applicationId}
+          initialConversationId={initialConversationId}
+        />
+        <OperationNotification
+          notification={notification}
+          onDismiss={dismissNotification}
+        />
+      </>
     )
   }
   return (

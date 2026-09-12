@@ -3,8 +3,6 @@ import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { User } from "@/lib/api/auth"
 import type { ToolRef } from "@/lib/api/tools"
 
-export type KnowledgeQueryMode = "required" | "agentic"
-
 export type AppType = "agent" | "workflow"
 
 export type AgentInteractionConfig = {
@@ -27,7 +25,6 @@ export type Agent = {
   interaction_config: AgentInteractionConfig
   instructions: string
   model_id: string
-  knowledge_query_mode: KnowledgeQueryMode
   knowledge_base_ids: string[]
   tools?: ToolRef[]
   /** @deprecated Read-only compatibility for responses created before ToolRef. */
@@ -60,7 +57,6 @@ export type AgentPayload = {
   name: string
   app_type?: AppType
   model_id: string
-  knowledge_query_mode: KnowledgeQueryMode
   knowledge_base_ids: string[]
   tools: ToolRef[]
   description?: string
@@ -137,7 +133,6 @@ export type AgentRun = {
   attachments?: AgentRunAttachment[]
   model_id: string
   model_name: string
-  knowledge_query_mode: KnowledgeQueryMode
   status: AgentRunStatus
   plan: AgentPlanStep[]
   events: AgentRunEvent[]

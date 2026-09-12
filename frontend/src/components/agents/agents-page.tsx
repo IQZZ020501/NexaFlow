@@ -24,6 +24,7 @@ import {
   StatusBadge,
 } from "@/components/knowledge/status-badges"
 import { TopLoadingBar } from "@/components/app/top-progress"
+import { feedbackConfirmationLabel } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
@@ -130,7 +131,6 @@ export type AgentFormState = {
   interactionConfig: AgentInteractionConfig
   modelId: string
   instructions: string
-  knowledgeQueryMode: Agent["knowledge_query_mode"]
   knowledgeBaseIds: string[]
   tools: ToolRef[]
   status: Agent["status"]
@@ -144,7 +144,6 @@ const EMPTY_FORM: AgentFormState = {
   interactionConfig: defaultInteractionConfig(),
   modelId: "",
   instructions: "",
-  knowledgeQueryMode: "required",
   knowledgeBaseIds: [],
   tools: [],
   status: "active",
@@ -189,7 +188,6 @@ function formFromAgent(agent: Agent): AgentFormState {
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
     instructions: agent.instructions,
-    knowledgeQueryMode: agent.knowledge_query_mode,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
     status: agent.status,
@@ -223,10 +221,9 @@ export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
   )
   return {
     ...liveRun,
-    attachments:
-      liveRun.attachments?.length
-        ? liveRun.attachments
-        : pendingRun.attachments,
+    attachments: liveRun.attachments?.length
+      ? liveRun.attachments
+      : pendingRun.attachments,
     events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
     result:
       keepLiveAnswer && !liveRun.result ? pendingRun.result : liveRun.result,
@@ -299,7 +296,7 @@ export function mergeAgentRunStreamEvent(
                     currentValue.length > nextValue.length &&
                     currentValue.startsWith(nextValue)
                       ? currentValue
-                      : nextValue ?? currentValue,
+                      : (nextValue ?? currentValue),
                   ]
                 })
               ),
@@ -542,7 +539,6 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
       JSON.stringify(agent.interaction_config) ||
     form.modelId !== agent.model_id ||
     form.instructions.trim() !== agent.instructions ||
-    form.knowledgeQueryMode !== agent.knowledge_query_mode ||
     form.status !== agent.status ||
     (form.appType === "agent" &&
       (!sameValues(form.knowledgeBaseIds, agent.knowledge_base_ids) ||
@@ -609,7 +605,9 @@ export function AgentsPage({
   const [isPublishing, setIsPublishing] = React.useState(false)
   const [deleteAgentTarget, setDeleteAgentTarget] =
     React.useState<Agent | null>(null)
-  const [moveAgentTarget, setMoveAgentTarget] = React.useState<Agent | null>(null)
+  const [moveAgentTarget, setMoveAgentTarget] = React.useState<Agent | null>(
+    null
+  )
   const [selectedAgentIds, setSelectedAgentIds] = React.useState<string[]>([])
   const [isBatchManaging, setIsBatchManaging] = React.useState(false)
   const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
@@ -683,14 +681,7 @@ export function AgentsPage({
         })
       : inFolder
     return sortAgents(matched, agentSortKey, languageLocales[language])
-  }, [
-    agentSearch,
-    agentSortKey,
-    agents,
-    language,
-    models,
-    isInSelectedFolder,
-  ])
+  }, [agentSearch, agentSortKey, agents, language, models, isInSelectedFolder])
   const movableAgentIds = filteredAgents
     .filter((agent) => agent.can_edit)
     .map((agent) => agent.id)
@@ -1291,7 +1282,6 @@ export function AgentsPage({
         interaction_config: interactionConfig,
         model_id: form.modelId,
         instructions: form.instructions,
-        knowledge_query_mode: form.knowledgeQueryMode,
         knowledge_base_ids:
           form.appType === "workflow" ? [] : form.knowledgeBaseIds,
         status: form.status,
@@ -1580,7 +1570,6 @@ export function AgentsPage({
       model_id: selectedAgent.model_id,
       model_name:
         models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
-      knowledge_query_mode: selectedAgent.knowledge_query_mode,
       status: "running",
       plan: [],
       events: [
@@ -1846,6 +1835,7 @@ export function AgentsPage({
         return
       }
       setRuns((current) => mergeAgentRunSnapshot(current, updated))
+      notify("success", feedbackConfirmationLabel(value, t))
     } catch (error) {
       if (
         !isCurrentAgentConversation(
@@ -2142,63 +2132,52 @@ export function AgentsPage({
           />
         </div>
 
-      <div aria-busy={isAgentListBusy} className="flex flex-col gap-4">
-        {isAgentListBusy && agents.length === 0 ? null : agents.length === 0 ? (
-          <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
-            <span className="flex size-14 items-center justify-center rounded-lg bg-muted">
-              <BotIcon className="size-5 text-muted-foreground" />
-            </span>
-            <div className="flex flex-col gap-2">
-              <p className="text-base font-semibold">{t("还没有应用")}</p>
-              <p className="text-sm leading-6 text-muted-foreground">
-                {activeModels.length === 0
-                  ? t("先接入一个已启用的大语言模型，再创建 Agent。")
-                  : t("创建应用后，可以编排对话、检索和工具调用流程。")}
-              </p>
+        <div aria-busy={isAgentListBusy} className="flex flex-col gap-4">
+          {isAgentListBusy && agents.length === 0 ? null : agents.length ===
+            0 ? (
+            <div className="mx-auto flex min-h-[320px] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
+              <span className="flex size-14 items-center justify-center rounded-lg bg-muted">
+                <BotIcon className="size-5 text-muted-foreground" />
+              </span>
+              <div className="flex flex-col gap-2">
+                <p className="text-base font-semibold">{t("还没有应用")}</p>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {activeModels.length === 0
+                    ? t("先接入一个已启用的大语言模型，再创建 Agent。")
+                    : t("创建应用后，可以编排对话、检索和工具调用流程。")}
+                </p>
+              </div>
+              {activeModels.length > 0 ? (
+                <Button type="button" onClick={openCreateDialog}>
+                  <PlusIcon data-icon="inline-start" />
+                  {t("新建应用")}
+                </Button>
+              ) : null}
             </div>
-            {activeModels.length > 0 ? (
-              <Button type="button" onClick={openCreateDialog}>
-                <PlusIcon data-icon="inline-start" />
-                {t("新建应用")}
-              </Button>
-            ) : null}
-          </div>
-        ) : filteredAgents.length === 0 ? (
-          <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground shadow-sm">
-            {t("没有匹配的 Agent")}
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {filteredAgents.map((agent) => (
-                <div
-                  key={agent.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={
-                    isBatchManaging && agent.can_edit
-                      ? selectedAgentIds.includes(agent.id)
-                      : undefined
-                  }
-                  className={cn(
-                    "flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
-                    selectedAgentIds.includes(agent.id) &&
-                      "border-primary/50 bg-primary/[0.035]"
-                  )}
-                  onClick={(event) => {
-                    if (isEventFromDropdownMenu(event)) return
-                    if (isBatchManaging && agent.can_edit) {
-                      setSelectedAgentIds((current) =>
-                        toggleResourceSelection(current, agent.id)
-                      )
-                      return
+          ) : filteredAgents.length === 0 ? (
+            <div className="rounded-lg border bg-background p-8 text-center text-sm text-muted-foreground shadow-sm">
+              {t("没有匹配的 Agent")}
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {filteredAgents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={
+                      isBatchManaging && agent.can_edit
+                        ? selectedAgentIds.includes(agent.id)
+                        : undefined
                     }
-                    openAgent(agent)
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
+                    className={cn(
+                      "flex min-h-40 min-w-0 cursor-pointer flex-col rounded-md border p-3 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+                      selectedAgentIds.includes(agent.id) &&
+                        "border-primary/50 bg-primary/[0.035]"
+                    )}
+                    onClick={(event) => {
+                      if (isEventFromDropdownMenu(event)) return
                       if (isBatchManaging && agent.can_edit) {
                         setSelectedAgentIds((current) =>
                           toggleResourceSelection(current, agent.id)
@@ -2206,182 +2185,194 @@ export function AgentsPage({
                         return
                       }
                       openAgent(agent)
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 gap-3">
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
-                        {agent.app_type === "workflow" ? (
-                          <WorkflowIcon className="size-5" />
-                        ) : (
-                          <SparklesIcon className="size-5" />
-                        )}
-                      </span>
-                      <div className="min-w-0">
-                        <h2
-                          className="truncate text-sm font-semibold"
-                          title={agent.name}
-                        >
-                          {agent.name}
-                        </h2>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <Badge variant="secondary">
-                            {agent.app_type === "workflow"
-                              ? t("工作流")
-                              : t("Agent")}
-                          </Badge>
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        if (isBatchManaging && agent.can_edit) {
+                          setSelectedAgentIds((current) =>
+                            toggleResourceSelection(current, agent.id)
+                          )
+                          return
+                        }
+                        openAgent(agent)
+                      }
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
                           {agent.app_type === "workflow" ? (
-                            <Badge variant="secondary">
-                              {t(agent.published ? "已发布" : "未发布")}
-                            </Badge>
-                          ) : null}
-                          <StatusBadge status={agent.status} />
-                          <PermissionBadge
-                            permission={agent.can_edit ? "edit" : "view"}
-                          />
-                        </div>
-                        <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
-                          {modelLine(agent.model_id)}
-                        </p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {t("创建者：{creator}", {
-                            creator:
-                              agent.created_by_user_id === me.user.id
-                                ? t("我")
-                                : formatUserIdentity(
-                                    agent.created_by_name,
-                                    agent.created_by_username,
-                                    agent.created_by_user_id
-                                  ),
-                          })}
-                        </p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {t("更新时间")} ·{" "}
-                          {formatDateTime(
-                            agent.updated_at,
-                            languageLocales[language]
+                            <WorkflowIcon className="size-5" />
+                          ) : (
+                            <SparklesIcon className="size-5" />
                           )}
-                        </p>
-                      </div>
-                    </div>
-                    {agent.can_edit ? (
-                      <div className="flex shrink-0 items-center gap-1">
-                        {isBatchManaging ? (
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-primary"
-                            aria-label={t("选择 {value}", {
-                              value: agent.name,
-                            })}
-                            checked={selectedAgentIds.includes(agent.id)}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) =>
-                              setSelectedAgentIds((current) =>
-                                event.target.checked
-                                  ? [...current, agent.id]
-                                  : current.filter((id) => id !== agent.id)
-                              )
-                            }
-                          />
-                        ) : null}
-                        <IconButton
-                          label={t("编辑应用")}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            openAgent(agent)
-                          }}
-                        >
-                          <PencilIcon className="size-4" />
-                        </IconButton>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="mt-auto flex items-end justify-between gap-2 pt-4">
-                    <dl className="grid grid-cols-2 gap-3 text-sm">
-                      <Spec
-                        label={t("知识库")}
-                        value={String(agent.knowledge_base_ids.length)}
-                      />
-                      <Spec
-                        label={t("工具")}
-                        value={String(
-                          (agent.tools ?? agent.mcp_tools ?? []).length
-                        )}
-                      />
-                    </dl>
-                    {agent.published || agent.can_edit ? (
-                      <CardMoreMenu label={t("更多")}>
-                        {agent.published ? (
-                          <>
-                            <DropdownMenuItem asChild>
-                              <a
-                                href={`/chat/${agent.id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                <ExternalLinkIcon />
-                                {t("打开链接")}
-                              </a>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() => void copyPublicLink(agent.id)}
-                            >
-                              <CopyIcon />
-                              {t("复制链接")}
-                            </DropdownMenuItem>
-                            {agent.can_edit ? (
-                              <DropdownMenuSeparator />
+                        </span>
+                        <div className="min-w-0">
+                          <h2
+                            className="truncate text-sm font-semibold"
+                            title={agent.name}
+                          >
+                            {agent.name}
+                          </h2>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <Badge variant="secondary">
+                              {agent.app_type === "workflow"
+                                ? t("工作流")
+                                : t("Agent")}
+                            </Badge>
+                            {agent.app_type === "workflow" ? (
+                              <Badge variant="secondary">
+                                {t(agent.published ? "已发布" : "未发布")}
+                              </Badge>
                             ) : null}
-                          </>
-                        ) : null}
-                        {agent.can_edit ? (
-                          <>
-                            <DropdownMenuItem
-                              onSelect={() => setMoveAgentTarget(agent)}
-                            >
-                              <FolderInputIcon />
-                              {t("移动到文件夹")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                void handleOpenAgentPermissions(agent)
+                            <StatusBadge status={agent.status} />
+                            <PermissionBadge
+                              permission={agent.can_edit ? "edit" : "view"}
+                            />
+                          </div>
+                          <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
+                            {modelLine(agent.model_id)}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {t("创建者：{creator}", {
+                              creator:
+                                agent.created_by_user_id === me.user.id
+                                  ? t("我")
+                                  : formatUserIdentity(
+                                      agent.created_by_name,
+                                      agent.created_by_username,
+                                      agent.created_by_user_id
+                                    ),
+                            })}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {t("更新时间")} ·{" "}
+                            {formatDateTime(
+                              agent.updated_at,
+                              languageLocales[language]
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      {agent.can_edit ? (
+                        <div className="flex shrink-0 items-center gap-1">
+                          {isBatchManaging ? (
+                            <input
+                              type="checkbox"
+                              className="size-4 accent-primary"
+                              aria-label={t("选择 {value}", {
+                                value: agent.name,
+                              })}
+                              checked={selectedAgentIds.includes(agent.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setSelectedAgentIds((current) =>
+                                  event.target.checked
+                                    ? [...current, agent.id]
+                                    : current.filter((id) => id !== agent.id)
+                                )
                               }
-                            >
-                              <ShieldCheckIcon />
-                              {t("资源授权")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onSelect={() => setDeleteAgentTarget(agent)}
-                            >
-                              <Trash2Icon />
-                              {t("删除")}
-                            </DropdownMenuItem>
-                          </>
-                        ) : null}
-                      </CardMoreMenu>
-                    ) : null}
+                            />
+                          ) : null}
+                          <IconButton
+                            label={t("编辑应用")}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              openAgent(agent)
+                            }}
+                          >
+                            <PencilIcon className="size-4" />
+                          </IconButton>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="mt-auto flex items-end justify-between gap-2 pt-4">
+                      <dl className="grid grid-cols-2 gap-3 text-sm">
+                        <Spec
+                          label={t("知识库")}
+                          value={String(agent.knowledge_base_ids.length)}
+                        />
+                        <Spec
+                          label={t("工具")}
+                          value={String(
+                            (agent.tools ?? agent.mcp_tools ?? []).length
+                          )}
+                        />
+                      </dl>
+                      {agent.published || agent.can_edit ? (
+                        <CardMoreMenu label={t("更多")}>
+                          {agent.published ? (
+                            <>
+                              <DropdownMenuItem asChild>
+                                <a
+                                  href={`/chat/${agent.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <ExternalLinkIcon />
+                                  {t("打开链接")}
+                                </a>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => void copyPublicLink(agent.id)}
+                              >
+                                <CopyIcon />
+                                {t("复制链接")}
+                              </DropdownMenuItem>
+                              {agent.can_edit ? (
+                                <DropdownMenuSeparator />
+                              ) : null}
+                            </>
+                          ) : null}
+                          {agent.can_edit ? (
+                            <>
+                              <DropdownMenuItem
+                                onSelect={() => setMoveAgentTarget(agent)}
+                              >
+                                <FolderInputIcon />
+                                {t("移动到文件夹")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  void handleOpenAgentPermissions(agent)
+                                }
+                              >
+                                <ShieldCheckIcon />
+                                {t("资源授权")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => setDeleteAgentTarget(agent)}
+                              >
+                                <Trash2Icon />
+                                {t("删除")}
+                              </DropdownMenuItem>
+                            </>
+                          ) : null}
+                        </CardMoreMenu>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-            <div
-              ref={agentsListEndRef}
-              className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
-            >
-              {isAgentsLoadingMore ? (
-                <>
-                  <LoaderCircleIcon className="size-4 animate-spin" />
-                  {t("正在加载")}
-                </>
-              ) : agents.length > 0 && !agentsHasMore ? (
-                t("已加载全部")
-              ) : null}
-            </div>
-          </>
-        )}
-      </div>
+                ))}
+              </div>
+              <div
+                ref={agentsListEndRef}
+                className="flex min-h-12 items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+              >
+                {isAgentsLoadingMore ? (
+                  <>
+                    <LoaderCircleIcon className="size-4 animate-spin" />
+                    {t("正在加载")}
+                  </>
+                ) : agents.length > 0 && !agentsHasMore ? (
+                  t("已加载全部")
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
       </ResourceFolderLayout>
 
       <ResourceFolderPickerDialog

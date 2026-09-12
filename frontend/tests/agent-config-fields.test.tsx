@@ -169,7 +169,6 @@ function initialForm(overrides: Partial<AgentFormState> = {}): AgentFormState {
     },
     modelId: "model-1",
     instructions: "Be concise.",
-    knowledgeQueryMode: "required",
     knowledgeBaseIds: ["knowledge-1"],
     tools: [{ tool_id: "tool-search", version_id: "version-1" }],
     status: "active",
@@ -249,14 +248,7 @@ describe("AgentConfigFields", () => {
     expect(instructions.value).toBe("New instructions")
 
     fireEvent.click(screen.getByText("关联知识库").closest("button")!)
-    expect(screen.getByText("每次先检索（推荐）")).toBeTruthy()
     expect(screen.getByText("产品文档")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Agent 按需检索" }))
-    expect(
-      screen
-        .getByRole("button", { name: "Agent 按需检索" })
-        .getAttribute("aria-pressed")
-    ).toBe("true")
 
     fireEvent.click(screen.getByText("工具").closest("button")!)
     expect(screen.getByText("Catalog search")).toBeTruthy()

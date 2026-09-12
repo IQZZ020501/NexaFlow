@@ -10,13 +10,12 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { cleanup } from "@testing-library/react"
 
-import { AgentsPage, type AgentFormState } from "@/components/agents/agents-page"
+import {
+  AgentsPage,
+  type AgentFormState,
+} from "@/components/agents/agents-page"
 import { LanguageProvider } from "@/contexts/language-provider"
-import type {
-  Agent,
-  AgentRun,
-  AgentToolCall,
-} from "@/lib/api/agents"
+import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -157,7 +156,6 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     },
     instructions: "Cite the sources you use.",
     model_id: "model-1",
-    knowledge_query_mode: "required",
     knowledge_base_ids: ["knowledge-1"],
     tools: [{ tool_id: "tool-1", version_id: "version-1" }],
     status: "active",
@@ -196,7 +194,6 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
     goal: "Summarize the latest releases",
     model_id: "model-1",
     model_name: "DeepSeek Chat",
-    knowledge_query_mode: "required",
     status: "succeeded",
     plan: [],
     events: [],
@@ -548,9 +545,7 @@ describe("AgentsPage tool catalog and workflow agent loading", () => {
     )
     // The list view renders again after workspace data is cleared.
     await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
-    expect(
-      notifyCalls.some((call) => call.kind === "error")
-    ).toBe(false)
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
   })
 
   test("reports an error when loading workflow agents fails", async () => {
@@ -631,9 +626,7 @@ describe("AgentsPage list guards and publish edges", () => {
       )
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(offsets).toEqual(["0"])
-      expect(
-        notifyCalls.some((call) => call.kind === "error")
-      ).toBe(false)
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
     } finally {
       globalThis.IntersectionObserver = OriginalIntersectionObserver
     }
@@ -700,9 +693,9 @@ describe("AgentsPage list guards and publish edges", () => {
     })
     fireEvent.click(screen.getByText("发布"))
     await waitFor(() =>
-      expect(
-        notifyCalls.some((call) => call.message === "工作流已发布")
-      ).toBe(true)
+      expect(notifyCalls.some((call) => call.message === "工作流已发布")).toBe(
+        true
+      )
     )
   })
 
@@ -735,10 +728,7 @@ describe("AgentsPage list guards and publish edges", () => {
 })
 
 describe("AgentsPage run regeneration", () => {
-  const conversationRoutes = (
-    runs: AgentRun[],
-    extra: FetchCase[] = []
-  ) => [
+  const conversationRoutes = (runs: AgentRun[], extra: FetchCase[] = []) => [
     {
       method: "GET",
       pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
@@ -790,9 +780,7 @@ describe("AgentsPage run regeneration", () => {
     const firstArticle = screen.getByText("First answer").closest("article")!
     const secondArticle = screen.getByText("Second answer").closest("article")!
 
-    fireEvent.click(
-      within(firstArticle).getByRole("button", { name: "点赞" })
-    )
+    fireEvent.click(within(firstArticle).getByRole("button", { name: "点赞" }))
     fireEvent.click(
       within(secondArticle).getByRole("button", { name: "重新生成" })
     )
@@ -805,6 +793,11 @@ describe("AgentsPage run regeneration", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "取消点赞" })).toBeTruthy()
     )
+    expect(
+      notifyCalls.some(
+        (call) => call.kind === "success" && call.message === "已点赞"
+      )
+    ).toBe(true)
   })
 
   test("regenerates a run and renders the streamed replacement", async () => {
@@ -855,9 +848,7 @@ describe("AgentsPage run regeneration", () => {
     )
 
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "重新生成" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "重新生成" }))
     await waitFor(() =>
       expect(screen.getByText("Regenerated answer")).toBeTruthy()
     )
@@ -865,9 +856,11 @@ describe("AgentsPage run regeneration", () => {
       .getByText("Regenerated answer")
       .closest("article")!
     expect(
-      (within(regeneratedArticle).getByRole("button", {
-        name: "重新生成",
-      }) as HTMLButtonElement).disabled
+      (
+        within(regeneratedArticle).getByRole("button", {
+          name: "重新生成",
+        }) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
   })
 
@@ -919,17 +912,13 @@ describe("AgentsPage run regeneration", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "重新生成" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "重新生成" }))
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.queryByText("regeneration exploded")).toBeNull()
-    expect(
-      notifyCalls.some((call) => call.kind === "error")
-    ).toBe(false)
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
   })
 
   test("restores the previous answer and reports an error when observing regeneration fails", async () => {
@@ -967,13 +956,9 @@ describe("AgentsPage run regeneration", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "重新生成" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "重新生成" }))
     await waitFor(() =>
-      expect(
-        notifyCalls.some((call) => call.kind === "error")
-      ).toBe(true)
+      expect(notifyCalls.some((call) => call.kind === "error")).toBe(true)
     )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
@@ -1006,9 +991,7 @@ describe("AgentsPage run regeneration", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "重新生成" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "重新生成" }))
     fireEvent.click(screen.getByLabelText("新建对话"))
     await waitFor(() =>
       expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
@@ -1039,9 +1022,7 @@ describe("AgentsPage run regeneration", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "重新生成" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "重新生成" }))
     await waitFor(() =>
       expect(
         notifyCalls.some((call) => call.message === "regenerate boom")
@@ -1084,9 +1065,7 @@ describe("AgentsPage run feedback", () => {
           exact: true,
           respond: () => {
             secondCalls += 1
-            return jsonResponse(
-              makeRun({ id: "run-2", feedback: "negative" })
-            )
+            return jsonResponse(makeRun({ id: "run-2", feedback: "negative" }))
           },
         },
       ],
@@ -1095,12 +1074,8 @@ describe("AgentsPage run feedback", () => {
     const firstArticle = screen.getByText("First answer").closest("article")!
     const secondArticle = screen.getByText("Second answer").closest("article")!
 
-    fireEvent.click(
-      within(firstArticle).getByRole("button", { name: "点赞" })
-    )
-    fireEvent.click(
-      within(secondArticle).getByRole("button", { name: "点赞" })
-    )
+    fireEvent.click(within(firstArticle).getByRole("button", { name: "点赞" }))
+    fireEvent.click(within(secondArticle).getByRole("button", { name: "点赞" }))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(secondCalls).toBe(0)
 
@@ -1132,9 +1107,7 @@ describe("AgentsPage run feedback", () => {
             expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
               feedback: "positive",
             })
-            return jsonResponse(
-              makeRun({ id: "run-1", feedback: "positive" })
-            )
+            return jsonResponse(makeRun({ id: "run-1", feedback: "positive" }))
           },
         },
       ],
@@ -1143,9 +1116,7 @@ describe("AgentsPage run feedback", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "点赞" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "点赞" }))
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "取消点赞" })).toBeTruthy()
     )
@@ -1181,9 +1152,7 @@ describe("AgentsPage run feedback", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "点赞" })
-    )
+    fireEvent.click(within(article).getByRole("button", { name: "点赞" }))
     fireEvent.click(screen.getByLabelText("新建对话"))
     await waitFor(() =>
       expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
@@ -1219,18 +1188,14 @@ describe("AgentsPage run feedback", () => {
       expect(screen.getByText("Original answer")).toBeTruthy()
     )
     const article = screen.getByText("Original answer").closest("article")!
-    fireEvent.click(
-      within(article).getByRole("button", { name: "点赞" })
+    fireEvent.click(within(article).getByRole("button", { name: "点赞" }))
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "feedback boom")).toBe(
+        true
+      )
     )
     await waitFor(() =>
-      expect(
-        notifyCalls.some((call) => call.message === "feedback boom")
-      ).toBe(true)
-    )
-    await waitFor(() =>
-      expect(
-        within(article).getByRole("button", { name: "点赞" })
-      ).toBeTruthy()
+      expect(within(article).getByRole("button", { name: "点赞" })).toBeTruthy()
     )
   })
 })
@@ -1287,9 +1252,9 @@ describe("AgentsPage stream approval tool-call loading", () => {
       ],
     })
     await waitFor(() =>
-      expect(
-        notifyCalls.some((call) => call.message === "calls boom")
-      ).toBe(true)
+      expect(notifyCalls.some((call) => call.message === "calls boom")).toBe(
+        true
+      )
     )
   })
 
@@ -1343,9 +1308,7 @@ describe("AgentsPage stream approval tool-call loading", () => {
     )
     resolveCalls!(jsonResponse({ detail: "late boom" }, 500))
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(
-      notifyCalls.some((call) => call.kind === "error")
-    ).toBe(false)
+    expect(notifyCalls.some((call) => call.kind === "error")).toBe(false)
   })
 
   test("loads tool calls requested by the stream approval and renders the decision UI", async () => {

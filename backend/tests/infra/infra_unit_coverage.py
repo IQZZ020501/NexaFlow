@@ -2622,6 +2622,8 @@ def test_settings_defaults_and_validation() -> None:
     assert base.agent_run_timeout_seconds == 300.0
     assert base.agent_max_turns == 8
     assert base.agent_max_tool_calls == 12
+    assert base.agent_max_knowledge_calls == 6
+    assert base.agent_max_knowledge_rounds == 3
     assert base.agent_max_model_tokens == 100_000
     assert base.agent_executor_lease_seconds == 90
     assert base.agent_executor_heartbeat_seconds == 30
@@ -2663,6 +2665,10 @@ def test_settings_defaults_and_validation() -> None:
         (replace(base, agent_max_turns=65), "AGENT_MAX_TURNS"),
         (replace(base, agent_max_tool_calls=0), "AGENT_MAX_TOOL_CALLS"),
         (replace(base, agent_max_tool_calls=129), "AGENT_MAX_TOOL_CALLS"),
+        (replace(base, agent_max_knowledge_calls=0), "AGENT_MAX_KNOWLEDGE_CALLS"),
+        (replace(base, agent_max_knowledge_calls=13), "AGENT_MAX_KNOWLEDGE_CALLS"),
+        (replace(base, agent_max_knowledge_rounds=0), "AGENT_MAX_KNOWLEDGE_ROUNDS"),
+        (replace(base, agent_max_knowledge_rounds=9), "AGENT_MAX_KNOWLEDGE_ROUNDS"),
         (replace(base, agent_max_model_tokens=0), "AGENT_MAX_MODEL_TOKENS"),
         (replace(base, agent_max_model_tokens=1_000_001), "AGENT_MAX_MODEL_TOKENS"),
         (replace(base, agent_executor_lease_seconds=29), "AGENT_EXECUTOR_LEASE_SECONDS"),
@@ -2713,6 +2719,8 @@ def test_settings_from_env() -> None:
             "AGENT_EVENT_POLL_SECONDS": "1.5",
             "AGENT_EXECUTOR_LEASE_SECONDS": "120",
             "AGENT_EXECUTOR_HEARTBEAT_SECONDS": "45",
+            "AGENT_MAX_KNOWLEDGE_CALLS": "5",
+            "AGENT_MAX_KNOWLEDGE_ROUNDS": "2",
         },
         clear=False,
     ):
@@ -2729,6 +2737,8 @@ def test_settings_from_env() -> None:
         assert parsed.agent_event_poll_seconds == 1.5
         assert parsed.agent_executor_lease_seconds == 120
         assert parsed.agent_executor_heartbeat_seconds == 45
+        assert parsed.agent_max_knowledge_calls == 5
+        assert parsed.agent_max_knowledge_rounds == 2
 
     with patch.dict(os.environ, {**required, "CELERY_TASK_ALWAYS_EAGER": "no"}, clear=False):
         parsed = config_mod.Settings.from_env(require_bootstrap=False)

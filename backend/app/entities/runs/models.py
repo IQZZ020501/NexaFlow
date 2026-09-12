@@ -31,7 +31,6 @@ class AgentRun:
     attachment_context: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)
-    knowledge_query_mode: str = "required"
     mcp_tools: list[dict[str, str]] = field(default_factory=list)
     snapshot_schema_version: int = 1
     configuration_source: str = "legacy"
@@ -44,6 +43,8 @@ class AgentRun:
     max_runtime_seconds: float = 300.0
     max_turns: int = 8
     max_tool_calls: int = 12
+    max_knowledge_calls: int = 6
+    max_knowledge_rounds: int = 3
     max_model_tokens: int = 100_000
     model_runtime_snapshot: dict[str, Any] = field(default_factory=dict)
     knowledge_resource_snapshot: dict[str, Any] = field(default_factory=dict)

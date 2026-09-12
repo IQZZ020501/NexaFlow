@@ -12,17 +12,65 @@ import {
 import type { TFunction } from "@/i18n"
 import type { AgentRunSource } from "@/lib/api/agents"
 
-const SOURCE_HREF_PATTERN =
-  /^#nex(?:aflow|faow)-source-([a-f0-9]{16})$/i
+const SOURCE_HREF_PATTERN = /(?:^|#)nex(?:aflow|faow)-source-([^\s)>'"]+)$/i
+const SOURCE_HREF_MARKER_PATTERN = /(?:^|#)nex(?:aflow|faow)-source-/i
 const SOURCE_LINK_PATTERN =
-  /[ \t]*\[[^\]\r\n]*\]\(#nex(?:aflow|faow)-source-([a-f0-9]{16})\)/gi
+  /[ \t]*\[[^\]\r\n]*\]\s*\(\s*(?:<\s*)?(?:[^\s<>()#"']*)?#nex(?:aflow|faow)-source-([^\s)>'"]+)\s*(?:>|(?:["'][^)]*["']))?\s*\)/gi
+const INCOMPLETE_SOURCE_LINK_PATTERN =
+  /[ \t]*\[(?:source|来源)\]\s*\(\s*(?:<\s*)?(?:[^)\r\n]*#nex(?:aflow|faow)-source-[^)\r\n]*)?(?=$|\r?\n)/gi
+const BARE_SOURCE_LABEL_PATTERN = /[ \t]*\[(?:source|来源)\](?!\s*\()/gi
+const SOURCE_LINK_BEFORE_SENTENCE_PUNCTUATION_PATTERN = new RegExp(
+  `(${SOURCE_LINK_PATTERN.source})([。！？.!?]+)`,
+  "gi"
+)
+
+function normalizeSourceRef(value: string) {
+  let decoded = value.trim()
+  try {
+    decoded = decodeURIComponent(decoded)
+  } catch {
+    // Keep the original token when a legacy answer contains malformed escapes.
+  }
+  return decoded.toLowerCase()
+}
 
 function sourceRefFromHref(href?: string) {
-  return href?.match(SOURCE_HREF_PATTERN)?.[1] ?? null
+  const value = href?.trim()
+  const rawSourceRef = value?.match(SOURCE_HREF_PATTERN)?.[1]
+  return rawSourceRef ? normalizeSourceRef(rawSourceRef) : null
+}
+
+function isSourceHref(href?: string) {
+  return SOURCE_HREF_MARKER_PATTERN.test(href?.trim() ?? "")
 }
 
 export function stripAgentSourceLinks(content: string) {
   return content.replace(SOURCE_LINK_PATTERN, "")
+}
+
+function hideIncompleteAgentSourceLinks(content: string) {
+  return content
+    .replace(INCOMPLETE_SOURCE_LINK_PATTERN, "")
+    .replace(BARE_SOURCE_LABEL_PATTERN, "")
+}
+
+function normalizeAgentSourceLinks(
+  content: string,
+  sourceByRef: Map<string, AgentRunSource>
+) {
+  return content.replace(SOURCE_LINK_PATTERN, (_link, rawSourceRef: string) => {
+    const sourceRef = normalizeSourceRef(rawSourceRef)
+    if (!sourceByRef.has(sourceRef)) return _link
+    return `[source](#nexaflow-source-${sourceRef})`
+  })
+}
+
+function normalizeAgentSourcePlacement(content: string) {
+  return content.replace(
+    SOURCE_LINK_BEFORE_SENTENCE_PUNCTUATION_PATTERN,
+    (_match, link: string, _sourceRef: string, punctuation: string) =>
+      `${punctuation} ${link.trim()}`
+  )
 }
 
 function deduplicateAgentSourceLinks(
@@ -31,8 +79,12 @@ function deduplicateAgentSourceLinks(
 ) {
   const seen = new Set<string>()
   return content.replace(SOURCE_LINK_PATTERN, (link, sourceRef: string) => {
-    if (!sourceByRef.has(sourceRef) || !seen.has(sourceRef)) {
-      seen.add(sourceRef)
+    const normalizedSourceRef = normalizeSourceRef(sourceRef)
+    if (
+      !sourceByRef.has(normalizedSourceRef) ||
+      !seen.has(normalizedSourceRef)
+    ) {
+      seen.add(normalizedSourceRef)
       return link
     }
     return ""
@@ -134,25 +186,67 @@ export function AgentAnswer({
   className?: string
 }) {
   const sourceByRef = React.useMemo(
-    () => new Map((sources ?? []).map((source) => [source.source_ref, source])),
+    () =>
+      new Map(
+        (sources ?? []).map((source) => [
+          normalizeSourceRef(source.source_ref),
+          source,
+        ])
+      ),
     [sources]
   )
-  const deduplicatedContent = React.useMemo(
-    () => deduplicateAgentSourceLinks(content, sourceByRef),
+  const normalizedContent = React.useMemo(
+    () =>
+      normalizeAgentSourceLinks(
+        normalizeAgentSourcePlacement(content),
+        sourceByRef
+      ),
     [content, sourceByRef]
+  )
+  const deduplicatedContent = React.useMemo(
+    () =>
+      hideIncompleteAgentSourceLinks(
+        deduplicateAgentSourceLinks(normalizedContent, sourceByRef)
+      ),
+    [normalizedContent, sourceByRef]
   )
   const hasInlineSource = React.useMemo(
     () =>
-      Array.from(deduplicatedContent.matchAll(SOURCE_LINK_PATTERN)).some((match) =>
-        sourceByRef.has(match[1])
+      Array.from(deduplicatedContent.matchAll(SOURCE_LINK_PATTERN)).some(
+        (match) => sourceByRef.has(normalizeSourceRef(match[1]))
       ),
     [deduplicatedContent, sourceByRef]
+  )
+  const hasUnresolvedSource = React.useMemo(
+    () =>
+      Array.from(deduplicatedContent.matchAll(SOURCE_LINK_PATTERN)).some(
+        (match) => !sourceByRef.has(normalizeSourceRef(match[1]))
+      ),
+    [deduplicatedContent, sourceByRef]
+  )
+  const inlineSourceRefs = React.useMemo(
+    () =>
+      new Set(
+        Array.from(deduplicatedContent.matchAll(SOURCE_LINK_PATTERN))
+          .map((match) => normalizeSourceRef(match[1]))
+          .filter((sourceRef) => sourceByRef.has(sourceRef))
+      ),
+    [deduplicatedContent, sourceByRef]
+  )
+  const fallbackSources = React.useMemo(
+    () =>
+      (sources ?? []).filter(
+        (source) => !inlineSourceRefs.has(normalizeSourceRef(source.source_ref))
+      ),
+    [inlineSourceRefs, sources]
   )
   const components = React.useMemo<Components>(
     () => ({
       a(props) {
         const sourceRef = sourceRefFromHref(props.href)
-        if (!sourceRef) return <MarkdownLink {...props} />
+        if (!sourceRef) {
+          return isSourceHref(props.href) ? null : <MarkdownLink {...props} />
+        }
         const source = sourceByRef.get(sourceRef)
         return source ? (
           <AgentSourceReference source={source} t={t} inline />
@@ -169,8 +263,11 @@ export function AgentAnswer({
         className={className}
         components={components}
       />
-      {hasInlineSource ? null : (
-        <AgentSourceReferences sources={sources} t={t} />
+      {hasInlineSource && !hasUnresolvedSource ? null : (
+        <AgentSourceReferences
+          sources={hasInlineSource ? fallbackSources : sources}
+          t={t}
+        />
       )}
     </>
   )

@@ -43,9 +43,17 @@ from app.domain.agents.runtime.usage import merge_usage, usage_from_message
 
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
+MAX_AGENT_KNOWLEDGE_CALLS = 6
+MAX_AGENT_KNOWLEDGE_ROUNDS = 3
 MAX_REASONING_CHARS = 6000
 MODEL_RESPONSE_TIMEOUT_SECONDS = 60
 TOOL_RESPONSE_TIMEOUT_SECONDS = 30
+KNOWLEDGE_BUDGET_FINALIZATION_PROMPT = (
+    "The knowledge search budget is exhausted. Do not call search_knowledge "
+    "again. Answer now using the evidence already retrieved; if it is "
+    "insufficient, say so explicitly. Use remaining non-knowledge tools only "
+    "when necessary."
+)
 
 
 class AgentRunnerError(ModelProviderError):
@@ -68,6 +76,8 @@ class AgentRuntimeContext:
     ] | None = None
     max_turns: int = MAX_AGENT_TURNS
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS
+    max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS
+    max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS
     max_model_tokens: int | None = None
     grounding_mode: InlineGroundingMode | None = None
 
@@ -519,20 +529,69 @@ async def agent_node(
         await callback.answer_delta(delta)
 
     model = runtime.context.model
-    allow_tools = turn < runtime.context.max_turns
+    tool_budget_exhausted = (
+        state["tool_call_count"] >= runtime.context.max_tool_calls
+    )
+    knowledge_budget_exhausted = (
+        state["knowledge_call_count"] >= runtime.context.max_knowledge_calls
+        or state["knowledge_round_count"]
+        >= runtime.context.max_knowledge_rounds
+    )
+    completed_tool_kinds = {
+        str(event.get("tool_kind") or "")
+        for event in state["events"]
+        if event.get("type") == "tool" and event.get("status") != "running"
+    }
+    finalize_from_knowledge = (
+        tool_budget_exhausted
+        and bool(state["evidence_packets"])
+        and completed_tool_kinds == {"knowledge"}
+    )
     available_tools = runtime.context.tools
-    if state["no_new_evidence_rounds"] >= 2:
+    if state["no_new_evidence_rounds"] >= 2 or knowledge_budget_exhausted:
         available_tools = [
             tool
             for tool in available_tools
             if agent_tool_metadata(tool)["kind"] != "knowledge"
+        ]
+    finalize_from_knowledge_budget = (
+        knowledge_budget_exhausted and not available_tools
+    )
+    allow_tools = (
+        turn < runtime.context.max_turns
+        and not finalize_from_knowledge
+        and not finalize_from_knowledge_budget
+    )
+    model_messages = state["messages"]
+    if finalize_from_knowledge:
+        # A read-only knowledge search may legitimately use the whole tool
+        # budget before the model has written its answer.  Remove tool schemas
+        # and give the model one explicit finalisation turn instead of failing
+        # the run after the budget has already been respected.
+        model_messages = [
+            *model_messages,
+            HumanMessage(
+                content=(
+                    "The tool-call budget is exhausted. Stop calling tools and "
+                    "answer now using the evidence already retrieved."
+                )
+            ),
+        ]
+    elif knowledge_budget_exhausted and not any(
+        isinstance(message, HumanMessage)
+        and message.content == KNOWLEDGE_BUDGET_FINALIZATION_PROMPT
+        for message in model_messages
+    ):
+        model_messages = [
+            *model_messages,
+            HumanMessage(content=KNOWLEDGE_BUDGET_FINALIZATION_PROMPT),
         ]
     bound_model = (
         model.bind_tools(available_tools) if allow_tools and available_tools else model
     )
     try:
         if callback.enabled:
-            async with aclosing(bound_model.astream(state["messages"])) as stream:
+            async with aclosing(bound_model.astream(model_messages)) as stream:
                 aggregate: AIMessageChunk | None = None
                 while True:
                     try:
@@ -622,7 +681,7 @@ async def agent_node(
                 )
         else:
             async with asyncio.timeout(MODEL_RESPONSE_TIMEOUT_SECONDS):
-                message = await bound_model.ainvoke(state["messages"])
+                message = await bound_model.ainvoke(model_messages)
     except TimeoutError as exc:
         raise AgentRunnerError("Agent model response timed out.") from exc
 
@@ -646,7 +705,7 @@ async def agent_node(
             await emit_answer_delta(trailing_text)
     message = sanitized_model_message(message, completion)
 
-    messages = [*state["messages"], message]
+    messages = [*model_messages, message]
     tool_calls = [pending_tool_call(call) for call in completion.tool_calls]
     model_usage = merge_usage(state["model_usage"], usage_from_message(message))
     if (
@@ -665,7 +724,15 @@ async def agent_node(
         ):
             raise AgentRunnerError("Agent model returned invalid tool call identifiers.")
         if not allow_tools:
-            raise AgentRunnerError("Agent turn limit reached.")
+            raise AgentRunnerError(
+                "Agent tool call limit reached."
+                if finalize_from_knowledge
+                else (
+                    "Agent knowledge search limit reached."
+                    if finalize_from_knowledge_budget
+                    else "Agent turn limit reached."
+                )
+            )
         await callback.process(completed_thought("agent.tools_selected"))
         return {
             "messages": messages,
@@ -809,13 +876,56 @@ async def tool_node(
 ) -> dict[str, Any]:
     calls = state["pending_tool_calls"]
     tool_call_count = state["tool_call_count"] + len(calls)
-    if tool_call_count > runtime.context.max_tool_calls:
-        raise AgentRunnerError("Agent tool call limit reached.")
-
     tools = {tool.name: tool for tool in runtime.context.tools}
+    pending_tool_kinds = [
+        (
+            agent_tool_metadata(tools[call["name"]])["kind"]
+            if call["name"] in tools
+            else "unknown"
+        )
+        for call in calls
+    ]
+    all_pending_tools_known = all(kind != "unknown" for kind in pending_tool_kinds)
+    knowledge_budget_overflow = (
+        tool_call_count > runtime.context.max_tool_calls
+        and bool(state["evidence_packets"])
+        and all_pending_tools_known
+        and set(pending_tool_kinds) == {"knowledge"}
+    )
+    if (
+        tool_call_count > runtime.context.max_tool_calls
+        and not knowledge_budget_overflow
+    ):
+        raise AgentRunnerError("Agent tool call limit reached.")
+    persisted_tool_call_count = min(
+        tool_call_count,
+        runtime.context.max_tool_calls,
+    )
+    remaining_knowledge_calls = max(
+        0,
+        runtime.context.max_knowledge_calls - state["knowledge_call_count"],
+    )
+    knowledge_round_available = (
+        state["knowledge_round_count"]
+        < runtime.context.max_knowledge_rounds
+        and state["no_new_evidence_rounds"] < 2
+    )
+    permitted_knowledge_indices: set[int] = set()
+    if not knowledge_budget_overflow and knowledge_round_available:
+        for index, kind in enumerate(pending_tool_kinds):
+            if kind != "knowledge" or remaining_knowledge_calls <= 0:
+                continue
+            permitted_knowledge_indices.add(index)
+            remaining_knowledge_calls -= 1
+    knowledge_call_count = (
+        state["knowledge_call_count"] + len(permitted_knowledge_indices)
+    )
+    knowledge_round_count = state["knowledge_round_count"] + int(
+        bool(permitted_knowledge_indices)
+    )
     callback = runtime.context.callback
     prepared_calls: list[PreparedToolCall] = []
-    for call in calls:
+    for call_index, call in enumerate(calls):
         tool = tools.get(call["name"])
         metadata = (
             agent_tool_metadata(tool)
@@ -831,10 +941,20 @@ async def tool_node(
         except (json.JSONDecodeError, TypeError):
             parsed_arguments = None
 
-        if state["finish_reason"] == "length":
+        if knowledge_budget_overflow:
             blocked_result = AgentToolResult(
                 content=(
-                    "Tool call was not executed because the model response was truncated."
+                    "Knowledge search was not executed because the tool-call "
+                    "budget is exhausted. Answer using the evidence already retrieved."
+                ),
+                summary="Knowledge search stopped at the tool-call budget.",
+                is_error=True,
+            )
+        elif state["finish_reason"] == "length":
+            blocked_result = AgentToolResult(
+                content=(
+                    "Tool call was not executed because the model response was "
+                    "truncated."
                 ),
                 summary="Truncated tool call rejected.",
                 is_error=True,
@@ -854,6 +974,19 @@ async def tool_node(
                     "Knowledge search stopped after two rounds without new evidence."
                 ),
                 summary="Knowledge search stopped after no new evidence.",
+                is_error=True,
+            )
+        elif (
+            agent_tool_metadata(tool)["kind"] == "knowledge"
+            and call_index not in permitted_knowledge_indices
+        ):
+            blocked_result = AgentToolResult(
+                content=(
+                    "Knowledge search was not executed because the knowledge "
+                    "search budget is exhausted. Answer using the evidence "
+                    "already retrieved."
+                ),
+                summary="Knowledge search stopped at its dedicated budget.",
                 is_error=True,
             )
         elif not isinstance(parsed_arguments, dict):
@@ -929,7 +1062,10 @@ async def tool_node(
         result, event = execution_results[index]
         messages.append(tool_message(prepared.call, result))
         events.append(event)
-        if prepared.metadata["kind"] == "knowledge":
+        if (
+            prepared.metadata["kind"] == "knowledge"
+            and index in permitted_knowledge_indices
+        ):
             has_retrieval_attempt = True
             if not result.is_error:
                 round_evidence_ids.update(result.evidence_ids)
@@ -969,7 +1105,9 @@ async def tool_node(
     return {
         "messages": messages,
         "events": events,
-        "tool_call_count": tool_call_count,
+        "tool_call_count": persisted_tool_call_count,
+        "knowledge_call_count": knowledge_call_count,
+        "knowledge_round_count": knowledge_round_count,
         "seen_evidence_ids": sorted(seen_evidence_ids),
         "evidence_packets": evidence_packets[:32],
         "no_new_evidence_rounds": no_new_evidence_rounds,

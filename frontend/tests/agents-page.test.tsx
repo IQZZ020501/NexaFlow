@@ -177,7 +177,6 @@ export function makeAgent(overrides: Partial<Agent> = {}): Agent {
     },
     instructions: "Cite the sources you use.",
     model_id: "model-1",
-    knowledge_query_mode: "required",
     knowledge_base_ids: ["knowledge-1"],
     tools: [{ tool_id: "tool-1", version_id: "version-1" }],
     status: "active",
@@ -218,7 +217,6 @@ function makeRun(overrides: Partial<AgentRun> = {}): AgentRun {
     goal: "Summarize the latest releases",
     model_id: "model-1",
     model_name: "DeepSeek Chat",
-    knowledge_query_mode: "required",
     status: "succeeded",
     plan: [],
     events: [],
@@ -2468,7 +2466,6 @@ describe("AgentsPage card menu: permissions and delete", () => {
 describe("AgentsPage run flows", () => {
   test("renders an agentic no-evidence grounding result as a neutral state", async () => {
     const run = makeRun({
-      knowledge_query_mode: "agentic",
       grounding_status: "skipped",
       grounding_meta: { reason: "no_evidence" },
       events: [
@@ -2489,7 +2486,7 @@ describe("AgentsPage run flows", () => {
       ],
     })
     await renderDetail({
-      agent: makeAgent({ knowledge_query_mode: "agentic" }),
+      agent: makeAgent(),
       initialView: "settings",
       initialConversationId: "conversation-1",
       extraRoutes: [
@@ -2508,7 +2505,6 @@ describe("AgentsPage run flows", () => {
 
   test("renders inline grounding as completed before the answer", async () => {
     const run = makeRun({
-      knowledge_query_mode: "agentic",
       grounding_status: "grounded",
       grounding_meta: { mode: "inline", evidence_ids: ["chunk-1"] },
       events: [
@@ -2529,7 +2525,7 @@ describe("AgentsPage run flows", () => {
       ],
     })
     await renderDetail({
-      agent: makeAgent({ knowledge_query_mode: "agentic" }),
+      agent: makeAgent(),
       initialView: "settings",
       initialConversationId: "conversation-1",
       extraRoutes: [
@@ -3929,7 +3925,6 @@ function formFromAgentFixture(agent: Agent): AgentFormState {
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
     instructions: agent.instructions,
-    knowledgeQueryMode: agent.knowledge_query_mode,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
     status: agent.status,

@@ -32,7 +32,7 @@ export function OperationNotification({
 
   return (
     <div
-      className="fixed top-16 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 sm:top-4"
+      className="fixed top-16 left-1/2 z-[60] w-[calc(100%-2rem)] max-w-xs -translate-x-1/2 sm:top-4"
       role={notification.kind === "error" ? "alert" : "status"}
       aria-live={notification.kind === "error" ? "assertive" : "polite"}
     >
