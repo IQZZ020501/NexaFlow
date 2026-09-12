@@ -31,7 +31,6 @@ class AgentRun:
     attachment_context: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)
-    knowledge_query_mode: str = "required"
     mcp_tools: list[dict[str, str]] = field(default_factory=list)
     snapshot_schema_version: int = 1
     configuration_source: str = "legacy"

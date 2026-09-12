@@ -22,12 +22,10 @@ from app.application.agents.runs.snapshots import (
     require_model_runtime_snapshot,
 )
 from app.application.agents.tools.builder import (
-    bounded_knowledge_context,
     build_knowledge_search_tool,
     build_mcp_agent_tool,
     build_unified_agent_tool,
     describe_knowledge_sources,
-    knowledge_packets_from_output,
     safe_agent_error,
     set_agent_tool_idempotency_key,
 )
@@ -267,30 +265,6 @@ def current_mcp_policy_mode(
         # require renewed approval before the call may resume.
         return "approval_required"
     return policy.mode
-
-
-async def _invoke_required_knowledge(
-    tool: StructuredTool,
-    query: str,
-    timeout_seconds: float,
-) -> AgentToolResult:
-    try:
-        async with asyncio.timeout(timeout_seconds):
-            return await tool.ainvoke({"query": query})
-    except Exception:
-        return AgentToolResult(
-            content=json.dumps(
-                {"hits": [], "evidence_status": "unavailable"},
-                ensure_ascii=False,
-            ),
-            summary="Knowledge search unavailable.",
-            output={
-                "query": query,
-                "hits": [],
-                "evidence_status": "unavailable",
-            },
-            is_error=True,
-        )
 
 
 class DurableToolLedger:
@@ -808,63 +782,8 @@ async def _execute_claimed_agent_run(
         if scope.knowledge_bases
         else None
     )
-    knowledge_context = ""
-    initial_evidence: list[dict[str, Any]] = []
-    if not run.checkpoint and knowledge_tool is not None and run.knowledge_query_mode == "required":
-        eager_call_id = f"eager-knowledge-{run.id}"
-        # The persisted event is deliberately redacted/bounded for UI replay;
-        # it is not authoritative evidence. Re-run the read-only eager query
-        # whenever the durable checkpoint is absent so retries never ground on
-        # a 2,000-character event preview.
-        eager_started_at = time.perf_counter()
-        eager_result = await _invoke_required_knowledge(
-            knowledge_tool,
-            run.goal,
-            min(
-                settings.agent_tool_timeout_seconds,
-                _remaining_run_seconds(run_deadline),
-            ),
-        )
-        eager_output = eager_result.output
-        eager_event = {
-            "type": "tool",
-            "turn": 0,
-            "tool_name": "search_knowledge",
-            "status": "failed" if eager_result.is_error else "succeeded",
-            "summary": eager_result.summary,
-            "call_id": eager_call_id,
-            "tool_label": "knowledge",
-            "tool_kind": "knowledge",
-            "server_name": "",
-            "input": {"query": run.goal},
-            "output": safe_event_value(eager_result.output),
-            "duration_ms": round(
-                (time.perf_counter() - eager_started_at) * 1000
-            ),
-        }
-        _upsert_process_event(process_events, eager_event)
-        await _append_event(
-            run,
-            {"type": "process", "event": eager_event},
-            worker_task_id=worker_task_id,
-        )
-        knowledge_context = bounded_knowledge_context(
-            eager_output
-            or {
-                "query": run.goal,
-                "hits": [],
-                "evidence_status": (
-                    "unavailable"
-                    if eager_event.get("status") == "failed"
-                    else "not_found"
-                ),
-            }
-        )
-        initial_evidence = knowledge_packets_from_output(eager_output)
-        await _require_current_knowledge_snapshot(scope)
-
     tools: list[StructuredTool] = []
-    if knowledge_tool is not None and run.knowledge_query_mode == "agentic":
+    if knowledge_tool is not None:
         tools.append(knowledge_tool)
     tools.extend(
         build_mcp_agent_tool(tool, settings, run.agent_id, policy_mode)
@@ -877,15 +796,13 @@ async def _execute_claimed_agent_run(
     chat_model = build_chat_model(settings, scope.model)
     base_messages = execution_messages(
         run,
-        knowledge_tool is not None and run.knowledge_query_mode == "agentic",
+        knowledge_tool is not None,
         has_application_tools,
         knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
             else ""
         ),
-        knowledge_query_mode=run.knowledge_query_mode,
-        knowledge_context=knowledge_context,
     )
     memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
     if not run.checkpoint:
@@ -915,18 +832,16 @@ async def _execute_claimed_agent_run(
             memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
     messages = execution_messages(
         run,
-        knowledge_tool is not None and run.knowledge_query_mode == "agentic",
+        knowledge_tool is not None,
         has_application_tools,
         knowledge_scope=(
             describe_knowledge_sources(scope.knowledge_bases)
             if scope.knowledge_bases
             else ""
         ),
-        knowledge_query_mode=run.knowledge_query_mode,
-        knowledge_context=knowledge_context,
         context_messages=memory.messages,
     )
-    grounding_mode = run.knowledge_query_mode if knowledge_tool is not None else None
+    grounding_mode = "agentic" if knowledge_tool is not None else None
 
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
@@ -1037,7 +952,6 @@ async def _execute_claimed_agent_run(
                     max_tool_calls=max_tool_calls,
                     max_model_tokens=max_model_tokens,
                     grounding_mode=grounding_mode,
-                    initial_evidence=initial_evidence,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc

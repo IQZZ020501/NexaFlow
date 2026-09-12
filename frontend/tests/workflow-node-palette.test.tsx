@@ -49,7 +49,6 @@ const agent: Agent & { current_published_version_id: string | null } = {
   },
   instructions: "Research",
   model_id: "model-1",
-  knowledge_query_mode: "agentic",
   knowledge_base_ids: [],
   mcp_tools: [],
   status: "active",

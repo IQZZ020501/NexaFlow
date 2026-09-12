@@ -188,7 +188,6 @@ def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
         interaction_config={"prologue": "Hello"},
         instructions="Use tools when needed.",
         model_id="model-1",
-        knowledge_query_mode="required",
     )
     first = ToolSnapshot(
         schema_version=1,

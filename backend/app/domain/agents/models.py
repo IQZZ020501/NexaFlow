@@ -150,10 +150,6 @@ class Agent(Base):
             name="ck_agents_status",
         ),
         CheckConstraint(
-            "knowledge_query_mode IN ('required', 'agentic')",
-            name="ck_agents_knowledge_query_mode",
-        ),
-        CheckConstraint(
             "app_type IN ('agent', 'workflow')",
             name="ck_agents_app_type",
         ),
@@ -179,9 +175,6 @@ class Agent(Base):
     )
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("model.id"), nullable=False, index=True)
-    knowledge_query_mode: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="required", server_default="required"
-    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     published_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -624,10 +617,6 @@ class AgentRunSnapshot(Base):
             name="fk_agent_run_snapshots_publication_workspace",
         ),
         CheckConstraint(
-            "knowledge_query_mode IN ('required', 'agentic')",
-            name="ck_agent_run_snapshots_knowledge_query_mode",
-        ),
-        CheckConstraint(
             "configuration_source IN ('draft', 'published', 'legacy')",
             name="ck_agent_run_snapshots_configuration_source",
         ),
@@ -671,7 +660,6 @@ class AgentRunSnapshot(Base):
     knowledge_base_ids: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    knowledge_query_mode: Mapped[str] = mapped_column(String(20), nullable=False)
     mcp_tools: Mapped[list[dict[str, str]]] = mapped_column(
         JSON, nullable=False, default=list
     )

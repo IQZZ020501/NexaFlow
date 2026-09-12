@@ -780,33 +780,6 @@ async def assert_hanging_model_stream_times_out() -> None:
             agent_graph_module.MODEL_RESPONSE_TIMEOUT_SECONDS = original_timeout
 
 
-async def assert_required_knowledge_timeout_is_unavailable() -> None:
-    async def execute(_arguments: str) -> AgentToolResult:
-        await asyncio.Event().wait()
-        raise AssertionError("unreachable")
-
-    result = await agent_executor._invoke_required_knowledge(
-        create_agent_tool(
-            name="search_knowledge",
-            description="Test required knowledge timeout",
-            parameters={
-                "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
-            },
-            execute=execute,
-        ),
-        "bounded query",
-        0.01,
-    )
-    assert result.is_error is True
-    assert result.output == {
-        "query": "bounded query",
-        "hits": [],
-        "evidence_status": "unavailable",
-    }
-
-
 async def assert_truncated_tool_call_is_not_executed() -> None:
     executions = 0
 
@@ -1478,7 +1451,6 @@ def assert_tool_routing_context_is_explicit() -> None:
         run,  # type: ignore[arg-type]
         False,
         True,
-        knowledge_query_mode="required",
     )[0]["content"]
     assert "workspace retrieval was performed" not in no_knowledge_system
     assert "No workspace knowledge source is available" in no_knowledge_system
@@ -3589,7 +3561,6 @@ def main() -> None:
     asyncio.run(assert_answer_delta_is_emitted_before_stream_completion())
     asyncio.run(assert_active_model_stream_does_not_time_out())
     asyncio.run(assert_hanging_model_stream_times_out())
-    asyncio.run(assert_required_knowledge_timeout_is_unavailable())
     asyncio.run(assert_truncated_tool_call_is_not_executed())
     asyncio.run(assert_invalid_tool_arguments_are_not_executed())
     asyncio.run(assert_invalid_tool_call_ids_are_not_executed())
@@ -3779,7 +3750,7 @@ def main() -> None:
             agent_id = agent["id"]
             assert agent["can_edit"] is True
             assert agent["knowledge_base_ids"] == [knowledge_base_id]
-            assert agent["knowledge_query_mode"] == "required"
+            assert "knowledge_query_mode" not in agent
             assert agent["app_type"] == "agent"
 
             workflow_created = client.post(
@@ -4064,18 +4035,19 @@ def main() -> None:
                     for item in call.get("messages", [])
                 )
                 for call in AgentModelHandler.calls
-            ) == 1
-            assert executed["events"][0]["tool_name"] == "search_knowledge"
+            ) == 2
             assert "citations" not in executed
-            assert query_calls == [
-                (knowledge_base_id, "Prepare the release with evidence")
-            ]
-            knowledge_event = executed["events"][0]
-            assert knowledge_event["call_id"] == f"eager-knowledge-{executed['id']}"
+            assert query_calls == [(knowledge_base_id, "release process")]
+            knowledge_event = next(
+                event
+                for event in executed["events"]
+                if event["tool_kind"] == "knowledge"
+            )
+            assert knowledge_event["call_id"] == "call-search"
             assert knowledge_event["tool_label"] == "knowledge"
             assert knowledge_event["tool_kind"] == "knowledge"
             assert knowledge_event["input"] == {
-                "query": "Prepare the release with evidence"
+                "query": "release process"
             }
             assert knowledge_event["duration_ms"] >= 0
             assert knowledge_event["output"]["evidence_status"] == "found"
@@ -4128,13 +4100,6 @@ def main() -> None:
                 member_run["id"],
             ]
 
-            agentic_update = client.patch(
-                agents_url(workspace_id, f"/{agent_id}"),
-                headers=auth_headers(admin_token),
-                json={"knowledge_query_mode": "agentic"},
-            )
-            assert agentic_update.status_code == 200, agentic_update.text
-            assert agentic_update.json()["knowledge_query_mode"] == "agentic"
             agentic_question = client.post(
                 agents_url(workspace_id, f"/{agent_id}/runs"),
                 headers=auth_headers(member_token),
@@ -4148,7 +4113,7 @@ def main() -> None:
             assert agentic_run["status"] == "succeeded"
             assert agentic_run["conversation_id"] == "conversation-agentic"
             assert agentic_run["conversation_id"] != executed["conversation_id"]
-            assert agentic_run["knowledge_query_mode"] == "agentic"
+            assert "knowledge_query_mode" not in agentic_run
             assert next(
                 event
                 for event in agentic_run["events"]

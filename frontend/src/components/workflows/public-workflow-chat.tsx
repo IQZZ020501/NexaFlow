@@ -19,7 +19,10 @@ import {
 } from "lucide-react"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
-import { RunActionBar } from "@/components/app/run-action-bar"
+import {
+  feedbackConfirmationLabel,
+  RunActionBar,
+} from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import {
   AgentAttachmentList,
@@ -316,7 +319,7 @@ export function PublicWorkflowChat({
 }) {
   const { language, t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
-  const { token, isSessionRestored } = useSession()
+  const { token, isSessionRestored, notify } = useSession()
   const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
     null
   )
@@ -640,6 +643,7 @@ export function PublicWorkflowChat({
       setRuns((current) =>
         current.map((run) => (run.id === runId ? { ...run, ...updated } : run))
       )
+      notify("success", feedbackConfirmationLabel(value, t))
     } catch (reason) {
       setRuns((current) =>
         current.map((run) =>

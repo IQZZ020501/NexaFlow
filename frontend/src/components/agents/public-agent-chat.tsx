@@ -27,7 +27,10 @@ import {
   UserIcon,
 } from "lucide-react"
 
-import { RunActionBar } from "@/components/app/run-action-bar"
+import {
+  feedbackConfirmationLabel,
+  RunActionBar,
+} from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
@@ -414,8 +417,7 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
   }
 
   function title(event: ExternalAgentProgressEvent) {
-    if (runCancelled && event.status !== "succeeded")
-      return t("已停止")
+    if (runCancelled && event.status !== "succeeded") return t("已停止")
     if (event.type === "knowledge") return t("知识库检索")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer")
@@ -528,10 +530,9 @@ export function mergePublicRunEvent(
       run.id === placeholderId || run.id === event.run.id
         ? {
             ...event.run,
-            attachments:
-              event.run.attachments?.length
-                ? event.run.attachments
-                : run.attachments,
+            attachments: event.run.attachments?.length
+              ? event.run.attachments
+              : run.attachments,
             result: event.run.result || run.result,
             live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
             live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
@@ -771,10 +772,9 @@ export function mergePublicRunEvent(
     run.id === event.run.id || run.id === placeholderId
       ? {
           ...event.run,
-          attachments:
-            event.run.attachments?.length
-              ? event.run.attachments
-              : run.attachments,
+          attachments: event.run.attachments?.length
+            ? event.run.attachments
+            : run.attachments,
           result:
             event.run.status === "cancelled"
               ? ""
@@ -986,7 +986,7 @@ export function PublicAgentChat({
   const router = useRouter()
   const { t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
-  const { token, isSessionRestored } = useSession()
+  const { token, isSessionRestored, notify } = useSession()
   const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
   const [conversations, setConversations] = React.useState<
     PublicAgentConversation[]
@@ -1440,6 +1440,7 @@ export function PublicAgentChat({
       setRuns((current) =>
         current.map((run) => (run.id === runId ? { ...run, ...updated } : run))
       )
+      notify("success", feedbackConfirmationLabel(value, t))
     } catch (error) {
       setRuns((current) =>
         current.map((run) =>
@@ -1933,9 +1934,7 @@ export function PublicAgentChat({
               onChange={(event) => {
                 const selected = Array.from(event.target.files ?? [])
                 setSendError(null)
-                setFiles((current) =>
-                  appendAttachmentFiles(current, selected)
-                )
+                setFiles((current) => appendAttachmentFiles(current, selected))
               }}
             />
             <textarea

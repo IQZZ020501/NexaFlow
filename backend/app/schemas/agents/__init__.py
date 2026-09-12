@@ -1,6 +1,5 @@
 from app.schemas.agents.contracts import (
     AgentMcpToolRef,
-    KnowledgeQueryMode,
     AppType,
     FileUploadType,
     AgentFileUploadSetting,

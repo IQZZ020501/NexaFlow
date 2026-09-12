@@ -387,41 +387,6 @@ export function AgentConfigFields({
             </div>
             {isKnowledgeOpen ? (
               <div className="grid gap-3 border-t px-4 py-3">
-                {form.appType === "agent" ? (
-                  <fieldset
-                    disabled={readOnly || form.knowledgeBaseIds.length === 0}
-                  >
-                    <legend className="mb-2 text-xs font-medium text-muted-foreground">
-                      {t("知识检索策略")}
-                    </legend>
-                    <div className="grid grid-cols-2 rounded-lg bg-muted p-1">
-                      {(["required", "agentic"] as const).map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`min-h-9 rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                            form.knowledgeQueryMode === mode
-                              ? "bg-background text-foreground shadow-xs"
-                              : "text-muted-foreground hover:text-foreground"
-                          }`}
-                          aria-pressed={form.knowledgeQueryMode === mode}
-                          onClick={() =>
-                            setForm((current) => ({
-                              ...current,
-                              knowledgeQueryMode: mode,
-                            }))
-                          }
-                        >
-                          {t(
-                            mode === "required"
-                              ? "每次先检索（推荐）"
-                              : "Agent 按需检索"
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </fieldset>
-                ) : null}
                 {selectedKnowledgeBaseNames.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
                     {selectedKnowledgeBaseNames.map((name) => (

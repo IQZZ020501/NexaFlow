@@ -61,7 +61,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 **agents/**（Agent 功能）
 - `frontend/src/components/agents/agents-page.tsx` — Agent CRUD、持久 Run 提交、PostgreSQL/Redis 双游标重连、实时答案与审批状态合并
 - `frontend/src/components/agents/agent-detail-workspace.tsx` — 运行工作台：过程事件、待审批/不确定工具调用处理
-- `frontend/src/components/agents/agent-config-fields.tsx` — 配置表单字段（模型、显式知识检索策略、知识库与统一 Tool picker）
+- `frontend/src/components/agents/agent-config-fields.tsx` — 配置表单字段（模型、知识库与统一 Tool picker）
 - `frontend/src/components/agents/agent-management-panels.tsx` — Agent 概览、API 凭据、对话日志、监控统计与对话用户面板
 - `frontend/src/components/agents/public-agent-chat.tsx` — 匿名公开对话历史、提问、脱敏执行摘要与答案流；最终回答沿用调试页的 Markdown 展示，执行链展示模型思考过程但不暴露工具名称/参数或检索原文
 - `frontend/src/components/agents/agent-api-documentation.tsx` — 校验 Agent API Key 后仅展示当前 Agent 的 API 调用文档

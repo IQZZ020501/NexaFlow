@@ -117,7 +117,6 @@ _RUN_SNAPSHOT_FIELDS = (
     "agent_publication_version_id",
     "instructions",
     "knowledge_base_ids",
-    "knowledge_query_mode",
     "mcp_tools",
     "application_snapshot",
     "application_snapshot_hash",
