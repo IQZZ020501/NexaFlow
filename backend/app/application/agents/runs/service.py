@@ -487,6 +487,8 @@ def build_regenerated_agent_run(
         max_runtime_seconds=runtime_policy.max_runtime_seconds,
         max_turns=runtime_policy.max_turns,
         max_tool_calls=runtime_policy.max_tool_calls,
+        max_knowledge_calls=runtime_policy.max_knowledge_calls,
+        max_knowledge_rounds=runtime_policy.max_knowledge_rounds,
         max_model_tokens=runtime_policy.max_model_tokens,
         model_runtime_snapshot=deepcopy(source.model_runtime_snapshot),
         knowledge_resource_snapshot=deepcopy(source.knowledge_resource_snapshot),
@@ -1170,6 +1172,8 @@ async def prepare_agent_run(
         max_runtime_seconds=runtime_policy.max_runtime_seconds,
         max_turns=runtime_policy.max_turns,
         max_tool_calls=runtime_policy.max_tool_calls,
+        max_knowledge_calls=runtime_policy.max_knowledge_calls,
+        max_knowledge_rounds=runtime_policy.max_knowledge_rounds,
         max_model_tokens=runtime_policy.max_model_tokens,
         model_runtime_snapshot=build_model_runtime_snapshot(model),
         knowledge_resource_snapshot=build_knowledge_resource_snapshot(

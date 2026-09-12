@@ -19,6 +19,8 @@ from app.domain.agents.runtime.callbacks import (
     NexaFlowCallback,
 )
 from app.domain.agents.runtime.graph import (
+    MAX_AGENT_KNOWLEDGE_CALLS,
+    MAX_AGENT_KNOWLEDGE_ROUNDS,
     MAX_AGENT_TOOL_CALLS,
     MAX_AGENT_TURNS,
     AgentRunnerError,
@@ -64,11 +66,28 @@ def serialize_agent_state(state: AgentState) -> dict[str, Any]:
 
 
 def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
+    events = list(checkpoint.get("events", []))
+    completed_knowledge_events = [
+        event
+        for event in events
+        if event.get("type") == "tool"
+        and event.get("tool_kind") == "knowledge"
+        and event.get("status") != "running"
+    ]
+    completed_knowledge_turns = {
+        event.get("turn") for event in completed_knowledge_events
+    }
     return {
         "messages": messages_from_dict(checkpoint.get("messages", [])),
-        "events": list(checkpoint.get("events", [])),
+        "events": events,
         "turn": int(checkpoint.get("turn", 0)),
         "tool_call_count": int(checkpoint.get("tool_call_count", 0)),
+        "knowledge_call_count": int(
+            checkpoint.get("knowledge_call_count", len(completed_knowledge_events))
+        ),
+        "knowledge_round_count": int(
+            checkpoint.get("knowledge_round_count", len(completed_knowledge_turns))
+        ),
         "seen_evidence_ids": list(checkpoint.get("seen_evidence_ids", [])),
         "no_new_evidence_rounds": int(checkpoint.get("no_new_evidence_rounds", 0)),
         "pending_tool_calls": list(checkpoint.get("pending_tool_calls", [])),
@@ -100,6 +119,8 @@ async def run_agent(
     initial_usage: dict[str, Any] | None = None,
     max_turns: int = MAX_AGENT_TURNS,
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS,
+    max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS,
+    max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS,
     max_model_tokens: int | None = None,
     grounding_mode: InlineGroundingMode | None = None,
     initial_evidence: list[dict[str, Any]] | None = None,
@@ -112,6 +133,8 @@ async def run_agent(
             "events": [],
             "turn": 0,
             "tool_call_count": 0,
+            "knowledge_call_count": 0,
+            "knowledge_round_count": 0,
             "seen_evidence_ids": [],
             "no_new_evidence_rounds": 0,
             "pending_tool_calls": [],
@@ -167,6 +190,8 @@ async def run_agent(
             after_tool_call=after_tool_call,
             max_turns=max_turns,
             max_tool_calls=max_tool_calls,
+            max_knowledge_calls=max_knowledge_calls,
+            max_knowledge_rounds=max_knowledge_rounds,
             max_model_tokens=max_model_tokens,
             grounding_mode=grounding_mode,
         ),

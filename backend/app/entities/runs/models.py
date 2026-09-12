@@ -43,6 +43,8 @@ class AgentRun:
     max_runtime_seconds: float = 300.0
     max_turns: int = 8
     max_tool_calls: int = 12
+    max_knowledge_calls: int = 6
+    max_knowledge_rounds: int = 3
     max_model_tokens: int = 100_000
     model_runtime_snapshot: dict[str, Any] = field(default_factory=dict)
     knowledge_resource_snapshot: dict[str, Any] = field(default_factory=dict)

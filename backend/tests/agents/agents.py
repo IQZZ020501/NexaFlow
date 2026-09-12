@@ -1846,6 +1846,8 @@ async def assert_runtime_budgets_are_enforced() -> None:
         RepeatedToolProvider("search_knowledge", 5),  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [knowledge_tool],
+        max_knowledge_calls=5,
+        max_knowledge_rounds=5,
     )
     assert retrievals == 5
     assert len(result.events) == 5

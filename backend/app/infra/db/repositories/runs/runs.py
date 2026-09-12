@@ -126,6 +126,8 @@ _RUN_SNAPSHOT_FIELDS = (
     "max_runtime_seconds",
     "max_turns",
     "max_tool_calls",
+    "max_knowledge_calls",
+    "max_knowledge_rounds",
     "max_model_tokens",
     "model_runtime_snapshot",
     "knowledge_resource_snapshot",

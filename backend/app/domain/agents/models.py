@@ -637,6 +637,14 @@ class AgentRunSnapshot(Base):
             name="ck_agent_run_snapshots_max_tool_calls",
         ),
         CheckConstraint(
+            "max_knowledge_calls > 0 AND max_knowledge_calls <= max_tool_calls",
+            name="ck_agent_run_snapshots_max_knowledge_calls",
+        ),
+        CheckConstraint(
+            "max_knowledge_rounds > 0 AND max_knowledge_rounds <= max_turns",
+            name="ck_agent_run_snapshots_max_knowledge_rounds",
+        ),
+        CheckConstraint(
             "max_model_tokens > 0 AND max_model_tokens <= 1000000",
             name="ck_agent_run_snapshots_max_model_tokens",
         ),
@@ -682,6 +690,12 @@ class AgentRunSnapshot(Base):
     )
     max_tool_calls: Mapped[int] = mapped_column(
         Integer, nullable=False, default=12, server_default="12"
+    )
+    max_knowledge_calls: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=6, server_default="6"
+    )
+    max_knowledge_rounds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
     )
     max_model_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, default=100_000, server_default="100000"

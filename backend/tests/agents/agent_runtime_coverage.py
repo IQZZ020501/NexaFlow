@@ -716,6 +716,8 @@ async def checkpoint_state(**overrides: Any) -> dict[str, Any]:
         "events": [],
         "turn": 0,
         "tool_call_count": 0,
+        "knowledge_call_count": 0,
+        "knowledge_round_count": 0,
         "seen_evidence_ids": [],
         "no_new_evidence_rounds": 0,
         "pending_tool_calls": [],
@@ -836,6 +838,130 @@ def assert_graph_error_branches() -> None:
         )
 
     asyncio.run(run_tool_budget_finalization())
+
+    async def run_knowledge_budget_finalization() -> None:
+        executed_calls: list[str] = []
+
+        async def retrieve(arguments: str) -> AgentToolResult:
+            query = str(json.loads(arguments).get("query") or "")
+            executed_calls.append(query)
+            chunk_id = f"chunk-{len(executed_calls)}"
+            return AgentToolResult(
+                content=f"Evidence for {query}",
+                summary="Knowledge returned one chunk.",
+                output={"hits": [{"chunk_id": chunk_id, "content": query}]},
+                evidence_ids=frozenset({chunk_id}),
+            )
+
+        knowledge_tool = create_agent_tool(
+            name="search_knowledge",
+            description="Search",
+            parameters={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            execute=retrieve,
+            kind="knowledge",
+            parallel_safe=True,
+        )
+
+        class BudgetSeekingProvider:
+            def __init__(self) -> None:
+                self.round = 0
+                self.requests: list[list[BaseMessage]] = []
+
+            def bind_tools(self, *_args, **_kwargs):
+                parent = self
+
+                class BoundProvider:
+                    async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
+                        parent.requests.append(list(messages))
+                        parent.round += 1
+                        calls = tuple(
+                            ModelToolCall(
+                                f"knowledge-{parent.round}-{index}",
+                                "search_knowledge",
+                                json.dumps(
+                                    {"query": f"query-{parent.round}-{index}"}
+                                ),
+                            )
+                            for index in range(2)
+                        )
+                        return completion_message(
+                            ModelCompletion(
+                                content="",
+                                tool_calls=calls,
+                                finish_reason="tool_calls",
+                            )
+                        )
+
+                return BoundProvider()
+
+            async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
+                self.requests.append(list(messages))
+                return completion_message(
+                    ok_completion("Answer after the knowledge budget is reached.")
+                )
+
+        provider = BudgetSeekingProvider()
+        result = await run_agent(
+            provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            max_tool_calls=24,
+        )
+        assert result.content == "Answer after the knowledge budget is reached."
+        assert len(executed_calls) == 6, executed_calls
+        assert provider.round == 3
+        assert "knowledge search budget is exhausted" in str(
+            provider.requests[-1][-1].content
+        ).lower()
+
+        executed_before_resume = len(executed_calls)
+        resumed_provider = SequenceProvider(
+            [ok_completion("Answer after truncating the resumed batch.")]
+        )
+        resumed_result = await run_agent(
+            resumed_provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=2,
+                tool_call_count=5,
+                knowledge_call_count=5,
+                knowledge_round_count=2,
+                pending_tool_calls=[
+                    {
+                        "id": "resumed-1",
+                        "name": "search_knowledge",
+                        "arguments": json.dumps({"query": "remaining-slot"}),
+                    },
+                    {
+                        "id": "resumed-2",
+                        "name": "search_knowledge",
+                        "arguments": json.dumps({"query": "over-budget"}),
+                    },
+                ],
+                finish_reason="tool_calls",
+                evidence_packets=[{"chunk_id": "existing", "content": "evidence"}],
+            ),
+            max_tool_calls=24,
+        )
+        assert resumed_result.content == "Answer after truncating the resumed batch."
+        assert len(executed_calls) == executed_before_resume + 1
+        assert [event["status"] for event in resumed_result.events] == [
+            "succeeded",
+            "failed",
+        ]
+        assert resumed_result.events[-1]["summary"] == (
+            "Knowledge search stopped at its dedicated budget."
+        )
+        assert "knowledge search budget is exhausted" in str(
+            resumed_provider.requests[-1][-1].content
+        ).lower()
+
+    asyncio.run(run_knowledge_budget_finalization())
 
     async def run_truncated() -> None:
         await run_agent(

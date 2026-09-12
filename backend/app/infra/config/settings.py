@@ -88,6 +88,8 @@ class Settings:
     agent_run_timeout_seconds: float = 300.0
     agent_max_turns: int = 8
     agent_max_tool_calls: int = 12
+    agent_max_knowledge_calls: int = 6
+    agent_max_knowledge_rounds: int = 3
     agent_max_model_tokens: int = 100_000
     agent_executor_lease_seconds: int = 90
     agent_executor_heartbeat_seconds: int = 30
@@ -149,6 +151,12 @@ class Settings:
             ),
             agent_max_turns=int(os.getenv("AGENT_MAX_TURNS", "8")),
             agent_max_tool_calls=int(os.getenv("AGENT_MAX_TOOL_CALLS", "12")),
+            agent_max_knowledge_calls=int(
+                os.getenv("AGENT_MAX_KNOWLEDGE_CALLS", "6")
+            ),
+            agent_max_knowledge_rounds=int(
+                os.getenv("AGENT_MAX_KNOWLEDGE_ROUNDS", "3")
+            ),
             agent_max_model_tokens=int(
                 os.getenv("AGENT_MAX_MODEL_TOKENS", "100000")
             ),
@@ -237,6 +245,15 @@ class Settings:
             raise RuntimeError("AGENT_MAX_TURNS must be between 1 and 64.")
         if not 1 <= self.agent_max_tool_calls <= 128:
             raise RuntimeError("AGENT_MAX_TOOL_CALLS must be between 1 and 128.")
+        if not 1 <= self.agent_max_knowledge_calls <= self.agent_max_tool_calls:
+            raise RuntimeError(
+                "AGENT_MAX_KNOWLEDGE_CALLS must be between 1 and "
+                "AGENT_MAX_TOOL_CALLS."
+            )
+        if not 1 <= self.agent_max_knowledge_rounds <= self.agent_max_turns:
+            raise RuntimeError(
+                "AGENT_MAX_KNOWLEDGE_ROUNDS must be between 1 and AGENT_MAX_TURNS."
+            )
         if not 1 <= self.agent_max_model_tokens <= 1_000_000:
             raise RuntimeError(
                 "AGENT_MAX_MODEL_TOKENS must be between 1 and 1000000."

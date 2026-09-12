@@ -90,10 +90,12 @@ AGENT_EVENT_REPLAY_PAGE_SIZE = 500
 def _run_limits(
     run: AgentRun,
     settings: Settings,
-) -> tuple[datetime, int, int, int]:
+) -> tuple[datetime, int, int, int, int, int]:
     max_runtime_seconds = float(run.max_runtime_seconds)
     max_turns = run.max_turns
     max_tool_calls = run.max_tool_calls
+    max_knowledge_calls = run.max_knowledge_calls
+    max_knowledge_rounds = run.max_knowledge_rounds
     max_model_tokens = run.max_model_tokens
     deadline = run.execution_deadline_at
     if deadline is not None and deadline.tzinfo is None:
@@ -115,6 +117,8 @@ def _run_limits(
         values = (
             limits.get("max_turns"),
             limits.get("max_tool_calls"),
+            limits.get("max_knowledge_calls", max_knowledge_calls),
+            limits.get("max_knowledge_rounds", max_knowledge_rounds),
             limits.get("max_model_tokens"),
         )
         if any(
@@ -122,13 +126,23 @@ def _run_limits(
             for value in values
         ):
             raise AgentRunnerError("Nested Agent runtime limits are invalid.")
-        max_turns, max_tool_calls, max_model_tokens = values
+        (
+            max_turns,
+            max_tool_calls,
+            max_knowledge_calls,
+            max_knowledge_rounds,
+            max_model_tokens,
+        ) = values
     elif run.depth != 0:
         raise AgentRunnerError("Agent runtime depth is invalid.")
     if (
         max_runtime_seconds <= 0
         or max_turns <= 0
         or max_tool_calls <= 0
+        or max_knowledge_calls <= 0
+        or max_knowledge_calls > max_tool_calls
+        or max_knowledge_rounds <= 0
+        or max_knowledge_rounds > max_turns
         or max_model_tokens <= 0
     ):
         raise AgentRunnerError("Agent runtime limits are invalid.")
@@ -139,7 +153,14 @@ def _run_limits(
         raise AgentRunnerError("Agent execution deadline is invalid.")
     if (deadline - utc_now()).total_seconds() <= 0:
         raise AgentRunnerError("Agent execution deadline exceeded.")
-    return deadline, max_turns, max_tool_calls, max_model_tokens
+    return (
+        deadline,
+        max_turns,
+        max_tool_calls,
+        max_knowledge_calls,
+        max_knowledge_rounds,
+        max_model_tokens,
+    )
 
 
 def _remaining_run_seconds(deadline: datetime) -> float:
@@ -757,10 +778,14 @@ async def _execute_claimed_agent_run(
     """
     scope = await _load_execution_scope(run_id)
     run = scope.run
-    run_deadline, max_turns, max_tool_calls, max_model_tokens = _run_limits(
-        run,
-        settings,
-    )
+    (
+        run_deadline,
+        max_turns,
+        max_tool_calls,
+        max_knowledge_calls,
+        max_knowledge_rounds,
+        max_model_tokens,
+    ) = _run_limits(run, settings)
     if run.depth == 1 and any(
         snapshot.approval != "auto"
         or snapshot.effect not in {"pure", "external_read"}
@@ -950,6 +975,8 @@ async def _execute_claimed_agent_run(
                     initial_usage=memory.model_usage,
                     max_turns=max_turns,
                     max_tool_calls=max_tool_calls,
+                    max_knowledge_calls=max_knowledge_calls,
+                    max_knowledge_rounds=max_knowledge_rounds,
                     max_model_tokens=max_model_tokens,
                     grounding_mode=grounding_mode,
                 )

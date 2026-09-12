@@ -393,10 +393,12 @@ def test_agent_runtime_snapshots_are_versioned_and_fail_closed() -> None:
             agent_run_timeout_seconds=45,
             agent_max_turns=3,
             agent_max_tool_calls=4,
+            agent_max_knowledge_calls=3,
+            agent_max_knowledge_rounds=2,
             agent_max_model_tokens=5000,
         )
     )
-    assert policy == AgentRuntimePolicy(45.0, 3, 4, 5000)
+    assert policy == AgentRuntimePolicy(45.0, 3, 4, 3, 2, 5000)
 
 
 def test_agent_tool_binding_requires_current_available_policy() -> None:

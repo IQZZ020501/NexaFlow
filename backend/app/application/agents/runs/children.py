@@ -33,6 +33,8 @@ from app.domain.tools.runtime import tool_snapshot_from_payload
 MAX_WORKFLOW_CHILDREN = 4
 MAX_CHILD_TURNS = 4
 MAX_CHILD_TOOL_CALLS = 6
+MAX_CHILD_KNOWLEDGE_CALLS = 4
+MAX_CHILD_KNOWLEDGE_ROUNDS = 2
 SAFE_CHILD_EFFECTS = frozenset({"pure", "external_read"})
 
 
@@ -208,6 +210,8 @@ async def ensure_workflow_agent_child(
     child.execution_deadline_at = datetime.fromisoformat(deadline_at)
     child.max_turns = MAX_CHILD_TURNS
     child.max_tool_calls = MAX_CHILD_TOOL_CALLS
+    child.max_knowledge_calls = MAX_CHILD_KNOWLEDGE_CALLS
+    child.max_knowledge_rounds = MAX_CHILD_KNOWLEDGE_ROUNDS
     child.max_model_tokens = remaining_model_tokens
     child.application_snapshot = {
         **child.application_snapshot,
@@ -215,6 +219,8 @@ async def ensure_workflow_agent_child(
             "deadline_at": deadline_at,
             "max_turns": MAX_CHILD_TURNS,
             "max_tool_calls": MAX_CHILD_TOOL_CALLS,
+            "max_knowledge_calls": MAX_CHILD_KNOWLEDGE_CALLS,
+            "max_knowledge_rounds": MAX_CHILD_KNOWLEDGE_ROUNDS,
             "max_model_tokens": remaining_model_tokens,
         },
     }
