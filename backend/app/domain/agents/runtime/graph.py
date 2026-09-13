@@ -44,6 +44,8 @@ from app.ports.llm import (
 
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
+# Retained in the runtime context and persisted snapshots for compatibility;
+# knowledge retrieval is no longer gated by dedicated call or round limits.
 MAX_AGENT_KNOWLEDGE_CALLS = 6
 MAX_AGENT_KNOWLEDGE_ROUNDS = 3
 MAX_AGENT_NO_PROGRESS_ROUNDS = 2
@@ -52,12 +54,6 @@ MAX_AGENT_NO_PROGRESS_ROUNDS = 2
 MAX_REASONING_CHARS = 12_000
 MODEL_RESPONSE_TIMEOUT_SECONDS = 60
 TOOL_RESPONSE_TIMEOUT_SECONDS = 30
-KNOWLEDGE_BUDGET_FINALIZATION_PROMPT = (
-    "The knowledge search budget is exhausted. Do not call search_knowledge "
-    "again. Answer now using the evidence already retrieved; if it is "
-    "insufficient, say so explicitly. Use remaining non-knowledge tools only "
-    "when necessary."
-)
 KNOWLEDGE_SUFFICIENCY_FINALIZATION_PROMPT = (
     "Enough distinct workspace evidence has been retrieved for the configured "
     "retrieval policy. Do not call search_knowledge again unless a concrete "
@@ -117,6 +113,7 @@ class AgentRuntimeContext:
     ] | None = None
     max_turns: int = MAX_AGENT_TURNS
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS
+    # Legacy snapshot fields retained for compatibility and telemetry only.
     max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS
     max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS
     max_no_progress_rounds: int = MAX_AGENT_NO_PROGRESS_ROUNDS
@@ -646,11 +643,6 @@ async def agent_node(
     tool_budget_exhausted = (
         state["tool_call_count"] >= runtime.context.max_tool_calls
     )
-    knowledge_budget_exhausted = (
-        state["knowledge_call_count"] >= runtime.context.max_knowledge_calls
-        or state["knowledge_round_count"]
-        >= runtime.context.max_knowledge_rounds
-    )
     knowledge_sufficiency_reached = _knowledge_evidence_sufficient(
         state,
         runtime.context,
@@ -661,14 +653,11 @@ async def agent_node(
         if event.get("type") == "tool" and event.get("status") != "running"
     }
     finalize_from_knowledge = (
-        tool_budget_exhausted
-        and bool(state["evidence_packets"])
-        and completed_tool_kinds == {"knowledge"}
+        tool_budget_exhausted and completed_tool_kinds == {"knowledge"}
     )
     available_tools = runtime.context.tools
     if (
         state["no_new_evidence_rounds"] >= runtime.context.max_no_progress_rounds
-        or knowledge_budget_exhausted
         or knowledge_sufficiency_reached
     ):
         available_tools = [
@@ -676,13 +665,9 @@ async def agent_node(
             for tool in available_tools
             if agent_tool_metadata(tool)["kind"] != "knowledge"
         ]
-    finalize_from_knowledge_budget = (
-        knowledge_budget_exhausted and not available_tools
-    )
     allow_tools = (
         turn < runtime.context.max_turns
         and not finalize_from_knowledge
-        and not finalize_from_knowledge_budget
     )
     model_messages = state["messages"]
     if finalize_from_knowledge:
@@ -695,18 +680,11 @@ async def agent_node(
             HumanMessage(
                 content=(
                     "The tool-call budget is exhausted. Stop calling tools and "
-                    "answer now using the evidence already retrieved."
+                    "answer now using the evidence already retrieved when "
+                    "available; if no evidence was found, provide a clearly "
+                    "labeled general-knowledge answer."
                 )
             ),
-        ]
-    elif knowledge_budget_exhausted and not any(
-        isinstance(message, HumanMessage)
-        and message.content == KNOWLEDGE_BUDGET_FINALIZATION_PROMPT
-        for message in model_messages
-    ):
-        model_messages = [
-            *model_messages,
-            HumanMessage(content=KNOWLEDGE_BUDGET_FINALIZATION_PROMPT),
         ]
     elif knowledge_sufficiency_reached and not any(
         isinstance(message, HumanMessage)
@@ -859,9 +837,7 @@ async def agent_node(
                 "Agent tool call limit reached."
                 if finalize_from_knowledge
                 else (
-                    "Agent knowledge search limit reached."
-                    if finalize_from_knowledge_budget
-                    else "Agent turn limit reached."
+                    "Agent turn limit reached."
                 )
             )
         await callback.process(completed_thought("agent.tools_selected"))
@@ -1017,7 +993,7 @@ async def tool_node(
         for call in calls
     ]
     all_pending_tools_known = all(kind != "unknown" for kind in pending_tool_kinds)
-    knowledge_budget_overflow = (
+    tool_budget_overflow = (
         tool_call_count > runtime.context.max_tool_calls
         and bool(state["evidence_packets"])
         and all_pending_tools_known
@@ -1025,22 +1001,15 @@ async def tool_node(
     )
     if (
         tool_call_count > runtime.context.max_tool_calls
-        and not knowledge_budget_overflow
+        and not tool_budget_overflow
     ):
         raise AgentRunnerError("Agent tool call limit reached.")
     persisted_tool_call_count = min(
         tool_call_count,
         runtime.context.max_tool_calls,
     )
-    remaining_knowledge_calls = max(
-        0,
-        runtime.context.max_knowledge_calls - state["knowledge_call_count"],
-    )
-    knowledge_round_available = (
-        state["knowledge_round_count"]
-        < runtime.context.max_knowledge_rounds
-        and state["no_new_evidence_rounds"]
-        < runtime.context.max_no_progress_rounds
+    knowledge_search_available = (
+        state["no_new_evidence_rounds"] < runtime.context.max_no_progress_rounds
         and not _knowledge_evidence_sufficient(state, runtime.context)
     )
     parsed_arguments_by_index: dict[int, dict[str, Any] | None] = {}
@@ -1060,18 +1029,18 @@ async def tool_node(
     duplicate_query_indices: set[int] = set()
     known_query_keys = set(state["knowledge_query_keys"])
     pending_query_keys: set[str] = set()
-    if not knowledge_budget_overflow and knowledge_round_available:
+    if not tool_budget_overflow and knowledge_search_available:
         for index, kind in enumerate(pending_tool_kinds):
-            if kind != "knowledge" or remaining_knowledge_calls <= 0:
+            if kind != "knowledge":
                 continue
             query_key = query_keys_by_index.get(index)
             if runtime.context.adaptive_retrieval and query_key is not None:
                 if query_key in known_query_keys or query_key in pending_query_keys:
                     duplicate_query_indices.add(index)
                     continue
+            if query_key is not None:
                 pending_query_keys.add(query_key)
             permitted_knowledge_indices.add(index)
-            remaining_knowledge_calls -= 1
     knowledge_call_count = (
         state["knowledge_call_count"] + len(permitted_knowledge_indices)
     )
@@ -1093,7 +1062,7 @@ async def tool_node(
         )
         parsed_arguments = parsed_arguments_by_index[call_index]
 
-        if knowledge_budget_overflow:
+        if tool_budget_overflow:
             blocked_result = AgentToolResult(
                 content=(
                     "Knowledge search was not executed because the tool-call "
@@ -1148,19 +1117,6 @@ async def tool_node(
                     "Knowledge search stopped after the configured number of rounds without new evidence."
                 ),
                 summary="Knowledge search stopped after no new evidence.",
-                is_error=True,
-            )
-        elif (
-            agent_tool_metadata(tool)["kind"] == "knowledge"
-            and call_index not in permitted_knowledge_indices
-        ):
-            blocked_result = AgentToolResult(
-                content=(
-                    "Knowledge search was not executed because the knowledge "
-                    "search budget is exhausted. Answer using the evidence "
-                    "already retrieved."
-                ),
-                summary="Knowledge search stopped at its dedicated budget.",
                 is_error=True,
             )
         elif not isinstance(parsed_arguments, dict):

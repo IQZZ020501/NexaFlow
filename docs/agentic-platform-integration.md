@@ -60,14 +60,14 @@ flowchart LR
 - `GET/PUT/DELETE /api/v1/workspaces/{workspace_id}/agent-skills/{skill_id}/permissions/{user_id}`
 - Agent 创建/更新请求新增 `skills: [{skill_id, version_id}]`
 
-Skill 版本在 Agent 发布和 Run 创建时都会冻结到 `resource_snapshot` / `skill_snapshots`。Skill 声明的知识库和工具会在 Run 准备阶段解析、做租户权限校验并纳入执行资源；Skill 的运行预算、检索预算、停止策略和评估要求由执行器读取。
+Skill 版本在 Agent 发布和 Run 创建时都会冻结到 `resource_snapshot` / `skill_snapshots`。Skill 声明的知识库和工具会在 Run 准备阶段解析、做租户权限校验并纳入执行资源；Skill 的运行预算、检索停止策略和评估要求由执行器读取。旧版检索 `max_calls` / `max_rounds` 字段仍随快照保留，但在自适应 Agentic RAG 中仅作为兼容性元数据，不再作为知识检索硬上限。
 
 ## 本分支分期验收状态
 
 | 期次 | 本分支状态 | 已接入的现有能力 |
 |---|---|---|
 | 1 控制面 | 已完成 | Skill 创建、草稿更新、发布版本、`view/use` 权限、Agent 绑定，以及 Agent 设置页的版本选择 |
-| 2 Runtime v3 | 已完成 | Run 快照携带 Skill 版本；执行时合并 Skill 指令、工具、知识库；运行时长、轮次、工具数、模型 token、检索轮次和无新增证据停止轮数取严格值 |
+| 2 Runtime v3 | 已完成 | Run 快照携带 Skill 版本；执行时合并 Skill 指令、工具、知识库；运行时长、轮次、工具数、模型 token 和无新增证据停止轮数取严格值，检索调用/轮次由模型按证据状态自适应决定 |
 | 3 Evidence Engine | 已完成 | Skill 可声明 grounding 和最小证据数；沿用现有混合检索、图谱和单次 grounding manifest，证据不足会落为 `insufficient` |
 | 4 Memory | 已复用 | 沿用现有 conversation memory、压缩、checkpoint 和四表 Run 账本；Skill 快照随 regenerate/子运行继续传递 |
 | 5 运营化 | 已复用 | 沿用现有审计日志、Run 事件、用量、延迟和评测链路；Skill 版本位于 Run/application snapshot 中，可按版本回放 |
@@ -76,7 +76,7 @@ Skill 版本在 Agent 发布和 Run 创建时都会冻结到 `resource_snapshot`
 
 ## Agentic RAG 检索控制器（本期增量）
 
-检索预算现在按“上限”解释，不再把上限当成目标次数。运行时在每轮工具调用后检查证据增量、Skill 声明的最小证据数和来源多样性；相同检索参数（忽略 `limit` 分页参数）会被跳过，并写入正常的 Tool 事件。这样简单问题可以一次检索后直接回答，多跳问题仍可继续检索到预算上限。
+检索现在由模型按证据状态自适应决定，不再设置独立的知识检索调用/轮次硬上限。模型可以在一个工具调用批次中并行发起多个不同关键词的搜索；运行时在每轮工具调用后检查证据增量、Skill 声明的最小证据数和来源多样性，相同检索参数（忽略 `limit` 分页参数）会被跳过并写入正常的 Tool 事件。简单问题可以一次检索后直接回答，多跳问题可以继续检索；若知识库没有有效证据，Agentic 模式允许模型基于通用知识给出明确标注“未被工作区资料验证”的最佳努力回答。
 
 ```mermaid
 flowchart TD

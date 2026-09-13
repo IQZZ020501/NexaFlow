@@ -1851,8 +1851,8 @@ async def assert_runtime_budgets_are_enforced() -> None:
         RepeatedToolProvider("search_knowledge", 5),  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [knowledge_tool],
-        max_knowledge_calls=5,
-        max_knowledge_rounds=5,
+        max_knowledge_calls=1,
+        max_knowledge_rounds=1,
     )
     assert retrievals == 5
     assert len(result.events) == 5
@@ -2179,6 +2179,50 @@ async def assert_retrieval_source_diversity_keeps_searching() -> None:
     )
     assert executions == 2
     assert result.content == "Done."
+
+
+async def assert_empty_knowledge_result_allows_best_effort_answer() -> None:
+    executions = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(
+            content="No relevant workspace evidence found.",
+            summary="No relevant evidence.",
+            output={"hits": [], "evidence_status": "not_found"},
+            evidence_ids=frozenset(),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={"type": "object", "properties": {}},
+        execute=retrieve,
+        kind="knowledge",
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "search_knowledge", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(
+                content="General answer (not verified against workspace sources).",
+                tool_calls=(),
+                finish_reason="stop",
+            ),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Answer even if the workspace has no evidence."}],
+        [knowledge_tool],
+        adaptive_retrieval=True,
+    )
+    assert executions == 1
+    assert result.content == "General answer (not verified against workspace sources)."
 
 
 async def assert_structured_tool_and_event_safety() -> None:
@@ -3794,6 +3838,7 @@ def main() -> None:
     asyncio.run(assert_adaptive_retrieval_skips_duplicate_queries())
     asyncio.run(assert_retrieval_stops_at_evidence_sufficiency())
     asyncio.run(assert_retrieval_source_diversity_keeps_searching())
+    asyncio.run(assert_empty_knowledge_result_allows_best_effort_answer())
     asyncio.run(assert_structured_tool_and_event_safety())
     assert_mcp_url_validation()
     assert_public_access_migration_downgrade_drops_external_runs()

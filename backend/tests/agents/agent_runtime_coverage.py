@@ -838,7 +838,7 @@ def assert_graph_error_branches() -> None:
 
     asyncio.run(run_tool_budget_finalization())
 
-    async def run_knowledge_budget_finalization() -> None:
+    async def run_knowledge_retrieval_without_dedicated_budget() -> None:
         executed_calls: list[str] = []
 
         async def retrieve(arguments: str) -> AgentToolResult:
@@ -900,7 +900,7 @@ def assert_graph_error_branches() -> None:
             async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
                 self.requests.append(list(messages))
                 return completion_message(
-                    ok_completion("Answer after the knowledge budget is reached.")
+                    ok_completion("Answer after multiple knowledge searches.")
                 )
 
         provider = BudgetSeekingProvider()
@@ -908,12 +908,14 @@ def assert_graph_error_branches() -> None:
             provider,
             [{"role": "user", "content": "hi"}],
             [knowledge_tool],
-            max_tool_calls=24,
+            max_tool_calls=12,
+            max_knowledge_calls=1,
+            max_knowledge_rounds=1,
         )
-        assert result.content == "Answer after the knowledge budget is reached."
-        assert len(executed_calls) == 6, executed_calls
-        assert provider.round == 3
-        assert "knowledge search budget is exhausted" in str(
+        assert result.content == "Answer after multiple knowledge searches."
+        assert len(executed_calls) == 12, executed_calls
+        assert provider.round == 6
+        assert "tool-call budget is exhausted" in str(
             provider.requests[-1][-1].content
         ).lower()
 
@@ -948,19 +950,13 @@ def assert_graph_error_branches() -> None:
             max_tool_calls=24,
         )
         assert resumed_result.content == "Answer after truncating the resumed batch."
-        assert len(executed_calls) == executed_before_resume + 1
+        assert len(executed_calls) == executed_before_resume + 2
         assert [event["status"] for event in resumed_result.events] == [
             "succeeded",
-            "failed",
+            "succeeded",
         ]
-        assert resumed_result.events[-1]["summary"] == (
-            "Knowledge search stopped at its dedicated budget."
-        )
-        assert "knowledge search budget is exhausted" in str(
-            resumed_provider.requests[-1][-1].content
-        ).lower()
 
-    asyncio.run(run_knowledge_budget_finalization())
+    asyncio.run(run_knowledge_retrieval_without_dedicated_budget())
 
     async def run_truncated() -> None:
         await run_agent(

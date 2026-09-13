@@ -114,8 +114,6 @@ def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
 def _retrieval_meta(
     state: AgentState,
     *,
-    max_knowledge_calls: int,
-    max_knowledge_rounds: int,
     max_no_progress_rounds: int,
     knowledge_min_evidence_items: int,
     knowledge_require_source_diversity: bool,
@@ -140,11 +138,6 @@ def _retrieval_meta(
         stop_reason = "evidence_sufficient"
     elif state["no_new_evidence_rounds"] >= max_no_progress_rounds:
         stop_reason = "no_progress"
-    elif (
-        state["knowledge_call_count"] >= max_knowledge_calls
-        or state["knowledge_round_count"] >= max_knowledge_rounds
-    ):
-        stop_reason = "budget"
     elif state["knowledge_call_count"]:
         stop_reason = "model_answered"
     else:
@@ -183,6 +176,13 @@ async def run_agent(
     grounding_mode: InlineGroundingMode | None = None,
     initial_evidence: list[dict[str, Any]] | None = None,
 ) -> AgentExecutionResult:
+    """Run the Agent graph with global safety limits and adaptive retrieval.
+
+    ``max_knowledge_calls`` and ``max_knowledge_rounds`` remain in the public
+    signature for checkpoint and snapshot compatibility, but are not dedicated
+    retrieval caps. Global turn, tool-call, token, and timeout limits remain
+    enforced as the emergency circuit breakers.
+    """
     initial_state: AgentState = (
         deserialize_agent_state(checkpoint)
         if checkpoint
@@ -299,8 +299,6 @@ async def run_agent(
             **grounding_meta,
             "retrieval": _retrieval_meta(
                 state,
-                max_knowledge_calls=max_knowledge_calls,
-                max_knowledge_rounds=max_knowledge_rounds,
                 max_no_progress_rounds=max_no_progress_rounds,
                 knowledge_min_evidence_items=knowledge_min_evidence_items,
                 knowledge_require_source_diversity=knowledge_require_source_diversity,

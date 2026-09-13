@@ -36,6 +36,8 @@ class AgentRuntimePolicy:
     max_runtime_seconds: float
     max_turns: int
     max_tool_calls: int
+    # Retained in frozen snapshots for backward compatibility; adaptive
+    # retrieval no longer enforces dedicated call or round caps.
     max_knowledge_calls: int
     max_knowledge_rounds: int
     max_model_tokens: int
