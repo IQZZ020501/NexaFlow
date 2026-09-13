@@ -320,6 +320,7 @@ def external_progress_events(
                         "agent.grounding_verified",
                         "agent.grounding_revised",
                         "agent.grounding_inline",
+                        "agent.grounding_insufficient",
                         "agent.grounding_skipped",
                     }
                     else "failed"

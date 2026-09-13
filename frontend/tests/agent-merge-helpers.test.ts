@@ -454,6 +454,25 @@ describe("mergeAgentRunStreamEvent", () => {
     expect(deduped[0]).toBe(freshRun)
   })
 
+  test("keeps reasoning separate from a legacy analysis plan event", () => {
+    const plan = thoughtEvent({
+      call_id: "analysis-plan",
+      summary: "agent.analysis_plan",
+      status: "succeeded",
+    })
+    const run = makeRun({ status: "running", result: "", events: [plan] })
+
+    const streamed = mergeAgentRunStreamEvent([run], "run-1", {
+      type: "reasoning_delta",
+      sequence: 1,
+      turn: 1,
+      delta: "先理解问题",
+    } as AgentRunStreamEvent)
+
+    expect(streamed[0].events[0]).toEqual(plan)
+    expect(streamed[0].events[1].reasoning).toBe("先理解问题")
+  })
+
   test("answer deltas append and reset on a new epoch", () => {
     const run = makeRun({ status: "running", result: "Hello", events: [] })
     const streamed = mergeAgentRunStreamEvent([run], "run-1", {

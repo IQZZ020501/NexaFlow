@@ -24,6 +24,8 @@ from types import SimpleNamespace
 
 import tests.support  # noqa: F401  (sets required env before app imports)
 
+from langchain_core.messages import AIMessageChunk
+
 from fastapi import HTTPException
 from app.application.models.registry import (
     is_masked_secret,
@@ -1055,6 +1057,25 @@ def test_safe_agent_error_classification() -> None:
     provider_error = ModelProviderError("boom")
     assert safe_agent_error(provider_error) == "Agent model request failed."
     assert safe_agent_error(ValueError("other")) == "Agent execution failed."
+
+
+def test_agent_reasoning_content_accepts_provider_variants() -> None:
+    from app.domain.agents.runtime.graph import reasoning_content
+
+    assert reasoning_content(
+        AIMessageChunk(content="", additional_kwargs={"reasoning": "think"})
+    ) == "think"
+    assert reasoning_content(
+        AIMessageChunk(content=[{"type": "thinking", "thinking": "思考"}])
+    ) == "思考"
+    assert reasoning_content(
+        AIMessageChunk(
+            content="",
+            additional_kwargs={
+                "reasoning_content": {"text": "nested reasoning"}
+            },
+        )
+    ) == "nested reasoning"
 
 def test_agent_process_events_update_in_place() -> None:
     from app.application.agents.runs.executor import (
@@ -2810,6 +2831,7 @@ def main() -> None:
     test_public_tool_responses_exclude_execution_details()
     test_validate_agent_permission_only_accepts_view()
     test_safe_agent_error_classification()
+    test_agent_reasoning_content_accepts_provider_variants()
     test_agent_process_events_update_in_place()
     test_agent_event_replay_reads_every_page()
     test_stale_mcp_policy_requires_approval()

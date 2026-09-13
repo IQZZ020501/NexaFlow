@@ -267,7 +267,8 @@ export function mergeAgentRunStreamEvent(
       const eventIndex = run.events.findIndex((event) =>
         streamEvent.event.call_id
           ? event.call_id === streamEvent.event.call_id
-          : event.type === streamEvent.event.type &&
+          : !event.call_id &&
+            event.type === streamEvent.event.type &&
             event.turn === streamEvent.event.turn &&
             event.tool_name === streamEvent.event.tool_name
       )
@@ -391,6 +392,41 @@ export function mergeAgentRunStreamEvent(
             ) {
               return run
             }
+            const eventIndex = run.events.findIndex(
+              (event) =>
+                event.type === "thought" &&
+                event.turn === streamEvent.turn &&
+                event.summary !== "agent.analysis_plan"
+            )
+            const events = [...run.events]
+            if (eventIndex === -1) {
+              events.push({
+                type: "thought",
+                turn: streamEvent.turn,
+                tool_name: "",
+                status: "running",
+                summary:
+                  streamEvent.turn === 1
+                    ? "agent.analyzing"
+                    : "agent.reviewing_tool_results",
+                call_id: "",
+                tool_label: "",
+                tool_kind: "unknown",
+                server_name: "",
+                input: {},
+                output: null,
+                duration_ms: 0,
+                reasoning: streamEvent.delta,
+              })
+            } else {
+              const current = events[eventIndex]
+              events[eventIndex] = {
+                ...current,
+                reasoning: sameStream
+                  ? (current.reasoning ?? "") + streamEvent.delta
+                  : streamEvent.delta,
+              }
+            }
             return {
               ...run,
               status: run.status === "queued" ? "running" : run.status,
@@ -399,16 +435,7 @@ export function mergeAgentRunStreamEvent(
                 streamEvent.stream_epoch ?? run.live_stream_epoch,
               live_stream_cursor:
                 streamEvent.live_sequence ?? run.live_stream_cursor,
-              events: run.events.map((event) =>
-                event.type === "thought" && event.turn === streamEvent.turn
-                  ? {
-                      ...event,
-                      reasoning: sameStream
-                        ? (event.reasoning ?? "") + streamEvent.delta
-                        : streamEvent.delta,
-                    }
-                  : event
-              ),
+              events,
             }
           })()
         : run

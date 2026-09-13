@@ -189,7 +189,8 @@ def _upsert_process_event(
         same_event = (
             current.get("call_id") == call_id
             if call_id
-            else current.get("type") == event.get("type")
+            else not current.get("call_id")
+            and current.get("type") == event.get("type")
             and current.get("turn") == event.get("turn")
             and current.get("tool_name") == event.get("tool_name")
         )

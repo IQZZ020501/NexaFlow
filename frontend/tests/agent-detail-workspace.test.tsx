@@ -636,6 +636,20 @@ describe("AgentDetailWorkspace preview", () => {
           turn: 1,
           tool_name: "",
           status: "succeeded",
+          summary: "agent.analysis_plan",
+          call_id: "analysis-plan",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: { steps: [{ key: "understand_question" }] },
+          duration_ms: 0,
+        },
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
           summary: "agent.answer_ready",
           call_id: "",
           tool_label: "",
@@ -896,6 +910,7 @@ describe("AgentDetailWorkspace preview", () => {
       ],
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
+    expect(screen.queryByText("agent.analysis_plan")).toBeNull()
     expect(screen.getAllByText("已完成分析")).toHaveLength(2)
     const reasoning = screen.getByText("Tool reasoning result")
     const preparing = screen.getAllByText("search")[0]!

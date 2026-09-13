@@ -167,7 +167,7 @@ function processSummary(
   if (event.summary === "agent.grounding_inline")
     return t("已基于知识依据生成回答")
   if (event.summary === "agent.grounding_insufficient")
-    return t("依据不足，已停止未经核实的回答")
+    return t("依据不足，回答将标注为未核实")
   if (event.summary === "agent.grounding_unavailable")
     return t("暂时无法完成依据核验")
   if (event.summary === "agent.grounding_skipped")
@@ -327,13 +327,15 @@ function ToolEventDetails({
 export function processTimeline(run: AgentRun) {
   const deduplicated: AgentRun["events"] = []
   for (const event of run.events) {
-    const eventIndex = deduplicated.findIndex((current) =>
-      event.call_id
-        ? current.call_id === event.call_id
-        : current.type === event.type &&
-          current.turn === event.turn &&
-          current.tool_name === event.tool_name
-    )
+    const eventIndex = deduplicated.findIndex((current) => {
+      if (event.call_id) return current.call_id === event.call_id
+      return (
+        !current.call_id &&
+        current.type === event.type &&
+        current.turn === event.turn &&
+        current.tool_name === event.tool_name
+      )
+    })
     if (eventIndex === -1) deduplicated.push(event)
     else deduplicated[eventIndex] = event
   }
@@ -537,6 +539,7 @@ function RunExchange({
   )
   const visibleTimeline = timeline.filter(
     ({ event }) =>
+      event.summary !== "agent.analysis_plan" &&
       !(
         event.summary === "agent.preparing_tool_call" &&
         approvalCallIds.has(event.call_id)

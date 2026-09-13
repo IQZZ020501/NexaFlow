@@ -13,6 +13,11 @@ MAX_INLINE_GROUNDING_CHARS = 4_096
 GROUNDING_FALLBACK_ANSWER = (
     "Unable to verify this answer against the configured workspace knowledge sources."
 )
+GROUNDING_INSUFFICIENT_FALLBACK_ANSWER = (
+    "The available workspace evidence is not sufficient to verify every detail. "
+    "Please treat any unverified portion as provisional and provide a more specific "
+    "question or the relevant source if you need a definitive answer."
+)
 
 InlineGroundingMode = Literal["agentic", "required"]
 
@@ -147,7 +152,7 @@ class InlineGroundingStreamFilter:
         if not delta:
             return ""
         if self.outcome is not None:
-            if self.outcome.status in {"grounded", "skipped"}:
+            if self.outcome.status in {"grounded", "insufficient", "skipped"}:
                 return self._record_visible(delta)
             return ""
 
@@ -184,7 +189,7 @@ class InlineGroundingStreamFilter:
         elif remainder.startswith(("\r", "\n")):
             remainder = remainder[1:]
         self._buffer = ""
-        if self.outcome.status not in {"grounded", "skipped"}:
+        if self.outcome.status not in {"grounded", "insufficient", "skipped"}:
             return ""
         return self._record_visible(remainder)
 
@@ -211,13 +216,16 @@ class InlineGroundingStreamFilter:
                 visible = GROUNDING_FALLBACK_ANSWER
             self._buffer = ""
             return self._record_visible(visible)
-        if self.outcome.status in {"insufficient", "unavailable"}:
+        if self.outcome.status == "unavailable":
             return self._record_visible(GROUNDING_FALLBACK_ANSWER)
+        if self.outcome.status == "insufficient" and not self.visible_content.strip():
+            return self._record_visible(GROUNDING_INSUFFICIENT_FALLBACK_ANSWER)
         return ""
 
 
 __all__ = [
     "GROUNDING_FALLBACK_ANSWER",
+    "GROUNDING_INSUFFICIENT_FALLBACK_ANSWER",
     "INLINE_GROUNDING_CLOSE",
     "INLINE_GROUNDING_OPEN",
     "MAX_INLINE_GROUNDING_CHARS",

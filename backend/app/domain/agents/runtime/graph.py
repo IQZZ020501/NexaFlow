@@ -45,7 +45,9 @@ MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
 MAX_AGENT_KNOWLEDGE_CALLS = 6
 MAX_AGENT_KNOWLEDGE_ROUNDS = 3
-MAX_REASONING_CHARS = 6000
+# Keep enough of each model turn for a useful, inspectable analysis trail while
+# still bounding durable event and live-stream payloads.
+MAX_REASONING_CHARS = 12_000
 MODEL_RESPONSE_TIMEOUT_SECONDS = 60
 TOOL_RESPONSE_TIMEOUT_SECONDS = 30
 KNOWLEDGE_BUDGET_FINALIZATION_PROMPT = (
@@ -420,9 +422,51 @@ def sanitized_model_message(
         return AIMessage(**update)
 
 
+def _reasoning_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, dict):
+        return ""
+    for key in ("reasoning_content", "reasoning", "thinking", "text"):
+        candidate = value.get(key)
+        if isinstance(candidate, str):
+            return candidate
+        if isinstance(candidate, dict):
+            nested = _reasoning_text(candidate)
+            if nested:
+                return nested
+    return ""
+
+
 def reasoning_content(message: AIMessageChunk) -> str:
-    reasoning = message.additional_kwargs.get("reasoning_content")
-    return reasoning if isinstance(reasoning, str) else ""
+    additional_kwargs = getattr(message, "additional_kwargs", {})
+    if isinstance(additional_kwargs, dict):
+        for key in ("reasoning_content", "reasoning"):
+            reasoning = _reasoning_text(additional_kwargs.get(key))
+            if reasoning:
+                return reasoning
+    for key in ("reasoning_content", "reasoning"):
+        reasoning = _reasoning_text(getattr(message, key, None))
+        if reasoning:
+            return reasoning
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        reasoning_blocks = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") not in {
+                "reasoning",
+                "reasoning_content",
+                "thinking",
+            }:
+                continue
+            text = _reasoning_text(block)
+            if text:
+                reasoning_blocks.append(text)
+        if reasoning_blocks:
+            return "".join(reasoning_blocks)
+    return ""
 
 
 def tool_message(tool_call: PendingToolCall, result: AgentToolResult) -> ToolMessage:
@@ -504,7 +548,7 @@ async def agent_node(
                 "call_id": "inline-grounding",
                 "status": (
                     "succeeded"
-                    if outcome.status in {"grounded", "skipped"}
+                    if outcome.status in {"grounded", "insufficient", "skipped"}
                     else "failed"
                 ),
                 "summary": {
@@ -514,7 +558,7 @@ async def agent_node(
                     "skipped": "agent.grounding_skipped",
                 }.get(outcome.status, "agent.grounding_unavailable"),
                 "output": outcome.meta,
-                "reasoning": reasoning,
+                "reasoning": "",
             }
         )
 

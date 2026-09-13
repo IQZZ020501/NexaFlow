@@ -548,10 +548,19 @@ export function mergePublicRunEvent(
   if (event.type === "progress") {
     return runs.map((run) => {
       if (run.id !== runId) return run
-      const index = run.progress.findIndex(
+      const eventIndex = run.progress.findIndex(
         (progress) => progress.id === event.event.id
       )
       const progress = [...run.progress]
+      const syntheticAnalysisIndex =
+        eventIndex === -1 && event.event.type === "analysis"
+          ? progress.findIndex(
+              (item) =>
+                item.id === `reasoning-${event.event.turn}` &&
+                item.type === "analysis" && item.turn === event.event.turn
+            )
+          : -1
+      const index = eventIndex === -1 ? syntheticAnalysisIndex : eventIndex
       if (index === -1) progress.push(event.event)
       else {
         const current = progress[index]
@@ -586,7 +595,8 @@ export function mergePublicRunEvent(
       }
       if (event.event.type === "answer" && event.event.reasoning) {
         const analysisIndex = progress.findIndex(
-          (item) => item.type === "analysis" && item.turn === event.event.turn
+          (item) =>
+            item.type === "analysis" && item.turn === event.event.turn
         )
         if (analysisIndex !== -1 && progress[analysisIndex]?.reasoning) {
           progress[analysisIndex] = {
@@ -729,7 +739,8 @@ export function mergePublicRunEvent(
       }
       const progress = [...run.progress]
       const index = progress.findIndex(
-        (item) => item.type === "analysis" && item.turn === event.turn
+        (item) =>
+          item.type === "analysis" && item.turn === event.turn
       )
       if (index === -1) {
         progress.push({

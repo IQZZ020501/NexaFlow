@@ -1368,6 +1368,7 @@ def test_inline_grounding_manifest_validation_fails_closed() -> None:
 def test_inline_grounding_stream_filter_bounds_and_preserves_output() -> None:
     from app.domain.agents.runtime.grounding import (
         GROUNDING_FALLBACK_ANSWER,
+        GROUNDING_INSUFFICIENT_FALLBACK_ANSWER,
         INLINE_GROUNDING_OPEN,
         MAX_INLINE_GROUNDING_CHARS,
         InlineGroundingStreamFilter,
@@ -1389,6 +1390,27 @@ def test_inline_grounding_stream_filter_bounds_and_preserves_output() -> None:
     assert agentic_without_evidence.visible_content == markdown
     assert agentic_without_evidence.outcome is not None
     assert agentic_without_evidence.outcome.status == "skipped"
+
+    insufficient = InlineGroundingStreamFilter(packets, "agentic")
+    insufficient_framed = (
+        '<nexaflow-grounding>{"status":"insufficient",'
+        '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
+        "</nexaflow-grounding>\n"
+        "这是基于通用知识的暂定说明。"
+    )
+    assert insufficient.push(insufficient_framed) == "这是基于通用知识的暂定说明。"
+    assert insufficient.finish() == ""
+    assert insufficient.visible_content == "这是基于通用知识的暂定说明。"
+    assert insufficient.outcome is not None
+    assert insufficient.outcome.status == "insufficient"
+
+    insufficient_without_answer = InlineGroundingStreamFilter(packets, "agentic")
+    assert insufficient_without_answer.push(
+        '<nexaflow-grounding>{"status":"insufficient",'
+        '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
+        "</nexaflow-grounding>"
+    ) == ""
+    assert insufficient_without_answer.finish() == GROUNDING_INSUFFICIENT_FALLBACK_ANSWER
 
     preserves_leading_markdown_space = InlineGroundingStreamFilter(packets, "required")
     framed = (
