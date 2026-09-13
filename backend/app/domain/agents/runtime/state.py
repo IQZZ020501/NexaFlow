@@ -17,6 +17,7 @@ class AgentState(TypedDict):
     knowledge_call_count: int
     knowledge_round_count: int
     seen_evidence_ids: list[str]
+    knowledge_query_keys: list[str]
     no_new_evidence_rounds: int
     pending_tool_calls: list[PendingToolCall]
     finish_reason: str

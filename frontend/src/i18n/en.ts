@@ -1135,6 +1135,8 @@ export const en = {
   暂无内容: "No content",
   回答已生成: "Answer generated",
   "已检索 {value} 个知识片段": "Retrieved {value} knowledge chunks",
+  已跳过重复知识检索: "Skipped duplicate knowledge search",
+  "知识依据已足够，停止继续检索": "Enough evidence retrieved; stopped searching",
   调用输入: "Input",
   调用结果: "Result",
   内容过长已截断: "Content too long, truncated",

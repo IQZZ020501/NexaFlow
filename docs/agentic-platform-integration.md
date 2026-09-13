@@ -74,6 +74,30 @@ Skill 版本在 Agent 发布和 Run 创建时都会冻结到 `resource_snapshot`
 
 这使得本分支可以先上线 Skill 控制面和运行时接入，再逐步补充 Skill 专属的评测集、漂移告警和长期记忆来源；这些增强不改变当前 Run、ToolInvocation 或知识图谱的事实源。
 
+## Agentic RAG 检索控制器（本期增量）
+
+检索预算现在按“上限”解释，不再把上限当成目标次数。运行时在每轮工具调用后检查证据增量、Skill 声明的最小证据数和来源多样性；相同检索参数（忽略 `limit` 分页参数）会被跳过，并写入正常的 Tool 事件。这样简单问题可以一次检索后直接回答，多跳问题仍可继续检索到预算上限。
+
+```mermaid
+flowchart TD
+  Q[用户问题] --> A[Agent 决策]
+  A -->|无需工作区事实| Answer[直接回答]
+  A -->|需要工作区事实| Search[search_knowledge]
+  Search --> State[证据状态
+  新增 evidence IDs
+  已覆盖来源
+  查询指纹]
+  State --> Gate{自适应停止门}
+  Gate -->|满足最小证据/来源多样性| Answer
+  Gate -->|查询重复| Reform[要求具体缺口或回答]
+  Gate -->|无新增证据| Reform
+  Gate -->|仍有具体缺口| A
+  Reform --> Answer
+  Answer --> Ground[Grounding manifest + 引用校验]
+```
+
+这对应公开研究中“按需检索、检索质量评估、按问题复杂度选择单步或迭代策略”的方向：[Self-RAG](https://arxiv.org/abs/2310.11511)、[CRAG](https://arxiv.org/abs/2401.15884)、[Adaptive-RAG](https://arxiv.org/abs/2403.14403)。本实现先采用确定性运行时门控，不把私有思维链落库；对外保留工具事件、证据 ID、grounding 状态和简短决策提示，便于审计和回放。
+
 ## 重要设计取舍
 
 1. `agent_runs`、`agent_run_states`、`agent_run_snapshots`、`agent_run_events` 和 `tool_invocations` 继续作为唯一运行与动作账本，不新建平行的 Agent action 表。

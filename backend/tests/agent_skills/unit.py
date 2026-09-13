@@ -8,6 +8,7 @@ from app.application.agents.runs.service import skill_execution_context
 from app.application.agents.runs.executor import (
     _apply_skill_runtime_limits,
     _skill_evaluation_requirements,
+    _skill_retrieval_stop_requirements,
 )
 from app.domain.agent_skills.access import evaluate_agent_skill_access
 from app.domain.agents.access.publications import build_agent_resource_snapshot
@@ -130,6 +131,7 @@ def test_skill_runtime_policies_use_the_strictest_pinned_values() -> None:
     assert adjusted[1:] == (3, 1, 1, 1, 1, 2_000)
     assert (adjusted[0] - utc_now()).total_seconds() <= 30.5
     assert _skill_evaluation_requirements([snapshot]) == (True, 2)
+    assert _skill_retrieval_stop_requirements([snapshot]) == (2, False)
     resource_snapshot = build_agent_resource_snapshot([], [], [snapshot])
     assert resource_snapshot["knowledge_base_ids"] == ["kb-1"]
     assert resource_snapshot["skills"][0]["version_id"] == "version-policy"

@@ -1972,6 +1972,212 @@ async def assert_retrieval_progress_uses_evidence_ids() -> None:
     )
 
 
+async def assert_adaptive_retrieval_skips_duplicate_queries() -> None:
+    executions = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(
+            content="hit",
+            summary="hit",
+            output={
+                "hits": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "document_id": "document-1",
+                        "content": "release evidence",
+                    }
+                ]
+            },
+            evidence_ids=frozenset({"chunk-1"}),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        execute=retrieve,
+        kind="knowledge",
+        parallel_safe=True,
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(
+                    ModelToolCall(
+                        "call-1",
+                        "search_knowledge",
+                        '{"query": "release"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(
+                content="",
+                tool_calls=(
+                    ModelToolCall(
+                        "call-2",
+                        "search_knowledge",
+                        '{"query": "release", "limit": 20}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Find the release evidence"}],
+        [knowledge_tool],
+        adaptive_retrieval=True,
+    )
+    assert executions == 1
+    assert result.content == "Done."
+    assert any(
+        event["summary"] == "agent.knowledge_duplicate_query"
+        for event in result.events
+    )
+
+
+async def assert_retrieval_stops_at_evidence_sufficiency() -> None:
+    executions = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(
+            content="two hits",
+            summary="hit",
+            output={
+                "hits": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "document_id": "document-1",
+                        "content": "first",
+                    },
+                    {
+                        "chunk_id": "chunk-2",
+                        "document_id": "document-1",
+                        "content": "second",
+                    },
+                ]
+            },
+            evidence_ids=frozenset({"chunk-1", "chunk-2"}),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={"type": "object", "properties": {}},
+        execute=retrieve,
+        kind="knowledge",
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "search_knowledge", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Find both facts"}],
+        [knowledge_tool],
+        knowledge_min_evidence_items=2,
+    )
+    assert executions == 1
+    assert result.content == "Done."
+    assert len([event for event in result.events if event["tool_kind"] == "knowledge"]) == 1
+
+
+async def assert_retrieval_source_diversity_keeps_searching() -> None:
+    executions = 0
+
+    async def retrieve(arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        query = json.loads(arguments)["query"]
+        if query == "first":
+            hits = [
+                {
+                    "chunk_id": "chunk-1",
+                    "document_id": "document-1",
+                    "knowledge_base": "kb-a",
+                    "content": "first-a",
+                },
+                {
+                    "chunk_id": "chunk-2",
+                    "document_id": "document-1",
+                    "knowledge_base": "kb-a",
+                    "content": "first-b",
+                },
+            ]
+            evidence_ids = frozenset({"chunk-1", "chunk-2"})
+        else:
+            hits = [
+                {
+                    "chunk_id": "chunk-3",
+                    "document_id": "document-2",
+                    "knowledge_base": "kb-b",
+                    "content": "second",
+                }
+            ]
+            evidence_ids = frozenset({"chunk-3"})
+        return AgentToolResult(
+            content="hits",
+            summary="hit",
+            output={"hits": hits},
+            evidence_ids=evidence_ids,
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        execute=retrieve,
+        kind="knowledge",
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "search_knowledge", '{"query":"first"}'),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-2", "search_knowledge", '{"query":"second"}'),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Find corroborating evidence"}],
+        [knowledge_tool],
+        adaptive_retrieval=True,
+        knowledge_min_evidence_items=2,
+        knowledge_require_source_diversity=True,
+    )
+    assert executions == 2
+    assert result.content == "Done."
+
+
 async def assert_structured_tool_and_event_safety() -> None:
     executions = 0
 
@@ -3582,6 +3788,9 @@ def main() -> None:
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())
+    asyncio.run(assert_adaptive_retrieval_skips_duplicate_queries())
+    asyncio.run(assert_retrieval_stops_at_evidence_sufficiency())
+    asyncio.run(assert_retrieval_source_diversity_keeps_searching())
     asyncio.run(assert_structured_tool_and_event_safety())
     assert_mcp_url_validation()
     assert_public_access_migration_downgrade_drops_external_runs()

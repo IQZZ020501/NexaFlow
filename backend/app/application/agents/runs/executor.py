@@ -266,6 +266,25 @@ def _skill_evaluation_requirements(
     return require_grounding, min_evidence_count
 
 
+def _skill_retrieval_stop_requirements(
+    skills: list[AgentSkillSnapshot],
+) -> tuple[int, bool]:
+    """Return the strictest evidence sufficiency gates from pinned Skills."""
+    min_evidence_items = 0
+    require_source_diversity = False
+    for skill in skills:
+        retrieval = skill.definition.get("retrieval", {})
+        if not isinstance(retrieval, dict):
+            continue
+        evidence_count = retrieval.get("min_evidence_items", 0)
+        if isinstance(evidence_count, int) and not isinstance(evidence_count, bool):
+            min_evidence_items = max(min_evidence_items, evidence_count)
+        require_source_diversity = require_source_diversity or bool(
+            retrieval.get("require_source_diversity", False)
+        )
+    return min_evidence_items, require_source_diversity
+
+
 @dataclass(frozen=True)
 class ExecutionScope:
     run: AgentRun
@@ -999,6 +1018,10 @@ async def _execute_claimed_agent_run(
     skill_requires_grounding, skill_min_evidence_count = _skill_evaluation_requirements(
         scope.skill_snapshots
     )
+    (
+        skill_min_retrieval_evidence,
+        skill_require_source_diversity,
+    ) = _skill_retrieval_stop_requirements(scope.skill_snapshots)
     grounding_mode = (
         "required"
         if skill_requires_grounding
@@ -1117,6 +1140,9 @@ async def _execute_claimed_agent_run(
                     max_knowledge_calls=max_knowledge_calls,
                     max_knowledge_rounds=max_knowledge_rounds,
                     max_no_progress_rounds=max_no_progress_rounds,
+                    adaptive_retrieval=True,
+                    knowledge_min_evidence_items=skill_min_retrieval_evidence,
+                    knowledge_require_source_diversity=skill_require_source_diversity,
                     max_model_tokens=max_model_tokens,
                     grounding_mode=grounding_mode,
                 )

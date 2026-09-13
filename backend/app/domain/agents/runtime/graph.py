@@ -1,5 +1,6 @@
 import asyncio
 from copy import copy
+import hashlib
 import html
 import json
 import re
@@ -57,6 +58,43 @@ KNOWLEDGE_BUDGET_FINALIZATION_PROMPT = (
     "insufficient, say so explicitly. Use remaining non-knowledge tools only "
     "when necessary."
 )
+KNOWLEDGE_SUFFICIENCY_FINALIZATION_PROMPT = (
+    "Enough distinct workspace evidence has been retrieved for the configured "
+    "retrieval policy. Do not call search_knowledge again unless a concrete "
+    "unanswered sub-question remains. Answer now using the evidence already retrieved."
+)
+
+
+def knowledge_query_key(arguments: Any) -> str:
+    """Return a stable, non-sensitive identity for a knowledge query."""
+    normalized = dict(arguments) if isinstance(arguments, dict) else {}
+    normalized.pop("limit", None)
+    payload = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def checkpoint_query_keys(events: list[dict[str, Any]]) -> list[str]:
+    keys: list[str] = []
+    for event in events:
+        if (
+            event.get("type") != "tool"
+            or event.get("tool_kind") != "knowledge"
+            or event.get("status") == "running"
+        ):
+            continue
+        input_value = event.get("input")
+        if not isinstance(input_value, dict):
+            continue
+        key = knowledge_query_key(input_value)
+        if key not in keys:
+            keys.append(key)
+    return keys
 
 
 class AgentRunnerError(ModelProviderError):
@@ -82,6 +120,9 @@ class AgentRuntimeContext:
     max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS
     max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS
     max_no_progress_rounds: int = MAX_AGENT_NO_PROGRESS_ROUNDS
+    adaptive_retrieval: bool = False
+    knowledge_min_evidence_items: int = 0
+    knowledge_require_source_diversity: bool = False
     max_model_tokens: int | None = None
     grounding_mode: InlineGroundingMode | None = None
 
@@ -486,6 +527,33 @@ def pending_tool_call(tool_call: ModelToolCall) -> PendingToolCall:
     }
 
 
+def _knowledge_source_keys(state: AgentState) -> set[str]:
+    sources: set[str] = set()
+    for packet in state["evidence_packets"]:
+        if not isinstance(packet, dict):
+            continue
+        source = (
+            packet.get("knowledge_base")
+            or packet.get("document_id")
+            or packet.get("document")
+        )
+        if isinstance(source, str) and source:
+            sources.add(source)
+    return sources
+
+
+def _knowledge_evidence_sufficient(
+    state: AgentState,
+    context: AgentRuntimeContext,
+) -> bool:
+    minimum = max(0, context.knowledge_min_evidence_items)
+    if minimum == 0 or len(state["seen_evidence_ids"]) < minimum:
+        return False
+    if context.knowledge_require_source_diversity:
+        return len(_knowledge_source_keys(state)) >= 2
+    return True
+
+
 async def agent_node(
     state: AgentState,
     runtime: Runtime[AgentRuntimeContext],
@@ -583,6 +651,10 @@ async def agent_node(
         or state["knowledge_round_count"]
         >= runtime.context.max_knowledge_rounds
     )
+    knowledge_sufficiency_reached = _knowledge_evidence_sufficient(
+        state,
+        runtime.context,
+    )
     completed_tool_kinds = {
         str(event.get("tool_kind") or "")
         for event in state["events"]
@@ -597,6 +669,7 @@ async def agent_node(
     if (
         state["no_new_evidence_rounds"] >= runtime.context.max_no_progress_rounds
         or knowledge_budget_exhausted
+        or knowledge_sufficiency_reached
     ):
         available_tools = [
             tool
@@ -634,6 +707,15 @@ async def agent_node(
         model_messages = [
             *model_messages,
             HumanMessage(content=KNOWLEDGE_BUDGET_FINALIZATION_PROMPT),
+        ]
+    elif knowledge_sufficiency_reached and not any(
+        isinstance(message, HumanMessage)
+        and message.content == KNOWLEDGE_SUFFICIENCY_FINALIZATION_PROMPT
+        for message in model_messages
+    ):
+        model_messages = [
+            *model_messages,
+            HumanMessage(content=KNOWLEDGE_SUFFICIENCY_FINALIZATION_PROMPT),
         ]
     bound_model = (
         model.bind_tools(available_tools) if allow_tools and available_tools else model
@@ -959,12 +1041,35 @@ async def tool_node(
         < runtime.context.max_knowledge_rounds
         and state["no_new_evidence_rounds"]
         < runtime.context.max_no_progress_rounds
+        and not _knowledge_evidence_sufficient(state, runtime.context)
     )
+    parsed_arguments_by_index: dict[int, dict[str, Any] | None] = {}
+    query_keys_by_index: dict[int, str] = {}
+    for index, call in enumerate(calls):
+        try:
+            parsed = json.loads(call["arguments"])
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        parsed_arguments_by_index[index] = (
+            parsed if isinstance(parsed, dict) else None
+        )
+        if isinstance(parsed, dict):
+            query_keys_by_index[index] = knowledge_query_key(parsed)
+
     permitted_knowledge_indices: set[int] = set()
+    duplicate_query_indices: set[int] = set()
+    known_query_keys = set(state["knowledge_query_keys"])
+    pending_query_keys: set[str] = set()
     if not knowledge_budget_overflow and knowledge_round_available:
         for index, kind in enumerate(pending_tool_kinds):
             if kind != "knowledge" or remaining_knowledge_calls <= 0:
                 continue
+            query_key = query_keys_by_index.get(index)
+            if runtime.context.adaptive_retrieval and query_key is not None:
+                if query_key in known_query_keys or query_key in pending_query_keys:
+                    duplicate_query_indices.add(index)
+                    continue
+                pending_query_keys.add(query_key)
             permitted_knowledge_indices.add(index)
             remaining_knowledge_calls -= 1
     knowledge_call_count = (
@@ -986,10 +1091,7 @@ async def tool_node(
                 "server_name": "",
             }
         )
-        try:
-            parsed_arguments = json.loads(call["arguments"])
-        except (json.JSONDecodeError, TypeError):
-            parsed_arguments = None
+        parsed_arguments = parsed_arguments_by_index[call_index]
 
         if knowledge_budget_overflow:
             blocked_result = AgentToolResult(
@@ -1013,6 +1115,27 @@ async def tool_node(
             blocked_result = AgentToolResult(
                 content=f"Tool {call['name']} is not available.",
                 summary="Unknown tool rejected.",
+                is_error=True,
+            )
+        elif call_index in duplicate_query_indices:
+            blocked_result = AgentToolResult(
+                content=(
+                    "This knowledge query duplicates an earlier successful query. "
+                    "Use a concrete missing aspect or answer from the evidence already retrieved."
+                ),
+                summary="agent.knowledge_duplicate_query",
+                is_error=True,
+            )
+        elif (
+            agent_tool_metadata(tool)["kind"] == "knowledge"
+            and _knowledge_evidence_sufficient(state, runtime.context)
+        ):
+            blocked_result = AgentToolResult(
+                content=(
+                    "Knowledge search stopped because the evidence sufficiency "
+                    "policy has been satisfied. Answer using the evidence already retrieved."
+                ),
+                summary="agent.knowledge_evidence_sufficient",
                 is_error=True,
             )
         elif (
@@ -1105,8 +1228,10 @@ async def tool_node(
     messages = list(state["messages"])
     events = list(state["events"])
     seen_evidence_ids = set(state["seen_evidence_ids"])
+    knowledge_query_keys = set(state["knowledge_query_keys"])
     evidence_packets = list(state["evidence_packets"])
     round_evidence_ids: set[str] = set()
+    successful_query_keys: set[str] = set()
     has_retrieval_attempt = False
     no_new_evidence_rounds = state["no_new_evidence_rounds"]
     for index, prepared in enumerate(prepared_calls):
@@ -1119,6 +1244,9 @@ async def tool_node(
         ):
             has_retrieval_attempt = True
             if not result.is_error:
+                query_key = query_keys_by_index.get(index)
+                if query_key is not None:
+                    successful_query_keys.add(query_key)
                 round_evidence_ids.update(result.evidence_ids)
                 output = result.output
                 if isinstance(output, dict) and isinstance(output.get("hits"), list):
@@ -1143,6 +1271,10 @@ async def tool_node(
         else:
             no_new_evidence_rounds += 1
 
+    knowledge_query_keys.update(successful_query_keys)
+    if duplicate_query_indices and not round_evidence_ids and not has_retrieval_attempt:
+        no_new_evidence_rounds += 1
+
     if no_new_evidence_rounds >= runtime.context.max_no_progress_rounds:
         messages.append(
             HumanMessage(
@@ -1152,6 +1284,25 @@ async def tool_node(
                 )
             )
         )
+    elif duplicate_query_indices and not round_evidence_ids and not has_retrieval_attempt:
+        messages.append(
+            HumanMessage(
+                content=(
+                    "A duplicate knowledge query was skipped. Continue only with "
+                    "a concrete unanswered aspect, otherwise answer now."
+                )
+            )
+        )
+
+    if _knowledge_evidence_sufficient(
+        {
+            **state,
+            "seen_evidence_ids": sorted(seen_evidence_ids),
+            "evidence_packets": evidence_packets,
+        },
+        runtime.context,
+    ):
+        messages.append(HumanMessage(content=KNOWLEDGE_SUFFICIENCY_FINALIZATION_PROMPT))
 
     return {
         "messages": messages,
@@ -1160,6 +1311,7 @@ async def tool_node(
         "knowledge_call_count": knowledge_call_count,
         "knowledge_round_count": knowledge_round_count,
         "seen_evidence_ids": sorted(seen_evidence_ids),
+        "knowledge_query_keys": sorted(knowledge_query_keys),
         "evidence_packets": evidence_packets[:32],
         "no_new_evidence_rounds": no_new_evidence_rounds,
         "pending_tool_calls": [],
