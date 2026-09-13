@@ -115,8 +115,9 @@ def execution_messages(
             "- MCP tools: use only for current or external data, or an external action the "
             "user explicitly needs. Do not use MCP to replace workspace retrieval.\n"
             "- If both sources could help, search_knowledge first. If it reports no relevant "
-            "evidence, state that clearly and do not fill the gap from memory; use MCP only "
-            "when the user asks for external/current verification or an external action.\n"
+            "evidence, answer directly with a clearly labeled provisional explanation when "
+            "useful; distinguish unsupported parts and use MCP only when the user asks for "
+            "external/current verification or an external action.\n"
         )
     elif has_knowledge_tool:
         routing_guide = (
@@ -125,8 +126,9 @@ def execution_messages(
             "that does not depend on workspace facts.\n"
             "- search_knowledge: first choice for workspace-specific documents, policies, "
             "project facts, or any answer that must be grounded in configured sources.\n"
-            "- If the search reports no relevant evidence, say that the configured sources "
-            "do not contain enough information; do not invent an answer from memory.\n"
+            "- If the search reports no relevant evidence, answer directly with a best-effort "
+            "provisional explanation when useful; clearly label unsupported parts instead of "
+            "stopping at a retrieval-status announcement or a bare refusal.\n"
         )
     elif has_mcp_tools:
         routing_guide = (
@@ -168,7 +170,9 @@ def execution_messages(
         "unless order matters, and put each item on its own list line; use nested lists for "
         "subitems. Never pack multiple numbered items into one bullet or paragraph, and do "
         "not combine Markdown bullets with inline outline numbering. Use emphasis selectively "
-        "and do not add sections that do not help the answer.\n"
+        "and do not add sections that do not help the answer. Start directly with the answer; "
+        "never preface it with retrieval or process narration such as 'first, let me explain "
+        "the search results', '检索结果如下', or '先说明检索结果'.\n"
     )
     grounding_rule = ""
     if has_knowledge_tool or knowledge_configured:
@@ -182,8 +186,12 @@ def execution_messages(
             "The JSON keys must be status, evidence_ids, and reason_codes. Use status "
             "grounded only when the answer is supported, and list the exact supporting "
             "chunk_id or contributing_chunk_id values. Use status insufficient when the "
-            "workspace evidence cannot support an answer, with no answer text after the "
-            "manifest. "
+            "workspace evidence cannot fully support the request, but still provide a "
+            "helpful best-effort answer after the manifest. Clearly label any general-"
+            "knowledge or unverified portion, explain what is missing, and do not cite "
+            "source_refs for unsupported claims. Do not stop at a bare refusal. In the "
+            "visible reasoning process, focus on interpreting the question, evidence gaps, "
+            "and tool choice; do not discuss manifest syntax or retrieval narration. "
         )
         grounding_rule += (
             "Use status skipped with empty evidence_ids only when no workspace evidence is "

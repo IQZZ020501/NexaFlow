@@ -1419,6 +1419,8 @@ def assert_tool_routing_context_is_explicit() -> None:
     assert "after the sentence-final punctuation" in system
     assert "Single-pass grounding protocol" in system
     assert "<nexaflow-grounding>" in system
+    assert "Start directly with the answer" in system
+    assert "先说明检索结果" in system
     assert "answer immediately without tools" not in system
     assert [message["role"] for message in messages[1:]] == [
         "user",

@@ -83,7 +83,7 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 
 ## 运行策略与生产边界
 
-- 知识策略显式分为 `required`（默认，用用户原始问题在首个模型节点前检索）和 `agentic`（模型生成查询并决定何时调用）。不再在答案生成后追加第二次 LLM 核验。最终模型节点先在同一次生成中对照证据，输出一个不展示给用户的 grounding manifest，后端确定性校验其证据 ID 后才放行随后的 Markdown 流。`required` 的 manifest 缺失、证据 ID 非法或证据不足时在正文前 fail closed；`agentic` 没有使用知识证据时可标记 `skipped` 并继续普通回答。终态 `grounding_meta` 保存决定、证据 ID、包数量与截断标记；最终 Markdown 不再被第二个模型重写。
+- 知识策略显式分为 `required`（默认，用用户原始问题在首个模型节点前检索）和 `agentic`（模型生成查询并决定何时调用）。不再在答案生成后追加第二次 LLM 核验。最终模型节点先在同一次生成中对照证据，输出一个不展示给用户的 grounding manifest，后端确定性校验其证据 ID 后才放行随后的 Markdown 流。manifest 缺失、证据 ID 非法或 grounding 协议不可用时在正文前 fail closed；`insufficient` 只表示工作区证据不足以完全支持请求，仍放行模型的有条件回答，要求明确标注未核实部分且不得为无依据的内容添加来源链接。`agentic` 没有使用知识证据时可标记 `skipped` 并继续普通回答。终态 `grounding_meta` 保存决定、证据 ID、包数量与截断标记；最终 Markdown 不再被第二个模型重写。
 - 每个 Run 都属于一个 `conversation_id`，并以 `access_source + consumer_id` 区分登录用户、公开访客和 API 凭据；同一工作区、Agent、来源主体、会话最多只有一个活动 Run。未传会话 ID 的旧登录客户端复用最近会话，前端把当前会话写入 URL，并可显式开始新会话。
 - 历史成功 Run 以真实 `user`/`assistant` 角色恢复。上下文在保守 token 预算内直接复用；超预算时用当前注册模型压缩较旧轮次，摘要持久化在最后被覆盖的成功 Run 上，同时保留最近 6 轮。摘要调用失败时回退到截断历史，不阻断当前问题，原始 Run 记录始终保留。
 - `model_usage` 累加 Agent loop 与摘要调用的实际供应商用量，并单列 compaction、cache read/create 与未上报调用数。系统不会为未返回 usage 的供应商猜测计费 token；服务端 prompt cache 的写法仍由各供应商 SDK 决定，不伪造跨供应商通用的 `cache_control`。
@@ -95,4 +95,4 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - 新发现的 MCP 工具默认逐次审批；只有管理员按当前定义哈希显式设置为 `read_only` 才会自动运行，远端 `readOnlyHint` 等注解不会单独改变审批策略。管理员可按当前定义哈希设置为只读、审批或禁用，工具定义变化后已有策略回落到逐次审批。副作用调用携带稳定幂等键；传输超时、worker 在外部调用后崩溃或结果未落账时标记 `uncertain`，禁止自动重试，只能人工确认后"不重试并继续"。远端 MCP 若不兑现幂等键，系统提供的是保守恢复而非跨系统 exactly-once。
 - 发布和 API 凭据写操作仅工作空间管理员可执行。发布固化当时的模型、知识库和 ToolSnapshot；后续草稿变化不撤销既有发布，公开/API 继续运行上一发布版本，直到重新发布、取消发布或停用应用。外部运行使用发布者快照身份受审计，但不冒充访问者；仅允许仍有效、无需逐次审批的只读工具，不开放外部审批路径。
 - 公开访客 Cookie 和 API Key 都使用高熵随机值，数据库只保存 SHA-256 派生标识或密钥哈希。外部提交同时受 Agent 总量桶和来源主体桶限流；Redis 不可用时成本型请求失败关闭，不先排队后补跑。
-- 公开/API Key Run 复用内部 durable 事件链，HTTP 契约只投影固定枚举的分析、知识检索、工具调用、回答生成状态、知识片段数量与模型思考过程（`reasoning_delta` 增量及 progress 上的累积文本）；工具名称/参数、检索原文、System Prompt 和 trace 不离开内部边界。
+- 公开/API Key Run 复用内部 durable 事件链，HTTP 契约只投影固定枚举的分析、知识检索、工具调用、回答生成状态、知识片段数量与模型思考过程（`reasoning_delta` 增量及 progress 上的累积文本）；grounding manifest 本身仍保持隐藏，工具名称/参数、检索原文、System Prompt 和 trace 不离开内部边界。

@@ -39,9 +39,14 @@ class ScriptedModel:
 
 
 class GatedStreamingModel:
-    def __init__(self, manifest: str | None = None) -> None:
+    def __init__(
+        self,
+        manifest: str | None = None,
+        reasoning: str = "",
+    ) -> None:
         self.first_chunk_emitted = asyncio.Event()
         self.finish = asyncio.Event()
+        self.reasoning = reasoning
         self.manifest = manifest or (
             '<nexaflow-grounding>{"status":"skipped",'
             '"evidence_ids":[],"reason_codes":[]}</nexaflow-grounding>\n'
@@ -51,7 +56,10 @@ class GatedStreamingModel:
         return self
 
     async def astream(self, _messages: list[BaseMessage]):
-        yield AIMessageChunk(content=f"{self.manifest}Live")
+        yield AIMessageChunk(
+            content=f"{self.manifest}Live",
+            additional_kwargs={"reasoning_content": self.reasoning},
+        )
         self.first_chunk_emitted.set()
         await self.finish.wait()
         yield AIMessageChunk(
@@ -82,6 +90,49 @@ class InlineGroundingStreamingModel:
         await self.finish.wait()
         yield AIMessageChunk(
             content="- 条目\n",
+            response_metadata={"finish_reason": "stop"},
+        )
+
+
+class GroundingToolStreamingModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def bind_tools(
+        self,
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> GroundingToolStreamingModel:
+        return self
+
+    async def astream(self, _messages: list[BaseMessage]):
+        self.calls += 1
+        if self.calls == 1:
+            yield AIMessageChunk(
+                content="",
+                additional_kwargs={
+                    "reasoning_content": "先检查工具返回的信息，再组织回答。"
+                },
+            )
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": "echo",
+                        "args": '{"value":"ok"}',
+                        "id": "call-echo",
+                        "index": 0,
+                    }
+                ],
+                response_metadata={"finish_reason": "tool_calls"},
+            )
+            return
+        yield AIMessageChunk(
+            content=(
+                '<nexaflow-grounding>{"status":"insufficient",'
+                '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
+                "</nexaflow-grounding>\n回答会明确标注未核实部分。"
+            ),
             response_metadata={"finish_reason": "stop"},
         )
 
@@ -427,6 +478,109 @@ def test_agentic_inline_grounding_streams_a_skipped_answer() -> None:
     asyncio.run(execute())
 
 
+def test_inline_grounding_streams_a_best_effort_insufficient_answer() -> None:
+    async def execute() -> None:
+        model = GatedStreamingModel(
+            '<nexaflow-grounding>{"status":"insufficient",'
+            '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
+            "</nexaflow-grounding>\n",
+            reasoning="The manifest is an internal protocol detail.",
+        )
+        answer_seen = asyncio.Event()
+        events: list[dict[str, Any]] = []
+
+        async def emit(event: dict[str, Any]) -> None:
+            events.append(event)
+            if event.get("type") == "answer_delta":
+                answer_seen.set()
+
+        task = asyncio.create_task(
+            run_agent(
+                model,
+                [{"role": "user", "content": "Answer with a caveat."}],
+                [],
+                on_event=emit,
+                grounding_mode="agentic",
+                initial_evidence=[{"chunk_id": "chunk-1", "content": "partial"}],
+            )
+        )
+        await model.first_chunk_emitted.wait()
+        await asyncio.wait_for(answer_seen.wait(), timeout=0.1)
+        model.finish.set()
+        result = await task
+        assert result.content == "Live answer."
+        assert result.grounding_status == "insufficient"
+        assert result.grounding_meta["reason_codes"] == ["no_relevant_evidence"]
+        assert [
+            event["delta"]
+            for event in events
+            if event.get("type") == "reasoning_delta"
+        ] == ["The manifest is an internal protocol detail."]
+        assert any(
+            event.get("type") == "process"
+            and event.get("event", {}).get("summary")
+            == "agent.grounding_insufficient"
+            and event.get("event", {}).get("status") == "succeeded"
+            for event in events
+        )
+
+    asyncio.run(execute())
+
+
+def test_grounding_keeps_pre_tool_analysis_visible() -> None:
+    async def execute() -> None:
+        model = GroundingToolStreamingModel()
+        events: list[dict[str, Any]] = []
+
+        async def echo(_arguments: str) -> AgentToolResult:
+            return AgentToolResult(
+                content="ok",
+                summary="Echo succeeded.",
+                output={"ok": True},
+            )
+
+        tool = create_agent_tool(
+            name="echo",
+            description="Echo a value.",
+            parameters={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+            execute=echo,
+            kind="builtin",
+        )
+
+        async def emit(event: dict[str, Any]) -> None:
+            events.append(event)
+
+        result = await run_agent(
+            model,
+            [{"role": "user", "content": "Inspect before answering."}],
+            [tool],
+            on_event=emit,
+            grounding_mode="agentic",
+        )
+        reasoning_deltas = [
+            event["delta"]
+            for event in events
+            if event.get("type") == "reasoning_delta"
+        ]
+        assert "".join(reasoning_deltas) == "先检查工具返回的信息，再组织回答。"
+        selected = next(
+            event["event"]
+            for event in events
+            if event.get("type") == "process"
+            and event.get("event", {}).get("summary") == "agent.tools_selected"
+        )
+        assert selected["reasoning"] == "先检查工具返回的信息，再组织回答。"
+        assert result.content == "回答会明确标注未核实部分。"
+        assert model.calls == 2
+
+    asyncio.run(execute())
+
+
 def test_required_inline_grounding_rejects_unknown_evidence_before_output() -> None:
     async def execute() -> None:
         model = GatedStreamingModel(
@@ -557,6 +711,8 @@ def main() -> None:
     test_gate_rejects_blocked_tools_and_unreported_usage()
     test_inline_grounding_stays_within_the_primary_model_token_budget()
     test_agentic_inline_grounding_streams_a_skipped_answer()
+    test_inline_grounding_streams_a_best_effort_insufficient_answer()
+    test_grounding_keeps_pre_tool_analysis_visible()
     test_required_inline_grounding_rejects_unknown_evidence_before_output()
     test_required_inline_grounding_streams_only_after_a_valid_manifest()
     test_live_runner_contract_is_safe_and_observable()

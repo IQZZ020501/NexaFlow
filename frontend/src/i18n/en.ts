@@ -1092,8 +1092,8 @@ export const en = {
   已完成依据核验: "Answer evidence verified",
   已根据依据修正回答: "Answer revised from evidence",
   已基于知识依据生成回答: "Answer generated from knowledge evidence",
-  "依据不足，已停止未经核实的回答":
-    "Evidence is insufficient; unverified claims were stopped",
+  "依据不足，回答将标注为未核实":
+    "Evidence is incomplete; the answer will be marked as unverified",
   暂时无法完成依据核验:
     "Answer evidence verification is temporarily unavailable",
   本次回答未使用知识依据: "No knowledge evidence was used for this answer",
