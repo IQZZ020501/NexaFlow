@@ -5,9 +5,9 @@ surface): preparing, executing, streaming, and listing agent runs.
 """
 
 import asyncio
-from copy import deepcopy
 import json
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from datetime import timedelta
 from typing import Any
 
@@ -15,33 +15,30 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.agents.tools.builder import (
-    run_to_response,
-)
 from app.application.agents.runs.snapshots import (
     AgentRuntimePolicy,
     build_knowledge_resource_snapshot,
     build_model_runtime_snapshot,
 )
-from app.application.tools.runtime.service import preflight_tool_snapshot
-from app.entities.agents import Agent, AgentPublicationVersion
-from app.entities.runs import AgentRun
-from app.entities.identity.user import User
-from app.entities.tools import ToolRef
-from app.entities.agent_skills import AgentSkillSnapshot
-from app.infra.agents.live_stream import (
-    LIVE_EVENT_TYPES,
-    AgentLiveStreamReader,
+from app.application.agents.tools.builder import (
+    run_to_response,
 )
-from app.infra.config.settings import Settings
 from app.application.governance.service import enforce_workspace_run_quota
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.db.session import get_session_factory
-from app.schemas.agents.contracts import AgentRunResponse, AgentToolCallResponse
-from app.domain.audit.services import record_audit_log
+from app.application.tools.runtime.service import preflight_tool_snapshot
+from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
+from app.domain.agent_skills.service import resolve_application_agent_skill_snapshots
+from app.domain.agents.access.permissions import require_agent_view
+from app.domain.agents.access.publications import (
+    AGENT_PUBLICATION_SCHEMA_VERSION,
+    agent_publication_hash,
+    build_agent_configuration_snapshot,
+    build_agent_resource_snapshot,
+)
+from app.domain.agents.models import (
+    AGENT_RUN_SUCCEEDED_STATUS,
+    agent_run_generation,
+    queued_agent_run_status,
+)
 from app.domain.agents.service import (
     ACTIVE_STATUS,
     AgentPublication,
@@ -50,30 +47,33 @@ from app.domain.agents.service import (
     get_agent,
     get_agent_model,
 )
-from app.domain.agents.access.permissions import require_agent_view
-from app.domain.agents.models import (
-    AGENT_RUN_SUCCEEDED_STATUS,
-    agent_run_generation,
-    queued_agent_run_status,
-)
-from app.domain.agents.access.publications import (
-    AGENT_PUBLICATION_SCHEMA_VERSION,
-    agent_publication_hash,
-    build_agent_configuration_snapshot,
-    build_agent_resource_snapshot,
-)
+from app.domain.audit.services import record_audit_log
 from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshots,
     resolve_tool_refs_for_actor,
 )
-from app.domain.agent_skills.service import resolve_application_agent_skill_snapshots
-from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
-from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_EACH_CALL,
     tool_snapshot_from_payload,
     tool_snapshot_payload,
 )
+from app.entities.agent_skills import AgentSkillSnapshot
+from app.entities.agents import Agent, AgentPublicationVersion
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolRef
+from app.infra.agents.live_stream import (
+    LIVE_EVENT_TYPES,
+    AgentLiveStreamReader,
+)
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.session import get_session_factory
+from app.schemas.agent_skills.contracts import AgentSkillDefinition
+from app.schemas.agents.contracts import AgentRunResponse, AgentToolCallResponse
 
 AGENT_EVENT_PAGE_SIZE = 200
 
@@ -126,6 +126,7 @@ def _require_agent_run_application(agent: Agent) -> None:
 
 from app.application.runs.feedback import update_run_feedback
 from app.application.runs.lifecycle import cancel_run_tree
+
 
 async def enqueue_prepared_agent_run(
     run_id: str,
@@ -1486,7 +1487,9 @@ async def create_agent_run(
     attachment_context = ""
     attachments: list[dict[str, Any]] = []
     if file_ids:
-        from app.application.workflows.uploads.service import resolve_workspace_agent_files
+        from app.application.workflows.uploads.service import (
+            resolve_workspace_agent_files,
+        )
 
         attachment_context, attachments = await resolve_workspace_agent_files(
             db,

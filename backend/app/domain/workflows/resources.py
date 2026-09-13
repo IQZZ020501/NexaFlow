@@ -5,6 +5,10 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from app.domain.tools.runtime import (
+    tool_snapshot_from_payload,
+    tool_snapshot_payload,
+)
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.schemas.workflows.contracts import (
     CodeNodeConfig,
@@ -15,11 +19,6 @@ from app.schemas.workflows.contracts import (
     WorkflowAgentNodeConfig,
     WorkflowGraph,
 )
-from app.domain.tools.runtime import (
-    tool_snapshot_from_payload,
-    tool_snapshot_payload,
-)
-
 
 WORKFLOW_RESOURCE_SCHEMA_VERSION = 1
 

@@ -1,30 +1,14 @@
-from dataclasses import fields
-from datetime import datetime
+# ruff: noqa: F401
 import hashlib
 import json
+from dataclasses import fields
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
-from app.entities.agents import Agent as AgentEntity
-from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
-from app.entities.agents import (
-    AgentPublicationVersion as AgentPublicationVersionEntity,
-)
-from app.entities.runs import AgentRun as AgentRunEntity
-from app.entities.runs import AgentRunEvent as AgentRunEventEntity
-from app.entities.agents import AgentToolCall as AgentToolCallEntity
-from app.entities.tools import ToolInvocation as ToolInvocationEntity
-from app.entities.defaults import utc_now
-from app.infra.db.mapping import (
-    refresh_entity,
-    save,
-    to_entity,
-    to_orm,
-)
 from app.domain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
@@ -33,20 +17,19 @@ from app.domain.agents.models import (
     AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_AWAITING_INPUT_STATUS,
     AGENT_RUN_AWAITING_INPUT_STATUSES,
+    AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_LEGACY_CLAIMABLE_STATUSES,
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
-    AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
     AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
     AGENT_RUN_UNIFIED_QUEUED_STATUS,
     AGENT_RUN_UNIFIED_RUNNING_STATUS,
-    agent_run_storage_statuses,
     Agent,
     AgentApiCredential,
     AgentKnowledgeBase,
@@ -56,15 +39,74 @@ from app.domain.agents.models import (
     AgentRunEvent,
     AgentRunSnapshot,
     AgentRunState,
+    agent_run_storage_statuses,
 )
+from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.domain.tools.models import ToolInvocation
 from app.domain.workflows.models import WorkflowNodeExecution
+from app.entities.agents import Agent as AgentEntity
+from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
+from app.entities.agents import (
+    AgentPublicationVersion as AgentPublicationVersionEntity,
+)
+from app.entities.agents import AgentToolCall as AgentToolCallEntity
+from app.entities.defaults import utc_now
+from app.entities.runs import AgentRun as AgentRunEntity
+from app.entities.runs import AgentRunEvent as AgentRunEventEntity
+from app.entities.tools import ToolInvocation as ToolInvocationEntity
+from app.infra.db.mapping import (
+    refresh_entity,
+    save,
+    to_entity,
+    to_orm,
+)
 
 _INTERNAL_TOOL_LEDGER = "agent_internal_v1"
 
 
 
 
+
+
+
+
+from app.infra.db.repositories.runs.events import (
+    append_agent_run_event,
+    append_owned_agent_run_event,
+    list_agent_run_events,
+)
+from app.infra.db.repositories.runs.leases import (
+    cancel_agent_run_tree,
+    claim_agent_run,
+    fail_agent_run_waiting_for_child,
+    fail_exhausted_agent_run_ids,
+    fail_exhausted_agent_runs,
+    list_recoverable_agent_run_ids,
+    queue_agent_run,
+    queue_agent_run_from_child,
+    queue_agent_run_from_input,
+    renew_agent_run_lease,
+    requeue_owned_agent_run,
+    save_agent_run_checkpoint,
+)
+from app.infra.db.repositories.runs.runs import (
+    _entity_values,
+    _load_run_rows,
+    _project_process_events,
+    _run_event_projections,
+    _to_agent_run_entity,
+    _with_answer_ready_timestamp,
+    _worker_generation,
+    create_agent_run,
+    finalize_agent_run,
+    get_active_agent_run,
+    get_agent_run_by_id,
+    pause_agent_run,
+    pause_agent_run_for_child,
+    pause_agent_run_for_input,
+    refresh_agent_run,
+    save_agent_run,
+)
 
 
 def _memory_run_query():
@@ -1552,36 +1594,7 @@ async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> N
     )
     await db.execute(delete(Agent).where(Agent.workspace_id == workspace_id))
 
-from app.infra.db.repositories.runs.runs import _entity_values
-from app.infra.db.repositories.runs.runs import _load_run_rows
-from app.infra.db.repositories.runs.runs import _project_process_events
-from app.infra.db.repositories.runs.runs import _run_event_projections
-from app.infra.db.repositories.runs.runs import _run_query
-from app.infra.db.repositories.runs.runs import _to_agent_run_entities
-from app.infra.db.repositories.runs.runs import _to_agent_run_entity
-from app.infra.db.repositories.runs.runs import _with_answer_ready_timestamp
-from app.infra.db.repositories.runs.runs import _worker_generation
-from app.infra.db.repositories.runs.runs import create_agent_run
-from app.infra.db.repositories.runs.runs import finalize_agent_run
-from app.infra.db.repositories.runs.runs import get_active_agent_run
-from app.infra.db.repositories.runs.runs import get_agent_run_by_id
-from app.infra.db.repositories.runs.runs import pause_agent_run
-from app.infra.db.repositories.runs.runs import pause_agent_run_for_child
-from app.infra.db.repositories.runs.runs import pause_agent_run_for_input
-from app.infra.db.repositories.runs.runs import refresh_agent_run
-from app.infra.db.repositories.runs.runs import save_agent_run
-from app.infra.db.repositories.runs.events import append_agent_run_event
-from app.infra.db.repositories.runs.events import append_owned_agent_run_event
-from app.infra.db.repositories.runs.events import list_agent_run_events
-from app.infra.db.repositories.runs.leases import cancel_agent_run_tree
-from app.infra.db.repositories.runs.leases import claim_agent_run
-from app.infra.db.repositories.runs.leases import fail_agent_run_waiting_for_child
-from app.infra.db.repositories.runs.leases import fail_exhausted_agent_run_ids
-from app.infra.db.repositories.runs.leases import fail_exhausted_agent_runs
-from app.infra.db.repositories.runs.leases import list_recoverable_agent_run_ids
-from app.infra.db.repositories.runs.leases import queue_agent_run
-from app.infra.db.repositories.runs.leases import queue_agent_run_from_child
-from app.infra.db.repositories.runs.leases import queue_agent_run_from_input
-from app.infra.db.repositories.runs.leases import renew_agent_run_lease
-from app.infra.db.repositories.runs.leases import requeue_owned_agent_run
-from app.infra.db.repositories.runs.leases import save_agent_run_checkpoint
+from app.infra.db.repositories.runs.runs import (
+    _run_query,
+    _to_agent_run_entities,
+)

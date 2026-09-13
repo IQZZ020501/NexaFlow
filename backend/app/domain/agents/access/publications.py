@@ -1,19 +1,18 @@
 """Canonical immutable Agent publication snapshots."""
 
-from dataclasses import dataclass, field
 import hashlib
 import json
+from dataclasses import dataclass, field
 from typing import Any
 
-from app.entities.agents import Agent
-from app.entities.agent_skills import AgentSkillSnapshot
-from app.entities.tools import ToolSnapshot
-from app.schemas.agents.contracts import AgentInteractionConfig
 from app.domain.tools.runtime import (
     tool_snapshot_from_payload,
     tool_snapshot_payload,
 )
-
+from app.entities.agent_skills import AgentSkillSnapshot
+from app.entities.agents import Agent
+from app.entities.tools import ToolSnapshot
+from app.schemas.agents.contracts import AgentInteractionConfig
 
 AGENT_PUBLICATION_SCHEMA_VERSION = 1
 

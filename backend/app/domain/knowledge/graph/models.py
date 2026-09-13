@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     Float,
@@ -9,7 +10,6 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -17,8 +17,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infra.db.base import Base
 from app.entities.defaults import new_id, utc_now
+from app.infra.db.base import Base
 
 
 def _revision_foreign_key(column: str, name: str) -> ForeignKeyConstraint:

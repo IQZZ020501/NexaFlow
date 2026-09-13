@@ -25,7 +25,6 @@ from app.schemas.agent_skills import (
     AgentSkillVersionResponse,
 )
 
-
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/agent-skills",
     tags=["agent-skills"],

@@ -7,22 +7,24 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agents.models import agent_run_display_status
+from app.domain.audit.services import record_audit_log
 from app.entities.analytics import (
     WorkspaceAnalyticsGraphBuild,
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
 )
+from app.entities.defaults import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
-from app.entities.defaults import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
 from app.infra.db.repositories.analytics import repository as analytics_repository
 from app.schemas.analytics import (
     AnalyticsCountComparison,
     AnalyticsRatioComparison,
     WorkspaceAnalyticsAnonymousUsage,
     WorkspaceAnalyticsApplicationRankingItem,
-    WorkspaceAnalyticsDistributions,
     WorkspaceAnalyticsDistributionItem,
+    WorkspaceAnalyticsDistributions,
     WorkspaceAnalyticsFrequentQuestion,
     WorkspaceAnalyticsHourlyPoint,
     WorkspaceAnalyticsMemberSummary,
@@ -35,8 +37,6 @@ from app.schemas.analytics import (
     WorkspaceAnalyticsTrendPoint,
     WorkspaceAnalyticsUserRankingItem,
 )
-from app.domain.agents.models import agent_run_display_status
-from app.domain.audit.services import record_audit_log
 
 ANALYTICS_TIMEZONE = APP_TIMEZONE_NAME
 DEFAULT_ANALYTICS_DAYS = 30

@@ -1,11 +1,11 @@
 import asyncio
 import base64
 import binascii
-from dataclasses import dataclass
 import hashlib
 import hmac
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.infra.config.settings import Settings

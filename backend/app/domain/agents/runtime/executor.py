@@ -12,7 +12,6 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import StructuredTool
 
-from app.infra.observability.logger import get_logger, log_event
 from app.domain.agents.runtime.callbacks import (
     AgentEventBus,
     AgentEventHandler,
@@ -35,6 +34,7 @@ from app.domain.agents.runtime.grounding import (
 from app.domain.agents.runtime.state import AgentState, PendingToolCall
 from app.domain.agents.runtime.tools import AgentToolResult
 from app.domain.agents.runtime.usage import empty_usage
+from app.infra.observability.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 

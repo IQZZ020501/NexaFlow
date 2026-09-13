@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import hmac
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from app.domain.models.registered import RegisteredModel
 from app.entities.knowledge import KnowledgeBase
 from app.infra.config.settings import Settings
 from app.ports.llm import DEFAULT_MODEL_REQUEST_PARAMS, MODEL_REQUEST_PARAMS_META_KEY
-
 
 MODEL_RUNTIME_SNAPSHOT_SCHEMA_VERSION = 1
 KNOWLEDGE_RESOURCE_SNAPSHOT_SCHEMA_VERSION = 1

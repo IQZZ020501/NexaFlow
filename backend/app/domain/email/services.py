@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from html import escape
 from urllib.parse import urlsplit
 
-
 EMAIL_KINDS = {
     "workspace_invitation",
     "welcome",

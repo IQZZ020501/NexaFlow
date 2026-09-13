@@ -140,6 +140,10 @@ def test_model_connection(
 
 
 __all__ = [
+    "DEFAULT_MODEL_REQUEST_PARAMS",
+    "MODEL_REQUEST_PARAMS_META_KEY",
+    "SUPPORTED_PROVIDER_TYPES",
+    "VISION_MODEL_REQUIRED_MESSAGE",
     "ChatProvider",
     "EmbeddingProvider",
     "ExternalServiceError",
@@ -148,14 +152,10 @@ __all__ = [
     "ModelProviderStatusError",
     "ModelProviderTimeoutError",
     "ModelToolCall",
-    "MODEL_REQUEST_PARAMS_META_KEY",
-    "DEFAULT_MODEL_REQUEST_PARAMS",
-    "SUPPORTED_PROVIDER_TYPES",
     "RerankProvider",
-    "VISION_MODEL_REQUIRED_MESSAGE",
     "build_chat_model",
     "build_embeddings",
     "build_reranker",
-    "test_model_connection",
     "extract_image_text",
+    "test_model_connection",
 ]

@@ -1,30 +1,14 @@
-from dataclasses import fields
-from datetime import datetime
+# ruff: noqa: F401
 import hashlib
 import json
+from dataclasses import fields
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import and_, case, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
-from app.entities.agents import Agent as AgentEntity
-from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
-from app.entities.agents import (
-    AgentPublicationVersion as AgentPublicationVersionEntity,
-)
-from app.entities.runs import AgentRun as AgentRunEntity
-from app.entities.runs import AgentRunEvent as AgentRunEventEntity
-from app.entities.agents import AgentToolCall as AgentToolCallEntity
-from app.entities.tools import ToolInvocation as ToolInvocationEntity
-from app.entities.defaults import utc_now
-from app.infra.db.mapping import (
-    refresh_entity,
-    save,
-    to_entity,
-    to_orm,
-)
 from app.domain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_AWAITING_APPROVAL_STATUS,
@@ -33,20 +17,19 @@ from app.domain.agents.models import (
     AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_AWAITING_INPUT_STATUS,
     AGENT_RUN_AWAITING_INPUT_STATUSES,
+    AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_LEGACY_CLAIMABLE_STATUSES,
     AGENT_RUN_QUEUED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
     AGENT_RUN_RUNNING_STATUSES,
     AGENT_RUN_SUCCEEDED_STATUS,
-    AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_APPROVAL_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_CHILD_STATUS,
     AGENT_RUN_UNIFIED_AWAITING_INPUT_STATUS,
     AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
     AGENT_RUN_UNIFIED_QUEUED_STATUS,
     AGENT_RUN_UNIFIED_RUNNING_STATUS,
-    agent_run_storage_statuses,
     Agent,
     AgentApiCredential,
     AgentKnowledgeBase,
@@ -56,11 +39,27 @@ from app.domain.agents.models import (
     AgentRunEvent,
     AgentRunSnapshot,
     AgentRunState,
+    agent_run_storage_statuses,
 )
+from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.domain.tools.models import ToolInvocation
 from app.domain.workflows.models import WorkflowNodeExecution
-
-
+from app.entities.agents import Agent as AgentEntity
+from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
+from app.entities.agents import (
+    AgentPublicationVersion as AgentPublicationVersionEntity,
+)
+from app.entities.agents import AgentToolCall as AgentToolCallEntity
+from app.entities.defaults import utc_now
+from app.entities.runs import AgentRun as AgentRunEntity
+from app.entities.runs import AgentRunEvent as AgentRunEventEntity
+from app.entities.tools import ToolInvocation as ToolInvocationEntity
+from app.infra.db.mapping import (
+    refresh_entity,
+    save,
+    to_entity,
+    to_orm,
+)
 
 _RUN_CORE_FIELDS = (
     "id",

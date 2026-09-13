@@ -1,16 +1,16 @@
 """Add unified Tool persistence and backfill legacy MCP references."""
 
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid5
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 
 revision: str = "202608160003"
 down_revision: str | None = "202608160002"

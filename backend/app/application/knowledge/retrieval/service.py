@@ -8,6 +8,7 @@ from typing import Literal, cast
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.knowledge.graph import query as knowledge_graph_query
 from app.domain.knowledge.retrieval import (
     MAX_EVIDENCE_CONTENT_CHARS,
     MAX_RERANK_CHILDREN,
@@ -18,18 +19,19 @@ from app.domain.knowledge.retrieval import (
     parent_evidence,
     reciprocal_rank_fusion,
 )
-from app.application.knowledge.graph import query as knowledge_graph_query
+from app.domain.knowledge.service import get_knowledge_model
+from app.domain.knowledge.tasks.orchestration import resolve_embedding_model
+from app.entities.defaults import new_id
 from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocumentChunk,
 )
 from app.infra.config.settings import Settings
-from app.infra.observability.logger import get_logger, log_event
-from app.entities.defaults import new_id
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.repositories.knowledge import (
     references as knowledge_reference_repository,
 )
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.observability.logger import get_logger, log_event
 from app.ports.llm import build_reranker
 from app.ports.vector_store import query_vectors
 from app.schemas.knowledge import (
@@ -38,8 +40,6 @@ from app.schemas.knowledge import (
     KnowledgeQueryRequest,
     KnowledgeRetrievalTraceResponse,
 )
-from app.domain.knowledge.tasks.orchestration import resolve_embedding_model
-from app.domain.knowledge.service import get_knowledge_model
 
 logger = get_logger(__name__)
 RerankStatus = Literal["not_configured", "applied", "fallback", "skipped"]

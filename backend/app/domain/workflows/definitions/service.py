@@ -4,15 +4,62 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
+from app.domain.agents.access.publications import agent_publication_hash
+from app.domain.agents.service import (
+    agent_publication_snapshot,
+    get_agent,
+    get_agent_model,
+)
+from app.domain.knowledge.service import (
+    ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
+)
+from app.domain.knowledge.service import (
+    RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
+)
+from app.domain.knowledge.service import (
+    effective_permission,
+)
+from app.domain.tools.access.bindings import (
+    resolve_application_tool_snapshots,
+    resolve_tool_refs_for_actor,
+    sync_application_tool_bindings,
+)
+from app.domain.tools.catalog.service import build_inline_python_tool
+from app.domain.tools.mcp.service import (
+    effective_mcp_tool_policy_mode,
+    get_mcp_tool_policy,
+    resolve_mcp_tools,
+)
+from app.domain.tools.runtime import tool_snapshot_from_payload
+from app.domain.workflows.definitions.defaults import default_workflow_graph
+from app.domain.workflows.resources import (
+    build_workflow_resource_snapshot,
+    canonicalize_workflow_graph,
+    select_tool_snapshots,
+    workflow_agent_references,
+    workflow_resource_hash,
+)
+from app.domain.workflows.resources import (
+    legacy_mcp_references as canonical_legacy_mcp_references,
+)
+from app.domain.workflows.resources import (
+    workflow_resource_references as canonical_workflow_resource_references,
+)
+from app.domain.workflows.runtime.engine import (
+    WorkflowValidationError,
+    graph_hash,
+    validate_graph,
+)
 from app.entities.agents import Agent
-from app.entities.tools import ToolRef, ToolSnapshot
-from app.entities.identity.user import User
-from app.entities.workflows import WorkflowDefinition, WorkflowVersion
 from app.entities.defaults import utc_now
+from app.entities.identity.user import User
+from app.entities.tools import ToolRef, ToolSnapshot
+from app.entities.workflows import WorkflowDefinition, WorkflowVersion
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.repositories.models.registry import get_registered_model_by_id
+from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.schemas.workflows.contracts import (
     KnowledgeNodeConfig,
     LlmNodeConfig,
@@ -21,45 +68,6 @@ from app.schemas.workflows.contracts import (
     WorkflowDefinitionResponse,
     WorkflowGraph,
     WorkflowVersionResponse,
-)
-from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
-from app.domain.agents.service import (
-    agent_publication_snapshot,
-    get_agent,
-    get_agent_model,
-)
-from app.domain.agents.access.publications import agent_publication_hash
-from app.domain.knowledge.service import (
-    ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
-    RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
-    effective_permission,
-)
-from app.domain.tools.mcp.service import (
-    effective_mcp_tool_policy_mode,
-    get_mcp_tool_policy,
-    resolve_mcp_tools,
-)
-from app.domain.tools.access.bindings import (
-    resolve_application_tool_snapshots,
-    resolve_tool_refs_for_actor,
-    sync_application_tool_bindings,
-)
-from app.domain.tools.catalog.service import build_inline_python_tool
-from app.domain.tools.runtime import tool_snapshot_from_payload
-from app.domain.workflows.definitions.defaults import default_workflow_graph
-from app.domain.workflows.runtime.engine import (
-    WorkflowValidationError,
-    graph_hash,
-    validate_graph,
-)
-from app.domain.workflows.resources import (
-    build_workflow_resource_snapshot,
-    canonicalize_workflow_graph,
-    legacy_mcp_references as canonical_legacy_mcp_references,
-    select_tool_snapshots,
-    workflow_resource_hash,
-    workflow_agent_references,
-    workflow_resource_references as canonical_workflow_resource_references,
 )
 
 OUTPUT_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

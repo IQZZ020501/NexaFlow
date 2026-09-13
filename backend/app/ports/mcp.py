@@ -63,7 +63,7 @@ def normalize_mcp_url(value: str, *, preserve_trailing_slash: bool = False) -> s
     url = stripped if preserve_trailing_slash else stripped.rstrip("/")
     parsed = urlparse(url)
     try:
-        parsed.port
+        _ = parsed.port
     except ValueError as exc:
         raise McpClientError("Invalid MCP server URL.") from exc
     if (

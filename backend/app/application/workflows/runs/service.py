@@ -1,41 +1,20 @@
 import asyncio
-from copy import deepcopy
-from collections.abc import AsyncIterator
-from datetime import date, timedelta
 import math
+from collections.abc import AsyncIterator
+from copy import deepcopy
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.agents.runs.children import preflight_workflow_agent_snapshots
 from app.application.agents.runs.service import cancel_run_tree, update_run_feedback
-from app.application.workflows.uploads.service import resolve_workspace_workflow_files
-from app.entities.runs import AgentRun
-from app.entities.identity.user import User
-from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
-from app.infra.agents.live_stream import (
-    LIVE_EVENT_TYPES,
-    AgentLiveStreamReader,
-)
-from app.infra.config.settings import Settings
 from app.application.governance.service import enforce_workspace_run_quota
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.db.session import get_session_factory
-from app.schemas.workflows.contracts import (
-    FormNodeConfig,
-    WorkflowFormSubmitRequest,
-    WorkflowNodeExecutionListResponse,
-    WorkflowNodeExecutionResponse,
-    WorkflowRunCreateRequest,
-    WorkflowRunResponse,
-    WorkflowPendingForm,
-    WorkflowGraph,
-)
+from app.application.runs.dispatch import enqueue_agent_run
+from app.application.tools.runtime.service import preflight_tool_snapshot
+from app.application.workflows.uploads.service import resolve_workspace_workflow_files
 from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
 from app.domain.agents.models import (
     agent_run_display_status,
@@ -43,23 +22,44 @@ from app.domain.agents.models import (
     queued_agent_run_status,
 )
 from app.domain.agents.service import ACTIVE_STATUS, get_agent_model
+from app.domain.tools.runtime import (
+    tool_snapshot_from_payload,
+    tool_snapshot_payload,
+)
 from app.domain.workflows.definitions.service import (
     get_or_create_definition,
     get_workflow_agent,
     prepare_workflow_resources,
     validate_workflow_resources,
 )
-from app.domain.tools.runtime import (
-    tool_snapshot_from_payload,
-    tool_snapshot_payload,
-)
-from app.domain.workflows.runtime.engine import graph_hash
 from app.domain.workflows.resources import (
     canonicalize_workflow_snapshot_graph,
     load_workflow_agent_snapshots,
     load_workflow_resource_snapshot,
 )
-from app.application.runs.dispatch import enqueue_agent_run
+from app.domain.workflows.runtime.engine import graph_hash
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.runs import AgentRun
+from app.entities.workflows import WorkflowRunDetail, WorkflowVersion
+from app.infra.agents.live_stream import (
+    LIVE_EVENT_TYPES,
+    AgentLiveStreamReader,
+)
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
+from app.schemas.workflows.contracts import (
+    FormNodeConfig,
+    WorkflowFormSubmitRequest,
+    WorkflowGraph,
+    WorkflowNodeExecutionListResponse,
+    WorkflowNodeExecutionResponse,
+    WorkflowPendingForm,
+    WorkflowRunCreateRequest,
+    WorkflowRunResponse,
+)
 
 WORKFLOW_MAX_STEPS = 100
 WORKFLOW_MAX_MODEL_TOKENS = 100_000

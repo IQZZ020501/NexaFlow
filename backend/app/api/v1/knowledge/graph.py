@@ -7,8 +7,10 @@ from app.api.deps import (
     Settings,
     WorkspaceContext,
     get_db,
-    get_settings as get_app_settings,
     get_workspace_context_from_path,
+)
+from app.api.deps import (
+    get_settings as get_app_settings,
 )
 from app.application.knowledge.graph import service as graph_application
 from app.schemas.knowledge import KnowledgeTaskResponse

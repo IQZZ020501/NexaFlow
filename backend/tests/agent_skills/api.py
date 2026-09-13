@@ -1,7 +1,7 @@
 """Agent Skill control-plane API smoke tests."""
 
-from tests.support import auth_headers, activate_user, test_client
 from tests.models.llm import model_payload, model_test_server
+from tests.support import activate_user, auth_headers, test_client
 
 
 def test_agent_skill_lifecycle() -> None:

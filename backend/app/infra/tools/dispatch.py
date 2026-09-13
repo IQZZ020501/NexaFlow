@@ -3,10 +3,10 @@
 import asyncio
 import logging
 
-from app.infra.queue.celery import celery_app, display_task_name
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event
+from app.infra.queue.celery import celery_app, display_task_name
 
 logger = get_logger(__name__)
 

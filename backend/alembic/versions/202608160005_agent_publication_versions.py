@@ -5,16 +5,16 @@ Revises: 202608160004
 Create Date: 2026-08-17
 """
 
-from collections.abc import Mapping, Sequence
-from datetime import datetime
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid5
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "202608160005"
 down_revision: str | None = "202608160004"

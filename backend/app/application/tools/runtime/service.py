@@ -7,15 +7,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tools.runtime.adapters import build_tool_adapter
-from app.entities.tools import ToolInvocation, ToolSnapshot
-from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.tools import mcp as mcp_repository
-from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.infra.db.session import get_session_factory
 from app.application.tools.runtime.contracts import (
     ToolAdapter,
     ToolAdapterBusy,
@@ -37,14 +28,25 @@ from app.domain.tools.runtime import (
     TOOL_INVOCATION_UNCERTAIN,
     TOOL_SAFE_EXTERNAL_EFFECTS,
     TOOL_UNCERTAIN_EFFECTS,
+    normalize_tool_arguments,
     tool_arguments_hash,
     tool_input_size_limit,
-    normalize_tool_arguments,
     tool_snapshot_from_payload,
     tool_snapshot_payload,
     validate_tool_arguments,
     validate_tool_output,
 )
+from app.entities.defaults import utc_now
+from app.entities.tools import ToolInvocation, ToolSnapshot
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.repositories.workspaces import (
+    resource_permissions as permission_repository,
+)
+from app.infra.db.session import get_session_factory
 
 
 class ToolInvocationBusy(RuntimeError):

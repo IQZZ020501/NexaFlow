@@ -6,8 +6,8 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.domain.platform.models import User as UserORM
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipORM
-from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.identity.user import User
+from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.infra.db.mapping import save, to_entity, to_orm
 
 

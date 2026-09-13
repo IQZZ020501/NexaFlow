@@ -1,18 +1,19 @@
 import logging
-from typing import Annotated, Callable
+from collections.abc import Callable
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
-from app.infra.config.settings import Settings
-from app.infra.observability.logger import get_logger, log_event
-from app.infra.db.session import get_db
-from app.entities.identity.user import User
-from app.infra.db.repositories.teams import repository as team_repository
-from app.infra.db.repositories.identity import users as user_repository
 from app.entities.defaults import utc_now
+from app.entities.identity.user import User
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.teams import repository as team_repository
+from app.infra.db.session import get_db
+from app.infra.observability.logger import get_logger, log_event
 from app.infra.security.auth import decode_access_session
 
 logger = get_logger(__name__)

@@ -5,26 +5,27 @@ from app.api.v1.admin.governance import routes as governance
 from app.api.v1.admin.smtp import routes as smtp
 from app.api.v1.admin.system_logs import routes as system_logs
 from app.api.v1.admin.users import routes as users
+from app.api.v1.agent_skills import routes as agent_skills
+from app.api.v1.agents import access as agent_access
+from app.api.v1.agents import routes as agents
 from app.api.v1.announcements import routes as announcements
 from app.api.v1.artifacts import routes as artifacts
-from app.api.v1.workspaces import routes as workspaces
-from app.api.v1.teams import routes as teams
-from app.api.v1.resource_folders import routes as resource_folders
-from app.api.v1.models import routes as models
-from app.api.v1.agent_skills import routes as agent_skills
-from app.api.v1.tools import mcp as mcp_servers
-from app.api.v1.tools import routes as tools
+from app.api.v1.identity import auth
+from app.api.v1.identity import enterprise as enterprise_identity
 from app.api.v1.knowledge import evaluation as knowledge_evaluation
 from app.api.v1.knowledge import graph as knowledge_graph
 from app.api.v1.knowledge import lifecycle as knowledge_lifecycle
 from app.api.v1.knowledge import retrieval as knowledge_retrieval
-from app.api.v1.agents import access as agent_access
-from app.api.v1.agents import routes as agents
 from app.api.v1.knowledge import routes as knowledge
+from app.api.v1.models import routes as models
+from app.api.v1.resource_folders import routes as resource_folders
+from app.api.v1.teams import routes as teams
+from app.api.v1.tools import mcp as mcp_servers
+from app.api.v1.tools import routes as tools
+from app.api.v1.tools import sources as tool_sources
 from app.api.v1.workflows import access as workflow_access
 from app.api.v1.workflows import routes as workflows
-from app.api.v1.tools import sources as tool_sources
-from app.api.v1.identity import auth, enterprise as enterprise_identity
+from app.api.v1.workspaces import routes as workspaces
 
 api_router = APIRouter(prefix="/api/v1")
 

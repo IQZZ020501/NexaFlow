@@ -5,8 +5,8 @@ from app.domain.platform.models import Team as TeamOrm
 from app.domain.platform.models import TeamMembership as TeamMembershipOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.entities.teams.models import Team, TeamMembership
 from app.entities.identity.user import User
+from app.entities.teams.models import Team, TeamMembership
 from app.infra.db import mapping
 
 

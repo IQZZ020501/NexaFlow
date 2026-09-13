@@ -1,17 +1,19 @@
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.registered import RegisteredModel
-from app.entities.resource_folders.models import ResourceFolder
-from app.infra.db.mapping import save, to_entity
 from app.domain.agents.access.permissions import AGENT_RESOURCE_TYPE
 from app.domain.agents.models import Agent
-from app.domain.knowledge.bases.permissions import RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE
+from app.domain.knowledge.bases.permissions import (
+    RESOURCE_TYPE as KNOWLEDGE_RESOURCE_TYPE,
+)
 from app.domain.knowledge.models import KnowledgeBase
+from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
 from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm
 from app.domain.tools.access.permissions import TOOL_RESOURCE_TYPE
 from app.domain.tools.models import Tool
+from app.entities.resource_folders.models import ResourceFolder
+from app.infra.db.mapping import save, to_entity
 
 _RESOURCE_MODELS = {
     "knowledge": KnowledgeBase,

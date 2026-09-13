@@ -1,8 +1,8 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlsplit
 from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 from app.adapters.identity.enterprise import (
     EnterpriseProviderError,
@@ -11,15 +11,15 @@ from app.adapters.identity.enterprise import (
     build_authorization_url,
     resolve_external_principal,
 )
+from app.domain.identity.enterprise.services import (
+    safe_next_path,
+    validate_connection_fields,
+)
 from app.entities.identity.enterprise import EnterpriseIdentityConnection
 from app.infra.security import enterprise_login_rate_limit as rate_limit
 from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
-)
-from app.domain.identity.enterprise.services import (
-    safe_next_path,
-    validate_connection_fields,
 )
 from tests.support import activate_admin, auth_headers, settings, test_client
 

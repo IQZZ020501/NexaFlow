@@ -6,30 +6,36 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.identity.user import User
-from app.entities.workspaces.models import WorkspaceMembership
-from app.entities.identity.invitations import WorkspaceInvitation
-from app.domain.platform.models import WorkspaceInvitation as WorkspaceInvitationOrm  # noqa: F401
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.infra.db.repositories.identity import invitations as invitation_repository
-from app.infra.config.settings import Settings
-from app.infra.security.auth import hash_password
-from app.infra.runtime.validation import normalize_email, normalize_name, normalize_username
-from app.entities.defaults import utc_now
-from app.schemas.identity.invitations import (
-    WorkspaceInvitationAcceptRequest,
-    WorkspaceInvitationCreateRequest,
-    WorkspaceInvitationResponse,
-)
-from app.schemas.identity.contracts import UserResponse
-from app.application.identity.service import user_to_response_with_scopes
 from app.application.email.delivery import (
     cancel_source_emails,
     dispatch_email_deliveries,
     queue_identity_email,
 )
+from app.application.identity.service import user_to_response_with_scopes
 from app.domain.audit.services import record_audit_log
+from app.domain.platform.models import (
+    WorkspaceInvitation as WorkspaceInvitationOrm,  # noqa: F401
+)
+from app.entities.defaults import utc_now
+from app.entities.identity.invitations import WorkspaceInvitation
+from app.entities.identity.user import User
+from app.entities.workspaces.models import WorkspaceMembership
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import invitations as invitation_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.runtime.validation import (
+    normalize_email,
+    normalize_name,
+    normalize_username,
+)
+from app.infra.security.auth import hash_password
+from app.schemas.identity.contracts import UserResponse
+from app.schemas.identity.invitations import (
+    WorkspaceInvitationAcceptRequest,
+    WorkspaceInvitationCreateRequest,
+    WorkspaceInvitationResponse,
+)
 
 
 def _hash_token(token: str) -> str:

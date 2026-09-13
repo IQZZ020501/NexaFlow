@@ -1,13 +1,19 @@
+import secrets
 from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-import secrets
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.identity.service import issue_refresh_session
+from app.domain.audit.services import record_audit_log
+from app.domain.identity.enterprise.services import (
+    safe_next_path,
+    validate_connection_fields,
+)
+from app.entities.defaults import utc_now
 from app.entities.identity.enterprise import (
     EnterpriseIdentity,
     EnterpriseIdentityConnection,
@@ -16,13 +22,12 @@ from app.entities.identity.enterprise import (
 from app.entities.identity.user import User
 from app.entities.workspaces.models import WorkspaceMembership
 from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
 from app.infra.db.repositories.identity import enterprise as identity_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.observability.system_log import record_system_log
 from app.infra.security.auth import hash_password
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infra.observability.system_log import record_system_log
 from app.ports.enterprise_identity import (
     EnterpriseProviderError,
     build_authorization_url,
@@ -36,8 +41,6 @@ from app.schemas.identity.enterprise import (
     PublicEnterpriseConnectionResponse,
     PublicEnterpriseConnectionsResponse,
 )
-from app.domain.audit.services import record_audit_log
-from app.domain.identity.enterprise.services import safe_next_path, validate_connection_fields
 
 LOGIN_STATE_TTL_SECONDS = 600
 FEISHU_QR_STATE_PREFIX = "feishu_qr."

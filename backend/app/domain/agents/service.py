@@ -2,30 +2,12 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.registered import RegisteredModel
-from app.infra.db.repositories.models import registry as model_repository
-from app.entities.agents import Agent, AgentPublicationVersion
-from app.entities.agent_skills import AgentSkillRef, AgentSkillSnapshot
-from app.entities.tools import ToolRef, ToolSnapshot
-from app.entities.workflows import WorkflowDefinition
-from app.entities.knowledge import KnowledgeBase
-from app.entities.identity.user import User
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.tools import repository as tools_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.runtime.validation import normalize_name
-from app.schemas.agents.contracts import (
-    AgentCreateRequest,
-    AgentInteractionConfig,
-    AgentMcpToolRef,
-    AgentResponse,
-    AgentUpdateRequest,
-    validate_agent_interaction_config,
+from app.domain.agent_skills.service import (
+    list_agent_skill_ref_map,
+    resolve_agent_skill_refs,
+    resolve_application_agent_skill_snapshots,
+    sync_agent_skill_bindings,
 )
-from app.schemas.tools.contracts import ToolRefSchema
-from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.domain.agents.access.permissions import (
     AGENT_RESOURCE_TYPE,
     can_edit_agent,
@@ -46,6 +28,7 @@ from app.domain.knowledge.service import (
     get_knowledge_base,
     require_knowledge_base_permission,
 )
+from app.domain.models.registered import RegisteredModel
 from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshot_map,
     resolve_application_tool_snapshots,
@@ -54,15 +37,31 @@ from app.domain.tools.access.bindings import (
 )
 from app.domain.tools.catalog.service import get_tool_catalog_detail
 from app.domain.tools.mcp.service import resolve_mcp_tools
-from app.domain.agent_skills.service import (
-    list_agent_skill_ref_map,
-    resolve_agent_skill_refs,
-    resolve_application_agent_skill_snapshots,
-    sync_agent_skill_bindings,
-)
 from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.runtime.engine import graph_hash
 from app.domain.workflows.uploads import queue_upload_cleanups
+from app.entities.agent_skills import AgentSkillRef, AgentSkillSnapshot
+from app.entities.agents import Agent, AgentPublicationVersion
+from app.entities.defaults import utc_now
+from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
+from app.entities.tools import ToolRef, ToolSnapshot
+from app.entities.workflows import WorkflowDefinition
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.models import registry as model_repository
+from app.infra.db.repositories.tools import repository as tools_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.runtime.validation import normalize_name
+from app.schemas.agent_skills.contracts import AgentSkillDefinition
+from app.schemas.agents.contracts import (
+    AgentCreateRequest,
+    AgentMcpToolRef,
+    AgentResponse,
+    AgentUpdateRequest,
+    validate_agent_interaction_config,
+)
+from app.schemas.tools.contracts import ToolRefSchema
 
 ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"
@@ -786,12 +785,11 @@ async def update_agent(
         name = normalize_name(payload.name)
         configuration_changed = configuration_changed or name != agent.name
         agent.name = name
-    if payload.app_type is not None:
-        if payload.app_type != agent.app_type:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "Application type cannot be changed after creation.",
-            )
+    if payload.app_type is not None and payload.app_type != agent.app_type:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Application type cannot be changed after creation.",
+        )
     if payload.description is not None:
         description = payload.description.strip()
         configuration_changed = configuration_changed or description != agent.description

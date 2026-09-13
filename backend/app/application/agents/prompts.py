@@ -6,13 +6,13 @@ import json
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agents.service import get_agent_model
 from app.infra.config.settings import Settings
 from app.ports.llm import build_chat_model
 from app.schemas.agents.contracts import (
     AgentInstructionsGenerateRequest,
     AgentInstructionsGenerateResponse,
 )
-from app.domain.agents.service import get_agent_model
 
 
 async def generate_agent_instructions(

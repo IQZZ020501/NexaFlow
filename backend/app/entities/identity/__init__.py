@@ -1,4 +1,9 @@
 from app.entities.identity.user import (
-    User,
     RefreshSession,
+    User,
 )
+
+__all__ = [
+    "RefreshSession",
+    "User",
+]

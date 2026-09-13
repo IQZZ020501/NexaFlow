@@ -3,9 +3,9 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.artifacts.models import GeneratedArtifact as GeneratedArtifactOrm
 from app.entities.artifacts import GeneratedArtifact
 from app.infra.db import mapping
-from app.domain.artifacts.models import GeneratedArtifact as GeneratedArtifactOrm
 
 
 async def create_artifact(

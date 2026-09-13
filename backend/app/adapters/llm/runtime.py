@@ -3,8 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -45,23 +44,26 @@ from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     legacy_credential_config,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.domain.models.registered import RegisteredModel
 from app.infra.config.settings import Settings
-from app.infra.observability.errors import ExternalServiceError, log_error
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
 from app.ports.llm import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
-    ModelCompletion,
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
     ModelProviderTimeoutError,
-    ModelToolCall,
 )
-from app.infra.observability.logger import get_logger
+from app.ports.llm import (
+    ModelCompletion as ModelCompletion,
+)
+from app.ports.llm import (
+    ModelToolCall as ModelToolCall,
+)
 
 logger = get_logger(__name__)
 

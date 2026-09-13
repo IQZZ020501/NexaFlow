@@ -1,19 +1,19 @@
+import traceback
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.api import api_router
-from app.infra.config.settings import Settings
-from app.infra.observability.errors import classify_error, log_error
-from app.infra.runtime.event_loop import configure_windows_event_loop_policy
-from app.infra.observability.logger import get_logger, setup_logging
-from app.infra.runtime.request_body_limit import RequestBodyLimitMiddleware
 from app.infra.bootstrap.seed import seed_bootstrap_admin
+from app.infra.config.settings import Settings
 from app.infra.db.session import configure_database, get_session_factory
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, setup_logging
 from app.infra.observability.system_log import record_system_log
+from app.infra.runtime.event_loop import configure_windows_event_loop_policy
+from app.infra.runtime.request_body_limit import RequestBodyLimitMiddleware
 
 logger = get_logger(__name__)
 

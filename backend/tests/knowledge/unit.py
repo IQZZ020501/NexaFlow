@@ -18,84 +18,14 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
-from dataclasses import FrozenInstanceError
 import json
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
-
-import tests.support  # noqa: F401  (sets required env before app imports)
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
-from app.application.models.registry import (
-    is_masked_secret,
-    normalize_model_type,
-    normalize_provider_credentials,
-    normalize_url_credential,
-    validate_status,
-)
-from app.domain.knowledge.retrieval import (
-    MAX_PARENT_CONTEXT_CHARS,
-    RankedHit,
-    bounded_text_chunks,
-    parent_evidence,
-    parent_context,
-    reciprocal_rank_fusion,
-)
+
 from app.adapters.rag.vector_store import VectorHit
-from app.entities.agents import Agent
-from app.entities.knowledge import KnowledgeBase
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.identity.user import User
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphImportRecord,
-    KnowledgeGraphReviewDecisionRequest,
-)
-from app.domain.agents.access.permissions import (
-    effective_agent_permission,
-    validate_agent_permission,
-)
-from app.domain.knowledge.tasks.orchestration import (
-    normalized_document_artifact,
-    parse_task_options,
-)
-from app.domain.knowledge.service import (
-    clean_upload_filename,
-    effective_permission,
-    validate_permission,
-)
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    default_graph_schema,
-    graph_schema_hash,
-    normalize_graph_name,
-)
-from app.domain.knowledge.graph.extraction import (
-    EntityLexiconEntry,
-    ExtractedEntity,
-    ExtractionChunk,
-    GraphExtractionBatch,
-    build_entity_lexicon,
-    deduplicate_extracted_entities,
-    extract_graph_batch,
-    validate_extraction_batch,
-)
-from app.domain.knowledge.graph.resolution import (
-    claim_fingerprint,
-    choose_automatic_entity_match,
-    initial_claim_status,
-)
-from app.domain.knowledge.graph.extraction import (
-    ExtractedClaim,
-    _entity_type,
-)
-from app.domain.knowledge.graph import traversal as graph_traversal
-from app.domain.knowledge.graph.traversal import (
-    GraphEvidenceView,
-    _collect_result_items,
-    _load_path_records,
-    assemble_path,
-)
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from unittest.mock import AsyncMock, patch
 from app.application.knowledge.graph.build import (
     _EntityResolutionContext,
     _parse_datetime,
@@ -103,14 +33,64 @@ from app.application.knowledge.graph.build import (
     finalize_abandoned_graph_reservations,
 )
 from app.application.knowledge.graph.maintenance import _revision_source_versions
-from app.application.resource_folders.service import descendant_folder_ids
-from app.entities.resource_folders.models import ResourceFolder
-
-
-
 from app.domain.knowledge.documents.parsing import (
     KnowledgePipelineError,
 )
+from app.domain.knowledge.graph import traversal as graph_traversal
+from app.domain.knowledge.graph.extraction import (
+    EntityLexiconEntry,
+    ExtractedClaim,
+    ExtractedEntity,
+    ExtractionChunk,
+    GraphExtractionBatch,
+    _entity_type,
+    build_entity_lexicon,
+    deduplicate_extracted_entities,
+    extract_graph_batch,
+    validate_extraction_batch,
+)
+from app.domain.knowledge.graph.resolution import (
+    choose_automatic_entity_match,
+    claim_fingerprint,
+    initial_claim_status,
+)
+from app.domain.knowledge.graph.schema import (
+    GraphSchemaDefinition,
+    default_graph_schema,
+    graph_schema_hash,
+    normalize_graph_name,
+)
+from app.domain.knowledge.graph.traversal import (
+    _collect_result_items,
+    _load_path_records,
+    assemble_path,
+)
+from app.domain.knowledge.retrieval import (
+    MAX_PARENT_CONTEXT_CHARS,
+    RankedHit,
+    bounded_text_chunks,
+    parent_context,
+    parent_evidence,
+    reciprocal_rank_fusion,
+)
+from app.domain.knowledge.service import (
+    clean_upload_filename,
+    effective_permission,
+    validate_permission,
+)
+from app.domain.knowledge.tasks.orchestration import (
+    normalized_document_artifact,
+    parse_task_options,
+)
+from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.schemas.knowledge.graph import (
+    KnowledgeGraphImportRecord,
+    KnowledgeGraphReviewDecisionRequest,
+)
+
+
 def expect_http_error(callback, status_code: int) -> None:
     try:
         callback()
@@ -872,20 +852,19 @@ def test_graph_traversal_timeout_and_empty_source_branches() -> None:
             graph_repository,
             "list_active_entities_by_ids",
             new=AsyncMock(return_value=endpoints),
+        ), patch.object(
+            graph_repository,
+            "query_shortest_path_rows",
+            new=AsyncMock(return_value=([], 7, True)),
         ):
-            with patch.object(
-                graph_repository,
-                "query_shortest_path_rows",
-                new=AsyncMock(return_value=([], 7, True)),
-            ):
-                timed_out = await graph_traversal.shortest_path(
-                    None,
-                    knowledge_base,
-                    revision,
-                    "a",
-                    "b",
-                    max_hops=2,
-                )
+            timed_out = await graph_traversal.shortest_path(
+                None,
+                knowledge_base,
+                revision,
+                "a",
+                "b",
+                max_hops=2,
+            )
         assert timed_out.truncated is True
         assert timed_out.limit_reason == "timeout"
         assert timed_out.visited_nodes == 7
@@ -920,19 +899,18 @@ def test_graph_traversal_timeout_and_empty_source_branches() -> None:
             graph_repository,
             "list_active_entities_by_ids",
             new=AsyncMock(return_value=[endpoints[0]]),
+        ), patch.object(
+            graph_repository,
+            "query_neighborhood_rows",
+            new=AsyncMock(return_value=([], 0, True)),
         ):
-            with patch.object(
-                graph_repository,
-                "query_neighborhood_rows",
-                new=AsyncMock(return_value=([], 0, True)),
-            ):
-                neighborhood_timeout = await graph_traversal.neighborhood(
-                    None,
-                    knowledge_base,
-                    revision,
-                    "a",
-                    max_hops=1,
-                )
+            neighborhood_timeout = await graph_traversal.neighborhood(
+                None,
+                knowledge_base,
+                revision,
+                "a",
+                max_hops=1,
+            )
         assert neighborhood_timeout.limit_reason == "timeout"
 
     asyncio.run(scenario())
@@ -1082,8 +1060,8 @@ def test_graph_import_record_requires_one_object_kind() -> None:
         raise AssertionError("structured graph object XOR must be enforced")
 
 def test_knowledge_writes_recheck_locked_owner() -> None:
-    from app.schemas.knowledge import KnowledgeBaseUpdateRequest
     from app.domain.knowledge.bases import service as knowledge_kb
+    from app.schemas.knowledge import KnowledgeBaseUpdateRequest
 
     stale = KnowledgeBase(
         id="kb-1",
@@ -1301,7 +1279,6 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
     assert ids == ["chunk-1"]
     assert joined.endswith("[… evidence truncated …]")
 
-    import json
 
     from app.application.agents.tools.builder import bounded_knowledge_context
 
@@ -1995,9 +1972,9 @@ def test_retrieval_evaluation_metrics_are_deterministic() -> None:
 
 def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None:
     from app.application.knowledge.evaluation import runner as evaluation_application
+    from app.domain.knowledge.evaluation import service as evaluation_service
     from app.entities.knowledge import KnowledgeTask
     from app.schemas.knowledge import KnowledgeEvaluationRunRequest
-    from app.domain.knowledge.evaluation import service as evaluation_service
 
     assert evaluation_application._evaluation_run_request(
         {"case_ids": ["case-1"], "similarity": 0.4}
@@ -2292,6 +2269,7 @@ def test_evaluation_mutations_lock_before_validation_and_require_lease() -> None
         )
 
 def test_evaluation_case_service_and_repository_edges() -> None:
+    from app.domain.knowledge.evaluation import service as evaluation_service
     from app.entities.knowledge import (
         KnowledgeEvaluationCase,
         KnowledgeEvaluationExpectation,
@@ -2301,7 +2279,6 @@ def test_evaluation_case_service_and_repository_edges() -> None:
         evaluation as evaluation_repository,
     )
     from app.schemas.knowledge import KnowledgeEvaluationCaseCreateRequest
-    from app.domain.knowledge.evaluation import service as evaluation_service
 
     knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
     actor = User(id="user-1", username="user")
@@ -2501,12 +2478,12 @@ def test_evaluation_case_service_and_repository_edges() -> None:
 def test_evaluation_result_upsert_recovers_concurrent_insert() -> None:
     from sqlalchemy.exc import IntegrityError
 
+    from app.domain.knowledge.models import (
+        KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
+    )
     from app.entities.knowledge import KnowledgeEvaluationResult
     from app.infra.db.repositories.knowledge import (
         evaluation as evaluation_repository,
-    )
-    from app.domain.knowledge.models import (
-        KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
     )
 
     result = KnowledgeEvaluationResult(
@@ -2857,14 +2834,14 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
     expect_error(too_many_rows(), "row 5002")
 
 def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
-    from app.entities.knowledge import (
-        KnowledgeDocument,
-        KnowledgeDocumentParentChunk,
-    )
     from app.domain.knowledge.documents.references import (
         _resolution_context,
         _resolved_target,
         extract_reference_labels,
+    )
+    from app.entities.knowledge import (
+        KnowledgeDocument,
+        KnowledgeDocumentParentChunk,
     )
 
     labels = extract_reference_labels(
@@ -2916,13 +2893,13 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
 def test_reference_rebuild_reuses_resolution_context() -> None:
     from unittest.mock import AsyncMock, patch
 
+    from app.domain.knowledge.documents import references as reference_service
     from app.entities.knowledge import (
         KnowledgeDocument,
         KnowledgeDocumentChunk,
         KnowledgeDocumentParentChunk,
         KnowledgeDocumentReference,
     )
-    from app.domain.knowledge.documents import references as reference_service
 
     knowledge_base = KnowledgeBase(id="kb-1", workspace_id="ws-1")
     source = KnowledgeDocument(
@@ -3038,11 +3015,11 @@ def test_parent_context_windows_around_child_offsets() -> None:
     )
 
 def test_knowledge_document_and_attachment_response_mapping() -> None:
-    from app.entities.knowledge import KnowledgeAttachment, KnowledgeDocument
     from app.domain.knowledge.service import (
         attachment_to_response,
         document_to_response,
     )
+    from app.entities.knowledge import KnowledgeAttachment, KnowledgeDocument
 
     document = KnowledgeDocument(
         id="doc-1",
@@ -3078,8 +3055,8 @@ def test_knowledge_document_and_attachment_response_mapping() -> None:
     assert attachment_response.status == "available"
 
 def test_knowledge_base_to_response() -> None:
-    from app.entities.knowledge import KnowledgeBase
     from app.domain.knowledge.service import knowledge_base_to_response
+    from app.entities.knowledge import KnowledgeBase
 
     knowledge_base = KnowledgeBase(
         id="kb-1",

@@ -1,22 +1,45 @@
 import asyncio
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, timedelta
-import hashlib
 from functools import partial
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.registered import RegisteredModel
 from app.domain.audit.services import record_audit_log
-from app.infra.config.settings import Settings
-from app.infra.observability.errors import log_error
-from app.infra.observability.logger import get_logger
+from app.domain.knowledge.bases.permissions import require_knowledge_base_active
+from app.domain.knowledge.documents.parsing import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    NORMALIZED_TEXT_VERSION,
+    SPLIT_SEPARATORS,
+    ChildChunkDraft,
+    DocumentChunkDrafts,
+    KnowledgePipelineError,
+    build_flat_chunks,
+    build_hierarchical_chunks,
+    chunk_token_count,
+    clean_text,
+    extract_document,
+    split_text,
+)
+from app.domain.knowledge.documents.qa_import import (
+    extract_qa_rows,
+)
+from app.domain.knowledge.documents.references import (
+    prepare_document_reference_rebuild,
+    rebuild_document_references,
+)
+from app.domain.knowledge.service import (
+    get_knowledge_model,
+    knowledge_document_path,
+    knowledge_object_storage,
+)
+from app.domain.models.registered import RegisteredModel
 from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.entities.knowledge import (
     CHUNK_INDEX_FAILED_STATUS,
     CHUNK_INDEXED_STATUS,
@@ -25,11 +48,9 @@ from app.entities.knowledge import (
     DOCUMENT_INDEX_FAILED_STATUS,
     DOCUMENT_INDEX_QUEUED_STATUS,
     DOCUMENT_INDEXED_STATUS,
-    DOCUMENT_INDEXING_STATUS,
     DOCUMENT_PARSE_FAILED_STATUS,
     DOCUMENT_PARSE_QUEUED_STATUS,
     DOCUMENT_PARSED_STATUS,
-    DOCUMENT_PARSING_STATUS,
     DOCUMENT_STAGED_META_KEY,
     GRAPH_RESUME_REVISION_ID_OPTION,
     GRAPH_RETRY_ALL,
@@ -37,8 +58,8 @@ from app.entities.knowledge import (
     GRAPH_RETRY_UNFINISHED,
     TASK_CANCELLED_STATUS,
     TASK_CANCELLING_STATUS,
-    TASK_FAILED_STATUS,
     TASK_EVALUATE,
+    TASK_FAILED_STATUS,
     TASK_GRAPH_REBUILD,
     TASK_GRAPH_SYNC,
     TASK_INDEX,
@@ -55,44 +76,18 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.knowledge.graph import GRAPH_REVISION_FAILED
-
-from app.ports.vector_store import delete_vectors
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.observability.logger import get_logger
+from app.ports.llm import extract_image_text
 from app.schemas.knowledge import (
     KnowledgeAssetResponse,
     KnowledgeDocumentChunkResponse,
     KnowledgeDocumentParseRequest,
     KnowledgeTaskResponse,
 )
-from app.domain.knowledge.bases.permissions import require_knowledge_base_active
-from app.domain.knowledge.documents.references import (
-    prepare_document_reference_rebuild,
-    rebuild_document_references,
-)
-from app.domain.knowledge.service import (
-    get_knowledge_model,
-    knowledge_document_path,
-    knowledge_object_storage,
-)
-from app.ports.llm import extract_image_text
 
-from app.domain.knowledge.documents.parsing import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
-    ChildChunkDraft,
-    DocumentChunkDrafts,
-    KnowledgePipelineError,
-    NORMALIZED_TEXT_VERSION,
-    SPLIT_SEPARATORS,
-    build_flat_chunks,
-    build_hierarchical_chunks,
-    chunk_token_count,
-    clean_text,
-    extract_document,
-    split_text,
-)
-from app.domain.knowledge.documents.qa_import import (
-    extract_qa_rows,
-)
 logger = get_logger(__name__)
 
 MAX_TASK_ATTEMPTS = 3

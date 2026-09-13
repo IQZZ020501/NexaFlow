@@ -3,24 +3,12 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infra.config.settings import Settings
-from app.infra.db.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
     get_workspace_context_from_path,
     require_password_changed,
     require_workspace_path_role,
-)
-from app.entities.identity.user import User
-from app.schemas.models.contracts import (
-    BaseModelOptionResponse,
-    ModelCredentialFieldResponse,
-    ModelProviderCatalogResponse,
-    ModelTypeOptionResponse,
-    RegisteredModelCreateRequest,
-    RegisteredModelResponse,
-    RegisteredModelUpdateRequest,
 )
 from app.application.models.service import (
     create_registered_model,
@@ -33,6 +21,18 @@ from app.application.models.service import (
     list_registered_models,
     model_to_response,
     update_registered_model,
+)
+from app.entities.identity.user import User
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
+from app.schemas.models.contracts import (
+    BaseModelOptionResponse,
+    ModelCredentialFieldResponse,
+    ModelProviderCatalogResponse,
+    ModelTypeOptionResponse,
+    RegisteredModelCreateRequest,
+    RegisteredModelResponse,
+    RegisteredModelUpdateRequest,
 )
 
 router = APIRouter(tags=["llm"])

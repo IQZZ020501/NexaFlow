@@ -4,37 +4,39 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 
-from app.domain.models.registered import RegisteredModel
-from app.domain.platform.models import ResourcePermission
-from app.entities.runs import AgentRun
-from app.entities.defaults import new_id, utc_now
-from app.infra.storage import object_storage as object_storage_module
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from app.infra.db.session import get_session_factory
-from app.domain.audit.models import AuditLog
 from app.domain.agents.models import (
     Agent,
     AgentKnowledgeBase,
     AgentMcpTool,
-    AgentRun as AgentRunOrm,
     AgentRunSnapshot,
     AgentRunState,
 )
-from app.domain.knowledge.storage import cleanup as knowledge_cleanup
+from app.domain.agents.models import (
+    AgentRun as AgentRunOrm,
+)
+from app.domain.analytics.services import resolve_analytics_period
+from app.domain.audit.models import AuditLog
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphRevision,
+    KnowledgeGraphSchema,
+)
 from app.domain.knowledge.models import (
     KnowledgeBase,
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.domain.knowledge.graph.models import (
-    KnowledgeGraphRevision,
-    KnowledgeGraphSchema,
-)
 from app.domain.knowledge.service import knowledge_object_storage
-from app.domain.analytics.services import resolve_analytics_period
+from app.domain.knowledge.storage import cleanup as knowledge_cleanup
+from app.domain.models.registered import RegisteredModel
+from app.domain.platform.models import ResourcePermission
 from app.domain.tools.models import McpServer, ToolSource
 from app.domain.workflows.models import WorkflowDefinition, WorkflowRunDetail
+from app.entities.defaults import new_id
+from app.entities.runs import AgentRun
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.session import get_session_factory
+from app.infra.storage import object_storage as object_storage_module
 from tests.support import (
     RESEARCH_PASSWORD,
     activate_admin,
@@ -108,8 +110,10 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
 
         for path in (
             f"/api/v1/admin/announcements/{global_id}/publish",
-            f"/api/v1/workspaces/{workspace_id}/announcements/"
-            f"{workspace_id_notice}/publish",
+            (
+                f"/api/v1/workspaces/{workspace_id}/announcements/"
+                f"{workspace_id_notice}/publish"
+            ),
         ):
             published = client.post(path, headers=headers)
             assert published.status_code == 200, published.text
@@ -163,8 +167,10 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
         for path, payload in (
             (f"/api/v1/admin/announcements/{global_id}", {"title": None}),
             (
-                f"/api/v1/workspaces/{workspace_id}/announcements/"
-                f"{workspace_id_notice}",
+                (
+                    f"/api/v1/workspaces/{workspace_id}/announcements/"
+                    f"{workspace_id_notice}"
+                ),
                 {"body": None},
             ),
         ):

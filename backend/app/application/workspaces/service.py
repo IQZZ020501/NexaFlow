@@ -1,45 +1,55 @@
 import logging
 from dataclasses import dataclass
 
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from fastapi import HTTPException, status
 
 from app.infra.config.settings import Settings
 from app.infra.observability.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 
-from app.domain.audit.services import record_audit_log
-from app.infra.runtime.validation import normalize_name
-from app.entities.defaults import new_id
-from app.entities.identity.user import User
-from app.schemas.identity.contracts import UserCreateRequest, UserPasswordResetResponse
 from app.application.identity.service import create_user
-from app.schemas.identity.contracts import user_to_response
-from app.entities.workspaces.models import WORKSPACE_MEMBER_ROLES, Workspace, WorkspaceMembership
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.tools import mcp as mcp_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.infra.db.repositories.models import registry as model_registry
+from app.application.knowledge.documents.service import (
+    enqueue_knowledge_storage_cleanup,
+)
+from app.domain.audit.services import record_audit_log
 from app.domain.knowledge.service import delete_workspace_knowledge_bases
 from app.domain.tools.catalog.service import (
     ensure_workspace_system_catalog,
     tombstone_workspace_mcp_catalog,
 )
-from app.domain.workflows.uploads import queue_upload_cleanups
-from app.application.knowledge.documents.service import enqueue_knowledge_storage_cleanup
-from app.domain.workflows.uploads import run_upload_storage_cleanup
+from app.domain.workflows.uploads import (
+    queue_upload_cleanups,
+    run_upload_storage_cleanup,
+)
+from app.entities.defaults import new_id
+from app.entities.identity.user import User
+from app.entities.workspaces.models import (
+    WORKSPACE_MEMBER_ROLES,
+    Workspace,
+    WorkspaceMembership,
+)
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.models import registry as model_registry
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.observability.errors import log_error
+from app.infra.runtime.validation import normalize_name
+from app.schemas.identity.contracts import (
+    UserCreateRequest,
+    UserPasswordResetResponse,
+    user_to_response,
+)
 from app.schemas.workspaces.contracts import (
-    WorkspaceMemberResponse,
-    WorkspaceUserCreateRequest,
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
+    WorkspaceMemberResponse,
     WorkspaceResponse,
     WorkspaceUpdateRequest,
+    WorkspaceUserCreateRequest,
 )
 
 ACTIVE_STATUS = "active"

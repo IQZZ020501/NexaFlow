@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 from dataclasses import fields
 from datetime import datetime
 
@@ -9,19 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.tools import (
-    ApplicationToolBinding,
-    Tool,
-    ToolDraft,
-    ToolInvocation,
-    ToolPolicy,
-    ToolRef,
-    ToolSource,
-    ToolVersion,
-)
-from app.entities.identity.user import User
-from app.infra.db.mapping import save, to_entity
 from app.domain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
 )
@@ -41,6 +29,19 @@ from app.domain.tools.runtime import (
     TOOL_INVOCATION_UNCERTAIN,
     exhausted_tool_invocation_terminal_state,
 )
+from app.entities.identity.user import User
+from app.entities.tools import (
+    ApplicationToolBinding,
+    Tool,
+    ToolDraft,
+    ToolInvocation,
+    ToolPolicy,
+    ToolRef,
+    ToolSource,
+    ToolVersion,
+)
+from app.entities.workspaces.resource_permissions import ResourcePermission
+from app.infra.db.mapping import save, to_entity
 
 ToolCatalogRow = tuple[
     Tool,
@@ -210,4 +211,3 @@ async def sync_application_tool_bindings(
     await db.execute(statement)
     for binding in bindings:
         await save_application_tool_binding(db, binding)
-

@@ -14,14 +14,6 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from tests.support import (
-    ADMIN_PASSWORD,
-    activate_admin,
-    auth_headers,
-    login,
-    settings as test_settings,
-    test_client,
-)
 from app.application.email.delivery import (
     EMAIL_BROKER_TIMEOUT_SECONDS,
     EMAIL_DISPATCH_TIMEOUT_SECONDS,
@@ -34,15 +26,25 @@ from app.application.email.delivery import (
     queue_identity_email,
     run_email_delivery,
 )
-from app.entities.email import EmailDelivery as EmailDeliveryEntity
-from app.entities.email.smtp import SmtpSettings
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.email import delivery as email_repository
-from app.infra.security.secrets import decrypt_secret, encrypt_secret
-from app.infra.db.session import get_session_factory
-from app.infra.email.smtp import SmtpConfigurationError, SmtpDeliveryError
 from app.domain.email.models import EmailDelivery, PasswordResetToken
 from app.domain.email.services import EmailPayloadError, render_email
+from app.entities.defaults import utc_now
+from app.entities.email import EmailDelivery as EmailDeliveryEntity
+from app.entities.email.smtp import SmtpSettings
+from app.infra.db.repositories.email import delivery as email_repository
+from app.infra.db.session import get_session_factory
+from app.infra.email.smtp import SmtpConfigurationError, SmtpDeliveryError
+from app.infra.security.secrets import decrypt_secret, encrypt_secret
+from tests.support import (
+    ADMIN_PASSWORD,
+    activate_admin,
+    auth_headers,
+    login,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 
 async def delivery_rows() -> list[EmailDelivery]:
@@ -380,8 +382,6 @@ async def test_delivery_edge_cases() -> None:
     ]
 
     broker_settings = replace(settings, celery_task_always_eager=False)
-    import app.tasks.email.jobs as email_tasks
-
     from app.infra.queue.celery import celery_app
 
     with (

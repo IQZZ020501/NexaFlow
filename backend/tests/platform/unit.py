@@ -18,94 +18,13 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
-from dataclasses import FrozenInstanceError
-import json
 from types import SimpleNamespace
-
-import tests.support  # noqa: F401  (sets required env before app imports)
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
-from app.application.models.registry import (
-    is_masked_secret,
-    normalize_model_type,
-    normalize_provider_credentials,
-    normalize_url_credential,
-    validate_status,
-)
-from app.domain.knowledge.retrieval import (
-    MAX_PARENT_CONTEXT_CHARS,
-    RankedHit,
-    bounded_text_chunks,
-    parent_evidence,
-    parent_context,
-    reciprocal_rank_fusion,
-)
-from app.adapters.rag.vector_store import VectorHit
-from app.entities.agents import Agent
-from app.entities.knowledge import KnowledgeBase
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.identity.user import User
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphImportRecord,
-    KnowledgeGraphReviewDecisionRequest,
-)
-from app.domain.agents.access.permissions import (
-    effective_agent_permission,
-    validate_agent_permission,
-)
-from app.domain.knowledge.tasks.orchestration import (
-    normalized_document_artifact,
-    parse_task_options,
-)
-from app.domain.knowledge.service import (
-    clean_upload_filename,
-    effective_permission,
-    validate_permission,
-)
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    default_graph_schema,
-    graph_schema_hash,
-    normalize_graph_name,
-)
-from app.domain.knowledge.graph.extraction import (
-    EntityLexiconEntry,
-    ExtractedEntity,
-    ExtractionChunk,
-    GraphExtractionBatch,
-    build_entity_lexicon,
-    deduplicate_extracted_entities,
-    extract_graph_batch,
-    validate_extraction_batch,
-)
-from app.domain.knowledge.graph.resolution import (
-    claim_fingerprint,
-    choose_automatic_entity_match,
-    initial_claim_status,
-)
-from app.domain.knowledge.graph.extraction import (
-    ExtractedClaim,
-    _entity_type,
-)
-from app.domain.knowledge.graph import traversal as graph_traversal
-from app.domain.knowledge.graph.traversal import (
-    GraphEvidenceView,
-    _collect_result_items,
-    _load_path_records,
-    assemble_path,
-)
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from unittest.mock import AsyncMock, patch
-from app.application.knowledge.graph.build import (
-    _EntityResolutionContext,
-    _parse_datetime,
-    _unique_surface_span,
-    finalize_abandoned_graph_reservations,
-)
-from app.application.knowledge.graph.maintenance import _revision_source_versions
+
 from app.application.resource_folders.service import descendant_folder_ids
 from app.entities.resource_folders.models import ResourceFolder
-
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -133,8 +52,8 @@ def test_resource_folder_descendants_cover_nested_children() -> None:
     }
 
 def test_team_to_response() -> None:
-    from app.entities.teams.models import Team
     from app.domain.teams.services import team_to_response
+    from app.entities.teams.models import Team
 
     team = Team(
         id="team-1",

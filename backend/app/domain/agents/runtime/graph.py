@@ -1,5 +1,4 @@
 import asyncio
-from copy import copy
 import hashlib
 import html
 import json
@@ -7,6 +6,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
+from copy import copy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -23,11 +23,6 @@ from langchain_core.utils.json import parse_partial_json
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
-from app.ports.llm import (
-    ModelCompletion,
-    ModelProviderError,
-    ModelToolCall,
-)
 from app.domain.agents.runtime.callbacks import NexaFlowCallback, safe_event_value
 from app.domain.agents.runtime.grounding import (
     InlineGroundingMode,
@@ -41,6 +36,11 @@ from app.domain.agents.runtime.tools import (
     is_parallel_safe,
 )
 from app.domain.agents.runtime.usage import merge_usage, usage_from_message
+from app.ports.llm import (
+    ModelCompletion,
+    ModelProviderError,
+    ModelToolCall,
+)
 
 MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12

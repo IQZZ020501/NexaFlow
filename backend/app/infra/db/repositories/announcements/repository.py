@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.announcements.models import (
     Announcement as AnnouncementOrm,
+)
+from app.domain.announcements.models import (
     AnnouncementRead as AnnouncementReadOrm,
 )
 from app.entities.announcements.models import Announcement, AnnouncementRead

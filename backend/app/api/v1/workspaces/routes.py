@@ -4,8 +4,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.audit import count_audit_logs, list_workspace_audit_logs
+from app.api.deps import (
+    WorkspaceContext,
+    get_settings,
+    get_workspace_context_from_path,
+    require_global_admin,
+    require_password_changed,
+    require_workspace_path_role,
+)
 from app.application.analytics import get_workspace_analytics
+from app.application.audit import count_audit_logs, list_workspace_audit_logs
 from app.application.governance.service import (
     get_workspace_governance,
     get_workspace_inventory,
@@ -17,51 +25,43 @@ from app.application.identity.invitations import (
     list_workspace_invitations,
     revoke_workspace_invitation,
 )
-from app.schemas.analytics import WorkspaceAnalyticsResponse
-from app.schemas.governance.contracts import (
-    WorkspaceGovernanceResponse,
-    WorkspaceGovernanceUpdateRequest,
-    WorkspaceInventoryResponse,
-)
-from app.schemas.identity.invitations import (
-    WorkspaceInvitationCreateRequest,
-    WorkspaceInvitationResponse,
-)
-from app.schemas.audit import AuditLogResponse
-from app.infra.config.settings import Settings
-from app.infra.db.session import get_db
-from app.api.deps import (
-    WorkspaceContext,
-    get_settings,
-    get_workspace_context_from_path,
-    require_global_admin,
-    require_password_changed,
-    require_workspace_path_role,
-)
-from app.entities.identity.user import User
-from app.schemas.identity.contracts import UserPasswordResetResponse
-from app.schemas.workspaces.contracts import (
-    WorkspaceMemberCreateRequest,
-    WorkspaceMemberResponse,
-    WorkspaceMemberUpdateRequest,
-    WorkspaceUserCreateRequest,
-    WorkspaceCreateRequest,
-    WorkspaceCreateResponse,
-    WorkspaceResponse,
-    WorkspaceUpdateRequest,
-)
 from app.application.workspaces.service import (
     add_workspace_member,
     create_workspace,
     create_workspace_user,
     delete_workspace_permanently,
     get_workspace_for_user,
-    list_workspaces,
     list_workspace_members,
+    list_workspaces,
     remove_workspace_member,
     update_workspace,
     update_workspace_member_role,
     workspace_to_response,
+)
+from app.entities.identity.user import User
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
+from app.schemas.analytics import WorkspaceAnalyticsResponse
+from app.schemas.audit import AuditLogResponse
+from app.schemas.governance.contracts import (
+    WorkspaceGovernanceResponse,
+    WorkspaceGovernanceUpdateRequest,
+    WorkspaceInventoryResponse,
+)
+from app.schemas.identity.contracts import UserPasswordResetResponse
+from app.schemas.identity.invitations import (
+    WorkspaceInvitationCreateRequest,
+    WorkspaceInvitationResponse,
+)
+from app.schemas.workspaces.contracts import (
+    WorkspaceCreateRequest,
+    WorkspaceCreateResponse,
+    WorkspaceMemberCreateRequest,
+    WorkspaceMemberResponse,
+    WorkspaceMemberUpdateRequest,
+    WorkspaceResponse,
+    WorkspaceUpdateRequest,
+    WorkspaceUserCreateRequest,
 )
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -384,7 +384,16 @@ async def list_workspace_logs(
     Returns:
         list[AuditLogResponse]: The matching workspace audit log records.
     """
-    filters = dict(workspace_id=context.workspace.id, actor=actor, action=action, resource_type=resource_type, resource_id=resource_id, search=search, from_date=from_date, to_date=to_date)
+    filters = {
+        "workspace_id": context.workspace.id,
+        "actor": actor,
+        "action": action,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "search": search,
+        "from_date": from_date,
+        "to_date": to_date,
+    }
     response.headers["X-Total-Count"] = str(await count_audit_logs(db, **filters))
     return await list_workspace_audit_logs(
         db,

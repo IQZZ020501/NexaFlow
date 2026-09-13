@@ -1,24 +1,21 @@
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi import HTTPException, status
-
 from app.domain.audit.services import record_audit_log
-from app.infra.runtime.validation import normalize_name
 from app.entities.defaults import new_id
-from app.entities.teams.models import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.entities.identity.user import User
+from app.entities.teams.models import TEAM_MEMBER_ROLES, Team, TeamMembership
 from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.runtime.validation import normalize_name
+from app.schemas.identity.contracts import user_to_response
 from app.schemas.teams.contracts import (
     TeamCreateRequest,
-    TeamMemberCreateRequest,
     TeamMemberResponse,
-    TeamMemberUpdateRequest,
     TeamResponse,
     TeamUpdateRequest,
 )
-from app.schemas.identity.contracts import user_to_response
 
 ACTIVE_STATUS = "active"
 ARCHIVED_STATUS = "archived"

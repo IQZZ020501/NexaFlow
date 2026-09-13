@@ -5,18 +5,36 @@ from contextlib import suppress
 from datetime import UTC, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.audit.services import record_audit_log
-from app.infra.config.settings import Settings
-from app.infra.observability.errors import classify_error, log_error
-from app.infra.observability.logger import get_logger, log_event
+
+# ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
+from app.domain.knowledge.documents.parsing import (
+    EMBED_BATCH_SIZE,
+    IMAGE_DOCUMENT_EXTENSIONS,
+    SEGMENTATION_VERSION,
+    KnowledgePipelineError,
+)
+from app.domain.knowledge.service import (
+    RESOURCE_TYPE,
+    get_default_knowledge_model,
+    knowledge_object_storage,
+)
+from app.domain.knowledge.tasks.orchestration import (
+    TASK_STOPPED_MESSAGE,
+    chunk_search_text,
+    enqueue_graph_rebuild,
+    enqueue_graph_sync,
+    enqueue_index_knowledge_document,
+    extract_document_chunk_contents,
+    parse_task_options_from_task,
+    replace_document_chunks,
+    resolve_embedding_model,
+    task_error_message,
+)
 from app.entities.defaults import new_id, utc_now
-from app.infra.db.session import get_session_factory
 from app.entities.identity.user import User
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.infra.db.repositories.identity import users as user_repository
 from app.entities.knowledge import (
     CHUNK_INDEX_FAILED_STATUS,
     CHUNK_INDEXED_STATUS,
@@ -27,10 +45,10 @@ from app.entities.knowledge import (
     DOCUMENT_PARSE_FAILED_STATUS,
     DOCUMENT_PARSED_STATUS,
     DOCUMENT_PARSING_STATUS,
-    TASK_FAILED_STATUS,
     TASK_CANCELLED_STATUS,
     TASK_CANCELLING_STATUS,
     TASK_EVALUATE,
+    TASK_FAILED_STATUS,
     TASK_GRAPH_REBUILD,
     TASK_GRAPH_SYNC,
     TASK_INDEX,
@@ -43,38 +61,19 @@ from app.entities.knowledge import (
     KnowledgeDocument,
     KnowledgeTask,
 )
-
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.db.session import get_session_factory
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 from app.ports.vector_store import (
     VectorChunk,
     delete_vectors,
     upsert_vectors,
 )
-from app.domain.knowledge.tasks.orchestration import (
-    chunk_search_text,
-    enqueue_graph_rebuild,
-    enqueue_graph_sync,
-    enqueue_index_knowledge_document,
-    extract_document_chunk_contents,
-    parse_task_options_from_task,
-    replace_document_chunks,
-    resolve_embedding_model,
-    TASK_STOPPED_MESSAGE,
-    task_error_message,
-)
-from app.domain.knowledge.service import (
-    RESOURCE_TYPE,
-    get_default_knowledge_model,
-    knowledge_object_storage,
-)
-from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 
-# ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
-from app.domain.knowledge.documents.parsing import (
-    EMBED_BATCH_SIZE,
-    IMAGE_DOCUMENT_EXTENSIONS,
-    KnowledgePipelineError,
-    SEGMENTATION_VERSION,
-)
 logger = get_logger(__name__)
 
 TASK_LEASE_SECONDS = 300

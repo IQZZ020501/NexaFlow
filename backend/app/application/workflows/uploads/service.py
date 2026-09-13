@@ -8,26 +8,6 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.agents import Agent
-from app.entities.identity.user import User
-from app.entities.workflows import WorkflowUpload
-from app.infra.config.settings import Settings
-from app.entities.defaults import new_id
-from app.infra.storage.object_storage import (
-    EmptyObjectError,
-    ObjectTooLargeError,
-    create_object_storage,
-)
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workspaces import repository as workspace_repository
-
-from app.ports.llm import (
-    VISION_MODEL_REQUIRED_MESSAGE,
-    extract_image_text,
-)
-from app.schemas.agents.contracts import AgentInteractionConfig, AgentUploadResponse
-from app.schemas.workflows.contracts import WorkflowUploadResponse
 from app.domain.agents.access.permissions import require_agent_view
 from app.domain.agents.service import get_agent
 from app.domain.knowledge.service import (
@@ -36,17 +16,37 @@ from app.domain.knowledge.service import (
 )
 from app.domain.workflows.definitions.service import get_workflow_agent
 from app.domain.workflows.uploads import queue_upload_cleanups
+from app.entities.agents import Agent
+from app.entities.defaults import new_id
+from app.entities.identity.user import User
+from app.entities.workflows import WorkflowUpload
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.storage.object_storage import (
+    EmptyObjectError,
+    ObjectTooLargeError,
+    create_object_storage,
+)
+from app.ports.llm import (
+    VISION_MODEL_REQUIRED_MESSAGE,
+    extract_image_text,
+)
+from app.schemas.agents.contracts import AgentInteractionConfig, AgentUploadResponse
+from app.schemas.workflows.contracts import WorkflowUploadResponse
 
 if TYPE_CHECKING:
     from app.application.agents.access.service import PublishedAgentContext
 
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 from app.domain.knowledge.documents.parsing import (
+    PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     ImageTextExtractor,
     KnowledgePipelineError,
-    PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     extract_document,
 )
+
 MAX_WORKFLOW_UPLOAD_BYTES = MAX_DOCUMENT_UPLOAD_BYTES
 MAX_WORKFLOW_UPLOAD_FILES = 10
 UPLOAD_EXTENSIONS = {

@@ -6,21 +6,32 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.knowledge import KnowledgeBase
+from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.bases.permissions import (
+    RESOURCE_TYPE,
+    effective_permission,
+    get_user_grant,
+    require_knowledge_base_active,
+    require_knowledge_base_permission,
+)
+from app.domain.knowledge.storage.cleanup import create_knowledge_storage_cleanup
+from app.domain.models.registered import RegisteredModel
 from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
 from app.infra.config.settings import Settings
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
 from app.infra.db.repositories.identity import users as user_repository
-from app.infra.runtime.validation import normalize_name
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.repositories.models import registry as model_repository
+from app.infra.db.repositories.workspaces import (
+    resource_permissions as permission_repository,
+)
+from app.infra.runtime.validation import normalize_name
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderStatusError,
     build_embeddings,
     build_reranker,
 )
-from app.domain.models.registered import RegisteredModel
 from app.schemas.knowledge import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseListItemResponse,
@@ -28,15 +39,6 @@ from app.schemas.knowledge import (
     KnowledgeBaseUpdateRequest,
     KnowledgeModelTestRequest,
     KnowledgeModelTestResponse,
-)
-from app.domain.audit.services import record_audit_log
-from app.domain.knowledge.storage.cleanup import create_knowledge_storage_cleanup
-from app.domain.knowledge.bases.permissions import (
-    RESOURCE_TYPE,
-    effective_permission,
-    get_user_grant,
-    require_knowledge_base_active,
-    require_knowledge_base_permission,
 )
 
 ACTIVE_STATUS = "active"

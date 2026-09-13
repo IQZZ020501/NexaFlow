@@ -23,8 +23,8 @@ those rules are intentionally not enforced here until stage 6 lands.
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
+from types import ModuleType
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -32,7 +32,7 @@ _LOADED = False
 _matrix = None
 
 
-def _analyzer() -> "module":
+def _analyzer() -> ModuleType:
     global _matrix, _LOADED
     if not _LOADED:
         spec = importlib.util.spec_from_file_location(

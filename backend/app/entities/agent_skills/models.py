@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 from app.entities.defaults import new_id, utc_now
 
-
 AgentSkillGrant = Literal["view", "use"]
 
 

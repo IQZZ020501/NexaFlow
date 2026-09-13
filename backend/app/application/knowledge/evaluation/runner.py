@@ -10,34 +10,18 @@ from app.application.knowledge.retrieval.service import (
     normalized_cosine_similarity,
     retrieve_knowledge_base,
 )
-from app.domain.knowledge.evaluation.metrics import (
-    RetrievalCaseMetrics,
-    aggregate_retrieval_metrics,
-    retrieval_case_metrics,
-)
-from app.entities.knowledge import (
-    KnowledgeBase,
-    KnowledgeEvaluationResult,
-    KnowledgeTask,
-)
-from app.entities.identity.user import User
-from app.infra.config.settings import Settings
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.knowledge import (
-    evaluation as evaluation_repository,
-)
-from app.schemas.knowledge import (
-    KnowledgeEvaluationResultResponse,
-    KnowledgeEvaluationRunRequest,
-    KnowledgeEvaluationSummaryResponse,
-    KnowledgeGraphEvaluationExpectation,
-    KnowledgeQueryRequest,
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
 )
 from app.domain.knowledge.evaluation import (
     EVALUATION_SIMILARITY_SEMANTICS,
     get_evaluation_task,
     graph_evaluation_metrics,
+)
+from app.domain.knowledge.evaluation.metrics import (
+    RetrievalCaseMetrics,
+    aggregate_retrieval_metrics,
+    retrieval_case_metrics,
 )
 from app.domain.knowledge.tasks.orchestration import (
     task_error_message,
@@ -47,11 +31,27 @@ from app.domain.knowledge.tasks.runner import (
     TASK_LEASE_SECONDS,
     ensure_knowledge_task_lease,
 )
-
-
-from app.domain.knowledge.documents.parsing import (
-    KnowledgePipelineError,
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.knowledge import (
+    KnowledgeBase,
+    KnowledgeEvaluationResult,
+    KnowledgeTask,
 )
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import (
+    evaluation as evaluation_repository,
+)
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.schemas.knowledge import (
+    KnowledgeEvaluationResultResponse,
+    KnowledgeEvaluationRunRequest,
+    KnowledgeEvaluationSummaryResponse,
+    KnowledgeGraphEvaluationExpectation,
+    KnowledgeQueryRequest,
+)
+
+
 async def _persist_owned_progress(
     db: AsyncSession,
     task: KnowledgeTask,

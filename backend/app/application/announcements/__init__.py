@@ -16,6 +16,7 @@ from app.application.announcements.service import (
 )
 
 __all__ = [
+    "MessageStreamUpdate",
     "archive_announcement",
     "create_announcement",
     "get_message_summary",
@@ -24,8 +25,7 @@ __all__ = [
     "mark_all_messages_read",
     "mark_message_read",
     "publish_announcement",
-    "update_announcement",
-    "MessageStreamUpdate",
     "stream_message_updates",
+    "update_announcement",
     "validate_message_workspace_access",
 ]

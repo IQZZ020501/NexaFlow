@@ -15,6 +15,47 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.knowledge.graph import service as knowledge_graph_application
+from app.domain.agents.runtime.usage import merge_usage
+from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.graph.extraction import (
+    MAX_EXTRACTED_CLAIMS,
+    MAX_EXTRACTED_ENTITIES,
+    EntityLexicon,
+    EntityLexiconEntry,
+    ExtractedClaim,
+    ExtractedEntity,
+    ExtractionChunk,
+    GraphExtractionBatch,
+    GraphExtractionResult,
+    build_entity_lexicon,
+    deduplicate_extracted_entities,
+    extract_graph_batch,
+    validate_extraction_batch,
+)
+from app.domain.knowledge.graph.resolution import (
+    choose_automatic_entity_match,
+    claim_fingerprint,
+    initial_claim_status,
+)
+from app.domain.knowledge.graph.revisions import (
+    create_revision,
+    publish_revision,
+    stage_revision_change,
+)
+from app.domain.knowledge.graph.schema import (
+    GraphSchemaDefinition,
+    default_graph_schema,
+    graph_schema_hash,
+    normalize_graph_name,
+)
+from app.domain.knowledge.graph.services import create_graph_schema
+from app.domain.knowledge.tasks.orchestration import resolve_embedding_model
+from app.domain.knowledge.tasks.runner import (
+    ensure_knowledge_task_lease,
+    persist_owned_knowledge_task_progress,
+)
+from app.entities.defaults import utc_now
+from app.entities.identity.user import User
 from app.entities.knowledge import (
     DOCUMENT_INDEXED_STATUS,
     GRAPH_RESUME_REVISION_ID_OPTION,
@@ -38,59 +79,18 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
-from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.infra.observability.errors import classify_error, log_error
-from app.infra.observability.logger import get_logger, log_event
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.knowledge import references as reference_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
 from app.ports.vector_store import (
     GraphProfileVector,
     delete_graph_profile_collection,
     upsert_graph_profile_vectors,
 )
 from app.schemas.knowledge.graph import KnowledgeGraphImportRecord
-from app.domain.agents.runtime.usage import merge_usage
-from app.domain.audit.services import record_audit_log
-from app.domain.knowledge.tasks.orchestration import resolve_embedding_model
-from app.domain.knowledge.tasks.runner import (
-    ensure_knowledge_task_lease,
-    persist_owned_knowledge_task_progress,
-)
-from app.domain.knowledge.graph.extraction import (
-    EntityLexiconEntry,
-    ExtractedClaim,
-    ExtractedEntity,
-    ExtractionChunk,
-    GraphExtractionBatch,
-    GraphExtractionResult,
-    MAX_EXTRACTED_CLAIMS,
-    MAX_EXTRACTED_ENTITIES,
-    EntityLexicon,
-    build_entity_lexicon,
-    deduplicate_extracted_entities,
-    extract_graph_batch,
-    validate_extraction_batch,
-)
-from app.domain.knowledge.graph.resolution import (
-    claim_fingerprint,
-    choose_automatic_entity_match,
-    initial_claim_status,
-)
-from app.domain.knowledge.graph.revisions import (
-    create_revision,
-    publish_revision,
-    stage_revision_change,
-)
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    default_graph_schema,
-    graph_schema_hash,
-    normalize_graph_name,
-)
-from app.domain.knowledge.graph.services import create_graph_schema
 
 GRAPH_BUILD_STAGES = (
     "extract",
@@ -105,6 +105,7 @@ GRAPH_BUILD_STAGES = (
 from app.domain.knowledge.documents.parsing import (
     KnowledgePipelineError,
 )
+
 logger = get_logger(__name__)
 
 
@@ -331,7 +332,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if value is None:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
     except ValueError as exc:
         raise ValueError("Graph claim timestamp is invalid.") from exc
 

@@ -1,7 +1,6 @@
 import asyncio
 import json
 from contextlib import suppress
-from typing import Any
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError

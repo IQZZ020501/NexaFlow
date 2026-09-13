@@ -5,10 +5,10 @@ surface): everything about building the agent's tools and converting runs to
 responses lives here, separate from run orchestration.
 """
 
-from contextvars import ContextVar
 import hashlib
 import json
 import re
+from contextvars import ContextVar
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -16,10 +16,28 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, ValidationError
 
 from app.application.knowledge.retrieval.service import retrieve_knowledge_base
-from app.entities.runs import AgentRun
-from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import ToolSnapshot
+from app.domain.agents.models import agent_run_display_status
+from app.domain.agents.runtime import (
+    AgentRunnerError,
+    AgentToolResult,
+    create_agent_tool,
+)
+from app.domain.agents.runtime.graph import clean_model_text
+from app.domain.agents.service import accessible_agent_knowledge_bases
+from app.domain.tools.catalog.service import (
+    mcp_function_name as catalog_mcp_function_name,
+)
+from app.domain.tools.mcp.service import (
+    ResolvedMcpTool,
+    effective_mcp_tool_policy_mode,
+    mcp_server_connection,
+    mcp_tool_definition_hash,
+    resolve_mcp_tools,
+)
 from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
 from app.ports.llm import (
@@ -29,22 +47,6 @@ from app.ports.llm import (
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.schemas.agents.contracts import AgentRunResponse, AgentRunSourceResponse
 from app.schemas.knowledge import KnowledgeQueryRequest
-from app.domain.agents.runtime import (
-    AgentRunnerError,
-    AgentToolResult,
-    create_agent_tool,
-)
-from app.domain.agents.service import accessible_agent_knowledge_bases
-from app.domain.agents.models import agent_run_display_status
-from app.domain.agents.runtime.graph import clean_model_text
-from app.domain.tools.catalog.service import mcp_function_name as catalog_mcp_function_name
-from app.domain.tools.mcp.service import (
-    ResolvedMcpTool,
-    effective_mcp_tool_policy_mode,
-    mcp_server_connection,
-    mcp_tool_definition_hash,
-    resolve_mcp_tools,
-)
 
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
 MAX_KNOWLEDGE_CONTENT_CHARS = 12_000

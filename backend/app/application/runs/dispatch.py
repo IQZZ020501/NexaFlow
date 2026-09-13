@@ -1,9 +1,8 @@
+from app.application.agents.runs.children import reconcile_workflow_agent_children
 from app.application.agents.runs.executor import (
-    RUN_FINISHED,
     run_durable_legacy_agent_run,
     run_durable_unified_agent_run,
 )
-from app.application.agents.runs.children import reconcile_workflow_agent_children
 from app.application.workflows.runs.executor import run_durable_workflow_run
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.workflows import repository as workflow_repository
@@ -51,7 +50,6 @@ async def enqueue_agent_run(
     generation: str = "legacy",
 ) -> None:
     """Publish an agent run by stable task name; eager mode runs it inline."""
-    import asyncio
     import logging
     import os
 

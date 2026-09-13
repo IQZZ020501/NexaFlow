@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, JSON, String, Text
+from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infra.db.base import Base
 from app.entities.defaults import new_id, utc_now
+from app.infra.db.base import Base
 
 
 class SystemLog(Base):

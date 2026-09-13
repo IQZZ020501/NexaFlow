@@ -1,44 +1,27 @@
 import asyncio
-from contextlib import suppress
-from dataclasses import dataclass, replace as dataclass_replace
-from datetime import UTC, datetime, timedelta
 import json
 import traceback
+from contextlib import suppress
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.application.agents.runs.children import (
+    ensure_workflow_agent_child,
+    preflight_workflow_agent_snapshots,
+)
 from app.application.agents.runs.executor import (
     RUN_BUSY,
     RUN_FINISHED,
     maintain_agent_run_lease,
 )
-from app.application.agents.runs.children import (
-    ensure_workflow_agent_child,
-    preflight_workflow_agent_snapshots,
+from app.application.workflows.nodes.executor import (
+    WorkflowNodeScope,
+    execute_workflow_node,
 )
-from app.application.workflows.nodes.executor import WorkflowNodeScope, execute_workflow_node
 from app.application.workflows.tools.runtime import WorkflowToolRuntime
 from app.application.workspaces.service import build_workspace_context
-from app.entities.runs import AgentRun
-from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import ToolSnapshot
-from app.entities.identity.user import User
-from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
-from app.infra.agents.live_stream import AgentLiveStreamPublisher
-from app.infra.config.settings import Settings
-from app.infra.observability.errors import classify_error
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.db.session import get_session_factory
-from app.infra.observability.system_log import record_system_log
-from app.ports.llm import (
-    ModelProviderError,
-    ModelProviderTimeoutError,
-)
-from app.domain.models.registered import RegisteredModel
-from app.infra.db.repositories.models.registry import get_registered_model_by_id
-from app.schemas.workflows.contracts import LlmNodeConfig, RerankerNodeConfig, WorkflowGraph
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -55,18 +38,43 @@ from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
+from app.domain.models.registered import RegisteredModel
 from app.domain.tools.runtime import tool_snapshot_payload
+from app.domain.workflows.resources import (
+    load_workflow_agent_snapshots,
+    load_workflow_resource_snapshot,
+)
 from app.domain.workflows.runtime.engine import (
     NodeTransition,
+    WorkflowChildRequired,
     WorkflowEngine,
     WorkflowEngineError,
     WorkflowEngineState,
     WorkflowInputRequired,
-    WorkflowChildRequired,
 )
-from app.domain.workflows.resources import (
-    load_workflow_agent_snapshots,
-    load_workflow_resource_snapshot,
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolSnapshot
+from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
+from app.infra.agents.live_stream import AgentLiveStreamPublisher
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.models.registry import get_registered_model_by_id
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
+from app.infra.observability.errors import classify_error
+from app.infra.observability.system_log import record_system_log
+from app.ports.llm import (
+    ModelProviderError,
+    ModelProviderTimeoutError,
+)
+from app.schemas.workflows.contracts import (
+    LlmNodeConfig,
+    RerankerNodeConfig,
+    WorkflowGraph,
 )
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024

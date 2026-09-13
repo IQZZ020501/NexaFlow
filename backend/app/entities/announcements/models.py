@@ -3,7 +3,6 @@ from datetime import datetime
 
 from app.entities.defaults import new_id, utc_now
 
-
 ANNOUNCEMENT_SCOPES = {"global", "workspace"}
 ANNOUNCEMENT_SEVERITIES = {"info", "warning", "critical"}
 ANNOUNCEMENT_STATUSES = {"draft", "published", "archived"}

@@ -11,7 +11,6 @@ from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
 from app.schemas.artifacts import ArtifactDownloadRequest
 
-
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 

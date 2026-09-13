@@ -4,8 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infra.config.settings import Settings
-from app.infra.db.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
@@ -21,6 +19,8 @@ from app.application.knowledge.documents.service import (
     require_knowledge_base_permission,
     set_knowledge_document_active,
 )
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.schemas.knowledge import (
     KnowledgeDocumentResponse,
     KnowledgeDocumentStatusUpdateRequest,

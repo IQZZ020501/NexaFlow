@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from functools import cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.domain.models.registered import RegisteredModel

@@ -3,7 +3,6 @@
 from collections.abc import Mapping
 from typing import Any
 
-
 _NUMERIC_KEYS = (
     "model_calls",
     "reported_model_calls",

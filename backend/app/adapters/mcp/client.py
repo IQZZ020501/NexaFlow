@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlparse
 
 import httpcore2
@@ -20,20 +20,18 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from app.infra.config.settings import Settings
-from app.infra.observability.errors import ExternalServiceError, log_error
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.tools.mcp_stdio import (
+    McpStdioConfigError,
+    validate_mcp_stdio_config_runtime,
+)
 from app.ports.mcp import (
     MAX_MCP_TOOL_PAGES,
     McpClientError,
     McpConnection,
     McpDiscovery,
-    McpTransport,
     normalize_mcp_url,
-)
-from app.infra.observability.logger import get_logger, log_event
-from app.infra.tools.mcp_stdio import (
-    McpStdioConfig,
-    McpStdioConfigError,
-    validate_mcp_stdio_config_runtime,
 )
 
 logger = get_logger(__name__)
@@ -102,26 +100,6 @@ def _pinned_http_transport(
     # internally and is covered by the pinned-connection regression test.
     transport._pool._network_backend = _PinnedNetworkBackend(destination)
     return transport
-
-
-def normalize_mcp_url(value: str, *, preserve_trailing_slash: bool = False) -> str:
-    stripped = value.strip()
-    url = stripped if preserve_trailing_slash else stripped.rstrip("/")
-    parsed = urlparse(url)
-    try:
-        parsed.port
-    except ValueError as exc:
-        raise McpClientError("Invalid MCP server URL.") from exc
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username
-        or parsed.password
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise McpClientError("Invalid MCP server URL.")
-    return url
 
 
 def is_private_address(value: str) -> bool:
@@ -248,9 +226,13 @@ async def mcp_client(
                         validate_mcp_stdio_config_runtime(config)
                     except McpStdioConfigError as exc:
                         raise McpClientError(str(exc)) from exc
-                    errlog = stack.enter_context(
-                        open(os.devnull, "w", encoding="utf-8")
+                    errlog = await asyncio.to_thread(
+                        open,
+                        os.devnull,
+                        "w",
+                        encoding="utf-8",
                     )
+                    stack.callback(errlog.close)
                     transport = stdio_client(
                         StdioServerParameters(
                             command=config.command,
@@ -328,7 +310,7 @@ async def discover_mcp_tools(
                         ],
                         "input_schema": input_schema,
                         "annotations": (
-                            getattr(tool, "annotations").model_dump(
+                            tool.annotations.model_dump(
                                 mode="json",
                                 by_alias=True,
                                 exclude_none=True,

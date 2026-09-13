@@ -3,7 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.agent_skills.models import (
     AgentSkill as AgentSkillOrm,
+)
+from app.domain.agent_skills.models import (
     AgentSkillBinding as AgentSkillBindingOrm,
+)
+from app.domain.agent_skills.models import (
     AgentSkillVersion as AgentSkillVersionOrm,
 )
 from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm

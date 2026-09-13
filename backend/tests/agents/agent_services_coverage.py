@@ -9,40 +9,33 @@ Plain Python script suite (no pytest).  Failure = exception or failed assertion.
 import asyncio
 import dataclasses
 import json
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
+from typing import ClassVar
 
 from fastapi import HTTPException
 
-# Import support FIRST: it configures the environment (in-memory DB, eager
-# Celery, JWT keys) before any app module is imported.
-from tests.support import (  # noqa: F401
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    settings as test_settings,
-    test_client,
-)
-
-from app.domain.models.registered import RegisteredModel
 from app.adapters.mcp.client import McpDiscovery
+from app.application.agents.runs.executor import RUN_BUSY
+from app.domain.agents import service as agent_services
+from app.domain.agents.access import permissions as agent_permissions
+from app.domain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
+from app.domain.models.registered import RegisteredModel
+from app.domain.tools.mcp import service as mcp_services
 from app.entities.agents import (
     Agent,
     AgentApiCredential,
     AgentToolCall,
 )
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
 from app.entities.runs import (
     AgentRun,
-    AgentRunEvent,
 )
-from app.entities.identity.user import User
-from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import repository as kb_repository
 from app.infra.db.session import get_session_factory
@@ -52,12 +45,20 @@ from app.schemas.agents.contracts import (
     AgentMcpToolRef,
     AgentUpdateRequest,
 )
-from app.domain.agents.access import permissions as agent_permissions
-from app.domain.agents import service as agent_services
-from app.domain.agents.models import AGENT_RUN_UNIFIED_QUEUED_STATUS
-from app.domain.tools.mcp import service as mcp_services
 from app.tasks.agents import jobs as agent_tasks
-from app.application.agents.runs.executor import RUN_BUSY
+
+# Import support FIRST: it configures the environment (in-memory DB, eager
+# Celery, JWT keys) before any app module is imported.
+from tests.support import (  # noqa: F401
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 MEMBER_PASSWORD = "AgentCoverage@12345."
 
@@ -77,7 +78,7 @@ def mcp_url(workspace_id: str, suffix: str = "") -> str:
 class ModelHandler(BaseHTTPRequestHandler):
     """Minimal chat-completions server used by eager agent run execution."""
 
-    calls: list[dict] = []
+    calls: ClassVar[list[dict]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
@@ -432,7 +433,6 @@ async def exercise_services_http_paths(
                 db, created_agent, member)
             == "view"
         )
-        denied = await agent_repository.get_agent_by_id(db, created.id)
         denied_agent = Agent(
             id=created.id,
             workspace_id=workspace_id,
@@ -1079,7 +1079,7 @@ async def exercise_repository_runs(
                 status="succeeded", created_at=t3,
             ),
         )
-        r4 = await agent_repository.create_agent_run(
+        _r4 = await agent_repository.create_agent_run(
             db,
             _run_entity(
                 workspace_id, agent_id, admin_id, "conv-api",
@@ -1578,7 +1578,7 @@ async def exercise_repository_tool_calls(
         assert duplicate.id == first.id
         await db.commit()
 
-        second = await agent_repository.create_agent_tool_call(
+        _second = await agent_repository.create_agent_tool_call(
             db, tool_entity(call_id="call-2")
         )
         await db.commit()
@@ -1796,7 +1796,6 @@ async def exercise_repository_workspace_deletion(workspace_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def exercise_tasks() -> None:
-    from celery.exceptions import Retry as CeleryRetry
 
     original_configure = agent_tasks.configure_task_worker
     original_run_durable = agent_tasks.run_durable_application_run
@@ -1927,8 +1926,9 @@ def exercise_tasks() -> None:
         non_eager = dataclasses.replace(
             eager_settings, celery_task_always_eager=False
         )
-        from app.infra.queue.celery import celery_app
         from unittest.mock import patch
+
+        from app.infra.queue.celery import celery_app
 
         legacy_queued: list[dict] = []
         unified_queued: list[dict] = []

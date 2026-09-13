@@ -47,7 +47,15 @@ async def list_logs(
     Returns:
         list[SystemLogResponse]: The matching system logs.
     """
-    filters = dict(level=level, event=event, status_code=status_code, user_id=user_id, search=search, from_date=from_date, to_date=to_date)
+    filters = {
+        "level": level,
+        "event": event,
+        "status_code": status_code,
+        "user_id": user_id,
+        "search": search,
+        "from_date": from_date,
+        "to_date": to_date,
+    }
     response.headers["X-Total-Count"] = str(await count_system_logs(db, **filters))
     return await list_system_logs(
         db,

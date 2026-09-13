@@ -7,7 +7,6 @@ from typing import Any
 
 from app.entities.agent_skills import AgentSkillSnapshot, AgentSkillVersion
 
-
 AGENT_SKILL_SCHEMA_VERSION = 1
 
 

@@ -12,9 +12,9 @@ from collections.abc import Sequence
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "202609110001"
 down_revision: str | None = "202609100001"
@@ -101,7 +101,10 @@ def _legacy_version_id(
     through the live catalog builder used different descriptions, so both
     legacy definition hashes are candidates.
     """
-    from app.domain.tools.catalog.service import canonical_definition_hash, stable_catalog_id
+    from app.domain.tools.catalog.service import (
+        canonical_definition_hash,
+        stable_catalog_id,
+    )
 
     input_schema = {
         "type": "object",

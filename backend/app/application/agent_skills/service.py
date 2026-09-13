@@ -53,7 +53,6 @@ from app.schemas.agent_skills.contracts import (
 )
 from app.schemas.identity.contracts import user_to_response
 
-
 MAX_AGENT_SKILLS = 4
 
 

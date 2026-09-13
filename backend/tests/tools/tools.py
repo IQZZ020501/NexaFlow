@@ -13,14 +13,6 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.support import (
-    activate_admin,
-    auth_headers,
-    create_active_user,
-    settings as test_settings,
-    test_client,
-)
-
 import sqlalchemy as sa
 from sqlalchemy import (
     CheckConstraint,
@@ -32,7 +24,15 @@ from sqlalchemy import (
 )
 
 from app.infra.db.session import get_session_factory
-
+from tests.support import (
+    activate_admin,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 EXPECTED_COLUMNS = {
     "ToolSource": (
@@ -1076,8 +1076,8 @@ def test_stable_catalog_contract_matches_legacy_mcp_identity() -> None:
 
 
 def test_mcp_network_policy_migration_is_reversible_and_defaults_legacy() -> None:
-    from app.entities.tools import McpServer as McpServerEntity
     from app.domain.tools.models import McpServer
+    from app.entities.tools import McpServer as McpServerEntity
 
     migration = load_network_policy_migration()
     assert migration.revision == "202608160004"
@@ -1164,8 +1164,8 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
     from mcp.types import Tool as McpTool
 
     from app.application.agents.tools.builder import mcp_function_name
-    from app.entities.tools import McpServer
     from app.domain.tools.mcp.service import ResolvedMcpTool
+    from app.entities.tools import McpServer
 
     resolved = ResolvedMcpTool(
         server=McpServer(id="server-1", workspace_id="workspace-1"),
@@ -1192,8 +1192,8 @@ def test_resolved_mcp_tool_preserves_catalog_function_name() -> None:
 
 
 def test_disabled_mcp_policy_wins_over_definition_drift() -> None:
-    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
     from app.domain.tools.catalog.service import McpCatalogLeaf, legacy_mcp_policy_mode
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
     leaf = McpCatalogLeaf(
         source=ToolSource(id="source-1", workspace_id="workspace-1", kind="mcp"),
@@ -1477,8 +1477,8 @@ def test_agent_publication_backfill_does_not_restore_membership_revoked_use() ->
 
 
 def test_entities_and_orm_columns_match_exactly() -> None:
-    from app.entities import tools as entities
     from app.domain.tools import models
+    from app.entities import tools as entities
 
     expected_tables = {
         "ToolSource": "tool_sources",
@@ -1626,7 +1626,7 @@ def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
 
 def test_tool_versions_are_immutable_at_repository_boundary() -> None:
     from app.entities.tools import ToolVersion
-    from app.infra.db.repositories.tools import repository as repository
+    from app.infra.db.repositories.tools import repository
 
     version = ToolVersion(id="version-1", workspace_id="workspace-1", tool_id="tool-1")
     db = SimpleNamespace(
@@ -1683,11 +1683,11 @@ def test_migration_reference_scanner_keeps_historical_mcp_tuples() -> None:
 
 
 async def assert_workspace_system_catalog(workspace_id: str) -> None:
-    from app.infra.db.repositories.tools import repository as repository
     from app.domain.tools.catalog.service import (
         CURRENT_TIME_TOOL_CODE,
         build_artifact_tool,
     )
+    from app.infra.db.repositories.tools import repository
 
     async with get_session_factory()() as db:
         sources = await repository.list_tool_sources(db, workspace_id)
@@ -1813,7 +1813,7 @@ def test_generated_artifact_link_serves_static_html() -> None:
     from app.infra.db.session import get_session_factory
 
     with test_client() as client:
-        _admin_token, workspace_id = activate_admin(client)
+        admin_token, workspace_id = activate_admin(client)
 
         async def create():
             async with get_session_factory()() as db:
@@ -1879,8 +1879,8 @@ def test_generated_artifact_downloads_common_formats() -> None:
     from zipfile import ZIP_DEFLATED, ZipFile
 
     from app.application.artifacts.service import create_generated_artifact
-    from app.infra.db.session import get_session_factory
     from app.domain.artifacts.services import artifact_format_from_filename
+    from app.infra.db.session import get_session_factory
 
     def office_bytes(root: str) -> bytes:
         buffer = BytesIO()
@@ -1925,7 +1925,7 @@ def test_generated_artifact_downloads_common_formats() -> None:
             raise AssertionError(f"Unsafe artifact filename accepted: {filename}")
 
     with test_client() as client:
-        _admin_token, workspace_id = activate_admin(client)
+        admin_token, workspace_id = activate_admin(client)
 
         async def create():
             async with get_session_factory()() as db:
@@ -1968,9 +1968,11 @@ def test_private_catalog_filters_before_pagination_for_every_role() -> None:
         require_tool_use,
     )
     from app.entities.workspaces.resource_permissions import ResourcePermission
-    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
-    from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
+    from app.infra.db.repositories.workspaces import (
+        resource_permissions as permission_repository,
+    )
 
     with test_client() as client:
         admin_token, workspace_id = activate_admin(client)
@@ -2222,9 +2224,11 @@ def test_private_tool_permission_lifecycle_preserves_bindings() -> None:
     from app.entities.tools import ApplicationToolBinding
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.audit import repository as audit_repository
-    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
-    from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
+    from app.infra.db.repositories.workspaces import (
+        resource_permissions as permission_repository,
+    )
 
     async def expect_status(expected_status: int, operation) -> None:
         try:
@@ -2636,18 +2640,18 @@ def test_mcp_resolution_requires_current_binding_owner_use_permission() -> None:
     from fastapi import HTTPException
 
     from app.domain.models.registered import RegisteredModel
-    from app.entities.agents import Agent
-    from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
-    from app.infra.db.repositories.agents import repository as agent_repository
-    from app.infra.db.repositories.tools import mcp as mcp_repository
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
-    from app.domain.tools.catalog.service import reconcile_mcp_discovery
     from app.domain.tools.access.permissions import (
         revoke_tool_permission,
         upsert_tool_permission,
     )
+    from app.domain.tools.catalog.service import reconcile_mcp_discovery
     from app.domain.tools.mcp.service import resolve_mcp_tools
+    from app.entities.agents import Agent
+    from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import mcp as mcp_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
 
     async def expect_status(expected_status: int, operation) -> None:
         try:
@@ -2842,6 +2846,7 @@ async def assert_mcp_server_deletion_preserves_tool_history(
     workspace_id: str,
 ) -> None:
     from app.domain.models.registered import RegisteredModel
+    from app.domain.tools.mcp import service as tool_services
     from app.entities.agents import Agent
     from app.entities.tools import (
         ApplicationToolBinding,
@@ -2853,10 +2858,9 @@ async def assert_mcp_server_deletion_preserves_tool_history(
         ToolVersion,
     )
     from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
-    from app.domain.tools.mcp import service as tool_services
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -3045,15 +3049,15 @@ async def assert_mcp_server_deletion_preserves_tool_history(
 async def assert_mcp_discovery_materializes_first_leaf(
     workspace_id: str,
 ) -> None:
-    from app.entities.tools import McpServer, Tool, ToolSource
-    from app.infra.db.repositories.tools import mcp as mcp_repository
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
     from app.domain.tools.catalog.service import (
         list_mcp_catalog_leaves,
         mcp_function_name_candidates,
         reconcile_mcp_discovery,
     )
+    from app.entities.tools import McpServer, Tool, ToolSource
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import mcp as mcp_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -3275,22 +3279,21 @@ async def assert_tool_policy_revision_compare_and_swap(workspace_id: str) -> Non
 async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
     from datetime import timedelta
 
-    from app.application.tools.runtime.service import (
-        execute_tool_invocation,
-        list_recoverable_tool_test_invocation_ids,
-        queue_tool_invocation,
-    )
-    from app.infra.config.settings import Settings
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
     from app.application.tools.runtime.contracts import (
         ToolAdapterBusy,
         ToolInvocationContext,
         ToolRuntimeResult,
     )
+    from app.application.tools.runtime.service import (
+        execute_tool_invocation,
+        list_recoverable_tool_test_invocation_ids,
+        queue_tool_invocation,
+    )
     from app.domain.tools.runtime import build_tool_snapshot
-    from app.application.tools.runtime.service import validate_tool_output
+    from app.entities.defaults import utc_now
+    from app.infra.config.settings import Settings
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -3681,18 +3684,24 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
 async def assert_python_tool_lifecycle(workspace_id: str) -> None:
     from datetime import timedelta
 
-    from app.application.tools.runtime.service import execute_tool_invocation, queue_tool_invocation
-    from app.infra.config.settings import Settings
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
-    from app.application.tools.runtime.contracts import ToolInvocationContext, ToolRuntimeResult
+    from app.application.tools.runtime.contracts import (
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
+    from app.application.tools.runtime.service import (
+        execute_tool_invocation,
+        queue_tool_invocation,
+    )
     from app.domain.tools.python.service import (
         build_python_test_snapshot,
         create_python_tool,
         publish_python_tool,
         update_python_tool_draft,
     )
+    from app.entities.defaults import utc_now
+    from app.infra.config.settings import Settings
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
 
     input_schema = {
         "type": "object",
@@ -3813,6 +3822,10 @@ async def assert_tool_runtime_edge_branches(
     from datetime import timedelta
     from unittest.mock import patch
 
+    from app.application.tools.runtime.contracts import (
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
     from app.application.tools.runtime.service import (
         ToolInvocationBusy,
         ToolInvocationConflict,
@@ -3820,19 +3833,18 @@ async def assert_tool_runtime_edge_branches(
         preflight_tool_snapshot,
         queue_tool_invocation,
     )
-    from app.entities.tools import McpServer, Tool, ToolPolicy, ToolSource, ToolVersion
-    from app.infra.config.settings import Settings
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.tools import mcp as mcp_repository
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
-    from app.application.tools.runtime.contracts import ToolInvocationContext, ToolRuntimeResult
     from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
     from app.domain.tools.runtime import (
         TOOL_APPROVAL_EACH_CALL,
         build_tool_snapshot,
         tool_snapshot_payload,
     )
+    from app.entities.defaults import utc_now
+    from app.entities.tools import McpServer, Tool, ToolPolicy, ToolSource, ToolVersion
+    from app.infra.config.settings import Settings
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import mcp as mcp_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
 
     settings = Settings.from_env(require_bootstrap=False)
 
@@ -4554,7 +4566,7 @@ async def assert_tool_runtime_edge_branches(
             actor_id,
         )
         mcp_server_id = mcp_server.id
-        mcp_source_id = mcp_source.id
+        _mcp_source_id = mcp_source.id
         await db.commit()
     async with get_session_factory()() as db:
         mcp_server = await mcp_repository.get_mcp_server_by_id(db, mcp_server_id)
@@ -4639,8 +4651,8 @@ async def assert_mcp_source_management(workspace_id: str) -> None:
         update_policy,
     )
     from app.infra.config.settings import Settings
-    from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
     from app.schemas.tools.mcp import McpServerCreateRequest
 
     settings = Settings.from_env(require_bootstrap=False)
@@ -4780,7 +4792,10 @@ async def assert_tool_management_branches(
     )
     from app.infra.config.settings import Settings
     from app.infra.db.repositories.identity import users as user_repository
-    from app.schemas.tools.contracts import PythonToolCreateRequest, PythonToolDraftUpdateRequest
+    from app.schemas.tools.contracts import (
+        PythonToolCreateRequest,
+        PythonToolDraftUpdateRequest,
+    )
 
     settings = Settings.from_env(require_bootstrap=False)
     input_schema = {
@@ -4928,26 +4943,25 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from datetime import datetime, timedelta
     from unittest.mock import AsyncMock, patch
 
-
+    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.application.tools.runtime.service import ToolInvocationBusy
     from app.application.workflows.tools.runtime import (
         WorkflowToolRuntime,
         workflow_tool_invocation_identity,
     )
     from app.domain.models.registered import RegisteredModel
-    from app.entities.agents import Agent as AgentEntity
-    from app.entities.runs import AgentRun
-    from app.entities.workflows import WorkflowRunDetail
-    from app.infra.config.settings import Settings
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.agents import repository as agent_repository
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
-    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.domain.tools.runtime import (
         TOOL_APPROVAL_EACH_CALL,
         build_tool_snapshot,
     )
+    from app.entities.agents import Agent as AgentEntity
+    from app.entities.defaults import utc_now
+    from app.entities.runs import AgentRun
+    from app.entities.workflows import WorkflowRunDetail
+    from app.infra.config.settings import Settings
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.sandbox.client import WorkflowSandboxResult
 
 
@@ -5071,7 +5085,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     detail = WorkflowRunDetail(
         id="wf-edge-detail",
         run_id=run.id,
-        deadline_at=datetime.now() + timedelta(seconds=30),
+        deadline_at=datetime.now(UTC) + timedelta(seconds=30),
     )
     lease_lost = asyncio.Event()
     runtime = WorkflowToolRuntime(
@@ -5377,25 +5391,28 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         PythonToolAdapter,
         build_tool_adapter,
     )
+    from app.application.tools.runtime.contracts import (
+        ToolAdapterBusy,
+        ToolInvocationContext,
+    )
+    from app.application.tools.runtime.service import validate_tool_output
+    from app.domain.tools.catalog.service import (
+        build_artifact_tool,
+        build_skill_artifact_tool,
+    )
+    from app.domain.tools.runtime import build_tool_snapshot
+    from app.entities.defaults import utc_now
     from app.entities.tools import McpServer
+    from app.infra.config.settings import Settings
+    from app.infra.db.repositories.identity import users as user_repository
+    from app.infra.db.repositories.tools import repository as tool_repository
     from app.infra.sandbox.client import (
         ArtifactSandboxResult,
         WorkflowSandboxBusyError,
         WorkflowSandboxError,
         WorkflowSandboxResult,
     )
-    from app.application.tools.runtime.service import validate_tool_output
-    from app.infra.config.settings import Settings
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.tools import repository as tool_repository
-    from app.infra.db.repositories.identity import users as user_repository
     from app.ports.mcp import McpClientError
-    from app.application.tools.runtime.contracts import ToolAdapterBusy, ToolInvocationContext
-    from app.domain.tools.catalog.service import (
-        build_artifact_tool,
-        build_skill_artifact_tool,
-    )
-    from app.domain.tools.runtime import build_tool_snapshot
 
     settings = Settings.from_env(require_bootstrap=False)
     context = ToolInvocationContext(
@@ -5517,7 +5534,9 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     assert artifact_sandbox.await_count == 1
     assert artifact_sandbox.await_args.args[2:4] == ("html", "page.html")
     assert artifact_sandbox.await_args.args[4] == ["documents"]
-    from app.application.tools.runtime.adapters._common import _redirect_legacy_artifact_path
+    from app.application.tools.runtime.adapters._common import (
+        _redirect_legacy_artifact_path,
+    )
 
     legacy_code = 'document.save("/tmp/report.docx")'
     assert _redirect_legacy_artifact_path(legacy_code, "report.docx") == (
@@ -6398,11 +6417,11 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
 
 
 def test_tool_boundaries_reject_unsafe_payloads() -> None:
-    from app.entities.tools import MAX_TOOL_SCHEMA_DEPTH, validate_tool_json_schema
     from app.domain.tools.runtime import (
         build_tool_snapshot,
         validate_tool_arguments,
     )
+    from app.entities.tools import MAX_TOOL_SCHEMA_DEPTH, validate_tool_json_schema
 
     # SEC-010: prototype-pollution keys, over-deep JSON, NaN/Infinity and
     # non-string keys are rejected at the schema/JSON boundaries.
@@ -6448,11 +6467,11 @@ def test_tool_boundaries_reject_unsafe_payloads() -> None:
     expect_schema_error(deep_schema, "too deeply nested")
 
     with test_client() as client:
-        admin_token, workspace_id = activate_admin(client)
+        _admin_token, workspace_id = activate_admin(client)
 
         async def run() -> None:
-            from app.infra.db.repositories.tools import repository as tool_repository
             from app.infra.db.repositories.identity import users as user_repository
+            from app.infra.db.repositories.tools import repository as tool_repository
 
             async with get_session_factory()() as db:
                 actor = await user_repository.get_active_user_by_username(

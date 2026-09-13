@@ -10,17 +10,17 @@ from app.adapters.llm.credentials import (
     encrypt_credential_secrets,
     legacy_credential_config,
 )
-from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.providers import PROVIDER_CATALOG
+from app.domain.models.registered import RegisteredModel
+from app.entities.defaults import utc_now
+from app.infra.config.settings import Settings
+from app.infra.security.secrets import secret_hint
 from app.ports.llm import (
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
     test_model_connection,
 )
-from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
-from app.infra.security.secrets import secret_hint
 
 ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"

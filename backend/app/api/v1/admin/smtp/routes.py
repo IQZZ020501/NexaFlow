@@ -9,8 +9,11 @@ from app.application.email.smtp import (
     test_smtp_settings,
     update_smtp_settings,
 )
-from app.schemas.email.smtp import SmtpSettingsResponse, SmtpSettingsUpdateRequest, SmtpTestRequest
-
+from app.schemas.email.smtp import (
+    SmtpSettingsResponse,
+    SmtpSettingsUpdateRequest,
+    SmtpTestRequest,
+)
 
 router = APIRouter(prefix="/smtp", tags=["smtp"])
 

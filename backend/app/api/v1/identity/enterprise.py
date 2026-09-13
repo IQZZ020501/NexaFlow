@@ -2,7 +2,16 @@ import secrets
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,12 +29,12 @@ from app.application.identity.enterprise import (
 )
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
     enforce_enterprise_login_rate_limit,
 )
-from app.infra.db.session import get_db
 from app.schemas.identity.enterprise import (
     EnterpriseConnectionResponse,
     EnterpriseConnectionUpdateRequest,

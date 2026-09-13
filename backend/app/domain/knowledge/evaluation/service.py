@@ -1,6 +1,15 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.bases.permissions import require_knowledge_base_active
+from app.domain.knowledge.graph.schema import normalize_graph_name
+from app.domain.knowledge.tasks.orchestration import (
+    create_knowledge_task,
+    task_to_response,
+)
+from app.entities.defaults import new_id
+from app.entities.identity.user import User
 from app.entities.knowledge import (
     TASK_EVALUATE,
     TASK_FAILED_STATUS,
@@ -10,12 +19,10 @@ from app.entities.knowledge import (
     KnowledgeEvaluationExpectation,
     KnowledgeTask,
 )
-from app.entities.identity.user import User
-from app.entities.defaults import new_id
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import (
     evaluation as evaluation_repository,
 )
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.schemas.knowledge import (
     KnowledgeEvaluationCaseCreateRequest,
     KnowledgeEvaluationCaseResponse,
@@ -25,13 +32,6 @@ from app.schemas.knowledge import (
     KnowledgeTaskResponse,
 )
 from app.schemas.knowledge.graph import KnowledgeGraphQueryResultResponse
-from app.domain.audit.services import record_audit_log
-from app.domain.knowledge.bases.permissions import require_knowledge_base_active
-from app.domain.knowledge.tasks.orchestration import (
-    create_knowledge_task,
-    task_to_response,
-)
-from app.domain.knowledge.graph.schema import normalize_graph_name
 
 EVALUATION_SIMILARITY_SEMANTICS = "normalized_cosine"
 

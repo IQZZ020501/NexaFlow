@@ -12,14 +12,16 @@ from app.domain.agent_skills.access import (
     require_agent_skill_view,
 )
 from app.domain.agent_skills.contracts import build_agent_skill_snapshot
-from app.domain.knowledge.service import get_knowledge_base, require_knowledge_base_permission
+from app.domain.knowledge.service import (
+    get_knowledge_base,
+    require_knowledge_base_permission,
+)
 from app.domain.tools.access.bindings import resolve_tool_refs_for_actor
 from app.entities.agent_skills import (
     AgentSkill,
     AgentSkillBinding,
     AgentSkillRef,
     AgentSkillSnapshot,
-    AgentSkillVersion,
 )
 from app.entities.identity.user import User
 from app.entities.tools import ToolRef
@@ -28,7 +30,6 @@ from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.db.repositories.workspaces import resource_permissions
 from app.schemas.agent_skills.contracts import AgentSkillDefinition, AgentSkillRefSchema
-
 
 MAX_AGENT_SKILLS = 4
 

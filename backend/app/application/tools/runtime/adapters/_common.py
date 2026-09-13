@@ -1,38 +1,14 @@
 """Provider adapters behind the unified Tool runtime contract."""
 
 import ast
-import json
 import re
-from typing import Any
 
-from app.application.artifacts.service import create_generated_artifact
-from app.entities.tools import McpServer, ToolSnapshot
-from app.infra.sandbox.client import (
-    WorkflowSandboxBusyError,
-    WorkflowSandboxError,
-    execute_artifact_code,
-    execute_skill_artifact,
-    execute_workflow_code,
-)
-from app.infra.config.settings import Settings
-from app.entities.defaults import APP_TIMEZONE, utc_now
-from app.infra.db.session import get_session_factory
-from app.ports.mcp import McpClientError, call_mcp_tool
 from app.application.tools.runtime.contracts import (
-    ToolAdapter,
-    ToolAdapterBusy,
-    ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.domain.artifacts.services import artifact_format_from_filename
-from app.domain.tools.mcp.service import mcp_server_connection
 
 DIRECT_ARTIFACT_CONTENT_FORMATS = frozenset(
-    "file txt md markdown html htm css csv tsv json jsonl xml yaml yml toml "
-    "ini cfg conf env py pyi ipynb java js jsx mjs cjs ts tsx c h cc cpp "
-    "cxx hpp go rs rb php swift kt kts scala sh bash zsh fish ps1 sql "
-    "graphql gql vue svelte dart lua r cs fs fsx vb gradle properties svg "
-    "tex rtf log po pot".split()
+    ["file", "txt", "md", "markdown", "html", "htm", "css", "csv", "tsv", "json", "jsonl", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "py", "pyi", "ipynb", "java", "js", "jsx", "mjs", "cjs", "ts", "tsx", "c", "h", "cc", "cpp", "cxx", "hpp", "go", "rs", "rb", "php", "swift", "kt", "kts", "scala", "sh", "bash", "zsh", "fish", "ps1", "sql", "graphql", "gql", "vue", "svelte", "dart", "lua", "r", "cs", "fs", "fsx", "vb", "gradle", "properties", "svg", "tex", "rtf", "log", "po", "pot"]
 )
 
 

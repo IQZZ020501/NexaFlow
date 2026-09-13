@@ -1,17 +1,16 @@
 """Real-process regression checks for all supported MCP transports."""
 
 import asyncio
-from dataclasses import replace
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import sys
 import tempfile
+from dataclasses import replace
+from pathlib import Path
 
 import tests.support  # noqa: F401  (sets required env before app imports)
-
 from app.adapters.mcp.client import (
     McpClientError,
     McpConnection,
@@ -20,7 +19,6 @@ from app.adapters.mcp.client import (
 )
 from app.infra.tools.mcp_stdio import McpStdioConfig, parse_mcp_stdio_config
 from tests.support import settings
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TEST_MODULE = "tests.support.mcp_test_server"

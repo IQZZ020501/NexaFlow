@@ -6,6 +6,35 @@ CRUD + model resolution), ``documents`` (documents/attachments), and
 this module so the split stays an internal detail.
 """
 
+from app.domain.knowledge.bases.permissions import (
+    RESOURCE_PERMISSIONS,
+    RESOURCE_TYPE,
+    effective_permission,
+    get_user_grant,
+    list_resource_permissions,
+    require_knowledge_base_active,
+    require_knowledge_base_permission,
+    revoke_resource_permission,
+    upsert_resource_permission,
+    validate_permission,
+)
+from app.domain.knowledge.bases.service import (
+    ACTIVE_STATUS,
+    ARCHIVED_STATUS,
+    KNOWLEDGE_BASE_STATUSES,
+    create_knowledge_base,
+    delete_knowledge_base_permanently,
+    get_default_knowledge_model,
+    get_knowledge_base,
+    get_knowledge_model,
+    knowledge_base_to_response,
+    list_knowledge_bases,
+    require_can_manage_permissions,
+    run_knowledge_model_test,
+    test_knowledge_base_models,
+    transfer_knowledge_base_owner,
+    update_knowledge_base,
+)
 from app.domain.knowledge.documents.service import (
     DEFAULT_DOCUMENT_META,
     DOCUMENT_UPLOADED_STATUS,
@@ -27,35 +56,6 @@ from app.domain.knowledge.storage.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
     purge_knowledge_base_storage,
     run_knowledge_storage_cleanup,
-)
-from app.domain.knowledge.bases.service import (
-    ACTIVE_STATUS,
-    ARCHIVED_STATUS,
-    KNOWLEDGE_BASE_STATUSES,
-    create_knowledge_base,
-    delete_knowledge_base_permanently,
-    get_default_knowledge_model,
-    get_knowledge_base,
-    get_knowledge_model,
-    knowledge_base_to_response,
-    list_knowledge_bases,
-    require_can_manage_permissions,
-    run_knowledge_model_test,
-    test_knowledge_base_models,
-    transfer_knowledge_base_owner,
-    update_knowledge_base,
-)
-from app.domain.knowledge.bases.permissions import (
-    RESOURCE_PERMISSIONS,
-    RESOURCE_TYPE,
-    effective_permission,
-    get_user_grant,
-    list_resource_permissions,
-    require_knowledge_base_active,
-    require_knowledge_base_permission,
-    revoke_resource_permission,
-    upsert_resource_permission,
-    validate_permission,
 )
 
 __all__ = [
@@ -85,10 +85,10 @@ __all__ = [
     "knowledge_base_to_response",
     "knowledge_document_path",
     "knowledge_object_storage",
+    "list_due_knowledge_storage_cleanup_ids",
     "list_knowledge_bases",
     "list_knowledge_documents",
     "list_resource_permissions",
-    "list_due_knowledge_storage_cleanup_ids",
     "purge_knowledge_base_storage",
     "require_can_manage_permissions",
     "require_knowledge_base_active",

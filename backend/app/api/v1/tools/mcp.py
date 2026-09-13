@@ -8,8 +8,6 @@ from app.api.deps import (
     get_settings,
     get_workspace_context_from_path,
 )
-from app.infra.config.settings import Settings
-from app.infra.db.session import get_db
 from app.application.tools import (
     create_mcp_server,
     delete_mcp_server,
@@ -19,6 +17,8 @@ from app.application.tools import (
     set_mcp_server_enabled,
     set_mcp_tool_policy,
 )
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
 from app.schemas.tools.mcp import (
     McpServerCreateRequest,
     McpServerResponse,

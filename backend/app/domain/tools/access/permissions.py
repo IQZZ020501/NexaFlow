@@ -6,10 +6,10 @@ from typing import Literal, cast
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.tools import Tool, ToolAccess, ToolGrant, effective_tool_access
-from app.entities.identity.user import User
 from app.domain.audit.services import record_audit_log
+from app.entities.identity.user import User
+from app.entities.tools import Tool, ToolAccess, ToolGrant, effective_tool_access
+from app.entities.workspaces.resource_permissions import ResourcePermission
 
 ToolPermissionLabel = Literal["owner", "admin", "view", "use"]
 TOOL_RESOURCE_TYPE = "tool"
@@ -113,8 +113,8 @@ async def require_managed_tool(
     *,
     lock: bool,
 ) -> Tool:
-    from app.infra.db.repositories.workspaces import resource_permissions as repository
     from app.infra.db.repositories.tools import repository as tool_repository
+    from app.infra.db.repositories.workspaces import resource_permissions as repository
 
     getter = tool_repository.lock_tool if lock else tool_repository.get_tool
     tool = await getter(db, workspace_id, tool_id)
@@ -287,8 +287,8 @@ __all__ = [
     "evaluate_tool_authorization",
     "has_tool_workspace_access",
     "list_tool_permissions",
-    "require_tool_manage",
     "require_managed_tool",
+    "require_tool_manage",
     "require_tool_use",
     "require_tool_view",
     "revoke_tool_permission",

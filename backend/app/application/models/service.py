@@ -10,8 +10,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.registered import RegisteredModel
-from app.infra.db.repositories.models import registry as model_repository
 from app.adapters.llm.credentials import legacy_credential_config
 from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.application.models.registry import (
@@ -29,10 +27,13 @@ from app.application.models.registry import (
     validate_provider_type,
     validate_status,
 )
-from app.ports.llm import DEFAULT_MODEL_REQUEST_PARAMS, MODEL_REQUEST_PARAMS_META_KEY
+from app.domain.audit.services import record_audit_log
+from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import User
 from app.infra.config.settings import Settings
+from app.infra.db.repositories.models import registry as model_repository
 from app.infra.runtime.validation import normalize_name
+from app.ports.llm import DEFAULT_MODEL_REQUEST_PARAMS, MODEL_REQUEST_PARAMS_META_KEY
 from app.schemas.models.contracts import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
@@ -42,7 +43,6 @@ from app.schemas.models.contracts import (
     RegisteredModelResponse,
     RegisteredModelUpdateRequest,
 )
-from app.domain.audit.services import record_audit_log
 
 
 def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:

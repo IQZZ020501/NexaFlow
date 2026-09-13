@@ -3,19 +3,23 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.identity.enterprise.models import (
+    EnterpriseIdentity as EnterpriseIdentityOrm,
+)
+from app.domain.identity.enterprise.models import (
+    EnterpriseIdentityConnection as EnterpriseIdentityConnectionOrm,
+)
+from app.domain.identity.enterprise.models import (
+    EnterpriseLoginState as EnterpriseLoginStateOrm,
+)
+from app.domain.platform.models import RefreshSession as RefreshSessionOrm
+from app.domain.platform.models import Workspace as WorkspaceOrm
 from app.entities.identity.enterprise import (
     EnterpriseIdentity,
     EnterpriseIdentityConnection,
     EnterpriseLoginState,
 )
 from app.infra.db import mapping
-from app.domain.identity.enterprise.models import (
-    EnterpriseIdentity as EnterpriseIdentityOrm,
-    EnterpriseIdentityConnection as EnterpriseIdentityConnectionOrm,
-    EnterpriseLoginState as EnterpriseLoginStateOrm,
-)
-from app.domain.platform.models import Workspace as WorkspaceOrm
-from app.domain.platform.models import RefreshSession as RefreshSessionOrm
 
 
 async def list_connections(

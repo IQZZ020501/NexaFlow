@@ -3,13 +3,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from math import isfinite
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from app.entities.defaults import new_id, utc_now
-
 
 MAX_PYTHON_TOOL_CODE_BYTES = 8 * 1024
 MAX_TOOL_SCHEMA_BYTES = 16 * 1024
@@ -22,7 +21,7 @@ MAX_TOOL_STRING_LENGTH = 8 * 1024
 class FrozenJsonDict(dict[str, Any]):
     """A JSON-serializable mapping that rejects in-place mutation."""
 
-    def __new__(cls, values: Any = ()) -> "FrozenJsonDict":
+    def __new__(cls, values: Any = ()) -> Self:
         instance = super().__new__(cls)
         dict.update(instance, values)
         return instance
@@ -52,7 +51,7 @@ class FrozenJsonDict(dict[str, Any]):
 class FrozenJsonList(list[Any]):
     """A JSON-serializable list that rejects in-place mutation."""
 
-    def __new__(cls, values: Any = ()) -> "FrozenJsonList":
+    def __new__(cls, values: Any = ()) -> Self:
         instance = super().__new__(cls)
         list.extend(instance, values)
         return instance

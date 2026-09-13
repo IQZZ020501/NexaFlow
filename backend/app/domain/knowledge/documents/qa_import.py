@@ -70,9 +70,9 @@ def validate_qa_rows(rows: Iterable[Sequence[object]]) -> list[QaRow]:
         if not any(values):
             continue
 
-        def value_for(field: str) -> str:
+        def value_for(field: str, row_values: list[str] = values) -> str:
             index = header_indexes.get(field)
-            return values[index] if index is not None and index < len(values) else ""
+            return row_values[index] if index is not None and index < len(row_values) else ""
 
         question = value_for("question")
         answer = value_for("answer")

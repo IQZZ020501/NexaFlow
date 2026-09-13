@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
+from typing import ClassVar
 
 from fastapi import HTTPException
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
@@ -18,55 +19,22 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from mcp.types import Tool as McpTool
 from sqlalchemy import create_engine, select, text
 
-from tests.support import (  # noqa: F401  (sets required env before app imports)
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    settings as test_settings,
-    test_client,
+from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
+from app.adapters.mcp import client as mcp_client_module
+from app.adapters.mcp.client import (
+    MAX_MCP_TOOL_PAGES,
+    McpClientError,
+    McpConnection,
+    McpDiscovery,
+    discover_mcp_tools,
+    normalize_mcp_url,
 )
-
 from app.application.agents.access import service as agent_access
 from app.application.agents.runs import executor as agent_executor
 from app.application.agents.runs import memory as agent_memory
 from app.application.agents.runs import service as agent_runs
 from app.application.agents.tools import builder as agent_tools
-from app.application import agents as agent_application
 from app.application.tools.runtime.adapters import mcp as tool_adapters
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
-from app.adapters.mcp import client as mcp_client_module
-from app.adapters.mcp.client import (
-    MAX_MCP_TOOL_PAGES,
-    McpConnection,
-    McpClientError,
-    McpDiscovery,
-    discover_mcp_tools,
-    normalize_mcp_url,
-)
-from app.schemas.knowledge import (
-    KnowledgeQueryHitResponse,
-    KnowledgeQueryInspectResponse,
-    KnowledgeRetrievalTraceResponse,
-)
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphEntityResponse,
-    KnowledgeGraphPathResponse,
-    KnowledgeGraphPathStepResponse,
-    KnowledgeGraphQueryResultResponse,
-)
-from app.entities.agents import AgentToolCall
-from app.entities.runs import AgentRun
-from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import ToolInvocation
-from app.entities.workflows import WorkflowUpload
-from app.infra.db.session import get_session_factory
-from app.entities.defaults import utc_now
-from app.infra.observability.system_log import SystemLog
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
@@ -78,6 +46,39 @@ from app.domain.agents.runtime import (
 from app.domain.agents.runtime import graph as agent_graph_module
 from app.domain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.domain.tools.mcp import service as mcp_services
+from app.entities.agents import AgentToolCall
+from app.entities.defaults import utc_now
+from app.entities.knowledge import KnowledgeBase
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolInvocation
+from app.entities.workflows import WorkflowUpload
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
+from app.infra.observability.system_log import SystemLog
+from app.schemas.knowledge import (
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
+    KnowledgeRetrievalTraceResponse,
+)
+from app.schemas.knowledge.graph import (
+    KnowledgeGraphEntityResponse,
+    KnowledgeGraphPathResponse,
+    KnowledgeGraphPathStepResponse,
+    KnowledgeGraphQueryResultResponse,
+)
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 MEMBER_PASSWORD = "AgentMember@12345."
 
@@ -236,9 +237,11 @@ async def grant_mcp_tool_use(
     server_id: str,
     user_id: str,
 ) -> None:
-    from app.entities.workspaces.resource_permissions import ResourcePermission
-    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
     from app.domain.tools.catalog.service import get_mcp_catalog_leaf
+    from app.entities.workspaces.resource_permissions import ResourcePermission
+    from app.infra.db.repositories.workspaces import (
+        resource_permissions as permission_repository,
+    )
 
     async with get_session_factory()() as db:
         leaf = await get_mcp_catalog_leaf(
@@ -264,7 +267,7 @@ async def grant_mcp_tool_use(
 
 
 class AgentModelHandler(BaseHTTPRequestHandler):
-    calls: list[dict] = []
+    calls: ClassVar[list[dict]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
@@ -5009,8 +5012,8 @@ def main() -> None:
 
 
 def test_cancelling_root_run_cancels_active_children() -> None:
-    from dataclasses import replace
     import hashlib
+    from dataclasses import replace
     from unittest.mock import AsyncMock, patch
 
     from app.entities.defaults import new_id, utc_now
@@ -5145,7 +5148,6 @@ def test_cancelling_root_run_cancels_active_children() -> None:
 
             async def invoke(self, snapshot, arguments, context):
                 self.calls += 1
-                return None
 
         late_adapter = LateFinalizeAdapter()
         late = asyncio.run(

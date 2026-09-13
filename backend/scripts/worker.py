@@ -5,7 +5,6 @@ import ctypes
 import ctypes.util
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import socket
@@ -14,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-
+from pathlib import Path
 
 SANDBOX_NETWORK_NONE = "none"
 SANDBOX_NETWORK_PUBLIC = "public"

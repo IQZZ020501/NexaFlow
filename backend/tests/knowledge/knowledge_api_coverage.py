@@ -23,6 +23,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException, UploadFile
 
+import tests.support as support_module
+from tests.models.llm import model_payload, model_test_server, models_url
 from tests.support import (
     activate_admin,
     activate_user,
@@ -30,8 +32,6 @@ from tests.support import (
     create_active_user,
     test_client,
 )
-import tests.support as support_module
-from tests.models.llm import model_payload, model_test_server, models_url
 
 # The shared test storage dir is wiped (shutil.rmtree) by every suite's
 # test_client() block; concurrent suites destroy each other's uploaded
@@ -54,7 +54,37 @@ def _isolated_support_settings():
 support_module.settings = _isolated_support_settings
 test_settings = support_module.settings
 
-from app.infra.db.session import get_session_factory
+from sqlalchemy import select, text
+
+from app.adapters.llm.runtime import ModelProviderError
+from app.adapters.rag import vector_store as knowledge_vector_store
+from app.adapters.rag.vector_store import VectorChunk, VectorHit
+from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
+from app.api.v1.knowledge import lifecycle as knowledge_lifecycle_api
+from app.api.v1.knowledge import retrieval as knowledge_retrieval_api
+from app.api.v1.knowledge import routes as knowledge_api
+from app.application.knowledge.documents import service as knowledge_application
+from app.application.knowledge.evaluation import (
+    runner as knowledge_evaluation_application,
+)
+from app.application.knowledge.graph import service as graph_application
+from app.application.knowledge.retrieval import (
+    service as knowledge_retrieval_application,
+)
+from app.domain.knowledge import retrieval as knowledge_retrieval
+from app.domain.knowledge.documents import parsing as knowledge_pipeline
+from app.domain.knowledge.graph.resolution import claim_fingerprint
+from app.domain.knowledge.graph.revisions import (
+    create_revision as create_graph_revision,
+)
+from app.domain.knowledge.graph.revisions import (
+    publish_revision as publish_graph_revision,
+)
+from app.domain.knowledge.graph.revisions import (
+    stage_revision_change as stage_graph_revision_change,
+)
+from app.domain.knowledge.graph.schema import default_graph_schema
+from app.domain.knowledge.graph.services import create_graph_schema
 from app.domain.knowledge.models import (
     KnowledgeAsset,
     KnowledgeBase,
@@ -62,22 +92,17 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
 )
-from app.api.v1.knowledge import routes as knowledge_api
-from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
-from app.application.knowledge.graph import service as graph_application
-from app.application.knowledge.evaluation import runner as knowledge_evaluation_application
-from app.api.v1.knowledge import lifecycle as knowledge_lifecycle_api
-from app.api.v1.knowledge import retrieval as knowledge_retrieval_api
-from app.application.knowledge.documents import service as knowledge_application
-from app.application.knowledge.retrieval import service as knowledge_retrieval_application
-from app.domain.knowledge import retrieval as knowledge_retrieval
-from app.adapters.rag import vector_store as knowledge_vector_store
-from app.domain.knowledge.documents import parsing as knowledge_pipeline
-from app.adapters.llm.runtime import ModelProviderError
-from app.adapters.rag.vector_store import VectorChunk, VectorHit
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.domain.knowledge.tasks.orchestration import (
+    enqueue_parse_knowledge_document,
+)
+from app.domain.knowledge.tasks.runner import (
+    recover_knowledge_tasks,
+    run_knowledge_task,
+)
 from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.session import get_session_factory
 from app.schemas.knowledge import (
     KnowledgeBaseOwnerTransferRequest,
     KnowledgeBaseUpdateRequest,
@@ -92,22 +117,6 @@ from app.schemas.knowledge import (
     ResourcePermissionUpsertRequest,
 )
 from app.schemas.knowledge.graph import KnowledgeGraphQueryResultResponse
-from app.domain.knowledge.tasks.orchestration import (
-    enqueue_parse_knowledge_document,
-)
-from app.domain.knowledge.graph.resolution import claim_fingerprint
-from app.domain.knowledge.graph.revisions import (
-    create_revision as create_graph_revision,
-    publish_revision as publish_graph_revision,
-    stage_revision_change as stage_graph_revision_change,
-)
-from app.domain.knowledge.graph.schema import default_graph_schema
-from app.domain.knowledge.graph.services import create_graph_schema
-from app.domain.knowledge.tasks.runner import (
-    recover_knowledge_tasks,
-    run_knowledge_task,
-)
-from sqlalchemy import select, text
 
 MEMBER_PASSWORD = "Member@12345."
 

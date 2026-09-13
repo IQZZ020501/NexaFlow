@@ -7,16 +7,22 @@ from typing import Literal
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge.graph import traversal as graph_traversal
+from app.domain.knowledge.graph.schema import (
+    GraphSchemaDefinition,
+    normalize_graph_name,
+)
 from app.domain.knowledge.retrieval import reciprocal_rank_fusion
+from app.domain.knowledge.tasks.orchestration import resolve_embedding_model
 from app.entities.knowledge import KnowledgeBase
 from app.entities.knowledge.graph import (
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
 from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
-from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.ports.vector_store import (
     GraphProfileVectorHit,
     VectorHit,
@@ -31,12 +37,6 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphPathResponse,
     KnowledgeGraphPathStepResponse,
     KnowledgeGraphQueryResultResponse,
-)
-from app.domain.knowledge.tasks.orchestration import resolve_embedding_model
-from app.domain.knowledge.graph import traversal as graph_traversal
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    normalize_graph_name,
 )
 
 EntityLinkStatus = Literal["selected", "ambiguous", "not_found"]

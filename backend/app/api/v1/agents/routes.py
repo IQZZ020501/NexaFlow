@@ -1,7 +1,7 @@
-from typing import Annotated
 import json
 from collections.abc import AsyncIterator
 from enum import IntEnum
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -18,28 +18,28 @@ from app.application.agents import (
     generate_agent_instructions,
     get_agent,
     get_agent_monitoring,
+    get_agent_response,
     get_agent_run_entity,
     get_agent_run_response,
-    get_agent_response,
-    list_agent_permissions,
-    list_agent_run_tool_calls,
     list_agent_api_credentials,
     list_agent_conversation_users,
     list_agent_logs,
+    list_agent_permissions,
+    list_agent_run_tool_calls,
     list_agent_runs,
     list_agents,
     prepare_agent_run,
     regenerate_agent_run,
-    resolve_workspace_agent_files,
     require_agent_edit,
     resolve_agent_tool_approval,
-    set_agent_run_feedback,
+    resolve_workspace_agent_files,
     revoke_agent_api_credential,
     revoke_agent_permission,
     rotate_agent_api_credential,
+    set_agent_run_feedback,
     stream_agent_run,
-    upload_workspace_agent_files,
     update_agent,
+    upload_workspace_agent_files,
     upsert_agent_permission,
 )
 from app.infra.config.settings import Settings
@@ -52,18 +52,18 @@ from app.schemas.agents.contracts import (
     AgentCreateRequest,
     AgentInstructionsGenerateRequest,
     AgentInstructionsGenerateResponse,
-    AgentResponse,
     AgentLogListResponse,
     AgentMonitoringResponse,
     AgentPermissionResponse,
     AgentPermissionUpsertRequest,
+    AgentResponse,
     AgentRunCreateRequest,
     AgentRunRegenerateRequest,
     AgentRunResponse,
-    RunFeedbackRequest,
     AgentToolCallResponse,
-    AgentUploadResponse,
     AgentUpdateRequest,
+    AgentUploadResponse,
+    RunFeedbackRequest,
 )
 
 router = APIRouter(

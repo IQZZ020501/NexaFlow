@@ -3,8 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.schemas.tools.contracts import ToolRefSchema
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.tools.contracts import ToolRefSchema
 
 
 class AgentMcpToolRef(BaseModel):

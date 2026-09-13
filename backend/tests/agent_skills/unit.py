@@ -1,22 +1,21 @@
 """Pure unit tests for the versioned Agent Skill control plane."""
 
-import tests.support  # noqa: F401
-
 from pydantic import ValidationError
 
-from app.application.agents.runs.service import skill_execution_context
+import tests.support  # noqa: F401
 from app.application.agents.runs.executor import (
     _apply_skill_runtime_limits,
     _skill_evaluation_requirements,
     _skill_retrieval_stop_requirements,
 )
+from app.application.agents.runs.service import skill_execution_context
 from app.domain.agent_skills.access import evaluate_agent_skill_access
-from app.domain.agents.access.publications import build_agent_resource_snapshot
 from app.domain.agent_skills.contracts import (
     agent_skill_snapshot_from_payload,
     agent_skill_snapshot_payload,
     build_agent_skill_snapshot,
 )
+from app.domain.agents.access.publications import build_agent_resource_snapshot
 from app.entities.agent_skills import AgentSkill, AgentSkillVersion
 from app.entities.identity.user import User
 from app.entities.workspaces.resource_permissions import ResourcePermission
@@ -107,8 +106,8 @@ def test_skill_runtime_policies_use_the_strictest_pinned_values() -> None:
     ).model_dump(mode="json")
     from datetime import timedelta
 
-    from app.entities.defaults import utc_now
     from app.domain.agent_skills.contracts import agent_skill_definition_hash
+    from app.entities.defaults import utc_now
 
     version = AgentSkillVersion(
         id="version-policy",

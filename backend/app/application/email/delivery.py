@@ -1,30 +1,29 @@
 """Transactional email enqueueing and durable delivery orchestration."""
 
-import asyncio
+import asyncio  # noqa: F401
 import json
-import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.email.smtp import build_smtp_transport_config, smtp_identity_ready
+from app.domain.email.services import render_email
+from app.entities.defaults import new_id, utc_now
 from app.entities.email import EmailDelivery
 from app.infra.config.settings import Settings
-from app.infra.observability.errors import log_error
-from app.infra.observability.logger import get_logger
-from app.entities.defaults import new_id, utc_now
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.db.repositories.email import smtp as smtp_repository
-from app.infra.security.secrets import decrypt_secret, encrypt_secret
 from app.infra.db.session import get_session_factory
 from app.infra.email.smtp import (
     SmtpConfigurationError,
     SmtpTransportConfig,
     send_smtp_message,
 )
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
 from app.infra.observability.system_log import record_system_log
 from app.infra.runtime.validation import normalize_email
-from app.domain.email.services import render_email
+from app.infra.security.secrets import decrypt_secret, encrypt_secret
 
 logger = get_logger(__name__)
 

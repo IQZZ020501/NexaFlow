@@ -3,10 +3,9 @@ from typing import Literal, cast
 
 from fastapi import HTTPException, status
 
-from app.entities.agent_skills import AgentSkill, AgentSkillGrant
+from app.entities.agent_skills import AgentSkill
 from app.entities.identity.user import User
 from app.entities.workspaces.resource_permissions import ResourcePermission
-
 
 AGENT_SKILL_RESOURCE_TYPE = "agent_skill"
 AGENT_SKILL_GRANTS = frozenset({"view", "use"})

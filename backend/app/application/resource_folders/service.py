@@ -2,11 +2,16 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.resource_folders.models import ResourceFolder
+from app.domain.agents.access.permissions import require_agent_edit
+from app.domain.agents.service import get_agent
+from app.domain.knowledge.bases.permissions import require_knowledge_base_permission
+from app.domain.knowledge.bases.service import get_knowledge_base
+from app.domain.tools.access.permissions import require_managed_tool
 from app.entities.identity.user import User
-from app.infra.db.repositories.resource_folders import repository as repository
-from app.infra.runtime.validation import normalize_name
+from app.entities.resource_folders.models import ResourceFolder
 from app.infra.db.repositories.models import registry as model_registry
+from app.infra.db.repositories.resource_folders import repository
+from app.infra.runtime.validation import normalize_name
 from app.schemas.resource_folders.contracts import (
     ResourceFolderBatchMoveRequest,
     ResourceFolderCreateRequest,
@@ -15,11 +20,6 @@ from app.schemas.resource_folders.contracts import (
     ResourceFolderType,
     ResourceFolderUpdateRequest,
 )
-from app.domain.agents.access.permissions import require_agent_edit
-from app.domain.agents.service import get_agent
-from app.domain.knowledge.bases.service import get_knowledge_base
-from app.domain.knowledge.bases.permissions import require_knowledge_base_permission
-from app.domain.tools.access.permissions import require_managed_tool
 
 
 def _response(folder: ResourceFolder) -> ResourceFolderResponse:

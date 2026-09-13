@@ -6,6 +6,7 @@ from urllib.parse import unquote, urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.entities.defaults import new_id
 from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
@@ -13,7 +14,6 @@ from app.entities.knowledge import (
     KnowledgeDocumentParentChunk,
     KnowledgeDocumentReference,
 )
-from app.entities.defaults import new_id
 from app.infra.db.repositories.knowledge import references as reference_repository
 
 MAX_REFERENCES_PER_DOCUMENT = 100

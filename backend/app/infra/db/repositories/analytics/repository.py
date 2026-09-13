@@ -3,23 +3,23 @@ from datetime import datetime
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.platform.models import Team as TeamOrm
-from app.domain.platform.models import TeamMembership as TeamMembershipOrm
-from app.domain.platform.models import User as UserOrm
-from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.entities.analytics import (
-    WorkspaceAnalyticsCounts,
-    WorkspaceAnalyticsGraphBuild,
-    WorkspaceAnalyticsRun,
-    WorkspaceAnalyticsTeamMember,
-)
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentRun as AgentRunOrm
 from app.domain.agents.models import AgentRunState as AgentRunStateOrm
 from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
 )
+from app.domain.platform.models import Team as TeamOrm
+from app.domain.platform.models import TeamMembership as TeamMembershipOrm
+from app.domain.platform.models import User as UserOrm
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailOrm
+from app.entities.analytics import (
+    WorkspaceAnalyticsCounts,
+    WorkspaceAnalyticsGraphBuild,
+    WorkspaceAnalyticsRun,
+    WorkspaceAnalyticsTeamMember,
+)
 
 
 async def get_workspace_analytics_counts(

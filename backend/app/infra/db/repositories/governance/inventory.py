@@ -3,27 +3,33 @@ from datetime import datetime
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.registered import RegisteredModel
-from app.domain.platform.models import Team as TeamOrm
-from app.domain.platform.models import User as UserOrm
-from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.infra.observability.system_log import SystemLog
 from app.domain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_LEGACY_CLAIMABLE_STATUSES,
     AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES,
+)
+from app.domain.agents.models import (
     Agent as AgentOrm,
+)
+from app.domain.agents.models import (
     AgentRun as AgentRunOrm,
+)
+from app.domain.agents.models import (
     AgentRunState as AgentRunStateOrm,
 )
-from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
-from app.domain.knowledge.models import KnowledgeTask as KnowledgeTaskOrm
 from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
 )
+from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
+from app.domain.knowledge.models import KnowledgeTask as KnowledgeTaskOrm
+from app.domain.models.registered import RegisteredModel
+from app.domain.platform.models import Team as TeamOrm
+from app.domain.platform.models import User as UserOrm
+from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.domain.tools.models import Tool as ToolOrm
 from app.domain.workflows.models import WorkflowDefinition as WorkflowDefinitionOrm
+from app.infra.observability.system_log import SystemLog
 
 
 async def _count(db: AsyncSession, model: type, workspace_id: str, *conditions) -> int:

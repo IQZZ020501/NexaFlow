@@ -14,15 +14,13 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import tests.support  # noqa: F401
-
-from app.schemas.workflows.contracts import WorkflowNode
+import tests.support
 from app.domain.agents.runtime.tools import AgentToolResult
 from app.domain.workflows.runtime.engine import (
     NodeExecutionContext,
-    NodeResult,
     WorkflowEngineError,
 )
+from app.schemas.workflows.contracts import WorkflowNode
 from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 # Populated by test_executor_manual_run_scenarios for manual run creation.
@@ -41,6 +39,8 @@ WORKFLOW_DEFINITION_ID = ""
 from app.domain.knowledge.documents.parsing import (
     KnowledgePipelineError,
 )
+
+
 class _FakeLlmMessage:
     def __init__(
         self,
@@ -251,7 +251,7 @@ def test_nodes_reranker_candidates_and_model_params() -> None:
         _reranker_candidates,
     )
 
-    candidates, texts = _reranker_candidates(
+    _candidates, texts = _reranker_candidates(
         [["a"], "plain", {"content": "dict-text"}]
     )
     assert texts == ["a", "plain", "dict-text"]
@@ -284,9 +284,10 @@ def test_nodes_reranker_candidates_and_model_params() -> None:
 
 
 def test_nodes_history_messages_and_invoke() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
     from app.application.workflows.nodes.executor import _history_messages
     from app.schemas.workflows.contracts import LlmNodeConfig
-    from langchain_core.messages import AIMessage, HumanMessage
 
     assert _history_messages(
         LlmNodeConfig.model_validate({"prompt": "p", "dialogue_number": 0}),
@@ -647,7 +648,10 @@ def _legacy_test_nodes_llm_tool_call_and_loop_branches() -> None:
 
 
 def test_nodes_llm_tool_call_and_loop_branches() -> None:
-    from app.application.workflows.nodes.executor import _llm_tool_call, execute_workflow_node
+    from app.application.workflows.nodes.executor import (
+        _llm_tool_call,
+        execute_workflow_node,
+    )
     from app.ports.llm import ModelToolCall
 
     async def run() -> None:
@@ -802,8 +806,9 @@ def test_nodes_llm_tool_call_and_loop_branches() -> None:
 def test_nodes_llm_stream_and_reasoning_branches() -> None:
     from unittest.mock import patch
 
-    from app.application.workflows.nodes.executor import execute_workflow_node
     from langchain_core.messages import AIMessage, AIMessageChunk
+
+    from app.application.workflows.nodes.executor import execute_workflow_node
 
     class StreamingModel(_FakeLlmModel):
         async def astream(self, messages, **kwargs):
@@ -900,7 +905,6 @@ def test_nodes_model_result_branches() -> None:
     from unittest.mock import patch
 
     from app.application.workflows.nodes.executor import _model_result
-    from app.domain.models.registered import RegisteredModel
 
     async def run() -> None:
         try:
@@ -933,7 +937,7 @@ def test_nodes_model_result_branches() -> None:
             )
         assert content == "classified"
         assert usage["total_tokens"] == 3
-        messages, kwargs = fake.calls[0]
+        messages, _kwargs = fake.calls[0]
         assert [type(item).__name__ for item in messages] == [
             "SystemMessage",
             "HumanMessage",
@@ -1300,8 +1304,8 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
     from unittest.mock import patch
 
     from app.application.workflows.nodes.executor import execute_workflow_node
-    from app.infra.sandbox.client import WorkflowSandboxResult
     from app.domain.agents.runtime import AgentExecutionPaused
+    from app.infra.sandbox.client import WorkflowSandboxResult
 
     async def run() -> None:
         fake_tool = SimpleNamespace(
@@ -1322,10 +1326,8 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
             },
             node_id="mcp-1",
         )
-        ledger = _FakeLlmLedger()
         scope = _node_scope(
             mcp_tools={("srv-1", "search"): ("resolved", "policy")},
-            ledger=ledger,
         )
         with patch(
             "app.application.workflows.nodes.executor.build_mcp_agent_tool",
@@ -1333,8 +1335,6 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
         ):
             result = await execute_workflow_node(scope, mcp_node, _context())
         assert result.outputs == {"found": 3}
-        assert ledger.calls[0][:3] == ("before", 3, "workflow-mcp-1")
-        assert ledger.calls[1][0] == "after"
 
         # unavailable mcp tool
         try:
@@ -1700,15 +1700,15 @@ def test_executor_workflow_context_branches() -> None:
 
 def test_executor_load_scope_branches() -> None:
     from app.application.workflows.runs import executor as executor_module
+    from app.domain.workflows.resources import (
+        build_workflow_resource_snapshot,
+        workflow_resource_hash,
+    )
     from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
-    from app.domain.workflows.resources import (
-        build_workflow_resource_snapshot,
-        workflow_resource_hash,
-    )
 
     class SessionContext:
         def __init__(self, db):
@@ -1919,11 +1919,12 @@ def _upload_file(filename: str, content: bytes = b"hello") -> object:
 
 
 def test_workflow_uploads_upload_branches() -> None:
+    from fastapi import HTTPException
+
     import app.application.workflows.uploads.service as uploads_module
     from app.application.workflows.uploads.service import _upload_files
     from app.entities.workflows import WorkflowUpload
     from app.infra.storage.object_storage import EmptyObjectError
-    from fastapi import HTTPException
     from app.schemas.agents.contracts import AgentInteractionConfig
 
     agent = SimpleNamespace(workspace_id="ws-1", id="agent-1")
@@ -2192,13 +2193,13 @@ def test_workflow_uploads_upload_branches() -> None:
 
 def test_workflow_uploads_resolve_branches() -> None:
     _UPLOAD_SETTINGS = SimpleNamespace(knowledge_storage_dir="/tmp/x")
+    from fastapi import HTTPException
+
     from app.application.workflows.uploads.service import (
         _resolve_agent_file_text,
         _resolve_workflow_files,
     )
     from app.entities.workflows import WorkflowUpload
-    from app.infra.storage.object_storage import EmptyObjectError
-    from fastapi import HTTPException
     from app.schemas.agents.contracts import AgentInteractionConfig
 
     agent = SimpleNamespace(workspace_id="ws-1", id="agent-1")
@@ -2571,12 +2572,13 @@ def test_workflow_uploads_workspace_wrappers() -> None:
 
 
 def test_workflow_access_helpers_and_rate_limit() -> None:
+    from fastapi import HTTPException
+
     from app.application.workflows.access.service import _external_error, _rate_limit
     from app.infra.security.agent_rate_limit import (
         AgentRateLimitExceeded,
         AgentRateLimitUnavailable,
     )
-    from fastapi import HTTPException
 
     assert _external_error("failed") == "Workflow run failed."
     assert _external_error("cancelled") == "Workflow run was cancelled."
@@ -2610,6 +2612,8 @@ def test_workflow_access_helpers_and_rate_limit() -> None:
 
 
 def test_workflow_access_external_run_branches() -> None:
+    from fastapi import HTTPException
+
     from app.application.workflows.access.service import (
         _external_run,
         create_external_workflow_run,
@@ -2618,7 +2622,6 @@ def test_workflow_access_external_run_branches() -> None:
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.schemas.workflows.contracts import ExternalWorkflowRunCreateRequest
-    from fastapi import HTTPException
 
     async def run() -> None:
         run = AgentRun(
@@ -2735,8 +2738,9 @@ def test_workflow_access_external_run_branches() -> None:
 
 
 def test_workflow_access_stream_mapping() -> None:
-    from app.application.workflows.access.service import stream_external_workflow_run
     from datetime import UTC
+
+    from app.application.workflows.access.service import stream_external_workflow_run
 
     payload = {
         "id": "run-1",
@@ -2914,16 +2918,16 @@ def _graph_node(node_id: str, node_type: str, config: dict) -> dict:
 
 
 def _make_running_run(graph: dict) -> str:
-    from app.entities.runs import AgentRun
-    from app.entities.workflows import WorkflowRunDetail
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.agents import repository as agent_repository
-    from app.infra.db.repositories.workflows import repository as workflow_repository
-    from app.infra.db.session import get_session_factory
     from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         workflow_resource_hash,
     )
+    from app.entities.defaults import utc_now
+    from app.entities.runs import AgentRun
+    from app.entities.workflows import WorkflowRunDetail
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
 
     async def create() -> str:
         async with get_session_factory()() as db:
@@ -2990,7 +2994,10 @@ def test_executor_manual_run_scenarios() -> None:
     """Executor error paths exercised with real DB rows and targeted mocks."""
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
-    from tests.agents.agents import agent_model_server, create_workspace_user, model_payload
+    from tests.agents.agents import (
+        agent_model_server,
+        model_payload,
+    )
 
     global WORKSPACE_ID, WORKFLOW_AGENT_ID, ADMIN_USER_ID, WORKFLOW_MODEL_ID
     global WORKFLOW_DEFINITION_ID
@@ -3133,7 +3140,6 @@ def test_executor_manual_run_scenarios() -> None:
         asyncio.run(check_success())
 
         # node output exceeds the 256 KiB budget
-        from app.application.workflows.runs.executor import execute_workflow_node as real_execute
         from app.domain.workflows.runtime.engine import NodeResult
 
         async def huge_node(scope, node, context):
@@ -3197,14 +3203,16 @@ def test_executor_manual_run_scenarios() -> None:
         }
 
         async def create_checkpoint_run() -> str:
-            from app.entities.defaults import utc_now
-            from app.infra.db.repositories.agents import repository as agent_repository
-            from app.infra.db.repositories.workflows import repository as workflow_repository
-            from app.infra.db.session import get_session_factory
             from app.domain.workflows.resources import (
                 build_workflow_resource_snapshot,
                 workflow_resource_hash,
             )
+            from app.entities.defaults import utc_now
+            from app.infra.db.repositories.agents import repository as agent_repository
+            from app.infra.db.repositories.workflows import (
+                repository as workflow_repository,
+            )
+            from app.infra.db.session import get_session_factory
 
             async with get_session_factory()() as db:
                 run = AgentRunEntity(
@@ -3279,10 +3287,10 @@ def test_executor_manual_run_scenarios() -> None:
         assert asyncio.run(fail_missing()) == "finished"
 
         # run_durable_workflow_run: claim held by another worker
-        from app.entities.runs import AgentRun
-        from app.entities.defaults import utc_now
-        from app.infra.db.session import get_session_factory
         from app.application.workflows.runs.executor import run_durable_workflow_run
+        from app.entities.defaults import utc_now
+        from app.entities.runs import AgentRun
+        from app.infra.db.session import get_session_factory
 
         async def busy_claim() -> str:
             async with get_session_factory()() as db:
@@ -3343,7 +3351,11 @@ def _publish_graph(
 
 
 def test_public_and_api_workflow_access_end_to_end() -> None:
-    from tests.agents.agents import agent_model_server, create_workspace_user, model_payload
+    from tests.agents.agents import (
+        agent_model_server,
+        create_workspace_user,
+        model_payload,
+    )
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -3763,15 +3775,14 @@ def test_public_and_api_workflow_access_end_to_end() -> None:
         assert failed_detail.json()["error"] == "Workflow run failed."
 
         # expired upload cleanup flow
-        from app.entities.defaults import utc_now
-        from app.infra.storage.object_storage import create_object_storage
-        from app.infra.db.repositories.workflows import repository as workflow_repository
-        from app.infra.db.session import get_session_factory
         from app.domain.workflows.models import WorkflowUpload
         from app.domain.workflows.uploads import (
             prepare_due_upload_cleanups,
             run_upload_storage_cleanup,
         )
+        from app.entities.defaults import utc_now
+        from app.infra.db.session import get_session_factory
+        from app.infra.storage.object_storage import create_object_storage
 
         expired_upload = client.post(
             f"/api/v1/public/workflows/{workflow_id}/uploads",
@@ -3989,7 +4000,6 @@ def test_api_endpoint_functions_direct() -> None:
 
 def test_workflow_access_application_functions_direct() -> None:
     """Call application-layer workflow access functions in the main thread."""
-    from app.application.workflows.access import service as access_module
     from app.application.workflows.access.service import (
         create_external_workflow_run,
         get_public_workflow_profile,

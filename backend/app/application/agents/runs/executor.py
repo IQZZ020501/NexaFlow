@@ -12,7 +12,6 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.registered import RegisteredModel
 from app.application.agents.runs.memory import (
     PreparedConversationMemory,
     prepare_conversation_memory,
@@ -31,24 +30,7 @@ from app.application.agents.tools.builder import (
 )
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.workspaces.service import build_workspace_context
-from app.entities.agents import AgentToolCall
-from app.entities.agent_skills import AgentSkillSnapshot
-from app.entities.runs import AgentRun
-from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import McpToolPolicy, ToolSnapshot
-from app.entities.identity.user import User
-from app.infra.config.settings import Settings
-from app.infra.agents.live_stream import AgentLiveStreamPublisher
-from app.infra.observability.errors import classify_error, log_error
-from app.infra.observability.logger import get_logger, log_event
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.session import get_session_factory
-from app.infra.observability.system_log import record_system_log
-from app.ports.llm import build_chat_model
+from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -72,6 +54,7 @@ from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
+from app.domain.models.registered import RegisteredModel
 from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
@@ -80,7 +63,24 @@ from app.domain.tools.mcp.service import (
     resolve_mcp_tools,
 )
 from app.domain.tools.runtime import tool_snapshot_from_payload
-from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
+from app.entities.agent_skills import AgentSkillSnapshot
+from app.entities.agents import AgentToolCall
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
+from app.entities.runs import AgentRun
+from app.entities.tools import McpToolPolicy, ToolSnapshot
+from app.infra.agents.live_stream import AgentLiveStreamPublisher
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.session import get_session_factory
+from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.logger import get_logger, log_event
+from app.infra.observability.system_log import record_system_log
+from app.ports.llm import build_chat_model
 
 logger = get_logger(__name__)
 

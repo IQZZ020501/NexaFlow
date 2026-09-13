@@ -1,5 +1,4 @@
 import asyncio
-import json
 from html import escape
 from io import BytesIO
 from types import SimpleNamespace
@@ -10,17 +9,24 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    settings as test_settings,
-    test_client,
+from app.adapters.rag import vector_store as knowledge_vector_store
+from app.adapters.rag.vector_store import VectorChunk, VectorHit
+from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
+from app.application.knowledge.documents import service as knowledge_application
+from app.application.knowledge.documents.service import mark_task_dispatch_failed
+from app.application.knowledge.evaluation import (
+    runner as knowledge_evaluation_application,
 )
-
-from app.infra.db.session import get_session_factory
-from app.domain.platform.models import User
+from app.application.knowledge.retrieval import (
+    service as knowledge_retrieval_application,
+)
+from app.domain.knowledge import retrieval as knowledge_retrieval
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
+    build_hierarchical_chunks,
+    clean_text,
+    split_text,
+)
 from app.domain.knowledge.models import (
     KnowledgeBase,
     KnowledgeDocument,
@@ -32,29 +38,6 @@ from app.domain.knowledge.models import (
     KnowledgeEvaluationResult,
     KnowledgeTask,
 )
-from app.api.v1.knowledge import routes as knowledge_api
-from app.api.v1.knowledge import evaluation as knowledge_evaluation_api
-from app.application.knowledge.documents import service as knowledge_application
-from app.application.knowledge.evaluation import runner as knowledge_evaluation_application
-from app.application.knowledge.retrieval import service as knowledge_retrieval_application
-from app.domain.knowledge import retrieval as knowledge_retrieval
-from app.adapters.rag import vector_store as knowledge_vector_store
-from app.domain.knowledge.documents.parsing import (
-    KnowledgePipelineError,
-    build_hierarchical_chunks,
-    clean_text,
-    split_text,
-)
-from app.adapters.rag.vector_store import VectorChunk, VectorHit
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.knowledge import (
-    evaluation as evaluation_repository,
-)
-from app.infra.db.repositories.identity import users as user_repository
-from app.entities.knowledge import (
-    DOCUMENT_DELETED_STATUS,
-    KnowledgeEvaluationResult as KnowledgeEvaluationResultEntity,
-)
 from app.domain.knowledge.tasks.orchestration import (
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
@@ -65,16 +48,41 @@ from app.domain.knowledge.tasks.runner import (
     run_knowledge_task,
     run_parse_task,
 )
-from app.application.knowledge.documents.service import mark_task_dispatch_failed
+from app.domain.platform.models import ResourcePermission, User
+from app.entities.knowledge import (
+    DOCUMENT_DELETED_STATUS,
+)
+from app.entities.knowledge import (
+    KnowledgeEvaluationResult as KnowledgeEvaluationResultEntity,
+)
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import (
+    evaluation as evaluation_repository,
+)
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.session import get_session_factory
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryInspectResponse,
     KnowledgeQueryRequest,
     KnowledgeRetrievalTraceResponse,
 )
-from tests.models.llm import ModelTestHandler, model_payload, model_test_server, models_url
-from app.domain.platform.models import ResourcePermission
-
+from tests.models.llm import (
+    ModelTestHandler,
+    model_payload,
+    model_test_server,
+    models_url,
+)
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 MEMBER_PASSWORD = "Member@12345."
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1470,7 +1478,7 @@ def main() -> None:
             },
         )
         assert created_workspace.status_code == 201, created_workspace.text
-        research_workspace_id = created_workspace.json()["workspace"]["id"]
+        _research_workspace_id = created_workspace.json()["workspace"]["id"]
 
         embedding_model = client.post(
             models_url(default_workspace_id),

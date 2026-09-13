@@ -6,8 +6,8 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 
 from app.domain.models.registered import RegisteredModel
-from app.ports.llm import ModelProviderError, build_reranker
 from app.infra.config.settings import Settings
+from app.ports.llm import ModelProviderError, build_reranker
 from app.ports.vector_store import VectorHit
 
 QUERY_OVERFETCH_FACTOR = 5

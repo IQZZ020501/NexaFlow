@@ -8,6 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.knowledge.graph.build import (
     finalize_abandoned_graph_reservations,
 )
+from app.domain.knowledge.tasks.orchestration import (
+    enqueue_graph_rebuild,
+    enqueue_graph_sync,
+    resolve_embedding_model,
+)
+from app.entities.defaults import utc_now
 from app.entities.knowledge import (
     TASK_CANCELLED_STATUS,
     TASK_CANCELLING_STATUS,
@@ -21,22 +27,16 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphRevision,
 )
 from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.session import get_session_factory
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.session import get_session_factory
 from app.ports.vector_store import (
     GraphProfileVector,
     delete_graph_profile_vectors,
     upsert_graph_profile_vectors,
-)
-from app.domain.knowledge.tasks.orchestration import (
-    enqueue_graph_rebuild,
-    enqueue_graph_sync,
-    resolve_embedding_model,
 )
 
 logger = get_logger(__name__)

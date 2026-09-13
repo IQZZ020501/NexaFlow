@@ -11,20 +11,22 @@ from fastapi import HTTPException
 
 import tests.support  # noqa: F401
 from app.application.knowledge.graph import service as knowledge_graph
+from app.domain.knowledge.graph import revisions as graph_revisions
+from app.domain.knowledge.graph.revisions import GraphRevisionConflict
+from app.entities.defaults import utc_now
+from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase, KnowledgeTask
 from app.entities.knowledge.graph import (
     KnowledgeGraphAlias,
     KnowledgeGraphClaim,
     KnowledgeGraphClaimEvidence,
     KnowledgeGraphMention,
+    KnowledgeGraphReviewItem,
     KnowledgeGraphRevision,
     KnowledgeGraphRevisionChange,
-    KnowledgeGraphReviewItem,
 )
-from app.entities.identity.user import User
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.schemas.knowledge import KnowledgeQueryRequest
 from app.schemas.knowledge.graph import (
     KnowledgeGraphNeighborhoodRequest,
@@ -32,9 +34,6 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphSchemaUpdateRequest,
     KnowledgeGraphSettingsUpdateRequest,
 )
-from app.domain.knowledge.graph import revisions as graph_revisions
-from app.domain.knowledge.graph.revisions import GraphRevisionConflict
-from app.domain.knowledge.graph.schema import default_graph_schema
 
 
 async def _expect_http(coroutine, status_code: int) -> None:
