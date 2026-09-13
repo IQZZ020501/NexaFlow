@@ -680,6 +680,9 @@ class AgentRunSnapshot(Base):
     tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    skill_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)
     model_name: Mapped[str] = mapped_column(String(160), nullable=False)
     max_runtime_seconds: Mapped[float] = mapped_column(

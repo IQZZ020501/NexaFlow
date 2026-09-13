@@ -32,6 +32,7 @@ from app.application.agents.tools.builder import (
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.workspaces.service import build_workspace_context
 from app.entities.agents import AgentToolCall
+from app.entities.agent_skills import AgentSkillSnapshot
 from app.entities.runs import AgentRun
 from app.entities.knowledge import KnowledgeBase
 from app.entities.tools import McpToolPolicy, ToolSnapshot
@@ -65,6 +66,7 @@ from app.domain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
+from app.domain.agents.runtime.graph import MAX_AGENT_NO_PROGRESS_ROUNDS
 from app.domain.agents.runtime.state import PendingToolCall
 from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
@@ -78,6 +80,7 @@ from app.domain.tools.mcp.service import (
     resolve_mcp_tools,
 )
 from app.domain.tools.runtime import tool_snapshot_from_payload
+from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 
 logger = get_logger(__name__)
 
@@ -170,6 +173,99 @@ def _remaining_run_seconds(deadline: datetime) -> float:
     return remaining
 
 
+def _apply_skill_runtime_limits(
+    deadline: datetime,
+    max_turns: int,
+    max_tool_calls: int,
+    max_knowledge_calls: int,
+    max_knowledge_rounds: int,
+    max_no_progress_rounds: int,
+    max_model_tokens: int,
+    skills: list[AgentSkillSnapshot],
+) -> tuple[datetime, int, int, int, int, int, int]:
+    """Apply the strictest pinned SkillBundle budgets to a run."""
+    skill_runtime_seconds: float | None = None
+    for skill in skills:
+        definition = skill.definition
+        budgets = definition.get("budgets", {})
+        retrieval = definition.get("retrieval", {})
+        if isinstance(budgets, dict):
+            runtime_value = budgets.get("max_runtime_seconds")
+            if isinstance(runtime_value, (int, float)) and not isinstance(
+                runtime_value, bool
+            ):
+                skill_runtime_seconds = (
+                    runtime_value
+                    if skill_runtime_seconds is None
+                    else min(skill_runtime_seconds, runtime_value)
+                )
+            for key, current in (
+                ("max_turns", max_turns),
+                ("max_tool_calls", max_tool_calls),
+                ("max_model_tokens", max_model_tokens),
+            ):
+                value = budgets.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    if key == "max_turns":
+                        max_turns = min(current, value)
+                    elif key == "max_tool_calls":
+                        max_tool_calls = min(current, value)
+                    else:
+                        max_model_tokens = min(current, value)
+        if isinstance(retrieval, dict):
+            calls = retrieval.get("max_calls")
+            rounds = retrieval.get("max_rounds")
+            if isinstance(calls, int) and not isinstance(calls, bool):
+                max_knowledge_calls = min(max_knowledge_calls, calls)
+            if isinstance(rounds, int) and not isinstance(rounds, bool):
+                max_knowledge_rounds = min(max_knowledge_rounds, rounds)
+        stop = definition.get("stop", {})
+        if isinstance(stop, dict):
+            no_progress = stop.get("max_no_progress_rounds")
+            if isinstance(no_progress, int) and not isinstance(no_progress, bool):
+                max_no_progress_rounds = min(max_no_progress_rounds, no_progress)
+    if skill_runtime_seconds is not None:
+        deadline = min(deadline, utc_now() + timedelta(seconds=skill_runtime_seconds))
+    # Keep the same cross-budget invariants enforced for Agent settings after
+    # applying each pinned SkillBundle's stricter limits.
+    max_knowledge_calls = min(max_knowledge_calls, max_tool_calls)
+    max_knowledge_rounds = min(max_knowledge_rounds, max_turns)
+    return (
+        deadline,
+        max_turns,
+        max_tool_calls,
+        max_knowledge_calls,
+        max_knowledge_rounds,
+        max_no_progress_rounds,
+        max_model_tokens,
+    )
+
+
+def _skill_evaluation_requirements(
+    skills: list[AgentSkillSnapshot],
+) -> tuple[bool, int]:
+    require_grounding = False
+    min_evidence_count = 0
+    for skill in skills:
+        retrieval = skill.definition.get("retrieval", {})
+        if isinstance(retrieval, dict):
+            retrieval_count = retrieval.get("min_evidence_items", 0)
+            if isinstance(retrieval_count, int) and not isinstance(
+                retrieval_count, bool
+            ):
+                min_evidence_count = max(min_evidence_count, retrieval_count)
+        evaluation = skill.definition.get("evaluation", {})
+        if not isinstance(evaluation, dict):
+            continue
+        require_grounding = require_grounding or bool(
+            evaluation.get("require_grounding", False)
+        )
+        evidence_count = evaluation.get("min_evidence_count", 0)
+        if isinstance(evidence_count, int) and not isinstance(evidence_count, bool):
+            min_evidence_count = max(min_evidence_count, evidence_count)
+    return require_grounding, min_evidence_count
+
+
 @dataclass(frozen=True)
 class ExecutionScope:
     run: AgentRun
@@ -178,6 +274,7 @@ class ExecutionScope:
     model: RegisteredModel
     knowledge_bases: list[KnowledgeBase]
     tool_snapshots: list[ToolSnapshot]
+    skill_snapshots: list[AgentSkillSnapshot]
     mcp_tools: list[tuple[ResolvedMcpTool, str]]
 
 
@@ -572,6 +669,14 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
             if run.configuration_source in {"draft", "published"}
             else []
         )
+        try:
+            skill_snapshots = (
+                [agent_skill_snapshot_from_payload(item) for item in run.skill_snapshots]
+                if run.configuration_source in {"draft", "published"}
+                else []
+            )
+        except ValueError as exc:
+            raise AgentRunnerError("Agent Skill snapshot is invalid.") from exc
         resolved_mcp_tools = (
             await resolve_mcp_tools(
                 db,
@@ -613,6 +718,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         model=model,
         knowledge_bases=knowledge_bases,
         tool_snapshots=tool_snapshots,
+        skill_snapshots=skill_snapshots,
         mcp_tools=mcp_tools,
     )
 
@@ -787,6 +893,24 @@ async def _execute_claimed_agent_run(
         max_knowledge_rounds,
         max_model_tokens,
     ) = _run_limits(run, settings)
+    (
+        run_deadline,
+        max_turns,
+        max_tool_calls,
+        max_knowledge_calls,
+        max_knowledge_rounds,
+        max_no_progress_rounds,
+        max_model_tokens,
+    ) = _apply_skill_runtime_limits(
+        run_deadline,
+        max_turns,
+        max_tool_calls,
+        max_knowledge_calls,
+        max_knowledge_rounds,
+        MAX_AGENT_NO_PROGRESS_ROUNDS,
+        max_model_tokens,
+        scope.skill_snapshots,
+    )
     if run.depth == 1 and any(
         snapshot.approval != "auto"
         or snapshot.effect not in {"pure", "external_read"}
@@ -817,7 +941,10 @@ async def _execute_claimed_agent_run(
     )
     tools.extend(build_unified_agent_tool(snapshot) for snapshot in scope.tool_snapshots)
     has_application_tools = bool(scope.mcp_tools or scope.tool_snapshots)
-    from app.application.agents.runs.service import execution_messages
+    from app.application.agents.runs.service import (
+        execution_messages,
+        skill_execution_context,
+    )
 
     chat_model = build_chat_model(settings, scope.model)
     base_messages = execution_messages(
@@ -829,6 +956,7 @@ async def _execute_claimed_agent_run(
             if scope.knowledge_bases
             else ""
         ),
+        skill_context=skill_execution_context(scope.skill_snapshots),
     )
     memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
     if not run.checkpoint:
@@ -865,9 +993,19 @@ async def _execute_claimed_agent_run(
             if scope.knowledge_bases
             else ""
         ),
+        skill_context=skill_execution_context(scope.skill_snapshots),
         context_messages=memory.messages,
     )
-    grounding_mode = "agentic" if knowledge_tool is not None else None
+    skill_requires_grounding, skill_min_evidence_count = _skill_evaluation_requirements(
+        scope.skill_snapshots
+    )
+    grounding_mode = (
+        "required"
+        if skill_requires_grounding
+        else "agentic"
+        if knowledge_tool is not None
+        else None
+    )
 
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
@@ -978,11 +1116,26 @@ async def _execute_claimed_agent_run(
                     max_tool_calls=max_tool_calls,
                     max_knowledge_calls=max_knowledge_calls,
                     max_knowledge_rounds=max_knowledge_rounds,
+                    max_no_progress_rounds=max_no_progress_rounds,
                     max_model_tokens=max_model_tokens,
                     grounding_mode=grounding_mode,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
+        result_grounding_status = result.grounding_status
+        result_grounding_meta = result.grounding_meta or {}
+        if skill_min_evidence_count:
+            evidence_ids = result_grounding_meta.get("evidence_ids", [])
+            evidence_count = len(evidence_ids) if isinstance(evidence_ids, list) else 0
+            if evidence_count < skill_min_evidence_count:
+                result_grounding_status = "insufficient"
+                result_grounding_meta = {
+                    **result_grounding_meta,
+                    "decision": "insufficient",
+                    "error": "skill_min_evidence_count",
+                    "required_evidence_count": skill_min_evidence_count,
+                    "actual_evidence_count": evidence_count,
+                }
         async with get_session_factory()() as db:
             finalized = await agent_repository.finalize_agent_run(
                 db,
@@ -994,8 +1147,8 @@ async def _execute_claimed_agent_run(
                 last_error=None,
                 finished_at=utc_now(),
                 model_usage=result.model_usage,
-                grounding_status=result.grounding_status,
-                grounding_meta=result.grounding_meta or {},
+                grounding_status=result_grounding_status,
+                grounding_meta=result_grounding_meta,
             )
             await db.commit()
         if not finalized:

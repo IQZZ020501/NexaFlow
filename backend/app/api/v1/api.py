@@ -11,6 +11,7 @@ from app.api.v1.workspaces import routes as workspaces
 from app.api.v1.teams import routes as teams
 from app.api.v1.resource_folders import routes as resource_folders
 from app.api.v1.models import routes as models
+from app.api.v1.agent_skills import routes as agent_skills
 from app.api.v1.tools import mcp as mcp_servers
 from app.api.v1.tools import routes as tools
 from app.api.v1.knowledge import evaluation as knowledge_evaluation
@@ -54,6 +55,7 @@ api_router.include_router(resource_folders.router)
 api_router.include_router(mcp_servers.router)
 api_router.include_router(tool_sources.router)
 api_router.include_router(tools.router)
+api_router.include_router(agent_skills.router)
 api_router.include_router(agents.router)
 api_router.include_router(workflows.router)
 api_router.include_router(agent_access.public_router)

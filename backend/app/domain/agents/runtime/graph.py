@@ -45,6 +45,7 @@ MAX_AGENT_TURNS = 8
 MAX_AGENT_TOOL_CALLS = 12
 MAX_AGENT_KNOWLEDGE_CALLS = 6
 MAX_AGENT_KNOWLEDGE_ROUNDS = 3
+MAX_AGENT_NO_PROGRESS_ROUNDS = 2
 # Keep enough of each model turn for a useful, inspectable analysis trail while
 # still bounding durable event and live-stream payloads.
 MAX_REASONING_CHARS = 12_000
@@ -80,6 +81,7 @@ class AgentRuntimeContext:
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS
     max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS
     max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS
+    max_no_progress_rounds: int = MAX_AGENT_NO_PROGRESS_ROUNDS
     max_model_tokens: int | None = None
     grounding_mode: InlineGroundingMode | None = None
 
@@ -592,7 +594,10 @@ async def agent_node(
         and completed_tool_kinds == {"knowledge"}
     )
     available_tools = runtime.context.tools
-    if state["no_new_evidence_rounds"] >= 2 or knowledge_budget_exhausted:
+    if (
+        state["no_new_evidence_rounds"] >= runtime.context.max_no_progress_rounds
+        or knowledge_budget_exhausted
+    ):
         available_tools = [
             tool
             for tool in available_tools
@@ -952,7 +957,8 @@ async def tool_node(
     knowledge_round_available = (
         state["knowledge_round_count"]
         < runtime.context.max_knowledge_rounds
-        and state["no_new_evidence_rounds"] < 2
+        and state["no_new_evidence_rounds"]
+        < runtime.context.max_no_progress_rounds
     )
     permitted_knowledge_indices: set[int] = set()
     if not knowledge_budget_overflow and knowledge_round_available:
@@ -1010,12 +1016,13 @@ async def tool_node(
                 is_error=True,
             )
         elif (
-            state["no_new_evidence_rounds"] >= 2
+            state["no_new_evidence_rounds"]
+            >= runtime.context.max_no_progress_rounds
             and agent_tool_metadata(tool)["kind"] == "knowledge"
         ):
             blocked_result = AgentToolResult(
                 content=(
-                    "Knowledge search stopped after two rounds without new evidence."
+                    "Knowledge search stopped after the configured number of rounds without new evidence."
                 ),
                 summary="Knowledge search stopped after no new evidence.",
                 is_error=True,
@@ -1136,11 +1143,11 @@ async def tool_node(
         else:
             no_new_evidence_rounds += 1
 
-    if no_new_evidence_rounds >= 2:
+    if no_new_evidence_rounds >= runtime.context.max_no_progress_rounds:
         messages.append(
             HumanMessage(
                 content=(
-                    "No new evidence found in two consecutive retrieval rounds. "
+                    "No new evidence found in the configured number of consecutive retrieval rounds. "
                     "Stop searching and answer with the available evidence."
                 )
             )

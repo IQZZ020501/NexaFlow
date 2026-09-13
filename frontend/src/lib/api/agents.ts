@@ -2,6 +2,7 @@ import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { User } from "@/lib/api/auth"
 import type { ToolRef } from "@/lib/api/tools"
+import type { AgentSkillRef } from "@/lib/api/agent-skills"
 
 export type AppType = "agent" | "workflow"
 
@@ -27,6 +28,7 @@ export type Agent = {
   model_id: string
   knowledge_base_ids: string[]
   tools?: ToolRef[]
+  skills?: AgentSkillRef[]
   /** @deprecated Read-only compatibility for responses created before ToolRef. */
   mcp_tools?: AgentMcpToolRef[]
   status: "active" | "disabled"
@@ -59,6 +61,7 @@ export type AgentPayload = {
   model_id: string
   knowledge_base_ids: string[]
   tools: ToolRef[]
+  skills?: AgentSkillRef[]
   description?: string
   interaction_config?: AgentInteractionConfig
   instructions?: string

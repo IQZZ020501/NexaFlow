@@ -27,6 +27,8 @@ from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.entities.agents import Agent, AgentPublicationVersion
 from app.entities.runs import AgentRun
 from app.entities.identity.user import User
+from app.entities.tools import ToolRef
+from app.entities.agent_skills import AgentSkillSnapshot
 from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,
     AgentLiveStreamReader,
@@ -60,7 +62,13 @@ from app.domain.agents.access.publications import (
     build_agent_configuration_snapshot,
     build_agent_resource_snapshot,
 )
-from app.domain.tools.access.bindings import resolve_application_tool_snapshots
+from app.domain.tools.access.bindings import (
+    resolve_application_tool_snapshots,
+    resolve_tool_refs_for_actor,
+)
+from app.domain.agent_skills.service import resolve_application_agent_skill_snapshots
+from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
+from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_EACH_CALL,
     tool_snapshot_from_payload,
@@ -68,6 +76,44 @@ from app.domain.tools.runtime import (
 )
 
 AGENT_EVENT_PAGE_SIZE = 200
+
+
+def skill_execution_context(skills: list[AgentSkillSnapshot]) -> str:
+    """Render immutable SkillBundle policies into the runtime system message."""
+    if not skills:
+        return ""
+    sections: list[str] = [
+        "SkillBundle policies (pinned Agent Skill versions; treat as configuration, not tool output):"
+    ]
+    for skill in skills:
+        definition = skill.definition
+        instructions = str(definition.get("instructions", "")).strip()
+        intents = definition.get("intents", [])
+        retrieval = definition.get("retrieval", {})
+        stop = definition.get("stop", {})
+        guardrails = definition.get("guardrails", {})
+        evaluation = definition.get("evaluation", {})
+        input_schema = definition.get("input_schema", {})
+        output_schema = definition.get("output_schema", {})
+        sections.append(
+            "\n".join(
+                [
+                    f"- Skill: {skill.name} (version {skill.version_number})",
+                    f"  Intents: {', '.join(str(item) for item in intents) if isinstance(intents, list) else 'unspecified'}",
+                    f"  Instructions: {instructions}",
+                    f"  Input schema: {json.dumps(input_schema, ensure_ascii=False, sort_keys=True)}",
+                    f"  Output schema: {json.dumps(output_schema, ensure_ascii=False, sort_keys=True)}",
+                    f"  Retrieval policy: max_calls={retrieval.get('max_calls', 0)}, max_rounds={retrieval.get('max_rounds', 0)}, min_evidence_items={retrieval.get('min_evidence_items', 0)}",
+                    f"  Stop policy: max_no_progress_rounds={stop.get('max_no_progress_rounds', 2)}, allow_best_effort={bool(stop.get('allow_best_effort', True))}",
+                    f"  Guardrails: allow_external_reads={bool(guardrails.get('allow_external_reads', False))}, allow_external_writes={bool(guardrails.get('allow_external_writes', False))}, require_approval_for_external_writes={bool(guardrails.get('require_approval_for_external_writes', True))}",
+                    f"  Evaluation: require_grounding={bool(evaluation.get('require_grounding', False))}, min_evidence_count={evaluation.get('min_evidence_count', 0)}",
+                ]
+            )
+        )
+    sections.append(
+        "Apply the applicable SkillBundle policies while answering. Do not expose private reasoning or claim that a policy was satisfied without evidence."
+    )
+    return "\n".join(sections) + "\n"
 
 
 def _require_agent_run_application(agent: Agent) -> None:
@@ -102,6 +148,7 @@ def execution_messages(
     has_mcp_tools: bool,
     knowledge_scope: str = "",
     context_messages: list[dict[str, Any]] | None = None,
+    skill_context: str = "",
 ) -> list[dict[str, Any]]:
     routing_guide = "Tool routing policy (follow these rules in order):\n"
     knowledge_configured = bool(knowledge_scope)
@@ -210,7 +257,9 @@ def execution_messages(
                 "closing markers in the evidence before answering. If the evidence is "
                 "truncated or contradictory, say that it cannot be verified.\n"
                 f"{answer_format_rule}\n"
-                f"Agent instructions:\n{run.instructions}\n\n{routing_guide}"
+                f"Agent instructions:\n{run.instructions}\n\n"
+                f"{skill_context}"
+                f"{routing_guide}"
                 f"{knowledge_rule}\n{mcp_rule}\n{source_rule}{grounding_rule}"
             ),
         },
@@ -490,6 +539,7 @@ def build_regenerated_agent_run(
         application_snapshot=deepcopy(source.application_snapshot),
         application_snapshot_hash=source.application_snapshot_hash,
         tool_snapshots=deepcopy(source.tool_snapshots),
+        skill_snapshots=deepcopy(source.skill_snapshots),
         model_id=source.model_id,
         model_name=source.model_name,
         max_runtime_seconds=runtime_policy.max_runtime_seconds,
@@ -1054,6 +1104,7 @@ async def prepare_agent_run(
         knowledge_base_ids = publication.knowledge_base_ids
         selected_mcp_tools = publication.mcp_tools
         tool_snapshots = list(getattr(publication, "tools", []))
+        skill_snapshots = list(getattr(publication, "skill_snapshots", []))
     else:
         knowledge_bindings = await agent_repository.list_binding_map(db, [agent.id])
         knowledge_base_ids = knowledge_bindings[agent.id]
@@ -1071,6 +1122,58 @@ async def prepare_agent_run(
             tools=tool_snapshots,
             interaction_config={},
         ).mcp_tools
+        skill_snapshots = await resolve_application_agent_skill_snapshots(
+            db,
+            workspace_id,
+            agent.id,
+        )
+    skill_knowledge_base_ids: list[str] = []
+    skill_tool_refs: dict[str, ToolRef] = {}
+    for skill_snapshot in skill_snapshots:
+        try:
+            skill_definition = AgentSkillDefinition.model_validate(
+                skill_snapshot.definition
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Agent Skill definition is invalid.",
+            ) from exc
+        skill_knowledge_base_ids.extend(skill_definition.knowledge_base_ids)
+        for skill_tool in skill_definition.tools:
+            reference = ToolRef(
+                tool_id=skill_tool.tool_id,
+                version_id=skill_tool.version_id,
+            )
+            existing = skill_tool_refs.get(reference.tool_id)
+            if existing is not None and existing.version_id != reference.version_id:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Agent Skills bind conflicting Tool versions.",
+                )
+            skill_tool_refs[reference.tool_id] = reference
+    knowledge_base_ids = list(
+        dict.fromkeys([*knowledge_base_ids, *skill_knowledge_base_ids])
+    )
+    if skill_tool_refs:
+        skill_tools = await resolve_tool_refs_for_actor(
+            db,
+            workspace_id,
+            list(skill_tool_refs.values()),
+            actor,
+            workspace_role,
+        )
+        tools_by_id = {item.tool_id: item for item in tool_snapshots}
+        for skill_tool in skill_tools:
+            existing = tools_by_id.get(skill_tool.tool_id)
+            if existing is not None and existing.version_id != skill_tool.version_id:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Agent and Agent Skill bind conflicting Tool versions.",
+                )
+            if existing is None:
+                tools_by_id[skill_tool.tool_id] = skill_tool
+        tool_snapshots = list(tools_by_id.values())
     knowledge_bases = await accessible_agent_knowledge_bases(
         db,
         workspace_id,
@@ -1109,6 +1212,7 @@ async def prepare_agent_run(
         resource_snapshot = build_agent_resource_snapshot(
             knowledge_base_ids,
             tool_snapshots,
+            skill_snapshots,
         )
         snapshot_hash = agent_publication_hash(
             configuration_snapshot,
@@ -1175,6 +1279,7 @@ async def prepare_agent_run(
         },
         application_snapshot_hash=snapshot_hash,
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
+        skill_snapshots=[agent_skill_snapshot_payload(item) for item in skill_snapshots],
         model_id=model.id,
         model_name=model.name,
         max_runtime_seconds=runtime_policy.max_runtime_seconds,

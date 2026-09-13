@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.models.registered import RegisteredModel
 from app.infra.db.repositories.models import registry as model_repository
 from app.entities.agents import Agent, AgentPublicationVersion
+from app.entities.agent_skills import AgentSkillRef, AgentSkillSnapshot
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.workflows import WorkflowDefinition
 from app.entities.knowledge import KnowledgeBase
@@ -24,6 +25,7 @@ from app.schemas.agents.contracts import (
     validate_agent_interaction_config,
 )
 from app.schemas.tools.contracts import ToolRefSchema
+from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.domain.agents.access.permissions import (
     AGENT_RESOURCE_TYPE,
     can_edit_agent,
@@ -52,6 +54,12 @@ from app.domain.tools.access.bindings import (
 )
 from app.domain.tools.catalog.service import get_tool_catalog_detail
 from app.domain.tools.mcp.service import resolve_mcp_tools
+from app.domain.agent_skills.service import (
+    list_agent_skill_ref_map,
+    resolve_agent_skill_refs,
+    resolve_application_agent_skill_snapshots,
+    sync_agent_skill_bindings,
+)
 from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.runtime.engine import graph_hash
 from app.domain.workflows.uploads import queue_upload_cleanups
@@ -76,6 +84,7 @@ def agent_to_response(
     knowledge_base_ids: list[str],
     tools: list[ToolRef],
     legacy_mcp_tools: list[dict[str, str]],
+    skills: list[AgentSkillRef],
     actor: User,
     *,
     has_unpublished_changes: bool,
@@ -93,6 +102,7 @@ def agent_to_response(
         model_id=agent.model_id,
         knowledge_base_ids=knowledge_base_ids,
         tools=[{"tool_id": item.tool_id, "version_id": item.version_id} for item in tools],
+        skills=[{"skill_id": item.skill_id, "version_id": item.version_id} for item in skills],
         mcp_tools=legacy_mcp_tools,
         status=agent.status,
         published=agent.published,
@@ -260,7 +270,13 @@ async def agent_has_unpublished_changes(
         )
     except HTTPException:
         tools = None
-    return _agent_has_unpublished_changes(agent, knowledge_base_ids, version, tools)
+    try:
+        skills = await resolve_application_agent_skill_snapshots(
+            db, agent.workspace_id, agent.id
+        )
+    except HTTPException:
+        skills = None
+    return _agent_has_unpublished_changes(agent, knowledge_base_ids, version, tools, skills)
 
 
 def _agent_has_unpublished_changes(
@@ -268,13 +284,14 @@ def _agent_has_unpublished_changes(
     knowledge_base_ids: list[str],
     version: AgentPublicationVersion | None,
     tools: list[ToolSnapshot] | None,
+    skills: list[AgentSkillSnapshot] | None = None,
 ) -> bool:
     if not agent.published:
         return False
     if version is None or version.agent_id != agent.id or tools is None:
         return True
     configuration = build_agent_configuration_snapshot(agent)
-    resources = build_agent_resource_snapshot(knowledge_base_ids, tools)
+    resources = build_agent_resource_snapshot(knowledge_base_ids, tools, skills)
     return agent_publication_hash(configuration, resources) != version.configuration_hash
 
 
@@ -392,6 +409,7 @@ async def list_agents(
     legacy_mcp_bindings = await tools_repository.list_application_mcp_reference_map(
         db, application_ids
     )
+    skill_ref_map = await list_agent_skill_ref_map(db, workspace_id, application_ids)
     publication_versions = await agent_repository.list_agent_publication_version_map(
         db,
         workspace_id,
@@ -421,12 +439,19 @@ async def list_agents(
             bindings[agent.id],
             actor,
         )
+        try:
+            agent_skills = await resolve_application_agent_skill_snapshots(
+                db, agent.workspace_id, agent.id
+            )
+        except HTTPException:
+            agent_skills = None
         responses.append(
             agent_to_response(
                 agent,
                 [knowledge_base.id for knowledge_base in knowledge_bases],
                 tool_bindings[agent.id],
                 legacy_mcp_bindings[agent.id],
+                skill_ref_map[agent.id],
                 actor,
                 creator=creators.get(agent.created_by_user_id),
                 has_unpublished_changes=_agent_has_unpublished_changes(
@@ -434,6 +459,7 @@ async def list_agents(
                     bindings[agent.id],
                     publication_versions.get(agent.current_published_version_id or ""),
                     tool_snapshot_map[agent.id],
+                    agent_skills,
                 ),
             )
         )
@@ -453,6 +479,7 @@ async def get_agent_response(
     legacy_mcp_bindings = await tools_repository.list_application_mcp_reference_map(
         db, [agent.id]
     )
+    skill_ref_map = await list_agent_skill_ref_map(db, agent.workspace_id, [agent.id])
     knowledge_bases = await accessible_agent_knowledge_bases(
         db,
         agent.workspace_id,
@@ -464,6 +491,7 @@ async def get_agent_response(
         [knowledge_base.id for knowledge_base in knowledge_bases],
         tool_bindings[agent.id],
         legacy_mcp_bindings[agent.id],
+        skill_ref_map[agent.id],
         actor,
         has_unpublished_changes=await agent_has_unpublished_changes(
             db,
@@ -480,19 +508,31 @@ async def create_agent(
     actor: User,
     workspace_role: str | None,
 ) -> AgentResponse:
+    if payload.skills and payload.app_type != "agent":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Agent Skills can only be attached to Agent applications.",
+        )
     model = await get_agent_model(db, workspace_id, payload.model_id)
-    knowledge_bases = await resolve_agent_knowledge_bases(
-        db,
-        workspace_id,
-        payload.knowledge_base_ids,
-        actor,
-        workspace_role,
-    )
     tool_snapshots = await resolve_requested_agent_tools(
         db,
         workspace_id,
         payload.tools,
         payload.mcp_tools,
+        actor,
+        workspace_role,
+    )
+    skill_snapshots = await resolve_agent_skill_refs(
+        db,
+        workspace_id,
+        payload.skills,
+        actor,
+        workspace_role,
+    )
+    knowledge_bases = await resolve_agent_knowledge_bases(
+        db,
+        workspace_id,
+        payload.knowledge_base_ids,
         actor,
         workspace_role,
     )
@@ -534,6 +574,13 @@ async def create_agent(
             tool_snapshots,
             actor.id,
         )
+        await sync_agent_skill_bindings(
+            db,
+            workspace_id,
+            agent.id,
+            skill_snapshots,
+            actor.id,
+        )
         record_audit_log(
             db,
             actor,
@@ -547,6 +594,10 @@ async def create_agent(
                 "tools": [
                     {"tool_id": item.tool_id, "version_id": item.version_id}
                     for item in tool_snapshots
+                ],
+                "skills": [
+                    {"skill_id": item.skill_id, "version_id": item.version_id}
+                    for item in skill_snapshots
                 ],
             },
             workspace_id=workspace_id,
@@ -562,6 +613,7 @@ async def create_agent(
         [knowledge_base.id for knowledge_base in knowledge_bases],
         [ToolRef(tool_id=item.tool_id, version_id=item.version_id) for item in tool_snapshots],
         legacy_mcp_references(tool_snapshots),
+        [AgentSkillRef(skill_id=item.skill_id, version_id=item.version_id) for item in skill_snapshots],
         actor,
         has_unpublished_changes=False,
     )
@@ -617,10 +669,49 @@ async def apply_agent_publication(
             agent.workspace_id,
             agent.id,
         )
+        publication_skills = await resolve_application_agent_skill_snapshots(
+            db,
+            agent.workspace_id,
+            agent.id,
+        )
+        skill_tool_refs: dict[str, ToolRef] = {}
+        for skill_snapshot in publication_skills:
+            definition = AgentSkillDefinition.model_validate(skill_snapshot.definition)
+            for skill_tool in definition.tools:
+                reference = ToolRef(
+                    tool_id=skill_tool.tool_id,
+                    version_id=skill_tool.version_id,
+                )
+                existing = skill_tool_refs.get(reference.tool_id)
+                if existing is not None and existing.version_id != reference.version_id:
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        "Agent Skills bind conflicting Tool versions.",
+                    )
+                skill_tool_refs[reference.tool_id] = reference
+        if skill_tool_refs:
+            skill_tools = await resolve_tool_refs_for_actor(
+                db,
+                agent.workspace_id,
+                list(skill_tool_refs.values()),
+                actor,
+                workspace_role,
+            )
+            tools_by_id = {item.tool_id: item for item in publication_tools}
+            for skill_tool in skill_tools:
+                existing = tools_by_id.get(skill_tool.tool_id)
+                if existing is not None and existing.version_id != skill_tool.version_id:
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        "Agent and Agent Skill bind conflicting Tool versions.",
+                    )
+                tools_by_id[skill_tool.tool_id] = skill_tool
+            publication_tools = list(tools_by_id.values())
         configuration = build_agent_configuration_snapshot(agent)
         resources = build_agent_resource_snapshot(
             publication_bindings,
             publication_tools,
+            publication_skills,
         )
         version = await agent_repository.create_agent_publication_version(
             db,
@@ -679,6 +770,9 @@ async def update_agent(
     current_mcp_bindings = (
         await tools_repository.list_application_mcp_reference_map(db, [agent.id])
     )[agent.id]
+    current_skill_bindings = await list_agent_skill_ref_map(
+        db, agent.workspace_id, [agent.id]
+    )
     legacy_publication_snapshot = (
         agent_publication_snapshot(agent, current_bindings, current_mcp_bindings)
         if agent.app_type == "workflow"
@@ -802,6 +896,32 @@ async def update_agent(
             )
             configuration_changed = True
 
+    if payload.skills is not None:
+        if agent.app_type != "agent" and payload.skills:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "Agent Skills can only be attached to Agent applications.",
+            )
+        skill_snapshots = await resolve_agent_skill_refs(
+            db,
+            agent.workspace_id,
+            payload.skills,
+            actor,
+            workspace_role,
+        )
+        await sync_agent_skill_bindings(
+            db,
+            agent.workspace_id,
+            agent.id,
+            skill_snapshots,
+            actor.id,
+        )
+        configuration_changed = configuration_changed or {
+            (item.skill_id, item.version_id)
+            for item in current_skill_bindings.get(agent.id, [])
+        } != {
+            (item.skill_id, item.version_id) for item in payload.skills
+        }
     if configuration_changed and legacy_publication_snapshot is not None:
         agent.published_snapshot = legacy_publication_snapshot
 

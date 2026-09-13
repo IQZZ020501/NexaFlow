@@ -15,6 +15,11 @@ from app.domain.agents.models import (  # noqa: F401
     AgentRunSnapshot,
     AgentRunState,
 )
+from app.domain.agent_skills.models import (  # noqa: F401
+    AgentSkill,
+    AgentSkillBinding,
+    AgentSkillVersion,
+)
 from app.domain.audit.models import AuditLog  # noqa: F401
 from app.domain.announcements.models import Announcement, AnnouncementRead  # noqa: F401
 from app.domain.artifacts.models import GeneratedArtifact  # noqa: F401

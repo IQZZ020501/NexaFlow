@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from app.entities.agents import Agent
+from app.entities.agent_skills import AgentSkillSnapshot
 from app.entities.tools import ToolSnapshot
 from app.schemas.agents.contracts import AgentInteractionConfig
 from app.domain.tools.runtime import (
@@ -27,6 +28,7 @@ class AgentPublication:
     tools: list[ToolSnapshot]
     interaction_config: dict[str, Any]
     legacy_mcp_tools: list[dict[str, str]] = field(default_factory=list)
+    skill_snapshots: list[AgentSkillSnapshot] = field(default_factory=list)
 
     @property
     def mcp_tools(self) -> list[dict[str, str]]:
@@ -60,16 +62,43 @@ def build_agent_configuration_snapshot(agent: Agent) -> dict[str, Any]:
 def build_agent_resource_snapshot(
     knowledge_base_ids: list[str],
     tools: list[ToolSnapshot],
+    skill_snapshots: list[AgentSkillSnapshot] | None = None,
 ) -> dict[str, Any]:
     if len(set(knowledge_base_ids)) != len(knowledge_base_ids):
         raise ValueError("Agent knowledge base references must be unique.")
+    effective_knowledge_base_ids = set(knowledge_base_ids)
+    for skill in skill_snapshots or []:
+        skill_knowledge_ids = skill.definition.get("knowledge_base_ids", [])
+        if not isinstance(skill_knowledge_ids, list) or not all(
+            isinstance(item, str) and item for item in skill_knowledge_ids
+        ):
+            raise ValueError("Agent Skill knowledge references are invalid.")
+        effective_knowledge_base_ids.update(skill_knowledge_ids)
+    normalized_knowledge_base_ids = sorted(effective_knowledge_base_ids)
     if len({tool.tool_id for tool in tools}) != len(tools):
         raise ValueError("Agent Tool references must be unique.")
     return {
-        "knowledge_base_ids": sorted(knowledge_base_ids),
+        "knowledge_base_ids": normalized_knowledge_base_ids,
         "tools": [
             tool_snapshot_payload(tool)
             for tool in sorted(tools, key=lambda item: (item.tool_id, item.version_id))
+        ],
+        "skills": [
+            {
+                "schema_version": skill.schema_version,
+                "skill_id": skill.skill_id,
+                "version_id": skill.version_id,
+                "version_number": skill.version_number,
+                "name": skill.name,
+                "description": skill.description,
+                "definition": skill.definition,
+                "definition_hash": skill.definition_hash,
+                "bound_by_user_id": skill.bound_by_user_id,
+            }
+            for skill in sorted(
+                skill_snapshots or [],
+                key=lambda item: (item.skill_id, item.version_id),
+            )
         ],
     }
 
@@ -113,9 +142,19 @@ def publication_from_snapshots(
             interaction_config=normalized_interaction_config(
                 configuration_snapshot.get("interaction_config", {})
             ),
+            skill_snapshots=[
+                _skill_snapshot_from_payload(item)
+                for item in resource_snapshot.get("skills", [])
+            ],
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("Agent publication snapshot is invalid.") from exc
+
+
+def _skill_snapshot_from_payload(payload: dict[str, Any]) -> AgentSkillSnapshot:
+    from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
+
+    return agent_skill_snapshot_from_payload(payload)
 
 
 __all__ = [

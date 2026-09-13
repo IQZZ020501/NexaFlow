@@ -191,7 +191,8 @@ class ResourcePermission(Base):
         CheckConstraint(
             "(resource_type = 'knowledge_base' AND permission IN ('view', 'edit')) OR "
             "(resource_type = 'agent' AND permission = 'view') OR "
-            "(resource_type = 'tool' AND permission IN ('view', 'use'))",
+            "(resource_type = 'tool' AND permission IN ('view', 'use')) OR "
+            "(resource_type = 'agent_skill' AND permission IN ('view', 'use'))",
             name="ck_resource_permissions_type_permission",
         ),
     )

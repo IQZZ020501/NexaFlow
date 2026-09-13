@@ -121,6 +121,7 @@ _RUN_SNAPSHOT_FIELDS = (
     "application_snapshot",
     "application_snapshot_hash",
     "tool_snapshots",
+    "skill_snapshots",
     "model_id",
     "model_name",
     "max_runtime_seconds",

@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
 import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
+import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
@@ -77,6 +78,7 @@ type AgentDetailWorkspaceProps = {
   setForm: React.Dispatch<React.SetStateAction<AgentFormState>>
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
+  skills?: AgentSkill[]
   tools: ToolSummary[]
   runs: AgentRun[]
   toolCallsByRun: Record<string, AgentToolCall[]>
@@ -819,6 +821,7 @@ export function AgentDetailWorkspace({
   setForm,
   models,
   knowledgeBases,
+  skills = [],
   tools,
   runs,
   toolCallsByRun,
@@ -1174,6 +1177,7 @@ export function AgentDetailWorkspace({
                         setForm={setForm}
                         models={models}
                         knowledgeBases={knowledgeBases}
+                        skills={skills}
                         tools={tools}
                         token={token}
                         workspaceId={workspaceId}

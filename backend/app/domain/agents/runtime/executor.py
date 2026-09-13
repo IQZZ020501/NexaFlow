@@ -21,6 +21,7 @@ from app.domain.agents.runtime.callbacks import (
 from app.domain.agents.runtime.graph import (
     MAX_AGENT_KNOWLEDGE_CALLS,
     MAX_AGENT_KNOWLEDGE_ROUNDS,
+    MAX_AGENT_NO_PROGRESS_ROUNDS,
     MAX_AGENT_TOOL_CALLS,
     MAX_AGENT_TURNS,
     AgentRunnerError,
@@ -121,6 +122,7 @@ async def run_agent(
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS,
     max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS,
     max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS,
+    max_no_progress_rounds: int = MAX_AGENT_NO_PROGRESS_ROUNDS,
     max_model_tokens: int | None = None,
     grounding_mode: InlineGroundingMode | None = None,
     initial_evidence: list[dict[str, Any]] | None = None,
@@ -192,6 +194,7 @@ async def run_agent(
             max_tool_calls=max_tool_calls,
             max_knowledge_calls=max_knowledge_calls,
             max_knowledge_rounds=max_knowledge_rounds,
+            max_no_progress_rounds=max_no_progress_rounds,
             max_model_tokens=max_model_tokens,
             grounding_mode=grounding_mode,
         ),
