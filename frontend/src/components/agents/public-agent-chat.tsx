@@ -216,7 +216,7 @@ function PublicToolEventRow({
 
   const leading = (
     <>
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
         {event.type === "knowledge" ? (
           <DatabaseIcon className="size-3.5" />
         ) : (
@@ -226,8 +226,8 @@ function PublicToolEventRow({
           />
         )}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">
+      <span className="min-w-0 flex-1 leading-4">
+        <span className="block truncate text-[13px] font-medium text-foreground">
           {title}
           {event.server_name ? (
             <span className="ml-1 font-normal text-muted-foreground">
@@ -236,7 +236,7 @@ function PublicToolEventRow({
           ) : null}
         </span>
         {detail ? (
-          <span className="block truncate text-xs text-muted-foreground">
+          <span className="block truncate text-[11px] text-muted-foreground">
             {detail}
           </span>
         ) : null}
@@ -246,24 +246,24 @@ function PublicToolEventRow({
   )
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-background/70">
+    <div className="overflow-hidden rounded-md border border-border/70 bg-background/60">
       {canExpand ? (
         <button
           type="button"
-          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((current) => !current)}
         >
           {leading}
           <ChevronDownIcon
-            className={`size-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+            className={`size-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
         </button>
       ) : (
-        <div className="flex items-center gap-2 px-3 py-2">{leading}</div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5">{leading}</div>
       )}
       {canExpand && isOpen ? (
-        <div className="grid gap-3 border-t bg-muted/20 p-3 text-xs">
+        <div className="grid gap-2.5 border-t bg-muted/20 p-2.5 text-xs">
           {Object.keys(event.input ?? {}).length > 0 ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -288,15 +288,15 @@ function PublicToolEventRow({
                   {event.hits.map((hit, index) => (
                     <article
                       key={index}
-                      className="rounded-md border bg-background p-3"
+                      className="rounded-md border bg-background p-2.5"
                     >
-                      <div className="flex flex-wrap items-center gap-2 font-medium">
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
                         <span>{hit.document || t("未知文档")}</span>
                         <span className="text-muted-foreground">
                           {hit.knowledge_base}
                         </span>
                       </div>
-                      <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+                      <p className="mt-1.5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground">
                         {hit.content}
                       </p>
                     </article>
@@ -472,7 +472,7 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
         <span className="flex-1">{t("执行过程")}</span>
         <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="mt-2 space-y-2 border-l pl-4">
+      <div className="mt-2 space-y-1.5 border-l pl-3">
         {timeline.length === 0 ? (
           <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
             <LoaderCircleIcon className="size-4 animate-spin" />
