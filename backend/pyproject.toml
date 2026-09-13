@@ -46,4 +46,5 @@ dev = [
     "aiosqlite>=0.22.1",
     "coverage[toml]>=7.0.0",
     "httpx2>=2.5.0",
+    "ruff>=0.16.7,<0.17.0",
 ]
