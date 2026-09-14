@@ -170,7 +170,7 @@ def _limit_tool_payload(
     if budget[0] <= 0 or budget[1] <= 0:
         return TOOL_PAYLOAD_ELLIPSIS, True
     if isinstance(value, dict):
-        limited: dict[str, object] = {}
+        limited_mapping: dict[str, object] = {}
         truncated = False
         for key, item in islice(value.items(), limits.max_items):
             if budget[0] <= 0 or budget[1] <= 0:
@@ -182,15 +182,15 @@ def _limit_tool_payload(
                 safe_key = safe_key[: limits.max_string] + TOOL_PAYLOAD_ELLIPSIS
                 truncated = True
             budget[1] -= len(safe_key)
-            limited[safe_key], item_truncated = _limit_tool_payload(
+            limited_mapping[safe_key], item_truncated = _limit_tool_payload(
                 item, depth + 1, budget, limits
             )
             truncated = truncated or item_truncated
-        if len(value) > len(limited):
+        if len(value) > len(limited_mapping):
             truncated = True
-        return limited, truncated
+        return limited_mapping, truncated
     if isinstance(value, list):
-        limited: list[object] = []
+        limited_sequence: list[object] = []
         truncated = False
         for item in islice(value, limits.max_items):
             if budget[0] <= 0 or budget[1] <= 0:
@@ -200,11 +200,11 @@ def _limit_tool_payload(
             limited_item, item_truncated = _limit_tool_payload(
                 item, depth + 1, budget, limits
             )
-            limited.append(limited_item)
+            limited_sequence.append(limited_item)
             truncated = truncated or item_truncated
-        if len(value) > len(limited):
+        if len(value) > len(limited_sequence):
             truncated = True
-        return limited, truncated
+        return limited_sequence, truncated
     if isinstance(value, str):
         budget[1] -= min(len(value), limits.max_string)
         if len(value) > limits.max_string:

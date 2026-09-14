@@ -173,3 +173,41 @@ class AgentToolCall:
     finished_at: datetime | None = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class AgentConsumerStats:
+    """Aggregated per-consumer activity for one Agent."""
+
+    access_source: str = ""
+    consumer_id: str = ""
+    first_seen_at: datetime = field(default_factory=utc_now)
+    last_seen_at: datetime = field(default_factory=utc_now)
+    conversation_count: int = 0
+    run_count: int = 0
+
+
+@dataclass
+class AgentMonitoringRow:
+    """One Agent run projected for monitoring aggregation."""
+
+    created_at: datetime = field(default_factory=utc_now)
+    access_source: str = ""
+    consumer_id: str = ""
+    conversation_id: str = ""
+    status: str = ""
+    model_usage: dict[str, Any] | None = None
+
+
+@dataclass
+class AgentConsumerConversation:
+    """Latest visible run plus activity totals for one consumer conversation."""
+
+    run_id: str = ""
+    conversation_id: str = ""
+    goal: str = ""
+    status: str = ""
+    result: str | None = None
+    run_count: int = 0
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)

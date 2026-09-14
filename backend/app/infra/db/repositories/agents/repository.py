@@ -47,6 +47,11 @@ from app.domain.workflows.models import WorkflowNodeExecution
 from app.entities.agents import Agent as AgentEntity
 from app.entities.agents import AgentApiCredential as AgentApiCredentialEntity
 from app.entities.agents import (
+    AgentConsumerConversation,
+    AgentConsumerStats,
+    AgentMonitoringRow,
+)
+from app.entities.agents import (
     AgentPublicationVersion as AgentPublicationVersionEntity,
 )
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
@@ -628,7 +633,7 @@ async def list_agent_consumer_stats(
     agent_id: str,
     limit: int,
     offset: int,
-) -> tuple[list[tuple], int]:
+) -> tuple[list[AgentConsumerStats], int]:
     grouped = (
         select(
             AgentRun.access_source.label("access_source"),
@@ -656,7 +661,7 @@ async def list_agent_consumer_stats(
         .limit(limit)
         .offset(offset)
     )
-    return list(result.all()), total
+    return [to_entity(AgentConsumerStats, row) for row in result.all()], total
 
 
 async def list_agent_monitoring_rows(
@@ -664,7 +669,7 @@ async def list_agent_monitoring_rows(
     workspace_id: str,
     agent_id: str,
     since: datetime,
-) -> list[tuple]:
+) -> list[AgentMonitoringRow]:
     result = await db.execute(
         select(
             AgentRun.created_at,
@@ -681,7 +686,7 @@ async def list_agent_monitoring_rows(
             AgentRun.created_at >= since,
         )
     )
-    return list(result.all())
+    return [to_entity(AgentMonitoringRow, row) for row in result.all()]
 
 
 async def list_consumer_conversations(
@@ -689,7 +694,7 @@ async def list_consumer_conversations(
     agent_id: str,
     access_source: str,
     consumer_id: str,
-) -> list[tuple]:
+) -> list[AgentConsumerConversation]:
     """
     List conversations for a consumer, including their latest visible run and activity totals.
     
@@ -777,7 +782,7 @@ async def list_consumer_conversations(
         )
         .order_by(aggregates.c.updated_at.desc(), aggregates.c.conversation_id)
     )
-    return list(result.all())
+    return [to_entity(AgentConsumerConversation, row) for row in result.all()]
 
 
 async def delete_consumer_conversation(

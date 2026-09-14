@@ -141,7 +141,7 @@ def _reasoning_content(value: Any) -> str:
     return reasoning if isinstance(reasoning, str) else ""
 
 
-class _ProviderErrorChatMixin:
+class _ProviderErrorChatMixin(BaseChatModel):
     def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
         try:
             return super()._generate(*args, **kwargs)

@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.error import HTTPError, URLError
 
 from fastapi import HTTPException
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from mcp.types import Tool as McpTool
@@ -247,7 +248,11 @@ def test_reasoning_content() -> None:
     assert _reasoning_content("not-a-dict") == ""
 
 
-class _RaisingParent:
+class _RaisingParent(BaseChatModel):
+    @property
+    def _llm_type(self) -> str:
+        return "raising"
+
     def _generate(self, *args, **kwargs):
         raise OpenAIError("sync boom")
 
@@ -561,7 +566,14 @@ def test_credential_helpers() -> None:
     assert _bedrock_model_arn("arn:aws:bedrock:x", "us-east-1") == "arn:aws:bedrock:x"
 
 
-class _YieldingParent:
+class _YieldingParent(BaseChatModel):
+    @property
+    def _llm_type(self) -> str:
+        return "yielding"
+
+    def _generate(self, *args, **kwargs):
+        return ChatResult(generations=[])
+
     def _stream(self, *args, **kwargs):
         yield SimpleNamespace(text="chunk")
 

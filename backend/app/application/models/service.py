@@ -29,7 +29,7 @@ from app.application.models.registry import (
 )
 from app.domain.audit.services import record_audit_log
 from app.domain.models.registered import RegisteredModel
-from app.domain.platform.models import User
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
 from app.infra.runtime.validation import normalize_name

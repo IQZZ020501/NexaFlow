@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
@@ -86,7 +86,7 @@ async def get_workspace_context_from_path(
 
 def require_workspace_path_role(
     roles: set[str],
-) -> Callable[[WorkspaceContext], WorkspaceContext]:
+) -> Callable[[WorkspaceContext], Awaitable[WorkspaceContext]]:
     async def dependency(
         context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     ) -> WorkspaceContext:

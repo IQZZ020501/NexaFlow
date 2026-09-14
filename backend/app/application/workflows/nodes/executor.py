@@ -507,11 +507,11 @@ async def execute_workflow_node(
         return NodeResult(inputs=inputs, outputs={"answer": answer})
     if node_type == "condition":
         parsed = ConditionNodeConfig.model_validate(config)
-        selected = None
+        selected_branch = None
         resolved_conditions = []
         for branch in parsed.branch:
             if branch.type == "ELSE":
-                selected = branch
+                selected_branch = branch
                 break
             matches = []
             for rule in branch.conditions:
@@ -533,14 +533,14 @@ async def execute_workflow_node(
             if (branch.condition == "and" and all(matches)) or (
                 branch.condition == "or" and any(matches)
             ):
-                selected = branch
+                selected_branch = branch
                 break
-        if selected is None:
+        if selected_branch is None:
             raise ValueError("Workflow condition did not match a branch.")
         return NodeResult(
             inputs={"conditions": resolved_conditions},
-            outputs={"branch_name": selected.type},
-            selected_handles=frozenset({selected.id}),
+            outputs={"branch_name": selected_branch.type},
+            selected_handles=frozenset({selected_branch.id}),
         )
     if node_type == "llm":
         parsed = LlmNodeConfig.model_validate(config)
@@ -627,11 +627,13 @@ async def execute_workflow_node(
         content, usage = await _model_result(
             scope, model_id, "", prompt, context.remaining_model_tokens
         )
-        selected = content.strip() if content.strip() in handles else parsed.default_handle
+        selected_handle = (
+            content.strip() if content.strip() in handles else parsed.default_handle
+        )
         return NodeResult(
             inputs={"input": value, "model_id": model_id},
-            outputs={"class": selected},
-            selected_handles=frozenset({selected}),
+            outputs={"class": selected_handle},
+            selected_handles=frozenset({selected_handle}),
             model_tokens=int(usage.get("total_tokens") or 0),
             model_usage=usage,
         )
