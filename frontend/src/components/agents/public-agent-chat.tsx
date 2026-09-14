@@ -1169,17 +1169,30 @@ export function PublicAgentChat({
         if (current) {
           const visibleRuns = latestRunVersions(response.items)
           setRuns((currentRuns) => {
+            const liveRunId = activeRunIdRef.current
+            const livePlaceholderId = activePlaceholderIdRef.current
             const preservedRuns = currentRuns.filter(
               (run) =>
                 run.conversation_id === activeConversationId &&
                 (run.status === "cancelled" ||
-                  run.id === activeRunIdRef.current ||
-                  run.id === activePlaceholderIdRef.current)
+                  run.status === "failed" ||
+                  run.status === "succeeded" ||
+                  run.status === "running" ||
+                  run.id === liveRunId ||
+                  run.id === livePlaceholderId)
             )
             const merged = new Map(
               visibleRuns.map((run) => [run.id, run] as const)
             )
-            preservedRuns.forEach((run) => merged.set(run.id, run))
+            preservedRuns.forEach((run) => {
+              if (
+                !merged.has(run.id) ||
+                run.id === liveRunId ||
+                run.id === livePlaceholderId
+              ) {
+                merged.set(run.id, run)
+              }
+            })
             return latestRunVersions([...merged.values()])
           })
           for (const run of visibleRuns) {

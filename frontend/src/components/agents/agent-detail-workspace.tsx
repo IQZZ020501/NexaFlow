@@ -575,7 +575,7 @@ function RunExchange({
   )?.created_at
   return (
     <article className="flex flex-col gap-5">
-      <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
+      <div className="ml-auto flex min-w-0 max-w-[85%] flex-col items-end gap-1">
         <RunAttachmentCards attachments={run.attachments} t={t} />
         {editDraft === null ? (
           <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
@@ -583,7 +583,7 @@ function RunExchange({
           </div>
         ) : (
           <form
-            className="w-[min(32rem,80vw)] rounded-2xl rounded-br-md border bg-background p-2 shadow-sm"
+            className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-br-md border bg-background p-2 shadow-sm"
             onSubmit={(event) => {
               event.preventDefault()
               const goal = editDraft.trim()
@@ -597,7 +597,7 @@ function RunExchange({
             <textarea
               autoFocus
               aria-label={t("编辑消息")}
-              className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none"
+              className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
               maxLength={4000}
               value={editDraft}
               onChange={(event) => setEditDraft(event.target.value)}
@@ -969,7 +969,7 @@ export function AgentDetailWorkspace({
   }, [visibleActiveView])
 
   return (
-    <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
+    <div className="-mx-4 -mt-6 flex min-h-[calc(100dvh-3.5rem-6rem)] flex-col overflow-hidden bg-background sm:-mx-6 sm:-mb-6 sm:min-h-[calc(100svh-3.5rem)] lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
       <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
         <Button
           type="button"
@@ -1229,7 +1229,7 @@ export function AgentDetailWorkspace({
                       }
                     }}
                   >
-                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-8">
+                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-3 py-4 sm:px-8 sm:py-8">
                       {isRunsLoading ? (
                         <div className="flex min-h-72 flex-1 items-center justify-center text-muted-foreground">
                           <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -1276,7 +1276,7 @@ export function AgentDetailWorkspace({
                     </div>
                   </div>
 
-                  <div className="shrink-0 border-t bg-background p-3 sm:p-4">
+                  <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                     <form
                       className="relative mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
                       onSubmit={(event) => {
@@ -1347,13 +1347,15 @@ export function AgentDetailWorkspace({
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className={`max-h-40 min-h-28 w-full resize-none bg-transparent px-3 pt-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed ${files.length ? "pb-2" : "pb-14"}`}
+                        className={`max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed sm:min-h-28 sm:text-sm ${files.length ? "pb-2" : "pb-2 sm:pb-14"}`}
                         placeholder={
                           isDirty
                             ? t("请先保存配置后再调试")
                             : t("向 Agent 提问...")
                         }
                         aria-label={t("向 Agent 提问")}
+                        enterKeyHint="send"
+                        autoComplete="off"
                         disabled={
                           isDirty ||
                           isRunsLoading ||
@@ -1361,7 +1363,7 @@ export function AgentDetailWorkspace({
                           agent.status !== "active"
                         }
                         maxLength={4000}
-                        rows={2}
+                        rows={1}
                       />
                       <AgentAttachmentList
                         files={files}
@@ -1374,7 +1376,7 @@ export function AgentDetailWorkspace({
                         }
                         t={t}
                       />
-                      <div className="absolute right-2 bottom-2 flex items-center gap-2">
+                      <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
                         <Button
                           type="button"
                           variant="ghost"

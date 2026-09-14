@@ -342,7 +342,7 @@ function EndpointSection({ endpoint }: { endpoint: EndpointDocumentation }) {
   const { t } = useLanguage()
 
   return (
-    <section id={endpoint.id} className="scroll-mt-32 lg:scroll-mt-24 border-t py-10 sm:py-12">
+    <section id={endpoint.id} className="scroll-mt-[calc(8rem+env(safe-area-inset-top))] border-t py-10 sm:py-12 lg:scroll-mt-24">
       <div className="flex flex-wrap items-center gap-2.5">
         <Badge
           variant={endpoint.method === "POST" ? "default" : "secondary"}
@@ -729,9 +729,9 @@ export function AgentApiReference({
   ]
 
   return (
-    <main className="min-h-svh bg-background">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-        <div className="mx-auto flex min-h-16 max-w-[1440px] items-center gap-3 px-4 sm:px-6 lg:px-8">
+    <main className="min-h-dvh bg-background">
+      <header className="sticky top-0 z-40 border-b bg-background/95 pt-[env(safe-area-inset-top)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="mx-auto flex min-h-16 max-w-[1440px] items-center gap-3 px-3 sm:px-6 lg:px-8">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
             <Code2Icon className="size-4" />
           </span>
@@ -766,7 +766,7 @@ export function AgentApiReference({
         <aside className="hidden border-r lg:block">
           <nav
             aria-label={t("内容导航")}
-            className="sticky top-16 max-h-[calc(100svh-4rem)] overflow-y-auto px-5 py-8"
+            className="sticky top-[calc(4rem+env(safe-area-inset-top))] max-h-[calc(100dvh-4rem-env(safe-area-inset-top))] overflow-y-auto px-5 py-8"
           >
             <p className="px-2 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
               {t("API Reference")}
@@ -800,10 +800,10 @@ export function AgentApiReference({
           </nav>
         </aside>
 
-        <div className="min-w-0 px-4 py-8 sm:px-8 sm:py-12 lg:px-12 xl:px-16">
+        <div className="min-w-0 px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8 sm:py-12 lg:px-12 xl:px-16">
           <nav
             aria-label={t("内容导航")}
-            className="sticky top-16 z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b bg-background/95 px-4 py-3 backdrop-blur sm:-mx-8 sm:px-8 lg:hidden"
+            className="sticky top-[calc(4rem+env(safe-area-inset-top))] z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b bg-background/95 px-4 py-3 backdrop-blur sm:-mx-8 sm:px-8 lg:hidden"
           >
             {navigation.map((item) => (
               <a
@@ -818,7 +818,7 @@ export function AgentApiReference({
           </nav>
 
           <div className="mx-auto max-w-5xl">
-            <section id="overview" className="scroll-mt-32 lg:scroll-mt-24 pb-10 sm:pb-12">
+            <section id="overview" className="scroll-mt-[calc(8rem+env(safe-area-inset-top))] pb-10 sm:pb-12 lg:scroll-mt-24">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs font-semibold tracking-wider text-sky-600 uppercase dark:text-sky-400">
                   {t("API Reference")}
@@ -856,7 +856,7 @@ export function AgentApiReference({
 
             <section
               id="authentication"
-              className="scroll-mt-32 lg:scroll-mt-24 border-t py-10 sm:py-12"
+              className="scroll-mt-[calc(8rem+env(safe-area-inset-top))] border-t py-10 sm:py-12 lg:scroll-mt-24"
             >
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">

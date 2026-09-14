@@ -112,9 +112,9 @@ export function AgentApiDocumentation({ agentId }: AgentApiDocumentationProps) {
   }
 
   return (
-    <main className="min-h-svh bg-muted/20">
+    <main className="min-h-dvh bg-muted/20">
       <header className="border-b bg-background">
-        <div className="mx-auto flex min-h-16 max-w-5xl items-center gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex min-h-16 max-w-5xl items-center gap-3 px-4 pt-[env(safe-area-inset-top)] sm:px-6">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
             <BookOpenIcon className="size-4" />
           </span>
@@ -129,7 +129,7 @@ export function AgentApiDocumentation({ agentId }: AgentApiDocumentationProps) {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+      <div className="mx-auto w-full max-w-5xl px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-12">
         {isCheckingSession ? (
           <div
             className="flex min-h-48 items-center justify-center"

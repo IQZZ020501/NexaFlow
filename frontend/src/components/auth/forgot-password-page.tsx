@@ -43,7 +43,7 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <main className="flex min-h-svh items-start justify-center bg-muted/30 p-6 py-8 sm:items-center sm:py-6">
+    <main className="flex min-h-dvh items-start justify-center bg-muted/30 p-6 py-8 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:items-center sm:py-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
