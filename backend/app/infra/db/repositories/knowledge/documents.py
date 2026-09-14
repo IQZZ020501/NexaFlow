@@ -80,8 +80,7 @@ _QUERY_KEYWORD_CHUNK_IDS = text(
 )
 
 
-
-def _visible_document_conditions(document: KnowledgeDocumentORM):
+def _visible_document_conditions(document: type[KnowledgeDocumentORM]):
     """Visibility predicate shared by document listing and stats aggregation."""
     return and_(
         document.status.in_(VISIBLE_DOCUMENT_STATUSES),
@@ -745,12 +744,3 @@ async def get_queued_graph_rebuild(
         .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
     )
     return to_entity(KnowledgeTask, row) if row else None
-
-_QUERY_KEYWORD_CHUNK_IDS = text(
-    (
-        Path(__file__).parent.parent.parent
-        / "sql"
-        / "knowledge"
-        / "query_keyword_chunk_ids.sql"
-    ).read_text(encoding="utf-8")
-)

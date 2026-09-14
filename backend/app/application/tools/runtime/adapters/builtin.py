@@ -19,7 +19,7 @@ from app.application.tools.runtime.contracts import (
     ToolRuntimeResult,
 )
 from app.domain.artifacts.services import artifact_format_from_filename
-from app.entities.tools import ToolSnapshot
+from app.entities.tools import ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
 from app.infra.sandbox.client import (
@@ -32,7 +32,7 @@ from app.infra.sandbox.client import (
 
 
 class BuiltinToolAdapter:
-    kind = "builtin"
+    kind: ToolKind = "builtin"
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings

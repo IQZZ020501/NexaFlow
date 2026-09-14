@@ -21,6 +21,9 @@ from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
 )
+from app.ports.enterprise_identity import (
+    resolve_external_principal as resolve_external_principal_via_port,
+)
 from tests.support import activate_admin, auth_headers, settings, test_client
 
 
@@ -140,6 +143,35 @@ def main() -> None:
         )
     assert resolved.subject_id == "ou-feishu"
     assert resolved.email == "fei@example.com"
+    delegated = AsyncMock(
+        return_value=ExternalPrincipal(
+            subject_id="ou-delegated",
+            tenant_id="fei-tenant",
+            display_name="Delegated User",
+        )
+    )
+    with patch(
+        "app.adapters.identity.enterprise.resolve_external_principal",
+        new=delegated,
+    ):
+        resolved = asyncio.run(
+            resolve_external_principal_via_port(
+                feishu,
+                "secret",
+                "code",
+                "https://app.example.com/callback",
+                "verifier",
+            )
+        )
+    assert resolved.subject_id == "ou-delegated"
+    assert delegated.await_args is not None
+    assert delegated.await_args.args == (
+        feishu,
+        "secret",
+        "code",
+        "https://app.example.com/callback",
+        "verifier",
+    )
     qr_requests = AsyncMock(
         side_effect=[
             {"access_token": "qr-token"},

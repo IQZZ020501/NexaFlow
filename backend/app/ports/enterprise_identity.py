@@ -41,7 +41,9 @@ class EnterpriseIdentityProvider(Protocol):
     async def resolve_external_principal(
         self,
         connection: EnterpriseIdentityConnection,
-        authorization_code: str,
+        client_secret: str,
+        code: str,
+        redirect_uri: str,
         code_verifier: str,
         *,
         feishu_qr: bool = False,
@@ -71,7 +73,9 @@ def build_authorization_url(
 
 async def resolve_external_principal(
     connection: EnterpriseIdentityConnection,
-    authorization_code: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str,
     code_verifier: str,
     *,
     feishu_qr: bool = False,
@@ -82,7 +86,9 @@ async def resolve_external_principal(
 
     return await _resolve_external_principal(
         connection,
-        authorization_code,
+        client_secret,
+        code,
+        redirect_uri,
         code_verifier,
         feishu_qr=feishu_qr,
     )

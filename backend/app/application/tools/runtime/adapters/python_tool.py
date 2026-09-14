@@ -16,7 +16,7 @@ from app.application.tools.runtime.contracts import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.entities.tools import ToolSnapshot
+from app.entities.tools import ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.sandbox.client import (
     WorkflowSandboxBusyError,
@@ -26,7 +26,7 @@ from app.infra.sandbox.client import (
 
 
 class PythonToolAdapter:
-    kind = "python"
+    kind: ToolKind = "python"
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings

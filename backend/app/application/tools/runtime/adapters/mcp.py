@@ -17,13 +17,13 @@ from app.application.tools.runtime.contracts import (
     ToolRuntimeResult,
 )
 from app.domain.tools.mcp.service import mcp_server_connection
-from app.entities.tools import McpServer, ToolSnapshot
+from app.entities.tools import McpServer, ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.ports.mcp import McpClientError, call_mcp_tool
 
 
 class McpToolAdapter:
-    kind = "mcp"
+    kind: ToolKind = "mcp"
 
     def __init__(self, settings: Settings, server: McpServer) -> None:
         self.settings = settings

@@ -205,9 +205,8 @@ async def execute_tool_invocation(
             raise ToolInvocationBusy("Tool invocation is owned by another worker.")
         selected_adapter = adapter or build_tool_adapter(snapshot, settings, mcp_server)
 
-    if selected_adapter.kind != snapshot.kind:
-        result = _failure("tool_adapter_mismatch", "Tool provider is unavailable.")
-    else:
+    result = _failure("tool_adapter_mismatch", "Tool provider is unavailable.")
+    if selected_adapter.kind == snapshot.kind:
         remaining = max(0.001, (context.deadline_at - utc_now()).total_seconds())
         try:
             async with asyncio.timeout(remaining):
