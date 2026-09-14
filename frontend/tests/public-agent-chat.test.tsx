@@ -1466,8 +1466,15 @@ describe("PublicAgentChat", () => {
     const composer = screen.getByLabelText("请输入问题").closest("form")
     expect(composer?.className).toContain("max-w-5xl")
     expect(composer?.className).toContain("2xl:max-w-6xl")
+    expect(composer?.closest("main")?.className).toContain("h-dvh")
+    expect(composer?.closest("main")?.className).toContain("overflow-hidden")
     expect(composer?.closest("main")?.className).toContain(
       "lg:grid-cols-[240px_minmax(0,1fr)]"
+    )
+    expect(screen.getByLabelText("请输入问题").className).toContain("min-h-11")
+    expect(screen.getByLabelText("请输入问题").className).toContain("sm:min-h-28")
+    expect(screen.getByLabelText("发送问题").parentElement?.className).toContain(
+      "sm:absolute"
     )
     expect(screen.getByLabelText("打开历史记录").className).toContain(
       "lg:hidden"
@@ -2939,6 +2946,9 @@ describe("PublicAgentChat", () => {
       '[data-slot="dialog-content"]'
     ) as HTMLElement
     expect(dialogContent).toBeTruthy()
+    expect(dialogContent.className).toContain("overflow-hidden")
+    expect(dialogContent.className).toContain("max-sm:max-w-none")
+    expect(within(dialogContent).getByRole("button", { name: "关闭" })).toBeTruthy()
 
     fireEvent.click(
       within(dialogContent).getByRole("button", { name: /第二个会话/ })

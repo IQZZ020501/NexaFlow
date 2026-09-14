@@ -97,7 +97,7 @@ export function PublicApplicationChat({
     )
   }
   return (
-    <main className="flex min-h-svh items-center justify-center p-6 text-sm text-muted-foreground">
+    <main className="flex min-h-dvh items-center justify-center p-6 text-sm text-muted-foreground">
       {kind === "missing" ? (
         t("未发布")
       ) : kind === "error" ? (
