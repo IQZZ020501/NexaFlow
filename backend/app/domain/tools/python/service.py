@@ -7,6 +7,15 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.services import record_audit_log
+from app.domain.tools.access.permissions import require_managed_tool
+from app.domain.tools.catalog.service import (
+    canonical_definition_hash,
+    stable_catalog_id,
+)
+from app.domain.tools.runtime import build_tool_snapshot
+from app.entities.defaults import utc_now
+from app.entities.identity.user import User
 from app.entities.tools import (
     Tool,
     ToolDraft,
@@ -16,15 +25,8 @@ from app.entities.tools import (
     validate_python_tool_code,
     validate_tool_json_schema,
 )
-from app.entities.identity.user import User
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.tools import repository as repository
+from app.infra.db.repositories.tools import repository
 from app.infra.runtime.validation import normalize_name
-from app.domain.audit.services import record_audit_log
-from app.domain.tools.catalog.service import canonical_definition_hash, stable_catalog_id
-from app.domain.tools.access.permissions import require_managed_tool
-from app.domain.tools.runtime import build_tool_snapshot
-
 
 DEFAULT_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",

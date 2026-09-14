@@ -26,17 +26,18 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 # Must be the first app-adjacent import: sets test env before app modules load.
-from tests.support import (  # noqa: F401
+from tests.support import (
     activate_admin,
     activate_user,
     auth_headers,
     create_active_user,
-    settings as test_settings,
     test_client,
+)
+from tests.support import (
+    settings as test_settings,
 )
 
 from app.application.agents.access import service as agent_access
-from app.application.agents.runs import service as agent_runs
 from app.application.agents.access.service import (
     TOOL_INPUT_LIMITS,
     ToolPayloadLimits,
@@ -48,22 +49,29 @@ from app.application.agents.access.service import (
     hash_agent_access_token,
     sanitize_external_agent_stream,
 )
-from app.infra.security import agent_rate_limit as rate_limit_module
-from app.infra.security.agent_rate_limit import (
-    AgentRateLimitExceeded,
-    AgentRateLimitUnavailable,
-    enforce_external_agent_rate_limit,
+from app.application.agents.runs import service as agent_runs
+from app.domain.agents.models import (
+    Agent as AgentOrm,
+)
+from app.domain.agents.models import (
+    AgentApiCredential as AgentApiCredentialOrm,
+)
+from app.domain.agents.models import (
+    AgentRun as AgentRunOrm,
+)
+from app.domain.agents.models import (
+    AgentRunSnapshot,
+    AgentRunState,
 )
 from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.session import get_session_factory
-from app.domain.agents.models import (
-    Agent as AgentOrm,
-    AgentApiCredential as AgentApiCredentialOrm,
-    AgentRun as AgentRunOrm,
-    AgentRunSnapshot,
-    AgentRunState,
+from app.infra.security import agent_rate_limit as rate_limit_module
+from app.infra.security.agent_rate_limit import (
+    AgentRateLimitExceeded,
+    AgentRateLimitUnavailable,
+    enforce_external_agent_rate_limit,
 )
 
 MEMBER_PASSWORD = "AgentMember@12345."
@@ -1394,7 +1402,6 @@ async def assert_direct_endpoint_calls(
     from starlette.datastructures import UploadFile
 
     import app.api.v1.agents.access as endpoints_module
-
     from app.entities.agents import AgentToolCall
 
     settings = test_settings()
@@ -1580,11 +1587,11 @@ async def assert_direct_endpoint_calls(
 # ---------------------------------------------------------------------------
 
 async def seed_approval(workspace_id: str, run_id: str, call_id: str) -> None:
-    from app.entities.agents import AgentToolCall
     from app.domain.agents.models import (
         AgentRunSnapshot,
         AgentRunState,
     )
+    from app.entities.agents import AgentToolCall
 
     async with get_session_factory()() as db:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
@@ -1636,6 +1643,8 @@ async def seed_runs_for_logs_and_monitoring(
     """
     from app.domain.agents.models import (
         AgentRun as AgentRunOrm,
+    )
+    from app.domain.agents.models import (
         AgentRunState,
     )
 
@@ -1781,7 +1790,7 @@ def assert_http_external_access() -> None:
             assert missing_profile.status_code == 404
 
             # ---- member: credential management and logs are admin-only ----
-            member_user_id, temporary = create_workspace_user(
+            _, temporary = create_workspace_user(
                 client, admin_token, workspace_id, "access-member"
             )
             member_token = activate_user(

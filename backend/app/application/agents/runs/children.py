@@ -10,25 +10,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.agents.runs.service import prepare_agent_run
 from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.workspaces.service import build_workspace_context
-from app.entities.agents import AgentPublicationVersion
-from app.entities.runs import AgentRun
-from app.entities.tools import ToolSnapshot
-from app.entities.identity.user import User
-from app.infra.config.settings import Settings
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.db.session import get_session_factory
+from app.domain.agents.access.permissions import require_agent_view
+from app.domain.agents.access.publications import agent_publication_hash
 from app.domain.agents.models import (
     AGENT_RUN_AWAITING_CHILD_STATUSES,
     AGENT_RUN_CANCELLED_STATUS,
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_SUCCEEDED_STATUS,
 )
-from app.domain.agents.access.permissions import require_agent_view
-from app.domain.agents.access.publications import agent_publication_hash
 from app.domain.tools.runtime import tool_snapshot_from_payload
+from app.entities.agents import AgentPublicationVersion
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolSnapshot
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
 
 MAX_WORKFLOW_CHILDREN = 4
 MAX_CHILD_TURNS = 4
@@ -58,7 +58,7 @@ async def _require_snapshot_binder(
     if binder is None or not binder.is_active:
         raise ValueError("Workflow Agent binder is unavailable.")
     try:
-        context = await build_workspace_context(db, binder, workspace_id)
+        await build_workspace_context(db, binder, workspace_id)
     except HTTPException as exc:
         raise ValueError("Workflow Agent binder is unavailable.") from exc
     target = await agent_repository.get_agent_by_id(db, str(snapshot.get("agent_id")))

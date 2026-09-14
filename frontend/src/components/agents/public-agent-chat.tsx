@@ -25,6 +25,7 @@ import {
   SquareIcon,
   SearchIcon,
   UserIcon,
+  XIcon,
 } from "lucide-react"
 
 import {
@@ -34,6 +35,7 @@ import {
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
+import { IconButton } from "@/components/ui/icon-button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -103,6 +105,37 @@ import {
 type PublicAgentChatProps = {
   agentId: string
   initialConversationId?: string | null
+}
+
+function readVisualViewportHeight() {
+  const viewport = window.visualViewport
+  if (!viewport) return null
+  const height = Math.round(viewport.height)
+  return Number.isFinite(height) && height > 0 ? height : null
+}
+
+function useVisualViewportHeight() {
+  const [height, setHeight] = React.useState<number | null>(
+    readVisualViewportHeight
+  )
+
+  React.useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+
+    const sync = () => {
+      const next = readVisualViewportHeight()
+      setHeight((current) => (current === next ? current : next))
+    }
+    viewport.addEventListener("resize", sync)
+    viewport.addEventListener("scroll", sync)
+    return () => {
+      viewport.removeEventListener("resize", sync)
+      viewport.removeEventListener("scroll", sync)
+    }
+  }, [])
+
+  return height
 }
 
 function CopyMessageButton({ value }: { value: string }) {
@@ -216,7 +249,7 @@ function PublicToolEventRow({
 
   const leading = (
     <>
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
         {event.type === "knowledge" ? (
           <DatabaseIcon className="size-3.5" />
         ) : (
@@ -226,8 +259,8 @@ function PublicToolEventRow({
           />
         )}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">
+      <span className="min-w-0 flex-1 leading-4">
+        <span className="block truncate text-[13px] font-medium text-foreground">
           {title}
           {event.server_name ? (
             <span className="ml-1 font-normal text-muted-foreground">
@@ -236,7 +269,7 @@ function PublicToolEventRow({
           ) : null}
         </span>
         {detail ? (
-          <span className="block truncate text-xs text-muted-foreground">
+          <span className="block truncate text-[11px] text-muted-foreground">
             {detail}
           </span>
         ) : null}
@@ -246,24 +279,24 @@ function PublicToolEventRow({
   )
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-background/70">
+    <div className="overflow-hidden rounded-md border border-border/70 bg-background/60">
       {canExpand ? (
         <button
           type="button"
-          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((current) => !current)}
         >
           {leading}
           <ChevronDownIcon
-            className={`size-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+            className={`size-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
         </button>
       ) : (
-        <div className="flex items-center gap-2 px-3 py-2">{leading}</div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5">{leading}</div>
       )}
       {canExpand && isOpen ? (
-        <div className="grid gap-3 border-t bg-muted/20 p-3 text-xs">
+        <div className="grid gap-2.5 border-t bg-muted/20 p-2.5 text-xs">
           {Object.keys(event.input ?? {}).length > 0 ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -288,15 +321,15 @@ function PublicToolEventRow({
                   {event.hits.map((hit, index) => (
                     <article
                       key={index}
-                      className="rounded-md border bg-background p-3"
+                      className="rounded-md border bg-background p-2.5"
                     >
-                      <div className="flex flex-wrap items-center gap-2 font-medium">
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
                         <span>{hit.document || t("未知文档")}</span>
                         <span className="text-muted-foreground">
                           {hit.knowledge_base}
                         </span>
                       </div>
-                      <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+                      <p className="mt-1.5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground">
                         {hit.content}
                       </p>
                     </article>
@@ -472,7 +505,7 @@ function PublicExecutionProcess({ run }: { run: ExternalAgentRun }) {
         <span className="flex-1">{t("执行过程")}</span>
         <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="mt-2 space-y-2 border-l pl-4">
+      <div className="mt-2 space-y-1.5 border-l pl-3">
         {timeline.length === 0 ? (
           <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
             <LoaderCircleIcon className="size-4 animate-spin" />
@@ -820,6 +853,7 @@ export function cancelPublicAgentStream(streamControllerRef: {
  * @param activeConversationId - The identifier of the currently selected conversation.
  * @param onNew - Called when a new conversation is requested.
  * @param onSelect - Called with the identifier of the selected conversation.
+ * @param onClose - Called when the mobile history panel is dismissed.
  */
 function ConversationHistory({
   profile,
@@ -828,6 +862,7 @@ function ConversationHistory({
   onNew,
   onSelect,
   onDelete,
+  onClose,
   deletingConversationId,
   onExport,
   exportingConversationId,
@@ -838,6 +873,7 @@ function ConversationHistory({
   onNew: () => void
   onSelect: (conversationId: string) => void
   onDelete: (conversationId: string) => void
+  onClose?: () => void
   deletingConversationId: string | null
   onExport: (conversationId: string) => void
   exportingConversationId: string | null
@@ -855,13 +891,18 @@ function ConversationHistory({
   }, [conversations, query])
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex min-h-16 items-center gap-3 border-b px-4">
+      <div className="flex min-h-16 items-center gap-3 border-b px-4 pt-[env(safe-area-inset-top)]">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <BotIcon className="size-4" />
         </span>
-        <p className="min-w-0 truncate text-sm font-semibold">
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold">
           {profile?.name ?? t("公开 Agent")}
         </p>
+        {onClose ? (
+          <IconButton label={t("关闭")} onClick={onClose}>
+            <XIcon />
+          </IconButton>
+        ) : null}
       </div>
       <div className="p-3">
         <Button
@@ -874,7 +915,7 @@ function ConversationHistory({
           {t("新建对话")}
         </Button>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+      <div className="flex min-h-0 flex-1 flex-col px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
           <HistoryIcon className="size-3.5" />
           <span className="flex-1">{t("历史记录")}</span>
@@ -882,7 +923,7 @@ function ConversationHistory({
         <div className="relative mb-2">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
-            className="h-8 w-full rounded-md border bg-background pr-2 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full rounded-md border bg-background pr-2 pl-8 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:text-xs"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("搜索历史记录")}
@@ -902,7 +943,7 @@ function ConversationHistory({
             filteredConversations.map((conversation) => (
               <div
                 key={conversation.conversation_id}
-                className={`group flex items-center gap-1 rounded-lg px-2 py-1 transition-colors hover:bg-muted ${
+                className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-muted ${
                   activeConversationId === conversation.conversation_id
                     ? "bg-muted"
                     : ""
@@ -910,7 +951,7 @@ function ConversationHistory({
               >
                 <button
                   type="button"
-                  className="min-w-0 flex-1 rounded-md px-1 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-current={
                     activeConversationId === conversation.conversation_id
                       ? "page"
@@ -931,7 +972,7 @@ function ConversationHistory({
                       type="button"
                       variant="ghost"
                       size="icon-xs"
-                      className="size-5 rounded-md p-0 text-muted-foreground"
+                      className="size-8 shrink-0 rounded-md p-0 text-muted-foreground sm:size-5"
                       aria-label={t("更多")}
                       title={t("更多")}
                       onClick={(event) => event.stopPropagation()}
@@ -998,6 +1039,7 @@ export function PublicAgentChat({
   const { t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored, notify } = useSession()
+  const viewportHeight = useVisualViewportHeight()
   const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
   const [conversations, setConversations] = React.useState<
     PublicAgentConversation[]
@@ -1127,17 +1169,30 @@ export function PublicAgentChat({
         if (current) {
           const visibleRuns = latestRunVersions(response.items)
           setRuns((currentRuns) => {
+            const liveRunId = activeRunIdRef.current
+            const livePlaceholderId = activePlaceholderIdRef.current
             const preservedRuns = currentRuns.filter(
               (run) =>
                 run.conversation_id === activeConversationId &&
                 (run.status === "cancelled" ||
-                  run.id === activeRunIdRef.current ||
-                  run.id === activePlaceholderIdRef.current)
+                  run.status === "failed" ||
+                  run.status === "succeeded" ||
+                  run.status === "running" ||
+                  run.id === liveRunId ||
+                  run.id === livePlaceholderId)
             )
             const merged = new Map(
               visibleRuns.map((run) => [run.id, run] as const)
             )
-            preservedRuns.forEach((run) => merged.set(run.id, run))
+            preservedRuns.forEach((run) => {
+              if (
+                !merged.has(run.id) ||
+                run.id === liveRunId ||
+                run.id === livePlaceholderId
+              ) {
+                merged.set(run.id, run)
+              }
+            })
             return latestRunVersions([...merged.values()])
           })
           for (const run of visibleRuns) {
@@ -1614,7 +1669,7 @@ export function PublicAgentChat({
 
   if (isInitializing) {
     return (
-      <main className="flex min-h-svh items-center justify-center bg-muted/30 text-sm text-muted-foreground">
+      <main className="flex min-h-dvh items-center justify-center bg-muted/30 text-sm text-muted-foreground">
         <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
         {t("正在加载")}
       </main>
@@ -1623,7 +1678,7 @@ export function PublicAgentChat({
 
   if (fatalError || !profile) {
     return (
-      <main className="flex min-h-svh items-center justify-center bg-muted/30 p-6">
+      <main className="flex min-h-dvh items-center justify-center bg-muted/30 p-6">
         <div className="max-w-md text-center">
           <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
             <CircleAlertIcon className="size-5" />
@@ -1653,13 +1708,20 @@ export function PublicAgentChat({
   }
 
   return (
-    <main className="grid h-svh min-h-0 bg-muted/20 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+    <main
+      className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 lg:h-svh lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]"
+      style={
+        viewportHeight
+          ? { height: viewportHeight, maxHeight: viewportHeight }
+          : undefined
+      }
+    >
       <aside className="hidden min-h-0 border-r lg:block">
         <ConversationHistory {...historyProps} />
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col">
-        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur sm:px-6">
+        <header className="flex min-h-16 shrink-0 items-center gap-2 border-b bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:gap-3 sm:px-6">
           <Button
             type="button"
             variant="ghost"
@@ -1671,7 +1733,7 @@ export function PublicAgentChat({
           >
             <MenuIcon />
           </Button>
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <span className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground sm:flex">
             <BotIcon className="size-4" />
           </span>
           <div className="min-w-0 flex-1">
@@ -1692,8 +1754,8 @@ export function PublicAgentChat({
           </Button>
         </header>
 
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-4 py-8 sm:px-8 2xl:max-w-6xl">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 sm:px-8 sm:py-8 2xl:max-w-6xl">
             {isRunsLoading ? (
               <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -1712,7 +1774,7 @@ export function PublicAgentChat({
                 </p>
               </div>
             ) : (
-              <div className="space-y-8">
+              <div className="space-y-6 sm:space-y-8">
                 {visibleRuns.map((run, index) => {
                   const answerStartedAt = run.progress.findLast(
                     (event) => event.type === "answer"
@@ -1723,15 +1785,15 @@ export function PublicAgentChat({
                   const isEditing = editingRunId === run.id
                   return (
                     <article key={run.id} className="space-y-4">
-                      <div className="flex items-start gap-2">
-                        <div className="ml-auto flex max-w-[85%] flex-col items-end gap-1">
+                      <div className="flex items-start justify-end gap-2">
+                        <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1">
                           <RunAttachmentCards
                             attachments={run.attachments}
                             t={t}
                           />
                           {isEditing ? (
                             <form
-                              className="w-[min(32rem,80vw)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
+                              className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
                               onSubmit={(event) => {
                                 event.preventDefault()
                                 const goal = editDraft.trim()
@@ -1749,7 +1811,7 @@ export function PublicAgentChat({
                               <textarea
                                 autoFocus
                                 aria-label={t("编辑消息")}
-                                className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none"
+                                className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
                                 maxLength={4000}
                                 value={editDraft}
                                 onChange={(event) =>
@@ -1818,16 +1880,16 @@ export function PublicAgentChat({
                             ) : null}
                           </div>
                         </div>
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                        <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
                           <UserIcon className="size-3.5" />
                         </span>
                       </div>
                       <div className="flex items-start gap-3">
-                        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
+                        <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
                           <BotIcon className="size-4" />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+                          <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
                             <PublicExecutionProcess run={run} />
                             {toolCallsByRun[run.id]
                               ?.filter(
@@ -1871,7 +1933,7 @@ export function PublicAgentChat({
                           </div>
                           {answerStartedAt ||
                           (run.status === "succeeded" && run.result) ? (
-                            <div className="flex items-start justify-between gap-2">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
                               <MessageTimestamp value={answerStartedAt} />
                               {run.status === "succeeded" && run.result ? (
                                 <RunActionBar
@@ -1907,7 +1969,7 @@ export function PublicAgentChat({
           </div>
         </div>
 
-        <div className="shrink-0 border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
+        <div className="shrink-0 border-t bg-background p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
           {sendError ? (
             <p
               role="alert"
@@ -1968,9 +2030,11 @@ export function PublicAgentChat({
                   event.currentTarget.form?.requestSubmit()
                 }
               }}
-              className={`max-h-40 min-h-28 w-full resize-none bg-transparent px-3 pt-2 text-sm leading-6 outline-none placeholder:text-muted-foreground ${files.length ? "pb-2" : "pb-14"}`}
+              className={`max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 outline-none placeholder:text-muted-foreground sm:min-h-28 sm:text-sm ${files.length ? "pb-2" : "pb-2 sm:pb-14"}`}
               placeholder={t("请输入问题")}
               aria-label={t("请输入问题")}
+              enterKeyHint="send"
+              autoComplete="off"
               maxLength={4000}
               rows={1}
               disabled={isSending}
@@ -1984,7 +2048,7 @@ export function PublicAgentChat({
               }
               t={t}
             />
-            <div className="absolute right-2 bottom-2 flex items-center gap-2">
+            <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
               <Button
                 type="button"
                 variant="ghost"
@@ -2022,12 +2086,18 @@ export function PublicAgentChat({
       </section>
 
       <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <DialogContent side="right" className="p-0 lg:hidden">
+        <DialogContent
+          side="right"
+          className="flex h-full min-h-0 flex-col gap-0 overflow-hidden p-0 max-sm:max-w-none lg:hidden"
+        >
           <DialogHeader className="sr-only">
             <DialogTitle>{t("历史记录")}</DialogTitle>
             <DialogDescription>{t("选择或新建对话")}</DialogDescription>
           </DialogHeader>
-          <ConversationHistory {...historyProps} />
+          <ConversationHistory
+            {...historyProps}
+            onClose={() => setIsHistoryOpen(false)}
+          />
         </DialogContent>
       </Dialog>
       {confirmDialog}

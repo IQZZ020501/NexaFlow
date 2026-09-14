@@ -8,22 +8,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 from sqlalchemy import select
-
 from tests.support import (
     activate_admin,
     auth_headers,
     create_active_user,
-    settings as test_settings,
     test_client,
 )
+from tests.support import (
+    settings as test_settings,
+)
+
 from app.application.email.smtp import (
     _validate_email,
     _validate_entity,
     build_smtp_transport_config,
 )
+from app.domain.audit.models import AuditLog
 from app.domain.platform.models import SmtpSettings as SmtpSettingsOrm
 from app.entities.email.smtp import SmtpSettings
-from app.infra.security.secrets import decrypt_secret
 from app.infra.db.session import get_session_factory
 from app.infra.email.smtp import (
     SmtpConfigurationError,
@@ -33,7 +35,7 @@ from app.infra.email.smtp import (
     _send_smtp_message_sync,
     send_smtp_message,
 )
-from app.domain.audit.models import AuditLog
+from app.infra.security.secrets import decrypt_secret
 
 
 async def stored_password() -> tuple[str | None, list[dict]]:

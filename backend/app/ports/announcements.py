@@ -47,7 +47,9 @@ class AnnouncementLiveStreamReader(Protocol):
 def build_announcement_live_stream_publisher(
     settings: Settings,
 ) -> AnnouncementLiveStreamPublisher:
-    from app.adapters.announcements.live_stream import RedisAnnouncementLiveStreamPublisher
+    from app.adapters.announcements.live_stream import (
+        RedisAnnouncementLiveStreamPublisher,
+    )
 
     return RedisAnnouncementLiveStreamPublisher(settings)
 

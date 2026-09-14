@@ -12,7 +12,6 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import StructuredTool
 
-from app.infra.observability.logger import get_logger, log_event
 from app.domain.agents.runtime.callbacks import (
     AgentEventBus,
     AgentEventHandler,
@@ -21,11 +20,12 @@ from app.domain.agents.runtime.callbacks import (
 from app.domain.agents.runtime.graph import (
     MAX_AGENT_KNOWLEDGE_CALLS,
     MAX_AGENT_KNOWLEDGE_ROUNDS,
+    MAX_AGENT_NO_PROGRESS_ROUNDS,
     MAX_AGENT_TOOL_CALLS,
     MAX_AGENT_TURNS,
-    AgentRunnerError,
     AgentRuntimeContext,
     agent_graph,
+    checkpoint_query_keys,
 )
 from app.domain.agents.runtime.grounding import (
     GROUNDING_FALLBACK_ANSWER,
@@ -34,6 +34,7 @@ from app.domain.agents.runtime.grounding import (
 from app.domain.agents.runtime.state import AgentState, PendingToolCall
 from app.domain.agents.runtime.tools import AgentToolResult
 from app.domain.agents.runtime.usage import empty_usage
+from app.infra.observability.logger import get_logger, log_event
 
 logger = get_logger(__name__)
 
@@ -77,6 +78,7 @@ def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
     completed_knowledge_turns = {
         event.get("turn") for event in completed_knowledge_events
     }
+
     return {
         "messages": messages_from_dict(checkpoint.get("messages", [])),
         "events": events,
@@ -89,6 +91,10 @@ def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
             checkpoint.get("knowledge_round_count", len(completed_knowledge_turns))
         ),
         "seen_evidence_ids": list(checkpoint.get("seen_evidence_ids", [])),
+        "knowledge_query_keys": list(
+            checkpoint.get("knowledge_query_keys")
+            or checkpoint_query_keys(events)
+        ),
         "no_new_evidence_rounds": int(checkpoint.get("no_new_evidence_rounds", 0)),
         "pending_tool_calls": list(checkpoint.get("pending_tool_calls", [])),
         "finish_reason": str(checkpoint.get("finish_reason", "")),
@@ -102,6 +108,47 @@ def deserialize_agent_state(checkpoint: dict[str, Any]) -> AgentState:
             if isinstance(packet, dict)
         ][:32],
         "model_usage": dict(checkpoint.get("model_usage") or empty_usage()),
+    }
+
+
+def _retrieval_meta(
+    state: AgentState,
+    *,
+    max_no_progress_rounds: int,
+    knowledge_min_evidence_items: int,
+    knowledge_require_source_diversity: bool,
+) -> dict[str, Any]:
+    source_keys: set[str] = set()
+    for packet in state["evidence_packets"]:
+        if not isinstance(packet, dict):
+            continue
+        source = (
+            packet.get("knowledge_base")
+            or packet.get("document_id")
+            or packet.get("document")
+        )
+        if isinstance(source, str) and source:
+            source_keys.add(source)
+    evidence_sufficient = (
+        knowledge_min_evidence_items > 0
+        and len(state["seen_evidence_ids"]) >= knowledge_min_evidence_items
+        and (not knowledge_require_source_diversity or len(source_keys) >= 2)
+    )
+    if evidence_sufficient:
+        stop_reason = "evidence_sufficient"
+    elif state["no_new_evidence_rounds"] >= max_no_progress_rounds:
+        stop_reason = "no_progress"
+    elif state["knowledge_call_count"]:
+        stop_reason = "model_answered"
+    else:
+        stop_reason = "not_used"
+    return {
+        "calls": state["knowledge_call_count"],
+        "rounds": state["knowledge_round_count"],
+        "unique_evidence_items": len(state["seen_evidence_ids"]),
+        "unique_queries": len(state["knowledge_query_keys"]),
+        "no_progress_rounds": state["no_new_evidence_rounds"],
+        "stop_reason": stop_reason,
     }
 
 
@@ -121,10 +168,21 @@ async def run_agent(
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS,
     max_knowledge_calls: int = MAX_AGENT_KNOWLEDGE_CALLS,
     max_knowledge_rounds: int = MAX_AGENT_KNOWLEDGE_ROUNDS,
+    max_no_progress_rounds: int = MAX_AGENT_NO_PROGRESS_ROUNDS,
+    adaptive_retrieval: bool = False,
+    knowledge_min_evidence_items: int = 0,
+    knowledge_require_source_diversity: bool = False,
     max_model_tokens: int | None = None,
     grounding_mode: InlineGroundingMode | None = None,
     initial_evidence: list[dict[str, Any]] | None = None,
 ) -> AgentExecutionResult:
+    """Run the Agent graph with global safety limits and adaptive retrieval.
+
+    ``max_knowledge_calls`` and ``max_knowledge_rounds`` remain in the public
+    signature for checkpoint and snapshot compatibility, but are not dedicated
+    retrieval caps. Global turn, tool-call, token, and timeout limits remain
+    enforced as the emergency circuit breakers.
+    """
     initial_state: AgentState = (
         deserialize_agent_state(checkpoint)
         if checkpoint
@@ -135,7 +193,19 @@ async def run_agent(
             "tool_call_count": 0,
             "knowledge_call_count": 0,
             "knowledge_round_count": 0,
-            "seen_evidence_ids": [],
+            "seen_evidence_ids": sorted(
+                {
+                    evidence_id
+                    for packet in (list(initial_evidence or [])[:32])
+                    if isinstance(packet, dict)
+                    for evidence_id in (
+                        [packet.get("chunk_id")]
+                        + list(packet.get("contributing_chunk_ids") or [])
+                    )
+                    if isinstance(evidence_id, str) and evidence_id
+                }
+            ),
+            "knowledge_query_keys": [],
             "no_new_evidence_rounds": 0,
             "pending_tool_calls": [],
             "finish_reason": "",
@@ -192,6 +262,10 @@ async def run_agent(
             max_tool_calls=max_tool_calls,
             max_knowledge_calls=max_knowledge_calls,
             max_knowledge_rounds=max_knowledge_rounds,
+            max_no_progress_rounds=max_no_progress_rounds,
+            adaptive_retrieval=adaptive_retrieval,
+            knowledge_min_evidence_items=knowledge_min_evidence_items,
+            knowledge_require_source_diversity=knowledge_require_source_diversity,
             max_model_tokens=max_model_tokens,
             grounding_mode=grounding_mode,
         ),
@@ -219,6 +293,17 @@ async def run_agent(
             "grounding_status": "skipped",
             "grounding_meta": {"reason": "no_grounding_source"},
         }
+    grounding_meta = state["grounding_meta"]
+    if adaptive_retrieval:
+        grounding_meta = {
+            **grounding_meta,
+            "retrieval": _retrieval_meta(
+                state,
+                max_no_progress_rounds=max_no_progress_rounds,
+                knowledge_min_evidence_items=knowledge_min_evidence_items,
+                knowledge_require_source_diversity=knowledge_require_source_diversity,
+            ),
+        }
     log_event(
         logger,
         logging.INFO,
@@ -233,5 +318,5 @@ async def run_agent(
         events=state["events"],
         model_usage=state["model_usage"],
         grounding_status=state["grounding_status"],
-        grounding_meta=state["grounding_meta"],
+        grounding_meta=grounding_meta,
     )

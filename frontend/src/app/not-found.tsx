@@ -12,7 +12,7 @@ export default function NotFound() {
   const { t } = useLanguage()
 
   return (
-    <main className="flex min-h-svh items-start justify-center p-6 py-8 sm:items-center sm:py-6">
+    <main className="flex min-h-dvh items-start justify-center p-6 py-8 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:items-center sm:py-6">
       <div className="w-full max-w-md rounded-xl border bg-background p-6 text-center shadow-sm sm:p-8">
         <p className="text-sm font-medium text-muted-foreground">404</p>
         <h1 className="mt-2 text-2xl font-semibold break-words">

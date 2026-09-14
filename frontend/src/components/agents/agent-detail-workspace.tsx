@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
 import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
+import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
@@ -77,6 +78,7 @@ type AgentDetailWorkspaceProps = {
   setForm: React.Dispatch<React.SetStateAction<AgentFormState>>
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
+  skills?: AgentSkill[]
   tools: ToolSummary[]
   runs: AgentRun[]
   toolCallsByRun: Record<string, AgentToolCall[]>
@@ -172,6 +174,10 @@ function processSummary(
     return t("暂时无法完成依据核验")
   if (event.summary === "agent.grounding_skipped")
     return t("本次回答未使用知识依据")
+  if (event.summary === "agent.knowledge_duplicate_query")
+    return t("已跳过重复知识检索")
+  if (event.summary === "agent.knowledge_evidence_sufficient")
+    return t("知识依据已足够，停止继续检索")
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready")
@@ -227,14 +233,14 @@ function ToolEventDetails({
   const status = effectiveProcessStatus(event.status, run.status)
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-background/70">
+    <div className="overflow-hidden rounded-md border border-border/70 bg-background/60">
       <button
         type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
       >
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
           {event.tool_kind === "knowledge" ? (
             <DatabaseIcon className="size-3.5" />
           ) : (
@@ -244,8 +250,8 @@ function ToolEventDetails({
             />
           )}
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-foreground">
+        <span className="min-w-0 flex-1 leading-4">
+          <span className="block truncate text-[13px] font-medium text-foreground">
             {label}
             {event.server_name ? (
               <span className="ml-1 font-normal text-muted-foreground">
@@ -253,7 +259,7 @@ function ToolEventDetails({
               </span>
             ) : null}
           </span>
-          <span className="block truncate text-xs text-muted-foreground">
+          <span className="block truncate text-[11px] text-muted-foreground">
             {detail}
           </span>
         </span>
@@ -265,11 +271,11 @@ function ToolEventDetails({
           <CircleXIcon className="size-3.5 text-destructive" />
         )}
         <ChevronDownIcon
-          className={`size-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+          className={`size-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
         />
       </button>
       {isOpen ? (
-        <div className="grid gap-3 border-t bg-muted/20 p-3 text-xs">
+        <div className="grid gap-2.5 border-t bg-muted/20 p-2.5 text-xs">
           {Object.keys(event.input).length > 0 ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -294,15 +300,15 @@ function ToolEventDetails({
                     return (
                       <article
                         key={index}
-                        className="rounded-md border bg-background p-3"
+                        className="rounded-md border bg-background p-2.5"
                       >
-                        <div className="flex flex-wrap items-center gap-2 font-medium">
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
                           <span>{String(item.document ?? t("未知文档"))}</span>
                           <span className="text-muted-foreground">
                             {String(item.knowledge_base ?? "")}
                           </span>
                         </div>
-                        <p className="mt-2 leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+                        <p className="mt-1.5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground">
                           {String(item.content ?? "")}
                         </p>
                       </article>
@@ -569,7 +575,7 @@ function RunExchange({
   )?.created_at
   return (
     <article className="flex flex-col gap-5">
-      <div className="ml-auto flex max-w-[88%] flex-col items-end gap-1">
+      <div className="ml-auto flex min-w-0 max-w-[85%] flex-col items-end gap-1">
         <RunAttachmentCards attachments={run.attachments} t={t} />
         {editDraft === null ? (
           <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
@@ -577,7 +583,7 @@ function RunExchange({
           </div>
         ) : (
           <form
-            className="w-[min(32rem,80vw)] rounded-2xl rounded-br-md border bg-background p-2 shadow-sm"
+            className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-br-md border bg-background p-2 shadow-sm"
             onSubmit={(event) => {
               event.preventDefault()
               const goal = editDraft.trim()
@@ -591,7 +597,7 @@ function RunExchange({
             <textarea
               autoFocus
               aria-label={t("编辑消息")}
-              className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none"
+              className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
               maxLength={4000}
               value={editDraft}
               onChange={(event) => setEditDraft(event.target.value)}
@@ -660,7 +666,7 @@ function RunExchange({
                   <span className="flex-1">{t("执行过程")}</span>
                   <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
                 </summary>
-                <div className="mt-2 space-y-2 border-l pl-4">
+                <div className="mt-2 space-y-1.5 border-l pl-3">
                   {visibleTimeline.map(({ event }, index) =>
                     event.type === "tool" ? (
                       <ToolEventDetails
@@ -819,6 +825,7 @@ export function AgentDetailWorkspace({
   setForm,
   models,
   knowledgeBases,
+  skills = [],
   tools,
   runs,
   toolCallsByRun,
@@ -962,7 +969,7 @@ export function AgentDetailWorkspace({
   }, [visibleActiveView])
 
   return (
-    <div className="-mx-4 -my-6 flex min-h-[calc(100svh-3.5rem)] flex-col overflow-hidden bg-background sm:-mx-6 lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
+    <div className="-mx-4 -mt-6 flex min-h-[calc(100dvh-3.5rem-6rem)] flex-col overflow-hidden bg-background sm:-mx-6 sm:-mb-6 sm:min-h-[calc(100svh-3.5rem)] lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
       <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
         <Button
           type="button"
@@ -1174,6 +1181,7 @@ export function AgentDetailWorkspace({
                         setForm={setForm}
                         models={models}
                         knowledgeBases={knowledgeBases}
+                        skills={skills}
                         tools={tools}
                         token={token}
                         workspaceId={workspaceId}
@@ -1221,7 +1229,7 @@ export function AgentDetailWorkspace({
                       }
                     }}
                   >
-                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-8">
+                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-3 py-4 sm:px-8 sm:py-8">
                       {isRunsLoading ? (
                         <div className="flex min-h-72 flex-1 items-center justify-center text-muted-foreground">
                           <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -1268,7 +1276,7 @@ export function AgentDetailWorkspace({
                     </div>
                   </div>
 
-                  <div className="shrink-0 border-t bg-background p-3 sm:p-4">
+                  <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                     <form
                       className="relative mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
                       onSubmit={(event) => {
@@ -1339,13 +1347,15 @@ export function AgentDetailWorkspace({
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className={`max-h-40 min-h-28 w-full resize-none bg-transparent px-3 pt-2 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed ${files.length ? "pb-2" : "pb-14"}`}
+                        className={`max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed sm:min-h-28 sm:text-sm ${files.length ? "pb-2" : "pb-2 sm:pb-14"}`}
                         placeholder={
                           isDirty
                             ? t("请先保存配置后再调试")
                             : t("向 Agent 提问...")
                         }
                         aria-label={t("向 Agent 提问")}
+                        enterKeyHint="send"
+                        autoComplete="off"
                         disabled={
                           isDirty ||
                           isRunsLoading ||
@@ -1353,7 +1363,7 @@ export function AgentDetailWorkspace({
                           agent.status !== "active"
                         }
                         maxLength={4000}
-                        rows={2}
+                        rows={1}
                       />
                       <AgentAttachmentList
                         files={files}
@@ -1366,7 +1376,7 @@ export function AgentDetailWorkspace({
                         }
                         t={t}
                       />
-                      <div className="absolute right-2 bottom-2 flex items-center gap-2">
+                      <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
                         <Button
                           type="button"
                           variant="ghost"

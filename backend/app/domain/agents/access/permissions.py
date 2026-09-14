@@ -3,13 +3,15 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.services import record_audit_log
 from app.entities.agents import Agent
-from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.entities.identity.user import User
-from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
+from app.entities.workspaces.resource_permissions import ResourcePermission
+from app.infra.db.repositories.workspaces import (
+    resource_permissions as permission_repository,
+)
 from app.schemas.agents.contracts import AgentPermissionResponse
 from app.schemas.identity.contracts import user_to_response
-from app.domain.audit.services import record_audit_log
 
 AGENT_RESOURCE_TYPE = "agent"
 AGENT_VIEW_PERMISSION = "view"

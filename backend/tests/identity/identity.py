@@ -2,25 +2,27 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
-
 from tests.support import (
     ADMIN_PASSWORD,
     BOOTSTRAP_ADMIN_PASSWORD,
     MANAGED_USER_INITIAL_PASSWORD,
     auth_headers,
     login,
-    settings as test_settings,
     test_client,
 )
+from tests.support import (
+    settings as test_settings,
+)
+
 from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
-from app.entities.identity.user import RefreshSession
 from app.entities.defaults import utc_now
+from app.entities.identity.user import RefreshSession
 from app.infra.db.repositories.identity import users as user_repository
-from app.infra.security.auth import hash_refresh_token
-from app.infra.security import agent_rate_limit
-from app.infra.security.agent_rate_limit import LoginRateLimitExceeded
 from app.infra.db.session import get_session_factory
 from app.infra.observability.system_log import SystemLog
+from app.infra.security import agent_rate_limit
+from app.infra.security.agent_rate_limit import LoginRateLimitExceeded
+from app.infra.security.auth import hash_refresh_token
 
 
 async def get_system_log_events() -> list[str]:
@@ -244,8 +246,10 @@ async def seed_agent_run_binder_audit(
 
 async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> None:
     from app.entities.workspaces.resource_permissions import ResourcePermission
-    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
     from app.infra.db.repositories.tools import repository as tools_repository
+    from app.infra.db.repositories.workspaces import (
+        resource_permissions as permission_repository,
+    )
 
     async with get_session_factory()() as db:
         tool = next(

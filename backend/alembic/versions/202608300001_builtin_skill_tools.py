@@ -4,9 +4,9 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "202608300001"
 down_revision: str | None = "202608290001"
@@ -192,7 +192,7 @@ def downgrade() -> None:
 
     for workspace_id in workspace_ids:
         for skill_name, *_ in _skill_definitions():
-            desired_tool, desired_version, _ = _desired(skill_name, workspace_id)
+            desired_tool, _, _ = _desired(skill_name, workspace_id)
             current_version_id = bind.scalar(
                 sa.select(tools.c.current_version_id).where(
                     tools.c.workspace_id == workspace_id,

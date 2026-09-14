@@ -18,94 +18,9 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
-from dataclasses import FrozenInstanceError
-import json
 from types import SimpleNamespace
 
-import tests.support  # noqa: F401  (sets required env before app imports)
-
 from fastapi import HTTPException
-from app.application.models.registry import (
-    is_masked_secret,
-    normalize_model_type,
-    normalize_provider_credentials,
-    normalize_url_credential,
-    validate_status,
-)
-from app.domain.knowledge.retrieval import (
-    MAX_PARENT_CONTEXT_CHARS,
-    RankedHit,
-    bounded_text_chunks,
-    parent_evidence,
-    parent_context,
-    reciprocal_rank_fusion,
-)
-from app.adapters.rag.vector_store import VectorHit
-from app.entities.agents import Agent
-from app.entities.knowledge import KnowledgeBase
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.identity.user import User
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphImportRecord,
-    KnowledgeGraphReviewDecisionRequest,
-)
-from app.domain.agents.access.permissions import (
-    effective_agent_permission,
-    validate_agent_permission,
-)
-from app.domain.knowledge.tasks.orchestration import (
-    normalized_document_artifact,
-    parse_task_options,
-)
-from app.domain.knowledge.service import (
-    clean_upload_filename,
-    effective_permission,
-    validate_permission,
-)
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    default_graph_schema,
-    graph_schema_hash,
-    normalize_graph_name,
-)
-from app.domain.knowledge.graph.extraction import (
-    EntityLexiconEntry,
-    ExtractedEntity,
-    ExtractionChunk,
-    GraphExtractionBatch,
-    build_entity_lexicon,
-    deduplicate_extracted_entities,
-    extract_graph_batch,
-    validate_extraction_batch,
-)
-from app.domain.knowledge.graph.resolution import (
-    claim_fingerprint,
-    choose_automatic_entity_match,
-    initial_claim_status,
-)
-from app.domain.knowledge.graph.extraction import (
-    ExtractedClaim,
-    _entity_type,
-)
-from app.domain.knowledge.graph import traversal as graph_traversal
-from app.domain.knowledge.graph.traversal import (
-    GraphEvidenceView,
-    _collect_result_items,
-    _load_path_records,
-    assemble_path,
-)
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from unittest.mock import AsyncMock, patch
-from app.application.knowledge.graph.build import (
-    _EntityResolutionContext,
-    _parse_datetime,
-    _unique_surface_span,
-    finalize_abandoned_graph_reservations,
-)
-from app.application.knowledge.graph.maintenance import _revision_source_versions
-from app.application.resource_folders.service import descendant_folder_ids
-from app.entities.resource_folders.models import ResourceFolder
-
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -120,8 +35,8 @@ def payload_with(**fields):
     return SimpleNamespace(model_dump=lambda: fields)
 
 def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
-    from app.schemas.workflows.contracts import LlmNodeConfig, ToolNodeConfig
     from app.domain.tools.catalog.service import build_inline_python_tool
+    from app.schemas.workflows.contracts import LlmNodeConfig, ToolNodeConfig
 
     reference = {"tool_id": "tool-1", "version_id": "version-1"}
     node = ToolNodeConfig.model_validate(
@@ -147,12 +62,12 @@ def test_workflow_uses_canonical_tool_refs_and_inline_python_builtin() -> None:
     assert policy.parallel_safe is False
 
 def test_workflow_legacy_tools_normalize_to_one_canonical_node_contract() -> None:
-    from app.entities.tools import ToolRef
-    from app.schemas.workflows.contracts import WorkflowGraph
     from app.domain.workflows.resources import (
         canonicalize_workflow_graph,
         workflow_resource_references,
     )
+    from app.entities.tools import ToolRef
+    from app.schemas.workflows.contracts import WorkflowGraph
 
     graph = WorkflowGraph.model_validate(
         {
@@ -228,8 +143,8 @@ def test_workflow_legacy_tools_normalize_to_one_canonical_node_contract() -> Non
     assert workflow_resource_references(canonical)[1] == [remote, inline]
 
 def test_workflow_selects_only_exact_bound_tool_versions() -> None:
-    from app.entities.tools import ToolRef, ToolSnapshot
     from app.domain.workflows.resources import select_tool_snapshots
+    from app.entities.tools import ToolRef, ToolSnapshot
 
     def snapshot(tool_id: str, version_id: str) -> ToolSnapshot:
         return ToolSnapshot(
@@ -277,13 +192,13 @@ def test_workflow_selects_only_exact_bound_tool_versions() -> None:
         raise AssertionError("Unbound Workflow Tool version was accepted.")
 
 def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
-    from app.entities.tools import ToolRef, ToolSnapshot
-    from app.schemas.workflows.contracts import WorkflowGraph
     from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         load_workflow_resource_snapshot,
         workflow_resource_hash,
     )
+    from app.entities.tools import ToolRef, ToolSnapshot
+    from app.schemas.workflows.contracts import WorkflowGraph
 
     reference = ToolRef("tool-1", "version-1")
     graph = WorkflowGraph.model_validate(
@@ -355,14 +270,14 @@ def test_workflow_resource_snapshot_must_match_the_canonical_graph() -> None:
         raise AssertionError("Invalid Workflow resource snapshot was accepted.")
 
 def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
-    from app.domain.workflows.runtime.engine import (
-        WorkflowValidationError,
-        validate_graph,
-    )
     from app.domain.workflows.resources import (
         build_workflow_resource_snapshot,
         load_workflow_agent_snapshots,
         workflow_resource_hash,
+    )
+    from app.domain.workflows.runtime.engine import (
+        WorkflowValidationError,
+        validate_graph,
     )
 
     def node(node_id: str, node_type: str, config: dict | None = None) -> dict:
@@ -498,7 +413,9 @@ def test_workflow_agent_nodes_pin_versions_and_cannot_run_in_parallel() -> None:
         raise AssertionError("Oversized Workflow Agent input was accepted.")
 
 def test_workflow_tool_invocation_identity_is_stable_and_bounded() -> None:
-    from app.application.workflows.tools.runtime import workflow_tool_invocation_identity
+    from app.application.workflows.tools.runtime import (
+        workflow_tool_invocation_identity,
+    )
     from app.domain.tools.runtime import tool_arguments_hash
 
     first = workflow_tool_invocation_identity("run-1", "node-1", "call-1")

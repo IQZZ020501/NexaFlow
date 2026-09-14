@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import sys
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -67,9 +66,7 @@ def is_orm_module(path: Path) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
             for base in node.bases:
-                if isinstance(base, ast.Name) and base.id == "Base":
-                    has_base_subclass = True
-                elif (
+                if isinstance(base, ast.Name) and base.id == "Base" or (
                     isinstance(base, ast.Attribute)
                     and base.attr == "Base"
                 ):

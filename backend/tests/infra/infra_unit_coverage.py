@@ -26,98 +26,41 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.error import HTTPError, URLError
 
-from tests.support import (  # noqa: F401  (must run before any app import)
+from fastapi import HTTPException
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessageChunk
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from mcp.types import Tool as McpTool
+from mcp.types import ToolAnnotations
+from openai import APIStatusError, OpenAIError
+from sqlalchemy import URL, func, make_url, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.pool import NullPool, StaticPool
+from tests.support import (
     activate_admin,
     auth_headers,
     settings,
     test_client,
 )
 
-from fastapi import HTTPException
-from openai import APIStatusError, OpenAIError
-from sqlalchemy import URL, func, make_url, select, text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.pool import NullPool, StaticPool
-
-from app.application.models import service as app_models
-from app.api import deps as deps_mod
 from app.adapters import mcp as mcp_capabilities
 from app.adapters.llm import credentials as llm_credentials
-from app.application.models import registry as llm_registry
-from app.infra.db.repositories.models import registry as llm_registry_repository
 from app.adapters.llm import runtime as llm_runtime
-from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.providers import PROVIDER_CATALOG
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.teams.models import TEAM_MEMBER_ROLES, Team, TeamMembership
-from app.entities.tools import McpServer, McpToolPolicy
-from app.entities.identity.user import RefreshSession, User
-from app.infra.queue import celery as celery_mod
-from app.infra.sandbox import client as code_sandbox
-from app.infra.config import settings as config_mod
-from app.infra.tools import mcp_stdio
-from app.infra.storage import object_storage
-from app.infra.bootstrap import seed as seed_mod
-from app.infra.security import auth as security_mod
-from app.infra.db import session as session_mod
-from app.infra.runtime import validation as validation_mod
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.tools import mcp as mcp_repo
-from app.infra.db import mapping as mapping_repo
-from app.infra.db.repositories.workspaces import resource_permissions as rp_repo
-from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infra.db.session import get_session_factory
-from app.ports import mcp as ports_mcp
-from app.infra.db.repositories.models import registry as ports_model_registry
-from app.schemas.tools.mcp import McpServerCreateRequest
-from app.schemas.models.contracts import RegisteredModelCreateRequest, RegisteredModelUpdateRequest
-from app.schemas.teams.contracts import TeamCreateRequest, TeamMemberUpdateRequest, TeamUpdateRequest
-from app.domain.agents.models import Agent as AgentOrm
-from app.domain.agents.models import AgentMcpTool as AgentMcpToolOrm
-from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm
-from app.domain.teams import services as teams_services
-from app.domain.tools.mcp import service as tools_services
-from app.domain.tools.models import McpServer as McpServerOrm
-from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
-from app.tasks.runtime import configure_task_worker
-from langchain_core.messages import AIMessage, AIMessageChunk
-from langchain_core.outputs import ChatGenerationChunk, ChatResult
-from mcp.types import Tool as McpTool
-from mcp.types import ToolAnnotations
-
-from app.adapters.mcp.client import (
-    MAX_MCP_RESULT_CHARS,
-    MAX_MCP_TOOLS,
-    McpClientError,
-    McpConnection,
-    McpDiscovery,
-    McpResolvedDestination,
-    MultiTransportMcpClient,
-    _PinnedNetworkBackend,
-    _hardened_http_client_factory,
-    call_mcp_tool,
-    discover_mcp_tools,
-    is_private_address,
-    mcp_client,
-    normalize_mcp_url,
-    validate_mcp_destination,
-)
 from app.adapters.llm.runtime import (
     STREAM_USAGE_SUPPORTED_META_KEY,
     CheckedEmbeddings,
-    ModelCompletion,
     ModelProviderError,
     ModelProviderStatusError,
     ModelProviderTimeoutError,
-    ModelToolCall,
     OpenAICompatibleChatModel,
     OpenAICompatibleReranker,
-    _ProviderErrorChatMixin,
     _api_error_detail,
     _bedrock_credentials,
     _bedrock_model_arn,
     _model_provider_error,
     _provider_status_code,
+    _ProviderErrorChatMixin,
     _reasoning_content,
     _registered_model_credentials,
     _required,
@@ -130,28 +73,79 @@ from app.adapters.llm.runtime import (
     openai_compatible_base,
     test_model_connection,
 )
-from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
+from app.adapters.mcp.client import (
+    MAX_MCP_RESULT_CHARS,
+    MAX_MCP_TOOLS,
+    McpClientError,
+    McpConnection,
+    McpDiscovery,
+    McpResolvedDestination,
+    MultiTransportMcpClient,
+    _hardened_http_client_factory,
+    _PinnedNetworkBackend,
+    call_mcp_tool,
+    discover_mcp_tools,
+    is_private_address,
+    mcp_client,
+    normalize_mcp_url,
+    validate_mcp_destination,
+)
+from app.api import deps as deps_mod
+from app.application.models import registry as llm_registry
+from app.application.models import service as app_models
+from app.domain.agents.models import Agent as AgentOrm
+from app.domain.agents.models import AgentMcpTool as AgentMcpToolOrm
+from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import Team as TeamOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import Workspace as WorkspaceOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.infra.security.auth import (
-    create_access_token,
-    create_refresh_token,
-    decode_access_token,
-    decode_access_session,
-    hash_password,
-    hash_refresh_token,
-    verify_password,
-)
+from app.domain.resource_folders.models import ResourceFolder as ResourceFolderOrm
+from app.domain.teams import services as teams_services
+from app.domain.tools.mcp import service as tools_services
+from app.entities.defaults import utc_now
+from app.entities.identity.user import RefreshSession, User
+from app.entities.teams.models import Team, TeamMembership
+from app.entities.tools import McpServer, McpToolPolicy
+from app.entities.workspaces.resource_permissions import ResourcePermission
+from app.infra.bootstrap import seed as seed_mod
+from app.infra.config import settings as config_mod
+from app.infra.db import mapping as mapping_repo
+from app.infra.db import session as session_mod
+from app.infra.db.repositories.models import registry as llm_registry_repository
+from app.infra.db.repositories.models import registry as ports_model_registry
+from app.infra.db.repositories.tools import mcp as mcp_repo
+from app.infra.db.repositories.workspaces import resource_permissions as rp_repo
+from app.infra.db.session import get_session_factory
+from app.infra.queue import celery as celery_mod
 from app.infra.runtime.validation import (
     normalize_email,
     normalize_name,
     normalize_username,
 )
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamable_http_client
+from app.infra.sandbox import client as code_sandbox
+from app.infra.security.auth import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_session,
+    decode_access_token,
+    hash_password,
+    hash_refresh_token,
+    verify_password,
+)
+from app.infra.security.secrets import encrypt_secret
+from app.infra.storage import object_storage
+from app.infra.tools import mcp_stdio
+from app.ports import mcp as ports_mcp
+from app.schemas.models.contracts import (
+    RegisteredModelCreateRequest,
+    RegisteredModelUpdateRequest,
+)
+from app.schemas.teams.contracts import (
+    TeamCreateRequest,
+    TeamUpdateRequest,
+)
+from app.schemas.tools.mcp import McpServerCreateRequest
 
 
 def run(coro):
@@ -254,7 +248,11 @@ def test_reasoning_content() -> None:
     assert _reasoning_content("not-a-dict") == ""
 
 
-class _RaisingParent:
+class _RaisingParent(BaseChatModel):
+    @property
+    def _llm_type(self) -> str:
+        return "raising"
+
     def _generate(self, *args, **kwargs):
         raise OpenAIError("sync boom")
 
@@ -532,7 +530,7 @@ def test_credential_helpers() -> None:
     assert _required({"api_key": "  k  "}, "api_key") == "k"
     assert isinstance(expect_error(lambda: _required({}, "api_key"), ModelProviderError), ModelProviderError)
 
-    from app.adapters.llm.runtime import _optional, _openai_api_key, _secret
+    from app.adapters.llm.runtime import _openai_api_key, _optional, _secret
 
     assert _optional({"x": "  v  "}, "x") == "v"
     assert _optional({"x": "  "}, "x") is None
@@ -568,7 +566,14 @@ def test_credential_helpers() -> None:
     assert _bedrock_model_arn("arn:aws:bedrock:x", "us-east-1") == "arn:aws:bedrock:x"
 
 
-class _YieldingParent:
+class _YieldingParent(BaseChatModel):
+    @property
+    def _llm_type(self) -> str:
+        return "yielding"
+
+    def _generate(self, *args, **kwargs):
+        return ChatResult(generations=[])
+
     def _stream(self, *args, **kwargs):
         yield SimpleNamespace(text="chunk")
 
@@ -664,23 +669,23 @@ def test_build_chat_model_and_friends() -> None:
 
 
 def _registered_model(**overrides) -> RegisteredModel:
-    fields = dict(
-        workspace_id="ws-1",
-        name="Model",
-        provider="model_deepseek_provider",
-        provider_type="deepseek",
-        api_base="https://api.deepseek.com",
-        api_key_ciphertext=llm_credentials.encrypt_credential_secrets(
+    fields = {
+        "workspace_id": "ws-1",
+        "name": "Model",
+        "provider": "model_deepseek_provider",
+        "provider_type": "deepseek",
+        "api_base": "https://api.deepseek.com",
+        "api_key_ciphertext": llm_credentials.encrypt_credential_secrets(
             {"api_key": "sk-test-1234"}, settings().model_secret_key
         ),
-        credential_config={"api_base": "https://api.deepseek.com"},
-        credential_secret_hints={"api_key": "****1234"},
-        model_type="LLM",
-        model_name="deepseek-chat",
-        status="active",
-        meta={},
-        created_by_user_id="user-1",
-    )
+        "credential_config": {"api_base": "https://api.deepseek.com"},
+        "credential_secret_hints": {"api_key": "****1234"},
+        "model_type": "LLM",
+        "model_name": "deepseek-chat",
+        "status": "active",
+        "meta": {},
+        "created_by_user_id": "user-1",
+    }
     fields.update(overrides)
     return RegisteredModel(**fields)
 
@@ -3223,11 +3228,11 @@ def _mcp_catalog_leaf(
     effect="unknown",
     tool_status="active",
 ):
-    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
     from app.domain.tools.catalog.service import (
         McpCatalogLeaf,
         mcp_definition_hash,
     )
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
     definition = _mcp_tool_dict(name)
     definition["annotations"] = annotations
@@ -3312,8 +3317,8 @@ def test_mcp_tool_hash_and_policy_mode() -> None:
 
 
 def test_mcp_server_to_response() -> None:
-    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
     from app.domain.tools.catalog.service import McpCatalogLeaf
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
     server = McpServer(
         id="srv-1",
@@ -4025,26 +4030,26 @@ def test_retained_tool_user_reference_query() -> None:
 
 
 def _team(**overrides) -> Team:
-    fields = dict(
-        id="team-1",
-        workspace_id="ws-1",
-        name="Team",
-        description="",
-        slug="team-slug",
-        status="active",
-    )
+    fields = {
+        "id": "team-1",
+        "workspace_id": "ws-1",
+        "name": "Team",
+        "description": "",
+        "slug": "team-slug",
+        "status": "active",
+    }
     fields.update(overrides)
     return Team(**fields)
 
 
 def _team_membership(**overrides) -> TeamMembership:
-    fields = dict(
-        id="m1",
-        workspace_id="ws-1",
-        team_id="team-1",
-        user_id="u1",
-        role="member",
-    )
+    fields = {
+        "id": "m1",
+        "workspace_id": "ws-1",
+        "team_id": "team-1",
+        "user_id": "u1",
+        "role": "member",
+    }
     fields.update(overrides)
     return TeamMembership(**fields)
 
@@ -4731,7 +4736,7 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
         )
 
         # update: rename to existing name -> 409
-        second = await app_models.create_registered_model(
+        _second = await app_models.create_registered_model(
             db,
             workspace_id,
             RegisteredModelCreateRequest(

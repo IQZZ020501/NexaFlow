@@ -6,18 +6,16 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.application.tools.runtime.contracts import (
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 from app.application.tools.runtime.service import (
     ToolInvocationBusy,
     ToolInvocationConflict,
     execute_tool_invocation,
     queue_tool_invocation,
 )
-from app.entities.runs import AgentRun
-from app.entities.tools import ToolSnapshot
-from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
-from app.infra.db.session import get_session_factory
-from app.application.tools.runtime.contracts import ToolInvocationContext, ToolRuntimeResult
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
@@ -27,6 +25,11 @@ from app.domain.agents.runtime import (
 )
 from app.domain.agents.runtime.state import PendingToolCall
 from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
+from app.entities.defaults import utc_now
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolSnapshot
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_session_factory
 
 
 def agent_tool_invocation_identity(

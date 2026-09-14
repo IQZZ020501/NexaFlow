@@ -12,39 +12,18 @@ from fastapi import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infra.config.settings import Settings
-from app.infra.observability.logger import get_logger
-from app.infra.db.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_settings,
     get_workspace_context_from_path,
-)
-from app.schemas.knowledge import (
-    KnowledgeAttachmentResponse,
-    KnowledgeBaseCreateRequest,
-    KnowledgeBaseListItemResponse,
-    KnowledgeBaseOwnerTransferRequest,
-    KnowledgeBaseResponse,
-    KnowledgeBaseUpdateRequest,
-    KnowledgeDocumentChunkResponse,
-    KnowledgeDocumentCreateRequest,
-    KnowledgeDocumentParseRequest,
-    KnowledgeDocumentResponse,
-    KnowledgeModelTestRequest,
-    KnowledgeModelTestResponse,
-    KnowledgeTaskRetryRequest,
-    KnowledgeTaskBulkDeleteRequest,
-    KnowledgeTaskBulkDeleteResponse,
-    KnowledgeTaskResponse,
-    ResourcePermissionResponse,
-    ResourcePermissionUpsertRequest,
 )
 from app.application.knowledge.documents.service import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,
     delete_knowledge_attachment,
     delete_knowledge_base_permanently,
+    delete_knowledge_task,
+    delete_knowledge_tasks,
     dispatch_knowledge_task,
     enqueue_index_knowledge_document,
     enqueue_parse_knowledge_document,
@@ -59,15 +38,36 @@ from app.application.knowledge.documents.service import (
     require_can_manage_permissions,
     require_knowledge_base_permission,
     retry_knowledge_task,
-    stop_knowledge_task,
-    delete_knowledge_task,
-    delete_knowledge_tasks,
     revoke_resource_permission,
+    stop_knowledge_task,
     test_knowledge_base_models,
     transfer_knowledge_base_owner,
     update_knowledge_base,
     upload_knowledge_attachment,
     upsert_resource_permission,
+)
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
+from app.infra.observability.logger import get_logger
+from app.schemas.knowledge import (
+    KnowledgeAttachmentResponse,
+    KnowledgeBaseCreateRequest,
+    KnowledgeBaseListItemResponse,
+    KnowledgeBaseOwnerTransferRequest,
+    KnowledgeBaseResponse,
+    KnowledgeBaseUpdateRequest,
+    KnowledgeDocumentChunkResponse,
+    KnowledgeDocumentCreateRequest,
+    KnowledgeDocumentParseRequest,
+    KnowledgeDocumentResponse,
+    KnowledgeModelTestRequest,
+    KnowledgeModelTestResponse,
+    KnowledgeTaskBulkDeleteRequest,
+    KnowledgeTaskBulkDeleteResponse,
+    KnowledgeTaskResponse,
+    KnowledgeTaskRetryRequest,
+    ResourcePermissionResponse,
+    ResourcePermissionUpsertRequest,
 )
 
 logger = get_logger(__name__)

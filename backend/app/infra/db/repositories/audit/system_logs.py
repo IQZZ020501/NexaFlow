@@ -8,7 +8,6 @@ from app.infra.db.mapping import to_entity
 from app.infra.observability.system_log import SystemLog
 
 
-
 def _system_log_filter_clauses(
     *,
     level: str | None = None,

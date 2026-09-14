@@ -4,7 +4,6 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
-
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 ARTIFACT_FORMAT = re.compile(r"[a-z0-9][a-z0-9+_-]{0,31}\Z")
 ARTIFACT_MEDIA_TYPES = {

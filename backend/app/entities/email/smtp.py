@@ -3,7 +3,6 @@ from datetime import datetime
 
 from app.entities.defaults import utc_now
 
-
 SMTP_SETTINGS_ID = "default"
 
 

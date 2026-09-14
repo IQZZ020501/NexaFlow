@@ -1,12 +1,29 @@
 from app.entities.agents.models import (
     Agent,
-    AgentPublicationVersion,
+    AgentApiCredential,
+    AgentConsumerConversation,
+    AgentConsumerStats,
     AgentKnowledgeBase,
     AgentMcpTool,
-    AgentApiCredential,
+    AgentMonitoringRow,
+    AgentPublicationVersion,
     AgentToolCall,
 )
 from app.entities.runs import (
     AgentRun,
     AgentRunEvent,
 )
+
+__all__ = [
+    "Agent",
+    "AgentApiCredential",
+    "AgentConsumerConversation",
+    "AgentConsumerStats",
+    "AgentKnowledgeBase",
+    "AgentMcpTool",
+    "AgentMonitoringRow",
+    "AgentPublicationVersion",
+    "AgentRun",
+    "AgentRunEvent",
+    "AgentToolCall",
+]

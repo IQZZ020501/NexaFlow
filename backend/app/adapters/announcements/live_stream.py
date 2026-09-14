@@ -1,7 +1,6 @@
 import asyncio
 import json
 from contextlib import suppress
-from typing import Any
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -58,13 +57,13 @@ class RedisAnnouncementLiveStreamPublisher:
             payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
             async with asyncio.timeout(PUBLISH_TIMEOUT_SECONDS):
                 async with self._redis.pipeline(transaction=False) as pipe:
-                    pipe.xadd(
+                    await pipe.xadd(
                         key,
                         {"payload": payload},
                         maxlen=STREAM_MAXLEN,
                         approximate=True,
                     )
-                    pipe.expire(key, STREAM_TTL_SECONDS)
+                    await pipe.expire(key, STREAM_TTL_SECONDS)
                     await pipe.execute()
         except (RedisError, OSError, TimeoutError) as exc:
             log_error(

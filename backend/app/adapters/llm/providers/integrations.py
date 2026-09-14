@@ -1,6 +1,5 @@
 from typing import Any
 
-
 CATALOG_VERIFIED_AT = "2026-09-10"
 
 

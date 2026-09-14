@@ -4,25 +4,24 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.audit.services import record_audit_log
-from app.infra.config.settings import Settings
-from app.infra.observability.errors import log_error
-from app.infra.observability.logger import get_logger
-from app.entities.identity.user import User
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.entities.knowledge import (
-    DOCUMENT_DELETED_STATUS,
-    KnowledgeAttachment,
-    KnowledgeBase,
-    KnowledgeDocument,
-)
-from app.ports.vector_store import delete_vectors
 from app.domain.knowledge.bases.permissions import require_knowledge_base_active
-from app.domain.knowledge.tasks.orchestration import enqueue_graph_sync
 from app.domain.knowledge.documents.references import (
     detach_document_references,
     resolve_references_matching_document,
 )
 from app.domain.knowledge.service import knowledge_object_storage
+from app.domain.knowledge.tasks.orchestration import enqueue_graph_sync
+from app.entities.identity.user import User
+from app.entities.knowledge import (
+    DOCUMENT_DELETED_STATUS,
+    KnowledgeBase,
+    KnowledgeDocument,
+)
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
+from app.ports.vector_store import delete_vectors
 
 logger = get_logger(__name__)
 

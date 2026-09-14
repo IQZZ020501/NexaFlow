@@ -10,6 +10,33 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.knowledge.graph import query as knowledge_graph_query
+from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.documents.parsing import (
+    chunk_token_count,
+)
+from app.domain.knowledge.graph.resolution import claim_fingerprint
+from app.domain.knowledge.graph.revisions import stage_revision_change
+from app.domain.knowledge.graph.schema import (
+    GraphSchemaDefinition,
+    normalize_graph_name,
+)
+from app.domain.knowledge.graph.services import create_graph_schema
+from app.domain.knowledge.service import (
+    DEFAULT_DOCUMENT_META,
+    clean_upload_filename,
+    get_knowledge_base,
+    get_knowledge_model,
+    knowledge_object_storage,
+    require_knowledge_base_active,
+    require_knowledge_base_permission,
+)
+from app.domain.knowledge.tasks.orchestration import (
+    enqueue_graph_rebuild,
+    enqueue_graph_sync,
+    task_to_response,
+)
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
 from app.entities.knowledge import (
     CHUNK_INDEXED_STATUS,
     DOCUMENT_INDEXED_STATUS,
@@ -28,13 +55,11 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphRevision,
     KnowledgeGraphSchema,
 )
-from app.entities.identity.user import User
 from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.schemas.knowledge import KnowledgeQueryRequest, KnowledgeTaskResponse
 from app.schemas.knowledge.graph import (
     KnowledgeGraphClaimResponse,
@@ -55,32 +80,7 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphSettingsUpdateRequest,
     KnowledgeGraphStatusResponse,
 )
-from app.domain.audit.services import record_audit_log
-from app.domain.knowledge.tasks.orchestration import (
-    enqueue_graph_rebuild,
-    enqueue_graph_sync,
-    task_to_response,
-)
-from app.domain.knowledge.service import (
-    DEFAULT_DOCUMENT_META,
-    clean_upload_filename,
-    get_knowledge_base,
-    get_knowledge_model,
-    knowledge_object_storage,
-    require_knowledge_base_active,
-    require_knowledge_base_permission,
-)
-from app.domain.knowledge.graph.resolution import claim_fingerprint
-from app.domain.knowledge.graph.revisions import stage_revision_change
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    normalize_graph_name,
-)
-from app.domain.knowledge.graph.services import create_graph_schema
 
-from app.domain.knowledge.documents.parsing import (
-    chunk_token_count,
-)
 MAX_GRAPH_IMPORT_BYTES = 10 * 1024 * 1024
 MAX_GRAPH_IMPORT_RECORDS = 5_000
 # ponytail: render a bounded overview; add server-side clustering when larger graphs need it.
@@ -1332,14 +1332,7 @@ async def _stage_merge_decision(
         alias_id = str(
             uuid5(
                 NAMESPACE_URL,
-                "|".join(
-                    (
-                        "kg-human-alias",
-                        knowledge_base.id,
-                        target.id,
-                        source_name,
-                    )
-                ),
+                f"kg-human-alias|{knowledge_base.id}|{target.id}|{source_name}",
             )
         )
         await stage_revision_change(

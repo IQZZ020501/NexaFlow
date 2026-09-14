@@ -4,14 +4,15 @@ Run from ``backend/`` with ``uv run python -m tests.workflows.workflows``.
 """
 
 import asyncio
-from datetime import UTC, datetime, timedelta
 import json
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-import tests.support  # noqa: F401
+import tests.support
+from tests.support import activate_admin, activate_user, auth_headers, test_client
 
-from app.schemas.workflows.contracts import WorkflowNode
 from app.domain.agents.runtime.tools import AgentToolResult
+from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.runtime.engine import (
     NodeExecutionContext,
     NodeResult,
@@ -23,8 +24,7 @@ from app.domain.workflows.runtime.engine import (
     WorkflowValidationError,
     validate_graph,
 )
-from app.domain.workflows.definitions.defaults import default_workflow_graph
-from tests.support import activate_admin, activate_user, auth_headers, test_client
+from app.schemas.workflows.contracts import WorkflowNode
 
 
 def test_default_workflow_only_contains_start() -> None:
@@ -682,8 +682,8 @@ def test_workflow_model_timeout_uses_specific_safe_error() -> None:
 def test_workflow_resources_come_from_nodes_without_knowledge_limit() -> None:
     from pydantic import ValidationError
 
-    from app.schemas.workflows.contracts import KnowledgeNodeConfig, WorkflowGraph
     from app.domain.workflows.definitions.service import workflow_resource_references
+    from app.schemas.workflows.contracts import KnowledgeNodeConfig, WorkflowGraph
 
     knowledge_ids = [f"base-{index}" for index in range(25)]
     assert KnowledgeNodeConfig.model_validate(
@@ -952,8 +952,8 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
     from unittest.mock import patch
 
     from app.application.workflows.nodes.executor import execute_workflow_node
-    from app.schemas.workflows.contracts import WorkflowNode
     from app.domain.workflows.runtime.engine import NodeExecutionContext
+    from app.schemas.workflows.contracts import WorkflowNode
 
     class FakeTool:
         async def ainvoke(self, arguments):
@@ -1117,8 +1117,8 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
     from pydantic import ValidationError
 
     from app.application.workflows.nodes.executor import execute_workflow_node
-    from app.schemas.workflows.contracts import KnowledgeNodeConfig, WorkflowNode
     from app.domain.workflows.runtime.engine import NodeExecutionContext
+    from app.schemas.workflows.contracts import KnowledgeNodeConfig, WorkflowNode
 
     assert KnowledgeNodeConfig.model_validate(
         {"query": "q", "knowledge_base_ids": ["base-1"]}
@@ -1539,13 +1539,13 @@ def test_interaction_config_migration_upgrades_prerequisites() -> None:
 
 
 def assert_upload_cleanup_removes_object(upload_id: str) -> None:
-    from app.infra.storage.object_storage import create_object_storage
-    from app.infra.db.repositories.workflows import repository as workflow_repository
-    from app.infra.db.session import get_session_factory
     from app.domain.workflows.uploads import (
         prepare_due_upload_cleanups,
         run_upload_storage_cleanup,
     )
+    from app.infra.db.repositories.workflows import repository as workflow_repository
+    from app.infra.db.session import get_session_factory
+    from app.infra.storage.object_storage import create_object_storage
 
     async def run() -> None:
         runtime_settings = tests.support.settings()
@@ -1663,7 +1663,11 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
     """
     Exercise the workflow API lifecycle, including definition revisions, publication, runs, permissions, feedback, regeneration, uploads, and audit events.
     """
-    from tests.agents.agents import agent_model_server, create_workspace_user, model_payload
+    from tests.agents.agents import (
+        agent_model_server,
+        create_workspace_user,
+        model_payload,
+    )
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -2364,8 +2368,9 @@ def _llm_context(**globals_overrides) -> NodeExecutionContext:
 def test_workflow_llm_node_dialogue_history_and_params() -> None:
     from unittest.mock import patch
 
+    from langchain_core.messages import AIMessage, HumanMessage
+
     from app.application.workflows.nodes.executor import execute_workflow_node
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
     async def run() -> None:
         fake = _FakeLlmModel(
@@ -2494,10 +2499,11 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
 
 
 def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
+    from tests.agents.agents import agent_model_server, model_payload
+
     from app.application.agents.runs.children import reconcile_workflow_agent_children
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.session import get_session_factory
-    from tests.agents.agents import agent_model_server, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -2628,9 +2634,9 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         from app.application.agents.runs.children import ensure_workflow_agent_child
         from app.application.agents.runs.service import prepare_agent_run
         from app.application.runs.lifecycle import cancel_run_tree
+        from app.domain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
         from app.entities.defaults import utc_now
         from app.infra.db.repositories.identity import users as user_repository
-        from app.domain.agents.models import AGENT_RUN_UNIFIED_RUNNING_STATUS
 
         async with get_session_factory()() as db:
             children = await agent_repository.list_agent_child_runs(
@@ -2868,26 +2874,28 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         # member_binder_id, retired_agent_id, retired_version_id,
         # extra_runs).
         # ------------------------------------------------------------------
+        from tests.support import settings as make_settings
+
         from app.application.agents.runs import children as acr
         from app.application.agents.runs import service as app_agent_runs
-        from app.application.workflows.runs import executor as workflow_executor
         from app.application.agents.runs.children import (
             _child_goal,
             _fail_expired_waiting_parent,
         )
+        from app.application.workflows.runs import executor as workflow_executor
         from app.application.workflows.runs.executor import run_durable_workflow_run
-        from app.entities.agents import AgentPublicationVersion
-        from app.entities.defaults import new_id
-        from app.infra.db.repositories.workflows import repository as workflow_repository
+        from app.domain.agents.access.publications import agent_publication_hash
         from app.domain.agents.models import (
             AGENT_RUN_FAILED_STATUS,
-            AGENT_RUN_SUCCEEDED_STATUS,
             agent_run_display_status,
         )
-        from app.domain.agents.access.publications import agent_publication_hash
-        from app.domain.workflows.runtime.engine import WorkflowChildRequired
         from app.domain.workflows.models import WorkflowRunDetail as DetailORM
-        from tests.support import settings as make_settings
+        from app.domain.workflows.runtime.engine import WorkflowChildRequired
+        from app.entities.agents import AgentPublicationVersion
+        from app.entities.defaults import new_id
+        from app.infra.db.repositories.workflows import (
+            repository as workflow_repository,
+        )
 
         runner_settings = make_settings()
 
@@ -3494,7 +3502,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                 workspace_role,
                 **kwargs,
             ):
-                child = await real_ensure(
+                _child = await real_ensure(
                     db,
                     parent,
                     parent_node_id,
@@ -3748,8 +3756,9 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
 def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
     from unittest.mock import patch
 
-    from app.application.workflows.nodes.executor import execute_workflow_node
     from langchain_core.messages import ToolMessage
+
+    from app.application.workflows.nodes.executor import execute_workflow_node
     from app.schemas.workflows.contracts import LlmNodeConfig
 
     async def run() -> None:
@@ -3836,8 +3845,9 @@ def test_workflow_llm_node_reasoning_and_mcp_tool_loop() -> None:
 def test_workflow_llm_result_streams_markdown_deltas() -> None:
     from unittest.mock import patch
 
-    from app.application.workflows.nodes.executor import execute_workflow_node
     from langchain_core.messages import AIMessageChunk
+
+    from app.application.workflows.nodes.executor import execute_workflow_node
 
     class StreamingModel(_FakeLlmModel):
         async def astream(self, messages, **kwargs):
@@ -4054,22 +4064,25 @@ def test_workflow_executor_recovery_paths() -> None:
             return created.json()["id"]
 
         async def run_scenarios() -> None:
+            from sqlalchemy import update
+
             from app.application.workflows.runs import executor as workflow_executor
             from app.application.workflows.runs.executor import run_durable_workflow_run
-            from app.entities.defaults import utc_now
-            from app.infra.db.repositories.agents import repository as agent_repository
-            from app.infra.db.repositories.workflows import repository as workflow_repository
-            from app.infra.db.session import get_session_factory
             from app.domain.agents.models import (
                 AGENT_RUN_FAILED_STATUS,
                 AgentRunSnapshot,
                 AgentRunState,
                 agent_run_display_status,
             )
-            from sqlalchemy import update
             from app.domain.workflows.models import (
                 WorkflowRunDetail as DetailORM,
             )
+            from app.entities.defaults import utc_now
+            from app.infra.db.repositories.agents import repository as agent_repository
+            from app.infra.db.repositories.workflows import (
+                repository as workflow_repository,
+            )
+            from app.infra.db.session import get_session_factory
 
             runner_settings = make_settings()
             original_maintain = workflow_executor.maintain_agent_run_lease

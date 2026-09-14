@@ -1,9 +1,13 @@
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.infra.config.settings import Settings
+from alembic import context
+from app.domain.agent_skills.models import (  # noqa: F401
+    AgentSkill,
+    AgentSkillBinding,
+    AgentSkillVersion,
+)
 from app.domain.agents.models import (  # noqa: F401
     Agent,
     AgentApiCredential,
@@ -15,14 +19,26 @@ from app.domain.agents.models import (  # noqa: F401
     AgentRunSnapshot,
     AgentRunState,
 )
-from app.domain.audit.models import AuditLog  # noqa: F401
 from app.domain.announcements.models import Announcement, AnnouncementRead  # noqa: F401
 from app.domain.artifacts.models import GeneratedArtifact  # noqa: F401
-from app.infra.db.base import Base
-from app.domain.platform.models import RefreshSession, User  # noqa: F401
-from app.domain.platform.models import WorkspaceGovernance  # noqa: F401
-from app.domain.platform.models import WorkspaceInvitation  # noqa: F401
-from app.domain.resource_folders.models import ResourceFolder  # noqa: F401
+from app.domain.audit.models import AuditLog  # noqa: F401
+from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
+from app.domain.identity.enterprise.models import (  # noqa: F401
+    EnterpriseIdentity,
+    EnterpriseIdentityConnection,
+    EnterpriseLoginState,
+)
+from app.domain.knowledge.graph.models import (  # noqa: F401
+    KnowledgeGraphAlias,
+    KnowledgeGraphClaim,
+    KnowledgeGraphClaimEvidence,
+    KnowledgeGraphEntity,
+    KnowledgeGraphMention,
+    KnowledgeGraphReviewItem,
+    KnowledgeGraphRevision,
+    KnowledgeGraphRevisionChange,
+    KnowledgeGraphSchema,
+)
 from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeAsset,
     KnowledgeAttachment,
@@ -38,17 +54,20 @@ from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
-from app.domain.knowledge.graph.models import (  # noqa: F401
-    KnowledgeGraphAlias,
-    KnowledgeGraphClaim,
-    KnowledgeGraphClaimEvidence,
-    KnowledgeGraphEntity,
-    KnowledgeGraphMention,
-    KnowledgeGraphReviewItem,
-    KnowledgeGraphRevision,
-    KnowledgeGraphRevisionChange,
-    KnowledgeGraphSchema,
+from app.domain.models.registered import RegisteredModel  # noqa: F401
+from app.domain.platform.models import (  # noqa: F401  # noqa: F401  # noqa: F401
+    RefreshSession,
+    ResourcePermission,
+    SmtpSettings,
+    Team,
+    TeamMembership,
+    User,
+    Workspace,
+    WorkspaceGovernance,
+    WorkspaceInvitation,
+    WorkspaceMembership,
 )
+from app.domain.resource_folders.models import ResourceFolder  # noqa: F401
 from app.domain.tools.models import (  # noqa: F401
     ApplicationToolBinding,
     McpServer,
@@ -68,18 +87,9 @@ from app.domain.workflows.models import (  # noqa: F401
     WorkflowUploadStorageCleanup,
     WorkflowVersion,
 )
-from app.domain.models.registered import RegisteredModel  # noqa: F401
-from app.domain.platform.models import ResourcePermission  # noqa: F401
-from app.domain.platform.models import SmtpSettings  # noqa: F401
-from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
-from app.domain.identity.enterprise.models import (  # noqa: F401
-    EnterpriseIdentity,
-    EnterpriseIdentityConnection,
-    EnterpriseLoginState,
-)
+from app.infra.config.settings import Settings
+from app.infra.db.base import Base
 from app.infra.observability.system_log import SystemLog  # noqa: F401
-from app.domain.platform.models import Team, TeamMembership  # noqa: F401
-from app.domain.platform.models import Workspace, WorkspaceMembership  # noqa: F401
 
 config = context.config
 

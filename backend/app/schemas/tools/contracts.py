@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.schemas.identity.contracts import UserResponse
 
-
 ToolKind = Literal["builtin", "python", "mcp"]
 _ToolId = Annotated[
     str,

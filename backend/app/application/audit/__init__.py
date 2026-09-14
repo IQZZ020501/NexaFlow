@@ -7,7 +7,7 @@ from app.domain.audit.services import (
 )
 
 __all__ = [
-    "list_audit_logs",
     "count_audit_logs",
+    "list_audit_logs",
     "list_workspace_audit_logs",
 ]

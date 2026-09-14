@@ -1,3 +1,5 @@
+# ruff: noqa: F401
+
 import hashlib
 import json
 from dataclasses import dataclass
@@ -8,35 +10,19 @@ from mcp.types import Tool as McpTool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ports.mcp import (
-    McpConnection,
-    McpClientError,
-    McpTransport,
-    discover_mcp_tools,
-    normalize_mcp_url,
-)
-from app.entities.tools import McpServer, McpToolPolicy, ToolPolicy, ToolSource
-from app.entities.identity.user import User
-from app.infra.config.settings import Settings
-from app.infra.db.repositories.tools import mcp as mcp_repository
-from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
-from app.infra.db.repositories.tools import repository as tools_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.entities.defaults import utc_now
-from app.infra.tools.mcp_stdio import (
-    McpStdioConfig,
-    McpStdioConfigError,
-    parse_mcp_stdio_config,
-    serialize_mcp_stdio_config,
-)
-from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
-from app.infra.runtime.validation import normalize_name
-from app.schemas.tools.mcp import (
-    McpServerCreateRequest,
-    McpServerResponse,
-)
 from app.domain.audit.services import record_audit_log
+from app.domain.tools.access.permissions import (
+    ToolAuthorization,
+    ToolPermissionEntry,
+    evaluate_tool_authorization,
+    has_tool_workspace_access,
+    list_tool_permissions,
+    require_tool_manage,
+    require_tool_use,
+    require_tool_view,
+    revoke_tool_permission,
+    upsert_tool_permission,
+)
 from app.domain.tools.catalog.service import (
     McpCatalogLeaf,
     ToolCatalogDetail,
@@ -50,17 +36,35 @@ from app.domain.tools.catalog.service import (
     reconcile_mcp_discovery,
     tombstone_mcp_server_catalog,
 )
-from app.domain.tools.access.permissions import (
-    ToolAuthorization,
-    ToolPermissionEntry,
-    evaluate_tool_authorization,
-    has_tool_workspace_access,
-    list_tool_permissions,
-    require_tool_manage,
-    require_tool_use,
-    require_tool_view,
-    revoke_tool_permission,
-    upsert_tool_permission,
+from app.entities.defaults import utc_now
+from app.entities.identity.user import User
+from app.entities.tools import McpServer, McpToolPolicy, ToolPolicy, ToolSource
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.tools import repository as tools_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.repositories.workspaces import (
+    resource_permissions as permission_repository,
+)
+from app.infra.runtime.validation import normalize_name
+from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
+from app.infra.tools.mcp_stdio import (
+    McpStdioConfig,
+    McpStdioConfigError,
+    parse_mcp_stdio_config,
+    serialize_mcp_stdio_config,
+)
+from app.ports.mcp import (
+    McpClientError,
+    McpConnection,
+    McpTransport,
+    discover_mcp_tools,
+    normalize_mcp_url,
+)
+from app.schemas.tools.mcp import (
+    McpServerCreateRequest,
+    McpServerResponse,
 )
 
 

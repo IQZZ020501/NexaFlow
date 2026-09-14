@@ -6,9 +6,9 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
-    Float,
     Index,
     Integer,
     String,
@@ -18,9 +18,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infra.db.base import Base
-from app.entities.defaults import new_id, utc_now
 from app.domain.resource_folders.models import ResourceFolder  # noqa: F401
+from app.entities.defaults import new_id, utc_now
+from app.infra.db.base import Base
 
 AGENT_RUN_QUEUED_STATUS = "queued"
 AGENT_RUN_PLANNING_STATUS = "planning"
@@ -678,6 +678,9 @@ class AgentRunSnapshot(Base):
         String(64), nullable=False
     )
     tool_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    skill_snapshots: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
     model_id: Mapped[str] = mapped_column(String(36), nullable=False)

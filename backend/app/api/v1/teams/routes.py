@@ -3,7 +3,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infra.db.session import get_db
 from app.api.deps import (
     WorkspaceContext,
     get_workspace_context_from_path,
@@ -21,6 +20,7 @@ from app.application.teams import (
     update_team,
     update_team_member_role,
 )
+from app.infra.db.session import get_db
 from app.schemas.teams.contracts import (
     TeamCreateRequest,
     TeamMemberCreateRequest,

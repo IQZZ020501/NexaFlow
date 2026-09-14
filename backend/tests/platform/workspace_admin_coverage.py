@@ -12,7 +12,7 @@ database, so blocks are independent of each other.
 import asyncio
 from datetime import timedelta
 
-from sqlalchemy import select, update as sa_update
+from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
 # MUST come before any app module import: configures test environment.
@@ -20,22 +20,21 @@ from tests.support import (
     activate_admin,
     auth_headers,
     create_active_user,
-    login,
     settings,
     test_client,
 )
 
 from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
 from app.application.workspaces import service as workspace_service
+from app.domain.knowledge.models import KnowledgeTask
+from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
-from app.entities.defaults import utc_now
-from app.infra.db.repositories.teams import repository as team_repo
 from app.infra.db.repositories.identity import users as user_repo
+from app.infra.db.repositories.teams import repository as team_repo
 from app.infra.db.repositories.workspaces import repository as workspace_repo
-from app.infra.security.auth import hash_refresh_token
 from app.infra.db.session import get_session_factory
-from app.domain.knowledge.models import KnowledgeTask
+from app.infra.security.auth import hash_refresh_token
 
 
 def members_url(workspace_id: str, suffix: str = "") -> str:
@@ -534,8 +533,8 @@ async def exercise_direct_identity_edges() -> None:
         user_to_response_with_scopes,
         user_workspaces_by_user_id,
     )
-    from app.entities.teams.models import Team
     from app.entities.identity.user import RefreshSession
+    from app.entities.teams.models import Team
     from app.entities.workspaces.models import Workspace, WorkspaceMembership
     from app.infra.security.agent_rate_limit import (
         LoginRateLimitExceeded,
@@ -1274,7 +1273,7 @@ def run_workspace_block() -> None:
             research_workspace_id
         ]
         missing_get = client.get(
-            f"/api/v1/workspaces/no-such-workspace",
+            "/api/v1/workspaces/no-such-workspace",
             headers=auth_headers(admin_token),
         )
         assert missing_get.status_code == 404, missing_get.text

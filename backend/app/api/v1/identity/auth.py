@@ -4,18 +4,10 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_settings
-from app.infra.config.settings import Settings
-from app.infra.db.session import get_db
-from app.entities.identity.user import User
-from app.schemas.identity.contracts import (
-    ChangePasswordRequest,
-    LoginRequest,
-    MeResponse,
-    PasswordResetConfirmRequest,
-    PasswordResetRequest,
-    TokenResponse,
-    RefreshSessionResponse,
-    UserResponse,
+from app.application.identity.invitations import accept_workspace_invitation
+from app.application.identity.password_reset import (
+    confirm_password_reset,
+    request_password_reset,
 )
 from app.application.identity.service import (
     authenticate_user,
@@ -29,10 +21,18 @@ from app.application.identity.sessions import (
     revoke_other_user_sessions,
     revoke_user_session,
 )
-from app.application.identity.invitations import accept_workspace_invitation
-from app.application.identity.password_reset import (
-    confirm_password_reset,
-    request_password_reset,
+from app.entities.identity.user import User
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
+from app.schemas.identity.contracts import (
+    ChangePasswordRequest,
+    LoginRequest,
+    MeResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequest,
+    RefreshSessionResponse,
+    TokenResponse,
+    UserResponse,
 )
 from app.schemas.identity.invitations import WorkspaceInvitationAcceptRequest
 

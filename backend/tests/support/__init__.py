@@ -1,9 +1,9 @@
 import asyncio
 import os
 import shutil
-from pathlib import Path
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -91,9 +91,8 @@ def test_client() -> Iterator[TestClient]:
     ), patch(
         "app.infra.security.enterprise_login_rate_limit._client",
         _PermissiveEnterpriseLoginRedis(),
-    ):
-        with TestClient(app) as client:
-            yield client
+    ), TestClient(app) as client:
+        yield client
 
 
 def login(client: TestClient, username: str, password: str) -> dict:

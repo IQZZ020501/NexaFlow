@@ -1,14 +1,13 @@
 """Pure contracts shared by Tool lifecycle and execution use cases."""
 
-from dataclasses import asdict
 import hashlib
 import json
+from dataclasses import asdict
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
 from app.entities.tools import Tool, ToolPolicy, ToolSnapshot, ToolSource, ToolVersion
-
 
 # Leave room for the JSON envelope around the sandbox's 256 KiB code limit.
 MAX_TOOL_INPUT_BYTES = 512 * 1024
@@ -264,8 +263,8 @@ def _validate_schema(schema: dict[str, Any], value: Any, message: str) -> None:
 
 
 __all__ = [
-    "MAX_TOOL_INPUT_BYTES",
     "MAX_DOCUMENT_TOOL_INPUT_BYTES",
+    "MAX_TOOL_INPUT_BYTES",
     "MAX_TOOL_RESULT_BYTES",
     "TOOL_APPROVAL_AUTO",
     "TOOL_APPROVAL_DISABLED",

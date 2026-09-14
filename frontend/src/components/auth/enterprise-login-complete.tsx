@@ -19,7 +19,7 @@ export function EnterpriseLoginComplete({ next }: { next?: string }) {
   }, [next, router, session.isSessionRestored, session.token])
 
   return (
-    <main className="flex min-h-svh items-center justify-center gap-2 bg-muted/30 p-6 text-sm text-muted-foreground">
+    <main className="flex min-h-dvh items-center justify-center gap-2 bg-muted/30 p-6 text-sm text-muted-foreground">
       <LoaderCircleIcon className="size-4 animate-spin" />
       {t("正在完成企业登录")}
     </main>

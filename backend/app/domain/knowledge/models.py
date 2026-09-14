@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -11,7 +12,6 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -20,9 +20,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infra.db.base import Base
-from app.entities.defaults import new_id, utc_now
 from app.domain.resource_folders.models import ResourceFolder  # noqa: F401
+from app.entities.defaults import new_id, utc_now
+from app.infra.db.base import Base
 
 
 class KnowledgeBase(Base):
@@ -725,4 +725,6 @@ class KnowledgeStorageCleanup(Base):
 
 # The knowledge table owns active graph foreign keys, so its metadata import must
 # also register the referenced graph tables for application and test startup.
-from app.domain.knowledge.graph import models as _knowledge_graph_models  # noqa: E402,F401
+from app.domain.knowledge.graph import (
+    models as _knowledge_graph_models,  # noqa: F401
+)

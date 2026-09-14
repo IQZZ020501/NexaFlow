@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-
 MAX_STDIO_CONFIG_JSON_CHARS = 65_536
 MAX_STDIO_ARGS = 64
 MAX_STDIO_ARGUMENT_CHARS = 2_000

@@ -1,11 +1,10 @@
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
-
 
 ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 

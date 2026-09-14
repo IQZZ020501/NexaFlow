@@ -1,26 +1,26 @@
 """Workflow bridge for the provider-neutral durable Tool runtime."""
 
 import asyncio
-from datetime import UTC
 import hashlib
+from datetime import UTC
 from typing import Any
 
 from app.application.agents.tools.runtime import tool_runtime_result_to_agent_result
+from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.application.tools.runtime.service import (
     ToolInvocationBusy,
     ToolInvocationConflict,
     execute_tool_invocation,
     queue_tool_invocation,
 )
+from app.domain.agents.runtime import AgentToolResult
+from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
+from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
 from app.entities.tools import ToolSnapshot
 from app.entities.workflows import WorkflowRunDetail
 from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
 from app.infra.db.session import get_session_factory
-from app.application.tools.runtime.contracts import ToolInvocationContext
-from app.domain.agents.runtime import AgentToolResult
-from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
 
 
 def workflow_tool_invocation_identity(

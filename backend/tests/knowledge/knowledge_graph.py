@@ -4,57 +4,27 @@ Run from backend/: uv run python -m tests.knowledge.knowledge_graph
 """
 
 import asyncio
+import json
 from datetime import timedelta
 from io import BytesIO
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import tests.support  # noqa: F401
+import tests.support
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, text
 
-from app.infra.db.base import Base
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.infra.db.repositories.governance import settings as governance_repository
-from app.infra.db.session import get_engine, get_session_factory
-from app.entities.knowledge import (
-    KnowledgeBase,
-    KnowledgeDocument,
-    KnowledgeDocumentChunk,
-    KnowledgeTask,
+from app.application.knowledge.graph import build as knowledge_graph_build
+from app.application.knowledge.graph import maintenance as knowledge_graph_maintenance
+from app.application.knowledge.graph import query as graph_query
+from app.application.knowledge.graph import service as knowledge_graph
+from app.application.knowledge.retrieval import (
+    service as knowledge_retrieval_application,
 )
-from app.entities.knowledge.graph import (
-    GRAPH_REVIEW_OPEN,
-    KnowledgeGraphAlias as GraphAliasRecord,
-    KnowledgeGraphClaim as GraphClaimRecord,
-    KnowledgeGraphClaimEvidence as GraphEvidenceRecord,
-    KnowledgeGraphEntity as GraphEntityRecord,
-    KnowledgeGraphMention as GraphMentionRecord,
-    KnowledgeGraphRevision as GraphRevisionRecord,
-    KnowledgeGraphReviewItem as GraphReviewRecord,
-)
-from app.entities.identity.user import User
-from app.entities.workspaces.models import Workspace
-from app.entities.governance.models import WorkspaceGovernance
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    default_graph_schema,
-    graph_schema_hash,
-)
-from app.schemas.knowledge import (
-    KnowledgeGraphEvaluationExpectation,
-    KnowledgeQueryRequest,
-)
-from app.schemas.knowledge.graph import KnowledgeGraphReviewDecisionRequest
+from app.domain.audit.models import AuditLog
+from app.domain.knowledge.documents import lifecycle as knowledge_lifecycle
 from app.domain.knowledge.evaluation import graph_evaluation_metrics
 from app.domain.knowledge.graph import revisions as graph_revisions
-from app.domain.knowledge.graph.revisions import GraphRevisionConflict
-from app.domain.knowledge.graph.resolution import claim_fingerprint
-from app.domain.knowledge.graph.services import create_graph_schema
 from app.domain.knowledge.graph import traversal as graph_traversal
 from app.domain.knowledge.graph.models import (
     KnowledgeGraphClaim,
@@ -62,8 +32,16 @@ from app.domain.knowledge.graph.models import (
     KnowledgeGraphEntity,
     KnowledgeGraphRevision,
 )
-from app.domain.audit.models import AuditLog
-from app.entities.defaults import utc_now
+from app.domain.knowledge.graph.resolution import claim_fingerprint
+from app.domain.knowledge.graph.revisions import GraphRevisionConflict
+from app.domain.knowledge.graph.schema import (
+    GraphSchemaDefinition,
+    default_graph_schema,
+    graph_schema_hash,
+)
+from app.domain.knowledge.graph.services import create_graph_schema
+from app.domain.knowledge.storage import cleanup as knowledge_cleanup
+from app.domain.knowledge.tasks import runner as knowledge_task_runner
 from app.domain.knowledge.tasks.orchestration import (
     delete_knowledge_task,
     delete_knowledge_tasks,
@@ -73,15 +51,52 @@ from app.domain.knowledge.tasks.orchestration import (
     retry_knowledge_task,
     stop_knowledge_task,
 )
-from app.application.knowledge.graph import build as knowledge_graph_build
-from app.application.knowledge.graph import maintenance as knowledge_graph_maintenance
-from app.application.knowledge.graph import service as knowledge_graph
-from app.application.knowledge.retrieval import service as knowledge_retrieval_application
-from app.application.knowledge.graph import query as graph_query
-from app.domain.knowledge.documents import lifecycle as knowledge_lifecycle
-from app.domain.knowledge.storage import cleanup as knowledge_cleanup
-from app.domain.knowledge.tasks import runner as knowledge_task_runner
-
+from app.entities.defaults import utc_now
+from app.entities.governance.models import WorkspaceGovernance
+from app.entities.identity.user import User
+from app.entities.knowledge import (
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
+    KnowledgeTask,
+)
+from app.entities.knowledge.graph import (
+    GRAPH_REVIEW_OPEN,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphAlias as GraphAliasRecord,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphClaim as GraphClaimRecord,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphClaimEvidence as GraphEvidenceRecord,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphEntity as GraphEntityRecord,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphMention as GraphMentionRecord,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphReviewItem as GraphReviewRecord,
+)
+from app.entities.knowledge.graph import (
+    KnowledgeGraphRevision as GraphRevisionRecord,
+)
+from app.entities.workspaces.models import Workspace
+from app.infra.db.base import Base
+from app.infra.db.repositories.governance import settings as governance_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import graph as graph_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.workspaces import repository as workspace_repository
+from app.infra.db.session import get_engine, get_session_factory
+from app.schemas.knowledge import (
+    KnowledgeGraphEvaluationExpectation,
+    KnowledgeQueryRequest,
+)
+from app.schemas.knowledge.graph import KnowledgeGraphReviewDecisionRequest
 
 GRAPH_IMPORT_RECORD = {
     "subject": {

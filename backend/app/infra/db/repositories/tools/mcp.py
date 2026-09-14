@@ -2,6 +2,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agents.models import AgentMcpTool
+from app.domain.tools.models import McpServer as McpServerOrm
+from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
+from app.domain.tools.models import ToolSource as ToolSourceOrm
 from app.entities.tools import McpServer, McpToolPolicy
 from app.infra.db.mapping import (
     apply_to_orm,
@@ -10,10 +14,6 @@ from app.infra.db.mapping import (
     to_entity,
     to_orm,
 )
-from app.domain.agents.models import AgentMcpTool
-from app.domain.tools.models import McpServer as McpServerOrm
-from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
-from app.domain.tools.models import ToolSource as ToolSourceOrm
 
 
 async def list_mcp_servers(

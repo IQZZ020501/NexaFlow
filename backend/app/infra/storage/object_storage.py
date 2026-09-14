@@ -1,6 +1,6 @@
+import shutil
 from collections.abc import AsyncIterable
 from pathlib import Path
-import shutil
 from typing import Protocol
 
 

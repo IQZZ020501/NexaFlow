@@ -77,6 +77,37 @@ import { latestRunVersions } from "@/lib/run-versions"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import { workflowErrorMessage, workflowNodeLabel } from "@/lib/workflows/graph"
 
+function readVisualViewportHeight() {
+  const viewport = window.visualViewport
+  if (!viewport) return null
+  const height = Math.round(viewport.height)
+  return Number.isFinite(height) && height > 0 ? height : null
+}
+
+function useVisualViewportHeight() {
+  const [height, setHeight] = React.useState<number | null>(
+    readVisualViewportHeight
+  )
+
+  React.useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+
+    const sync = () => {
+      const next = readVisualViewportHeight()
+      setHeight((current) => (current === next ? current : next))
+    }
+    viewport.addEventListener("resize", sync)
+    viewport.addEventListener("scroll", sync)
+    return () => {
+      viewport.removeEventListener("resize", sync)
+      viewport.removeEventListener("scroll", sync)
+    }
+  }, [])
+
+  return height
+}
+
 /**
  * Derives a conversation title from the question input.
  *
@@ -181,7 +212,7 @@ function ConversationHistory({
   }, [conversations, query])
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex min-h-16 items-center gap-3 border-b px-4">
+      <div className="flex min-h-16 items-center gap-3 border-b px-4 pt-[env(safe-area-inset-top)]">
         <span className="flex size-9 items-center justify-center rounded-lg bg-foreground text-background">
           <WorkflowIcon className="size-4" />
         </span>
@@ -205,7 +236,7 @@ function ConversationHistory({
           {t("新建对话")}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <p className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
           <HistoryIcon className="size-3.5" />
           {t("历史记录")}
@@ -213,7 +244,7 @@ function ConversationHistory({
         <div className="relative mb-2">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
-            className="h-8 w-full rounded-md border bg-background pr-2 pl-8 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-10 w-full rounded-md border bg-background pr-2 pl-8 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:text-xs"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("搜索历史记录")}
@@ -223,11 +254,11 @@ function ConversationHistory({
         {filteredConversations.map((item) => (
           <div
             key={item.conversation_id}
-            className={`group flex items-center gap-1 rounded-md px-2 py-1 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
+            className={`group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
           >
             <button
               type="button"
-              className="min-w-0 flex-1 rounded-md px-1 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-current={
                 conversationId === item.conversation_id ? "page" : undefined
               }
@@ -246,7 +277,7 @@ function ConversationHistory({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="size-5 rounded-md p-0 text-muted-foreground"
+                  className="size-8 shrink-0 rounded-md p-0 text-muted-foreground sm:size-5"
                   aria-label={t("更多")}
                   title={t("更多")}
                   onClick={(event) => event.stopPropagation()}
@@ -320,6 +351,7 @@ export function PublicWorkflowChat({
   const { language, t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored, notify } = useSession()
+  const viewportHeight = useVisualViewportHeight()
   const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
     null
   )
@@ -734,13 +766,20 @@ export function PublicWorkflowChat({
   }
 
   return (
-    <main className="grid h-dvh min-h-0 bg-muted/20 md:h-svh md:grid-cols-[16rem_minmax(0,1fr)]">
+    <main
+      className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 md:h-svh md:grid-cols-[16rem_minmax(0,1fr)]"
+      style={
+        viewportHeight
+          ? { height: viewportHeight, maxHeight: viewportHeight }
+          : undefined
+      }
+    >
       <aside className="hidden min-h-0 border-r md:block">
         <ConversationHistory {...historyProps} />
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col">
-        <header className="flex min-h-16 items-center gap-3 border-b bg-background px-4 sm:px-6">
+        <header className="flex min-h-16 items-center gap-2 border-b bg-background px-3 pt-[env(safe-area-inset-top)] sm:gap-3 sm:px-6">
           <Button
             type="button"
             variant="ghost"
@@ -763,21 +802,22 @@ export function PublicWorkflowChat({
           </div>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
             className="md:hidden"
+            aria-label={t("新建对话")}
+            title={t("新建对话")}
             onClick={() => selectConversation(null)}
           >
             <MessageSquarePlusIcon />
-            {t("新建对话")}
           </Button>
         </header>
 
         <div
           ref={conversationScrollRef}
-          className="min-h-0 flex-1 overflow-y-auto"
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
         >
-          <div className="mx-auto w-full max-w-3xl space-y-6 px-4 pt-8 pb-[calc(2rem+env(safe-area-inset-bottom))] sm:px-8">
+          <div className="mx-auto w-full max-w-3xl space-y-6 px-3 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:px-8 sm:pt-8 sm:pb-[calc(2rem+env(safe-area-inset-bottom))]">
             {runsLoading ? (
               <p className="flex items-center justify-center py-12 text-sm text-muted-foreground">
                 <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -787,7 +827,7 @@ export function PublicWorkflowChat({
               runs.map((run) => (
                 <article
                   key={run.id}
-                  className="space-y-3 rounded-lg border bg-background p-4 shadow-xs"
+                  className="space-y-3 rounded-lg border bg-background p-3 shadow-xs sm:p-4"
                 >
                   <div className="flex justify-end">
                     <div className="grid max-w-[85%] justify-items-end gap-1">
@@ -903,7 +943,7 @@ export function PublicWorkflowChat({
             ) : null}
 
             <form
-              className="rounded-lg border bg-background p-4 shadow-xs"
+              className="rounded-lg border bg-background p-3 shadow-xs sm:p-4"
               onSubmit={handleRun}
             >
               <div className="mb-4">
@@ -924,7 +964,7 @@ export function PublicWorkflowChat({
                   <textarea
                     id="workflow-chat-question"
                     rows={4}
-                    className="resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-h-24 resize-y rounded-md border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
                     onKeyDown={(event) => {
@@ -985,7 +1025,7 @@ export function PublicWorkflowChat({
               ) : null}
               <Button
                 type="submit"
-                className="mt-5"
+                className="mt-5 w-full sm:w-auto"
                 disabled={
                   running ||
                   runs.some((run) => run.status === "awaiting_input") ||
@@ -1005,7 +1045,10 @@ export function PublicWorkflowChat({
       </section>
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent side="right" className="p-0 md:hidden">
+        <DialogContent
+          side="right"
+          className="flex h-full min-h-0 flex-col gap-0 overflow-hidden p-0 max-sm:max-w-none md:hidden"
+        >
           <DialogHeader className="sr-only">
             <DialogTitle>{t("历史记录")}</DialogTitle>
             <DialogDescription>{t("选择或新建对话")}</DialogDescription>

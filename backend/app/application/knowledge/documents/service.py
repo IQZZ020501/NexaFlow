@@ -11,26 +11,25 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.knowledge.retrieval.service import (
-    query_knowledge_base,
-    retrieve_knowledge_base,
-)
-from app.application.knowledge.graph.service import import_graph_records
 from app.application.knowledge.evaluation.runner import (
     get_evaluation_summary,
     get_latest_evaluation_summary,
     run_evaluation_task,
 )
 from app.application.knowledge.graph.build import run_graph_build_task
-from app.infra.config.settings import Settings
-from app.infra.observability.errors import log_error
-from app.infra.observability.logger import get_logger
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
-from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
-from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
+from app.application.knowledge.graph.service import import_graph_records
+from app.application.knowledge.retrieval.service import (
+    query_knowledge_base,
+    retrieve_knowledge_base,
+)
 from app.domain.knowledge.documents.lifecycle import (
     delete_knowledge_document as delete_knowledge_document_record,
+)
+from app.domain.knowledge.documents.lifecycle import (
     set_knowledge_document_active as set_knowledge_document_active_record,
+)
+from app.domain.knowledge.documents.parsing import (
+    IMAGE_DOCUMENT_EXTENSIONS,
 )
 from app.domain.knowledge.evaluation import (
     create_evaluation_case,
@@ -41,31 +40,10 @@ from app.domain.knowledge.evaluation import (
     list_evaluation_cases,
     list_evaluation_runs,
 )
-from app.domain.knowledge.tasks.orchestration import (
-    enqueue_index_knowledge_document,
-    enqueue_parse_knowledge_document,
-    enqueue_rebuild_knowledge_index,
-    get_knowledge_document,
-    list_knowledge_document_chunks,
-    list_knowledge_tasks,
-    retry_knowledge_task,
-    stop_knowledge_task,
-    delete_knowledge_task,
-    delete_knowledge_tasks,
-)
-from app.entities.knowledge import (
-    KnowledgeAsset,
-    KnowledgeBase,
-    KnowledgeDocument,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
-)
-from app.entities.identity.user import User
 from app.domain.knowledge.service import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,
     delete_knowledge_attachment,
-    delete_knowledge_base_permanently as delete_knowledge_base_record,
     document_to_response,
     get_default_knowledge_model,
     get_knowledge_base,
@@ -80,15 +58,41 @@ from app.domain.knowledge.service import (
     test_knowledge_base_models,
     transfer_knowledge_base_owner,
     update_knowledge_base,
-    upload_knowledge_attachment as upload_knowledge_attachment_record,
     upsert_resource_permission,
 )
-
-import asyncio
-
-from app.domain.knowledge.documents.parsing import (
-    IMAGE_DOCUMENT_EXTENSIONS,
+from app.domain.knowledge.service import (
+    delete_knowledge_base_permanently as delete_knowledge_base_record,
 )
+from app.domain.knowledge.service import (
+    upload_knowledge_attachment as upload_knowledge_attachment_record,
+)
+from app.domain.knowledge.tasks.orchestration import (
+    delete_knowledge_task,
+    delete_knowledge_tasks,
+    enqueue_index_knowledge_document,
+    enqueue_parse_knowledge_document,
+    enqueue_rebuild_knowledge_index,
+    get_knowledge_document,
+    list_knowledge_document_chunks,
+    list_knowledge_tasks,
+    retry_knowledge_task,
+    stop_knowledge_task,
+)
+from app.entities.identity.user import User
+from app.entities.knowledge import (
+    TASK_GRAPH_REBUILD,
+    TASK_GRAPH_SYNC,
+    KnowledgeAsset,
+    KnowledgeBase,
+    KnowledgeDocument,
+)
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
+from app.infra.observability.errors import log_error
+from app.infra.observability.logger import get_logger
+from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
+from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
+
 logger = get_logger(__name__)
 
 from app.domain.knowledge.storage.cleanup import run_knowledge_storage_cleanup
@@ -96,8 +100,8 @@ from app.domain.knowledge.tasks.runner import (
     mark_knowledge_task_failed,
     run_knowledge_task,
 )
-from app.infra.observability.errors import classify_error
 from app.infra.db.session import get_session_factory
+from app.infra.observability.errors import classify_error
 
 GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
 GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
@@ -111,16 +115,21 @@ async def upload_knowledge_attachment(
     actor: User,
     settings: Settings,
 ) -> KnowledgeAttachmentResponse:
-    if Path(upload.filename or "").suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS:
-        if await get_default_knowledge_model(
-            db,
-            knowledge_base.workspace_id,
-            "VISION",
-        ) is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                VISION_MODEL_REQUIRED_MESSAGE,
+    if (
+        Path(upload.filename or "").suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS
+        and (
+            await get_default_knowledge_model(
+                db,
+                knowledge_base.workspace_id,
+                "VISION",
             )
+            is None
+        )
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            VISION_MODEL_REQUIRED_MESSAGE,
+        )
     return await upload_knowledge_attachment_record(
         db,
         knowledge_base,
@@ -285,47 +294,47 @@ async def get_knowledge_asset_file(
 
 
 __all__ = [
+    "create_evaluation_case",
     "create_knowledge_base",
     "create_knowledge_documents_from_attachments",
+    "delete_evaluation_case",
+    "delete_evaluation_run",
     "delete_knowledge_attachment",
     "delete_knowledge_base_permanently",
     "delete_knowledge_document",
-    "create_evaluation_case",
-    "delete_evaluation_case",
-    "delete_evaluation_run",
+    "delete_knowledge_task",
+    "delete_knowledge_tasks",
     "dispatch_knowledge_task",
     "document_response_with_chunk_count",
     "document_to_response",
-    "enqueue_index_knowledge_document",
     "enqueue_evaluation_run",
+    "enqueue_index_knowledge_document",
     "enqueue_parse_knowledge_document",
     "enqueue_rebuild_knowledge_index",
-    "get_knowledge_asset_file",
     "get_evaluation_run",
     "get_evaluation_summary",
-    "get_latest_evaluation_summary",
+    "get_knowledge_asset_file",
     "get_knowledge_base",
     "get_knowledge_document",
+    "get_latest_evaluation_summary",
     "import_graph_records",
     "knowledge_document_path",
-    "list_knowledge_bases",
     "list_evaluation_cases",
     "list_evaluation_runs",
+    "list_knowledge_bases",
     "list_knowledge_document_chunks",
     "list_knowledge_documents",
     "list_knowledge_documents_with_counts",
     "list_knowledge_tasks",
     "list_resource_permissions",
     "query_knowledge_base",
-    "retrieve_knowledge_base",
     "require_can_manage_permissions",
     "require_knowledge_base_permission",
+    "retrieve_knowledge_base",
     "retry_knowledge_task",
-    "stop_knowledge_task",
-    "delete_knowledge_task",
-    "delete_knowledge_tasks",
     "revoke_resource_permission",
     "set_knowledge_document_active",
+    "stop_knowledge_task",
     "test_knowledge_base_models",
     "transfer_knowledge_base_owner",
     "update_knowledge_base",

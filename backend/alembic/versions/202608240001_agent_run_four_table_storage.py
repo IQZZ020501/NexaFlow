@@ -1,13 +1,12 @@
 """Split Agent Run identity, state, snapshot, events, and tool calls."""
 
-from collections.abc import Mapping, Sequence
-from datetime import datetime
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "202608240001"
 down_revision: str | None = "202608210001"
@@ -746,7 +745,10 @@ def downgrade() -> None:
     with op.batch_alter_table("agent_runs") as batch:
         for column in legacy_columns:
             if column.name != "agent_publication_version_id":
-                batch.alter_column(column.name, nullable=False if column.name in _RUN_REQUIRED_COLUMNS else True)
+                batch.alter_column(
+                    column.name,
+                    nullable=column.name in _RUN_REQUIRED_COLUMNS,
+                )
         batch.create_foreign_key(
             "fk_agent_runs_publication_workspace",
             "agent_publication_versions",

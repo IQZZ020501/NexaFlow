@@ -3,7 +3,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 AnnouncementSeverity = Literal["info", "warning", "critical"]
 
 

@@ -91,6 +91,8 @@ import {
   type AgentRunStreamEvent,
   type AgentToolCall,
 } from "@/lib/api/agents"
+import type { AgentSkillRef } from "@/lib/api/agent-skills"
+import { listAgentSkills, type AgentSkill } from "@/lib/api/agent-skills"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
 import { listMcpServers, type McpServer } from "@/lib/api/mcp"
@@ -133,6 +135,7 @@ export type AgentFormState = {
   instructions: string
   knowledgeBaseIds: string[]
   tools: ToolRef[]
+  skills?: AgentSkillRef[]
   status: Agent["status"]
 }
 
@@ -146,6 +149,7 @@ const EMPTY_FORM: AgentFormState = {
   instructions: "",
   knowledgeBaseIds: [],
   tools: [],
+  skills: [],
   status: "active",
 }
 
@@ -190,6 +194,7 @@ function formFromAgent(agent: Agent): AgentFormState {
     instructions: agent.instructions,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
+    skills: (agent.skills ?? []).map((skill) => ({ ...skill })),
     status: agent.status,
   }
 }
@@ -559,6 +564,12 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
   const agentTools = (agent.tools ?? []).map(
     (tool) => `${tool.tool_id}:${tool.version_id}`
   )
+  const formSkills = (form.skills ?? []).map(
+    (skill) => `${skill.skill_id}:${skill.version_id}`
+  )
+  const agentSkills = (agent.skills ?? []).map(
+    (skill) => `${skill.skill_id}:${skill.version_id}`
+  )
   return (
     form.name.trim() !== agent.name ||
     form.description.trim() !== agent.description ||
@@ -569,7 +580,8 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
     form.status !== agent.status ||
     (form.appType === "agent" &&
       (!sameValues(form.knowledgeBaseIds, agent.knowledge_base_ids) ||
-        !sameValues(formTools, agentTools)))
+        !sameValues(formTools, agentTools) ||
+        !sameValues(formSkills, agentSkills)))
   )
 }
 
@@ -604,6 +616,7 @@ export function AgentsPage({
   const [knowledgeBases, setKnowledgeBases] = React.useState<KnowledgeBase[]>(
     []
   )
+  const [agentSkills, setAgentSkills] = React.useState<AgentSkill[]>([])
   const [mcpServers, setMcpServers] = React.useState<McpServer[]>([])
   const [workflowAgents, setWorkflowAgents] = React.useState<Agent[]>([])
   const [toolCatalog, setToolCatalog] =
@@ -868,6 +881,7 @@ export function AgentsPage({
       setAgents([])
       setModels([])
       setKnowledgeBases([])
+      setAgentSkills([])
       setMcpServers([])
       setToolCatalog(EMPTY_TOOL_CATALOG)
       setWorkflowAgents([])
@@ -879,7 +893,7 @@ export function AgentsPage({
     setIsLoading(true)
     setHasLoadedWorkspaceData(false)
     try {
-      const [listedAgents, nextModels, nextKnowledgeBases, nextMcpServers] =
+      const [listedAgents, nextModels, nextKnowledgeBases, nextMcpServers, nextAgentSkills] =
         await Promise.all([
           listAgents(token, selectedWorkspaceId, {
             limit: CARD_BATCH_SIZE,
@@ -888,17 +902,20 @@ export function AgentsPage({
           listRegisteredModels(token, selectedWorkspaceId),
           listKnowledgeBases(token, selectedWorkspaceId),
           listMcpServers(token, selectedWorkspaceId),
+          listAgentSkills(token, selectedWorkspaceId).catch(() => []),
         ])
       setAgents(listedAgents)
       setListedAgentsCount(listedAgents.length)
       setAgentsHasMore(listedAgents.length === CARD_BATCH_SIZE)
       setModels(nextModels)
       setKnowledgeBases(nextKnowledgeBases)
+      setAgentSkills(nextAgentSkills)
       setMcpServers(nextMcpServers)
     } catch (error) {
       setAgents([])
       setModels([])
       setKnowledgeBases([])
+      setAgentSkills([])
       setMcpServers([])
       setListedAgentsCount(0)
       reportError(error)
@@ -1316,9 +1333,12 @@ export function AgentsPage({
       if (form.id) {
         const toolPayload =
           form.appType === "workflow" ? { tools: [] } : { tools: form.tools }
+        const skillPayload =
+          form.appType === "workflow" ? { skills: [] } : { skills: form.skills ?? [] }
         const updated = await updateAgent(token, selectedWorkspaceId, form.id, {
           ...payload,
           ...toolPayload,
+          ...skillPayload,
         })
         setAgents((current) =>
           current.map((agent) => (agent.id === updated.id ? updated : agent))
@@ -1332,6 +1352,7 @@ export function AgentsPage({
         const created = await createAgent(token, selectedWorkspaceId, {
           ...payload,
           tools: form.appType === "workflow" ? [] : form.tools,
+          skills: form.appType === "workflow" ? [] : form.skills ?? [],
         })
         setAgents((current) => [created, ...current])
         setForm(formFromAgent(created))
@@ -2025,6 +2046,7 @@ export function AgentsPage({
             setForm={setForm}
             models={models}
             knowledgeBases={knowledgeBases}
+            skills={agentSkills}
             tools={tools}
             runs={runs}
             toolCallsByRun={toolCallsByRun}
@@ -2585,6 +2607,7 @@ export function AgentsPage({
               setForm={setForm}
               models={models}
               knowledgeBases={knowledgeBases}
+              skills={agentSkills}
               tools={tools}
               token={token ?? ""}
               workspaceId={selectedWorkspaceId ?? ""}

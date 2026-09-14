@@ -1,6 +1,15 @@
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge.models import (
+    KnowledgeDocument as KnowledgeDocumentORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
+)
 from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     KnowledgeBase,
@@ -9,11 +18,6 @@ from app.entities.knowledge import (
     KnowledgeDocumentReference,
 )
 from app.infra.db.mapping import save, to_entity, to_orm
-from app.domain.knowledge.models import (
-    KnowledgeDocument as KnowledgeDocumentORM,
-    KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-)
 
 
 async def delete_source_references(

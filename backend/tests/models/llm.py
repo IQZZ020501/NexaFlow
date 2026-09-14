@@ -6,10 +6,18 @@ from contextlib import contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
+from typing import ClassVar
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import text
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    settings,
+    test_client,
+)
 
 from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
@@ -17,7 +25,6 @@ from app.adapters.llm.credentials import (
 )
 from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.adapters.llm.providers.integrations import PROVIDER_INTEGRATIONS
-from app.domain.models.registered import RegisteredModel
 from app.adapters.llm.runtime import (
     build_chat_model,
     build_embeddings,
@@ -27,14 +34,8 @@ from app.adapters.llm.runtime import (
     build_reranker,
     extract_registered_image_text,
 )
+from app.domain.models.registered import RegisteredModel
 from app.infra.db.session import get_session_factory
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    settings,
-    test_client,
-)
 
 MEMBER_PASSWORD = "Member@12345."
 
@@ -70,9 +71,9 @@ def test_registered_chat_model_uses_configured_timeout() -> None:
 
 
 class ModelTestHandler(BaseHTTPRequestHandler):
-    calls: list[dict] = []
-    fail_next = False
-    reject_stream_usage = False
+    calls: ClassVar[list[dict]] = []
+    fail_next: ClassVar[bool] = False
+    reject_stream_usage: ClassVar[bool] = False
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))

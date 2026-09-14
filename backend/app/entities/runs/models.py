@@ -38,6 +38,7 @@ class AgentRun:
     application_snapshot: dict[str, Any] = field(default_factory=dict)
     application_snapshot_hash: str = ""
     tool_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    skill_snapshots: list[dict[str, Any]] = field(default_factory=list)
     model_id: str = ""
     model_name: str = ""
     max_runtime_seconds: float = 300.0

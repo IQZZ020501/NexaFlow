@@ -9,14 +9,19 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.services import record_audit_log
+from app.domain.platform.models import (
+    WorkspaceGovernance as WorkspaceGovernanceOrm,  # noqa: F401
+)
+from app.entities.defaults import APP_TIMEZONE, utc_now
+from app.entities.governance.models import WorkspaceGovernance
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
-from app.entities.governance.models import WorkspaceGovernance
-from app.domain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm  # noqa: F401
 from app.infra.config.settings import Settings
-from app.entities.defaults import APP_TIMEZONE, utc_now
 from app.infra.db.repositories.governance import inventory as governance_repository
-from app.infra.db.repositories.governance import settings as workspace_governance_repository
+from app.infra.db.repositories.governance import (
+    settings as workspace_governance_repository,
+)
 from app.ports.vector_store import check_vector_store_health
 from app.schemas.governance.contracts import (
     AdminHealthResponse,
@@ -25,8 +30,6 @@ from app.schemas.governance.contracts import (
     WorkspaceGovernanceUpdateRequest,
     WorkspaceInventoryResponse,
 )
-from app.domain.audit.services import record_audit_log
-
 
 HEALTH_PROBE_TIMEOUT_SECONDS = 3.0
 _STORAGE_PROBE_CONTENT = b"nexaflow-health"

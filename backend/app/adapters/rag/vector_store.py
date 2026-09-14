@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from functools import cache
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.domain.models.registered import RegisteredModel
@@ -111,6 +108,7 @@ def _ensure_collection(
                 )
                 return
 
+    vectors_config: models.VectorParams | dict[str, models.VectorParams] | None = None
     for attempt in range(3):
         try:
             vectors_config = client.get_collection(collection_name).config.params.vectors
@@ -305,9 +303,14 @@ def query_vectors(
             )
         results = client.query_points(
             collection_name,
-            query=models.NearestQuery(
-                nearest=query_embedding,
-                mmr=models.Mmr(diversity=0.5, candidates_limit=limit * 2),
+            # qdrant-client accepts NearestQuery at runtime; older IDE stubs
+            # narrow the query parameter to point IDs only.
+            query=cast(
+                Any,
+                models.NearestQuery(
+                    nearest=query_embedding,
+                    mmr=models.Mmr(diversity=0.5, candidates_limit=limit * 2),
+                ),
             ),
             limit=limit,
             with_payload=["chunk_id"],
@@ -324,14 +327,17 @@ def query_vectors(
             duration_ms=round((time.monotonic() - started) * 1000, 1),
         )
         raise
-    return [
+    hits: list[VectorHit] = []
+    for point in results:
+        if not isinstance(point.payload, dict):
+            continue
+        chunk_id = point.payload.get("chunk_id")
+        if not isinstance(chunk_id, str):
+            continue
         # Qdrant COSINE reports cosine similarity (1 = identical); expose
         # cosine distance (1 - score, [0, 2]) so lower is more similar.
-        VectorHit(chunk_id=chunk_id, distance=1.0 - point.score)
-        for point in results
-        if isinstance(point.payload, dict)
-        and isinstance(chunk_id := point.payload.get("chunk_id"), str)
-    ]
+        hits.append(VectorHit(chunk_id=chunk_id, distance=1.0 - point.score))
+    return hits
 
 
 def upsert_graph_profile_vectors(
@@ -391,7 +397,8 @@ def query_graph_profile_vectors(
     ).embed_query(query)
     points = client.query_points(
         collection_name,
-        query=models.NearestQuery(nearest=query_embedding),
+        # See the compatibility note in query_vectors above.
+        query=cast(Any, models.NearestQuery(nearest=query_embedding)),
         limit=limit,
         with_payload=["entity_id", "profile_hash"],
         query_filter=models.Filter(
@@ -407,17 +414,22 @@ def query_graph_profile_vectors(
             ]
         ),
     ).points
-    return [
-        GraphProfileVectorHit(
-            entity_id=entity_id,
-            profile_hash=profile_hash,
-            distance=1.0 - point.score,
+    hits: list[GraphProfileVectorHit] = []
+    for point in points:
+        if not isinstance(point.payload, dict):
+            continue
+        entity_id = point.payload.get("entity_id")
+        profile_hash = point.payload.get("profile_hash")
+        if not isinstance(entity_id, str) or not isinstance(profile_hash, str):
+            continue
+        hits.append(
+            GraphProfileVectorHit(
+                entity_id=entity_id,
+                profile_hash=profile_hash,
+                distance=1.0 - point.score,
+            )
         )
-        for point in points
-        if isinstance(point.payload, dict)
-        and isinstance(entity_id := point.payload.get("entity_id"), str)
-        and isinstance(profile_hash := point.payload.get("profile_hash"), str)
-    ]
+    return hits
 
 
 def delete_graph_profile_vectors(

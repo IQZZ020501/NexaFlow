@@ -8,8 +8,8 @@ from celery.signals import after_setup_logger, task_failure, task_postrun
 
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
-from app.infra.runtime.event_loop import configure_windows_event_loop_policy
 from app.infra.observability.logger import get_logger, setup_logging
+from app.infra.runtime.event_loop import configure_windows_event_loop_policy
 
 logger = get_logger("celery")
 

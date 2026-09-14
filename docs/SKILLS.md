@@ -5,6 +5,15 @@ its format-specific instructions and renderer inside the bundle instead of
 accepting Python source from an Agent. The platform still owns sandboxing,
 limits, artifact validation, temporary storage, and download authorization.
 
+## Agent 运行时技能包
+
+Agent 还可以绑定工作区级、版本化的运行时技能包（`agent_skills`）。它们
+携带意图、指令、输入/输出 Schema、知识库与 Tool 引用，以及检索、预算、
+停止、护栏和评测要求；发布后以不可变版本写入 Agent publication 和 Run
+snapshot。运行时会把技能包声明的资源纳入同一租户权限、ToolInvocation 和
+Evidence grounding 链路。它们不携带凭据，也不绕过下面描述的 sandbox 或
+现有工具策略。
+
 A Skill directory has a required `SKILL.md`, the declared Python entrypoint,
 and optional `references/`, `assets/`, and `requirements.txt` files.
 

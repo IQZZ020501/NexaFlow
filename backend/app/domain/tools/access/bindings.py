@@ -3,6 +3,14 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.tools.access.permissions import (
+    evaluate_tool_authorization,
+    require_tool_use,
+)
+from app.domain.tools.catalog.service import get_tool_catalog_detail
+from app.domain.tools.runtime import build_tool_snapshot
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
 from app.entities.tools import (
     ApplicationToolBinding,
     Tool,
@@ -12,17 +20,9 @@ from app.entities.tools import (
     ToolSource,
     ToolVersion,
 )
-from app.entities.identity.user import User
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.tools import repository as repository
 from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.tools import repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
-from app.domain.tools.catalog.service import get_tool_catalog_detail
-from app.domain.tools.access.permissions import (
-    evaluate_tool_authorization,
-    require_tool_use,
-)
-from app.domain.tools.runtime import build_tool_snapshot
 
 
 def build_bindable_tool_snapshot(

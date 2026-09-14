@@ -6,17 +6,17 @@ from datetime import timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge.bases.permissions import RESOURCE_TYPE
+from app.domain.knowledge.documents.service import knowledge_object_storage
+from app.entities.defaults import utc_now
 from app.entities.knowledge import KnowledgeBase, KnowledgeStorageCleanup
 from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.session import get_session_factory
 from app.ports.vector_store import (
     delete_graph_profile_collection,
     delete_vector_collection,
 )
-from app.domain.knowledge.documents.service import knowledge_object_storage
-from app.domain.knowledge.bases.permissions import RESOURCE_TYPE
 
 
 async def purge_knowledge_base_storage(

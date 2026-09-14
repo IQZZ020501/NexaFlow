@@ -19,6 +19,44 @@ from sqlalchemy import (
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agents.models import AgentRun as AgentRunORM
+from app.domain.agents.models import AgentRunState as AgentRunStateORM
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphAlias as KnowledgeGraphAliasORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphClaim as KnowledgeGraphClaimORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphClaimEvidence as KnowledgeGraphClaimEvidenceORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphEntity as KnowledgeGraphEntityORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphMention as KnowledgeGraphMentionORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphReviewItem as KnowledgeGraphReviewItemORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphRevision as KnowledgeGraphRevisionORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphRevisionChange as KnowledgeGraphRevisionChangeORM,
+)
+from app.domain.knowledge.graph.models import (
+    KnowledgeGraphSchema as KnowledgeGraphSchemaORM,
+)
+from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
+from app.domain.knowledge.models import (
+    KnowledgeDocument as KnowledgeDocumentORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
+)
+from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailORM
+from app.entities.defaults import utc_now
 from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     DOCUMENT_INDEXED_STATUS,
@@ -41,27 +79,7 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.entities.defaults import utc_now
 from app.infra.db.mapping import save, to_entity
-from app.domain.agents.models import AgentRun as AgentRunORM
-from app.domain.agents.models import AgentRunState as AgentRunStateORM
-from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseORM
-from app.domain.knowledge.models import (
-    KnowledgeDocument as KnowledgeDocumentORM,
-    KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
-)
-from app.domain.knowledge.graph.models import (
-    KnowledgeGraphAlias as KnowledgeGraphAliasORM,
-    KnowledgeGraphClaim as KnowledgeGraphClaimORM,
-    KnowledgeGraphClaimEvidence as KnowledgeGraphClaimEvidenceORM,
-    KnowledgeGraphEntity as KnowledgeGraphEntityORM,
-    KnowledgeGraphMention as KnowledgeGraphMentionORM,
-    KnowledgeGraphReviewItem as KnowledgeGraphReviewItemORM,
-    KnowledgeGraphRevision as KnowledgeGraphRevisionORM,
-    KnowledgeGraphRevisionChange as KnowledgeGraphRevisionChangeORM,
-    KnowledgeGraphSchema as KnowledgeGraphSchemaORM,
-)
-from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailORM
 
 _GRAPH_SQL_DIR = Path(__file__).parent.parent.parent / "sql" / "knowledge" / "graph"
 _SHORTEST_PATH_SQL = text(
@@ -1229,7 +1247,7 @@ async def current_graph_source_versions(
         meta = document.meta or {}
         versions[document.id] = (
             f"{int(meta.get('document_version') or 0)}:"
-            f"{str(meta.get('normalized_content_hash') or '')}:"
+            f"{meta.get('normalized_content_hash') or ''!s}:"
             f"{int(document.is_active)}:{document.status}"
         )
     return versions

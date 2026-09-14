@@ -4,12 +4,12 @@ from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.services import record_audit_log
+from app.entities.defaults import utc_now
 from app.entities.email.smtp import SmtpSettings
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.entities.defaults import utc_now
 from app.infra.db.repositories.email import smtp as smtp_repository
-from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infra.email.smtp import (
     SmtpConfigurationError,
     SmtpDeliveryError,
@@ -17,13 +17,13 @@ from app.infra.email.smtp import (
     send_smtp_message,
 )
 from app.infra.runtime.validation import normalize_email
+from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.schemas.email.smtp import (
     SmtpSettingsResponse,
     SmtpSettingsUpdateRequest,
     SmtpTestRequest,
     normalize_site_url,
 )
-from app.domain.audit.services import record_audit_log
 
 
 def _response(entity: SmtpSettings) -> SmtpSettingsResponse:

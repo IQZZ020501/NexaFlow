@@ -16,7 +16,7 @@ export default function WorkflowLayout({
 }) {
   return (
     <SessionGate>
-      <div className="h-svh overflow-hidden">{children}</div>
+      <div className="h-dvh overflow-hidden sm:h-svh">{children}</div>
     </SessionGate>
   )
 }

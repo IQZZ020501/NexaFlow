@@ -4,9 +4,9 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision: str = "202608290001"
 down_revision: str | None = "202608250007"

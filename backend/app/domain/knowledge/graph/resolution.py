@@ -3,12 +3,12 @@ import json
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.domain.knowledge.graph.schema import normalize_graph_name
 from app.entities.knowledge.graph import (
     GRAPH_CLAIM_ACTIVE,
     GRAPH_CLAIM_CANDIDATE,
     GRAPH_CLAIM_REJECTED,
 )
-from app.domain.knowledge.graph.schema import normalize_graph_name
 
 
 class EntityCandidate(Protocol):

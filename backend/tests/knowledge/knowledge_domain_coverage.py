@@ -14,84 +14,31 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from tests.models.llm import model_test_server
 from tests.support import (
     activate_admin,
     activate_user,
     auth_headers,
     create_active_user,
-    settings as test_settings,
     test_client,
 )
-from tests.models.llm import model_test_server
-
-from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.infra.db.session import get_session_factory
-from app.entities.defaults import new_id, utc_now
-from app.entities.knowledge import (
-    CHUNK_INDEXED_STATUS,
-    CHUNK_INDEX_FAILED_STATUS,
-    CHUNK_PREVIEW_STATUS,
-    DOCUMENT_DELETED_STATUS,
-    DOCUMENT_INDEX_FAILED_STATUS,
-    DOCUMENT_INDEXED_STATUS,
-    DOCUMENT_INDEX_QUEUED_STATUS,
-    DOCUMENT_PARSED_STATUS,
-    KnowledgeAsset,
-    KnowledgeAttachment,
-    KnowledgeBase,
-    KnowledgeDocument,
-    KnowledgeDocumentChunk,
-    KnowledgeDocumentParentChunk,
-    KnowledgeStorageCleanup,
-    KnowledgeTask,
-    TASK_FAILED_STATUS,
-    TASK_GRAPH_SYNC,
-    TASK_INDEX,
-    TASK_PARSE,
-    TASK_QUEUED_STATUS,
-    TASK_REBUILD_INDEX,
-    TASK_RUNNING_STATUS,
-    TASK_SUCCEEDED_STATUS,
+from tests.support import (
+    settings as test_settings,
 )
-from app.entities.identity.user import User
-from app.entities.workflows import WorkflowUploadStorageCleanup
-from app.infra.queue.celery import celery_app
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.domain.knowledge.storage import cleanup as cleanup_service
-from app.domain.knowledge.documents import service as documents_service
-from app.domain.knowledge.bases import service as kb_service
-from app.domain.knowledge.documents import lifecycle as lifecycle_service
-from app.domain.knowledge.tasks import orchestration as orchestration_service
-from app.domain.knowledge.bases import permissions as permissions_service
-from app.domain.knowledge.tasks import runner as task_runner_service
-from app.domain.knowledge import models as knowledge_models
-from app.tasks.knowledge import jobs as knowledge_tasks_module
+
 from app.application.knowledge.documents import service as application_knowledge
-from app.application.workspaces import service as uploads_cleanup_module
 from app.application.knowledge.documents.service import (
     enqueue_knowledge_storage_cleanup,
     enqueue_knowledge_task,
     mark_task_dispatch_failed,
 )
+from app.application.workspaces import service as uploads_cleanup_module
 from app.application.workspaces.service import enqueue_upload_storage_cleanups
-from app.tasks.knowledge.jobs import (
-    recover_knowledge_storage_cleanups_job,
-    recover_knowledge_tasks_job,
-    recover_upload_storage_cleanups_job,
-    reconcile_knowledge_graphs_job,
-    run_knowledge_storage_cleanup_job,
-    run_knowledge_task_job,
-    run_upload_storage_cleanup_job,
-)
-from app.schemas.knowledge import (
-    KnowledgeDocumentParseRequest,
-    KnowledgeModelTestRequest,
-)
+from app.domain.knowledge import models as knowledge_models
+from app.domain.knowledge.bases import permissions as permissions_service
+from app.domain.knowledge.bases import service as kb_service
+from app.domain.knowledge.documents import lifecycle as lifecycle_service
+from app.domain.knowledge.documents import service as documents_service
 from app.domain.knowledge.documents.parsing import (
     ChildChunkDraft,
     DocumentAssetDraft,
@@ -99,7 +46,9 @@ from app.domain.knowledge.documents.parsing import (
     KnowledgePipelineError,
     ParentChunkDraft,
 )
-from app.ports.llm import ModelProviderError, ModelProviderStatusError
+from app.domain.knowledge.storage import cleanup as cleanup_service
+from app.domain.knowledge.tasks import orchestration as orchestration_service
+from app.domain.knowledge.tasks import runner as task_runner_service
 from app.domain.knowledge.tasks.orchestration import (
     enqueue_parse_knowledge_document,
 )
@@ -112,10 +61,58 @@ from app.domain.knowledge.tasks.runner import (
     maintain_knowledge_task_lease,
     mark_knowledge_task_failed,
     recover_knowledge_tasks,
-    run_parse_task,
     run_knowledge_task,
+    run_parse_task,
 )
 from app.domain.models.registered import RegisteredModel
+from app.entities.defaults import new_id, utc_now
+from app.entities.knowledge import (
+    CHUNK_INDEX_FAILED_STATUS,
+    CHUNK_INDEXED_STATUS,
+    CHUNK_PREVIEW_STATUS,
+    DOCUMENT_DELETED_STATUS,
+    DOCUMENT_INDEX_FAILED_STATUS,
+    DOCUMENT_INDEX_QUEUED_STATUS,
+    DOCUMENT_INDEXED_STATUS,
+    DOCUMENT_PARSED_STATUS,
+    TASK_FAILED_STATUS,
+    TASK_GRAPH_SYNC,
+    TASK_INDEX,
+    TASK_PARSE,
+    TASK_QUEUED_STATUS,
+    TASK_REBUILD_INDEX,
+    TASK_RUNNING_STATUS,
+    TASK_SUCCEEDED_STATUS,
+    KnowledgeAsset,
+    KnowledgeAttachment,
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
+    KnowledgeDocumentParentChunk,
+    KnowledgeStorageCleanup,
+    KnowledgeTask,
+)
+from app.entities.workflows import WorkflowUploadStorageCleanup
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
+from app.infra.queue.celery import celery_app
+from app.ports.llm import ModelProviderError, ModelProviderStatusError
+from app.schemas.knowledge import (
+    KnowledgeDocumentParseRequest,
+    KnowledgeModelTestRequest,
+)
+from app.tasks.knowledge import jobs as knowledge_tasks_module
+from app.tasks.knowledge.jobs import (
+    reconcile_knowledge_graphs_job,
+    recover_knowledge_storage_cleanups_job,
+    recover_knowledge_tasks_job,
+    recover_upload_storage_cleanups_job,
+    run_knowledge_storage_cleanup_job,
+    run_knowledge_task_job,
+    run_upload_storage_cleanup_job,
+)
 
 MEMBER_PASSWORD = "Member@12345."
 
@@ -4098,19 +4095,15 @@ async def run_direct_shareddomain_tests(
 
     from fastapi import HTTPException, UploadFile
 
+    from app.domain.knowledge.service import (
+        get_knowledge_model as services_get_knowledge_model,
+    )
     from app.schemas.knowledge import (
         KnowledgeBaseCreateRequest,
         KnowledgeBaseUpdateRequest,
         KnowledgeDocumentCreateRequest,
         KnowledgeModelTestRequest,
     )
-    from app.domain.knowledge.service import (
-        get_knowledge_model as services_get_knowledge_model,
-    )
-    from app.infra.db.repositories.workspaces import (
-        resource_permissions as permission_repository,
-    )
-    from app.entities.workspaces.resource_permissions import ResourcePermission
 
     settings = test_settings()
     direct_embedding = create_model(

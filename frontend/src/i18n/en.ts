@@ -269,7 +269,6 @@ export const en = {
   统计天数: "Analytics days",
   退出登录: "Sign out",
   最近更新: "Recently updated",
-  "搜索{label}...": "Search {label}...",
   工作空间: "Workspaces",
   团队: "Teams",
   用户管理: "Users",
@@ -718,6 +717,14 @@ export const en = {
     "Members can connect only to public HTTP or SSE addresses.",
   "配置 Agent 使用的模型、知识库和工具。":
     "Configure the model, knowledge bases, and tools used by the Agent.",
+  技能包: "Skill bundles",
+  关联技能包: "Attach skill bundles",
+  "{value} 个技能包": "{value} skill bundles",
+  "选择已发布且有使用权限的技能包，最多 {value} 个。":
+    "Select published skill bundles you can use, up to {value}.",
+  "搜索{label}...": "Search {label}...",
+  暂无可用技能包: "No skill bundles available",
+  选择的技能包展示在这里: "Selected skill bundles appear here",
   选择的工具展示在这里: "Selected tools appear here",
   "此 Agent 仍绑定旧版 MCP 工具；旧绑定不会继续写入，请重新选择需要保留的工具。":
     "This Agent still has legacy MCP tool bindings. They will no longer be saved; reselect any tools you want to keep.",
@@ -1128,6 +1135,8 @@ export const en = {
   暂无内容: "No content",
   回答已生成: "Answer generated",
   "已检索 {value} 个知识片段": "Retrieved {value} knowledge chunks",
+  已跳过重复知识检索: "Skipped duplicate knowledge search",
+  "知识依据已足够，停止继续检索": "Enough evidence retrieved; stopped searching",
   调用输入: "Input",
   调用结果: "Result",
   内容过长已截断: "Content too long, truncated",

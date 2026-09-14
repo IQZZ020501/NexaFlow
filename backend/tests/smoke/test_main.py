@@ -1,8 +1,8 @@
 import asyncio
 
 from fastapi.testclient import TestClient
-
 from tests.support import settings as testing_settings
+
 from app.infra.db.base import Base
 from app.infra.db.session import get_engine
 from app.infra.runtime.request_body_limit import RequestBodyLimitMiddleware

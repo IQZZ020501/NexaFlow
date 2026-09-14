@@ -4,6 +4,7 @@ import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   BotIcon,
+  BrainCircuitIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -44,6 +45,7 @@ import { generateAgentInstructions } from "@/lib/api/agents"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
+import type { AgentSkill, AgentSkillRef } from "@/lib/api/agent-skills"
 import { toolDisplayName } from "@/lib/tool-display"
 
 import type { AgentFormState } from "./agents-page"
@@ -53,6 +55,7 @@ type AgentConfigFieldsProps = {
   setForm: React.Dispatch<React.SetStateAction<AgentFormState>>
   models: RegisteredModel[]
   knowledgeBases: KnowledgeBase[]
+  skills?: AgentSkill[]
   tools: ToolSummary[]
   token: string
   workspaceId: string
@@ -80,6 +83,7 @@ export function AgentConfigFields({
   setForm,
   models,
   knowledgeBases,
+  skills = [],
   tools,
   token,
   workspaceId,
@@ -92,8 +96,11 @@ export function AgentConfigFields({
     "knowledge" | null
   >(null)
   const [isKnowledgeOpen, setIsKnowledgeOpen] = React.useState(false)
+  const [isSkillsOpen, setIsSkillsOpen] = React.useState(false)
   const [isToolsOpen, setIsToolsOpen] = React.useState(false)
   const [isToolPickerOpen, setIsToolPickerOpen] = React.useState(false)
+  const [isSkillPickerOpen, setIsSkillPickerOpen] = React.useState(false)
+  const [skillSearch, setSkillSearch] = React.useState("")
   const [knowledgeSearch, setKnowledgeSearch] = React.useState("")
   const [isGeneratingInstructions, setIsGeneratingInstructions] =
     React.useState(false)
@@ -125,6 +132,49 @@ export function AgentConfigFields({
     const tool = tools.find((item) => item.id === reference.tool_id)
     return tool ? toolDisplayName(tool, t) : reference.tool_id
   })
+  const selectedSkillNames = (form.skills ?? []).map((reference) => {
+    return (
+      skills.find((skill) => skill.id === reference.skill_id)?.name ??
+      reference.skill_id
+    )
+  })
+  const filteredSkills = skills.filter((skill) => {
+    const query = skillSearch.trim().toLowerCase()
+    return (
+      skill.can_use &&
+      skill.status === "active" &&
+      skill.current_published_version_id &&
+      (!query || `${skill.name} ${skill.description}`.toLowerCase().includes(query))
+    )
+  })
+
+  function toggleSkill(skill: AgentSkill) {
+    const versionId = skill.current_published_version_id
+    if (!versionId) return
+    setForm((current) => {
+      const currentSkills = current.skills ?? []
+      const existing = currentSkills.find(
+        (item) => item.skill_id === skill.id
+      )
+      if (existing) {
+        return {
+          ...current,
+          skills: currentSkills.filter((item) => item.skill_id !== skill.id),
+        }
+      }
+      if (currentSkills.length >= 4) return current
+      return {
+        ...current,
+        skills: [
+          ...currentSkills,
+          {
+            skill_id: skill.id,
+            version_id: versionId,
+          } satisfies AgentSkillRef,
+        ],
+      }
+    })
+  }
 
   function toggleKnowledgeBase(id: string) {
     setForm((current) => {
@@ -341,6 +391,69 @@ export function AgentConfigFields({
                 )}
               </IconButton>
             </div>
+          </section>
+        ) : null}
+
+        {form.id && form.appType === "agent" ? (
+          <section className="rounded-xl border bg-background shadow-xs">
+            <div className="flex items-center gap-2 px-4 py-3">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={isSkillsOpen}
+                onClick={() => setIsSkillsOpen((current) => !current)}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                  <BrainCircuitIcon className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    {t("技能包")}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t("{value} 个技能包", { value: (form.skills ?? []).length })}
+                  </span>
+                </span>
+                <ChevronRightIcon
+                  className={`size-4 text-muted-foreground transition-transform ${isSkillsOpen ? "rotate-90" : ""}`}
+                />
+              </button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label={t("关联技能包")}
+                title={t("关联技能包")}
+                disabled={readOnly}
+                onClick={() => {
+                  setSkillSearch("")
+                  setIsSkillPickerOpen(true)
+                }}
+              >
+                <PlusIcon />
+              </Button>
+            </div>
+            {isSkillsOpen ? (
+              <div className="border-t px-4 py-3">
+                {selectedSkillNames.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedSkillNames.map((name, index) => (
+                      <Badge
+                        key={`${form.skills?.[index]?.skill_id}:${form.skills?.[index]?.version_id}`}
+                        variant="secondary"
+                        className="font-normal"
+                      >
+                        {name}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("选择的技能包展示在这里")}
+                  </p>
+                )}
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -638,6 +751,115 @@ export function AgentConfigFields({
               type="button"
               className="w-full sm:w-auto sm:min-w-20"
               onClick={() => setResourcePicker(null)}
+            >
+              {t("完成")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={form.appType === "agent" && isSkillPickerOpen}
+        onOpenChange={(open) => {
+          setIsSkillPickerOpen(open)
+          if (!open) setSkillSearch("")
+        }}
+      >
+        <DialogContent className="max-h-[calc(100svh-2rem)] max-w-xl gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-b bg-muted/25 px-5 py-5 sm:px-6">
+            <div className="flex items-start gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                <BrainCircuitIcon className="size-5" />
+              </span>
+              <div className="min-w-0 pt-0.5">
+                <DialogTitle>{t("关联技能包")}</DialogTitle>
+                <DialogDescription className="mt-1.5 leading-5">
+                  {t("选择已发布且有使用权限的技能包，最多 {value} 个。", {
+                    value: 4,
+                  })}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="border-b px-3 py-3 sm:px-4">
+            <div className="relative">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={skillSearch}
+                onChange={(event) => setSkillSearch(event.target.value)}
+                className="bg-muted/20 pl-9"
+                placeholder={t("搜索{label}...", { label: t("技能包") })}
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-[46svh] min-h-48 overflow-y-auto p-3 sm:p-4">
+            {filteredSkills.length === 0 ? (
+              <div className="flex min-h-40 items-center justify-center rounded-xl border border-dashed bg-muted/20 p-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {t("暂无可用技能包")}
+                </p>
+              </div>
+            ) : (
+              <fieldset className="space-y-2" disabled={readOnly}>
+                {filteredSkills.map((skill) => {
+                  const selected = (form.skills ?? []).some(
+                    (item) => item.skill_id === skill.id
+                  )
+                  const disabled = !selected && (form.skills ?? []).length >= 4
+                  return (
+                    <label
+                      key={skill.id}
+                      className={`group flex items-center gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] ${
+                        selected
+                          ? "border-foreground/20 bg-muted/70 shadow-xs"
+                          : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
+                      } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={selected}
+                        disabled={disabled}
+                        onChange={() => toggleSkill(skill)}
+                      />
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                        <BrainCircuitIcon className="size-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                          {skill.name}
+                        </span>
+                        {skill.description ? (
+                          <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
+                            {skill.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span
+                        className={`flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                          selected
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-muted-foreground/30 text-transparent group-hover:border-muted-foreground/60"
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <CheckIcon className="size-3.5" />
+                      </span>
+                    </label>
+                  )
+                })}
+              </fieldset>
+            )}
+          </div>
+          <DialogFooter className="flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <p className="text-xs text-muted-foreground">
+              {t("{value} 个技能包", { value: (form.skills ?? []).length })}
+            </p>
+            <Button
+              type="button"
+              className="w-full sm:w-auto sm:min-w-20"
+              onClick={() => setIsSkillPickerOpen(false)}
             >
               {t("完成")}
             </Button>

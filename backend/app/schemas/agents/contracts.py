@@ -3,13 +3,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.schemas.tools.contracts import ToolRefSchema
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.tools.contracts import ToolRefSchema
 
 
 class AgentMcpToolRef(BaseModel):
     server_id: str = Field(min_length=1, max_length=36)
     tool_name: str = Field(min_length=1, max_length=255)
+
+
+class AgentSkillRefSchema(BaseModel):
+    skill_id: str = Field(min_length=1, max_length=36)
+    version_id: str = Field(min_length=1, max_length=36)
 
 
 AppType = Literal["agent", "workflow"]
@@ -67,6 +72,7 @@ class AgentResponse(BaseModel):
     model_id: str
     knowledge_base_ids: list[str]
     tools: list[ToolRefSchema] = Field(default_factory=list)
+    skills: list[AgentSkillRefSchema] = Field(default_factory=list)
     mcp_tools: list[AgentMcpToolRef] = Field(default_factory=list, deprecated=True)
     status: str
     published: bool
@@ -93,6 +99,7 @@ class AgentCreateRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=36)
     knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
     tools: list[ToolRefSchema] = Field(default_factory=list, max_length=12)
+    skills: list[AgentSkillRefSchema] = Field(default_factory=list, max_length=4)
     mcp_tools: list[AgentMcpToolRef] = Field(
         default_factory=list,
         max_length=12,
@@ -121,6 +128,7 @@ class AgentUpdateRequest(BaseModel):
         max_length=12,
         deprecated=True,
     )
+    skills: list[AgentSkillRefSchema] | None = Field(default=None, max_length=4)
     status: str | None = Field(default=None, min_length=1, max_length=20)
     published: bool | None = None
 

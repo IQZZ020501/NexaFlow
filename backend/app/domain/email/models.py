@@ -1,10 +1,18 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.infra.db.base import Base
 from app.entities.defaults import new_id, utc_now
+from app.infra.db.base import Base
 
 
 class EmailDelivery(Base):

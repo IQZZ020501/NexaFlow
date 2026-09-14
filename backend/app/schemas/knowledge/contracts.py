@@ -3,8 +3,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from app.schemas.knowledge.graph import KnowledgeGraphQueryResultResponse
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.knowledge.graph import KnowledgeGraphQueryResultResponse
 
 
 class KnowledgeBaseResponse(BaseModel):

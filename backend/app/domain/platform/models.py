@@ -17,9 +17,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.entities.defaults import APP_TIMEZONE_NAME, new_id, utc_now
 from app.entities.email.smtp import SMTP_SETTINGS_ID
 from app.infra.db.base import Base
-from app.entities.defaults import APP_TIMEZONE_NAME, new_id, utc_now
 
 
 class User(Base):
@@ -191,7 +191,8 @@ class ResourcePermission(Base):
         CheckConstraint(
             "(resource_type = 'knowledge_base' AND permission IN ('view', 'edit')) OR "
             "(resource_type = 'agent' AND permission = 'view') OR "
-            "(resource_type = 'tool' AND permission IN ('view', 'use'))",
+            "(resource_type = 'tool' AND permission IN ('view', 'use')) OR "
+            "(resource_type = 'agent_skill' AND permission IN ('view', 'use'))",
             name="ck_resource_permissions_type_permission",
         ),
     )

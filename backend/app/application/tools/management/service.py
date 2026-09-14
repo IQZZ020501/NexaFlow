@@ -6,32 +6,8 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.tools.runtime.service import queue_tool_invocation
-from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
-from app.entities.identity.user import User
-from app.infra.config.settings import Settings
-from app.entities.defaults import new_id, utc_now
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.tools.dispatch import enqueue_tool_invocation
 from app.application.tools.runtime.contracts import ToolInvocationContext
-from app.schemas.tools.mcp import McpServerCreateRequest, McpServerResponse
-from app.schemas.tools.contracts import (
-    PythonToolCreateRequest,
-    PythonToolDraftUpdateRequest,
-    ToolDetailResponse,
-    ToolDraftResponse,
-    ToolInvocationResponse,
-    ToolPermissionResponse,
-    ToolSourceDetailResponse,
-    ToolSummaryResponse,
-)
-from app.schemas.identity.contracts import user_to_response
-from app.domain.tools.catalog.service import (
-    ToolCatalogDetail,
-    ToolCatalogItem,
-    get_tool_catalog_detail,
-    list_tool_catalog,
-)
+from app.application.tools.runtime.service import queue_tool_invocation
 from app.domain.tools.access.permissions import (
     list_tool_permissions,
     require_managed_tool,
@@ -39,13 +15,11 @@ from app.domain.tools.access.permissions import (
     revoke_tool_permission,
     upsert_tool_permission,
 )
-from app.domain.tools.python.service import (
-    archive_python_tool,
-    build_python_test_snapshot,
-    create_python_tool,
-    publish_python_tool,
-    set_python_tool_enabled,
-    update_python_tool_draft,
+from app.domain.tools.catalog.service import (
+    ToolCatalogDetail,
+    ToolCatalogItem,
+    get_tool_catalog_detail,
+    list_tool_catalog,
 )
 from app.domain.tools.mcp.service import (
     create_mcp_server,
@@ -56,7 +30,33 @@ from app.domain.tools.mcp.service import (
     set_mcp_server_enabled,
     set_mcp_tool_policy,
 )
+from app.domain.tools.python.service import (
+    archive_python_tool,
+    build_python_test_snapshot,
+    create_python_tool,
+    publish_python_tool,
+    set_python_tool_enabled,
+    update_python_tool_draft,
+)
 from app.domain.tools.runtime import validate_tool_arguments
+from app.entities.defaults import new_id, utc_now
+from app.entities.identity.user import User
+from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.tools.dispatch import enqueue_tool_invocation
+from app.schemas.identity.contracts import user_to_response
+from app.schemas.tools.contracts import (
+    PythonToolCreateRequest,
+    PythonToolDraftUpdateRequest,
+    ToolDetailResponse,
+    ToolDraftResponse,
+    ToolInvocationResponse,
+    ToolPermissionResponse,
+    ToolSourceDetailResponse,
+    ToolSummaryResponse,
+)
+from app.schemas.tools.mcp import McpServerCreateRequest, McpServerResponse
 
 
 async def list_tools(

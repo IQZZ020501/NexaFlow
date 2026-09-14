@@ -2,6 +2,18 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge.models import (
+    KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeEvaluationExpectation as KnowledgeEvaluationExpectationORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeTask as KnowledgeTaskORM,
+)
 from app.entities.knowledge import (
     TASK_EVALUATE,
     TASK_FAILED_STATUS,
@@ -17,12 +29,6 @@ from app.infra.db.mapping import (
     save,
     to_entity,
     to_orm,
-)
-from app.domain.knowledge.models import (
-    KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
-    KnowledgeEvaluationExpectation as KnowledgeEvaluationExpectationORM,
-    KnowledgeEvaluationResult as KnowledgeEvaluationResultORM,
-    KnowledgeTask as KnowledgeTaskORM,
 )
 
 

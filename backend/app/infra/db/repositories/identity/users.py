@@ -3,18 +3,21 @@ from datetime import datetime
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.platform.models import RefreshSession as RefreshSessionOrm
 from app.domain.platform.models import Team as TeamOrm
 from app.domain.platform.models import TeamMembership as TeamMembershipOrm
-from app.domain.platform.models import RefreshSession as RefreshSessionOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import Workspace as WorkspaceOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
-from app.entities.teams.models import Team, TeamMembership
-from app.entities.identity.user import RefreshSession, User
-from app.entities.workspaces.models import WORKSPACE_ADMIN_ROLE
-from app.entities.workspaces.models import Workspace, WorkspaceMembership
-from app.infra.db import mapping
 from app.entities.defaults import utc_now
+from app.entities.identity.user import RefreshSession, User
+from app.entities.teams.models import Team, TeamMembership
+from app.entities.workspaces.models import (
+    WORKSPACE_ADMIN_ROLE,
+    Workspace,
+    WorkspaceMembership,
+)
+from app.infra.db import mapping
 
 
 async def list_users(

@@ -1,10 +1,10 @@
+import hashlib
+import json
+import secrets
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
-import hashlib
-import json
 from itertools import islice
-import secrets
 from typing import Any, Literal
 
 from fastapi import HTTPException, status
@@ -27,26 +27,39 @@ from app.application.agents.tools.builder import (
     normalize_agent_source_links,
     safe_agent_run_error,
 )
+from app.application.workflows.uploads.service import resolve_public_agent_files
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
+from app.domain.agents.access.permissions import require_agent_ops
+from app.domain.agents.models import agent_run_display_status
+from app.domain.agents.runtime.callbacks import safe_event_value
+from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
+from app.domain.agents.service import (
+    ACTIVE_STATUS,
+    AgentPublication,
+    agent_publication_from_snapshot,
+    agent_publication_from_version,
+    get_agent,
+)
+from app.domain.audit.services import record_audit_log
 from app.entities.agents import (
     Agent,
     AgentApiCredential,
     AgentPublicationVersion,
 )
+from app.entities.defaults import APP_TIMEZONE, utc_now
+from app.entities.identity.user import User
 from app.entities.runs import (
     AgentRun,
 )
-from app.entities.identity.user import User
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.runtime.validation import normalize_name
 from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,
     enforce_external_agent_rate_limit,
 )
-from app.infra.config.settings import Settings
-from app.entities.defaults import APP_TIMEZONE, utc_now
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.runtime.validation import normalize_name
 from app.schemas.agents.contracts import (
     AgentApiCredentialCreateResponse,
     AgentApiCredentialListResponse,
@@ -67,20 +80,6 @@ from app.schemas.agents.contracts import (
     PublicAgentConversationResponse,
     PublicAgentProfileResponse,
 )
-from app.application.workflows.uploads.service import resolve_public_agent_files
-from app.domain.agents.service import (
-    ACTIVE_STATUS,
-    AgentPublication,
-    agent_publication_from_version,
-    agent_publication_from_snapshot,
-    get_agent,
-    require_agent_edit,
-)
-from app.domain.agents.access.permissions import require_agent_ops
-from app.domain.agents.models import agent_run_display_status
-from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
-from app.domain.audit.services import record_audit_log
-from app.domain.agents.runtime.callbacks import safe_event_value
 
 ExternalAccessSource = Literal["public", "api"]
 
@@ -171,7 +170,7 @@ def _limit_tool_payload(
     if budget[0] <= 0 or budget[1] <= 0:
         return TOOL_PAYLOAD_ELLIPSIS, True
     if isinstance(value, dict):
-        limited: dict[str, object] = {}
+        limited_mapping: dict[str, object] = {}
         truncated = False
         for key, item in islice(value.items(), limits.max_items):
             if budget[0] <= 0 or budget[1] <= 0:
@@ -183,15 +182,15 @@ def _limit_tool_payload(
                 safe_key = safe_key[: limits.max_string] + TOOL_PAYLOAD_ELLIPSIS
                 truncated = True
             budget[1] -= len(safe_key)
-            limited[safe_key], item_truncated = _limit_tool_payload(
+            limited_mapping[safe_key], item_truncated = _limit_tool_payload(
                 item, depth + 1, budget, limits
             )
             truncated = truncated or item_truncated
-        if len(value) > len(limited):
+        if len(value) > len(limited_mapping):
             truncated = True
-        return limited, truncated
+        return limited_mapping, truncated
     if isinstance(value, list):
-        limited: list[object] = []
+        limited_sequence: list[object] = []
         truncated = False
         for item in islice(value, limits.max_items):
             if budget[0] <= 0 or budget[1] <= 0:
@@ -201,11 +200,11 @@ def _limit_tool_payload(
             limited_item, item_truncated = _limit_tool_payload(
                 item, depth + 1, budget, limits
             )
-            limited.append(limited_item)
+            limited_sequence.append(limited_item)
             truncated = truncated or item_truncated
-        if len(value) > len(limited):
+        if len(value) > len(limited_sequence):
             truncated = True
-        return limited, truncated
+        return limited_sequence, truncated
     if isinstance(value, str):
         budget[1] -= min(len(value), limits.max_string)
         if len(value) > limits.max_string:
@@ -567,7 +566,7 @@ def _copy_external_stream_metadata(
     raw_epoch = event.get("stream_epoch")
     if isinstance(raw_epoch, str) and raw_epoch:
         sanitized["stream_epoch"] = hashlib.sha256(
-            f"external-stream:{raw_epoch}".encode("utf-8")
+            f"external-stream:{raw_epoch}".encode()
         ).hexdigest()[:32]
 
 

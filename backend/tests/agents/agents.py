@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
 from types import SimpleNamespace
+from typing import ClassVar
 
 from fastapi import HTTPException
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
@@ -17,56 +18,33 @@ from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from mcp.types import Tool as McpTool
 from sqlalchemy import create_engine, select, text
-
-from tests.support import (  # noqa: F401  (sets required env before app imports)
+from tests.support import (
     activate_admin,
     activate_user,
     auth_headers,
     create_active_user,
-    settings as test_settings,
     test_client,
 )
+from tests.support import (
+    settings as test_settings,
+)
 
+from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
+from app.adapters.mcp import client as mcp_client_module
+from app.adapters.mcp.client import (
+    MAX_MCP_TOOL_PAGES,
+    McpClientError,
+    McpConnection,
+    McpDiscovery,
+    discover_mcp_tools,
+    normalize_mcp_url,
+)
 from app.application.agents.access import service as agent_access
 from app.application.agents.runs import executor as agent_executor
 from app.application.agents.runs import memory as agent_memory
 from app.application.agents.runs import service as agent_runs
 from app.application.agents.tools import builder as agent_tools
-from app.application import agents as agent_application
 from app.application.tools.runtime.adapters import mcp as tool_adapters
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
-from app.adapters.mcp import client as mcp_client_module
-from app.adapters.mcp.client import (
-    MAX_MCP_TOOL_PAGES,
-    McpConnection,
-    McpClientError,
-    McpDiscovery,
-    discover_mcp_tools,
-    normalize_mcp_url,
-)
-from app.schemas.knowledge import (
-    KnowledgeQueryHitResponse,
-    KnowledgeQueryInspectResponse,
-    KnowledgeRetrievalTraceResponse,
-)
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphEntityResponse,
-    KnowledgeGraphPathResponse,
-    KnowledgeGraphPathStepResponse,
-    KnowledgeGraphQueryResultResponse,
-)
-from app.entities.agents import AgentToolCall
-from app.entities.runs import AgentRun
-from app.entities.knowledge import KnowledgeBase
-from app.entities.tools import ToolInvocation
-from app.entities.workflows import WorkflowUpload
-from app.infra.db.session import get_session_factory
-from app.entities.defaults import utc_now
-from app.infra.observability.system_log import SystemLog
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
@@ -78,6 +56,29 @@ from app.domain.agents.runtime import (
 from app.domain.agents.runtime import graph as agent_graph_module
 from app.domain.agents.runtime.graph import MAX_REASONING_CHARS
 from app.domain.tools.mcp import service as mcp_services
+from app.entities.agents import AgentToolCall
+from app.entities.defaults import utc_now
+from app.entities.knowledge import KnowledgeBase
+from app.entities.runs import AgentRun
+from app.entities.tools import ToolInvocation
+from app.entities.workflows import WorkflowUpload
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.session import get_session_factory
+from app.infra.observability.system_log import SystemLog
+from app.schemas.knowledge import (
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
+    KnowledgeRetrievalTraceResponse,
+)
+from app.schemas.knowledge.graph import (
+    KnowledgeGraphEntityResponse,
+    KnowledgeGraphPathResponse,
+    KnowledgeGraphPathStepResponse,
+    KnowledgeGraphQueryResultResponse,
+)
 
 MEMBER_PASSWORD = "AgentMember@12345."
 
@@ -236,9 +237,11 @@ async def grant_mcp_tool_use(
     server_id: str,
     user_id: str,
 ) -> None:
-    from app.entities.workspaces.resource_permissions import ResourcePermission
-    from app.infra.db.repositories.workspaces import resource_permissions as permission_repository
     from app.domain.tools.catalog.service import get_mcp_catalog_leaf
+    from app.entities.workspaces.resource_permissions import ResourcePermission
+    from app.infra.db.repositories.workspaces import (
+        resource_permissions as permission_repository,
+    )
 
     async with get_session_factory()() as db:
         leaf = await get_mcp_catalog_leaf(
@@ -264,7 +267,7 @@ async def grant_mcp_tool_use(
 
 
 class AgentModelHandler(BaseHTTPRequestHandler):
-    calls: list[dict] = []
+    calls: ClassVar[list[dict]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
@@ -1848,8 +1851,8 @@ async def assert_runtime_budgets_are_enforced() -> None:
         RepeatedToolProvider("search_knowledge", 5),  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [knowledge_tool],
-        max_knowledge_calls=5,
-        max_knowledge_rounds=5,
+        max_knowledge_calls=1,
+        max_knowledge_rounds=1,
     )
     assert retrievals == 5
     assert len(result.events) == 5
@@ -1970,6 +1973,256 @@ async def assert_retrieval_progress_uses_evidence_ids() -> None:
         "No new evidence found" in message.text
         for message in repeated_provider.requests[-1]
     )
+
+
+async def assert_adaptive_retrieval_skips_duplicate_queries() -> None:
+    executions = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(
+            content="hit",
+            summary="hit",
+            output={
+                "hits": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "document_id": "document-1",
+                        "content": "release evidence",
+                    }
+                ]
+            },
+            evidence_ids=frozenset({"chunk-1"}),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        execute=retrieve,
+        kind="knowledge",
+        parallel_safe=True,
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(
+                    ModelToolCall(
+                        "call-1",
+                        "search_knowledge",
+                        '{"query": "release"}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(
+                content="",
+                tool_calls=(
+                    ModelToolCall(
+                        "call-2",
+                        "search_knowledge",
+                        '{"query": "release", "limit": 20}',
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Find the release evidence"}],
+        [knowledge_tool],
+        adaptive_retrieval=True,
+    )
+    assert executions == 1
+    assert result.content == "Done."
+    assert any(
+        event["summary"] == "agent.knowledge_duplicate_query"
+        for event in result.events
+    )
+
+
+async def assert_retrieval_stops_at_evidence_sufficiency() -> None:
+    executions = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(
+            content="two hits",
+            summary="hit",
+            output={
+                "hits": [
+                    {
+                        "chunk_id": "chunk-1",
+                        "document_id": "document-1",
+                        "content": "first",
+                    },
+                    {
+                        "chunk_id": "chunk-2",
+                        "document_id": "document-1",
+                        "content": "second",
+                    },
+                ]
+            },
+            evidence_ids=frozenset({"chunk-1", "chunk-2"}),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={"type": "object", "properties": {}},
+        execute=retrieve,
+        kind="knowledge",
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "search_knowledge", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Find both facts"}],
+        [knowledge_tool],
+        knowledge_min_evidence_items=2,
+    )
+    assert executions == 1
+    assert result.content == "Done."
+    assert len([event for event in result.events if event["tool_kind"] == "knowledge"]) == 1
+
+
+async def assert_retrieval_source_diversity_keeps_searching() -> None:
+    executions = 0
+
+    async def retrieve(arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        query = json.loads(arguments)["query"]
+        if query == "first":
+            hits = [
+                {
+                    "chunk_id": "chunk-1",
+                    "document_id": "document-1",
+                    "knowledge_base": "kb-a",
+                    "content": "first-a",
+                },
+                {
+                    "chunk_id": "chunk-2",
+                    "document_id": "document-1",
+                    "knowledge_base": "kb-a",
+                    "content": "first-b",
+                },
+            ]
+            evidence_ids = frozenset({"chunk-1", "chunk-2"})
+        else:
+            hits = [
+                {
+                    "chunk_id": "chunk-3",
+                    "document_id": "document-2",
+                    "knowledge_base": "kb-b",
+                    "content": "second",
+                }
+            ]
+            evidence_ids = frozenset({"chunk-3"})
+        return AgentToolResult(
+            content="hits",
+            summary="hit",
+            output={"hits": hits},
+            evidence_ids=evidence_ids,
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        execute=retrieve,
+        kind="knowledge",
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "search_knowledge", '{"query":"first"}'),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-2", "search_knowledge", '{"query":"second"}'),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(content="Done.", tool_calls=(), finish_reason="stop"),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Find corroborating evidence"}],
+        [knowledge_tool],
+        adaptive_retrieval=True,
+        knowledge_min_evidence_items=2,
+        knowledge_require_source_diversity=True,
+    )
+    assert executions == 2
+    assert result.content == "Done."
+
+
+async def assert_empty_knowledge_result_allows_best_effort_answer() -> None:
+    executions = 0
+
+    async def retrieve(_arguments: str) -> AgentToolResult:
+        nonlocal executions
+        executions += 1
+        return AgentToolResult(
+            content="No relevant workspace evidence found.",
+            summary="No relevant evidence.",
+            output={"hits": [], "evidence_status": "not_found"},
+            evidence_ids=frozenset(),
+        )
+
+    knowledge_tool = create_agent_tool(
+        name="search_knowledge",
+        description="Search",
+        parameters={"type": "object", "properties": {}},
+        execute=retrieve,
+        kind="knowledge",
+    )
+    provider = SequenceProvider(
+        [
+            ModelCompletion(
+                content="",
+                tool_calls=(ModelToolCall("call-1", "search_knowledge", "{}"),),
+                finish_reason="tool_calls",
+            ),
+            ModelCompletion(
+                content="General answer (not verified against workspace sources).",
+                tool_calls=(),
+                finish_reason="stop",
+            ),
+        ]
+    )
+    result = await run_agent(
+        provider,  # type: ignore[arg-type]
+        [{"role": "user", "content": "Answer even if the workspace has no evidence."}],
+        [knowledge_tool],
+        adaptive_retrieval=True,
+    )
+    assert executions == 1
+    assert result.content == "General answer (not verified against workspace sources)."
 
 
 async def assert_structured_tool_and_event_safety() -> None:
@@ -3582,6 +3835,10 @@ def main() -> None:
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())
     asyncio.run(assert_retrieval_progress_uses_evidence_ids())
+    asyncio.run(assert_adaptive_retrieval_skips_duplicate_queries())
+    asyncio.run(assert_retrieval_stops_at_evidence_sufficiency())
+    asyncio.run(assert_retrieval_source_diversity_keeps_searching())
+    asyncio.run(assert_empty_knowledge_result_allows_best_effort_answer())
     asyncio.run(assert_structured_tool_and_event_safety())
     assert_mcp_url_validation()
     assert_public_access_migration_downgrade_drops_external_runs()
@@ -4800,8 +5057,8 @@ def main() -> None:
 
 
 def test_cancelling_root_run_cancels_active_children() -> None:
-    from dataclasses import replace
     import hashlib
+    from dataclasses import replace
     from unittest.mock import AsyncMock, patch
 
     from app.entities.defaults import new_id, utc_now
@@ -4936,7 +5193,6 @@ def test_cancelling_root_run_cancels_active_children() -> None:
 
             async def invoke(self, snapshot, arguments, context):
                 self.calls += 1
-                return None
 
         late_adapter = LateFinalizeAdapter()
         late = asyncio.run(

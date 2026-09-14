@@ -4,16 +4,6 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_settings, require_global_admin
-from app.infra.config.settings import Settings
-from app.infra.db.session import get_db
-from app.entities.identity.user import User
-from app.schemas.identity.contracts import (
-    ChangePasswordRequest,
-    UserCreateRequest,
-    UserPasswordResetResponse,
-    UserResponse,
-    UserUpdateRequest,
-)
 from app.application.identity.service import (
     change_user_password,
     create_user,
@@ -27,7 +17,17 @@ from app.application.identity.sessions import (
     revoke_all_user_sessions,
     revoke_user_session,
 )
-from app.schemas.identity.contracts import RefreshSessionResponse
+from app.entities.identity.user import User
+from app.infra.config.settings import Settings
+from app.infra.db.session import get_db
+from app.schemas.identity.contracts import (
+    ChangePasswordRequest,
+    RefreshSessionResponse,
+    UserCreateRequest,
+    UserPasswordResetResponse,
+    UserResponse,
+    UserUpdateRequest,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 

@@ -5,6 +5,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge.graph.schema import GraphSchemaDefinition
+from app.entities.defaults import utc_now
 from app.entities.knowledge import KnowledgeBase
 from app.entities.knowledge.graph import (
     GRAPH_CLAIM_REJECTED,
@@ -14,9 +16,9 @@ from app.entities.knowledge.graph import (
     GRAPH_ENTITY_RETIRED,
     GRAPH_EVIDENCE_ACTIVE,
     GRAPH_EVIDENCE_DELETED,
+    GRAPH_REVIEW_RESOLVED,
     GRAPH_REVISION_BUILDING,
     GRAPH_REVISION_PUBLISHED,
-    GRAPH_REVIEW_RESOLVED,
     GRAPH_SCHEMA_ACTIVE,
     KnowledgeGraphAlias,
     KnowledgeGraphClaim,
@@ -28,9 +30,7 @@ from app.entities.knowledge.graph import (
     KnowledgeGraphRevisionChange,
     KnowledgeGraphSchema,
 )
-from app.entities.defaults import utc_now
 from app.infra.db.repositories.knowledge import graph as graph_repository
-from app.domain.knowledge.graph.schema import GraphSchemaDefinition
 
 RECORD_KINDS = {"entity", "alias", "mention", "claim", "evidence", "review"}
 OPERATIONS = {"upsert", "retire", "delete"}
@@ -184,9 +184,7 @@ async def _upsert_claim(
     for field_name in ("valid_from", "valid_to"):
         value = values.get(field_name)
         if isinstance(value, str):
-            values[field_name] = datetime.fromisoformat(
-                value.replace("Z", "+00:00")
-            )
+            values[field_name] = datetime.fromisoformat(value)
     if (
         existing is not None
         and existing.status == GRAPH_CLAIM_REJECTED
@@ -237,9 +235,7 @@ async def _upsert_review(
     values = _upsert_values(revision, change, existing, versioned=False)
     values["revision_id"] = revision.id
     if isinstance(values.get("reviewed_at"), str):
-        values["reviewed_at"] = datetime.fromisoformat(
-            values["reviewed_at"].replace("Z", "+00:00")
-        )
+        values["reviewed_at"] = datetime.fromisoformat(values["reviewed_at"])
     await graph_repository.save_review_item(db, KnowledgeGraphReviewItem(**values))
 
 

@@ -1,16 +1,52 @@
+# ruff: noqa: F401
 from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import and_, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.knowledge.models import (
+    KnowledgeAsset as KnowledgeAssetORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeAttachment as KnowledgeAttachmentORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeBase as KnowledgeBaseORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeChunkAsset as KnowledgeChunkAssetORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocument as KnowledgeDocumentORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeStorageCleanup as KnowledgeStorageCleanupORM,
+)
+from app.domain.knowledge.models import (
+    KnowledgeTask as KnowledgeTaskORM,
+)
+from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
+from app.entities.defaults import new_id, utc_now
 from app.entities.knowledge import (
     CHUNK_INDEXED_STATUS,
     DOCUMENT_DELETED_STATUS,
     DOCUMENT_INDEXED_STATUS,
     DOCUMENT_STAGED_META_KEY,
-    TASK_FAILED_STATUS,
     TASK_CANCELLING_STATUS,
+    TASK_FAILED_STATUS,
     TASK_GRAPH_REBUILD,
     TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
@@ -27,26 +63,11 @@ from app.entities.knowledge import (
     KnowledgeTask,
 )
 from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.defaults import new_id, utc_now
 from app.infra.db.mapping import (
     refresh_entity,
     save,
     to_entity,
     to_orm,
-)
-from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
-from app.domain.knowledge.models import (
-    KnowledgeAsset as KnowledgeAssetORM,
-    KnowledgeAttachment as KnowledgeAttachmentORM,
-    KnowledgeBase as KnowledgeBaseORM,
-    KnowledgeChunkAsset as KnowledgeChunkAssetORM,
-    KnowledgeDocument as KnowledgeDocumentORM,
-    KnowledgeDocumentChunk as KnowledgeDocumentChunkORM,
-    KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-    KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
-    KnowledgeStorageCleanup as KnowledgeStorageCleanupORM,
-    KnowledgeTask as KnowledgeTaskORM,
 )
 
 _QUERY_KEYWORD_CHUNK_IDS = text(
@@ -59,8 +80,7 @@ _QUERY_KEYWORD_CHUNK_IDS = text(
 )
 
 
-
-def _visible_document_conditions(document: KnowledgeDocumentORM):
+def _visible_document_conditions(document: type[KnowledgeDocumentORM]):
     """Visibility predicate shared by document listing and stats aggregation."""
     return and_(
         document.status.in_(VISIBLE_DOCUMENT_STATUSES),
@@ -724,12 +744,3 @@ async def get_queued_graph_rebuild(
         .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
     )
     return to_entity(KnowledgeTask, row) if row else None
-
-_QUERY_KEYWORD_CHUNK_IDS = text(
-    (
-        Path(__file__).parent.parent.parent
-        / "sql"
-        / "knowledge"
-        / "query_keyword_chunk_ids.sql"
-    ).read_text(encoding="utf-8")
-)

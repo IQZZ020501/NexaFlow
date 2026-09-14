@@ -18,96 +18,24 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
-from dataclasses import FrozenInstanceError
 import json
+from dataclasses import FrozenInstanceError
+from datetime import UTC
 from types import SimpleNamespace
-
-import tests.support  # noqa: F401  (sets required env before app imports)
-
-from langchain_core.messages import AIMessageChunk
+from typing import ClassVar
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
-from app.application.models.registry import (
-    is_masked_secret,
-    normalize_model_type,
-    normalize_provider_credentials,
-    normalize_url_credential,
-    validate_status,
-)
-from app.domain.knowledge.retrieval import (
-    MAX_PARENT_CONTEXT_CHARS,
-    RankedHit,
-    bounded_text_chunks,
-    parent_evidence,
-    parent_context,
-    reciprocal_rank_fusion,
-)
-from app.adapters.rag.vector_store import VectorHit
-from app.entities.agents import Agent
-from app.entities.knowledge import KnowledgeBase
-from app.entities.workspaces.resource_permissions import ResourcePermission
-from app.entities.identity.user import User
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphImportRecord,
-    KnowledgeGraphReviewDecisionRequest,
-)
+from langchain_core.messages import AIMessageChunk
+
 from app.domain.agents.access.permissions import (
     effective_agent_permission,
     validate_agent_permission,
 )
-from app.domain.knowledge.tasks.orchestration import (
-    normalized_document_artifact,
-    parse_task_options,
-)
-from app.domain.knowledge.service import (
-    clean_upload_filename,
-    effective_permission,
-    validate_permission,
-)
-from app.domain.knowledge.graph.schema import (
-    GraphSchemaDefinition,
-    default_graph_schema,
-    graph_schema_hash,
-    normalize_graph_name,
-)
-from app.domain.knowledge.graph.extraction import (
-    EntityLexiconEntry,
-    ExtractedEntity,
-    ExtractionChunk,
-    GraphExtractionBatch,
-    build_entity_lexicon,
-    deduplicate_extracted_entities,
-    extract_graph_batch,
-    validate_extraction_batch,
-)
-from app.domain.knowledge.graph.resolution import (
-    claim_fingerprint,
-    choose_automatic_entity_match,
-    initial_claim_status,
-)
-from app.domain.knowledge.graph.extraction import (
-    ExtractedClaim,
-    _entity_type,
-)
-from app.domain.knowledge.graph import traversal as graph_traversal
-from app.domain.knowledge.graph.traversal import (
-    GraphEvidenceView,
-    _collect_result_items,
-    _load_path_records,
-    assemble_path,
-)
-from app.infra.db.repositories.knowledge import graph as graph_repository
-from unittest.mock import AsyncMock, patch
-from app.application.knowledge.graph.build import (
-    _EntityResolutionContext,
-    _parse_datetime,
-    _unique_surface_span,
-    finalize_abandoned_graph_reservations,
-)
-from app.application.knowledge.graph.maintenance import _revision_source_versions
-from app.application.resource_folders.service import descendant_folder_ids
-from app.entities.resource_folders.models import ResourceFolder
-
+from app.entities.agents import Agent
+from app.entities.identity.user import User
+from app.entities.knowledge import KnowledgeBase
+from app.entities.workspaces.resource_permissions import ResourcePermission
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -171,16 +99,16 @@ def test_tool_ref_requires_stable_ids() -> None:
         raise AssertionError("ToolRef must be immutable.")
 
 def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
-    from app.entities.agents import AgentPublicationVersion
-    from app.entities.runs import AgentRun
-    from app.entities.tools import ToolSnapshot
-    from app.domain.agents.service import agent_publication_from_version
     from app.domain.agents.access.publications import (
         agent_publication_hash,
         build_agent_configuration_snapshot,
         build_agent_resource_snapshot,
         publication_from_snapshots,
     )
+    from app.domain.agents.service import agent_publication_from_version
+    from app.entities.agents import AgentPublicationVersion
+    from app.entities.runs import AgentRun
+    from app.entities.tools import ToolSnapshot
 
     agent = Agent(
         id="agent-1",
@@ -404,8 +332,8 @@ def test_agent_runtime_snapshots_are_versioned_and_fail_closed() -> None:
 
 
 def test_agent_tool_binding_requires_current_available_policy() -> None:
-    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
     from app.domain.tools.access.bindings import build_bindable_tool_snapshot
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
     source = ToolSource(id="source-1", workspace_id="ws-1", kind="python")
     tool = Tool(
@@ -498,8 +426,8 @@ def test_tool_contracts_deep_freeze_nested_json() -> None:
     from copy import copy, deepcopy
     from operator import setitem
 
-    from app.entities.tools import ToolSnapshot, validate_tool_json_schema
     from app.application.tools.runtime.contracts import ToolRuntimeResult
+    from app.entities.tools import ToolSnapshot, validate_tool_json_schema
 
     input_schema = {
         "type": "object",
@@ -642,14 +570,14 @@ def test_freeze_json_rejects_non_json_values() -> None:
         raise AssertionError(f"Non-JSON Tool value was accepted: {invalid!r}")
 
 def test_tool_adapter_contract_is_provider_neutral() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    from app.entities.tools import ToolSnapshot
     from app.application.tools.runtime.contracts import (
         ToolAdapter,
         ToolInvocationContext,
         ToolRuntimeResult,
     )
+    from app.entities.tools import ToolSnapshot
 
     snapshot = ToolSnapshot(
         schema_version=1,
@@ -681,7 +609,7 @@ def test_tool_adapter_contract_is_provider_neutral() -> None:
         invocation_id="invocation-1",
         execution_user_id="user-1",
         access_source="console",
-        deadline_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
+        deadline_at=datetime(2026, 8, 16, tzinfo=UTC),
         idempotency_key="key-1",
     )
 
@@ -933,8 +861,8 @@ def test_unified_agent_runs_use_a_worker_generation_fence() -> None:
 
 def test_tool_invocation_identity_ignores_refreshable_deadline() -> None:
     from app.application.tools.runtime.service import _same_invocation
-    from app.entities.tools import ToolInvocation
     from app.domain.tools.runtime import exhausted_tool_invocation_terminal_state
+    from app.entities.tools import ToolInvocation
 
     fields = {
         "workspace_id": "workspace-1",
@@ -1045,8 +973,8 @@ def test_validate_agent_permission_only_accepts_view() -> None:
 
 def test_safe_agent_error_classification() -> None:
     from app.application.agents.tools.builder import safe_agent_error
-    from app.ports.llm import ModelProviderError, ModelProviderStatusError
     from app.domain.agents.runtime import AgentRunnerError
+    from app.ports.llm import ModelProviderError, ModelProviderStatusError
 
     status_error = ModelProviderStatusError(429, "rate limited")
     assert safe_agent_error(status_error) == "Provider returned status 429"
@@ -1155,9 +1083,9 @@ def test_agent_event_replay_reads_every_page() -> None:
 
 def test_stale_mcp_policy_requires_approval() -> None:
     from app.application.agents.runs import executor as agent_executor
+    from app.domain.agents.runtime import AgentExecutionPaused
     from app.entities.runs import AgentRun
     from app.entities.tools import McpToolPolicy
-    from app.domain.agents.runtime import AgentExecutionPaused
 
     created_calls = []
 
@@ -1786,10 +1714,10 @@ def test_external_progress_events_include_grounding_stage() -> None:
 def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
 
-    from app.entities.tools import McpToolPolicy
-    from app.entities.defaults import utc_now
-    from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.domain.tools.models import McpToolPolicy as McpToolPolicyOrm
+    from app.entities.defaults import utc_now
+    from app.entities.tools import McpToolPolicy
+    from app.infra.db.repositories.tools import mcp as mcp_repository
 
     now = utc_now()
     existing = McpToolPolicyOrm(
@@ -1858,9 +1786,12 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
 
     from mcp.types import Tool as McpTool
 
-    from app.application.agents.tools.builder import build_mcp_agent_tool, mcp_function_name
-    from app.entities.tools import McpServer
+    from app.application.agents.tools.builder import (
+        build_mcp_agent_tool,
+        mcp_function_name,
+    )
     from app.domain.tools.mcp.service import ResolvedMcpTool
+    from app.entities.tools import McpServer
 
     server = McpServer(id="server-1", name="orders")
     tool = ResolvedMcpTool(
@@ -1883,7 +1814,10 @@ def test_mcp_function_name_is_stable_and_sanitized() -> None:
     assert built.metadata["policy_mode"] == "approval_required"
 
 def test_run_to_response_maps_run_fields() -> None:
-    from app.application.agents.tools.builder import knowledge_source_ref, run_to_response
+    from app.application.agents.tools.builder import (
+        knowledge_source_ref,
+        run_to_response,
+    )
     from app.entities.runs import AgentRun
 
     run = AgentRun(
@@ -2106,8 +2040,8 @@ def test_repeated_run_feedback_write_is_idempotent() -> None:
     from unittest.mock import AsyncMock, patch
 
     from app.application.runs.feedback import update_run_feedback
-    from app.entities.runs import AgentRun
     from app.entities.defaults import utc_now
+    from app.entities.runs import AgentRun
 
     feedback_updated_at = utc_now()
     run = AgentRun(
@@ -2267,7 +2201,7 @@ def test_agent_memory_compacts_old_turns() -> None:
             return None
 
     class FakeModel:
-        profile = {"max_input_tokens": 4096}
+        profile: ClassVar[dict[str, int]] = {"max_input_tokens": 4096}
 
         async def ainvoke(self, _messages):
             return AIMessage(
@@ -2325,9 +2259,10 @@ def test_agent_memory_compacts_old_turns() -> None:
     ) == 0
 
 def test_agent_memory_query_is_bounded_and_projected() -> None:
+    from sqlalchemy.dialects import postgresql
+
     from app.entities.runs import AgentRun
     from app.infra.db.repositories.agents import repository as agent_repository
-    from sqlalchemy.dialects import postgresql
 
     statements = []
 
@@ -2378,21 +2313,21 @@ def test_agent_memory_query_is_bounded_and_projected() -> None:
         assert "agent_run_states.checkpoint" not in sql
 
 def test_mcp_server_to_response() -> None:
-    from app.entities.tools import (
-        McpServer,
-        McpToolPolicy,
-        Tool,
-        ToolPolicy,
-        ToolSource,
-        ToolVersion,
-    )
+    from mcp.types import Tool as McpTool
+
     from app.domain.tools.catalog.service import McpCatalogLeaf
     from app.domain.tools.mcp.service import (
         effective_mcp_tool_policy_mode,
         mcp_server_to_response,
         mcp_tool_definition_hash,
     )
-    from mcp.types import Tool as McpTool
+    from app.entities.tools import (
+        McpServer,
+        Tool,
+        ToolPolicy,
+        ToolSource,
+        ToolVersion,
+    )
 
     server = McpServer(
         id="mcp-1",
@@ -2520,11 +2455,11 @@ def test_mcp_server_to_response() -> None:
     assert response.tools[0].definition_hash == search_hash
 
 def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> None:
-    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
     from app.domain.tools.catalog.service import (
         McpCatalogLeaf,
         legacy_mcp_policy_mode,
     )
+    from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
     source = ToolSource(id="source-1", workspace_id="ws-1", kind="mcp")
     tool = Tool(
@@ -2558,8 +2493,9 @@ def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> 
     assert legacy_mcp_policy_mode(leaf) == "disabled"
 
 def test_agent_live_stream_round_trip() -> None:
-    from app.infra.agents import live_stream as agent_live_stream
     from tests.support import settings
+
+    from app.infra.agents import live_stream as agent_live_stream
 
     class FakeRedis:
         def __init__(self) -> None:

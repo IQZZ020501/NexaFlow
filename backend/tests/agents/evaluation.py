@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import tests.support  # noqa: F401  # sets required env before app imports
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 
 from app.domain.agents.evaluation import (

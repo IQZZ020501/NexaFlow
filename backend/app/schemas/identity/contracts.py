@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.domain.platform.models import User
+from app.entities.identity.user import User
 
 
 class LoginRequest(BaseModel):

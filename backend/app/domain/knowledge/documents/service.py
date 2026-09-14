@@ -5,28 +5,28 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.services import record_audit_log
+from app.entities.defaults import new_id
+from app.entities.identity.user import User
 from app.entities.knowledge import (
     DOCUMENT_STAGED_META_KEY,
     KnowledgeAttachment,
     KnowledgeBase,
     KnowledgeDocument,
 )
-from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.entities.defaults import new_id
+from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.storage.object_storage import (
     EmptyObjectError,
     ObjectStorage,
     ObjectTooLargeError,
     create_object_storage,
 )
-from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.schemas.knowledge import (
     KnowledgeAttachmentResponse,
     KnowledgeDocumentCreateRequest,
     KnowledgeDocumentResponse,
 )
-from app.domain.audit.services import record_audit_log
 
 DOCUMENT_UPLOADED_STATUS = "uploaded"
 MAX_DOCUMENT_UPLOAD_BYTES = 100 * 1024 * 1024

@@ -7,13 +7,13 @@ from typing import Any
 from langchain_core.messages.utils import count_tokens_approximately
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.entities.runs import AgentRun
-from app.infra.db.repositories.agents import repository as agent_repository
 from app.domain.agents.runtime.usage import (
     add_compaction_usage,
     empty_usage,
     usage_from_message,
 )
+from app.entities.runs import AgentRun
+from app.infra.db.repositories.agents import repository as agent_repository
 
 MAX_MEMORY_TURN_CHARS = 6000
 MAX_MEMORY_TOKENS = 12000

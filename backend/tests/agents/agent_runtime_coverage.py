@@ -16,7 +16,7 @@ from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 from fastapi import HTTPException
 from langchain_core.messages import (
@@ -27,18 +27,21 @@ from langchain_core.messages import (
     message_to_dict,
 )
 from langchain_core.messages.tool import tool_call_chunk
+from mcp.types import Tool as McpTool
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-
-from tests.support import (  # noqa: F401  (sets required env before app imports)
+from tests.support import (
     activate_admin,
     auth_headers,
-    settings as test_settings,
     test_client,
 )
+from tests.support import (
+    settings as test_settings,
+)
 
+from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.application.agents.runs import executor as agent_executor
 from app.application.agents.runs import memory as agent_memory
 from app.application.agents.runs import service as agent_runs
@@ -48,28 +51,9 @@ from app.application.agents.runs.snapshots import (
 )
 from app.application.agents.tools import builder as agent_tools
 from app.application.tools.runtime.adapters import mcp as tool_adapters
-from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
-from app.entities.agents import Agent, AgentToolCall
-from app.entities.runs import AgentRun
-from app.entities.knowledge import (
-    KnowledgeBase,
-    KnowledgeDocument,
-    KnowledgeDocumentChunk,
-)
-from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
-from app.infra.agents import live_stream as live_stream_module
-from app.infra.config.settings import Settings
-from app.infra.db.repositories.agents import repository as agent_repository
-from app.infra.db.repositories.knowledge import repository as knowledge_repository
-from app.infra.db.repositories.tools import mcp as mcp_repository
-from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.session import get_session_factory
-from app.entities.defaults import new_id, utc_now
-from app.schemas.knowledge import (
-    KnowledgeQueryHitResponse,
-    KnowledgeQueryInspectResponse,
-    KnowledgeRetrievalTraceResponse,
+from app.domain.agents.models import (
+    AGENT_RUN_UNIFIED_RUNNING_STATUS,
+    agent_run_display_status,
 )
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
@@ -81,25 +65,40 @@ from app.domain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
-from app.domain.agents.models import (
-    AGENT_RUN_UNIFIED_RUNNING_STATUS,
-    agent_run_display_status,
-)
-from app.domain.agents.runtime import graph as graph_module
 from app.domain.agents.runtime import executor as executor_module
-from app.domain.agents.runtime import usage as usage_module
+from app.domain.agents.runtime import graph as graph_module
 from app.domain.agents.runtime.usage import (
     add_compaction_usage,
     empty_usage,
     merge_usage,
     usage_from_message,
 )
+from app.domain.tools.catalog.service import reconcile_mcp_discovery
 from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
-    mcp_tool_definition_hash,
 )
-from app.domain.tools.catalog.service import reconcile_mcp_discovery
-from mcp.types import Tool as McpTool
+from app.entities.agents import Agent, AgentToolCall
+from app.entities.defaults import new_id, utc_now
+from app.entities.knowledge import (
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
+)
+from app.entities.runs import AgentRun
+from app.entities.tools import ApplicationToolBinding, McpServer, ToolSource
+from app.infra.agents import live_stream as live_stream_module
+from app.infra.config.settings import Settings
+from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.knowledge import repository as knowledge_repository
+from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.tools import repository as tool_repository
+from app.infra.db.session import get_session_factory
+from app.schemas.knowledge import (
+    KnowledgeQueryHitResponse,
+    KnowledgeQueryInspectResponse,
+    KnowledgeRetrievalTraceResponse,
+)
 
 MODEL_BASE_URL = "http://127.0.0.1:9"
 
@@ -839,7 +838,7 @@ def assert_graph_error_branches() -> None:
 
     asyncio.run(run_tool_budget_finalization())
 
-    async def run_knowledge_budget_finalization() -> None:
+    async def run_knowledge_retrieval_without_dedicated_budget() -> None:
         executed_calls: list[str] = []
 
         async def retrieve(arguments: str) -> AgentToolResult:
@@ -901,7 +900,7 @@ def assert_graph_error_branches() -> None:
             async def ainvoke(self, messages: list[BaseMessage]) -> AIMessage:
                 self.requests.append(list(messages))
                 return completion_message(
-                    ok_completion("Answer after the knowledge budget is reached.")
+                    ok_completion("Answer after multiple knowledge searches.")
                 )
 
         provider = BudgetSeekingProvider()
@@ -909,12 +908,14 @@ def assert_graph_error_branches() -> None:
             provider,
             [{"role": "user", "content": "hi"}],
             [knowledge_tool],
-            max_tool_calls=24,
+            max_tool_calls=12,
+            max_knowledge_calls=1,
+            max_knowledge_rounds=1,
         )
-        assert result.content == "Answer after the knowledge budget is reached."
-        assert len(executed_calls) == 6, executed_calls
-        assert provider.round == 3
-        assert "knowledge search budget is exhausted" in str(
+        assert result.content == "Answer after multiple knowledge searches."
+        assert len(executed_calls) == 12, executed_calls
+        assert provider.round == 6
+        assert "tool-call budget is exhausted" in str(
             provider.requests[-1][-1].content
         ).lower()
 
@@ -949,19 +950,13 @@ def assert_graph_error_branches() -> None:
             max_tool_calls=24,
         )
         assert resumed_result.content == "Answer after truncating the resumed batch."
-        assert len(executed_calls) == executed_before_resume + 1
+        assert len(executed_calls) == executed_before_resume + 2
         assert [event["status"] for event in resumed_result.events] == [
             "succeeded",
-            "failed",
+            "succeeded",
         ]
-        assert resumed_result.events[-1]["summary"] == (
-            "Knowledge search stopped at its dedicated budget."
-        )
-        assert "knowledge search budget is exhausted" in str(
-            resumed_provider.requests[-1][-1].content
-        ).lower()
 
-    asyncio.run(run_knowledge_budget_finalization())
+    asyncio.run(run_knowledge_retrieval_without_dedicated_budget())
 
     async def run_truncated() -> None:
         await run_agent(
@@ -1860,7 +1855,7 @@ async def assert_memory_db_paths(
         await db.commit()
 
     class CompactionStub:
-        profile = {"max_input_tokens": 32768}
+        profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
         async def ainvoke(self, _messages):
             raise AssertionError("compaction should not run")
@@ -1970,7 +1965,7 @@ async def assert_memory_db_paths(
         await db.commit()
 
     class SummarizingStub:
-        profile = {"max_input_tokens": 32768}
+        profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
         async def ainvoke(self, _messages):
             return AIMessage(
@@ -2024,7 +2019,7 @@ async def assert_memory_db_paths(
         registered_model = SimpleNamespace(meta={"context_window_tokens": 32768})
 
         class FailingStub:
-            profile = {"max_input_tokens": 32768}
+            profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
             async def ainvoke(self, _messages):
                 raise RuntimeError("provider exploded")
@@ -2044,7 +2039,7 @@ async def assert_memory_db_paths(
         registered_model = SimpleNamespace(meta={"context_window_tokens": 32768})
 
         class GoodStub:
-            profile = {"max_input_tokens": 32768}
+            profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
             async def ainvoke(self, _messages):
                 return AIMessage(content="Another summary.")
@@ -4924,7 +4919,6 @@ async def assert_ledger_db_paths(
     mcp_server_id: str,
     settings: Settings,
 ) -> None:
-    actor = await get_admin_actor()
     metadata = {
         "kind": "mcp",
         "policy_mode": "approval_required",
@@ -5701,6 +5695,11 @@ async def assert_tool_service_paths(
     """Repository + service branches of the Tool lifecycle (direct calls)."""
     import dataclasses as dc
 
+    from app.domain.tools.catalog.service import (
+        get_mcp_catalog_leaf,
+    )
+    from app.domain.tools.mcp import service as tool_services
+    from app.entities.identity.user import User
     from app.entities.tools import (
         ApplicationToolBinding,
         McpServer,
@@ -5708,17 +5707,9 @@ async def assert_tool_service_paths(
         ToolInvocation,
         ToolSource,
     )
-    from app.entities.identity.user import User
     from app.entities.workspaces.models import WorkspaceMembership
-    from app.domain.tools.mcp import service as tool_services
-    from app.domain.tools.catalog.service import (
-        get_mcp_catalog_leaf,
-    )
-    from app.domain.tools.runtime import exhausted_tool_invocation_terminal_state
 
     actor = await get_admin_actor()
-    settings = test_settings()
-
     async def make_member() -> str:
         async with get_session_factory()() as db:
             user = await user_repository.create_user(
@@ -5752,7 +5743,8 @@ async def assert_tool_service_paths(
     member = await member_actor()
     assert member is not None and member.is_active
 
-    hash_of = lambda value: hashlib.sha256(value.encode()).hexdigest()
+    def hash_of(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()
 
     async with get_session_factory()() as db:
         tools_list = await tool_repository.list_tools(db, workspace_id)
@@ -6360,8 +6352,9 @@ async def assert_tool_service_paths(
         else:
             raise AssertionError("Missing MCP tool was policied.")
         # a tool with no policy row creates one (704, 722)
-        from app.infra.db.repositories.tools import repository as tools_repository
         from sqlalchemy import delete
+
+        from app.infra.db.repositories.tools import repository as tools_repository
 
         await db.execute(
             delete(tools_repository.ToolPolicyOrm).where(
