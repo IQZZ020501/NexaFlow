@@ -8,6 +8,22 @@ from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
+from tests.models.llm import (
+    ModelTestHandler,
+    model_payload,
+    model_test_server,
+    models_url,
+)
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 from app.adapters.rag import vector_store as knowledge_vector_store
 from app.adapters.rag.vector_store import VectorChunk, VectorHit
@@ -66,22 +82,6 @@ from app.schemas.knowledge import (
     KnowledgeQueryInspectResponse,
     KnowledgeQueryRequest,
     KnowledgeRetrievalTraceResponse,
-)
-from tests.models.llm import (
-    ModelTestHandler,
-    model_payload,
-    model_test_server,
-    models_url,
-)
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
 )
 
 MEMBER_PASSWORD = "Member@12345."

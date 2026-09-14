@@ -2,16 +2,6 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
-
-from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
-from app.entities.defaults import utc_now
-from app.entities.identity.user import RefreshSession
-from app.infra.db.repositories.identity import users as user_repository
-from app.infra.db.session import get_session_factory
-from app.infra.observability.system_log import SystemLog
-from app.infra.security import agent_rate_limit
-from app.infra.security.agent_rate_limit import LoginRateLimitExceeded
-from app.infra.security.auth import hash_refresh_token
 from tests.support import (
     ADMIN_PASSWORD,
     BOOTSTRAP_ADMIN_PASSWORD,
@@ -23,6 +13,16 @@ from tests.support import (
 from tests.support import (
     settings as test_settings,
 )
+
+from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
+from app.entities.defaults import utc_now
+from app.entities.identity.user import RefreshSession
+from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.session import get_session_factory
+from app.infra.observability.system_log import SystemLog
+from app.infra.security import agent_rate_limit
+from app.infra.security.agent_rate_limit import LoginRateLimitExceeded
+from app.infra.security.auth import hash_refresh_token
 
 
 async def get_system_log_events() -> list[str]:

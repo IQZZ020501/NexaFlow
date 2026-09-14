@@ -7,9 +7,9 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import tests.support  # noqa: F401
 from fastapi import HTTPException
 
-import tests.support  # noqa: F401
 from app.application.knowledge.graph import service as knowledge_graph
 from app.domain.knowledge.graph import revisions as graph_revisions
 from app.domain.knowledge.graph.revisions import GraphRevisionConflict

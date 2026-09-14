@@ -22,8 +22,6 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
 )
-
-from app.infra.db.session import get_session_factory
 from tests.support import (
     activate_admin,
     auth_headers,
@@ -33,6 +31,8 @@ from tests.support import (
 from tests.support import (
     settings as test_settings,
 )
+
+from app.infra.db.session import get_session_factory
 
 EXPECTED_COLUMNS = {
     "ToolSource": (
@@ -6306,10 +6306,11 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
 
 
 def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
+    from tests.support import settings as test_settings
+
     from app.application.tools.runtime.service import ToolInvocationBusy
     from app.infra.tools import dispatch as tool_dispatch
     from app.tasks.tools import jobs as tool_tasks
-    from tests.support import settings as test_settings
 
     original_configure = tool_tasks.configure_task_worker
     original_execute = tool_tasks.execute_tool_invocation

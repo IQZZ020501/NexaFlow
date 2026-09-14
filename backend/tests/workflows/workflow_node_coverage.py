@@ -15,13 +15,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import tests.support
+from tests.support import activate_admin, activate_user, auth_headers, test_client
+
 from app.domain.agents.runtime.tools import AgentToolResult
 from app.domain.workflows.runtime.engine import (
     NodeExecutionContext,
     WorkflowEngineError,
 )
 from app.schemas.workflows.contracts import WorkflowNode
-from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 # Populated by test_executor_manual_run_scenarios for manual run creation.
 WORKSPACE_ID = ""
@@ -2992,12 +2993,13 @@ def _execute_claimed(run_id: str, *, lease_lost: bool = False) -> str:
 
 def test_executor_manual_run_scenarios() -> None:
     """Executor error paths exercised with real DB rows and targeted mocks."""
-    from app.infra.db.repositories.agents import repository as agent_repository
-    from app.infra.db.repositories.workflows import repository as workflow_repository
     from tests.agents.agents import (
         agent_model_server,
         model_payload,
     )
+
+    from app.infra.db.repositories.agents import repository as agent_repository
+    from app.infra.db.repositories.workflows import repository as workflow_repository
 
     global WORKSPACE_ID, WORKFLOW_AGENT_ID, ADMIN_USER_ID, WORKFLOW_MODEL_ID
     global WORKFLOW_DEFINITION_ID

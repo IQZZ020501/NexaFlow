@@ -10,10 +10,10 @@ from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import tests.support
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select, text
 
-import tests.support
 from app.application.knowledge.graph import build as knowledge_graph_build
 from app.application.knowledge.graph import maintenance as knowledge_graph_maintenance
 from app.application.knowledge.graph import query as graph_query

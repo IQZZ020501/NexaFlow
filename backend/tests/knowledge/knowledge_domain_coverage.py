@@ -14,6 +14,18 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from tests.models.llm import model_test_server
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
+
 from app.application.knowledge.documents import service as application_knowledge
 from app.application.knowledge.documents.service import (
     enqueue_knowledge_storage_cleanup,
@@ -100,17 +112,6 @@ from app.tasks.knowledge.jobs import (
     run_knowledge_storage_cleanup_job,
     run_knowledge_task_job,
     run_upload_storage_cleanup_job,
-)
-from tests.models.llm import model_test_server
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
 )
 
 MEMBER_PASSWORD = "Member@12345."

@@ -32,6 +32,14 @@ from pydantic import ValidationError
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from tests.support import (
+    activate_admin,
+    auth_headers,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.application.agents.runs import executor as agent_executor
@@ -90,14 +98,6 @@ from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
     KnowledgeQueryInspectResponse,
     KnowledgeRetrievalTraceResponse,
-)
-from tests.support import (
-    activate_admin,
-    auth_headers,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
 )
 
 MODEL_BASE_URL = "http://127.0.0.1:9"

@@ -25,6 +25,18 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
+# Must be the first app-adjacent import: sets test env before app modules load.
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
+
 from app.application.agents.access import service as agent_access
 from app.application.agents.access.service import (
     TOOL_INPUT_LIMITS,
@@ -60,18 +72,6 @@ from app.infra.security.agent_rate_limit import (
     AgentRateLimitExceeded,
     AgentRateLimitUnavailable,
     enforce_external_agent_rate_limit,
-)
-
-# Must be the first app-adjacent import: sets test env before app modules load.
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
 )
 
 MEMBER_PASSWORD = "AgentMember@12345."

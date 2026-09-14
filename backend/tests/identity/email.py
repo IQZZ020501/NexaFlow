@@ -13,6 +13,16 @@ from unittest.mock import AsyncMock, call, patch
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from tests.support import (
+    ADMIN_PASSWORD,
+    activate_admin,
+    auth_headers,
+    login,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 from app.application.email.delivery import (
     EMAIL_BROKER_TIMEOUT_SECONDS,
@@ -35,16 +45,6 @@ from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.db.session import get_session_factory
 from app.infra.email.smtp import SmtpConfigurationError, SmtpDeliveryError
 from app.infra.security.secrets import decrypt_secret, encrypt_secret
-from tests.support import (
-    ADMIN_PASSWORD,
-    activate_admin,
-    auth_headers,
-    login,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
-)
 
 
 async def delivery_rows() -> list[EmailDelivery]:

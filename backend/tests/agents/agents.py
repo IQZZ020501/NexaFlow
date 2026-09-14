@@ -18,6 +18,16 @@ from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from mcp.types import Tool as McpTool
 from sqlalchemy import create_engine, select, text
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
 
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.adapters.mcp import client as mcp_client_module
@@ -68,16 +78,6 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphPathResponse,
     KnowledgeGraphPathStepResponse,
     KnowledgeGraphQueryResultResponse,
-)
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
 )
 
 MEMBER_PASSWORD = "AgentMember@12345."

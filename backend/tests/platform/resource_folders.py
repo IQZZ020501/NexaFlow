@@ -1,8 +1,9 @@
 import asyncio
 
+from tests.support import activate_admin, activate_user, auth_headers, test_client
+
 from app.domain.models.registered import RegisteredModel
 from app.infra.db.session import get_session_factory
-from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 MEMBER_PASSWORD = "FolderMember@12345."
 

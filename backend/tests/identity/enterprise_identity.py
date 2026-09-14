@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlsplit
 
+from tests.support import activate_admin, auth_headers, settings, test_client
+
 from app.adapters.identity.enterprise import (
     EnterpriseProviderError,
     ExternalPrincipal,
@@ -24,7 +26,6 @@ from app.infra.security.enterprise_login_rate_limit import (
 from app.ports.enterprise_identity import (
     resolve_external_principal as resolve_external_principal_via_port,
 )
-from tests.support import activate_admin, auth_headers, settings, test_client
 
 
 def _raises(error_type, callback):

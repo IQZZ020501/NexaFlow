@@ -19,6 +19,19 @@ from typing import ClassVar
 
 from fastapi import HTTPException
 
+# Import support FIRST: it configures the environment (in-memory DB, eager
+# Celery, JWT keys) before any app module is imported.
+from tests.support import (  # noqa: F401
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
+
 from app.adapters.mcp.client import McpDiscovery
 from app.application.agents.runs.executor import RUN_BUSY
 from app.domain.agents import service as agent_services
@@ -46,19 +59,6 @@ from app.schemas.agents.contracts import (
     AgentUpdateRequest,
 )
 from app.tasks.agents import jobs as agent_tasks
-
-# Import support FIRST: it configures the environment (in-memory DB, eager
-# Celery, JWT keys) before any app module is imported.
-from tests.support import (  # noqa: F401
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
-)
 
 MEMBER_PASSWORD = "AgentCoverage@12345."
 

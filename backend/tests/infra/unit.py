@@ -97,8 +97,9 @@ def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
         pool.stop()
 
 def test_worker_database_rejects_in_memory_sqlite() -> None:
-    from app.infra.db.session import configure_database
     from tests.support import settings
+
+    from app.infra.db.session import configure_database
 
     try:
         configure_database(settings(), worker_process=True)

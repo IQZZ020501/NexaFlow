@@ -21,9 +21,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from fastapi import HTTPException, UploadFile
-
 import tests.support as support_module
+from fastapi import HTTPException, UploadFile
 from tests.models.llm import model_payload, model_test_server, models_url
 from tests.support import (
     activate_admin,

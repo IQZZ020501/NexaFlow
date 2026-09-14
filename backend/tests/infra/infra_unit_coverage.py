@@ -36,6 +36,12 @@ from openai import APIStatusError, OpenAIError
 from sqlalchemy import URL, func, make_url, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool, StaticPool
+from tests.support import (
+    activate_admin,
+    auth_headers,
+    settings,
+    test_client,
+)
 
 from app.adapters import mcp as mcp_capabilities
 from app.adapters.llm import credentials as llm_credentials
@@ -140,12 +146,6 @@ from app.schemas.teams.contracts import (
     TeamUpdateRequest,
 )
 from app.schemas.tools.mcp import McpServerCreateRequest
-from tests.support import (
-    activate_admin,
-    auth_headers,
-    settings,
-    test_client,
-)
 
 
 def run(coro):

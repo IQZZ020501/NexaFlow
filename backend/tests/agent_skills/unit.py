@@ -1,8 +1,8 @@
 """Pure unit tests for the versioned Agent Skill control plane."""
 
+import tests.support  # noqa: F401
 from pydantic import ValidationError
 
-import tests.support  # noqa: F401
 from app.application.agents.runs.executor import (
     _apply_skill_runtime_limits,
     _skill_evaluation_requirements,

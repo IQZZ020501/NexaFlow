@@ -11,6 +11,13 @@ from typing import ClassVar
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import text
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    settings,
+    test_client,
+)
 
 from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
@@ -29,13 +36,6 @@ from app.adapters.llm.runtime import (
 )
 from app.domain.models.registered import RegisteredModel
 from app.infra.db.session import get_session_factory
-from tests.support import (
-    activate_admin,
-    activate_user,
-    auth_headers,
-    settings,
-    test_client,
-)
 
 MEMBER_PASSWORD = "Member@12345."
 

@@ -11,6 +11,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import tests.support  # noqa: F401  (sets required env before app imports)
+from tests.support import settings
+
 from app.adapters.mcp.client import (
     McpClientError,
     McpConnection,
@@ -18,7 +20,6 @@ from app.adapters.mcp.client import (
     discover_mcp_tools,
 )
 from app.infra.tools.mcp_stdio import McpStdioConfig, parse_mcp_stdio_config
-from tests.support import settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TEST_MODULE = "tests.support.mcp_test_server"

@@ -2,15 +2,15 @@ import asyncio
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
-
-from app.domain.platform.models import TeamMembership, User
-from app.infra.db.session import get_session_factory
 from tests.support import (
     activate_admin,
     auth_headers,
     create_active_user,
     test_client,
 )
+
+from app.domain.platform.models import TeamMembership, User
+from app.infra.db.session import get_session_factory
 
 
 def teams_url(workspace_id: str, suffix: str = "") -> str:

@@ -3,6 +3,15 @@ from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
+from tests.support import (
+    RESEARCH_PASSWORD,
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    settings,
+    test_client,
+)
 
 from app.domain.agents.models import (
     Agent,
@@ -37,15 +46,6 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.session import get_session_factory
 from app.infra.storage import object_storage as object_storage_module
-from tests.support import (
-    RESEARCH_PASSWORD,
-    activate_admin,
-    activate_user,
-    auth_headers,
-    create_active_user,
-    settings,
-    test_client,
-)
 
 
 def members_url(workspace_id: str, suffix: str = "") -> str:

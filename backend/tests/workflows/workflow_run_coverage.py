@@ -25,9 +25,8 @@ from unittest.mock import AsyncMock, patch
 # Cache-Control headers and log unhandled errors, which these tests do not
 # depend on, so route requests straight through the inner ASGI chain.
 import starlette.middleware.base as _starlette_base_middleware
-from starlette.requests import ClientDisconnect
-
 import tests.support  # noqa: F401  (must set env before any app import)
+from starlette.requests import ClientDisconnect
 from tests.support import (
     activate_admin,
     activate_user,
@@ -780,12 +779,12 @@ def test_validated_form_data_branches() -> None:
 
 def test_create_workflow_run_guard_errors() -> None:
     from fastapi import HTTPException
+    from tests.agents.agents import agent_model_server
 
     from app.application.workflows.runs.service import create_workflow_run
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowRunCreateRequest
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         _token, workspace_id, _model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -851,6 +850,7 @@ def test_create_workflow_run_guard_errors() -> None:
 
 def test_create_workflow_run_external_and_conflicts() -> None:
     from fastapi import HTTPException
+    from tests.agents.agents import agent_model_server
 
     from app.application.workflows.runs.service import create_workflow_run
     from app.entities.runs import AgentRun
@@ -858,7 +858,6 @@ def test_create_workflow_run_external_and_conflicts() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowRunCreateRequest
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -996,6 +995,7 @@ def test_create_workflow_run_external_and_conflicts() -> None:
 
 def test_resume_workflow_form_error_branches() -> None:
     from fastapi import HTTPException
+    from tests.agents.agents import agent_model_server
 
     from app.application.workflows.runs.service import resume_workflow_form
     from app.entities.runs import AgentRun
@@ -1003,7 +1003,6 @@ def test_resume_workflow_form_error_branches() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowFormSubmitRequest
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         _token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1167,12 +1166,13 @@ def _collect_stream(
 
 
 def test_workflow_stream_branches() -> None:
+    from tests.agents.agents import agent_model_server
+
     from app.entities.runs import AgentRun
     from app.entities.workflows import WorkflowRunDetail
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         _token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1347,6 +1347,7 @@ def test_workflow_stream_branches() -> None:
 
 def test_workflow_services_boundaries() -> None:
     from fastapi import HTTPException
+    from tests.agents.agents import agent_model_server
 
     from app.domain.workflows.definitions.service import (
         get_or_create_definition,
@@ -1360,7 +1361,6 @@ def test_workflow_services_boundaries() -> None:
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.session import get_session_factory
     from app.schemas.workflows.contracts import WorkflowGraph
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -1624,6 +1624,8 @@ def test_workflow_services_boundaries() -> None:
 
 
 def test_upload_cleanup_records() -> None:
+    from tests.agents.agents import agent_model_server
+
     from app.domain.workflows.uploads import (
         prepare_due_upload_cleanups,
         queue_upload_cleanups,
@@ -1632,7 +1634,6 @@ def test_upload_cleanup_records() -> None:
     from app.entities.workflows import WorkflowUpload
     from app.infra.db.repositories.workflows import repository as workflow_repository
     from app.infra.db.session import get_session_factory
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         _token, workspace_id, _model_id, agent_id, admin_user_id = _setup_workflow_ctx(
@@ -2148,6 +2149,7 @@ def test_workflow_run_direct_api_functions() -> None:
     where tracing is recorded faithfully.
     """
     from fastapi import HTTPException
+    from tests.agents.agents import agent_model_server
 
     from app.application.workflows.runs.service import (
         create_workflow_run,
@@ -2171,7 +2173,6 @@ def test_workflow_run_direct_api_functions() -> None:
         WorkflowFormSubmitRequest,
         WorkflowRunCreateRequest,
     )
-    from tests.agents.agents import agent_model_server
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id, model_id, agent_id, admin_user_id = _setup_workflow_ctx(

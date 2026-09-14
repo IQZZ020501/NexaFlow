@@ -5,6 +5,17 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from tests.support import (
+    ADMIN_PASSWORD,
+    activate_admin,
+    auth_headers,
+    login,
+    test_client,
+)
+from tests.support import (
+    settings as test_settings,
+)
+
 from app.application.governance.service import (
     _check_health_component,
     _probe_qdrant,
@@ -21,16 +32,6 @@ from app.domain.knowledge.graph.models import (
 from app.domain.knowledge.models import KnowledgeBase, KnowledgeTask
 from app.entities.defaults import new_id, utc_now
 from app.infra.db.session import get_session_factory
-from tests.support import (
-    ADMIN_PASSWORD,
-    activate_admin,
-    auth_headers,
-    login,
-    test_client,
-)
-from tests.support import (
-    settings as test_settings,
-)
 
 
 async def check_health_probe_functions() -> None:

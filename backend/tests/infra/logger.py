@@ -8,6 +8,8 @@ import logging
 from types import SimpleNamespace
 from urllib.error import URLError
 
+import tests.support  # noqa: F401  # sets required env before app imports
+
 from app.application.knowledge.graph.build import _log_graph_build_stage
 from app.application.knowledge.graph.query import _log_graph_query_event
 from app.infra.observability.errors import (

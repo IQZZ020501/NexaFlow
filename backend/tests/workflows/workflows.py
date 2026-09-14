@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import tests.support
+from tests.support import activate_admin, activate_user, auth_headers, test_client
+
 from app.domain.agents.runtime.tools import AgentToolResult
 from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.runtime.engine import (
@@ -23,7 +25,6 @@ from app.domain.workflows.runtime.engine import (
     validate_graph,
 )
 from app.schemas.workflows.contracts import WorkflowNode
-from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 
 def test_default_workflow_only_contains_start() -> None:
@@ -2498,10 +2499,11 @@ def test_workflow_llm_node_dialogue_history_and_params() -> None:
 
 
 def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
+    from tests.agents.agents import agent_model_server, model_payload
+
     from app.application.agents.runs.children import reconcile_workflow_agent_children
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.session import get_session_factory
-    from tests.agents.agents import agent_model_server, model_payload
 
     with test_client() as client, agent_model_server() as model_base_url:
         token, workspace_id = activate_admin(client)
@@ -2872,6 +2874,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         # member_binder_id, retired_agent_id, retired_version_id,
         # extra_runs).
         # ------------------------------------------------------------------
+        from tests.support import settings as make_settings
+
         from app.application.agents.runs import children as acr
         from app.application.agents.runs import service as app_agent_runs
         from app.application.agents.runs.children import (
@@ -2892,7 +2896,6 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         from app.infra.db.repositories.workflows import (
             repository as workflow_repository,
         )
-        from tests.support import settings as make_settings
 
         runner_settings = make_settings()
 

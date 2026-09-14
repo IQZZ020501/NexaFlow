@@ -15,6 +15,15 @@ from datetime import timedelta
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
+# MUST come before any app module import: configures test environment.
+from tests.support import (
+    activate_admin,
+    auth_headers,
+    create_active_user,
+    settings,
+    test_client,
+)
+
 from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
 from app.application.workspaces import service as workspace_service
 from app.domain.knowledge.models import KnowledgeTask
@@ -26,15 +35,6 @@ from app.infra.db.repositories.teams import repository as team_repo
 from app.infra.db.repositories.workspaces import repository as workspace_repo
 from app.infra.db.session import get_session_factory
 from app.infra.security.auth import hash_refresh_token
-
-# MUST come before any app module import: configures test environment.
-from tests.support import (
-    activate_admin,
-    auth_headers,
-    create_active_user,
-    settings,
-    test_client,
-)
 
 
 def members_url(workspace_id: str, suffix: str = "") -> str:

@@ -2493,8 +2493,9 @@ def test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch() -> 
     assert legacy_mcp_policy_mode(leaf) == "disabled"
 
 def test_agent_live_stream_round_trip() -> None:
-    from app.infra.agents import live_stream as agent_live_stream
     from tests.support import settings
+
+    from app.infra.agents import live_stream as agent_live_stream
 
     class FakeRedis:
         def __init__(self) -> None:
