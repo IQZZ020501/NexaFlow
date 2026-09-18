@@ -65,6 +65,7 @@ import { useSession } from "@/contexts/session-context"
 import { languageLocales } from "@/i18n"
 import {
   cancelAgentRun,
+  sendAgentSessionInput,
   compareLiveStreamIds,
   createAgent,
   deleteAgent,
@@ -636,6 +637,12 @@ export function AgentsPage({
   const [askAbortController, setAskAbortController] =
     React.useState<AbortController | null>(null)
   const liveRunIdRef = React.useRef<string | null>(null)
+  const sessionInputRef = React.useRef<{
+    input_id: string
+    mode: "steer" | "follow_up"
+    content: string
+  } | null>(null)
+  const sessionInputBusyRef = React.useRef(false)
   const [form, setForm] = React.useState<AgentFormState>(EMPTY_FORM)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
@@ -1578,8 +1585,69 @@ export function AgentsPage({
     }
   }
 
+  async function handleSessionInput(mode: "steer" | "follow_up") {
+    const runId = liveRunIdRef.current
+    const content = question.trim()
+    if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgent ||
+      !runId ||
+      !content ||
+      agentFiles.length ||
+      sessionInputBusyRef.current
+    )
+      return
+    const previous = sessionInputRef.current
+    const input =
+      previous?.content === content && previous.mode === mode
+        ? previous
+        : { input_id: crypto.randomUUID(), mode, content }
+    sessionInputRef.current = input
+    sessionInputBusyRef.current = true
+    try {
+      const queued = await sendAgentSessionInput(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        runId,
+        input
+      )
+      if (liveRunIdRef.current !== runId) return
+      setRuns((current) =>
+        current.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                session_inputs: [
+                  ...(run.session_inputs ?? []).filter(
+                    (item) => item.input_id !== queued.input_id
+                  ),
+                  queued,
+                ],
+              }
+            : run
+        )
+      )
+      setQuestion((current) => (current.trim() === content ? "" : current))
+      sessionInputRef.current = null
+      notify(
+        "success",
+        t(mode === "steer" ? "指令已排队，将在下一轮生效" : "后续任务已排队")
+      )
+    } catch (error) {
+      if (liveRunIdRef.current === runId) reportError(error)
+    } finally {
+      sessionInputBusyRef.current = false
+    }
+  }
+
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isAsking) {
+      await handleSessionInput("steer")
+      return
+    }
     const nextQuestion = question.trim()
     if (
       !token ||
@@ -2072,6 +2140,7 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             notify={notify}
             onAsk={handleAsk}
+            onSessionInput={handleSessionInput}
             onCancelAsk={handleCancelAsk}
             onRegenerateRun={(runId, goal) =>
               void handleRegenerateRun(runId, goal)

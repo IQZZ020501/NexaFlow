@@ -1,5 +1,11 @@
 // Simplified Chinese dictionary; keys are the default (Chinese) copy.
 export const zhHans = {
+  调整当前任务: "调整当前任务",
+  追加后续任务: "追加后续任务",
+  "指令已排队，将在下一轮生效": "指令已排队，将在下一轮生效",
+  后续任务已排队: "后续任务已排队",
+  追加指令: "追加指令",
+  后续任务: "后续任务",
   语言: "语言",
   "切换语言，当前为 {language}": "切换语言，当前为 {language}",
   主题: "主题",

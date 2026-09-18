@@ -103,6 +103,7 @@ type AgentDetailWorkspaceProps = {
   onPublish: () => void
   onViewChange: (view: AgentDetailView) => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
+  onSessionInput?: (mode: "steer" | "follow_up") => void
   onCancelAsk: () => void
   onNewConversation: () => void
   onToolCallDecision: (
@@ -162,22 +163,6 @@ function processSummary(
   if (event.summary === "agent.preparing_tool_call")
     return t("正在准备工具调用")
   if (event.summary === "agent.tools_selected") return t("已完成分析")
-  if (event.summary === "agent.grounding_check") return t("正在核验回答依据")
-  if (event.summary === "agent.grounding_verified") return t("已完成依据核验")
-  if (event.summary === "agent.grounding_revised")
-    return t("已根据依据修正回答")
-  if (event.summary === "agent.grounding_inline")
-    return t("已基于知识依据生成回答")
-  if (event.summary === "agent.grounding_insufficient")
-    return t("依据不足，回答将标注为未核实")
-  if (event.summary === "agent.grounding_unavailable")
-    return t("暂时无法完成依据核验")
-  if (event.summary === "agent.grounding_skipped")
-    return t("本次回答未使用知识依据")
-  if (event.summary === "agent.knowledge_duplicate_query")
-    return t("已跳过重复知识检索")
-  if (event.summary === "agent.knowledge_evidence_sufficient")
-    return t("知识依据已足够，停止继续检索")
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready")
@@ -546,6 +531,11 @@ function RunExchange({
   const visibleTimeline = timeline.filter(
     ({ event }) =>
       event.summary !== "agent.analysis_plan" &&
+      !event.summary.startsWith("agent.grounding_") &&
+      ![
+        "agent.knowledge_duplicate_query",
+        "agent.knowledge_evidence_sufficient",
+      ].includes(event.summary) &&
       !(
         event.summary === "agent.preparing_tool_call" &&
         approvalCallIds.has(event.call_id)
@@ -649,6 +639,34 @@ function RunExchange({
           ) : null}
         </div>
       </div>
+      {(run.session_inputs ?? []).map((input) => (
+        <React.Fragment key={input.input_id}>
+          {input.previous_answer && (
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
+                <BotIcon className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+                <AgentAnswer
+                  content={input.previous_answer}
+                  sources={run.sources}
+                  t={t}
+                  className="text-sm leading-6"
+                />
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="text-xs text-muted-foreground">
+              {t(input.mode === "steer" ? "追加指令" : "后续任务")}
+            </span>
+            <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
+              {input.content}
+            </div>
+            <CopyMessageButton value={input.content} t={t} />
+          </div>
+        </React.Fragment>
+      ))}
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
           <BotIcon className="size-4" />
@@ -850,6 +868,7 @@ export function AgentDetailWorkspace({
   onPublish,
   onViewChange,
   onAsk,
+  onSessionInput,
   onCancelAsk,
   onNewConversation,
   onToolCallDecision,
@@ -1330,6 +1349,7 @@ export function AgentDetailWorkspace({
                         value={question}
                         onChange={(event) => setQuestion(event.target.value)}
                         onPaste={(event) => {
+                          if (isAsking) return
                           const pasted = transferredFiles(event.clipboardData)
                           if (!pasted.length) return
                           event.preventDefault()
@@ -1344,6 +1364,10 @@ export function AgentDetailWorkspace({
                             !event.nativeEvent.isComposing
                           ) {
                             event.preventDefault()
+                            if (event.altKey && isAsking && onSessionInput) {
+                              onSessionInput("follow_up")
+                              return
+                            }
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
@@ -1359,7 +1383,7 @@ export function AgentDetailWorkspace({
                         disabled={
                           isDirty ||
                           isRunsLoading ||
-                          isAsking ||
+                          (isAsking && !onSessionInput) ||
                           agent.status !== "active"
                         }
                         maxLength={4000}
@@ -1377,6 +1401,31 @@ export function AgentDetailWorkspace({
                         t={t}
                       />
                       <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
+                        {isAsking && onSessionInput && (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={!question.trim()}
+                              onClick={() => onSessionInput("follow_up")}
+                            >
+                              {t("追加后续任务")}
+                            </Button>
+                            {question.trim() && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-lg"
+                                aria-label={t("停止生成")}
+                                title={t("停止生成")}
+                                onClick={onCancelAsk}
+                              >
+                                <SquareIcon className="fill-current" />
+                              </Button>
+                            )}
+                          </>
+                        )}
                         <Button
                           type="button"
                           variant="ghost"
@@ -1399,12 +1448,32 @@ export function AgentDetailWorkspace({
                           <PaperclipIcon />
                         </Button>
                         <Button
-                          type={isAsking ? "button" : "submit"}
+                          type={
+                            isAsking && (!onSessionInput || !question.trim())
+                              ? "button"
+                              : "submit"
+                          }
                           size="icon-lg"
                           className="rounded-xl"
-                          aria-label={t(isAsking ? "停止生成" : "发送问题")}
-                          title={t(isAsking ? "停止生成" : "发送问题")}
-                          onClick={isAsking ? onCancelAsk : undefined}
+                          aria-label={t(
+                            isAsking
+                              ? onSessionInput && question.trim()
+                                ? "调整当前任务"
+                                : "停止生成"
+                              : "发送问题"
+                          )}
+                          title={t(
+                            isAsking
+                              ? onSessionInput && question.trim()
+                                ? "调整当前任务"
+                                : "停止生成"
+                              : "发送问题"
+                          )}
+                          onClick={
+                            isAsking && (!onSessionInput || !question.trim())
+                              ? onCancelAsk
+                              : undefined
+                          }
                           disabled={
                             !isAsking &&
                             (!question.trim() ||
@@ -1413,7 +1482,7 @@ export function AgentDetailWorkspace({
                               agent.status !== "active")
                           }
                         >
-                          {isAsking ? (
+                          {isAsking && (!onSessionInput || !question.trim()) ? (
                             <SquareIcon className="fill-current" />
                           ) : (
                             <SendIcon />

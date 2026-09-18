@@ -1675,7 +1675,7 @@ def test_external_progress_events_knowledge_failure_has_no_hits() -> None:
     assert event.status == "failed"
     assert event.hits == []
 
-def test_external_progress_events_include_grounding_stage() -> None:
+def test_external_progress_events_ignore_retired_grounding_stage() -> None:
     from app.application.agents.access.service import external_progress_events
 
     progress = external_progress_events(
@@ -1690,10 +1690,7 @@ def test_external_progress_events_include_grounding_stage() -> None:
         ],
         "succeeded",
     )
-    assert len(progress) == 1
-    assert progress[0].type == "analysis"
-    assert progress[0].status == "succeeded"
-    assert progress[0].stage == "completed"
+    assert progress == []
 
     skipped = external_progress_events(
         [
@@ -1707,9 +1704,7 @@ def test_external_progress_events_include_grounding_stage() -> None:
         ],
         "succeeded",
     )
-    assert len(skipped) == 1
-    assert skipped[0].status == "succeeded"
-    assert skipped[0].stage == "completed"
+    assert skipped == []
 
 def test_mcp_policy_concurrent_first_write_reloads_existing() -> None:
     from sqlalchemy.exc import IntegrityError
@@ -1890,10 +1885,12 @@ def test_run_to_response_maps_run_fields() -> None:
     assert response.model_usage["total_tokens"] == 12
     assert response.attachments[0].filename == "report.pdf"
     assert response.sources[0].document == "社保制度.pdf"
-    assert response.sources[0].source_ref == knowledge_source_ref("chunk-2")
-    assert response.sources[0].parent_title == "补缴规则"
-    assert response.sources[0].chunk_index == 4
-    assert response.sources[0].content == "不足十五年时可以补缴。"
+    assert len(response.sources) == 2
+    assert response.sources[0].source_ref == knowledge_source_ref("chunk-1")
+    assert response.sources[1].source_ref == knowledge_source_ref("chunk-2")
+    assert response.sources[1].parent_title == "补缴规则"
+    assert response.sources[1].chunk_index == 4
+    assert response.sources[1].content == "不足十五年时可以补缴。"
     assert response.trace_id == "trace-1"
 
 
@@ -2310,7 +2307,11 @@ def test_agent_memory_query_is_bounded_and_projected() -> None:
         assert "agent_run_snapshots" not in sql
         assert "agent_run_events" not in sql
         assert "agent_run_states.plan" not in sql
-        assert "agent_run_states.checkpoint" not in sql
+        assert "agent_run_states.checkpoint -> 'harness'" in sql
+        assert "'inputs'" in sql and "AS input_history" in sql
+    # Only the small input/answer history subtree is loaded, never the full
+    # checkpoint's tool outputs or serialized model transcript.
+    assert "checkpoint" not in agent_repository._memory_run_query().selected_columns.keys()
 
 def test_mcp_server_to_response() -> None:
     from mcp.types import Tool as McpTool
@@ -2778,7 +2779,7 @@ def main() -> None:
     test_external_progress_events_carry_mcp_tool_details()
     test_external_progress_events_bound_tool_inputs_and_pass_output()
     test_external_progress_events_knowledge_failure_has_no_hits()
-    test_external_progress_events_include_grounding_stage()
+    test_external_progress_events_ignore_retired_grounding_stage()
     test_mcp_policy_concurrent_first_write_reloads_existing()
     test_mcp_function_name_is_stable_and_sanitized()
     test_run_to_response_maps_run_fields()

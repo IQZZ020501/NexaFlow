@@ -2464,7 +2464,7 @@ describe("AgentsPage card menu: permissions and delete", () => {
 })
 
 describe("AgentsPage run flows", () => {
-  test("renders an agentic no-evidence grounding result as a neutral state", async () => {
+  test("hides retired skipped grounding events on historical runs", async () => {
     const run = makeRun({
       grounding_status: "skipped",
       grounding_meta: { reason: "no_evidence" },
@@ -2499,11 +2499,13 @@ describe("AgentsPage run flows", () => {
       ],
     })
 
-    expect(await screen.findByText("本次回答未使用知识依据")).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(run.result)).toBeTruthy())
+    expect(screen.queryByText("本次回答未使用知识依据")).toBeNull()
+    expect(screen.queryByText("agent.grounding_skipped")).toBeNull()
     expect(screen.queryByText("暂时无法完成依据核验")).toBeNull()
   })
 
-  test("renders inline grounding as completed before the answer", async () => {
+  test("hides retired inline grounding events without hiding the answer", async () => {
     const run = makeRun({
       grounding_status: "grounded",
       grounding_meta: { mode: "inline", evidence_ids: ["chunk-1"] },
@@ -2538,7 +2540,9 @@ describe("AgentsPage run flows", () => {
       ],
     })
 
-    expect(await screen.findByText("已基于知识依据生成回答")).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(run.result)).toBeTruthy())
+    expect(screen.queryByText("已基于知识依据生成回答")).toBeNull()
+    expect(screen.queryByText("agent.grounding_inline")).toBeNull()
     expect(screen.queryByText("正在核验回答依据")).toBeNull()
   })
 
@@ -2632,6 +2636,80 @@ describe("AgentsPage run flows", () => {
     )
     expect(screen.getByText("Summarize the latest releases")).toBeTruthy()
     expect(screen.getByText("回答已生成")).toBeTruthy()
+  })
+
+  test("queues steering and follow-up on the live run without submitting another run", async () => {
+    const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
+    const inputs: Array<{ input_id: string; mode: string; content: string }> =
+      []
+    let submitted = 0
+    await renderDetail({
+      agent: makeAgent(),
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => {
+            submitted += 1
+            return jsonResponse(queuedRun, 201)
+          },
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
+          exact: false,
+          respond: () => new Promise<Response>(() => undefined),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/inputs`,
+          exact: true,
+          respond: (init) => {
+            const input = JSON.parse(String(init?.body))
+            inputs.push(input)
+            return jsonResponse(
+              {
+                ...input,
+                sequence: inputs.length,
+                run_id: "run-1",
+                status: "queued",
+              },
+              202
+            )
+          },
+        },
+      ],
+    })
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "Start the task" } })
+    fireEvent.click(screen.getByLabelText("发送问题"))
+    await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
+    fireEvent.change(textarea, { target: { value: "Use Chinese" } })
+    fireEvent.click(screen.getByLabelText("调整当前任务"))
+    await waitFor(() => expect(inputs).toHaveLength(1))
+    await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByText("Use Chinese")).toBeTruthy()
+    fireEvent.change(textarea, { target: { value: "Then summarize" } })
+    fireEvent.click(screen.getByText("追加后续任务"))
+    await waitFor(() => expect(inputs).toHaveLength(2))
+    await waitFor(() => expect(textarea.value).toBe(""))
+    expect(inputs.map((input) => input.mode)).toEqual(["steer", "follow_up"])
+    expect(inputs[0].input_id).not.toBe(inputs[1].input_id)
+    expect(screen.getByText("Then summarize")).toBeTruthy()
+    expect(submitted).toBe(1)
   })
 
   test("stopping generation cancels the run on the backend", async () => {

@@ -1,6 +1,6 @@
 # Agent 生产评测门禁
 
-Agent 评测分成两层：CI 中的确定性运行时回归，和部署/发布前对真实 Agent 的在线评测。前者阻止执行内核、工具安全和 grounding 预算逻辑回退；后者验证当前模型、知识、提示词和工具组合的实际质量。
+Agent 评测分成两层：CI 中的确定性运行时回归，和部署/发布前对真实 Agent 的在线评测。前者阻止执行内核、工具安全和通用能力循环回退；后者验证当前模型、知识、提示词和工具组合的实际质量。
 
 ## CI 门禁
 
@@ -10,14 +10,14 @@ Agent 评测分成两层：CI 中的确定性运行时回归，和部署/发布�
 uv run python -m tests.agents.evaluation
 ```
 
-该套件不访问数据库、网络或第三方模型，覆盖直接回答、工具选择与成功执行、grounding、必需用例门禁、未上报 token 拒绝以及 grounding 调用纳入 token 总预算。它已接入 GitHub Actions 和后端覆盖率套件。
+该套件不访问数据库、网络或第三方模型，覆盖直接回答、可选工具选择与成功执行、无 manifest 的即时流式回答、知识/MCP/Skill 工具的统一预算、必需用例门禁及未上报 token 拒绝。它已接入 GitHub Actions 和后端覆盖率套件。
 
 ## 在线发布门禁
 
 复制并按具体 Agent 修改 [examples/agent-evaluation.json](examples/agent-evaluation.json)。生产数据集建议至少覆盖 20–50 个稳定用例，并包含以下类别：
 
 - 关键业务答案和拒答边界；
-- `required` / `agentic` 知识检索与证据不足场景；
+- 可选知识检索、没有检索和检索无结果场景；
 - 每个允许工具、禁止工具和参数校验场景；
 - 提示注入、越权访问、敏感信息和高成本输入；
 - 历史上出现过的线上缺陷。
@@ -45,7 +45,6 @@ uv run python -m scripts.agent_eval \
 - `samples`：同一问题重复执行次数，用于发现模型波动；
 - `required`：默认为 `true`，任一必需样本失败都会阻断发布，即使总通过率达到阈值；
 - `expect.status`：预期 Run 终态；
-- `grounding_statuses`：允许的 `grounded`、`insufficient`、`unavailable` 或 `skipped`；
 - `answer_contains` / `answer_not_contains`：稳定、短小的答案断言；
 - `required_tool_names` / `forbidden_tool_names`：成功调用和绝对禁止观察到的工具；
 - `min_sources`：API 返回的最少证据源数量；

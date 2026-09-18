@@ -8,6 +8,7 @@ export type AgentSkillDefinition = {
   output_schema: Record<string, unknown>
   knowledge_base_ids: string[]
   tools: ToolRef[]
+  /** @deprecated Legacy snapshot metadata; does not control the Agent loop. */
   retrieval: {
     max_calls: number
     max_rounds: number
@@ -18,8 +19,10 @@ export type AgentSkillDefinition = {
     max_runtime_seconds: number
     max_turns: number
     max_tool_calls: number
+    /** @deprecated Cumulative Agent token limits are not enforced. */
     max_model_tokens: number
   }
+  /** @deprecated Legacy RAG stop policy; ignored at execution time. */
   stop: {
     max_no_progress_rounds: number
     allow_best_effort: boolean
@@ -30,7 +33,9 @@ export type AgentSkillDefinition = {
     require_approval_for_external_writes: boolean
   }
   evaluation: {
+    /** @deprecated Grounding verification has been removed. */
     require_grounding: boolean
+    /** @deprecated Grounding verification has been removed. */
     min_evidence_count: number
     max_tool_failures: number
   }

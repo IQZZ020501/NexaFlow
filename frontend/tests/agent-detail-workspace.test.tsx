@@ -308,6 +308,7 @@ type HarnessProps = {
   onPublish?: () => void
   onAsk?: (event: unknown) => void
   onCancelAsk?: () => void
+  onSessionInput?: (mode: "steer" | "follow_up") => void
   onNewConversation?: () => void
   onToolCallDecision?: (
     runId: string,
@@ -315,10 +316,7 @@ type HarnessProps = {
     decision: "approve" | "reject"
   ) => void
   onRegenerateRun?: (runId: string, goal?: string) => void
-  onRunFeedback?: (
-    runId: string,
-    value: "positive" | "negative" | null
-  ) => void
+  onRunFeedback?: (runId: string, value: "positive" | "negative" | null) => void
   regeneratingRunId?: string | null
   feedbackPendingRunId?: string | null
 }
@@ -379,6 +377,7 @@ function Harness(props: HarnessProps = {}) {
       onViewChange={callbacks.onViewChange as never}
       onAsk={callbacks.onAsk as never}
       onCancelAsk={callbacks.onCancelAsk}
+      onSessionInput={props.onSessionInput}
       onNewConversation={callbacks.onNewConversation}
       onToolCallDecision={callbacks.onToolCallDecision}
       onRegenerateRun={callbacks.onRegenerateRun}
@@ -544,6 +543,67 @@ describe("AgentDetailWorkspace header and navigation", () => {
 })
 
 describe("AgentDetailWorkspace preview", () => {
+  test("accepts steering and follow-up while keeping cancellation available", () => {
+    const inputs: string[] = []
+    let cancelled = false
+    renderPage(
+      <Harness
+        activeView="settings"
+        isAsking
+        onSessionInput={(mode) => inputs.push(mode)}
+        onCancelAsk={() => {
+          cancelled = true
+        }}
+      />
+    )
+    const textarea = screen.getByPlaceholderText("向 Agent 提问...")
+    expect((textarea as HTMLTextAreaElement).disabled).toBe(false)
+    fireEvent.change(textarea, { target: { value: "Use Chinese" } })
+    fireEvent.keyDown(textarea, { key: "Enter", altKey: true })
+    expect(inputs).toEqual(["follow_up"])
+    fireEvent.click(screen.getByRole("button", { name: "追加后续任务" }))
+    expect(inputs).toEqual(["follow_up", "follow_up"])
+    expect(screen.getByRole("button", { name: "调整当前任务" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }))
+    expect(cancelled).toBe(true)
+  })
+
+  test("renders accepted session inputs alongside the original goal", () => {
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[
+          makeRun({
+            session_inputs: [
+              {
+                sequence: 1,
+                run_id: "run-1",
+                input_id: "steer",
+                mode: "steer",
+                content: "Use Chinese",
+                status: "applied",
+              },
+              {
+                sequence: 2,
+                run_id: "run-1",
+                input_id: "follow",
+                mode: "follow_up",
+                content: "Then summarize",
+                status: "queued",
+                previous_answer: "First task completed",
+              },
+            ],
+          }),
+        ]}
+      />
+    )
+    expect(screen.getByText("Use Chinese")).toBeTruthy()
+    expect(screen.getByText("Then summarize")).toBeTruthy()
+    expect(screen.getByText("追加指令")).toBeTruthy()
+    expect(screen.getByText("后续任务")).toBeTruthy()
+    expect(screen.getByText("First task completed")).toBeTruthy()
+  })
+
   test("shows the empty conversation state", () => {
     renderPage(<Harness activeView="settings" />)
     expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
@@ -668,9 +728,7 @@ describe("AgentDetailWorkspace preview", () => {
     const timestamps = container.querySelectorAll("time")
 
     expect(timestamps).toHaveLength(1)
-    expect(timestamps[0]?.getAttribute("datetime")).toBe(
-      "2026-08-04T00:00:01Z"
-    )
+    expect(timestamps[0]?.getAttribute("datetime")).toBe("2026-08-04T00:00:01Z")
   })
 
   test("renders generated artifacts as filename download links", () => {
@@ -719,9 +777,9 @@ describe("AgentDetailWorkspace preview", () => {
     const { container } = renderPage(
       <Harness activeView="settings" runs={[makeRun({ goal })]} />
     )
-    const message = Array.from(container.querySelectorAll(".bg-foreground")).find(
-      (element) => element.textContent === goal
-    )
+    const message = Array.from(
+      container.querySelectorAll(".bg-foreground")
+    ).find((element) => element.textContent === goal)
 
     expect(message).toBeTruthy()
     expect(message!.className).toContain("whitespace-pre-wrap")
@@ -756,7 +814,9 @@ describe("AgentDetailWorkspace preview", () => {
     expect(regenerated).toEqual([])
     expect(feedback).toEqual([["run-1", null]])
     expect(screen.getByRole("button", { name: "点踩" })).toBeTruthy()
-    expect(screen.getAllByRole("button", { name: "复制" }).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByRole("button", { name: "复制" }).length
+    ).toBeGreaterThan(0)
   })
 
   test("renders a failed run with the error message", () => {
@@ -1606,7 +1666,9 @@ describe("AgentLogsPanel", () => {
     fireEvent.click(screen.getByLabelText("查看日志详情"))
     await waitFor(() => expect(screen.getByText("对话详情")).toBeTruthy())
     expect(screen.getByText("Step one")).toBeTruthy()
-    expect(screen.getAllByRole("img", { name: "点赞" }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("img", { name: "点赞" }).length).toBeGreaterThan(
+      0
+    )
     expect(screen.getByText("暂无错误")).toBeTruthy()
     expect(screen.getByText(/"prompt_tokens"/)).toBeTruthy()
   })

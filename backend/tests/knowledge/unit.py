@@ -1293,118 +1293,6 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
     assert len(context) <= 180
     assert json.loads(context)["context_truncated"] is True
 
-def test_inline_grounding_manifest_validation_fails_closed() -> None:
-    from app.domain.agents.runtime.grounding import (
-        validate_inline_grounding_manifest,
-    )
-
-    packets = [
-        {
-            "chunk_id": "chunk-16",
-            "section_path": ["第二章"],
-            "content": "第二章\n第十六条。",
-        }
-    ]
-    grounded = validate_inline_grounding_manifest(
-        '{"status":"grounded","evidence_ids":["chunk-16"],'
-        '"reason_codes":["article_boundary_checked"]}',
-        packets,
-        "required",
-    )
-    assert grounded.status == "grounded"
-    assert grounded.meta["evidence_ids"] == ["chunk-16"]
-    assert grounded.meta["evidence_packet_count"] == 1
-    assert grounded.meta["evidence_truncated"] is False
-    assert grounded.meta["mode"] == "inline"
-
-    unknown = validate_inline_grounding_manifest(
-        '{"status":"grounded","evidence_ids":["unknown"],'
-        '"reason_codes":[]}',
-        packets,
-        "required",
-    )
-    assert unknown.status == "unavailable"
-    assert unknown.meta["error"] == "invalid_evidence_ids"
-
-    required_skip = validate_inline_grounding_manifest(
-        '{"status":"skipped","evidence_ids":[],"reason_codes":[]}',
-        packets,
-        "required",
-    )
-    assert required_skip.status == "unavailable"
-    assert required_skip.meta["error"] == "invalid_skip"
-
-    agentic_skip = validate_inline_grounding_manifest(
-        '{"status":"skipped","evidence_ids":[],"reason_codes":[]}',
-        [],
-        "agentic",
-    )
-    assert agentic_skip.status == "skipped"
-
-
-def test_inline_grounding_stream_filter_bounds_and_preserves_output() -> None:
-    from app.domain.agents.runtime.grounding import (
-        GROUNDING_FALLBACK_ANSWER,
-        GROUNDING_INSUFFICIENT_FALLBACK_ANSWER,
-        INLINE_GROUNDING_OPEN,
-        MAX_INLINE_GROUNDING_CHARS,
-        InlineGroundingStreamFilter,
-    )
-
-    packets = [{"chunk_id": "chunk-16", "content": "第十六条。"}]
-    required_missing = InlineGroundingStreamFilter(packets, "required")
-    assert required_missing.push("# 不应泄露的回答\n") == ""
-    assert required_missing.finish() == GROUNDING_FALLBACK_ANSWER
-    assert required_missing.visible_content == GROUNDING_FALLBACK_ANSWER
-    assert required_missing.outcome is not None
-    assert required_missing.outcome.status == "unavailable"
-    assert required_missing.outcome.meta["error"] == "missing_manifest"
-
-    agentic_without_evidence = InlineGroundingStreamFilter([], "agentic")
-    markdown = "# 标题\n\n- 条目\n"
-    assert agentic_without_evidence.push(markdown) == ""
-    assert agentic_without_evidence.finish() == markdown
-    assert agentic_without_evidence.visible_content == markdown
-    assert agentic_without_evidence.outcome is not None
-    assert agentic_without_evidence.outcome.status == "skipped"
-
-    insufficient = InlineGroundingStreamFilter(packets, "agentic")
-    insufficient_framed = (
-        '<nexaflow-grounding>{"status":"insufficient",'
-        '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
-        "</nexaflow-grounding>\n"
-        "这是基于通用知识的暂定说明。"
-    )
-    assert insufficient.push(insufficient_framed) == "这是基于通用知识的暂定说明。"
-    assert insufficient.finish() == ""
-    assert insufficient.visible_content == "这是基于通用知识的暂定说明。"
-    assert insufficient.outcome is not None
-    assert insufficient.outcome.status == "insufficient"
-
-    insufficient_without_answer = InlineGroundingStreamFilter(packets, "agentic")
-    assert insufficient_without_answer.push(
-        '<nexaflow-grounding>{"status":"insufficient",'
-        '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
-        "</nexaflow-grounding>"
-    ) == ""
-    assert insufficient_without_answer.finish() == GROUNDING_INSUFFICIENT_FALLBACK_ANSWER
-
-    preserves_leading_markdown_space = InlineGroundingStreamFilter(packets, "required")
-    framed = (
-        '<nexaflow-grounding>{"status":"grounded",'
-        '"evidence_ids":["chunk-16"],"reason_codes":[]}'
-        "</nexaflow-grounding>\n\n# 标题\n\n- 条目\n"
-    )
-    assert preserves_leading_markdown_space.push(framed) == "\n# 标题\n\n- 条目\n"
-    assert preserves_leading_markdown_space.finish() == ""
-    assert preserves_leading_markdown_space.visible_content == "\n# 标题\n\n- 条目\n"
-
-    oversized = InlineGroundingStreamFilter(packets, "required")
-    oversized.push(INLINE_GROUNDING_OPEN + "x" * MAX_INLINE_GROUNDING_CHARS)
-    assert oversized.finish() == GROUNDING_FALLBACK_ANSWER
-    assert oversized.outcome is not None
-    assert oversized.outcome.meta["error"] == "manifest_too_large"
-
 def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     from io import BytesIO
     from pathlib import Path
@@ -3110,8 +2998,6 @@ def main() -> None:
     test_markdown_table_rules_apply_to_parent_and_child_chunks()
     test_plain_legal_headings_keep_chapters_in_separate_parents()
     test_evidence_windows_mark_truncation_and_preserve_article_boundary()
-    test_inline_grounding_manifest_validation_fails_closed()
-    test_inline_grounding_stream_filter_bounds_and_preserves_output()
     test_docx_images_without_alt_text_do_not_add_placeholder_content()
     test_docx_image_mime_cannot_shape_asset_paths()
     test_archive_limits_run_before_document_conversion()

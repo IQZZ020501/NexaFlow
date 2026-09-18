@@ -6,7 +6,14 @@ import asyncio
 from typing import Any
 
 import tests.support  # noqa: F401  # sets required env before app imports
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    message_to_dict,
+)
 
 from app.domain.agents.evaluation import (
     AgentEvaluationObservation,
@@ -31,35 +38,30 @@ from scripts.agent_eval import (
 class ScriptedModel:
     def __init__(self, responses: list[AIMessage]) -> None:
         self.responses = list(responses)
+        self.requests: list[list[BaseMessage]] = []
+        self.bindings: list[list[str]] = []
 
     def bind_tools(self, *_args: Any, **_kwargs: Any) -> ScriptedModel:
+        self.bindings.append([tool.name for tool in _args[0]])
         return self
 
     async def ainvoke(self, _messages: list[BaseMessage]) -> AIMessage:
+        self.requests.append(list(_messages))
         return self.responses.pop(0)
 
 
 class GatedStreamingModel:
-    def __init__(
-        self,
-        manifest: str | None = None,
-        reasoning: str = "",
-    ) -> None:
+    def __init__(self) -> None:
         self.first_chunk_emitted = asyncio.Event()
         self.finish = asyncio.Event()
-        self.reasoning = reasoning
-        self.manifest = manifest or (
-            '<nexaflow-grounding>{"status":"skipped",'
-            '"evidence_ids":[],"reason_codes":[]}</nexaflow-grounding>\n'
-        )
 
     def bind_tools(self, *_args: Any, **_kwargs: Any) -> GatedStreamingModel:
         return self
 
     async def astream(self, _messages: list[BaseMessage]):
         yield AIMessageChunk(
-            content=f"{self.manifest}Live",
-            additional_kwargs={"reasoning_content": self.reasoning},
+            content="Live",
+            additional_kwargs={"reasoning_content": "Choose the useful capability."},
         )
         self.first_chunk_emitted.set()
         await self.finish.wait()
@@ -67,134 +69,6 @@ class GatedStreamingModel:
             content=" answer.",
             response_metadata={"finish_reason": "stop"},
         )
-
-
-class InlineGroundingStreamingModel:
-    def __init__(self) -> None:
-        self.first_answer_chunk_emitted = asyncio.Event()
-        self.finish = asyncio.Event()
-        self.calls = 0
-
-    def bind_tools(self, *_args: Any, **_kwargs: Any) -> InlineGroundingStreamingModel:
-        return self
-
-    async def astream(self, _messages: list[BaseMessage]):
-        self.calls += 1
-        yield AIMessageChunk(content="<nexaflow-")
-        yield AIMessageChunk(
-            content=(
-                'grounding>{"status":"grounded","evidence_ids":["chunk-1"],'
-                '"reason_codes":[]}</nexaflow-grounding>\n# 标题\n\n'
-            )
-        )
-        self.first_answer_chunk_emitted.set()
-        await self.finish.wait()
-        yield AIMessageChunk(
-            content="- 条目\n",
-            response_metadata={"finish_reason": "stop"},
-        )
-
-
-class GroundingToolStreamingModel:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def bind_tools(
-        self,
-        *_args: Any,
-        **_kwargs: Any,
-    ) -> GroundingToolStreamingModel:
-        return self
-
-    async def astream(self, _messages: list[BaseMessage]):
-        self.calls += 1
-        if self.calls == 1:
-            yield AIMessageChunk(
-                content="",
-                additional_kwargs={
-                    "reasoning_content": "先检查工具返回的信息，再组织回答。"
-                },
-            )
-            yield AIMessageChunk(
-                content="",
-                tool_call_chunks=[
-                    {
-                        "name": "echo",
-                        "args": '{"value":"ok"}',
-                        "id": "call-echo",
-                        "index": 0,
-                    }
-                ],
-                response_metadata={"finish_reason": "tool_calls"},
-            )
-            return
-        yield AIMessageChunk(
-            content=(
-                '<nexaflow-grounding>{"status":"insufficient",'
-                '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
-                "</nexaflow-grounding>\n回答会明确标注未核实部分。"
-            ),
-            response_metadata={"finish_reason": "stop"},
-        )
-
-
-def test_inline_grounding_precedes_streamed_markdown_without_a_second_call() -> None:
-    async def execute() -> None:
-        model = InlineGroundingStreamingModel()
-        answer_seen = asyncio.Event()
-        events: list[dict[str, Any]] = []
-
-        async def emit(event: dict[str, Any]) -> None:
-            events.append(event)
-            if event.get("type") == "answer_delta":
-                answer_seen.set()
-
-        task = asyncio.create_task(
-            run_agent(
-                model,
-                [{"role": "user", "content": "Answer from evidence."}],
-                [],
-                on_event=emit,
-                grounding_mode="agentic",
-                initial_evidence=[{"chunk_id": "chunk-1", "content": "fact"}],
-            )
-        )
-        await model.first_answer_chunk_emitted.wait()
-        await asyncio.wait_for(answer_seen.wait(), timeout=0.1)
-        model.finish.set()
-        result = await task
-        assert model.calls == 1
-        assert result.content == "# 标题\n\n- 条目\n"
-        assert result.grounding_status == "grounded"
-        assert result.grounding_meta["decision"] == "grounded"
-        assert result.grounding_meta["evidence_ids"] == ["chunk-1"]
-        assert result.grounding_meta["reason_codes"] == []
-        assert result.grounding_meta["evidence_packet_count"] == 1
-        assert result.grounding_meta["evidence_truncated"] is False
-        assert len(result.grounding_meta["evidence_digest"]) == 64
-        assert result.grounding_meta["mode"] == "inline"
-        deltas = [
-            event.get("delta")
-            for event in events
-            if event.get("type") == "answer_delta"
-        ]
-        assert "".join(deltas) == result.content
-        assert "nexaflow-grounding" not in "".join(deltas)
-        grounded_index = next(
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "process"
-            and event.get("event", {}).get("summary")
-            == "agent.grounding_inline"
-        )
-        answer_index = next(
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "answer_delta"
-        )
-        assert grounded_index < answer_index
-
-    asyncio.run(execute())
 
 
 def answer_message(text: str, *, tokens: int = 12) -> AIMessage:
@@ -236,7 +110,6 @@ def observation(result: Any, *, source_count: int = 0) -> AgentEvaluationObserva
     return AgentEvaluationObservation(
         status="succeeded",
         answer=result.content,
-        grounding_status=result.grounding_status,
         successful_tool_names=successful,
         observed_tool_names=observed,
         source_count=source_count,
@@ -254,7 +127,9 @@ async def runtime_observations() -> tuple[AgentEvaluationObservation, ...]:
     )
 
     async def echo(arguments: str) -> AgentToolResult:
-        return AgentToolResult(content=arguments, summary="Echo succeeded.", output={"ok": True})
+        return AgentToolResult(
+            content=arguments, summary="Echo succeeded.", output={"ok": True}
+        )
 
     tool = create_agent_tool(
         name="echo",
@@ -269,30 +144,35 @@ async def runtime_observations() -> tuple[AgentEvaluationObservation, ...]:
         kind="builtin",
     )
     with_tool = await run_agent(
-        ScriptedModel([tool_message("echo", "call-echo"), answer_message("Tool answer: ready.")]),
+        ScriptedModel(
+            [tool_message("echo", "call-echo"), answer_message("Tool answer: ready.")]
+        ),
         [{"role": "user", "content": "Use echo."}],
         [tool],
         max_model_tokens=100,
     )
 
-    grounded = await run_agent(
+    knowledge = create_agent_tool(
+        name="search_knowledge",
+        description="Search optional workspace documents.",
+        parameters={"type": "object", "properties": {"value": {"type": "string"}}},
+        execute=echo,
+        kind="knowledge",
+    )
+    searched = await run_agent(
         ScriptedModel(
             [
-                answer_message(
-                    '<nexaflow-grounding>{"status":"grounded",'
-                    '"evidence_ids":["chunk-1"],"reason_codes":[]}'
-                    "</nexaflow-grounding>\nGrounded answer: fact."
-                )
+                tool_message("search_knowledge", "call-search"),
+                answer_message("Document answer: fact."),
             ]
         ),
-        [{"role": "user", "content": "Answer from evidence."}],
-        [],
-        grounding_mode="required",
-        initial_evidence=[{"chunk_id": "chunk-1", "content": "fact"}],
-        max_model_tokens=100,
+        [{"role": "user", "content": "Find the document."}],
+        [knowledge],
     )
-    return observation(direct), observation(with_tool), observation(
-        grounded, source_count=1
+    return (
+        observation(direct),
+        observation(with_tool),
+        observation(searched, source_count=1),
     )
 
 
@@ -307,7 +187,6 @@ def test_release_gate() -> None:
                     "category": "answer",
                     "expect": {
                         "answer_contains": ["Direct answer"],
-                        "grounding_statuses": ["skipped"],
                         "max_total_tokens": 30,
                         "max_model_calls": 1,
                     },
@@ -324,15 +203,14 @@ def test_release_gate() -> None:
                     },
                 },
                 {
-                    "id": "grounded",
+                    "id": "knowledge",
                     "goal": "Answer from evidence.",
-                    "category": "grounding",
+                    "category": "capability",
                     "expect": {
                         "answer_contains": ["fact"],
-                        "grounding_statuses": ["grounded"],
                         "min_sources": 1,
                         "max_total_tokens": 30,
-                        "max_model_calls": 1,
+                        "max_model_calls": 2,
                     },
                 },
             ],
@@ -376,7 +254,6 @@ def test_gate_rejects_blocked_tools_and_unreported_usage() -> None:
         AgentEvaluationObservation(
             status="succeeded",
             answer="unsafe",
-            grounding_status="skipped",
             observed_tool_names=("missing_tool",),
             model_usage={
                 "model_calls": 1,
@@ -404,35 +281,29 @@ def test_gate_rejects_blocked_tools_and_unreported_usage() -> None:
     assert summary["required_failures"] == ["security#1"]
 
 
-def test_inline_grounding_stays_within_the_primary_model_token_budget() -> None:
+def test_plain_answer_ignores_retired_grounding_and_token_limits() -> None:
     async def execute() -> None:
-        await run_agent(
-            ScriptedModel(
-                [
-                    answer_message(
-                        '<nexaflow-grounding>{"status":"grounded",'
-                        '"evidence_ids":["chunk-1"],"reason_codes":[]}'
-                        "</nexaflow-grounding>\ndraft",
-                        tokens=12,
-                    )
-                ]
-            ),
-            [{"role": "user", "content": "ground"}],
+        result = await run_agent(
+            ScriptedModel([answer_message("A useful ordinary answer.", tokens=12)]),
+            [{"role": "user", "content": "Answer normally."}],
             [],
             grounding_mode="required",
-            initial_evidence=[{"chunk_id": "chunk-1", "content": "fact"}],
-            max_model_tokens=10,
+            initial_evidence=[{"chunk_id": "chunk-1", "content": "unrelated"}],
+            max_model_tokens=1,
+        )
+        assert result.content == "A useful ordinary answer."
+        assert not hasattr(result, "grounding_status")
+        assert not hasattr(result, "grounding_meta")
+        assert result.model_usage["total_tokens"] == 12
+        assert not any(
+            str(event.get("summary") or "").startswith("agent.grounding_")
+            for event in result.events
         )
 
-    try:
-        asyncio.run(execute())
-    except AgentRunnerError as exc:
-        assert "token limit" in str(exc)
-    else:
-        raise AssertionError("Inline grounding exceeded the model token budget.")
+    asyncio.run(execute())
 
 
-def test_agentic_inline_grounding_streams_a_skipped_answer() -> None:
+def test_plain_answer_streams_immediately_without_a_manifest() -> None:
     async def execute() -> None:
         model = GatedStreamingModel()
         answer_seen = asyncio.Event()
@@ -446,225 +317,175 @@ def test_agentic_inline_grounding_streams_a_skipped_answer() -> None:
         task = asyncio.create_task(
             run_agent(
                 model,
-                [{"role": "user", "content": "Answer without retrieval."}],
-                [],
-                on_event=emit,
-                grounding_mode="agentic",
-            )
-        )
-        await model.first_chunk_emitted.wait()
-        await asyncio.wait_for(answer_seen.wait(), timeout=0.1)
-        assert [
-            event.get("delta")
-            for event in events
-            if event.get("type") == "answer_delta"
-        ] == ["Live"]
-        model.finish.set()
-        result = await task
-        assert result.content == "Live answer."
-        assert result.grounding_status == "skipped"
-        assert [
-            event.get("delta")
-            for event in events
-            if event.get("type") == "answer_delta"
-        ] == ["Live", " answer."]
-        assert not any(event.get("type") == "answer_reset" for event in events)
-        assert any(
-            event.get("type") == "process"
-            and event.get("event", {}).get("summary")
-            == "agent.grounding_skipped"
-            for event in events
-        )
-
-    asyncio.run(execute())
-
-
-def test_inline_grounding_streams_a_best_effort_insufficient_answer() -> None:
-    async def execute() -> None:
-        model = GatedStreamingModel(
-            '<nexaflow-grounding>{"status":"insufficient",'
-            '"evidence_ids":[],"reason_codes":["no_relevant_evidence"]}'
-            "</nexaflow-grounding>\n",
-            reasoning="The manifest is an internal protocol detail.",
-        )
-        answer_seen = asyncio.Event()
-        events: list[dict[str, Any]] = []
-
-        async def emit(event: dict[str, Any]) -> None:
-            events.append(event)
-            if event.get("type") == "answer_delta":
-                answer_seen.set()
-
-        task = asyncio.create_task(
-            run_agent(
-                model,
-                [{"role": "user", "content": "Answer with a caveat."}],
-                [],
-                on_event=emit,
-                grounding_mode="agentic",
-                initial_evidence=[{"chunk_id": "chunk-1", "content": "partial"}],
-            )
-        )
-        await model.first_chunk_emitted.wait()
-        await asyncio.wait_for(answer_seen.wait(), timeout=0.1)
-        model.finish.set()
-        result = await task
-        assert result.content == "Live answer."
-        assert result.grounding_status == "insufficient"
-        assert result.grounding_meta["reason_codes"] == ["no_relevant_evidence"]
-        assert [
-            event["delta"]
-            for event in events
-            if event.get("type") == "reasoning_delta"
-        ] == ["The manifest is an internal protocol detail."]
-        assert any(
-            event.get("type") == "process"
-            and event.get("event", {}).get("summary")
-            == "agent.grounding_insufficient"
-            and event.get("event", {}).get("status") == "succeeded"
-            for event in events
-        )
-
-    asyncio.run(execute())
-
-
-def test_grounding_keeps_pre_tool_analysis_visible() -> None:
-    async def execute() -> None:
-        model = GroundingToolStreamingModel()
-        events: list[dict[str, Any]] = []
-
-        async def echo(_arguments: str) -> AgentToolResult:
-            return AgentToolResult(
-                content="ok",
-                summary="Echo succeeded.",
-                output={"ok": True},
-            )
-
-        tool = create_agent_tool(
-            name="echo",
-            description="Echo a value.",
-            parameters={
-                "type": "object",
-                "properties": {"value": {"type": "string"}},
-                "required": ["value"],
-                "additionalProperties": False,
-            },
-            execute=echo,
-            kind="builtin",
-        )
-
-        async def emit(event: dict[str, Any]) -> None:
-            events.append(event)
-
-        result = await run_agent(
-            model,
-            [{"role": "user", "content": "Inspect before answering."}],
-            [tool],
-            on_event=emit,
-            grounding_mode="agentic",
-        )
-        reasoning_deltas = [
-            event["delta"]
-            for event in events
-            if event.get("type") == "reasoning_delta"
-        ]
-        assert "".join(reasoning_deltas) == "先检查工具返回的信息，再组织回答。"
-        selected = next(
-            event["event"]
-            for event in events
-            if event.get("type") == "process"
-            and event.get("event", {}).get("summary") == "agent.tools_selected"
-        )
-        assert selected["reasoning"] == "先检查工具返回的信息，再组织回答。"
-        assert result.content == "回答会明确标注未核实部分。"
-        assert model.calls == 2
-
-    asyncio.run(execute())
-
-
-def test_required_inline_grounding_rejects_unknown_evidence_before_output() -> None:
-    async def execute() -> None:
-        model = GatedStreamingModel(
-            '<nexaflow-grounding>{"status":"grounded",'
-            '"evidence_ids":["unknown"],"reason_codes":[]}'
-            "</nexaflow-grounding>\n"
-        )
-        answer_seen = asyncio.Event()
-        events: list[dict[str, Any]] = []
-
-        async def emit(event: dict[str, Any]) -> None:
-            events.append(event)
-            if event.get("type") == "answer_delta":
-                answer_seen.set()
-
-        task = asyncio.create_task(
-            run_agent(
-                model,
-                [{"role": "user", "content": "Answer from evidence."}],
+                [{"role": "user", "content": "Answer normally."}],
                 [],
                 on_event=emit,
                 grounding_mode="required",
-                initial_evidence=[{"chunk_id": "chunk-1", "content": "fact"}],
+                initial_evidence=[{"chunk_id": "chunk-1", "content": "unrelated"}],
             )
         )
         await model.first_chunk_emitted.wait()
         try:
-            await asyncio.wait_for(answer_seen.wait(), timeout=0.05)
-        except TimeoutError:
-            pass
-        else:
-            raise AssertionError("Required grounding released an invalid answer.")
-        model.finish.set()
+            await asyncio.wait_for(answer_seen.wait(), timeout=0.1)
+            assert [
+                event["delta"]
+                for event in events
+                if event.get("type") == "answer_delta"
+            ] == ["Live"]
+        finally:
+            model.finish.set()
         result = await task
-        assert result.grounding_status == "unavailable"
-        assert result.grounding_meta["error"] == "invalid_evidence_ids"
-        assert result.content.startswith("Unable to verify this answer")
-        assert not any(event.get("type") == "answer_reset" for event in events)
+        assert result.content == "Live answer."
+        assert (
+            "".join(
+                event["delta"]
+                for event in events
+                if event.get("type") == "answer_delta"
+            )
+            == result.content
+        )
+        assert (
+            "".join(
+                event["delta"]
+                for event in events
+                if event.get("type") == "reasoning_delta"
+            )
+            == "Choose the useful capability."
+        )
+        assert not any(
+            str(event.get("event", {}).get("summary") or "").startswith(
+                "agent.grounding_"
+            )
+            for event in events
+        )
 
     asyncio.run(execute())
 
 
-def test_required_inline_grounding_streams_only_after_a_valid_manifest() -> None:
+def test_capabilities_share_the_same_loop_and_budget() -> None:
     async def execute() -> None:
-        model = GatedStreamingModel(
-            '<nexaflow-grounding>{"status":"grounded",'
-            '"evidence_ids":["chunk-1"],"reason_codes":[]}'
-            "</nexaflow-grounding>\n"
-        )
-        answer_seen = asyncio.Event()
-        events: list[dict[str, Any]] = []
+        invoked: list[str] = []
+        tools = []
+        for kind in ("knowledge", "mcp", "builtin"):
 
-        async def emit(event: dict[str, Any]) -> None:
-            events.append(event)
-            if event.get("type") == "answer_delta":
-                answer_seen.set()
+            async def call(_arguments: str, selected: str = kind) -> AgentToolResult:
+                invoked.append(selected)
+                return AgentToolResult(content="No new information.", summary="Done.")
 
-        task = asyncio.create_task(
-            run_agent(
-                model,
-                [{"role": "user", "content": "Answer from evidence."}],
-                [],
-                on_event=emit,
-                grounding_mode="required",
-                initial_evidence=[{"chunk_id": "chunk-1", "content": "fact"}],
+            tools.append(
+                create_agent_tool(
+                    name=f"tool_{kind}",
+                    description=f"Optional {kind} capability.",
+                    parameters={
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}},
+                    },
+                    execute=call,
+                    kind=kind,
+                )
             )
+        result = await run_agent(
+            ScriptedModel(
+                [
+                    tool_message("tool_knowledge", "search-1"),
+                    tool_message("tool_mcp", "external-1"),
+                    tool_message("tool_builtin", "skill-1"),
+                    tool_message("tool_knowledge", "search-2"),
+                    tool_message("tool_knowledge", "search-3"),
+                    answer_message("Completed."),
+                ]
+            ),
+            [{"role": "user", "content": "Use the capabilities as needed."}],
+            tools,
+            max_turns=6,
+            adaptive_retrieval=True,
+            max_no_progress_rounds=1,
+            knowledge_min_evidence_items=1,
         )
-        await model.first_chunk_emitted.wait()
-        await asyncio.wait_for(answer_seen.wait(), timeout=0.1)
-        assert [
-            event.get("delta")
-            for event in events
-            if event.get("type") == "answer_delta"
-        ] == ["Live"]
-        model.finish.set()
-        result = await task
-        assert result.content == "Live answer."
-        assert result.grounding_status == "grounded"
-        assert [
-            event.get("delta")
-            for event in events
-            if event.get("type") == "answer_delta"
-        ] == ["Live", " answer."]
+        assert result.content == "Completed."
+        assert invoked == ["knowledge", "mcp", "builtin", "knowledge", "knowledge"]
+        assert len(result.events) == 5
+        for tool in tools:
+            model = ScriptedModel(
+                [
+                    tool_message(tool.name, "call-budget"),
+                    answer_message("Finished with available results."),
+                ]
+            )
+            finalized = await run_agent(
+                model,
+                [{"role": "user", "content": "Use a capability."}],
+                [tool],
+                max_tool_calls=1,
+            )
+            assert finalized.content == "Finished with available results."
+            assert model.bindings == [[tool.name]]
+            assert "tool-call budget is exhausted" in str(
+                model.requests[-1][-1].content
+            )
+            try:
+                await run_agent(
+                    ScriptedModel([tool_message(tool.name, "call-1")]),
+                    [{"role": "user", "content": "Use a tool."}],
+                    [tool],
+                    max_tool_calls=0,
+                )
+            except AgentRunnerError as exc:
+                assert "tool call limit" in str(exc)
+            else:
+                raise AssertionError(f"{tool.name} bypassed the common tool budget.")
+
+    asyncio.run(execute())
+
+
+def test_legacy_checkpoint_uses_the_generic_protocol_without_replaying_tools() -> None:
+    async def execute() -> None:
+        model = ScriptedModel([answer_message("Continued normally.")])
+        saved: list[dict[str, Any]] = []
+
+        async def checkpoint(state: dict[str, Any], _phase: str) -> None:
+            saved.append(state)
+
+        result = await run_agent(
+            model,
+            [
+                {"role": "system", "content": "Tools are optional capabilities."},
+                {"role": "user", "content": "Current goal."},
+            ],
+            [],
+            checkpoint={
+                "messages": [
+                    message_to_dict(
+                        SystemMessage(content="<nexaflow-grounding> required")
+                    ),
+                    message_to_dict(HumanMessage(content="Current goal.")),
+                ],
+                "events": [
+                    {"type": "thought", "summary": "agent.grounding_check"},
+                    {"type": "tool", "tool_kind": "knowledge", "status": "succeeded"},
+                ],
+                "turn": 1,
+                "tool_call_count": 1,
+                "grounding_status": "pending",
+                "evidence_packets": [{"chunk_id": "chunk-1"}],
+                "knowledge_call_count": 1,
+            },
+            on_checkpoint=checkpoint,
+        )
+        assert result.content == "Continued normally."
+        assert model.requests[0][0].content == "Tools are optional capabilities."
+        assert not any(
+            "<nexaflow-grounding>" in str(message.content)
+            for message in model.requests[0]
+        )
+        assert result.events == [
+            {"type": "tool", "tool_kind": "knowledge", "status": "succeeded"},
+        ]
+        assert saved
+        assert not (
+            {"grounding_status", "evidence_packets", "knowledge_call_count"}
+            & saved[-1].keys()
+        )
 
     asyncio.run(execute())
 
@@ -690,7 +511,6 @@ def test_live_runner_contract_is_safe_and_observable() -> None:
         {
             "status": "succeeded",
             "result": "answer",
-            "grounding_status": "grounded",
             "events": [
                 {"type": "tool", "tool_name": "echo", "status": "running"},
                 {"type": "tool", "tool_name": "echo", "status": "succeeded"},
@@ -707,15 +527,12 @@ def test_live_runner_contract_is_safe_and_observable() -> None:
 
 
 def main() -> None:
-    test_inline_grounding_precedes_streamed_markdown_without_a_second_call()
+    test_plain_answer_ignores_retired_grounding_and_token_limits()
+    test_plain_answer_streams_immediately_without_a_manifest()
+    test_capabilities_share_the_same_loop_and_budget()
+    test_legacy_checkpoint_uses_the_generic_protocol_without_replaying_tools()
     test_release_gate()
     test_gate_rejects_blocked_tools_and_unreported_usage()
-    test_inline_grounding_stays_within_the_primary_model_token_budget()
-    test_agentic_inline_grounding_streams_a_skipped_answer()
-    test_inline_grounding_streams_a_best_effort_insufficient_answer()
-    test_grounding_keeps_pre_tool_analysis_visible()
-    test_required_inline_grounding_rejects_unknown_evidence_before_output()
-    test_required_inline_grounding_streams_only_after_a_valid_manifest()
     test_live_runner_contract_is_safe_and_observable()
     print("AGENT_EVALUATION_OK")
 

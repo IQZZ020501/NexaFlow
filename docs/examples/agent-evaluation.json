@@ -4,14 +4,13 @@
   },
   "cases": [
     {
-      "id": "critical-grounded-answer",
-      "category": "grounding",
+      "id": "critical-document-answer",
+      "category": "knowledge-tool",
       "goal": "Replace this with a stable business-critical question.",
       "samples": 2,
       "required": true,
       "expect": {
         "status": "succeeded",
-        "grounding_statuses": ["grounded"],
         "answer_contains": ["replace-with-required-fact"],
         "min_sources": 1,
         "max_total_tokens": 12000,

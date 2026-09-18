@@ -178,6 +178,28 @@ class AgentRunRegenerateRequest(BaseModel):
     goal: str | None = Field(default=None, min_length=1, max_length=4000)
 
 
+class AgentSessionInputRequest(BaseModel):
+    input_id: str = Field(min_length=1, max_length=64)
+    mode: Literal["steer", "follow_up"] = "steer"
+    content: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("content", "input_id")
+    @classmethod
+    def require_nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Session input must not be blank.")
+        return value
+
+
+class AgentSessionInputResponse(AgentSessionInputRequest):
+    sequence: int
+    run_id: str
+    status: Literal["queued", "applied"] = "queued"
+    previous_answer: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
 class RunFeedbackRequest(BaseModel):
     value: Literal["positive", "negative"] | None = None
 
@@ -250,6 +272,9 @@ class AgentRunResponse(BaseModel):
     conversation_id: str
     regenerated_from_run_id: str | None = None
     goal: str
+    session_inputs: list[AgentSessionInputResponse] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
     model_id: str
     model_name: str
@@ -262,8 +287,8 @@ class AgentRunResponse(BaseModel):
         exclude_if=lambda value: not value,
     )
     model_usage: dict[str, Any] = Field(default_factory=dict)
-    grounding_status: str = "not_started"
-    grounding_meta: dict[str, Any] = Field(default_factory=dict)
+    grounding_status: str = Field(default="not_started", deprecated=True)
+    grounding_meta: dict[str, Any] = Field(default_factory=dict, deprecated=True)
     feedback: Literal["positive", "negative"] | None = None
     feedback_updated_at: datetime | None = None
     last_error: str | None
@@ -381,6 +406,9 @@ class ExternalAgentRunResponse(BaseModel):
     conversation_id: str
     regenerated_from_run_id: str | None = None
     question: str
+    session_inputs: list[AgentSessionInputResponse] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
     status: str
     result: str

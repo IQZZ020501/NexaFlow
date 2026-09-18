@@ -28,6 +28,7 @@ class AgentRun:
     regenerated_from_run_id: str | None = None
     depth: int = 0
     goal: str = ""
+    session_inputs: list[dict[str, Any]] = field(default_factory=list)
     attachment_context: str = ""
     instructions: str = ""
     knowledge_base_ids: list[str] = field(default_factory=list)

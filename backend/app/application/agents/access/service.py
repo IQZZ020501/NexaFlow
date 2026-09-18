@@ -26,6 +26,7 @@ from app.application.agents.tools.builder import (
     knowledge_sources_from_events,
     normalize_agent_source_links,
     safe_agent_run_error,
+    session_inputs_to_response,
 )
 from app.application.workflows.uploads.service import resolve_public_agent_files
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
@@ -301,39 +302,6 @@ def external_progress_events(
                         reasoning=str(event.get("reasoning") or ""),
                     )
                 )
-            elif summary in {
-                "agent.grounding_check",
-                "agent.grounding_verified",
-                "agent.grounding_revised",
-                "agent.grounding_inline",
-                "agent.grounding_insufficient",
-                "agent.grounding_unavailable",
-                "agent.grounding_skipped",
-            }:
-                grounding_stage = (
-                    "reviewing"
-                    if summary == "agent.grounding_check"
-                    else "completed"
-                    if summary
-                    in {
-                        "agent.grounding_verified",
-                        "agent.grounding_revised",
-                        "agent.grounding_inline",
-                        "agent.grounding_insufficient",
-                        "agent.grounding_skipped",
-                    }
-                    else "failed"
-                )
-                upsert(
-                    ExternalAgentProgressEventResponse(
-                        id=_external_progress_id(event, "grounding"),
-                        type="analysis",
-                        status=event_status,
-                        stage=grounding_stage,
-                        turn=turn,
-                        reasoning=str(event.get("reasoning") or ""),
-                    )
-                )
             continue
 
         if event_type != "tool":
@@ -429,16 +397,14 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
             else None
         ),
         question=str(value.get("goal") or value.get("question") or ""),
+        session_inputs=session_inputs_to_response(value),
         attachments=attachments or [],
         status=run_status,
         result=normalize_agent_source_links(
             clean_model_text(str(value.get("result") or "")),
             value.get("events") or [],
         ),
-        sources=knowledge_sources_from_events(
-            value.get("events") or [],
-            value.get("grounding_meta"),
-        ),
+        sources=knowledge_sources_from_events(value.get("events") or []),
         error=generic_error,
         progress=external_progress_events(value.get("events") or [], run_status),
         created_at=value["created_at"],

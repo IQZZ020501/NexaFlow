@@ -96,11 +96,21 @@ not trigger unrelated cleanup.
   in `agent_run_events`. All Agent, Workflow, and test Tool executions use
   `tool_invocations`; do not recreate an `agent_tool_calls` table or dual-write
   ledger.
-- Agent Run execution budgets, non-secret model configuration fingerprints, and
-  knowledge resource metadata are frozen in `agent_run_snapshots`; the overall
-  execution deadline is initialized on first claim in `agent_run_states` and
-  is not reset by worker retries. Knowledge-backed answers run the durable
-  post-draft grounding verifier and record an evidence-input digest.
+- Agent Run execution budgets for runtime, turns, and tool calls, non-secret
+  model configuration fingerprints, and knowledge resource metadata are frozen
+  in `agent_run_snapshots`; the legacy `max_model_tokens` snapshot field remains
+  for compatibility but is not enforced as a cumulative Agent token ceiling.
+  The overall execution deadline is initialized on first claim in
+  `agent_run_states` and is not reset by worker retries.
+  The Agent core is a generic model/tool loop: knowledge retrieval,
+  MCP and executable Skills are optional tools, not mandatory RAG stages.
+  There is no grounding verifier, hidden answer manifest, or evidence gate.
+  `domain/agents/runtime/session.py` composes context compaction, trusted
+  extension hooks, and the authorized capability registry. Skill catalogs are
+  injected initially and pinned definitions are loaded through `load_skill`.
+  Session inputs are append-only `agent_run_events` records, with consumed IDs
+  in checkpoint; enqueue and successful finalization share the RunState lock.
+  Do not bypass the tool ledger or reset frozen budgets when adding input.
 - Pure unit suites (no DB, no HTTP, no network) for business rules and
   services with mocked ports/repositories live per feature under
   `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run
@@ -403,7 +413,7 @@ examples.
   Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
 - `backend/` Python changes: use the project's Python tooling. Run `compileall`
   over the touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.agent_access,
+  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.harness, agents.agent_access,
   agents.agent_services_coverage, agents.agent_runtime_coverage, workflows.workflows,
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
   knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,

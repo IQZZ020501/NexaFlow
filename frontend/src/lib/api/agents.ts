@@ -133,6 +133,7 @@ export type AgentRun = {
   conversation_id: string
   regenerated_from_run_id?: string | null
   goal: string
+  session_inputs?: AgentSessionInput[]
   attachments?: AgentRunAttachment[]
   model_id: string
   model_name: string
@@ -142,6 +143,7 @@ export type AgentRun = {
   result: string
   sources?: AgentRunSource[]
   model_usage: Record<string, unknown>
+  /** @deprecated Historical run compatibility only; no verifier is executed. */
   grounding_status?:
     | "not_started"
     | "pending"
@@ -151,6 +153,7 @@ export type AgentRun = {
     | "insufficient"
     | "unavailable"
     | "skipped"
+  /** @deprecated Historical run compatibility only. */
   grounding_meta?: Record<string, unknown>
   feedback?: "positive" | "negative" | null
   feedback_updated_at?: string | null
@@ -753,6 +756,29 @@ export async function cancelAgentRun(
   return request<AgentRun>(
     agentsPath(workspaceId, `/${agentId}/runs/${runId}/cancel`),
     { method: "POST", token }
+  )
+}
+
+export type AgentSessionInput = {
+  input_id: string
+  mode: "steer" | "follow_up"
+  content: string
+  sequence: number
+  run_id: string
+  status?: "queued" | "applied"
+  previous_answer?: string | null
+}
+
+export async function sendAgentSessionInput(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  runId: string,
+  input: Pick<AgentSessionInput, "input_id" | "mode" | "content">
+) {
+  return request<AgentSessionInput>(
+    agentsPath(workspaceId, `/${agentId}/runs/${runId}/inputs`),
+    { method: "POST", token, body: JSON.stringify(input) }
   )
 }
 

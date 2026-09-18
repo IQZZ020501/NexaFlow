@@ -36,7 +36,9 @@ class AgentSkillBudgetPolicy(BaseModel):
     max_runtime_seconds: float = Field(default=300, gt=0, le=1800)
     max_turns: int = Field(default=8, ge=1, le=64)
     max_tool_calls: int = Field(default=12, ge=1, le=128)
-    max_model_tokens: int = Field(default=100_000, ge=1, le=1_000_000)
+    max_model_tokens: int = Field(
+        default=100_000, ge=1, le=1_000_000, deprecated=True
+    )
 
 
 class AgentSkillStopPolicy(BaseModel):
@@ -63,8 +65,9 @@ class AgentSkillGuardrails(BaseModel):
 class AgentSkillEvaluationRubric(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    require_grounding: bool = False
-    min_evidence_count: int = Field(default=0, ge=0, le=20)
+    # Read old versioned definitions without activating a retired verifier.
+    require_grounding: bool = Field(default=False, deprecated=True)
+    min_evidence_count: int = Field(default=0, ge=0, le=20, deprecated=True)
     max_tool_failures: int = Field(default=0, ge=0, le=20)
 
 
@@ -86,10 +89,12 @@ class AgentSkillDefinition(BaseModel):
     ] = Field(default_factory=list, max_length=4)
     tools: list[ToolRefSchema] = Field(default_factory=list, max_length=12)
     retrieval: AgentSkillRetrievalPolicy = Field(
-        default_factory=AgentSkillRetrievalPolicy
+        default_factory=AgentSkillRetrievalPolicy, deprecated=True
     )
     budgets: AgentSkillBudgetPolicy = Field(default_factory=AgentSkillBudgetPolicy)
-    stop: AgentSkillStopPolicy = Field(default_factory=AgentSkillStopPolicy)
+    stop: AgentSkillStopPolicy = Field(
+        default_factory=AgentSkillStopPolicy, deprecated=True
+    )
     guardrails: AgentSkillGuardrails = Field(default_factory=AgentSkillGuardrails)
     evaluation: AgentSkillEvaluationRubric = Field(
         default_factory=AgentSkillEvaluationRubric
@@ -114,13 +119,6 @@ class AgentSkillDefinition(BaseModel):
             raise ValueError("Agent Skill knowledge references must be unique.")
         if len({item.tool_id for item in self.tools}) != len(self.tools):
             raise ValueError("Agent Skill Tool references must be unique.")
-        if (
-            (self.evaluation.require_grounding or self.evaluation.min_evidence_count)
-            and not self.knowledge_base_ids
-        ):
-            raise ValueError("Grounding requirements need at least one knowledge base.")
-        if self.retrieval.min_evidence_items and not self.knowledge_base_ids:
-            raise ValueError("Retrieval evidence requirements need at least one knowledge base.")
         return self
 
 

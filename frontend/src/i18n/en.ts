@@ -1,6 +1,12 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  调整当前任务: "Steer current task",
+  追加后续任务: "Queue follow-up",
+  "指令已排队，将在下一轮生效": "Instruction queued for the next turn",
+  后续任务已排队: "Follow-up queued",
+  追加指令: "Additional instruction",
+  后续任务: "Follow-up task",
   语言: "Language",
   "切换语言，当前为 {language}": "Change language, currently {language}",
   主题: "Theme",
@@ -1136,7 +1142,8 @@ export const en = {
   回答已生成: "Answer generated",
   "已检索 {value} 个知识片段": "Retrieved {value} knowledge chunks",
   已跳过重复知识检索: "Skipped duplicate knowledge search",
-  "知识依据已足够，停止继续检索": "Enough evidence retrieved; stopped searching",
+  "知识依据已足够，停止继续检索":
+    "Enough evidence retrieved; stopped searching",
   调用输入: "Input",
   调用结果: "Result",
   内容过长已截断: "Content too long, truncated",

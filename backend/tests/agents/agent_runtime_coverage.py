@@ -323,41 +323,7 @@ class RuntimeModelStub:
                 ],
             )
         if completion.content:
-            inline_grounding = any(
-                "Single-pass grounding protocol" in str(
-                    message.get("content", "")
-                    if isinstance(message, dict)
-                    else getattr(message, "content", "")
-                )
-                for message in messages
-            )
-            evidence_ids: list[str] = []
-            for message in messages:
-                if getattr(message, "type", "") != "tool":
-                    continue
-                try:
-                    output = json.loads(str(getattr(message, "content", "") or "{}"))
-                except ValueError:
-                    continue
-                evidence_ids.extend(
-                    str(hit["chunk_id"])
-                    for hit in output.get("hits", [])
-                    if isinstance(hit, dict) and hit.get("chunk_id")
-                )
-            manifest = (
-                "<nexaflow-grounding>"
-                + json.dumps(
-                    {
-                        "status": "grounded" if evidence_ids else "skipped",
-                        "evidence_ids": evidence_ids,
-                        "reason_codes": [],
-                    }
-                )
-                + "</nexaflow-grounding>\n"
-                if inline_grounding
-                else ""
-            )
-            yield AIMessageChunk(content=f"{manifest}{completion.content}")
+            yield AIMessageChunk(content=completion.content)
         yield AIMessageChunk(
             content="",
             response_metadata={"finish_reason": completion.finish_reason},
@@ -808,33 +774,33 @@ def assert_graph_error_branches() -> None:
         overflow_provider = SequenceProvider(
             [ok_completion("Answer after stopping the extra searches.")]
         )
-        overflow_result = await run_agent(
-            overflow_provider,
-            [{"role": "user", "content": "hi"}],
-            [knowledge_tool],
-            checkpoint=await checkpoint_state(
-                turn=1,
-                tool_call_count=11,
-                pending_tool_calls=[
-                    {"id": "call-1", "name": "search_knowledge", "arguments": "{}"},
-                    {"id": "call-2", "name": "search_knowledge", "arguments": "{}"},
-                ],
-                events=[
-                    {
-                        "type": "tool",
-                        "tool_kind": "knowledge",
-                        "status": "succeeded",
-                    }
-                ],
-                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
-            ),
-            max_tool_calls=12,
-        )
-        assert overflow_result.content == "Answer after stopping the extra searches."
-        assert (
-            "tool-call budget is exhausted"
-            in overflow_provider.requests[0][-1].content
-        )
+        try:
+            await run_agent(
+                overflow_provider,
+                [{"role": "user", "content": "hi"}],
+                [knowledge_tool],
+                checkpoint=await checkpoint_state(
+                    turn=1,
+                    tool_call_count=11,
+                    pending_tool_calls=[
+                        {"id": "call-1", "name": "search_knowledge", "arguments": "{}"},
+                        {"id": "call-2", "name": "search_knowledge", "arguments": "{}"},
+                    ],
+                    events=[
+                        {
+                            "type": "tool",
+                            "tool_kind": "knowledge",
+                            "status": "succeeded",
+                        }
+                    ],
+                    evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+                ),
+                max_tool_calls=12,
+            )
+        except AgentRunnerError as exc:
+            assert "tool call limit" in str(exc)
+        else:
+            raise AssertionError("Knowledge bypassed the shared tool budget.")
 
     asyncio.run(run_tool_budget_finalization())
 
@@ -1085,14 +1051,14 @@ def assert_graph_error_branches() -> None:
 
     asyncio.run(run_unknown_tool())
 
-    async def run_knowledge_stop() -> None:
+    async def run_knowledge_ignores_legacy_stop() -> None:
         events: list[dict] = []
 
         async def record(event: dict) -> None:
             events.append(event)
 
         async def retrieve(_arguments: str) -> AgentToolResult:
-            raise AssertionError("knowledge tool must not execute")
+            return AgentToolResult(content="normal tool result", summary="Knowledge plugin ran.")
 
         knowledge_tool = create_agent_tool(
             name="search_knowledge",
@@ -1124,11 +1090,11 @@ def assert_graph_error_branches() -> None:
         ]
         assert any(
             event["call_id"] == "call-knowledge"
-            and event["summary"] == "Knowledge search stopped after no new evidence."
+            and event["summary"] == "Knowledge plugin ran."
             for event in tool_events
         )
 
-    asyncio.run(run_knowledge_stop())
+    asyncio.run(run_knowledge_ignores_legacy_stop())
 
 
 def create_echo_tool() -> Any:
@@ -1190,8 +1156,8 @@ def assert_executor_checkpoint_paths() -> None:
             grounding_mode="agentic",
         )
         assert result.content == "draft answer"
-        assert result.grounding_status == "unavailable"
-        assert result.grounding_meta["error"] == "legacy_post_generation_checkpoint"
+        assert not hasattr(result, "grounding_status")
+        assert not hasattr(result, "grounding_meta")
         assert provider.requests == []
 
     asyncio.run(run_grounding_resume())
@@ -1217,7 +1183,9 @@ def assert_executor_checkpoint_paths() -> None:
         assert saved[0]["turn"] == 0
         restored = executor_module.deserialize_agent_state(saved[-1])
         assert restored["final_answer"] == "final"
-        assert restored["grounding_status"] == "skipped"
+        assert "grounding_status" not in restored
+        assert "evidence_packets" not in restored
+        assert "knowledge_call_count" not in restored
 
     asyncio.run(run_with_checkpoints())
 
@@ -3852,11 +3820,10 @@ async def assert_durable_execution_paths(
     assert current.status == "succeeded"
     assert current.result == "Happy answer."
     assert current.grounding_status == "skipped"
-    assert current.grounding_meta["evidence_packet_count"] == 0
-    assert current.grounding_meta["mode"] == "inline"
+    assert current.grounding_meta == {}
     assert current.checkpoint_phase == "done"
     assert current.checkpoint.get("final_answer") == "Happy answer."
-    assert any(
+    assert not any(
         event.event.get("type") == "process"
         and str(event.event.get("event", {}).get("summary", "")).startswith(
             "agent.grounding_"

@@ -42,6 +42,7 @@ from app.application.agents import (
     upload_workspace_agent_files,
     upsert_agent_permission,
 )
+from app.application.agents.runs.session import send_agent_session_input
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
 from app.schemas.agents.contracts import (
@@ -60,6 +61,8 @@ from app.schemas.agents.contracts import (
     AgentRunCreateRequest,
     AgentRunRegenerateRequest,
     AgentRunResponse,
+    AgentSessionInputRequest,
+    AgentSessionInputResponse,
     AgentToolCallResponse,
     AgentUpdateRequest,
     AgentUploadResponse,
@@ -70,6 +73,29 @@ router = APIRouter(
     prefix="/workspaces/{workspace_id}/agents",
     tags=["agents"],
 )
+
+
+@router.post(
+    "/{agent_id}/runs/{run_id}/inputs",
+    response_model=AgentSessionInputResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def send_workspace_agent_session_input(
+    agent_id: str,
+    run_id: str,
+    payload: AgentSessionInputRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentSessionInputResponse:
+    return await send_agent_session_input(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        payload,
+        context.user,
+        context.membership_role,
+    )
 
 
 @router.get(

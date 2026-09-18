@@ -5,8 +5,6 @@ from pydantic import ValidationError
 
 from app.application.agents.runs.executor import (
     _apply_skill_runtime_limits,
-    _skill_evaluation_requirements,
-    _skill_retrieval_stop_requirements,
 )
 from app.application.agents.runs.service import skill_execution_context
 from app.domain.agent_skills.access import evaluate_agent_skill_access
@@ -60,7 +58,7 @@ def test_skill_snapshot_is_hashed_and_round_trips() -> None:
     snapshot = build_agent_skill_snapshot(version, "owner-1")
     restored = agent_skill_snapshot_from_payload(agent_skill_snapshot_payload(snapshot))
     assert restored == snapshot
-    assert "SkillBundle policies" in skill_execution_context([restored])
+    assert "Available Skills" in skill_execution_context([restored])
     assert "Research" in skill_execution_context([restored])
 
 
@@ -125,12 +123,17 @@ def test_skill_runtime_policies_use_the_strictest_pinned_values() -> None:
     snapshot = build_agent_skill_snapshot(version, "owner-1")
     deadline = utc_now() + timedelta(seconds=300)
     adjusted = _apply_skill_runtime_limits(
-        deadline, 8, 12, 6, 3, 2, 100_000, [snapshot]
+        deadline, 8, 12, [snapshot]
     )
-    assert adjusted[1:] == (3, 1, 1, 1, 1, 2_000)
+    assert adjusted[1:] == (3, 1)
     assert (adjusted[0] - utc_now()).total_seconds() <= 30.5
-    assert _skill_evaluation_requirements([snapshot]) == (True, 2)
-    assert _skill_retrieval_stop_requirements([snapshot]) == (2, False)
+    context = skill_execution_context([snapshot])
+    assert "Use evidence." not in context
+    assert "version-policy" in context and "load_skill" in context
+    assert "Retrieval policy" not in context
+    assert "Stop policy" not in context
+    assert "Evaluation:" not in context
+    assert "require_grounding" not in context
     resource_snapshot = build_agent_resource_snapshot([], [], [snapshot])
     assert resource_snapshot["knowledge_base_ids"] == ["kb-1"]
     assert resource_snapshot["skills"][0]["version_id"] == "version-policy"

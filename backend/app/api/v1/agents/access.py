@@ -36,6 +36,7 @@ from app.application.agents import (
     upload_public_agent_files,
 )
 from app.application.agents.access.service import PublishedAgentContext
+from app.application.agents.runs.session import append_session_input
 from app.entities.agents import AgentApiCredential
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
@@ -43,6 +44,8 @@ from app.infra.db.session import get_db
 from app.schemas.agents.contracts import (
     AgentApiDocumentationResponse,
     AgentRunRegenerateRequest,
+    AgentSessionInputRequest,
+    AgentSessionInputResponse,
     AgentToolCallResponse,
     AgentUploadResponse,
     ExternalAgentRunCreateRequest,
@@ -58,6 +61,42 @@ _api_key_scheme = HTTPBearer(auto_error=False)
 
 public_router = APIRouter(prefix="/public/agents/{agent_id}", tags=["public-agents"])
 api_router = APIRouter(prefix="/agent-api/{agent_id}", tags=["agent-api"])
+
+
+@public_router.post(
+    "/runs/{run_id}/inputs",
+    response_model=AgentSessionInputResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def send_public_agent_session_input(
+    agent_id: str,
+    run_id: str,
+    payload: AgentSessionInputRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> AgentSessionInputResponse:
+    await get_workspace_published_agent_context(db, agent_id, user)
+    run = await get_external_agent_run(db, agent_id, run_id, "public", user.id)
+    return await append_session_input(db, run, payload)
+
+
+@api_router.post(
+    "/runs/{run_id}/inputs",
+    response_model=AgentSessionInputResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def send_api_agent_session_input(
+    agent_id: str,
+    run_id: str,
+    payload: AgentSessionInputRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+) -> AgentSessionInputResponse:
+    _, credential = await _api_context(db, agent_id, credentials)
+    run = await get_external_agent_run(db, agent_id, run_id, "api", credential.id)
+    return await append_session_input(db, run, payload)
 
 async def _encode_events(events: AsyncIterator[dict]) -> AsyncIterator[bytes]:
     async for event in events:
