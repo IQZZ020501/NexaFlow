@@ -1698,6 +1698,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         tools = await repository.list_tools(db, workspace_id)
         assert {tool.stable_key for tool in tools} == {
             "current_time",
+            "install_skill_dependencies",
             "inline_python",
             "skill_documents",
             "skill_pdf",
@@ -1723,6 +1724,32 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.approval == "auto"
         assert policy.effect == "pure"
         assert policy.parallel_safe is False
+
+        installer = next(
+            item
+            for item in tools
+            if item.stable_key == "install_skill_dependencies"
+        )
+        installer_version = await repository.get_tool_version(
+            db,
+            workspace_id,
+            installer.current_version_id or "",
+        )
+        installer_policy = await repository.get_tool_policy(
+            db,
+            workspace_id,
+            installer.id,
+        )
+        assert installer_version is not None
+        assert installer_policy is not None
+        assert installer_version.execution_spec == {
+            "builtin": "skill_dependency_install"
+        }
+        assert installer_policy.approval == "each_call"
+        assert installer_policy.effect == "external_write"
+        assert installer_policy.allowed_access_sources == ["console"]
+        assert installer_policy.workflow_callable is False
+        assert installer_policy.parallel_safe is False
 
         for skill_name in ("documents", "pdf", "pptx", "spreadsheets"):
             skill_tool = next(
@@ -5954,6 +5981,7 @@ def test_workspace_creation_initializes_system_catalog() -> None:
         assert {item["function_name"] for item in response.json()} == {
             "current_time",
             "documents_skill",
+            "install_skill_dependencies",
             "pdf_skill",
             "pptx_skill",
             "spreadsheets_skill",

@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
-ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
 
 def _database_url_from_env() -> str:

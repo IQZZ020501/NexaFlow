@@ -1018,6 +1018,7 @@ async def _execute_claimed_agent_run(
             lease_lost.set()
             raise AgentToolBusy("", "Agent run checkpoint lease was lost.")
 
+    terminal = False
     try:
         try:
             async with asyncio.timeout(_remaining_run_seconds(run_deadline)):
@@ -1056,6 +1057,7 @@ async def _execute_claimed_agent_run(
             await db.commit()
         if not finalized:
             raise AgentToolBusy("", "Agent run finalization lease was lost.")
+        terminal = True
         current = await _current_run(run.id)
         await _append_event(
             run,
@@ -1135,6 +1137,7 @@ async def _execute_claimed_agent_run(
         except Exception as log_exc:
             log_error(logger, "Failed to record agent execution error.", log_exc)
         if finalized:
+            terminal = True
             current = await _current_run(run.id)
             await _append_event(
                 run,
@@ -1142,6 +1145,19 @@ async def _execute_claimed_agent_run(
             )
         return RUN_FINISHED
     finally:
+        if terminal:
+            try:
+                from app.ports.execution import close_execution_session
+
+                await close_execution_session(settings, run.workspace_id, run.id)
+            except Exception as exc:
+                log_error(
+                    logger,
+                    "Failed to close Agent execution session.",
+                    exc,
+                    agent_run_id=run.id,
+                    workspace_id=run.workspace_id,
+                )
         await live_stream.close()
 
 

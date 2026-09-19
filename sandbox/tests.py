@@ -70,6 +70,85 @@ class JobTests(unittest.TestCase):
                 b"version-pinned",
             )
 
+    def test_run_session_dependency_survives_separate_script_call(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            packages = root / "packages"
+            package = packages / ("1" * 32)
+            package.mkdir(parents=True)
+            (package / "main.py").write_text(
+                "import demo_dependency\nprint(demo_dependency.VALUE)\n"
+            )
+            session = root / "session"
+            setup = {
+                "shell": {
+                    "manager": "python",
+                    "command": (
+                        'mkdir -p "$NEXAFLOW_PYTHON_PACKAGES" && '
+                        "printf 'VALUE = 7\\n' > "
+                        '"$NEXAFLOW_PYTHON_PACKAGES/demo_dependency.py"'
+                    ),
+                    "bootstrap_id": "a" * 64,
+                },
+                "skill_environment": "1" * 32,
+                "files": {"main.py": ""},
+            }
+            with (
+                patch.object(job, "PACKAGE_DIR", packages),
+                patch.object(job, "SESSION_DIR", session, create=True),
+            ):
+                installed = job.execute(setup)
+                result = job.execute(
+                    {
+                        "script": "main.py",
+                        "skill_environment": "1" * 32,
+                        "files": {"main.py": ""},
+                    }
+                )
+                repeated = job.execute(setup)
+            self.assertTrue(installed["ok"], installed)
+            self.assertEqual(result["stdout"].strip(), "7")
+            self.assertTrue(repeated["ok"], repeated)
+            self.assertTrue(repeated.get("bootstrap_skipped"))
+
+    def test_failed_dependency_install_does_not_pollute_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            packages = root / "packages"
+            package = packages / ("2" * 32)
+            package.mkdir(parents=True)
+            (package / "main.py").write_text(
+                "import demo_dependency\nprint(demo_dependency.VALUE)\n"
+            )
+            session = root / "session"
+            request = {
+                "shell": {
+                    "manager": "python",
+                    "command": (
+                        "printf 'VALUE = 9\\n' > "
+                        '"$NEXAFLOW_PYTHON_PACKAGES/demo_dependency.py"; exit 1'
+                    ),
+                    "bootstrap_id": "b" * 64,
+                },
+                "skill_environment": "2" * 32,
+                "files": {"main.py": ""},
+            }
+            with (
+                patch.object(job, "PACKAGE_DIR", packages),
+                patch.object(job, "SESSION_DIR", session, create=True),
+            ):
+                failed = job.execute(request)
+                result = job.execute(
+                    {
+                        "script": "main.py",
+                        "skill_environment": "2" * 32,
+                        "files": {"main.py": ""},
+                    }
+                )
+            self.assertFalse(failed["ok"], failed)
+            self.assertFalse(result["ok"], result)
+            self.assertIn("demo_dependency", result["stderr"])
+
     def test_protocol_rejections(self):
         for request in (
             {"limits": {"timeout_ms": 0}},
@@ -94,6 +173,14 @@ class JobTests(unittest.TestCase):
                 job.execute({"artifact": {"filename": name, "format": "txt"}})
 
     def test_limits_configuration(self):
+        self.assertTrue(job._use_address_space_limit({"code": "print(1)"}))
+        self.assertFalse(
+            job._use_address_space_limit(
+                {"shell": {"manager": "node", "command": "npm install"}}
+            )
+        )
+        self.assertFalse(job._use_address_space_limit({"script": "main.js"}))
+        self.assertFalse(job._use_address_space_limit({"mcp": {}}))
         with patch.object(job.resource, "setrlimit") as apply_limit:
             self.real_limits(0.2)
             calls = {call.args[0]: call.args[1] for call in apply_limit.call_args_list}

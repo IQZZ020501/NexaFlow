@@ -29,8 +29,18 @@ class ExecutionPlatform(Protocol):
         self, request: dict[str, Any], *, timeout_seconds: float, max_output_bytes: int
     ) -> dict[str, Any]: ...
 
+    async def close_session(self, workspace_id: str, run_id: str) -> None: ...
+
 
 def build_execution_platform(settings: "Settings") -> ExecutionPlatform:
     from app.adapters.execution.opensandbox import OpenSandboxExecution
 
     return OpenSandboxExecution(settings)
+
+
+async def close_execution_session(
+    settings: "Settings",
+    workspace_id: str,
+    run_id: str,
+) -> None:
+    await build_execution_platform(settings).close_session(workspace_id, run_id)

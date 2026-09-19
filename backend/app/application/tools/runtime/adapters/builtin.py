@@ -51,6 +51,19 @@ class BuiltinToolAdapter:
                 return await execute_skill_script(self.settings, arguments, context)
             except (ValueError, WorkflowSandboxError) as exc:
                 return _failure("skill_script_failed", str(exc)[:1000])
+        if builtin == "skill_dependency_install":
+            from app.application.agent_skills.dependencies import (
+                execute_skill_dependency_install,
+            )
+
+            try:
+                return await execute_skill_dependency_install(
+                    self.settings,
+                    arguments,
+                    context,
+                )
+            except (ValueError, WorkflowSandboxError) as exc:
+                return _failure("skill_dependency_install_failed", str(exc)[:1000])
         if builtin in {"artifact", "python_artifact", "skill"}:
             failure_code = {
                 "artifact": "artifact_failed",

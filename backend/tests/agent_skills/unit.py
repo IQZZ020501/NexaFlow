@@ -239,12 +239,49 @@ def test_package_input_boundaries():
     assert inspect_skill_package("example.zip", output.getvalue())["name"] == "example"
 
 
+def test_dependency_install_requests_are_exact_and_shell_safe() -> None:
+    from app.application.agent_skills.dependencies import dependency_install_plan
+
+    python = dependency_install_plan(
+        "python",
+        ["requests==2.32.5", "pydantic==2.12.5", "requests==2.32.5"],
+    )
+    assert python.packages == ("pydantic==2.12.5", "requests==2.32.5")
+    assert python.command == (
+        'uv pip install --target "$NEXAFLOW_PYTHON_PACKAGES" '
+        "--only-binary :all: --upgrade pydantic==2.12.5 requests==2.32.5"
+    )
+    node = dependency_install_plan("node", ["@scope/pkg@1.2.3", "lodash@4.17.21"])
+    assert node.command == (
+        'npm install --prefix "$NEXAFLOW_NODE_PREFIX" --ignore-scripts '
+        "--no-audit --no-fund --save-exact @scope/pkg@1.2.3 lodash@4.17.21"
+    )
+    for manager, packages in (
+        ("python", ["requests"]),
+        ("python", ["requests>=2"]),
+        ("python", ["https://example.com/pkg.whl"]),
+        ("python", ["-r requirements.txt"]),
+        ("node", ["lodash"]),
+        ("node", ["pkg@latest"]),
+        ("node", ["git+https://example.com/pkg"]),
+        ("ruby", ["rack==3.0.0"]),
+        ("python", []),
+    ):
+        try:
+            dependency_install_plan(manager, packages)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError((manager, packages))
+
+
 def main() -> None:
     test_skill_definition_rejects_duplicate_resources()
     test_skill_snapshot_is_hashed_and_round_trips()
     test_skill_access_requires_use_grant_for_members()
     test_packages_and_retired_policies()
     test_package_input_boundaries()
+    test_dependency_install_requests_are_exact_and_shell_safe()
     print("AGENT_SKILLS_UNIT_OK")
 
 

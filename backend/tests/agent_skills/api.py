@@ -22,6 +22,7 @@ from app.domain.tools.runtime import tool_snapshot_from_payload
 from app.entities.defaults import utc_now
 from app.infra.db.repositories.agent_skills import repository as skills
 from app.infra.db.repositories.agents import repository as runs
+from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.ports.execution import execution_scope
 
@@ -35,6 +36,11 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
             for item in run.tool_snapshots
             if item["function_name"] == "run_skill_script"
         )
+        installer_snapshot = next(
+            tool_snapshot_from_payload(item)
+            for item in run.tool_snapshots
+            if item["function_name"] == "install_skill_dependencies"
+        )
         assert await runs.claim_agent_run(
             db,
             run_id,
@@ -47,12 +53,42 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
 
     content = b"generated-result"
     requests = []
+    initial_environment_hash = "b" * 64
+    final_environment_hash = "c" * 64
 
     async def execute(request, **kwargs):
         scope = execution_scope.get()
         assert scope is not None and scope.workspace_id == workspace_id
-        assert scope.run_id == run_id and scope.invocation_id == "skill-script"
+        assert scope.run_id == run_id
         requests.append(request)
+        if "shell" in request:
+            assert scope.invocation_id in {
+                "skill-install-1",
+                "skill-install-2",
+                "skill-script",
+            }
+            assert request["shell"]["manager"] == "python"
+            assert request["network_domains"] == [
+                "pypi.org",
+                "files.pythonhosted.org",
+            ]
+            environment_hash = (
+                initial_environment_hash
+                if scope.invocation_id == "skill-install-1"
+                else final_environment_hash
+            )
+            return {
+                "ok": True,
+                "exit_code": 0,
+                "stdout": "dependencies-ready",
+                "stderr": "",
+                "environment_hash": environment_hash,
+                "environment_lock": {
+                    "manager": "python",
+                    "packages": [{"name": "demo", "version": "1.0.0"}],
+                },
+            }
+        assert scope.invocation_id == "skill-script"
         assert request["script"] == "scripts/main.py"
         assert json.loads(request["stdin"]) == {"value": 3}
         assert base64.b64decode(request["files"]["assets/data.bin"]) == b"\x00\xff"
@@ -91,7 +127,7 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
         idempotency_key="skill-script:" + run_id,
     )
 
-    async def queue(args, call_context):
+    async def queue(args, call_context, *, snapshot=snapshot):
         async with get_session_factory()() as db:
             invocation = await queue_tool_invocation(db, snapshot, args, call_context)
             await db.commit()
@@ -100,7 +136,82 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
     with patch(
         "app.application.agent_skills.scripts.build_execution_platform",
         return_value=platform,
+    ), patch(
+        "app.application.agent_skills.dependencies.build_execution_platform",
+        return_value=platform,
+    ), patch(
+        "app.application.agent_skills.dependencies._require_package_domains"
     ):
+        install_context = replace(
+            context,
+            invocation_id="skill-install-1",
+            idempotency_key="skill-install-1:" + run_id,
+        )
+        install = await queue(
+            {
+                "version_id": version_id,
+                "manager": "python",
+                "packages": ["demo==1.0.0"],
+            },
+            install_context,
+            snapshot=installer_snapshot,
+        )
+        assert install.status == "awaiting_approval"
+        pending = await execute_tool_invocation(
+            install.id, settings(), "install-before-approval"
+        )
+        assert not pending.ok and pending.error_code == "approval_required"
+        assert requests == []
+        async with get_session_factory()() as db:
+            assert await tool_repository.resolve_tool_invocation_approval(
+                db,
+                workspace_id,
+                install.id,
+                actor_id,
+                utc_now(),
+                utc_now() + timedelta(seconds=30),
+                approve=True,
+            )
+            await db.commit()
+        installed = await execute_tool_invocation(
+            install.id, settings(), "install-worker"
+        )
+        assert (
+            installed.ok
+            and installed.data["environment_hash"] == initial_environment_hash
+        )
+        second_context = replace(
+            context,
+            invocation_id="skill-install-2",
+            idempotency_key="skill-install-2:" + run_id,
+        )
+        second_install = await queue(
+            {
+                "version_id": version_id,
+                "manager": "python",
+                "packages": ["other-demo==2.0.0"],
+            },
+            second_context,
+            snapshot=installer_snapshot,
+        )
+        async with get_session_factory()() as db:
+            assert await tool_repository.resolve_tool_invocation_approval(
+                db,
+                workspace_id,
+                second_install.id,
+                actor_id,
+                utc_now(),
+                utc_now() + timedelta(seconds=30),
+                approve=True,
+            )
+            await db.commit()
+        installed = await execute_tool_invocation(
+            second_install.id, settings(), "install-worker-2"
+        )
+        assert (
+            installed.ok
+            and installed.data["environment_hash"] == final_environment_hash
+        )
         invocation = await queue(arguments, context)
         assert (await queue(arguments, context)).id == invocation.id
         result = await execute_tool_invocation(
@@ -111,7 +222,7 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
             invocation.id, settings(), "script-worker-2"
         )
         assert replay.data == result.data
-        assert len(requests) == 1
+        assert len(requests) == 5
         for number, invalid in enumerate(
             (
                 {**arguments, "version_id": "not-bound"},
@@ -129,7 +240,7 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
             assert not outcome.ok and outcome.error_code == "skill_script_failed", (
                 outcome
             )
-        assert len(requests) == 1
+        assert len(requests) == 5
         drifted = await queue(
             arguments,
             replace(context, invocation_id="drift", idempotency_key="drift:" + run_id),
@@ -155,7 +266,7 @@ async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
             revoked.id, settings(), "revoked-worker"
         )
         assert not outcome.ok
-        assert len(requests) == 1
+        assert len(requests) == 5
     return result.data["artifacts"][0]["download_url"], content
 
 

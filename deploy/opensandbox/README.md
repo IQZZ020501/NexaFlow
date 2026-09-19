@@ -3,8 +3,10 @@
 NexaFlow's API, database, Celery Worker and execution host are separate trust
 boundaries. Do not give the business containers a Docker socket or run arbitrary
 programs on the business host. The Worker talks to an authenticated OpenSandbox
-control plane; each Workflow code job, artifact renderer, Skill script and stdio
-MCP request gets a fresh sandbox with a native expiry and explicit destruction.
+control plane. Workflow code, artifact renderers and stdio MCP requests use
+short-lived sandboxes. Workspace Skill scripts reuse one Run-private sandbox so
+approved dependencies survive subsequent script calls; it is explicitly destroyed
+when the Run reaches a terminal state and still has a native expiry as fallback.
 
 ## Pinned runtime
 
@@ -22,8 +24,12 @@ docker build -f deploy/dockerfiles/app.Dockerfile --target sandbox-runtime \
 The image includes Python, Node.js/npm/npx, the four fixed renderers and their
 locked dependencies. Production must publish this image through the normal
 authorized release process and use an immutable image digest. Skill uploads
-cannot select an image, install requirements or mount a host directory. Bake
-additional reviewed dependencies/MCP programs into a versioned execution image.
+cannot select an image, mount a host directory, provide setup commands or execute
+`requirements.txt`/`package.json` installation. An Agent may request exact-version
+PyPI or npm packages through the built-in dependency installer. Every request is
+recorded in the unified Tool ledger and requires user approval; Python source
+builds and npm lifecycle scripts are disabled. Bake fixed renderer dependencies
+and reviewed MCP programs into a versioned execution image.
 
 ## Dedicated Linux host
 
@@ -78,9 +84,13 @@ the reverse proxy/listening address deliberately; do not bind the control plane
 to all interfaces without network protection.
 
 Python programs, renderers and imported Skill scripts have no external network.
-For stdio MCP, the registration's `egress_domains` must be an exact subset of
-`OPENSANDBOX_EGRESS_DOMAINS` (lowercase domain patterns, not URLs/IPs). Requests
-always deny private, loopback ranges and metadata addresses. Guest-local
+The approval-backed Skill installer temporarily enables only its required package
+registry domains, and restores default-deny before any Skill script runs. Enable
+`pypi.org,files.pythonhosted.org` for Python installs and/or `registry.npmjs.org`
+for Node installs in `OPENSANDBOX_EGRESS_DOMAINS`; leaving them out disables that
+installer. For stdio MCP, the registration's `egress_domains` must be an exact
+subset of the same deployment allowlist (lowercase domain patterns, not URLs/IPs).
+Requests always deny private, loopback ranges and metadata addresses. Guest-local
 loopback remains usable for helper processes; it is not business-host loopback.
 MCP receives only its encrypted registration environment, never business secrets.
 

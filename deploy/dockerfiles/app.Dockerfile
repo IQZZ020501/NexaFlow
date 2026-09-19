@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && groupadd --gid 65532 nexaflow && useradd --uid 65532 --gid 65532 --no-create-home nexaflow
 WORKDIR /opt/nexaflow
 COPY --from=execution-builder /opt/nexaflow/.venv ./.venv
+COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \

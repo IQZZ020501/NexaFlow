@@ -1055,10 +1055,18 @@ async def prepare_agent_run(
         any(path.endswith((".py", ".js")) for path in skill.definition.get("files", {}))
         for skill in skill_snapshots
     ):
-        from app.domain.tools.catalog.service import build_skill_script_tool
+        from app.domain.tools.catalog.service import (
+            build_skill_dependency_installer_tool,
+            build_skill_script_tool,
+        )
 
         script_tool, script_version, _ = build_skill_script_tool(workspace_id)
         skill_tool_refs[script_tool.id] = ToolRef(script_tool.id, script_version.id)
+        if not authorized_by_parent and access_source == "console":
+            installer, installer_version, _ = build_skill_dependency_installer_tool(
+                workspace_id
+            )
+            skill_tool_refs[installer.id] = ToolRef(installer.id, installer_version.id)
     if skill_tool_refs:
         skill_tools = await resolve_tool_refs_for_actor(
             db,

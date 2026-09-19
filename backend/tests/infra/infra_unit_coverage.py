@@ -2042,7 +2042,7 @@ def test_object_storage() -> None:
 
 
 def test_load_env_file() -> None:
-    assert config_mod.ENV_FILE == Path(config_mod.__file__).resolve().parents[3] / ".env"
+    assert config_mod.ENV_FILE == Path(config_mod.__file__).resolve().parents[4] / ".env"
     with TemporaryDirectory() as temp_dir:
         env_path = Path(temp_dir) / ".env"
         env_path.write_text(

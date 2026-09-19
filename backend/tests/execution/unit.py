@@ -54,6 +54,9 @@ def sandbox(files=None, run=None):
         id="sb-owned",
         files=files or Files(),
         destroy=AsyncMock(),
+        renew=AsyncMock(),
+        patch_egress_rules=AsyncMock(),
+        delete_egress_rules=AsyncMock(),
         commands=SimpleNamespace(
             run=run or AsyncMock(return_value=SimpleNamespace(error=None, exit_code=0))
         ),
@@ -111,6 +114,60 @@ async def assert_execution_lifecycle():
             assert command.kwargs["opts"].uid == 65532
             assert command.kwargs["opts"].timeout.total_seconds() == 5
             assert command.kwargs["handlers"].skip_accumulation
+            instance.destroy.assert_awaited_once()
+    finally:
+        execution_scope.reset(scope)
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+async def assert_agent_run_session_lifecycle():
+    instance = sandbox()
+    config = replace(
+        runtime_settings(),
+        opensandbox_egress_domains=("packages.example",),
+    )
+    platform = adapter.OpenSandboxExecution(config)
+    scope = execution_scope.set(ExecutionScope("tenant-a", "install-1", "run-a"))
+    try:
+        with patch.object(
+            adapter.Sandbox,
+            "create",
+            AsyncMock(return_value=instance),
+        ) as create:
+            first = await platform.execute(
+                {
+                    "execution_session": "agent_run",
+                    "network_domains": ["packages.example"],
+                    "shell": {
+                        "manager": "python",
+                        "command": "install",
+                        "bootstrap_id": "a" * 64,
+                    },
+                },
+                timeout_seconds=5,
+                max_output_bytes=1000,
+            )
+            second = await platform.execute(
+                {
+                    "execution_session": "agent_run",
+                    "code": "print(1)",
+                },
+                timeout_seconds=5,
+                max_output_bytes=1000,
+            )
+            assert first == {"ok": True} and second == {"ok": True}
+            assert create.await_count == 1
+            instance.destroy.assert_not_awaited()
+            instance.renew.assert_awaited()
+            instance.patch_egress_rules.assert_awaited_once()
+            rules = instance.patch_egress_rules.call_args.args[0]
+            assert [(rule.action, rule.target) for rule in rules] == [
+                ("allow", "packages.example")
+            ]
+            instance.delete_egress_rules.assert_awaited_once_with(
+                ["packages.example"]
+            )
+            await platform.close_session("tenant-a", "run-a")
             instance.destroy.assert_awaited_once()
     finally:
         execution_scope.reset(scope)
@@ -581,6 +638,7 @@ def main():
             raise AssertionError("A retried run used a different execution profile")
     for check in (
         assert_execution_lifecycle,
+        assert_agent_run_session_lifecycle,
         assert_failure_and_cancellation_cleanup,
         assert_platform_failure_boundaries,
         assert_immutable_package_staging,

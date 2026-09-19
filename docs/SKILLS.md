@@ -57,6 +57,9 @@ skill/version 引用，Run 冻结快照及非敏感执行镜像/网络指纹。�
 - `run_skill_script(version_id, path, inputs, filename?)` 是普通内置 Tool，
   不是绕过账本的管理动作；绑定脚本包的 Agent 自动纳入此 Tool 的固定
   授权快照。只允许运行该 Run 绑定版本中的 `.py`/`.js` 文件。
+- `install_skill_dependencies(version_id, manager, packages)` 只接受精确版本的
+  PyPI `package==version` 或 npm `package@version`，每次调用都需要用户审批。
+  它不接受 URL、路径、版本范围、tag、安装参数或 Skill 自带的安装脚本。
 - 每次加载、读取和执行都重新检查工作空间、绑定者状态、`use` 授权、
   停用状态和不可变版本哈希。Skill 文本不会创建或授权任意 Tool。
 - Tool 仍经过统一审批、幂等、租约和 `tool_invocations` 账本；
@@ -89,9 +92,16 @@ Path(os.environ["NEXAFLOW_OUTPUT_PATH"]).write_text(data)
 attachment/nosniff 与 HTML CSP。脚本默认超时 30 秒，可声明 0.1–120 秒；
 整个调用仍受 Tool/Run 总截止时间限制。
 
-包不能选镜像、挂载宿主目录或安装 `requirements.txt`。依赖须审查后预装
-到版本化执行镜像，生产使用 digest。脚本默认无外网；MCP 走已授权 Tool，
-不向脚本注入业务凭据。
+包不能选镜像、挂载宿主目录、提供安装命令或直接安装
+`requirements.txt`/`package.json`。如果脚本缺包，Agent 可显式调用
+`install_skill_dependencies` 请求精确版本依赖；审批通过后，依赖安装到该
+Agent Run 的私有 OpenSandbox 会话，并由后续脚本复用。Worker 恢复时会根据
+已成功的 Tool 账本重建环境并核对哈希。Python 仅接受二进制 wheel，npm
+禁用 lifecycle scripts；依赖数量、文件数、单文件和总存储均有上限。
+
+安装期间只临时开放部署允许的官方包注册域名，结束后立即恢复默认拒绝；
+脚本本身始终无外网。固定 renderer 依赖仍须预装到 digest 固定的执行镜像。
+MCP 走已授权 Tool，不向脚本注入业务凭据。
 
 ## 固定文件渲染 Tools
 
@@ -110,9 +120,11 @@ Python Code 均通过同一 execution port 进入 OpenSandbox。
 ## 执行边界与检查
 
 生产采用独立 Linux/Kata 主机、`dns+nft` 默认拒绝、无业务挂载/环境继承、
-cgroup/process 限制、任务 UID 65532、显式 destroy 与原生 TTL。普通 Docker
-只用于显式开发检查。包内只读权限和程序限制是纵深防御，不能替代整个
-容器/VM 隔离边界。详情见 [OpenSandbox 部署](../deploy/opensandbox/README.md)。
+cgroup/process 限制、任务 UID 65532、显式 destroy 与原生 TTL。工作空间
+Skill 的安装与脚本在同一个 Run 私有 sandbox 中串行执行；Run 终态销毁，
+Worker 丢失时由原生 TTL 回收。普通 Docker 只用于显式开发检查。包内只读
+权限和程序限制是纵深防御，不能替代整个容器/VM 隔离边界。详情见
+[OpenSandbox 部署](../deploy/opensandbox/README.md)。
 
 回归：`tests.agent_skills.unit`、`tests.agent_skills.api`、
 `tests.agents.harness`、`tests.execution.unit`、`sandbox.tests` 和执行镜像自检。

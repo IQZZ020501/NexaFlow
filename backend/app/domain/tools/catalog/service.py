@@ -1251,6 +1251,93 @@ def build_skill_script_tool(
     )
 
 
+def build_skill_dependency_installer_tool(
+    workspace_id: str, created_at: datetime | None = None
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    tool_id = stable_catalog_id(
+        f"tool:{workspace_id}:builtin:install_skill_dependencies"
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "version_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            "manager": {"type": "string", "enum": ["python", "node"]},
+            "packages": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 3, "maxLength": 255},
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": True,
+            },
+        },
+        "required": ["version_id", "manager", "packages"],
+        "additionalProperties": False,
+    }
+    description = (
+        "Install exact-version Python or Node dependencies for one authorized, "
+        "pinned Skill in this Agent Run's isolated OpenSandbox. This call always "
+        "requires user approval. Use Python package==version or Node package@version; "
+        "URLs, paths, ranges, tags, lifecycle scripts, source builds, and host installs "
+        "are denied. After approval, retry run_skill_script."
+    )
+    execution_spec = {"builtin": "skill_dependency_install"}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "install_skill_dependencies",
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": None,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=source_id,
+            kind="builtin",
+            stable_key="install_skill_dependencies",
+            function_name="install_skill_dependencies",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Install Skill dependencies",
+            description=description,
+            input_schema=input_schema,
+            output_schema=None,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="each_call",
+            effect="external_write",
+            allowed_access_sources=["console"],
+            workflow_callable=False,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
 def build_artifact_tool(
     workspace_id: str,
     created_at: datetime | None = None,
@@ -1513,6 +1600,7 @@ async def ensure_workspace_system_catalog(
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
     await ensure_tool(*build_skill_script_tool(workspace_id))
+    await ensure_tool(*build_skill_dependency_installer_tool(workspace_id))
     for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:
         await ensure_tool(*build_skill_artifact_tool(workspace_id, skill_name))
 

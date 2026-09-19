@@ -161,7 +161,9 @@ async def run(url: str, image: str) -> None:
         opensandbox_image=image,
         opensandbox_api_key=os.environ["OPENSANDBOX_API_KEY"],
     )
-    scope = execution_scope.set(ExecutionScope("smoke-workspace", "smoke-invocation"))
+    scope = execution_scope.set(
+        ExecutionScope("smoke-workspace", "smoke-invocation", "smoke-run")
+    )
     try:
         result = await execute_workflow_code(
             runtime, "result = inputs['value'] + 1", {"value": 2}
@@ -192,6 +194,41 @@ async def run(url: str, image: str) -> None:
                 max_output_bytes=10000,
             )
             assert result.get("ok") and result["stdout"].strip() == "3", result
+        environment = "1" * 32
+        session_script = "import smoke_dependency\nprint(smoke_dependency.VALUE)\n"
+        installed = await platform.execute(
+            {
+                "execution_session": "agent_run",
+                "skill_environment": environment,
+                "files": {"scripts/session.py": encoded(session_script)},
+                "shell": {
+                    "manager": "python",
+                    "command": (
+                        "printf 'VALUE = 7\\n' > "
+                        '"$NEXAFLOW_PYTHON_PACKAGES/smoke_dependency.py"'
+                    ),
+                    "bootstrap_id": "a" * 64,
+                },
+                "limits": {"timeout_ms": 5000},
+            },
+            timeout_seconds=6,
+            max_output_bytes=10000,
+        )
+        assert installed.get("ok") and installed.get("environment_hash"), installed
+        session_result = await platform.execute(
+            {
+                "execution_session": "agent_run",
+                "skill_environment": environment,
+                "script": "scripts/session.py",
+                "files": {"scripts/session.py": encoded(session_script)},
+                "limits": {"timeout_ms": 5000},
+            },
+            timeout_seconds=6,
+            max_output_bytes=10000,
+        )
+        assert session_result.get("ok"), session_result
+        assert session_result["stdout"].strip() == "7", session_result
+        await platform.close_session("smoke-workspace", "smoke-run")
         probe = await platform.execute(
             {
                 "code": "import os, json, socket\nassert not any(k in os.environ for k in ['DATABASE_URL', 'OPENSANDBOX_API_KEY', 'MODEL_SECRET_KEY', 'JWT_SECRET_KEY'])\nfor target in [('1.1.1.1', 443), ('169.254.169.254', 80)]:\n try:\n  socket.create_connection(target, timeout=0.3)\n except OSError:\n  pass\n else:\n  raise AssertionError('Unexpected egress')\nprint('isolated')",

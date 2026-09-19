@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Hashable
 from datetime import timedelta
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
@@ -46,6 +47,9 @@ def _metadata_label(value: str) -> str:
 
 
 class OpenSandboxExecution:
+    _sessions: dict[tuple[Hashable, ...], object] = {}
+    _session_locks: dict[tuple[Hashable, ...], asyncio.Lock] = {}
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
@@ -58,20 +62,126 @@ class OpenSandboxExecution:
         payload = json.dumps(request, ensure_ascii=False, allow_nan=False).encode()
         if len(payload) > MAX_REQUEST_BYTES:
             raise ExecutionError("Execution input exceeds 8 MiB.")
-        endpoint = urlparse(settings.opensandbox_url)
-        config = ConnectionConfig(
+        scope = execution_scope.get()
+        domains = self._network_domains(request)
+        session_key = self._session_key(request, scope)
+        if session_key is None:
+            sandbox = await self._create_sandbox(
+                scope,
+                domains,
+                timeout_seconds,
+                persistent=False,
+            )
+            try:
+                return await self._run_request(
+                    sandbox,
+                    request,
+                    payload,
+                    timeout_seconds,
+                    max_output_bytes,
+                )
+            finally:
+                await self._destroy_sandbox(sandbox)
+
+        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        async with lock:
+            sandbox = self._sessions.get(session_key)
+            if sandbox is None:
+                sandbox = await self._create_sandbox(
+                    scope,
+                    [],
+                    timeout_seconds,
+                    persistent=True,
+                )
+                self._sessions[session_key] = sandbox
+            else:
+                try:
+                    await sandbox.renew(
+                        timedelta(
+                            seconds=max(60, settings.agent_run_timeout_seconds + 60)
+                        )
+                    )
+                except Exception as exc:
+                    self._sessions.pop(session_key, None)
+                    await self._destroy_sandbox(sandbox)
+                    raise ExecutionError(
+                        "OpenSandbox execution is unavailable or failed."
+                    ) from exc
+            try:
+                if domains:
+                    await sandbox.patch_egress_rules(
+                        [NetworkRule(action="allow", target=domain) for domain in domains]
+                    )
+                    await self._require_enforcement(sandbox, domains)
+                return await self._run_request(
+                    sandbox,
+                    request,
+                    payload,
+                    timeout_seconds,
+                    max_output_bytes,
+                )
+            except BaseException:
+                self._sessions.pop(session_key, None)
+                await self._destroy_sandbox(sandbox)
+                raise
+            finally:
+                if domains and self._sessions.get(session_key) is sandbox:
+                    try:
+                        await sandbox.delete_egress_rules(domains)
+                        await self._require_enforcement(sandbox, [])
+                    except BaseException:
+                        self._sessions.pop(session_key, None)
+                        await self._destroy_sandbox(sandbox)
+                        raise
+
+    def _network_domains(self, request) -> list[str]:
+        domains = request.get("network_domains", [])
+        if not isinstance(domains, list) or any(
+            not isinstance(domain, str)
+            or domain not in self.settings.opensandbox_egress_domains
+            for domain in domains
+        ):
+            raise ExecutionError("Execution egress exceeds the deployment allowlist.")
+        for domain in domains:
+            validate_egress_domain(domain)
+        return list(dict.fromkeys(domains))
+
+    def _session_key(self, request, scope):
+        session_scope = request.get("execution_session")
+        if session_scope is None:
+            return None
+        if session_scope != "agent_run" or scope is None or not scope.run_id:
+            raise ExecutionError("Agent Run execution session is unavailable.")
+        return (
+            self.settings.opensandbox_url,
+            self.settings.opensandbox_image,
+            scope.workspace_id,
+            scope.run_id,
+        )
+
+    def _connection_config(self, timeout_seconds):
+        endpoint = urlparse(self.settings.opensandbox_url)
+        return ConnectionConfig(
             domain=endpoint.netloc + endpoint.path.rstrip("/"),
             protocol=endpoint.scheme,
-            api_key=settings.opensandbox_api_key,
+            api_key=self.settings.opensandbox_api_key,
             use_server_proxy=True,
             request_timeout=timedelta(seconds=timeout_seconds + 30),
-            # Retrying a create or an external-write command after an ambiguous
-            # transport failure can duplicate an execution.
             retry_policy=RetryPolicy.disabled(),
             disable_metrics=True,
         )
-        # Code never gets connection_config, control-plane keys or host env.
-        scope = execution_scope.get()
+
+    async def _create_sandbox(
+        self,
+        scope,
+        domains,
+        timeout_seconds,
+        *,
+        persistent,
+    ):
+        settings = self.settings
+        config = self._connection_config(timeout_seconds)
+        sandbox = None
         metadata = {"owner": "nexaflow", "execution": str(uuid4())}
         if scope:
             metadata.update(
@@ -80,21 +190,22 @@ class OpenSandboxExecution:
             )
             if scope.run_id:
                 metadata["run"] = _metadata_label(scope.run_id)
-        domains = request.get("network_domains", [])
-        if not isinstance(domains, list) or any(
-            domain not in settings.opensandbox_egress_domains for domain in domains
-        ):
-            raise ExecutionError("Execution egress exceeds the deployment allowlist.")
-        for domain in domains:
-            validate_egress_domain(domain)
-        sandbox = None
         try:
             sandbox = await Sandbox.create(
                 settings.opensandbox_image,
                 connection_config=config,
                 metadata=metadata,
                 # Native TTL also reclaims executions after worker death or kill failure.
-                timeout=timedelta(seconds=max(60, timeout_seconds + 60)),
+                timeout=timedelta(
+                    seconds=max(
+                        60,
+                        (
+                            settings.agent_run_timeout_seconds + 60
+                            if persistent
+                            else timeout_seconds + 60
+                        ),
+                    )
+                ),
                 ready_timeout=timedelta(seconds=30),
                 resource={"cpu": "1", "memory": "512Mi"},
                 network_policy=NetworkPolicy(
@@ -111,100 +222,144 @@ class OpenSandboxExecution:
                     ],
                 ),
             )
-            # The upstream default `dns` mode does not block direct IP access.
-            # Refuse degraded enforcement before staging credentials or code.
             await self._require_enforcement(sandbox, domains)
-            await sandbox.files.write_files(
-                [
-                    WriteEntry(
-                        path="/tmp/nexaflow-request.json",
-                        data=payload,
-                        mode=400,
-                        owner="nexaflow",
-                        group="nexaflow",
-                    )
-                ]
-            )
-            entries = []
-            for name, encoded in request.get("files", {}).items():
-                if (
-                    not isinstance(name, str)
-                    or PurePosixPath(name).is_absolute()
-                    or any(part in {"", ".", ".."} for part in name.split("/"))
-                    or "\\" in name
-                    or ":" in name
-                ):
-                    raise ExecutionError("Invalid execution package path.")
-                entries.append(
-                    WriteEntry(
-                        path=f"/tmp/nexaflow-skill/{name}",
-                        data=base64.b64decode(encoded, validate=True),
-                        mode=444,
-                        owner="root",
-                        group="root",
-                    )
-                )
-            if entries:
-                await sandbox.files.write_files(entries)
-            count = 0
-
-            async def bound_output(message):
-                nonlocal count
-                count += len(message.text.encode())
-                if count > 8192:
-                    raise ExecutionError("Execution command output exceeds its limit.")
-
-            async with asyncio.timeout(timeout_seconds + 5):
-                result = await sandbox.commands.run(
-                    "/opt/nexaflow/.venv/bin/python -I /opt/nexaflow/job.py /tmp/nexaflow-request.json",
-                    opts=RunCommandOpts(
-                        timeout=timedelta(seconds=timeout_seconds), uid=65532, gid=65532
-                    ),
-                    handlers=ExecutionHandlers(
-                        on_stdout=bound_output,
-                        on_stderr=bound_output,
-                        skip_accumulation=True,
-                    ),
-                )
-                if result.error or result.exit_code not in (None, 0):
-                    raise ExecutionError("OpenSandbox execution failed.")
-                content = bytearray()
-                stream = await sandbox.files.read_bytes_stream(
-                    "/tmp/nexaflow-response.json"
-                )
-                async for chunk in stream:
-                    content.extend(chunk)
-                    if len(content) > max_output_bytes:
-                        raise ExecutionError("Execution output exceeds its limit.")
-                value = json.loads(content)
-                if not isinstance(value, dict):
-                    raise ExecutionError("OpenSandbox returned an invalid response.")
-                return value
-        except ExecutionError:
-            raise
+            return sandbox
         except Exception as exc:
-            # Do not leak endpoints, credentials or provider tracebacks to callers.
+            if sandbox is not None:
+                await self._destroy_sandbox(sandbox)
+            else:
+                await config.close_transport_if_owned()
             raise ExecutionError(
                 "OpenSandbox execution is unavailable or failed."
             ) from exc
-        finally:
-            if sandbox is not None:
-                cleanup = asyncio.create_task(sandbox.destroy())
-                try:
-                    await asyncio.wait_for(asyncio.shield(cleanup), 10)
-                except asyncio.CancelledError:
-                    cleanup.add_done_callback(_consume_cleanup)
-                    raise
-                except Exception:
-                    logger.warning(
-                        "OpenSandbox cleanup deferred to native TTL",
-                        extra={"sandbox_id": sandbox.id},
-                    )
-                    # destroy() closes transport even on kill failure. Keep the task
-                    # alive on cancellation; never swallow the original cancellation.
-                    cleanup.add_done_callback(_consume_cleanup)
-            else:
-                await config.close_transport_if_owned()
+
+    async def _run_request(
+        self,
+        sandbox,
+        request,
+        payload,
+        timeout_seconds,
+        max_output_bytes,
+    ):
+        await sandbox.files.write_files(
+            [
+                WriteEntry(
+                    path="/tmp/nexaflow-request.json",
+                    data=payload,
+                    mode=400,
+                    owner="nexaflow",
+                    group="nexaflow",
+                )
+            ]
+        )
+        environment = request.get("skill_environment")
+        if environment is not None and (
+            not isinstance(environment, str)
+            or re.fullmatch(r"[a-f0-9]{32}", environment) is None
+        ):
+            raise ExecutionError("Invalid Skill environment.")
+        package_root = (
+            f"/tmp/nexaflow-skill/{environment}"
+            if environment is not None
+            else "/tmp/nexaflow-skill"
+        )
+        entries = []
+        files = request.get("files", {})
+        if not isinstance(files, dict):
+            raise ExecutionError("Invalid execution package.")
+        for name, encoded in files.items():
+            if (
+                not isinstance(name, str)
+                or PurePosixPath(name).is_absolute()
+                or any(part in {"", ".", ".."} for part in name.split("/"))
+                or "\\" in name
+                or ":" in name
+            ):
+                raise ExecutionError("Invalid execution package path.")
+            try:
+                data = base64.b64decode(encoded, validate=True)
+            except (TypeError, ValueError) as exc:
+                raise ExecutionError("Invalid execution package content.") from exc
+            entries.append(
+                WriteEntry(
+                    path=f"{package_root}/{name}",
+                    data=data,
+                    mode=444,
+                    owner="root",
+                    group="root",
+                )
+            )
+        if entries:
+            await sandbox.files.write_files(entries)
+        count = 0
+
+        async def bound_output(message):
+            nonlocal count
+            count += len(message.text.encode())
+            if count > 8192:
+                raise ExecutionError("Execution command output exceeds its limit.")
+
+        async with asyncio.timeout(timeout_seconds + 5):
+            result = await sandbox.commands.run(
+                "/opt/nexaflow/.venv/bin/python -I /opt/nexaflow/job.py /tmp/nexaflow-request.json",
+                opts=RunCommandOpts(
+                    timeout=timedelta(seconds=timeout_seconds), uid=65532, gid=65532
+                ),
+                handlers=ExecutionHandlers(
+                    on_stdout=bound_output,
+                    on_stderr=bound_output,
+                    skip_accumulation=True,
+                ),
+            )
+            if result.error or result.exit_code not in (None, 0):
+                raise ExecutionError("OpenSandbox execution failed.")
+            content = bytearray()
+            stream = await sandbox.files.read_bytes_stream(
+                "/tmp/nexaflow-response.json"
+            )
+            async for chunk in stream:
+                content.extend(chunk)
+                if len(content) > max_output_bytes:
+                    raise ExecutionError("Execution output exceeds its limit.")
+            try:
+                value = json.loads(content)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise ExecutionError(
+                    "OpenSandbox returned an invalid response."
+                ) from exc
+            if not isinstance(value, dict):
+                raise ExecutionError("OpenSandbox returned an invalid response.")
+            return value
+
+    async def close_session(self, workspace_id: str, run_id: str) -> None:
+        keys = [
+            key
+            for key in self._sessions
+            if key[:2]
+            == (self.settings.opensandbox_url, self.settings.opensandbox_image)
+            and key[2:] == (workspace_id, run_id)
+        ]
+        for key in keys:
+            lock = self._session_locks.setdefault(key, asyncio.Lock())
+            async with lock:
+                sandbox = self._sessions.pop(key, None)
+                if sandbox is not None:
+                    await self._destroy_sandbox(sandbox)
+            self._session_locks.pop(key, None)
+
+    async def _destroy_sandbox(self, sandbox) -> None:
+        cleanup = asyncio.create_task(sandbox.destroy())
+        try:
+            await asyncio.wait_for(asyncio.shield(cleanup), 10)
+        except asyncio.CancelledError:
+            cleanup.add_done_callback(_consume_cleanup)
+            raise
+        except Exception:
+            logger.warning(
+                "OpenSandbox cleanup deferred to native TTL",
+                extra={"sandbox_id": sandbox.id},
+            )
+            cleanup.add_done_callback(_consume_cleanup)
 
     async def _require_enforcement(self, sandbox, domains):
         endpoint = await sandbox.get_endpoint(18080)
@@ -237,7 +392,7 @@ class OpenSandboxExecution:
             status.get("enforcementMode") != "dns+nft"
             or policy.get("defaultAction") != "deny"
             or not set(DENIED_NETWORKS).issubset(denies)
-            or not allows.issubset(domains)
+            or allows != set(domains)
         ):
             raise ExecutionError(
                 "OpenSandbox requires dns+nft enforcement with private-network denial; execution is disabled."

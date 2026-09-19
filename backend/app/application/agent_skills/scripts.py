@@ -1,54 +1,79 @@
 import json
+import re
 from pathlib import PurePosixPath
 
-from app.application.agent_skills.execution import require_pinned_skill_access
+from app.application.agent_skills.dependencies import (
+    dependency_install_plan,
+    dependency_shell_request,
+    skill_environment_id,
+)
+from app.application.agent_skills.execution import load_authorized_run_skill
 from app.application.tools.runtime.contracts import ToolRuntimeResult
-from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
-from app.domain.agents.models import AGENT_RUN_RUNNING_STATUSES
 from app.domain.artifacts.services import artifact_format_from_filename
-from app.infra.db.repositories.agents import repository as runs
+from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
-from app.infra.execution.profile import require_execution_profile
-from app.infra.sandbox.client import _artifact_result, _execution_fields
+from app.infra.sandbox.client import (
+    WorkflowSandboxError,
+    _artifact_result,
+    _execution_fields,
+)
 from app.ports.execution import build_execution_platform
 
 
-async def execute_skill_script(settings, arguments, context):
-    async with get_session_factory()() as db:
-        run = (
-            await runs.get_agent_run_by_id(db, context.run_id)
-            if context.run_id
-            else None
-        )
+async def _installed_dependency_plans(db, workspace_id: str, run_id: str, version_id: str):
+    from app.domain.tools.catalog.service import build_skill_dependency_installer_tool
+
+    tool, _, _ = build_skill_dependency_installer_tool(workspace_id)
+    invocations = await tool_repository.list_tool_invocations(
+        db,
+        workspace_id,
+        run_id,
+    )
+    installed = []
+    for invocation in reversed(invocations):
         if (
-            run is None
-            or run.workspace_id != context.workspace_id
-            or run.execution_user_id != context.execution_user_id
-            or run.status not in AGENT_RUN_RUNNING_STATUSES
+            invocation.tool_id != tool.id
+            or invocation.status != "succeeded"
+            or invocation.arguments.get("version_id") != version_id
         ):
-            raise ValueError("Skill script requires its authorized Agent run.")
-        require_execution_profile(
-            settings, run.application_snapshot.get("execution_profile")
+            continue
+        result = invocation.result_data
+        if not isinstance(result, dict):
+            raise WorkflowSandboxError("Stored dependency lock is invalid.")
+        expected_hash = result.get("environment_hash")
+        if not isinstance(expected_hash, str) or re.fullmatch(
+            r"[a-f0-9]{64}", expected_hash
+        ) is None:
+            raise WorkflowSandboxError("Stored dependency lock is invalid.")
+        plan = dependency_install_plan(
+            invocation.arguments.get("manager"),
+            invocation.arguments.get("packages"),
         )
-        snapshot = next(
-            (
-                agent_skill_snapshot_from_payload(item)
-                for item in run.skill_snapshots
-                if item.get("version_id") == arguments["version_id"]
-            ),
-            None,
+        installed.append((plan, expected_hash))
+    return installed
+
+
+async def execute_skill_script(settings, arguments, context):
+    snapshot = await load_authorized_run_skill(
+        settings,
+        context,
+        arguments["version_id"],
+    )
+    async with get_session_factory()() as db:
+        installed = await _installed_dependency_plans(
+            db,
+            context.workspace_id,
+            context.run_id,
+            snapshot.version_id,
         )
-        if snapshot is None:
-            raise ValueError("Skill is not in the run's pinned catalog.")
-        # A script tool is not a harness_internal action. Unified invocation
-        # authorization/ledger already ran; package ACL is checked here too.
-        await require_pinned_skill_access(db, context.workspace_id, snapshot)
     path = arguments["path"]
     if path not in snapshot.definition.get("files", {}) or PurePosixPath(
         path
     ).suffix not in {".py", ".js"}:
         raise ValueError("Script is not in the pinned Skill package.")
     request = {
+        "execution_session": "agent_run",
+        "skill_environment": skill_environment_id(snapshot.version_id),
         "script": path,
         "files": snapshot.definition["files"],
         "stdin": json.dumps(arguments["inputs"], ensure_ascii=False),
@@ -64,7 +89,24 @@ async def execute_skill_script(settings, arguments, context):
             "filename": filename,
             "format": artifact_format_from_filename(filename),
         }
-    response = await build_execution_platform(settings).execute(
+    platform = build_execution_platform(settings)
+    expected_hashes = {}
+    replay_hashes = {}
+    for plan, expected_hash in installed:
+        expected_hashes[plan.manager] = expected_hash
+        replay = await platform.execute(
+            dependency_shell_request(snapshot, plan),
+            timeout_seconds=snapshot.definition.get("execution_timeout_seconds", 30),
+            max_output_bytes=256 * 1024,
+        )
+        _execution_fields(replay)
+        replay_hashes[plan.manager] = replay.get("environment_hash")
+    if replay_hashes != expected_hashes:
+        await platform.close_session(context.workspace_id, context.run_id)
+        raise WorkflowSandboxError(
+            "Pinned Skill dependency environment could not be reproduced."
+        )
+    response = await platform.execute(
         request,
         timeout_seconds=snapshot.definition.get("execution_timeout_seconds", 30),
         max_output_bytes=8 * 1024 * 1024,

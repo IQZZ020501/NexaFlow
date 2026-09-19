@@ -233,8 +233,13 @@ not trigger unrelated cleanup.
   caller-supplied Python.
   Workspace Skills are immutable schema-v2 SKILL.md/file bundles with lazy
   loading, live ACL checks and unified-ledger script execution. They cannot
-  clamp an entire Run's budgets or grant tools themselves. Dependencies are
-  baked into the locked execution image, never installed from a Skill upload.
+  clamp an entire Run's budgets or grant tools themselves. Their scripts may
+  request exact-version PyPI/npm dependencies only through the per-call-approved
+  built-in installer. Installation runs in the Run-private OpenSandbox session,
+  with temporary deployment-allowlisted registry egress, Python binary wheels,
+  npm lifecycle scripts disabled, bounded storage and a recorded environment
+  lock; Skill uploads cannot supply setup commands or dependency files. Fixed
+  renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
 - `deploy/` holds the Docker Compose topology, the unified application
