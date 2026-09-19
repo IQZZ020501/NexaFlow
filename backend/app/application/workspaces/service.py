@@ -518,8 +518,8 @@ async def enqueue_upload_storage_cleanups(
 
         try:
             await publish_task(
-                "app.uploads.cleanup_storage",
-                (cleanup_id,),
+                "app.storage.cleanup",
+                ("upload", cleanup_id),
                 settings=settings,
             )
         except Exception as exc:

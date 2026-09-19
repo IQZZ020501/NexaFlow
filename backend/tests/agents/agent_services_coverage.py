@@ -1796,14 +1796,9 @@ async def exercise_repository_workspace_deletion(workspace_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def exercise_tasks() -> None:
-
     original_configure = agent_tasks.configure_task_worker
     original_run_durable = agent_tasks.run_durable_application_run
-    original_list_unified = agent_tasks.list_recoverable_unified_agent_run_ids
-    original_list_legacy = agent_tasks.list_recoverable_legacy_agent_run_ids
     original_log_error = agent_tasks.log_error
-    original_legacy_apply_async = agent_tasks.run_agent_job.apply_async
-    original_unified_apply_async = agent_tasks.run_unified_agent_job.apply_async
     original_broker_url = agent_tasks.celery_app.conf.broker_url
     original_eager = agent_tasks.celery_app.conf.task_always_eager
     try:
@@ -1812,12 +1807,13 @@ def exercise_tasks() -> None:
         # bind=True tasks receive the task instance as `self`; invoke the raw
         # body with a synthetic self carrying a deterministic request id.
         real_task = agent_tasks.run_agent_job._get_current_object()
-        legacy_run_body = type(real_task).run
-        unified_task = agent_tasks.run_unified_agent_job._get_current_object()
-        unified_run_body = type(unified_task).run
+        run_body = type(real_task).run
 
         # run_agent_job: happy path
+        run_calls: list[tuple[str, dict]] = []
+
         async def ok_run(_run_id, _settings, **kwargs):
+            run_calls.append((_run_id, kwargs))
             return None
 
         agent_tasks.run_durable_application_run = ok_run
@@ -1825,8 +1821,18 @@ def exercise_tasks() -> None:
             request=SimpleNamespace(id="worker-task-1"),
             retry=lambda **kwargs: None,
         )
-        assert legacy_run_body(ok_self, "run-ok") is None
-        assert unified_run_body(ok_self, "run-v2-ok") is None
+        assert run_body(ok_self, "run-ok", "legacy") is None
+        assert run_body(ok_self, "run-v2-ok", "unified") is None
+        assert run_calls == [
+            (
+                "run-ok",
+                {"worker_task_id": "worker-task-1", "generation": "legacy"},
+            ),
+            (
+                "run-v2-ok",
+                {"worker_task_id": "worker-task-1", "generation": "unified"},
+            ),
+        ]
 
         # run_agent_job: RUN_BUSY -> self.retry with heartbeat countdown
         async def busy_run(_run_id, _settings, **kwargs):
@@ -1847,7 +1853,7 @@ def exercise_tasks() -> None:
             retry=fake_retry,
         )
         try:
-            legacy_run_body(busy_self, "run-busy")
+            run_body(busy_self, "run-busy", "legacy")
             raise AssertionError("expected retry signal")
         except RetrySignal:
             assert retry_kwargs["countdown"] == 30
@@ -1855,11 +1861,17 @@ def exercise_tasks() -> None:
 
         retry_kwargs.clear()
         try:
-            unified_run_body(busy_self, "run-v2-busy")
+            run_body(busy_self, "run-v2-busy", "unified")
             raise AssertionError("expected retry signal")
         except RetrySignal:
             assert retry_kwargs["countdown"] == 30
             assert retry_kwargs["queue"] == "agents-v2"
+
+        try:
+            run_body(ok_self, "run-invalid", "future")
+            raise AssertionError("expected ValueError")
+        except ValueError:
+            pass
 
         # run_agent_job: crash -> log_error + re-raise
         async def crash_run(_run_id, _settings, **kwargs):
@@ -1867,37 +1879,10 @@ def exercise_tasks() -> None:
 
         agent_tasks.run_durable_application_run = crash_run
         try:
-            legacy_run_body(ok_self, "run-crash")
+            run_body(ok_self, "run-crash", "legacy")
             raise AssertionError("expected RuntimeError")
         except RuntimeError:
             pass
-
-        # Each recovery task only sees and dispatches its own generation.
-        async def unified_ids(_settings):
-            return ["run-unified-1", "run-unified-2"]
-
-        async def legacy_ids(_settings):
-            return ["run-legacy-1"]
-
-        agent_tasks.list_recoverable_unified_agent_run_ids = unified_ids
-        agent_tasks.list_recoverable_legacy_agent_run_ids = legacy_ids
-        unified_dispatched: list[dict] = []
-        legacy_dispatched: list[dict] = []
-        agent_tasks.run_unified_agent_job.apply_async = (
-            lambda **kwargs: unified_dispatched.append(kwargs)
-        )
-        agent_tasks.run_agent_job.apply_async = (
-            lambda **kwargs: legacy_dispatched.append(kwargs)
-        )
-        agent_tasks.recover_agent_runs_job()
-        agent_tasks.recover_legacy_agent_runs_job()
-        assert unified_dispatched == [
-            {"args": ("run-unified-1",), "queue": "agents-v2"},
-            {"args": ("run-unified-2",), "queue": "agents-v2"},
-        ]
-        assert legacy_dispatched == [
-            {"args": ("run-legacy-1",), "queue": "agents-legacy"},
-        ]
 
         # enqueue_agent_run: eager settings execute the run inline
         from app.application.runs import dispatch as run_dispatch
@@ -1930,19 +1915,11 @@ def exercise_tasks() -> None:
 
         from app.infra.queue.celery import celery_app
 
-        legacy_queued: list[dict] = []
-        unified_queued: list[dict] = []
-        agent_tasks.run_agent_job.apply_async = (
-            lambda **kwargs: legacy_queued.append(kwargs)
-        )
-        agent_tasks.run_unified_agent_job.apply_async = (
-            lambda **kwargs: unified_queued.append(kwargs)
-        )
+        queued: list[tuple[str, dict]] = []
         with patch.object(
-            celery_app, "send_task", side_effect=lambda name, **kwargs: {
-                "app.agents.run": legacy_queued,
-                "app.agents.run_v2": unified_queued,
-            }[name].append(kwargs)
+            celery_app,
+            "send_task",
+            side_effect=lambda name, **kwargs: queued.append((name, kwargs)),
         ):
             asyncio.run(run_dispatch.enqueue_agent_run("run-queued", non_eager))
             asyncio.run(
@@ -1952,19 +1929,25 @@ def exercise_tasks() -> None:
                     generation="unified",
                 )
             )
-        legacy_keys = [
-            {k: v for k, v in entry.items() if k in ("args", "queue")}
-            for entry in legacy_queued
-        ]
-        unified_keys = [
-            {k: v for k, v in entry.items() if k in ("args", "queue")}
-            for entry in unified_queued
-        ]
-        assert legacy_keys == [
-            {"args": ("run-queued",), "queue": "agents-legacy"}
-        ]
-        assert unified_keys == [
-            {"args": ("run-v2-queued",), "queue": "agents-v2"}
+        assert [
+            (
+                name,
+                {
+                    key: value
+                    for key, value in entry.items()
+                    if key in {"args", "queue"}
+                },
+            )
+            for name, entry in queued
+        ] == [
+            (
+                "app.agents.run",
+                {"args": ("run-queued", "legacy"), "queue": "agents-legacy"},
+            ),
+            (
+                "app.agents.run",
+                {"args": ("run-v2-queued", "unified"), "queue": "agents-v2"},
+            ),
         ]
 
         # enqueue_agent_run: dispatch failure is logged, not raised
@@ -1979,11 +1962,7 @@ def exercise_tasks() -> None:
     finally:
         agent_tasks.configure_task_worker = original_configure
         agent_tasks.run_durable_application_run = original_run_durable
-        agent_tasks.list_recoverable_unified_agent_run_ids = original_list_unified
-        agent_tasks.list_recoverable_legacy_agent_run_ids = original_list_legacy
         agent_tasks.log_error = original_log_error
-        agent_tasks.run_agent_job.apply_async = original_legacy_apply_async
-        agent_tasks.run_unified_agent_job.apply_async = original_unified_apply_async
         agent_tasks.celery_app.conf.broker_url = original_broker_url
         agent_tasks.celery_app.conf.task_always_eager = original_eager
 

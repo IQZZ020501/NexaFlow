@@ -86,6 +86,24 @@ def test_worker_command_consumes_all_application_queues() -> None:
     assert command[-1] == "--autoscale=10,0"
 
 
+def test_celery_registers_one_task_per_job_type() -> None:
+    from app.infra.queue.celery import celery_app
+
+    celery_app.loader.import_default_modules()
+    registered = {name for name in celery_app.tasks if name.startswith("app.")}
+    assert registered == {
+        "app.agents.run",
+        "app.email.send",
+        "app.knowledge.run_task",
+        "app.maintenance.run",
+        "app.storage.cleanup",
+        "app.tools.run",
+    }
+    assert {
+        entry["task"] for entry in celery_app.conf.beat_schedule.values()
+    } == {"app.maintenance.run"}
+
+
 def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
     import threading
 
@@ -148,6 +166,7 @@ def main() -> None:
     test_coverage_runner_times_out_suites()
     test_celery_worker_pool_is_fork_safe_without_prefork()
     test_worker_command_consumes_all_application_queues()
+    test_celery_registers_one_task_per_job_type()
     test_celery_nonfork_pool_runs_tasks_concurrently()
     test_worker_database_rejects_in_memory_sqlite()
     test_windows_event_loop_policy_is_selector_based()

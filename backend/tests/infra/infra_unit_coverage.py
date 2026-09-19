@@ -2454,7 +2454,7 @@ def test_celery() -> None:
             sender=SimpleNamespace(name="app.knowledge.run_task")
         )
         celery_mod.collect_task_garbage(
-            sender=SimpleNamespace(name="app.maintenance.recover_frequent")
+            sender=SimpleNamespace(name="app.maintenance.run")
         )
         celery_mod.collect_task_garbage(sender=None)
         collect.assert_called_once_with()
@@ -2462,8 +2462,8 @@ def test_celery() -> None:
     app = celery_mod.create_celery_app()
     assert app.task_cls is celery_mod.NexaFlowTask
     display_task = celery_mod.NexaFlowTask()
-    display_task.name = "app.maintenance.recover_minutely"
-    assert display_task.shadow_name((), {}, {}) == "恢复每分钟维护任务"
+    display_task.name = "app.maintenance.run"
+    assert display_task.shadow_name((), {}, {}) == "执行周期维护"
     display_task.name = "app.unregistered"
     assert display_task.shadow_name((), {}, {}) == "app.unregistered"
 
@@ -2474,7 +2474,7 @@ def test_celery() -> None:
         "",
         0,
         "Task %(name)s received",
-        ({"name": "恢复每分钟维护任务"},),
+        ({"name": "执行周期维护"},),
         None,
     )
     assert log_filter.filter(maintenance_log) is False
@@ -2496,7 +2496,7 @@ def test_celery() -> None:
         "",
         0,
         "Scheduler: Sending due task %s (%s)",
-        ("recover-frequent-maintenance", "app.maintenance.recover_frequent"),
+        ("recover-frequent-maintenance", "app.maintenance.run"),
         None,
     )
     assert log_filter.filter(beat_log) is False
@@ -2511,12 +2511,14 @@ def test_celery() -> None:
     beat = app.conf.beat_schedule
     assert beat == {
         "recover-frequent-maintenance": {
-            "task": "app.maintenance.recover_frequent",
+            "task": "app.maintenance.run",
             "schedule": 30.0,
+            "args": ("frequent",),
         },
         "recover-minutely-maintenance": {
-            "task": "app.maintenance.recover_minutely",
+            "task": "app.maintenance.run",
             "schedule": 60.0,
+            "args": ("minutely",),
         },
     }
     assert app.conf.accept_content == ["json"]
@@ -2526,33 +2528,130 @@ def test_celery() -> None:
 def test_maintenance_recovery_sweeps() -> None:
     from app.tasks.maintenance import jobs as maintenance
 
-    first = SimpleNamespace(name="first", run=MagicMock())
-    broken = SimpleNamespace(
-        name="broken",
-        run=MagicMock(side_effect=RuntimeError("boom")),
-    )
-    last = SimpleNamespace(name="last", run=MagicMock())
+    first = MagicMock()
+    broken = MagicMock(side_effect=RuntimeError("boom"))
+    last = MagicMock()
 
     with (
         patch.object(
             maintenance,
-            "FREQUENT_RECOVERY_TASKS",
-            (first, broken, last),
+            "FREQUENT_MAINTENANCE_STEPS",
+            (("first", first), ("broken", broken), ("last", last)),
         ),
+        patch.object(maintenance, "configure_task_worker"),
         patch.object(maintenance, "log_error") as mocked_log_error,
     ):
-        maintenance.recover_frequent_jobs.run()
+        maintenance.run_maintenance_job.run("frequent")
 
-    first.run.assert_called_once_with()
-    broken.run.assert_called_once_with()
-    last.run.assert_called_once_with()
+    first.assert_called_once()
+    broken.assert_called_once()
+    last.assert_called_once()
     mocked_log_error.assert_called_once()
     assert mocked_log_error.call_args.kwargs["task_name"] == "broken"
 
-    minutely = SimpleNamespace(name="minutely", run=MagicMock())
-    with patch.object(maintenance, "MINUTELY_RECOVERY_TASKS", (minutely,)):
-        maintenance.recover_minutely_jobs.run()
-    minutely.run.assert_called_once_with()
+    minutely = MagicMock()
+    with (
+        patch.object(
+            maintenance,
+            "MINUTELY_MAINTENANCE_STEPS",
+            (("minutely", minutely),),
+        ),
+        patch.object(maintenance, "configure_task_worker"),
+    ):
+        maintenance.run_maintenance_job.run("minutely")
+    minutely.assert_called_once()
+
+    try:
+        maintenance.run_maintenance_job.run("unknown")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected unsupported maintenance cadence")
+
+
+def test_maintenance_dispatches_recoverable_work() -> None:
+    from app.tasks.maintenance import jobs as maintenance
+
+    with (
+        patch.object(maintenance, "configure_task_worker"),
+        patch.object(
+            maintenance,
+            "list_recoverable_knowledge_task_ids",
+            new=AsyncMock(return_value=["knowledge-1"]),
+        ),
+        patch.object(
+            maintenance,
+            "reconcile_workflow_agent_children",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            maintenance,
+            "list_recoverable_unified_agent_run_ids",
+            new=AsyncMock(return_value=["agent-v2"]),
+        ),
+        patch.object(
+            maintenance,
+            "list_recoverable_legacy_agent_run_ids",
+            new=AsyncMock(return_value=["agent-v1"]),
+        ),
+        patch.object(
+            maintenance,
+            "list_recoverable_tool_test_invocation_ids",
+            new=AsyncMock(return_value=["tool-1"]),
+        ),
+        patch.object(
+            maintenance,
+            "list_due_email_delivery_ids",
+            new=AsyncMock(return_value=["email-1"]),
+        ),
+        patch.object(maintenance.run_knowledge_task_job, "apply_async") as knowledge,
+        patch.object(maintenance.run_agent_job, "apply_async") as agent,
+        patch.object(maintenance.run_tool_invocation_job, "apply_async") as tool,
+        patch.object(maintenance.run_email_delivery_job, "apply_async") as email,
+    ):
+        maintenance.run_maintenance_job.run("frequent")
+
+    assert knowledge.call_args.kwargs == {"args": ("knowledge-1",)}
+    assert [item.kwargs for item in agent.call_args_list] == [
+        {"args": ("agent-v2", "unified"), "queue": "agents-v2"},
+        {"args": ("agent-v1", "legacy"), "queue": "agents-legacy"},
+    ]
+    assert tool.call_args.kwargs == {"args": ("tool-1",)}
+    assert email.call_args.kwargs == {"args": ("email-1",)}
+
+    with (
+        patch.object(maintenance, "configure_task_worker"),
+        patch.object(
+            maintenance,
+            "cleanup_expired_generated_artifacts",
+            new=AsyncMock(),
+        ) as cleanup_artifacts,
+        patch.object(
+            maintenance,
+            "reconcile_knowledge_graphs",
+            new=AsyncMock(return_value=["graph-1"]),
+        ),
+        patch.object(
+            maintenance,
+            "list_due_knowledge_storage_cleanup_ids",
+            new=AsyncMock(return_value=["knowledge-cleanup-1"]),
+        ),
+        patch.object(
+            maintenance,
+            "prepare_due_upload_cleanups",
+            new=AsyncMock(return_value=["upload-cleanup-1"]),
+        ),
+        patch.object(maintenance.run_knowledge_task_job, "apply_async") as graph,
+        patch.object(maintenance.run_storage_cleanup_job, "apply_async") as storage,
+    ):
+        maintenance.run_maintenance_job.run("minutely")
+
+    cleanup_artifacts.assert_awaited_once_with()
+    assert graph.call_args.kwargs == {"args": ("graph-1",)}
+    assert [item.kwargs for item in storage.call_args_list] == [
+        {"args": ("knowledge", "knowledge-cleanup-1")},
+        {"args": ("upload", "upload-cleanup-1")},
+    ]
 
 
 # ================================================================ tasks
@@ -4653,6 +4752,7 @@ def main() -> None:
     test_validation_normalizers()
     test_celery()
     test_maintenance_recovery_sweeps()
+    test_maintenance_dispatches_recoverable_work()
     test_configure_task_worker()
 
     test_deps()

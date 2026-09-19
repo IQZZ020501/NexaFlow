@@ -418,8 +418,8 @@ async def enqueue_knowledge_storage_cleanup(
 
     try:
         await publish_task(
-            "app.knowledge.cleanup_storage",
-            (cleanup_id,),
+            "app.storage.cleanup",
+            ("knowledge", cleanup_id),
             settings=settings,
         )
     except Exception as exc:

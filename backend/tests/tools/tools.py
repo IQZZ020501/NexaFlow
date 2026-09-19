@@ -6316,8 +6316,6 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
 
     original_configure = tool_tasks.configure_task_worker
     original_execute = tool_tasks.execute_tool_invocation
-    original_recover = tool_tasks.list_recoverable_tool_test_invocation_ids
-    original_apply_async = tool_tasks.run_tool_invocation_job.apply_async
     original_send_task = tool_dispatch.celery_app.send_task
     original_log_error = tool_dispatch.log_error
     original_broker_url = tool_dispatch.celery_app.conf.broker_url
@@ -6369,21 +6367,7 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         else:
             raise AssertionError("A busy Tool invocation must be retried.")
 
-        async def recoverable():
-            return ["invocation-3", "invocation-4"]
-
         dispatched: list[dict] = []
-        tool_tasks.list_recoverable_tool_test_invocation_ids = recoverable
-        tool_tasks.run_tool_invocation_job.apply_async = lambda **kwargs: dispatched.append(
-            kwargs
-        )
-        tool_tasks.recover_tool_invocations_job()
-        assert dispatched == [
-            {"args": ("invocation-3",)},
-            {"args": ("invocation-4",)},
-        ]
-
-        dispatched.clear()
         tool_dispatch.celery_app.conf.task_always_eager = True
         tool_dispatch.celery_app.send_task = lambda *args, **kwargs: dispatched.append(
             {"task": args[0], **kwargs}
@@ -6411,8 +6395,6 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
     finally:
         tool_tasks.configure_task_worker = original_configure
         tool_tasks.execute_tool_invocation = original_execute
-        tool_tasks.list_recoverable_tool_test_invocation_ids = original_recover
-        tool_tasks.run_tool_invocation_job.apply_async = original_apply_async
         tool_dispatch.celery_app.send_task = original_send_task
         tool_dispatch.log_error = original_log_error
         tool_dispatch.celery_app.conf.broker_url = original_broker_url
@@ -6540,14 +6522,14 @@ def test_tool_boundaries_reject_unsafe_payloads() -> None:
 
 def test_tool_tasks_are_registered() -> None:
     from app.infra.queue.celery import celery_app
-    from app.tasks.maintenance.jobs import cleanup_expired_generated_artifacts_job
 
+    celery_app.loader.import_default_modules()
     assert "app.tools.run" in celery_app.tasks
-    assert "app.tools.recover" in celery_app.tasks
-    assert cleanup_expired_generated_artifacts_job.name in celery_app.tasks
+    assert "app.tools.recover" not in celery_app.tasks
+    assert "app.maintenance.run" in celery_app.tasks
     assert (
         celery_app.conf.beat_schedule["recover-frequent-maintenance"]["task"]
-        == "app.maintenance.recover_frequent"
+        == "app.maintenance.run"
     )
 
 

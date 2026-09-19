@@ -1,10 +1,4 @@
-
-from app.application.agents.runs.children import reconcile_workflow_agent_children
-from app.application.agents.runs.executor import (
-    RUN_BUSY,
-    list_recoverable_legacy_agent_run_ids,
-    list_recoverable_unified_agent_run_ids,
-)
+from app.application.agents.runs.executor import RUN_BUSY
 from app.application.runs.dispatch import run_durable_application_run
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
@@ -14,35 +8,16 @@ from app.tasks.runtime import configure_task_worker, run_task_async
 
 logger = get_logger(__name__)
 
+
 @celery_app.task(
     bind=True,
     name="app.agents.run",
     ignore_result=True,
     max_retries=None,
 )
-def run_agent_job(self, run_id: str) -> None:
-    settings = Settings.from_env(require_bootstrap=False)
-    configure_task_worker(settings)
-    try:
-        outcome = run_task_async(
-            run_durable_application_run(run_id, settings, worker_task_id=self.request.id)
-        )
-    except Exception as exc:
-        log_error(logger, "Agent worker job crashed.", exc, agent_run_id=run_id)
-        raise
-    if outcome == RUN_BUSY:
-        raise self.retry(
-            countdown=settings.agent_executor_heartbeat_seconds,
-            queue="agents-legacy",
-        )
-
-@celery_app.task(
-    bind=True,
-    name="app.agents.run_v2",
-    ignore_result=True,
-    max_retries=None,
-)
-def run_unified_agent_job(self, run_id: str) -> None:
+def run_agent_job(self, run_id: str, generation: str = "legacy") -> None:
+    if generation not in {"legacy", "unified"}:
+        raise ValueError(f"Unsupported Agent worker generation: {generation}")
     settings = Settings.from_env(require_bootstrap=False)
     configure_task_worker(settings)
     try:
@@ -51,38 +26,20 @@ def run_unified_agent_job(self, run_id: str) -> None:
                 run_id,
                 settings,
                 worker_task_id=self.request.id,
-                generation="unified",
+                generation=generation,
             )
         )
     except Exception as exc:
-        log_error(logger, "Unified Agent worker job crashed.", exc, agent_run_id=run_id)
+        log_error(
+            logger,
+            "Agent worker job crashed.",
+            exc,
+            agent_run_id=run_id,
+            worker_generation=generation,
+        )
         raise
     if outcome == RUN_BUSY:
         raise self.retry(
             countdown=settings.agent_executor_heartbeat_seconds,
-            queue="agents-v2",
+            queue="agents-v2" if generation == "unified" else "agents-legacy",
         )
-
-@celery_app.task(
-    name="app.agents.recover",
-    ignore_result=True,
-)
-def recover_agent_runs_job() -> None:
-    settings = Settings.from_env(require_bootstrap=False)
-    configure_task_worker(settings)
-    run_task_async(reconcile_workflow_agent_children())
-    run_ids = run_task_async(list_recoverable_unified_agent_run_ids(settings))
-    for run_id in run_ids:
-        run_unified_agent_job.apply_async(args=(run_id,), queue="agents-v2")
-
-@celery_app.task(
-    name="app.agents.recover_legacy",
-    ignore_result=True,
-)
-def recover_legacy_agent_runs_job() -> None:
-    settings = Settings.from_env(require_bootstrap=False)
-    configure_task_worker(settings)
-    run_ids = run_task_async(list_recoverable_legacy_agent_run_ids(settings))
-    for run_id in run_ids:
-        run_agent_job.apply_async(args=(run_id,), queue="agents-legacy")
-
