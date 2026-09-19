@@ -72,7 +72,7 @@ flowchart LR
     Worker --> DB
     Worker --> Qdrant
     Worker --> Storage[(Shared upload storage)]
-    Worker --> Sandbox[Isolated Python sandbox]
+    Worker --> Sandbox[External OpenSandbox / Kata]
     Worker --> Models[LLM providers]
     Worker --> ToolRuntime[Unified Tool Runtime]
     ToolRuntime --> Sandbox
@@ -147,54 +147,19 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml down
 
 ## 本地开发
 
-本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。Docker 只运行 PostgreSQL、Redis 和 Qdrant；API、Worker 与前端分别从源码启动，并共用根目录 `.env`。macOS Worker 使用系统 Seatbelt 隔离代码子进程；Linux Worker 使用 namespace/chroot，需以 root 启动。Windows 请在 WSL2 内启动 API 与 Worker，原生 Windows Worker 会拒绝启动。
-
-### 1. 首次安装依赖
+本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。macOS 与 Linux 直接在仓库根目录运行：
 
 ```bash
-test -f .env || cp .env.example .env
-(cd backend && uv sync --dev --frozen)
-(cd frontend && bun install --frozen-lockfile)
-```
-
-### 2. 启动开发依赖
-
-```bash
-docker compose --env-file .env \
-  -f deploy/docker-compose.yml \
-  -f deploy/docker-compose.dev.yml \
-  up -d --build --wait db redis qdrant
-```
-
-这条命令只启动数据库、Redis 和 Qdrant。API 启动时会执行迁移。
-
-### 3. 启动 API
-
-```bash
-cd backend
 make dev
 ```
 
-`make dev` 会再次确认基础服务和迁移状态，然后在 <http://127.0.0.1:8000> 启动 API。
-如果端口已被其他 API 占用，先停止旧进程，或使用 `make dev PORT=8001` 启动到其他端口。
+首次运行会自动创建私有 `.env`、生成缺失的本地密钥、同步后端/前端依赖、构建执行镜像、生成普通 Docker 的 OpenSandbox 开发配置、启动 PostgreSQL/Redis/Qdrant，并应用 Alembic 迁移。随后由同一终端统一托管 OpenSandbox、API、Celery Worker 与前端，日志带进程前缀。开发配置保存在 `~/.local/share/nexaflow-opensandbox`，不会覆盖已有配置。
 
-### 4. 启动 Worker
+启动完成后访问 <http://localhost:3000>；API 健康检查和文档分别位于 <http://localhost:8000/health> 与 <http://localhost:8000/docs>。按 `Ctrl+C` 会停止本次托管的 OpenSandbox、API、Worker 和前端，但保留基础容器及数据，便于下次快速启动。若 OpenSandbox 已在运行且密钥匹配，启动器会直接复用。
 
-```bash
-cd backend
-make worker
-```
+默认端口被其他开发进程占用时，可用一次性的 `NEXAFLOW_DEV_API_PORT=8001 NEXAFLOW_DEV_FRONTEND_PORT=3001 make dev` 启动；前端代理会自动指向对应 API 端口。
 
-Worker 会从 `sandbox/` 源码启动并监管沙箱 Broker；无需单独启动 sandbox 服务。
-
-### 5. 启动前端
-
-```bash
-cd frontend
-bun run dev
-```
-
-前端默认运行在 <http://localhost:3000>，开发服务器会把 `/api`、`/health`、`/docs` 和 `/openapi.json` 代理到后端。
+本地 `--development` OpenSandbox 使用普通 Docker，只用于功能开发，不代表生产级隔离；生产仍须使用独立 Linux/Kata 执行主机。原生 Windows 不支持，请在 WSL2 中运行。需要单独调试 API 或 Worker 时，仍可分别使用 `cd backend && make dev` 和 `cd backend && make worker`。
 
 ## 仓库结构
 
@@ -202,7 +167,7 @@ bun run dev
 NexaFlow/
 ├── backend/    FastAPI API、服务、能力适配器、Celery 与 Alembic
 ├── frontend/   Next.js App Router、页面组件、API 客户端与三语词典
-├── sandbox/    Workflow Python Code 节点的隔离执行服务
+├── sandbox/    OpenSandbox 独立执行镜像、任务协议与固定文件渲染器
 ├── deploy/     Docker Compose、Dockerfile 与 Nginx 示例
 ├── docs/       模块、产品与工程文档
 ├── scripts/    仓库辅助脚本
@@ -248,17 +213,20 @@ bun run build
 沙箱：
 
 ```bash
-python3 -m sandbox.self_check
+uv run --project sandbox python -m sandbox.tests
+bash sandbox/run_coverage.sh
 ```
 
+执行镜像自检及真实 OpenSandbox 检查见 [部署说明](deploy/opensandbox/README.md)。
 完整 CI 套件以 [.github/workflows/ci.yml](.github/workflows/ci.yml) 为准。
 
 ## 安全说明
 
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
-- stdio MCP 配置允许工作空间管理员启动后端进程，因此只应向可信管理员开放管理权限。
-- Python Tool 与 Python Code 节点必须运行在 Worker 监管的源码沙箱中；socket 只能存在于 Worker 进程树，不能暴露给 API 或宿主外部网络。
+- stdio MCP 在独立 OpenSandbox 内运行；command/cwd 是执行镜像路径，不能读取业务宿主目录。仅注入该集成的环境值，出站域名须由部署 allowlist 批准。
+- Python Tool、Python Code、文件渲染与 Skill 脚本通过统一 execution port 执行；业务 Worker 无 Docker socket、namespace 特权或本地运行器回退。
+- 生产执行平面使用 Kata + `dns+nft`、持久化元数据与不可变镜像 digest；网络策略不满足要求时失败关闭。开发 Docker 测试不能替代生产 VM 隔离验收。
 - 不要提交根目录 `.env`、模型凭据或其他真实密钥。
 
 ## 贡献

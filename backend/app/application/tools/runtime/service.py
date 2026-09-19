@@ -210,11 +210,21 @@ async def execute_tool_invocation(
         remaining = max(0.001, (context.deadline_at - utc_now()).total_seconds())
         try:
             async with asyncio.timeout(remaining):
-                result = await selected_adapter.invoke(
-                    snapshot,
-                    invocation.arguments,
-                    context,
+                from app.ports.execution import ExecutionScope, execution_scope
+
+                scope_token = execution_scope.set(
+                    ExecutionScope(
+                        context.workspace_id, context.invocation_id, context.run_id
+                    )
                 )
+                try:
+                    result = await selected_adapter.invoke(
+                        snapshot,
+                        invocation.arguments,
+                        context,
+                    )
+                finally:
+                    execution_scope.reset(scope_token)
         except ToolAdapterBusy:
             if invocation.attempts + 1 < invocation.max_attempts:
                 async with get_session_factory()() as db:

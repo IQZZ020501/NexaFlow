@@ -35,6 +35,11 @@ import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { SkillDialog } from "@/components/tools/skill-dialog"
+import {
+  listAllAgentSkills,
+  updateAgentSkill,
+  type AgentSkill,
+} from "@/lib/api/agent-skills"
 import { ToolPermissionsDialog } from "@/components/tools/tool-permissions-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -205,6 +210,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   }>({ open: false, tool: null })
   const [mcpDialogOpen, setMcpDialogOpen] = React.useState(false)
   const [skillDialogOpen, setSkillDialogOpen] = React.useState(false)
+  const [workspaceSkills, setWorkspaceSkills] = React.useState<AgentSkill[]>([])
+  const [editingSkill, setEditingSkill] = React.useState<
+    AgentSkill | undefined
+  >()
   const [permissionTool, setPermissionTool] =
     React.useState<ToolSummary | null>(null)
   const [moveToolTarget, setMoveToolTarget] =
@@ -232,23 +241,27 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     if (!token || !selectedWorkspaceId) {
       setTools([])
       setSources([])
+      setWorkspaceSkills([])
       return
     }
     const requestId = ++requestRef.current
     setIsLoading(true)
     setError(null)
     try {
-      const [nextTools, nextSources] = await Promise.all([
+      const [nextTools, nextSources, nextSkills] = await Promise.all([
         listAllTools(token, selectedWorkspaceId),
         listAllToolSources(token, selectedWorkspaceId),
+        listAllAgentSkills(token, selectedWorkspaceId),
       ])
       if (requestId !== requestRef.current) return
       setTools(nextTools)
       setSources(nextSources)
+      setWorkspaceSkills(nextSkills)
     } catch (nextError) {
       if (requestId !== requestRef.current) return
       setTools([])
       setSources([])
+      setWorkspaceSkills([])
       setError(getErrorMessage(nextError, t))
     } finally {
       if (requestId === requestRef.current) setIsLoading(false)
@@ -293,6 +306,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     displayToolName
   )
   const isSkillsTab = Boolean(initialKind) && activeKind === "builtin"
+  const filteredWorkspaceSkills = workspaceSkills.filter(
+    (skill) =>
+      !query ||
+      `${skill.name} ${skill.description}`.toLowerCase().includes(query)
+  )
   const builtinSkillTools = sortToolResources(
     tools.filter(
       (tool) =>
@@ -784,7 +802,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           </Button>
         </div>
       ) : isSkillsTab ? (
-        query && builtinSkillTools.length === 0 ? (
+        query && builtinSkillTools.length === 0 && filteredWorkspaceSkills.length === 0 ? (
           <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
             {t("没有匹配的工具")}
           </div>
@@ -853,8 +871,73 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 >
                   {t("工作区 Skills")}
                 </h2>
-                <Badge variant="secondary">0</Badge>
-              </div>
+                  <Badge variant="secondary">{workspaceSkills.length}</Badge>
+                </div>
+                {workspaceSkills.length ? (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {filteredWorkspaceSkills.map((skill) => (
+                        <article
+                          key={skill.id}
+                          className="min-w-0 rounded-md border p-4"
+                        >
+                          <Button
+                            variant="ghost"
+                            className="max-w-full justify-start truncate px-0 font-semibold"
+                            onClick={() => {
+                              setEditingSkill(skill)
+                              setSkillDialogOpen(true)
+                            }}
+                          >
+                            {skill.name}
+                          </Button>
+                          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+                            {skill.description}
+                          </p>
+                          <div className="mt-3 flex items-center gap-2">
+                            <Badge variant="secondary">
+                              {skill.status === "disabled"
+                                ? t("已停用")
+                                : skill.current_version_number
+                                  ? `${t("已发布版本")} ${skill.current_version_number}`
+                                  : t("草稿")}
+                            </Badge>
+                            {skill.can_manage ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={busyId === skill.id}
+                                onClick={async () => {
+                                  setBusyId(skill.id)
+                                  try {
+                                    await updateAgentSkill(
+                                      accessToken,
+                                      workspaceId,
+                                      skill.id,
+                                      {
+                                        status:
+                                          skill.status === "active"
+                                            ? "disabled"
+                                            : "active",
+                                      }
+                                    )
+                                    await load()
+                                  } catch (cause) {
+                                    message("error", getErrorMessage(cause, t))
+                                  } finally {
+                                    setBusyId(null)
+                                  }
+                                }}
+                              >
+                                {skill.status === "active"
+                                  ? t("停用")
+                                  : t("启用")}
+                              </Button>
+                            ) : null}
+                          </div>
+                        </article>
+                      ))}
+                  </div>
+                ) : (
               <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
                 <p className="font-medium">{t("还没有工作区 Skill")}</p>
                 <p className="mt-1 max-w-md text-sm text-muted-foreground">
@@ -869,6 +952,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   {t("新建 Skill")}
                 </Button>
               </div>
+                )}
             </section>
           </div>
         )
@@ -893,9 +977,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   {filteredTools.map((tool) => {
                     const Icon = kindIcon(tool.kind)
                     const available = toolIsAvailable(tool)
-                    const source = sources.find(
-                      (item) => item.id === tool.source.id
-                    )
+              const source = sources.find((item) => item.id === tool.source.id)
                     return (
                       <article
                         key={tool.id}
@@ -949,9 +1031,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                 <h3 className="truncate text-sm font-semibold">
                                   {displayToolName(tool)}
                                 </h3>
-                                <Badge
-                                  variant={available ? "secondary" : "outline"}
-                                >
+                          <Badge variant={available ? "secondary" : "outline"}>
                                   {available ? t("可用") : t("不可用")}
                                 </Badge>
                                 {tool.permission ? (
@@ -960,9 +1040,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                   </Badge>
                                 ) : null}
                                 {source?.status === "disabled" ? (
-                                  <Badge variant="outline">
-                                    {t("来源已禁用")}
-                                  </Badge>
+                            <Badge variant="outline">{t("来源已禁用")}</Badge>
                                 ) : null}
                               </div>
                             </div>
@@ -1076,10 +1154,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                             variant="destructive"
                                             disabled={Boolean(busyId)}
                                             onSelect={() =>
-                                              void setMcpPolicy(
-                                                tool,
-                                                "disabled"
-                                              )
+                                        void setMcpPolicy(tool, "disabled")
                                             }
                                           >
                                             <PowerIcon />
@@ -1097,9 +1172,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                     onSelect={() => void togglePythonTool(tool)}
                                   >
                                     <PowerIcon />
-                                    {tool.status === "active"
-                                      ? t("禁用")
-                                      : t("启用")}
+                              {tool.status === "active" ? t("禁用") : t("启用")}
                                   </DropdownMenuItem>
                                 ) : null}
                                 {tool.kind === "python" ||
@@ -1144,14 +1217,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         <dl
                           className={`mt-auto grid min-w-0 grid-cols-2 gap-3 pt-4 text-sm ${tool.can_manage ? "pr-10" : ""}`}
                         >
-                          <Spec
-                            label={t("类型")}
-                            value={t(kindLabel(tool.kind))}
-                          />
-                          <Spec
-                            label={t("来源")}
-                            value={displaySourceName(tool)}
-                          />
+                    <Spec label={t("类型")} value={t(kindLabel(tool.kind))} />
+                    <Spec label={t("来源")} value={displaySourceName(tool)} />
                         </dl>
                       </article>
                     )
@@ -1232,8 +1299,16 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         onError={(value) => message("error", value)}
       />
       <SkillDialog
+        key={`${workspaceId}:${editingSkill?.id ?? "new"}:${skillDialogOpen}`}
         open={skillDialogOpen}
-        onOpenChange={setSkillDialogOpen}
+        onOpenChange={(open) => {
+          setSkillDialogOpen(open)
+          if (!open) setEditingSkill(undefined)
+        }}
+        token={accessToken}
+        workspaceId={workspaceId}
+        skill={editingSkill}
+        onSaved={() => void load()}
         returnFocusRef={addToolTriggerRef}
       />
       <ToolPermissionsDialog
@@ -1257,7 +1332,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         <DialogContent
           className={cn(
             "max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto",
-            skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl",
+            skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl"
           )}
         >
           <IconButton

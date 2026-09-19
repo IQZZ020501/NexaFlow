@@ -93,6 +93,7 @@ import {
   type ConversationExportMessage,
 } from "@/lib/conversation-export"
 import { latestRunVersions } from "@/lib/run-versions"
+import { useVisualViewportShellStyle } from "@/lib/visual-viewport"
 import {
   AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
@@ -105,37 +106,6 @@ import {
 type PublicAgentChatProps = {
   agentId: string
   initialConversationId?: string | null
-}
-
-function readVisualViewportHeight() {
-  const viewport = window.visualViewport
-  if (!viewport) return null
-  const height = Math.round(viewport.height)
-  return Number.isFinite(height) && height > 0 ? height : null
-}
-
-function useVisualViewportHeight() {
-  const [height, setHeight] = React.useState<number | null>(
-    readVisualViewportHeight
-  )
-
-  React.useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return
-
-    const sync = () => {
-      const next = readVisualViewportHeight()
-      setHeight((current) => (current === next ? current : next))
-    }
-    viewport.addEventListener("resize", sync)
-    viewport.addEventListener("scroll", sync)
-    return () => {
-      viewport.removeEventListener("resize", sync)
-      viewport.removeEventListener("scroll", sync)
-    }
-  }, [])
-
-  return height
 }
 
 function CopyMessageButton({ value }: { value: string }) {
@@ -1039,7 +1009,7 @@ export function PublicAgentChat({
   const { t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored, notify } = useSession()
-  const viewportHeight = useVisualViewportHeight()
+  const viewportStyle = useVisualViewportShellStyle()
   const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
   const [conversations, setConversations] = React.useState<
     PublicAgentConversation[]
@@ -1710,11 +1680,7 @@ export function PublicAgentChat({
   return (
     <main
       className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 lg:h-svh lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]"
-      style={
-        viewportHeight
-          ? { height: viewportHeight, maxHeight: viewportHeight }
-          : undefined
-      }
+      style={viewportStyle}
     >
       <aside className="hidden min-h-0 border-r lg:block">
         <ConversationHistory {...historyProps} />

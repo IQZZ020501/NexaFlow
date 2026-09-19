@@ -1,6 +1,12 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const zhHant = {
+  "编辑 Skill": "編輯 Skill",
+  "技能指令": "技能指令",
+  "包文件": "套件檔案",
+  "保存并发布": "儲存並發佈",
+  "Skill 包不能超过 2 MiB": "Skill 套件不能超過 2 MiB",
+  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。": "Skill 是按需載入的指令與檔案套件，不會自動建立或授權外部工具。",
   调整当前任务: "調整目前任務",
   追加后续任务: "追加後續任務",
   "指令已排队，将在下一轮生效": "指令已排隊，將在下一輪生效",
@@ -1154,12 +1160,12 @@ export const zhHant = {
   SSE: "SSE",
   "兼容旧版远程 Server": "相容舊版遠端 Server",
   stdio: "stdio",
-  "运行本地 stdio Server": "執行本機 stdio Server",
+  "运行本地 stdio Server": "在 OpenSandbox 中執行 stdio Server",
   "stdio 命令：{command}": "stdio 命令：{command}",
   "stdio 配置（JSON）": "stdio 設定（JSON）",
   "请输入有效的 stdio JSON 配置。": "請輸入有效的 stdio JSON 設定。",
   "stdio 配置会加密保存，之后不会返回明文。":
-    "stdio 設定會加密儲存，之後不會回傳明文。",
+    "stdio 設定加密儲存，不回傳明文。命令及目錄指向執行映像；出站網域須在部署白名單內。",
   "例如：业务工具": "例如：業務工具",
   "MCP 地址": "MCP 位址",
   "支持 HTTP 和 HTTPS；内网地址需由部署管理员启用，HTTP 不加密。":

@@ -12,13 +12,9 @@ SQLite database (schema created per ``with`` block).
 """
 
 import asyncio
-import base64
-import hashlib
-import importlib.util
 import json
 import logging
 import os
-import sys
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -123,7 +119,6 @@ from app.infra.runtime.validation import (
     normalize_name,
     normalize_username,
 )
-from app.infra.sandbox import client as code_sandbox
 from app.infra.security.auth import (
     create_access_token,
     create_refresh_token,
@@ -1404,32 +1399,9 @@ def test_mcp_client_sse() -> None:
 
 
 def test_mcp_client_stdio() -> None:
-    async def scenario() -> None:
-        fake_client = _FakeMcpClient()
-        client_factory = MagicMock(return_value=fake_client)
-        stdio_client_mock = MagicMock(return_value=_FakeTransport())
-        stdio_config = mcp_stdio.McpStdioConfig(
-            command="/bin/echo",
-            args=("hello",),
-            cwd=None,
-            env=(("A", "B"),),
-        )
-        with patch.object(mcp_capabilities.client, "Client", client_factory), patch.object(
-            mcp_capabilities.client, "stdio_client", stdio_client_mock
-        ):
-            async with mcp_client(
-                McpConnection(transport="stdio", stdio_config=stdio_config),
-                _mcp_settings(),
-                timeout_seconds=5,
-            ) as client:
-                assert client is fake_client
-                assert client_factory.call_args.kwargs["read_timeout_seconds"] == 5
-                params = stdio_client_mock.call_args.args[0]
-                assert params.command == "/bin/echo"
-                assert params.args == ["hello"]
-                assert params.env == {"A": "B"}
+    from tests.execution.unit import assert_stdio_dispatch
 
-    run(scenario())
+    run(assert_stdio_dispatch())
 
 
 def test_mcp_client_error_paths() -> None:
@@ -1727,36 +1699,43 @@ def test_call_mcp_tool() -> None:
         )
         with patch.object(mcp_capabilities.client, "mcp_client") as context:
             context.return_value.__aenter__.return_value = fake_client
-            content, is_error = await call_mcp_tool(
-                McpConnection(transport="streamable_http", url="https://example.com/mcp"),
+            result = await call_mcp_tool(
+                McpConnection(
+                    transport="streamable_http", url="https://example.com/mcp"
+                ),
                 _mcp_settings(),
                 "echo",
                 {"message": "hi"},
                 idempotency_key="idem-1",
             )
-        assert not is_error
-        assert json.loads(content) == {"message": "hi"}
-        assert fake_client.call_tool.call_args.kwargs["meta"] == {"nexaflow/idempotencyKey": "idem-1"}
+        assert not result.is_error
+        assert result.structured_content == {"message": "hi"}
+        assert fake_client.call_tool.call_args.kwargs["meta"] == {
+            "nexaflow/idempotencyKey": "idem-1"
+        }
 
         # no structured content -> dump content items
         fake_client.call_tool.return_value = SimpleNamespace(
             structured_content=None,
-            content=[SimpleNamespace(model_dump=lambda **kw: {"type": "text", "text": "raw"})],
+            content=[
+                SimpleNamespace(model_dump=lambda **kw: {"type": "text", "text": "raw"})
+            ],
             is_error=True,
         )
         with patch.object(mcp_capabilities.client, "mcp_client") as context:
             context.return_value.__aenter__.return_value = fake_client
-            content, is_error = await call_mcp_tool(
-                McpConnection(transport="streamable_http", url="https://example.com/mcp"),
+            result = await call_mcp_tool(
+                McpConnection(
+                    transport="streamable_http", url="https://example.com/mcp"
+                ),
                 _mcp_settings(),
                 "echo",
                 {},
             )
-        assert is_error
-        assert json.loads(content) == [{"type": "text", "text": "raw"}]
+        assert result.is_error
+        assert result.content == [{"type": "text", "text": "raw"}]
         assert fake_client.call_tool.call_args.kwargs.get("meta") is None
 
-        # truncation
         fake_client.call_tool.return_value = SimpleNamespace(
             structured_content={"data": "x" * (MAX_MCP_RESULT_CHARS + 100)},
             content=[],
@@ -1764,13 +1743,19 @@ def test_call_mcp_tool() -> None:
         )
         with patch.object(mcp_capabilities.client, "mcp_client") as context:
             context.return_value.__aenter__.return_value = fake_client
-            content, _ = await call_mcp_tool(
-                McpConnection(transport="streamable_http", url="https://example.com/mcp"),
-                _mcp_settings(),
-                "echo",
-                {},
-            )
-        assert content.endswith("\n[truncated]")
+            try:
+                await call_mcp_tool(
+                    McpConnection(
+                        transport="streamable_http", url="https://example.com/mcp"
+                    ),
+                    _mcp_settings(),
+                    "echo",
+                    {},
+                )
+            except McpClientError:
+                pass
+            else:
+                raise AssertionError("Oversized MCP output accepted")
 
     run(scenario())
 
@@ -1814,6 +1799,7 @@ def test_mcp_stdio_parse() -> None:
             "args": ["--port", "8080"],
             "cwd": "/tmp",
             "env": {"B": "b", "TOKEN": "abc"},
+            "egress_domains": [],
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -1825,602 +1811,146 @@ def test_mcp_stdio_parse() -> None:
     )
     assert from_json.args == ("x",)
 
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config("x" * (mcp_stdio.MAX_STDIO_CONFIG_JSON_CHARS + 1)), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config("not json"), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config([1, 2]), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "bogus": 1}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"args": []}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "relative/path"}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": ""}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": 42}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "args": "nope"}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "args": [1]}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "args": ["x" * (mcp_stdio.MAX_STDIO_ARGUMENT_CHARS + 1)]}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "args": ["a\x00b"]}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "cwd": "relative"}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "env": "nope"}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "env": {"1BAD": "x"}}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "env": {"OK": "x" * (mcp_stdio.MAX_STDIO_ENV_VALUE_CHARS + 1)}}), mcp_stdio.McpStdioConfigError)
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "env": {"OK": 5}}), mcp_stdio.McpStdioConfigError)
-    many_args = {"command": "/bin/echo", "args": [f"a{index}" for index in range(mcp_stdio.MAX_STDIO_ARGS + 1)]}
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config(many_args), mcp_stdio.McpStdioConfigError)
-    many_env = {"command": "/bin/echo", "env": {f"K{index}": "v" for index in range(mcp_stdio.MAX_STDIO_ENV_VARS + 1)}}
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config(many_env), mcp_stdio.McpStdioConfigError)
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            "x" * (mcp_stdio.MAX_STDIO_CONFIG_JSON_CHARS + 1)
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config("not json"),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config([1, 2]), mcp_stdio.McpStdioConfigError
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "bogus": 1}),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config({"args": []}),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config({"command": "relative/path"}),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config({"command": ""}),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config({"command": 42}),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {"command": "/bin/echo", "args": "nope"}
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config({"command": "/bin/echo", "args": [1]}),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {
+                "command": "/bin/echo",
+                "args": ["x" * (mcp_stdio.MAX_STDIO_ARGUMENT_CHARS + 1)],
+            }
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {"command": "/bin/echo", "args": ["a\x00b"]}
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {"command": "/bin/echo", "cwd": "relative"}
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {"command": "/bin/echo", "env": "nope"}
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {"command": "/bin/echo", "env": {"1BAD": "x"}}
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {
+                "command": "/bin/echo",
+                "env": {"OK": "x" * (mcp_stdio.MAX_STDIO_ENV_VALUE_CHARS + 1)},
+            }
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(
+            {"command": "/bin/echo", "env": {"OK": 5}}
+        ),
+        mcp_stdio.McpStdioConfigError,
+    )
+    many_args = {
+        "command": "/bin/echo",
+        "args": [f"a{index}" for index in range(mcp_stdio.MAX_STDIO_ARGS + 1)],
+    }
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(many_args),
+        mcp_stdio.McpStdioConfigError,
+    )
+    many_env = {
+        "command": "/bin/echo",
+        "env": {f"K{index}": "v" for index in range(mcp_stdio.MAX_STDIO_ENV_VARS + 1)},
+    }
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(many_env),
+        mcp_stdio.McpStdioConfigError,
+    )
     # serialized size check
-    big_env = {"command": "/bin/echo", "env": {f"K{index}": "v" * 2100 for index in range(mcp_stdio.MAX_STDIO_ENV_VARS)}}
-    expect_error(lambda: mcp_stdio.parse_mcp_stdio_config(big_env), mcp_stdio.McpStdioConfigError)
+    big_env = {
+        "command": "/bin/echo",
+        "env": {
+            f"K{index}": "v" * 2100 for index in range(mcp_stdio.MAX_STDIO_ENV_VARS)
+        },
+    }
+    expect_error(
+        lambda: mcp_stdio.parse_mcp_stdio_config(big_env), mcp_stdio.McpStdioConfigError
+    )
 
 
 def test_mcp_stdio_runtime_validation() -> None:
-    valid = mcp_stdio.McpStdioConfig(command="/bin/echo", args=(), cwd=None, env=())
+    # Container paths need not exist on the API or Worker host.
+    valid = mcp_stdio.McpStdioConfig(
+        command="/image-only/server", args=(), cwd="/image-only/work", env=()
+    )
     mcp_stdio.validate_mcp_stdio_config_runtime(valid)
-    with_cwd = mcp_stdio.McpStdioConfig(command="/bin/echo", args=(), cwd="/tmp", env=())
-    mcp_stdio.validate_mcp_stdio_config_runtime(with_cwd)
     expect_error(
         lambda: mcp_stdio.validate_mcp_stdio_config_runtime(
-            mcp_stdio.McpStdioConfig(command="/bin/definitely-missing", args=(), cwd=None, env=())
-        ),
-        mcp_stdio.McpStdioConfigError,
-    )
-    expect_error(
-        lambda: mcp_stdio.validate_mcp_stdio_config_runtime(
-            mcp_stdio.McpStdioConfig(command="/bin/echo", args=(), cwd="/definitely/missing/dir", env=())
+            mcp_stdio.McpStdioConfig(command="relative/path", args=(), cwd=None, env=())
         ),
         mcp_stdio.McpStdioConfigError,
     )
 
 
-# ================================================================ code_sandbox
+# ================================================================ execution
 
 
-class _FakeSandboxWriter:
-    def __init__(self):
-        self.data = b""
-        self.closed = False
+def test_execution_platform() -> None:
+    from tests.execution.unit import main as check_execution
 
-    def write(self, data):
-        self.data += data
-
-    async def drain(self):
-        pass
-
-    def close(self):
-        self.closed = True
-
-    async def wait_closed(self):
-        pass
-
-
-class _FakeSandboxReader:
-    def __init__(self, line, error=None):
-        self.line = line
-        self.error = error
-
-    async def readline(self):
-        if self.error is not None:
-            raise self.error
-        return self.line
-
-
-def _sandbox_response(**overrides):
-    payload = {
-        "ok": True,
-        "exit_code": 0,
-        "stdout": "",
-        "stderr": "",
-    }
-    payload.update(overrides)
-    return json.dumps(payload).encode()
-
-
-async def _run_sandbox(reader, settings_override=None, code="x = 1\nresult = x + 1", inputs=None):
-    writer = _FakeSandboxWriter()
-    runtime_settings = replace(settings(), workflow_sandbox_timeout_seconds=5)
-    if settings_override:
-        runtime_settings = replace(runtime_settings, **settings_override)
-    with patch("asyncio.open_unix_connection", new=AsyncMock(return_value=(reader, writer))):
-        return await code_sandbox.execute_workflow_code(
-            runtime_settings,
-            code,
-            inputs if inputs is not None else {"v": 1},
-        )
-
-
-def test_code_sandbox_program_wrapping() -> None:
-    program = code_sandbox._program("result = 42")
-    assert "import json, sys" in program
-    assert code_sandbox.RESULT_MARKER in program
-    assert "result = 42" in program
-
-
-def _sandbox_expect_error(coro_factory) -> code_sandbox.WorkflowSandboxError:
-    try:
-        run(coro_factory())
-    except code_sandbox.WorkflowSandboxError as exc:
-        return exc
-    raise AssertionError("expected WorkflowSandboxError")
-
-
-def test_code_sandbox_execute() -> None:
-    result = run(
-        _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(
-                    stdout=f"hello\n{code_sandbox.RESULT_MARKER}{json.dumps({'result': 42})}",
-                    stderr="",
-                    exit_code=0,
-                )
-            )
-        )
-    )
-    assert result.result == 42
-    assert result.stdout == "hello"
-    assert result.exit_code == 0
-
-    # failing execution
-    failed = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(ok=False, exit_code=1, stderr="boom", error=None)
-            )
-        )
-    )
-    assert "boom" in str(failed)
-
-    # error field takes precedence
-    errored = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(ok=False, exit_code=1, stderr="", error="script crashed")
-            )
-        )
-    )
-    assert "script crashed" in str(errored)
-
-    busy = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(
-                    ok=False,
-                    exit_code=1,
-                    stderr="ignored",
-                    error="sandbox_busy",
-                )
-            )
-        )
-    )
-    assert isinstance(busy, code_sandbox.WorkflowSandboxBusyError)
-
-    stderr_busy = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(
-                    ok=False,
-                    exit_code=1,
-                    stderr="sandbox_busy",
-                    error=None,
-                )
-            )
-        )
-    )
-    assert type(stderr_busy) is code_sandbox.WorkflowSandboxError
-    # long traceback: the actionable final error line must survive; the
-    # previous [:1000] head slice cut it mid-line ("ValueError: step").
-    traceback = (
-        "Traceback (most recent call last):\n"
-        + "".join(
-            f'  File "/tmp/nexaflow-sandbox-{i}/skills/pptx/scripts/render.py", '
-            f"line {i}, in _steps_slide\n    _text_box(\n"
-            for i in range(40)
-        )
-        + "ValueError: step 3 title does not fit its text box\n"
-    )
-    long_trace = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(
-                    ok=False,
-                    exit_code=1,
-                    stderr=traceback,
-                    error=None,
-                )
-            )
-        )
-    )
-    assert (
-        str(long_trace) == "ValueError: step 3 title does not fit its text box"
-    )
-
-    # non-int exit code
-    invalid_exit = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(_sandbox_response(ok=True, exit_code="0", stdout="no marker"))
-        )
-    )
-    assert isinstance(invalid_exit, code_sandbox.WorkflowSandboxError)
-
-    # ok not true
-    not_ok = _sandbox_expect_error(
-        lambda: _run_sandbox(_FakeSandboxReader(_sandbox_response(ok="yes", exit_code=0, stdout="x")))
-    )
-    assert isinstance(not_ok, code_sandbox.WorkflowSandboxError)
-
-    # empty line
-    empty = _sandbox_expect_error(lambda: _run_sandbox(_FakeSandboxReader(b"")))
-    assert isinstance(empty, code_sandbox.WorkflowSandboxError)
-
-    # non-dict response
-    non_dict = _sandbox_expect_error(lambda: _run_sandbox(_FakeSandboxReader(b'[1,2,3]')))
-    assert isinstance(non_dict, code_sandbox.WorkflowSandboxError)
-
-    # missing result marker
-    no_marker = _sandbox_expect_error(
-        lambda: _run_sandbox(_FakeSandboxReader(_sandbox_response(exit_code=0, stdout="nothing here")))
-    )
-    assert isinstance(no_marker, code_sandbox.WorkflowSandboxError)
-
-    # invalid result json
-    bad_json = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(exit_code=0, stdout=code_sandbox.RESULT_MARKER + "not-json")
-            )
-        )
-    )
-    assert isinstance(bad_json, code_sandbox.WorkflowSandboxError)
-
-    # payload without result key
-    no_result_key = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(exit_code=0, stdout=code_sandbox.RESULT_MARKER + '{"other": 1}')
-            )
-        )
-    )
-    assert isinstance(no_result_key, code_sandbox.WorkflowSandboxError)
-
-    # non-dict payload
-    list_payload = _sandbox_expect_error(
-        lambda: _run_sandbox(
-            _FakeSandboxReader(
-                _sandbox_response(exit_code=0, stdout=code_sandbox.RESULT_MARKER + '[1]')
-            )
-        )
-    )
-    assert isinstance(list_payload, code_sandbox.WorkflowSandboxError)
-
-    # oversized line
-    oversized = _sandbox_expect_error(
-        lambda: _run_sandbox(_FakeSandboxReader(b"x" * (code_sandbox.MAX_RESPONSE_BYTES + 1)))
-    )
-    assert isinstance(oversized, code_sandbox.WorkflowSandboxError)
-
-    # unavailable: OSError from connect
-    async def run_unavailable() -> code_sandbox.WorkflowSandboxError:
-        with patch("asyncio.open_unix_connection", new=AsyncMock(side_effect=OSError("refused"))):
-            try:
-                await code_sandbox.execute_workflow_code(
-                    replace(settings(), workflow_sandbox_timeout_seconds=5),
-                    "result = 1",
-                    {},
-                )
-            except code_sandbox.WorkflowSandboxError as exc:
-                return exc
-            raise AssertionError("expected WorkflowSandboxError")
-
-    unavailable = run(run_unavailable())
-    assert type(unavailable) is code_sandbox.WorkflowSandboxError
-    assert "unavailable" in str(unavailable)
-
-    # unavailable: readline raising
-    reader_error = _sandbox_expect_error(
-        lambda: _run_sandbox(_FakeSandboxReader(b"", error=TimeoutError("slow")))
-    )
-    assert type(reader_error) is code_sandbox.WorkflowSandboxError
-
-
-def test_code_sandbox_artifact_execute() -> None:
-    content = b"<html><body>ready</body></html>"
-    writer = _FakeSandboxWriter()
-    response = _sandbox_response(
-        artifact={
-            "format": "html",
-            "filename": "page.html",
-            "size_bytes": len(content),
-            "sha256": hashlib.sha256(content).hexdigest(),
-            "content_base64": base64.b64encode(content).decode(),
-        }
-    )
-
-    async def execute():
-        with patch(
-            "asyncio.open_unix_connection",
-            new=AsyncMock(return_value=(_FakeSandboxReader(response), writer)),
-        ):
-            return await code_sandbox.execute_artifact_code(
-                replace(settings(), workflow_sandbox_timeout_seconds=5),
-                "open(output_path, 'w').write('ready')",
-                "html",
-                "page.html",
-                ["documents"],
-            )
-
-    result = run(execute())
-    request = json.loads(writer.data)
-    assert request["artifact"] == {"format": "html", "filename": "page.html"}
-    assert request["skills"] == ["documents"]
-    assert "output_path" in request["code"]
-    assert result.content == content
-    assert result.filename == "page.html"
-
-    skill_content = b"docx-content"
-    skill_writer = _FakeSandboxWriter()
-    skill_response = _sandbox_response(
-        artifact={
-            "format": "docx",
-            "filename": "report.docx",
-            "size_bytes": len(skill_content),
-            "sha256": hashlib.sha256(skill_content).hexdigest(),
-            "content_base64": base64.b64encode(skill_content).decode(),
-        }
-    )
-
-    async def execute_skill():
-        with patch(
-            "asyncio.open_unix_connection",
-            new=AsyncMock(
-                return_value=(_FakeSandboxReader(skill_response), skill_writer)
-            ),
-        ):
-            return await code_sandbox.execute_skill_artifact(
-                replace(settings(), workflow_sandbox_timeout_seconds=5),
-                "documents",
-                {"content": "# Report"},
-                "docx",
-                "report.docx",
-            )
-
-    skill_result = run(execute_skill())
-    skill_request = json.loads(skill_writer.data)
-    assert skill_request["skill"] == "documents"
-    assert json.loads(skill_request["stdin"]) == {"content": "# Report"}
-    assert "code" not in skill_request and "skills" not in skill_request
-    assert skill_result.content == skill_content
-    # Invalid JSON response (code_sandbox.py:117).
-    bad_json = _sandbox_expect_error(
-        lambda: _run_sandbox(_FakeSandboxReader(b"not-json"))
-    )
-    assert isinstance(bad_json, code_sandbox.WorkflowSandboxError)
-    # Skills are forwarded on workflow code requests (code_sandbox.py:145).
-    skills_writer = _FakeSandboxWriter()
-    skills_response = _sandbox_response(
-        stdout=f"{code_sandbox.RESULT_MARKER}{json.dumps({'result': None})}"
-    )
-
-    async def execute_with_skills():
-        with patch(
-            "asyncio.open_unix_connection",
-            new=AsyncMock(
-                return_value=(_FakeSandboxReader(skills_response), skills_writer)
-            ),
-        ):
-            return await code_sandbox.execute_workflow_code(
-                replace(settings(), workflow_sandbox_timeout_seconds=5),
-                "result = None",
-                {},
-                ["documents"],
-            )
-
-    run(execute_with_skills())
-    assert json.loads(skills_writer.data)["skills"] == ["documents"]
-
-    async def run_artifact(reader, artifact_format="html", filename="page.html"):
-        with patch(
-            "asyncio.open_unix_connection",
-            new=AsyncMock(return_value=(reader, _FakeSandboxWriter())),
-        ):
-            return await code_sandbox.execute_artifact_code(
-                replace(settings(), workflow_sandbox_timeout_seconds=5),
-                "open(output_path, 'w').write('ready')",
-                artifact_format,
-                filename,
-                [],
-            )
-
-    # Artifact response without an artifact payload (code_sandbox.py:229).
-    missing = _sandbox_expect_error(
-        lambda: run_artifact(_FakeSandboxReader(_sandbox_response()))
-    )
-    assert isinstance(missing, code_sandbox.WorkflowSandboxError)
-    # Artifact response with corrupt base64 (code_sandbox.py:232-233).
-    corrupt = _sandbox_expect_error(
-        lambda: run_artifact(
-            _FakeSandboxReader(
-                _sandbox_response(
-                    artifact={
-                        "format": "html",
-                        "filename": "page.html",
-                        "size_bytes": 1,
-                        "sha256": "x",
-                        "content_base64": "!!!not-base64!!!",
-                    }
-                )
-            )
-        )
-    )
-    assert isinstance(corrupt, code_sandbox.WorkflowSandboxError)
-    # Artifact response with a tampered digest (code_sandbox.py:246).
-    tampered = _sandbox_expect_error(
-        lambda: run_artifact(
-            _FakeSandboxReader(
-                _sandbox_response(
-                    artifact={
-                        "format": "html",
-                        "filename": "page.html",
-                        "size_bytes": len(content),
-                        "sha256": "0" * 64,
-                        "content_base64": base64.b64encode(content).decode(),
-                    }
-                )
-            )
-        )
-    )
-    assert isinstance(tampered, code_sandbox.WorkflowSandboxError)
-
-
-def test_worker_supervisor_sandbox_commands() -> None:
-    script = Path(__file__).resolve().parents[2] / "scripts" / "worker.py"
-    spec = importlib.util.spec_from_file_location("nexaflow_worker_script", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    sandbox_root = Path(__file__).resolve().parents[2]
-    socket_path = Path("/tmp/nexaflow-worker-test/sandbox.sock")
-
-    soft = module.build_sandbox_command(
-        sandbox_python=Path(sys.executable),
-        sandbox_root=sandbox_root,
-        socket_path=socket_path,
-        hard_isolation=False,
-        skills_dir=None,
-    )
-    assert soft[-4:] == [
-        "-m",
-        "sandbox.server",
-        "--socket",
-        str(socket_path),
-    ]
-
-    hard = module.build_sandbox_command(
-        sandbox_python=Path(sys.executable),
-        sandbox_root=sandbox_root,
-        socket_path=socket_path,
-        hard_isolation=True,
-        skills_dir=Path("/srv/nexaflow-skills"),
-    )
-    assert hard[:4] == [str(Path(sys.executable)), "-B", "-m", "sandbox.launcher"]
-    assert "--sandbox-root" in hard
-    assert "--skills-dir" in hard
-    assert hard[-2:] == ["--socket", str(socket_path)]
-
-    egress = module.build_sandbox_command(
-        sandbox_python=Path(sys.executable),
-        sandbox_root=sandbox_root,
-        socket_path=socket_path,
-        hard_isolation=True,
-        skills_dir=None,
-        egress_socket=socket_path.with_name("egress.sock"),
-    )
-    assert egress[-2:] == ["--egress-socket", str(socket_path.with_name("egress.sock"))]
-    with patch.dict(os.environ, {}, clear=True):
-        assert module._sandbox_network() == "none"
-    with patch.dict(os.environ, {"SANDBOX_NETWORK": "public"}):
-        assert module._sandbox_network() == "public"
-    with patch.dict(os.environ, {"SANDBOX_NETWORK": "invalid"}):
-        try:
-            module._sandbox_network()
-        except RuntimeError as exc:
-            assert "SANDBOX_NETWORK" in str(exc)
-        else:
-            raise AssertionError("invalid sandbox network mode was accepted")
-    with TemporaryDirectory() as directory:
-        protected = Path(directory) / "egress.sock"
-        protected.write_text("keep")
-        try:
-            module._open_egress_listener(protected)
-        except RuntimeError:
-            pass
-        else:
-            raise AssertionError("non-socket egress path was accepted")
-        assert protected.read_text() == "keep"
-    sandbox_environment = module._sandbox_environment(
-        sandbox_python=Path(sys.executable),
-        skills_dir=Path("/srv/nexaflow-skills"),
-        hard_isolation=False,
-    )
-    assert sandbox_environment["SANDBOX_MAX_CONCURRENT_RUNS"] == "50"
-    assert sandbox_environment["SANDBOX_SKILLS_DIR"] == "/srv/nexaflow-skills"
-    assert sandbox_environment["PATH"].startswith(str(Path(sys.executable).parent))
-    hard_environment = module._sandbox_environment(
-        sandbox_python=Path(sys.executable),
-        skills_dir=None,
-        hard_isolation=True,
-    )
-    assert "SANDBOX_MAX_CONCURRENT_RUNS" not in hard_environment
-    with patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "3"}):
-        opted = module._sandbox_environment(
-            sandbox_python=Path(sys.executable),
-            skills_dir=None,
-            hard_isolation=True,
-        )
-        assert opted["SANDBOX_MAX_CONCURRENT_RUNS"] == "3"
-    with patch.dict(os.environ):
-        os.environ.pop("SANDBOX_MAX_CONCURRENT_RUNS", None)
-        relaxed = module._sandbox_environment(
-            sandbox_python=Path(sys.executable),
-            skills_dir=None,
-            hard_isolation=False,
-        )
-        assert relaxed["SANDBOX_MAX_CONCURRENT_RUNS"] == "50"
-    with patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "4"}):
-        forced = module._sandbox_environment(
-            sandbox_python=Path(sys.executable),
-            skills_dir=None,
-            hard_isolation=False,
-        )
-        assert forced["SANDBOX_MAX_CONCURRENT_RUNS"] == "4"
-    with patch.dict(os.environ):
-        os.environ.pop("SANDBOX_MAX_CONCURRENT_RUNS", None)
-        default_hard = module._sandbox_environment(
-            sandbox_python=Path(sys.executable),
-            skills_dir=None,
-            hard_isolation=True,
-        )
-        assert "SANDBOX_MAX_CONCURRENT_RUNS" not in default_hard
-    with patch.dict(os.environ, {"SANDBOX_MAX_CONCURRENT_RUNS": "nope"}):
-        invalid = module._sandbox_environment(
-            sandbox_python=Path(sys.executable),
-            skills_dir=None,
-            hard_isolation=False,
-        )
-        assert invalid["SANDBOX_MAX_CONCURRENT_RUNS"] == "nope"
-
-
-class _BrokenSandboxWriter:
-    def write(self, data):
-        raise OSError("disk full")
-
-    async def drain(self):
-        pass
-
-    def close(self):
-        pass
-
-    async def wait_closed(self):
-        pass
-
-
-def test_code_sandbox_write_failure() -> None:
-    writer = _BrokenSandboxWriter()
-
-    async def run_write_failure() -> code_sandbox.WorkflowSandboxError:
-        with patch(
-            "asyncio.open_unix_connection",
-            new=AsyncMock(return_value=(_FakeSandboxReader(b""), writer)),
-        ):
-            try:
-                await code_sandbox.execute_workflow_code(
-                    replace(settings(), workflow_sandbox_timeout_seconds=5),
-                    "result = 1",
-                    {},
-                )
-            except code_sandbox.WorkflowSandboxError as exc:
-                return exc
-            raise AssertionError("expected WorkflowSandboxError")
-
-    result = run(run_write_failure())
-    assert isinstance(result, code_sandbox.WorkflowSandboxError)
+    check_execution()
 
 
 # ================================================================ object_storage
@@ -2635,7 +2165,7 @@ def test_settings_defaults_and_validation() -> None:
     assert base.agent_event_poll_seconds == 0.5
     assert base.agent_external_agent_runs_per_minute == 60
     assert base.agent_external_consumer_runs_per_minute == 10
-    assert base.workflow_sandbox_socket == "/run/sandbox/sandbox.sock"
+    assert base.opensandbox_url == "http://127.0.0.1:8088"
     assert base.workflow_sandbox_timeout_seconds == 5.0
     assert base.jwt_expires_minutes == 1440
     assert base.refresh_token_expires_days == 30
@@ -2651,7 +2181,10 @@ def test_settings_defaults_and_validation() -> None:
     cases = [
         (replace(base, bootstrap_admin_username=""), "Missing initialization"),
         (replace(base, bootstrap_admin_email=""), "Missing initialization"),
-        (replace(base, managed_user_initial_password=""), "MANAGED_USER_INITIAL_PASSWORD"),
+        (
+            replace(base, managed_user_initial_password=""),
+            "MANAGED_USER_INITIAL_PASSWORD",
+        ),
         (replace(base, jwt_secret_key=""), "JWT_SECRET_KEY"),
         (replace(base, model_secret_key=""), "MODEL_SECRET_KEY"),
         (replace(base, knowledge_storage_dir=None), "KNOWLEDGE_STORAGE_DIR"),
@@ -2660,8 +2193,14 @@ def test_settings_defaults_and_validation() -> None:
         (replace(base, log_level="TRACE"), "Invalid LOG_LEVEL"),
         (replace(base, mcp_request_timeout_seconds=0), "MCP_REQUEST_TIMEOUT_SECONDS"),
         (replace(base, mcp_request_timeout_seconds=301), "MCP_REQUEST_TIMEOUT_SECONDS"),
-        (replace(base, model_request_timeout_seconds=0), "MODEL_REQUEST_TIMEOUT_SECONDS"),
-        (replace(base, model_request_timeout_seconds=301), "MODEL_REQUEST_TIMEOUT_SECONDS"),
+        (
+            replace(base, model_request_timeout_seconds=0),
+            "MODEL_REQUEST_TIMEOUT_SECONDS",
+        ),
+        (
+            replace(base, model_request_timeout_seconds=301),
+            "MODEL_REQUEST_TIMEOUT_SECONDS",
+        ),
         (replace(base, agent_tool_timeout_seconds=0), "AGENT_TOOL_TIMEOUT_SECONDS"),
         (replace(base, agent_tool_timeout_seconds=301), "AGENT_TOOL_TIMEOUT_SECONDS"),
         (replace(base, agent_run_timeout_seconds=0), "AGENT_RUN_TIMEOUT_SECONDS"),
@@ -2676,16 +2215,37 @@ def test_settings_defaults_and_validation() -> None:
         (replace(base, agent_max_knowledge_rounds=9), "AGENT_MAX_KNOWLEDGE_ROUNDS"),
         (replace(base, agent_max_model_tokens=0), "AGENT_MAX_MODEL_TOKENS"),
         (replace(base, agent_max_model_tokens=1_000_001), "AGENT_MAX_MODEL_TOKENS"),
-        (replace(base, agent_executor_lease_seconds=29), "AGENT_EXECUTOR_LEASE_SECONDS"),
-        (replace(base, agent_executor_heartbeat_seconds=0), "AGENT_EXECUTOR_HEARTBEAT_SECONDS"),
-        (replace(base, agent_executor_heartbeat_seconds=60), "AGENT_EXECUTOR_HEARTBEAT_SECONDS"),
+        (
+            replace(base, agent_executor_lease_seconds=29),
+            "AGENT_EXECUTOR_LEASE_SECONDS",
+        ),
+        (
+            replace(base, agent_executor_heartbeat_seconds=0),
+            "AGENT_EXECUTOR_HEARTBEAT_SECONDS",
+        ),
+        (
+            replace(base, agent_executor_heartbeat_seconds=60),
+            "AGENT_EXECUTOR_HEARTBEAT_SECONDS",
+        ),
         (replace(base, agent_event_poll_seconds=0.05), "AGENT_EVENT_POLL_SECONDS"),
         (replace(base, agent_event_poll_seconds=6), "AGENT_EVENT_POLL_SECONDS"),
-        (replace(base, agent_external_agent_runs_per_minute=0), "AGENT_EXTERNAL_AGENT_RUNS_PER_MINUTE"),
-        (replace(base, agent_external_consumer_runs_per_minute=0), "AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE"),
-        (replace(base, workflow_sandbox_socket="relative.sock"), "WORKFLOW_SANDBOX_SOCKET"),
-        (replace(base, workflow_sandbox_timeout_seconds=0.05), "WORKFLOW_SANDBOX_TIMEOUT_SECONDS"),
-        (replace(base, workflow_sandbox_timeout_seconds=31), "WORKFLOW_SANDBOX_TIMEOUT_SECONDS"),
+        (
+            replace(base, agent_external_agent_runs_per_minute=0),
+            "AGENT_EXTERNAL_AGENT_RUNS_PER_MINUTE",
+        ),
+        (
+            replace(base, agent_external_consumer_runs_per_minute=0),
+            "AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE",
+        ),
+        (replace(base, opensandbox_url="file:///host"), "OPENSANDBOX_URL"),
+        (
+            replace(base, workflow_sandbox_timeout_seconds=0.05),
+            "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
+        ),
+        (
+            replace(base, workflow_sandbox_timeout_seconds=31),
+            "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
+        ),
         (replace(base, jwt_expires_minutes=0), "JWT_EXPIRES_MINUTES"),
         (replace(base, refresh_token_expires_days=0), "REFRESH_TOKEN_EXPIRES_DAYS"),
     ]
@@ -3206,7 +2766,6 @@ def test_ports_mcp() -> None:
         content, is_error = run(ports_mcp.call_mcp_tool(connection, settings(), "echo", {}, "idem"))
         assert (content, is_error) == ("{}", False)
         fake.call_mcp_tool.assert_awaited_once_with(connection, "echo", {}, "idem")
-
 
 
 def _mcp_tool_dict(name="echo", description="Echo tool", schema=None):
@@ -5080,11 +4639,7 @@ def main() -> None:
     test_mcp_stdio_parse()
     test_mcp_stdio_runtime_validation()
 
-    test_code_sandbox_program_wrapping()
-    test_code_sandbox_execute()
-    test_code_sandbox_artifact_execute()
-    test_worker_supervisor_sandbox_commands()
-    test_code_sandbox_write_failure()
+    test_execution_platform()
 
     test_object_storage()
 

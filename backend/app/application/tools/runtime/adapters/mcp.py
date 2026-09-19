@@ -1,6 +1,5 @@
 """Provider adapters behind the unified Tool runtime contract."""
 
-import json
 from typing import Any
 
 from app.application.tools.runtime.adapters._common import (  # noqa: F401
@@ -39,7 +38,7 @@ class McpToolAdapter:
         if not isinstance(tool_name, str) or not tool_name:
             return _failure("invalid_mcp_tool", "MCP Tool is unavailable.")
         try:
-            content, is_error = await call_mcp_tool(
+            result = await call_mcp_tool(
                 mcp_server_connection(self.server, self.settings),
                 self.settings,
                 tool_name,
@@ -57,13 +56,10 @@ class McpToolAdapter:
                 outcome="uncertain" if uncertain else "confirmed",
                 usage={},
             )
-        try:
-            data: Any = json.loads(content)
-        except json.JSONDecodeError:
-            data = content
+        is_error = result.is_error
         return ToolRuntimeResult(
             ok=not is_error,
-            data=data,
+            data=result.payload(),
             summary="MCP Tool completed." if not is_error else "MCP Tool returned an error.",
             error_code="mcp_tool_error" if is_error else None,
             error_message="MCP Tool returned an error." if is_error else None,

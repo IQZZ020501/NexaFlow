@@ -72,6 +72,7 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
+from app.infra.execution.profile import execution_profile
 from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.schemas.agents.contracts import AgentRunResponse, AgentToolCallResponse
 
@@ -357,7 +358,7 @@ async def validate_regeneration_source(
         if {
             key: value
             for key, value in source.application_snapshot.items()
-            if key != "attachments"
+            if key not in {"attachments", "execution_profile"}
         } != {
             "schema_version": version.schema_version,
             "configuration": version.configuration_snapshot,
@@ -1050,6 +1051,14 @@ async def prepare_agent_run(
     knowledge_base_ids = list(
         dict.fromkeys([*knowledge_base_ids, *skill_knowledge_base_ids])
     )
+    if any(
+        any(path.endswith((".py", ".js")) for path in skill.definition.get("files", {}))
+        for skill in skill_snapshots
+    ):
+        from app.domain.tools.catalog.service import build_skill_script_tool
+
+        script_tool, script_version, _ = build_skill_script_tool(workspace_id)
+        skill_tool_refs[script_tool.id] = ToolRef(script_tool.id, script_version.id)
     if skill_tool_refs:
         skill_tools = await resolve_tool_refs_for_actor(
             db,
@@ -1171,6 +1180,9 @@ async def prepare_agent_run(
             "configuration": configuration_snapshot,
             "resources": resource_snapshot,
             "attachments": attachments or [],
+            "execution_profile": execution_profile(
+                settings or Settings.from_env(require_bootstrap=False)
+            ),
         },
         application_snapshot_hash=snapshot_hash,
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],

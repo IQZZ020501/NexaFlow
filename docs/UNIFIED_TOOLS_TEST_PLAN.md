@@ -95,7 +95,7 @@ git log --oneline --decorate -20
 - PostgreSQL 17 临时数据库，名称包含测试批次号；禁止使用开发共享库或生产库。
 - Redis、Celery worker、Celery Beat。
 - Qdrant；涉及知识库的 Agent 场景使用独立 collection 前缀。
-- Worker 监管的源码 sandbox：Linux namespace/chroot、capability 收敛、私有 socket；macOS Seatbelt；Windows 走 WSL2。
+- 独立 OpenSandbox 0.2.3 test server 与执行镜像：生产 Linux/Kata + dns+nft；开发显式普通 Docker，不能据此判定 VM 隔离通过。
 - Backend API 与 Frontend 开发/预发布构建。
 - 两个 MCP fixture：
   - 公网语义的 Streamable HTTP/SSE fixture，包含只读、外部写、错误和慢响应 Tool。
@@ -347,8 +347,8 @@ git log --oneline --decorate -20
 | SEC-004 | P0 | public/API 尝试审批写 Tool | canonical 路径不可进入公开审批接口 |
 | SEC-005 | P0 | MCP DNS rebinding、redirect 到私网、IPv4/IPv6 loopback | 每次连接/redirect 均执行网络策略，普通成员入口拒绝 |
 | SEC-006 | P0 | MCP 响应中的 prompt injection | 作为不可信 Tool data，不改变系统策略或泄露上下文 |
-| SEC-007 | P0 | Python import socket/subprocess/ctypes、读取 `/proc`/env，或绕过代理直连网络 | sandbox 与解释器限制阻断；允许的公网模式只可经 Worker HTTP(S) 代理 |
-| SEC-008 | P0 | API 进程访问 sandbox socket | socket 只存在于 Worker 进程树；API 无路径可达 |
+| SEC-007 | P0 | 程序尝试读取业务目录/环境或直连公网、私网、metadata | 无业务挂载/环境；有效 dns+nft 默认拒绝；stdio 仅批准公网域名可出站；guest 内 subprocess/import 不是业务宿主执行 |
+| SEC-008 | P0 | API/Worker 本地执行回退、Docker socket 或 namespace 特权 | 均不存在；控制面未配置/不满足网络策略时失败关闭 |
 | SEC-009 | P1 | secret/token 出现在 validation、trace、audit、SSE、前端错误 | 全部脱敏 |
 | SEC-010 | P0 | 参数原型污染键、超深 JSON、NaN/Infinity、非字符串 key | schema/JSON 边界拒绝 |
 | SEC-011 | P1 | 审批 invocation_id 重放或跨用户使用 | 只允许当前 actor、Run、turn、call 精确匹配 |
@@ -363,12 +363,12 @@ git log --oneline --decorate -20
 | --- | --- | --- | --- |
 | OPS-001 | P1 | 1k Tool、多人授权下列表分页 | 查询在数据库层过滤，响应时间与内存无异常增长 |
 | OPS-002 | P1 | 同时刷新多个 MCP Source | function_name/version 无冲突，失败互不污染 |
-| OPS-003 | P1 | sandbox 单槽下批量 Python 测试 | 有界排队/退避；busy、等待、失败有指标或结构化日志 |
+| OPS-003 | P1 | OpenSandbox 并发创建/资源不足下批量 Python 测试 | 截止时间和调用租约有界；无宿主回退，不自动重试不确定写入 |
 | OPS-004 | P1 | Celery worker/Beat 重启 | queued test、Tool invocation、Agent/Workflow Run 可恢复 |
 | OPS-005 | P1 | API 与 worker 使用不同版本 | 部署代际闸门阻断旧 worker claim canonical Run |
 | OPS-006 | P1 | Compose 配置检查 | 无 sandbox 服务/卷；Worker capability 最小化、默认 seccomp 与 no-new-privileges 保留 |
-| OPS-007 | P1 | host worker 执行 Python Tool | macOS Seatbelt/Linux namespace/WSL2 路径真实自检，其他平台失败关闭 |
-| OPS-008 | P1 | 源码 Worker + sandbox 开发命令 | 能启动必要进程，退出/重启无孤儿子进程或 socket |
+| OPS-007 | P1 | Worker 执行 Python Tool | 经 execution port 到外部执行平面；镜像内 UID/限制与 Linux/Kata 网络边界分别验证 |
+| OPS-008 | P1 | Worker/控制面退出重启 | 无本地 broker/socket；临时执行有显式 destroy 与持久元数据/native TTL 恢复 |
 | OPS-009 | P1 | invocation/Run 日志 | 含 trace/run/invocation/tool version、attempt、duration、outcome；不含敏感值 |
 | OPS-010 | P1 | audit 查询 | 创建、发布、授权、撤权、policy、启停、归档均可追踪 actor 与目标 |
 | OPS-011 | P2 | 运行取消/失败后的临时资源 | 无残留 lease、测试数据库、MCP fixture、sandbox 子进程或临时容器 |
@@ -391,37 +391,39 @@ git log --oneline --decorate -20
 # Backend 定向与全量
 cd backend
 uv run python -m compileall app alembic tests
-uv run python -m tests.unit
-uv run python -m tests.tools
-uv run python -m tests.mcp_transports
-uv run python -m tests.agents
-uv run python -m tests.agent_services_coverage
-uv run python -m tests.agent_runtime_coverage
-uv run python -m tests.workflows
-uv run python -m tests.workflow_node_coverage
-uv run python -m tests.workflow_run_coverage
-uv run python -m tests.workspace_admin_coverage
-uv run python -m tests.infra_unit_coverage
+uv run python -m tests.tools.unit
+uv run python -m tests.tools.tools
+uv run python -m tests.infra.mcp_transports
+uv run python -m tests.execution.unit
+uv run python -m tests.agent_skills.unit
+uv run python -m tests.agent_skills.api
+uv run python -m tests.agents.harness
+uv run python -m tests.agents.agents
+uv run python -m tests.agents.agent_services_coverage
+uv run python -m tests.agents.agent_runtime_coverage
+uv run python -m tests.workflows.workflows
+uv run python -m tests.workflows.workflow_node_coverage
+uv run python -m tests.workflows.workflow_run_coverage
+uv run python -m tests.platform.workspace_admin_coverage
+uv run python -m tests.infra.infra_unit_coverage
 make coverage
 
 # Sandbox
-cd ../sandbox
-python -m sandbox.tests
-./run_coverage.sh
+cd ..
+uv run --project sandbox python -m sandbox.tests
+bash sandbox/run_coverage.sh
 
 # Frontend
-cd ../frontend
+cd frontend
 bun test --parallel
 bun run typecheck
 bun run lint
 bun run build
 ./scripts/coverage.sh
 
-# Compose 静态与 sandbox 自检
+# Compose 静态；执行镜像/真实 OpenSandbox 命令见 deploy/opensandbox/README.md
 cd ..
 docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml config --quiet
-docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml \
-  run --rm --no-deps --entrypoint python sandbox -m sandbox.self_check
 ```
 
 迁移测试必须显式传入临时 PostgreSQL URL，并在执行前后分别记录：
@@ -525,7 +527,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | AUD-008 | P1 | binder 稳定 | 未变化 binding 保留原 `bound_by_user_id`；管理员普通保存不会接管；历史 binder 删除有 409/保留策略 |
 | AUD-009 | P0 | worker 代际隔离 | legacy 与 canonical Agent task/queue/claim 有明确 fence；滚动部署时旧 worker 不能 claim 新 Run |
 | AUD-010 | P0 | durable child Run | child 唯一键、父 checkpoint/`awaiting_child`、requeue、Beat reconciler、取消/deadline race 均有持久状态而非 inline wait |
-| AUD-011 | P1 | Python sandbox 边界 | API 不执行代码；Worker 私有 socket；namespace/chroot 或 Seatbelt、cap drop、低权限、大小与时间限制明确 |
+| AUD-011 | P1 | 执行平面边界 | API/Worker 无本地执行、业务 mounts/env、Docker socket 或特殊 capability；外部 Kata/dns+nft、UID/资源/输入输出/TTL 边界明确 |
 | AUD-012 | P1 | secret 与不可信输出 | MCP token/stdio env/code/stdout/stderr 不进入公开响应、模型上下文、审计或未截断日志 |
 
 源码审计必须给出文件与行号。只看到类、表或测试名称不能判定实现已接入生产调用链。
@@ -551,9 +553,9 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | DB-002 | P0 | backfill 语义 | disabled、missing leaf/server、stale version、publication-only binding、撤权证据均按 MIG 预期处理 |
 | DB-003 | P0 | downgrade 安全 | 新 canonical 写入、活跃 Run、ledger 漂移或副作用风险存在时明确拒绝回滚 |
 | DB-004 | P1 | 历史审计 | Source 删除、用户/Agent/workspace 删除不会级联丢失仍需保留的 Version/Policy/Invocation |
-| DEP-001 | P1 | Compose | worker 订阅正确队列；Beat 单例；无 sandbox 服务且 Worker 内隔离符合设计 |
+| DEP-001 | P1 | Compose | worker 队列正确、Beat 单例、cap-drop ALL；执行平面独立且无业务 mounts/env |
 | DEP-002 | P1 | 开发启动 | 文档中的源码 Worker 命令可执行；macOS/Linux/WSL2 限制明确 |
-| DEP-003 | P1 | 恢复 | API/worker/Beat 与受监管 Broker 重启后 queued/leased/awaiting_child 状态可恢复 |
+| DEP-003 | P1 | 恢复 | API/worker/Beat 与 OpenSandbox 重启后 queued/leased/awaiting_child 和原生 TTL 清理可恢复 |
 
 ## 14. 自动化门禁与证据
 

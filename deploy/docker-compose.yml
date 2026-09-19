@@ -107,22 +107,11 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       KNOWLEDGE_STORAGE_DIR: /data/knowledge
       QDRANT_URL: http://qdrant:6333
-      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-public}
     volumes:
       - ./data/uploads:/data
     cap_drop:
       - ALL
-    cap_add:
-      - CHOWN
-      - KILL
-      - SETGID
-      - SETPCAP
-      - SETUID
-      - NET_ADMIN
-      - SYS_ADMIN
-      - SYS_CHROOT
     security_opt:
-      - apparmor=unconfined
       - no-new-privileges:true
     depends_on:
       migrate:

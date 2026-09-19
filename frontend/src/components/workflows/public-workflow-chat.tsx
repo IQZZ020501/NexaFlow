@@ -76,37 +76,7 @@ import {
 import { latestRunVersions } from "@/lib/run-versions"
 import { acceptedUploadExtensions } from "@/lib/interaction-config"
 import { workflowErrorMessage, workflowNodeLabel } from "@/lib/workflows/graph"
-
-function readVisualViewportHeight() {
-  const viewport = window.visualViewport
-  if (!viewport) return null
-  const height = Math.round(viewport.height)
-  return Number.isFinite(height) && height > 0 ? height : null
-}
-
-function useVisualViewportHeight() {
-  const [height, setHeight] = React.useState<number | null>(
-    readVisualViewportHeight
-  )
-
-  React.useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return
-
-    const sync = () => {
-      const next = readVisualViewportHeight()
-      setHeight((current) => (current === next ? current : next))
-    }
-    viewport.addEventListener("resize", sync)
-    viewport.addEventListener("scroll", sync)
-    return () => {
-      viewport.removeEventListener("resize", sync)
-      viewport.removeEventListener("scroll", sync)
-    }
-  }, [])
-
-  return height
-}
+import { useVisualViewportShellStyle } from "@/lib/visual-viewport"
 
 /**
  * Derives a conversation title from the question input.
@@ -351,7 +321,7 @@ export function PublicWorkflowChat({
   const { language, t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored, notify } = useSession()
-  const viewportHeight = useVisualViewportHeight()
+  const viewportStyle = useVisualViewportShellStyle()
   const [profile, setProfile] = React.useState<PublicWorkflowProfile | null>(
     null
   )
@@ -768,11 +738,7 @@ export function PublicWorkflowChat({
   return (
     <main
       className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 md:h-svh md:grid-cols-[16rem_minmax(0,1fr)]"
-      style={
-        viewportHeight
-          ? { height: viewportHeight, maxHeight: viewportHeight }
-          : undefined
-      }
+      style={viewportStyle}
     >
       <aside className="hidden min-h-0 border-r md:block">
         <ConversationHistory {...historyProps} />

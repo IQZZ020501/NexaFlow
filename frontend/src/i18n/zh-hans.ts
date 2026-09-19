@@ -1,5 +1,11 @@
 // Simplified Chinese dictionary; keys are the default (Chinese) copy.
 export const zhHans = {
+  "编辑 Skill": "编辑 Skill",
+  "技能指令": "技能指令",
+  "包文件": "包文件",
+  "保存并发布": "保存并发布",
+  "Skill 包不能超过 2 MiB": "Skill 包不能超过 2 MiB",
+  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。": "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。",
   调整当前任务: "调整当前任务",
   追加后续任务: "追加后续任务",
   "指令已排队，将在下一轮生效": "指令已排队，将在下一轮生效",
@@ -1152,12 +1158,12 @@ export const zhHans = {
   SSE: "SSE",
   "兼容旧版远程 Server": "兼容旧版远程 Server",
   stdio: "stdio",
-  "运行本地 stdio Server": "运行本地 stdio Server",
+  "运行本地 stdio Server": "在 OpenSandbox 中运行 stdio Server",
   "stdio 命令：{command}": "stdio 命令：{command}",
   "stdio 配置（JSON）": "stdio 配置（JSON）",
   "请输入有效的 stdio JSON 配置。": "请输入有效的 stdio JSON 配置。",
   "stdio 配置会加密保存，之后不会返回明文。":
-    "stdio 配置会加密保存，之后不会返回明文。",
+    "stdio 配置加密保存，不返回明文。命令和目录指向执行镜像；出站域名须在部署白名单内。",
   "例如：业务工具": "例如：业务工具",
   "MCP 地址": "MCP 地址",
   "支持 HTTP 和 HTTPS；内网地址需由部署管理员启用，HTTP 不加密。":

@@ -1703,6 +1703,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             "skill_pdf",
             "skill_pptx",
             "skill_spreadsheets",
+            "run_skill_script",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
         python_source = next(source for source in sources if source.kind == "python")
@@ -5412,7 +5413,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         WorkflowSandboxError,
         WorkflowSandboxResult,
     )
-    from app.ports.mcp import McpClientError
+    from app.ports.mcp import McpCallResult, McpClientError
 
     settings = Settings.from_env(require_bootstrap=False)
     context = ToolInvocationContext(
@@ -5792,21 +5793,21 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     # MCP adapter happy path (tool_adapters.py:123-129, 141-145, 145-153).
     with patch(
         "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
-        new=AsyncMock(return_value=('{"ok": true}', False)),
+        new=AsyncMock(return_value=McpCallResult(content=[], structured_content={"ok": True})),
     ) as call:
         result = await mcp.invoke(mcp_snapshot, {}, context)
     assert result.ok is True
-    assert result.data == {"ok": True}
+    assert result.data == {"content": [], "isError": False, "structuredContent": {"ok": True}}
     assert call.await_count == 1
     # MCP adapter non-JSON error content (tool_adapters.py:142-144, 147-150).
     with patch(
         "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
-        new=AsyncMock(return_value=("plain failure", True)),
+        new=AsyncMock(return_value=McpCallResult(content=[{"type": "text", "text": "plain failure"}], is_error=True)),
     ):
         result = await mcp.invoke(mcp_snapshot, {}, context)
     assert result.ok is False
     assert result.error_code == "mcp_tool_error"
-    assert result.data == "plain failure"
+    assert result.data == {"content": [{"type": "text", "text": "plain failure"}], "isError": True}
     # MCP adapter client error, confirmed outcome (tool_adapters.py:130-140).
     with patch(
         "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
@@ -5956,6 +5957,7 @@ def test_workspace_creation_initializes_system_catalog() -> None:
             "pdf_skill",
             "pptx_skill",
             "spreadsheets_skill",
+            "run_skill_script",
         }
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
         run(assert_mcp_discovery_materializes_first_leaf(workspace_id))

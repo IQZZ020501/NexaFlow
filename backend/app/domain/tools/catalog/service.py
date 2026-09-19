@@ -1173,6 +1173,84 @@ def build_inline_python_tool(
     )
 
 
+def build_skill_script_tool(
+    workspace_id: str, created_at: datetime | None = None
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:run_skill_script")
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "version_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            "path": {"type": "string", "minLength": 1, "maxLength": 255},
+            "inputs": {"type": "object"},
+            "filename": {"type": "string", "maxLength": 255},
+        },
+        "required": ["version_id", "path", "inputs"],
+        "additionalProperties": False,
+    }
+    description = (
+        "Execute a .py or .js script from an authorized, pinned Skill package in an isolated OpenSandbox. "
+        "Load the Skill first. Scripts receive JSON inputs on stdin, package files under NEXAFLOW_SKILL_DIR, "
+        "and may write a file to NEXAFLOW_OUTPUT_PATH when filename is supplied. Network is denied."
+    )
+    execution_spec = {"builtin": "skill_script"}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "run_skill_script",
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": None,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=source_id,
+            kind="builtin",
+            stable_key="run_skill_script",
+            function_name="run_skill_script",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Skill script",
+            description=description,
+            input_schema=input_schema,
+            output_schema=None,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=["console", "public", "api"],
+            workflow_callable=False,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
 def build_artifact_tool(
     workspace_id: str,
     created_at: datetime | None = None,
@@ -1194,9 +1272,9 @@ def build_artifact_tool(
         "python-pptx (`from pptx import Presentation`); images use Pillow "
         "(`from PIL import Image`). Managed Skills may be selected with `skills`: "
         "built-in bundles are `documents`, `pdf`, `pptx`, and `spreadsheets`; their files "
-        "are staged read-only below `NEXAFLOW_SKILLS_DIR`, and an optional "
-        "`requirements.txt` is installed into `NEXAFLOW_PACKAGES_DIR` through the "
-        "Worker public HTTP(S) proxy. Do not install packages yourself, use package "
+        "are read-only below `NEXAFLOW_SKILLS_DIR`. Dependencies are pinned in the "
+        "platform execution image, not installed from Skill requirements at runtime. "
+        "Execution is network-denied. Do not install packages yourself, use package "
         "URLs, or create diagnostic files. The Python standard library is also available. User "
         "attachment text is already included in the conversation and can be used "
         "to produce an edited copy. Enforce requested measurable constraints in "
@@ -1434,6 +1512,7 @@ async def ensure_workspace_system_catalog(
 
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
+    await ensure_tool(*build_skill_script_tool(workspace_id))
     for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:
         await ensure_tool(*build_skill_artifact_tool(workspace_id, skill_name))
 

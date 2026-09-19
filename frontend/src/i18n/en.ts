@@ -1,6 +1,12 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "编辑 Skill": "Edit Skill",
+  "技能指令": "Skill instructions",
+  "包文件": "Package files",
+  "保存并发布": "Save and publish",
+  "Skill 包不能超过 2 MiB": "Skill packages cannot exceed 2 MiB",
+  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。": "Skills are instruction and file packages loaded on demand. They do not automatically create or authorize external tools.",
   调整当前任务: "Steer current task",
   追加后续任务: "Queue follow-up",
   "指令已排队，将在下一轮生效": "Instruction queued for the next turn",
@@ -1209,12 +1215,12 @@ export const en = {
   SSE: "SSE",
   "兼容旧版远程 Server": "Compatible with legacy remote Servers",
   stdio: "stdio",
-  "运行本地 stdio Server": "Run a local stdio Server",
+  "运行本地 stdio Server": "Run stdio inside OpenSandbox",
   "stdio 命令：{command}": "stdio command: {command}",
   "stdio 配置（JSON）": "stdio configuration (JSON)",
   "请输入有效的 stdio JSON 配置。": "Enter a valid stdio JSON configuration.",
   "stdio 配置会加密保存，之后不会返回明文。":
-    "The stdio configuration is encrypted and is never returned in plaintext.",
+    "Configuration is encrypted and never returned in plaintext. Paths refer to the execution image; egress domains must be deployment-allowlisted.",
   "例如：业务工具": "Example: Business tools",
   "MCP 地址": "MCP URL",
   "支持 HTTP 和 HTTPS；内网地址需由部署管理员启用，HTTP 不加密。":

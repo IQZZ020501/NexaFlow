@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 
 import { ToolsPage } from "@/components/tools/tools-page"
 import type { MeResponse } from "@/lib/api/auth"
+import type { AgentSkill } from "@/lib/api/agent-skills"
 import type {
   ToolDetail,
   ToolSourceDetail,
@@ -117,6 +118,81 @@ beforeEach(() => {
   }) as typeof fetch
 })
 describe("ToolsPage", () => {
+  test("searches workspace Skills independently of built-in tools and edits the pinned files", async () => {
+    const skill: AgentSkill = {
+      id: "skill-1", workspace_id: "ws-1", name: "Research package", description: "Research tasks",
+      definition: { instructions: "Use bundled resources.", intents: [], input_schema: {}, output_schema: {}, knowledge_base_ids: [], tools: [], files: { "assets/data.bin": "AP8=" }, execution_timeout_seconds: 30, guardrails: { allow_external_reads: false, allow_external_writes: false, require_approval_for_external_writes: true } },
+      status: "active", current_published_version_id: "v1", current_version_number: 1,
+      has_unpublished_changes: false, permission: "owner", can_manage: true, can_use: true,
+      created_by_user_id: "u-1", created_at: "2026-09-18T00:00:00Z", updated_at: "2026-09-18T00:00:00Z",
+    }
+    let patchBody: unknown
+    globalThis.fetch = (async (input, options) => {
+      const url = String(input)
+      if (options?.method === "PATCH") {
+        patchBody = JSON.parse(String(options.body))
+        return jsonResponse(skill)
+      }
+      if (url.includes("/agent-skills?")) return jsonResponse([skill])
+      return jsonResponse([])
+    }) as typeof fetch
+    renderPage(<ToolsPage initialKind="builtin" />)
+    await screen.findByRole("button", { name: "Research package" })
+    fireEvent.change(screen.getByPlaceholderText("搜索名称、描述或来源"), { target: { value: "research" } })
+    expect(Boolean(screen.queryByRole("button", { name: "Research package" }))).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Research package" }))
+    await screen.findByRole("heading", { name: "编辑 Skill" })
+    expect(screen.getByText(/assets\/data.bin/)).toBeTruthy()
+    expect(screen.getByText("已发布版本：1")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }))
+    await waitFor(() => expect(Boolean(screen.queryByRole("heading", { name: "编辑 Skill" }))).toBe(false))
+    expect((patchBody as { definition: { files: unknown } }).definition.files).toEqual({ "assets/data.bin": "AP8=" })
+    fireEvent.change(screen.getByPlaceholderText("搜索名称、描述或来源"), { target: { value: "no-match" } })
+    expect(screen.getByText("没有匹配的工具")).toBeTruthy()
+  })
+
+  test("enables and disables manageable Skills and reports mutation errors", async () => {
+    let status = "active"
+    let fail = false
+    const notifications: string[] = []
+    Object.assign(session, {
+      notify: (_kind: string, value: string) => { notifications.push(value) },
+    })
+    globalThis.fetch = (async (input, options) => {
+      const url = String(input)
+      if (options?.method === "PATCH") {
+        if (fail) return jsonResponse({ detail: "Skill update rejected" }, 409)
+        status = JSON.parse(String(options.body)).status
+        return jsonResponse({ id: "skill-1" })
+      }
+      if (url.includes("/agent-skills?")) return jsonResponse([{ id: "skill-1", name: "Toggle package", description: "Tasks", status, can_manage: true, definition: { instructions: "Do work", files: {} } }])
+      return jsonResponse([])
+    }) as typeof fetch
+    renderPage(<ToolsPage initialKind="builtin" />)
+    fireEvent.click(await screen.findByRole("button", { name: "停用" }))
+    fireEvent.click(await screen.findByRole("button", { name: "启用" }))
+    await screen.findByRole("button", { name: "停用" })
+    expect(status).toBe("active")
+    fail = true
+    fireEvent.click(screen.getByRole("button", { name: "停用" }))
+    await waitFor(() => expect(notifications).toContain("Skill update rejected"))
+    expect(status).toBe("active")
+  })
+
+  test("does not offer mutation controls for view-only workspace Skills", async () => {
+    globalThis.fetch = (async (input) => String(input).includes("/agent-skills?")
+      ? jsonResponse([{ id: "skill-1", name: "View package", description: "Tasks", status: "disabled", current_version_number: 1, can_manage: false, definition: { instructions: "Read only", files: {} } }])
+      : jsonResponse([])) as typeof fetch
+    renderPage(<ToolsPage initialKind="builtin" />)
+    fireEvent.click(await screen.findByRole("button", { name: "View package" }))
+    await screen.findByRole("heading", { name: "编辑 Skill" })
+    expect((screen.getByLabelText("显示名称") as HTMLInputElement).disabled).toBe(true)
+    expect(screen.queryByRole("button", { name: "保存并发布" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "启用" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "取消" }))
+    await waitFor(() => expect(Boolean(screen.queryByRole("heading", { name: "编辑 Skill" }))).toBe(false))
+  })
+
   test("sorts tools and shows their update time", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -334,12 +410,10 @@ describe("ToolsPage", () => {
     expect(await screen.findByText("Python 工具")).toBeTruthy()
     expect(screen.getByText("MCP Server")).toBeTruthy()
     fireEvent.click(screen.getByRole("menuitem", { name: "Skills" }))
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: /新建 Skill/ })).toBeTruthy()
-    expect(screen.getByRole("button", { name: /导入 Skill/ })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /新建 Skill/ }))
     expect(await screen.findByRole("heading", { name: "创建 Skill" })).toBeTruthy()
-    expect(screen.getByLabelText("SKILL.md")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /导入 Skill/ })).toBeTruthy()
+    expect(screen.getByLabelText("技能指令")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "保存并发布" })).toBeTruthy()
   })
 
   test("shows an explicit retry state when the catalog fails", async () => {

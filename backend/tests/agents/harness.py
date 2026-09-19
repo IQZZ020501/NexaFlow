@@ -1,6 +1,8 @@
 """Deterministic harness integration: lifecycle, loadout, context and durable input."""
 
 import asyncio
+import base64
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import tests.support  # noqa: F401
@@ -48,7 +50,7 @@ def call(name, args, call_id):
 
 def skill():
     return AgentSkillSnapshot(
-        schema_version=1,
+        schema_version=2,
         skill_id="s1",
         version_id="v1",
         version_number=1,
@@ -142,6 +144,76 @@ async def assert_capabilities_and_lazy_skills():
 
 def replace_tool_name(tool, name):
     return tool.model_copy(update={"name": name})
+
+
+async def assert_skill_file_reads_and_revocation():
+    snapshot = replace(
+        skill(),
+        definition={
+            "instructions": "Read references/guide.md when needed.",
+            "files": {
+                "references/guide.md": base64.b64encode(
+                    ("x" * 12000 + "next-page").encode()
+                ).decode(),
+                "assets/data.bin": base64.b64encode(b"\x00\xff").decode(),
+            },
+        },
+    )
+    authorize = AsyncMock()
+    registry = CapabilityRegistry(ExtensionRuntime([]), [snapshot], authorize)
+    read = registry.management_tools[3]
+    arguments = {"version_id": "v1", "path": "references/guide.md"}
+    assert (await read.ainvoke(arguments)).is_error
+    authorize.assert_not_awaited()
+    await registry.management_tools[2].ainvoke({"version_id": "v1"})
+    result = await read.ainvoke(arguments)
+    assert result.content == "x" * 12000
+    result = await read.ainvoke({**arguments, "offset": 12000})
+    assert result.content == "next-page"
+    assert (await read.ainvoke({**arguments, "path": "assets/data.bin"})).is_error
+    assert (await read.ainvoke({**arguments, "path": "../escape"})).is_error
+    authorize.side_effect = ValueError("revoked")
+    for tool, args in (
+        (registry.management_tools[2], {"version_id": "v1"}),
+        (read, arguments),
+    ):
+        try:
+            await tool.ainvoke(args)
+        except ValueError as exc:
+            assert str(exc) == "revoked"
+        else:
+            raise AssertionError("Lazy Skill access bypassed live revocation")
+    for state in ({"active_tools": [{}]}, {"loaded_skills": [{}]}):
+        try:
+            registry.restore(state)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Malformed checkpoint capability accepted")
+
+    tools = [
+        create_agent_tool(
+            name=f"tool_{number}",
+            description="optional capability",
+            parameters={"type": "object"},
+            execute=AsyncMock(),
+            kind="builtin",
+        )
+        for number in range(9)
+    ]
+    large = CapabilityRegistry(
+        ExtensionRuntime([AgentExtension("large", "1", tuple(tools))]), []
+    )
+    assert large.active_names == []
+    result = await large.management_tools[0].ainvoke({"query": "capability"})
+    assert len(result.output) == 9
+    huge = tools[0].model_copy(update={"description": "x" * 17000})
+    assert (
+        CapabilityRegistry(
+            ExtensionRuntime([AgentExtension("huge", "1", (huge,))]), []
+        ).active_names
+        == []
+    )
 
 
 async def assert_steering_and_followup():
@@ -551,6 +623,7 @@ def assert_session_input_api_isolation():
 
 def main():
     asyncio.run(assert_capabilities_and_lazy_skills())
+    asyncio.run(assert_skill_file_reads_and_revocation())
     asyncio.run(assert_steering_and_followup())
     asyncio.run(assert_context_compaction_and_hooks())
     asyncio.run(assert_durable_input_finalization())

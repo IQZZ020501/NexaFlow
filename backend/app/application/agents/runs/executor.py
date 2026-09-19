@@ -171,42 +171,6 @@ def _remaining_run_seconds(deadline: datetime) -> float:
     return remaining
 
 
-def _apply_skill_runtime_limits(
-    deadline: datetime,
-    max_turns: int,
-    max_tool_calls: int,
-    skills: list[AgentSkillSnapshot],
-) -> tuple[datetime, int, int]:
-    """Apply the strictest pinned SkillBundle budgets to a run."""
-    skill_runtime_seconds: float | None = None
-    for skill in skills:
-        definition = skill.definition
-        budgets = definition.get("budgets", {})
-        if isinstance(budgets, dict):
-            runtime_value = budgets.get("max_runtime_seconds")
-            if isinstance(runtime_value, (int, float)) and not isinstance(
-                runtime_value, bool
-            ):
-                skill_runtime_seconds = (
-                    runtime_value
-                    if skill_runtime_seconds is None
-                    else min(skill_runtime_seconds, runtime_value)
-                )
-            for key, current in (
-                ("max_turns", max_turns),
-                ("max_tool_calls", max_tool_calls),
-            ):
-                value = budgets.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    if key == "max_turns":
-                        max_turns = min(current, value)
-                    else:
-                        max_tool_calls = min(current, value)
-    if skill_runtime_seconds is not None:
-        deadline = min(deadline, utc_now() + timedelta(seconds=skill_runtime_seconds))
-    return deadline, max_turns, max_tool_calls
-
-
 @dataclass(frozen=True)
 class ExecutionScope:
     run: AgentRun
@@ -826,6 +790,13 @@ async def _execute_claimed_agent_run(
     """
     scope = await _load_execution_scope(run_id)
     run = scope.run
+    from app.infra.execution.profile import require_execution_profile
+
+    if "execution_profile" in run.application_snapshot:
+        try:
+            require_execution_profile(settings, run.application_snapshot["execution_profile"])
+        except ValueError as exc:
+            raise AgentRunnerError(str(exc)) from exc
     (
         run_deadline,
         max_turns,
@@ -834,12 +805,6 @@ async def _execute_claimed_agent_run(
         _legacy_knowledge_rounds,
         _legacy_model_tokens,
     ) = _run_limits(run, settings)
-    run_deadline, max_turns, max_tool_calls = _apply_skill_runtime_limits(
-        run_deadline,
-        max_turns,
-        max_tool_calls,
-        scope.skill_snapshots,
-    )
     if run.depth == 1 and any(
         snapshot.approval != "auto"
         or snapshot.effect not in {"pure", "external_read"}
@@ -891,7 +856,14 @@ async def _execute_claimed_agent_run(
             for name, group in capability_groups.items()
         ]
     )
-    registry = CapabilityRegistry(extensions, scope.skill_snapshots)
+
+    async def authorize_skill(snapshot):
+        from app.application.agent_skills.execution import require_pinned_skill_access
+
+        async with get_session_factory()() as db:
+            await require_pinned_skill_access(db, run.workspace_id, snapshot)
+
+    registry = CapabilityRegistry(extensions, scope.skill_snapshots, authorize_skill)
     chat_model = build_chat_model(settings, scope.model)
 
     async def session_inputs(consumed: list[int], settled: bool):
@@ -998,6 +970,7 @@ async def _execute_claimed_agent_run(
             )
             if metadata.get("kind") == "knowledge":
                 await _require_current_knowledge_snapshot(scope)
+
     durable_before = before_tool_call
     durable_after = after_tool_call
 

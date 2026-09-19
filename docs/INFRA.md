@@ -55,7 +55,8 @@
 
 ### app/infra/sandbox/
 
-- `backend/app/infra/sandbox/client.py` — 通过 Worker 私有 Unix socket 调用 Python sandbox 的客户端：有界 JSON 结果（`WorkflowSandboxResult`）与通用可下载 Artifact（`ArtifactSandboxResult`），支持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact`；API 进程不执行用户代码，请求大小/超时均有上界。
+- `backend/app/infra/sandbox/client.py` — Workflow/Artifact 语义与结果校验：通过 `app/ports/execution.py` 委托外部 OpenSandbox，保持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact` 契约；无 Unix socket 或宿主进程回退。
+- `backend/app/infra/execution/` — 公网域名语法/私网 deny 列表、非敏感执行配置指纹；生命周期在 `adapters/execution/opensandbox.py`，运行器在独立执行镜像。
 
 ### app/infra/runtime/
 
@@ -71,7 +72,7 @@
 ### app/infra/tools/
 
 - `backend/app/infra/tools/dispatch.py` — durable ToolInvocation 的 broker 分发：`enqueue_tool_invocation` 经 Celery `send_task("app.tools.run", …)` 投递。
-- `backend/app/infra/tools/mcp_stdio.py` — MCP stdio 内联配置（command/args/cwd/env）解析与序列化、输入边界校验及可执行文件/工作目录运行时校验（`McpStdioConfigError`）。
+- `backend/app/infra/tools/mcp_stdio.py` — MCP stdio 配置（command/args/cwd/env/egress_domains）解析、加密序列化和输入边界；路径属于执行镜像，不查询或执行业务宿主文件。
 
 ### app/infra/email/
 
@@ -92,7 +93,7 @@
 - `backend/tests/infra/unit.py` — 本模块单元测试（配置、运行时工具、密钥、对象存储、日志器等）
 - `backend/tests/infra/infra_unit_coverage.py` — 基础设施覆盖聚合
 - `backend/tests/infra/logger.py` — 全局日志器与错误分类（internal/external）单元测试
-- `backend/tests/infra/mcp_transports.py` — 真实子进程/HTTP Server 回归：传输、Bearer 校验、stdio 环境变量传递与超时进程回收
+- `backend/tests/infra/mcp_transports.py` — 本地 HTTP/SSE Server 与 mock execution port 回归：Bearer、DNS/代理边界、stdio 配置传递和取消；真实 stdio 进程在执行镜像自检中验证
 - `backend/tests/smoke/test_main.py` — 应用冒烟测试：/health、bootstrap 管理员登录、auth/me、404 路由
 
 按特性套件运行（点号路径，`python -m tests.<feature>.<file>`）：`python -m tests.infra.unit`、`python -m tests.infra.infra_unit_coverage`、`python -m tests.infra.logger`、`python -m tests.infra.mcp_transports`、`python -m tests.smoke.test_main`。

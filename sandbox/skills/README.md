@@ -2,10 +2,9 @@
 
 Each child directory is a Skill bundle. An executable artifact Skill contains
 `SKILL.md` frontmatter with `entrypoint` and `artifact-format`, plus the named
-Python entrypoint below `scripts/`. It may also include references, assets, and
-an optional `requirements.txt`. The Worker stages only the selected Skill and
-runs its read-only entrypoint with JSON input from the Agent Tool call. Package
-requirements are installed into an ephemeral per-run directory.
+Python entrypoint below `scripts/`. These fixed renderers and their locked
+dependencies are baked into the OpenSandbox execution image. Calls accept JSON
+content/data only, never a replacement program or runtime requirements install.
 
 The built-in bundles below are NexaFlow-authored renderers:
 
@@ -17,7 +16,9 @@ The built-in bundles below are NexaFlow-authored renderers:
 They are intentionally small and project-specific; they are not copies of an
 upstream Skill distribution.
 
-To add an executable managed Skill, create a lowercase directory under
-`SANDBOX_SKILLS_DIR`, declare its entrypoint and artifact format in `SKILL.md`,
-then restart the Worker. A corresponding published Tool contract is still
-required before an Agent or Workflow can select it.
+To add a platform renderer, add its bundle here and register a fixed published
+Tool contract, then rebuild/version the execution image. There is no host Skills
+directory or local Worker runner. Workspace-uploaded SKILL.md/ZIP packages are a
+separate versioned control-plane feature with lazy loading and ledger-backed
+scripts; see [Skills](../../docs/SKILLS.md) and
+[OpenSandbox deployment](../../deploy/opensandbox/README.md).

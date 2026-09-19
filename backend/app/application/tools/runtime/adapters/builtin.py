@@ -44,6 +44,13 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "skill_script":
+            from app.application.agent_skills.scripts import execute_skill_script
+
+            try:
+                return await execute_skill_script(self.settings, arguments, context)
+            except (ValueError, WorkflowSandboxError) as exc:
+                return _failure("skill_script_failed", str(exc)[:1000])
         if builtin in {"artifact", "python_artifact", "skill"}:
             failure_code = {
                 "artifact": "artifact_failed",
@@ -106,8 +113,7 @@ class BuiltinToolAdapter:
                         or len(set(skills)) != len(skills)
                         or any(
                             not isinstance(skill, str)
-                            or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", skill)
-                            is None
+                            or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", skill) is None
                             for skill in skills
                         )
                     ):

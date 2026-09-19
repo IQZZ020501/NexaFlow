@@ -15,39 +15,6 @@ class AgentSkillRefSchema(BaseModel):
     version_id: str = Field(min_length=1, max_length=36)
 
 
-class AgentSkillRetrievalPolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    max_calls: int = Field(default=3, ge=0, le=12)
-    max_rounds: int = Field(default=2, ge=0, le=8)
-    min_evidence_items: int = Field(default=0, ge=0, le=20)
-    require_source_diversity: bool = False
-
-    @model_validator(mode="after")
-    def validate_rounds(self) -> "AgentSkillRetrievalPolicy":
-        if self.max_calls == 0 and self.max_rounds != 0:
-            raise ValueError("Retrieval rounds require at least one retrieval call.")
-        return self
-
-
-class AgentSkillBudgetPolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    max_runtime_seconds: float = Field(default=300, gt=0, le=1800)
-    max_turns: int = Field(default=8, ge=1, le=64)
-    max_tool_calls: int = Field(default=12, ge=1, le=128)
-    max_model_tokens: int = Field(
-        default=100_000, ge=1, le=1_000_000, deprecated=True
-    )
-
-
-class AgentSkillStopPolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    max_no_progress_rounds: int = Field(default=2, ge=1, le=8)
-    allow_best_effort: bool = True
-
-
 class AgentSkillGuardrails(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,20 +29,11 @@ class AgentSkillGuardrails(BaseModel):
         return self
 
 
-class AgentSkillEvaluationRubric(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # Read old versioned definitions without activating a retired verifier.
-    require_grounding: bool = Field(default=False, deprecated=True)
-    min_evidence_count: int = Field(default=0, ge=0, le=20, deprecated=True)
-    max_tool_failures: int = Field(default=0, ge=0, le=20)
-
-
 class AgentSkillDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intents: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(
-        min_length=1, max_length=16
+        default_factory=list, max_length=16
     )
     instructions: str = Field(min_length=1, max_length=12_000)
     input_schema: dict[str, Any] = Field(
@@ -84,21 +42,20 @@ class AgentSkillDefinition(BaseModel):
     output_schema: dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "additionalProperties": False}
     )
-    knowledge_base_ids: list[
-        Annotated[str, Field(min_length=1, max_length=36)]
-    ] = Field(default_factory=list, max_length=4)
+    knowledge_base_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = (
+        Field(default_factory=list, max_length=4)
+    )
     tools: list[ToolRefSchema] = Field(default_factory=list, max_length=12)
-    retrieval: AgentSkillRetrievalPolicy = Field(
-        default_factory=AgentSkillRetrievalPolicy, deprecated=True
-    )
-    budgets: AgentSkillBudgetPolicy = Field(default_factory=AgentSkillBudgetPolicy)
-    stop: AgentSkillStopPolicy = Field(
-        default_factory=AgentSkillStopPolicy, deprecated=True
-    )
+    files: dict[str, str] = Field(default_factory=dict)
+    execution_timeout_seconds: float = Field(default=30, ge=0.1, le=120)
     guardrails: AgentSkillGuardrails = Field(default_factory=AgentSkillGuardrails)
-    evaluation: AgentSkillEvaluationRubric = Field(
-        default_factory=AgentSkillEvaluationRubric
-    )
+
+    @field_validator("files")
+    @classmethod
+    def validate_files(cls, value: dict[str, str]) -> dict[str, str]:
+        from app.domain.agent_skills.packages import validate_skill_files
+
+        return validate_skill_files(value)
 
     @field_validator("intents")
     @classmethod
@@ -126,7 +83,7 @@ class AgentSkillCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=500)
+    description: str = Field(min_length=1, max_length=500)
     definition: AgentSkillDefinition
 
 
@@ -134,7 +91,7 @@ class AgentSkillUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, min_length=1, max_length=500)
     definition: AgentSkillDefinition | None = None
     status: Literal["active", "disabled"] | None = None
 

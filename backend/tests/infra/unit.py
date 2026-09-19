@@ -69,6 +69,23 @@ def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
     assert worker_pool_for_platform("win32") == "solo"
     assert worker_pool_for_platform("linux") == "prefork"
 
+
+def test_worker_command_consumes_all_application_queues() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parents[2] / "scripts/worker.py"
+    spec = importlib.util.spec_from_file_location("nexaflow_worker_script", path)
+    assert spec is not None and spec.loader is not None
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    command = worker.worker_command(["--autoscale=10,0"])
+    assert "--beat" in command
+    assert "--queues=celery,agents-legacy,agents-v2" in command
+    assert command[-1] == "--autoscale=10,0"
+
+
 def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
     import threading
 
@@ -130,6 +147,7 @@ def test_windows_event_loop_policy_is_selector_based() -> None:
 def main() -> None:
     test_coverage_runner_times_out_suites()
     test_celery_worker_pool_is_fork_safe_without_prefork()
+    test_worker_command_consumes_all_application_queues()
     test_celery_nonfork_pool_runs_tasks_concurrently()
     test_worker_database_rejects_in_memory_sqlite()
     test_windows_event_loop_policy_is_selector_based()

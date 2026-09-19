@@ -1,221 +1,154 @@
-"""Small stdlib-only smoke test for the runner and socket protocol."""
+"""Behavioral checks inside the execution image, without business credentials."""
 
-from __future__ import annotations
-
+import base64
 import json
 import os
-import signal
-import socket
-import sys
 import tempfile
-import threading
-import time
 from pathlib import Path
 
-from sandbox.healthcheck import PROBE_DEADLINE_SECONDS, probe
-from sandbox.runner import MAX_STDIN_BYTES, Limits, run_code
-from sandbox.server import SandboxServer
+try:
+    from .job import MAX_FILE, execute
+except ImportError:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from job import MAX_FILE, execute
 
 
-def request(socket_path: Path, payload: dict) -> dict:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(socket_path))
-        client.sendall((json.dumps(payload) + "\n").encode())
-        return json.loads(client.makefile("rb").readline())
+def check_execution():
+    try:
+        from .renderer_checks.entrypoints import check_builtin_skill_entrypoints
+        from .renderer_checks.quality import check_builtin_skill_quality_guards
+    except ImportError:
+        from renderer_checks.entrypoints import check_builtin_skill_entrypoints
+        from renderer_checks.quality import check_builtin_skill_quality_guards
 
-
-def serve_probe_response(socket_path: Path, response: bytes, delay: float = 0) -> None:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-        server.bind(str(socket_path))
-        server.listen(1)
-        connection, _ = server.accept()
-        with connection:
-            connection.recv(1024)
-            for value in response:
-                if delay:
-                    time.sleep(delay)
-                try:
-                    connection.sendall(bytes((value,)))
-                except BrokenPipeError:
-                    break
-
-
-def main() -> None:
-    result = run_code("print(2 + 2)")
-    assert result.ok and result.stdout.strip() == "4", result
-
-    if os.geteuid() == 0:
-        identity = run_code("import os; print(os.geteuid())")
-        assert identity.stdout.strip() == "65532", identity
-
-    timeout = run_code(
-        "while True: pass",
-        limits=Limits(timeout_ms=200, cpu_seconds=1),
+    check_builtin_skill_entrypoints()
+    check_builtin_skill_quality_guards()
+    result = execute(
+        {
+            "code": "import json, sys; print(json.loads(sys.stdin.read())['value'] + 1)",
+            "stdin": '{"value": 2}',
+        }
     )
-    assert timeout.error == "wall_time_limit_exceeded", timeout
-
-    closed_output = run_code(
-        "import os\nos.close(1)\nos.close(2)\nwhile True: pass",
-        limits=Limits(timeout_ms=200, cpu_seconds=1),
+    assert result["ok"] and result["stdout"].strip() == "3", result
+    secret = execute(
+        {"code": "import os; print(os.environ.get('DATABASE_URL', 'absent'))"}
     )
-    assert closed_output.error == "wall_time_limit_exceeded", closed_output
-
-    cpu = run_code(
-        "while True: pass",
-        limits=Limits(timeout_ms=3_000, cpu_seconds=1),
-    )
-    assert not cpu.ok and cpu.error is None, cpu
-    assert cpu.exit_code in (-signal.SIGXCPU, -signal.SIGKILL), cpu
-
-    output = run_code(
-        "print('x' * 100_000)",
-        limits=Limits(max_output_bytes=1024),
-    )
-    assert output.error == "output_limit_exceeded", output
-    assert len(output.stdout.encode()) == 1024, output
-
-    file_size = run_code(
-        "open('large', 'wb').write(b'x' * 100_000)",
-        limits=Limits(max_file_bytes=1024),
-    )
-    assert not file_size.ok and file_size.exit_code != 0, file_size
-
-    open_files = run_code(
-        "files = []\n"
-        "try:\n"
-        "    while True: files.append(open('/dev/null'))\n"
-        "except OSError:\n"
-        "    print('open-file-limit')\n",
-        limits=Limits(max_open_files=16),
-    )
-    assert open_files.ok and open_files.stdout.strip() == "open-file-limit", open_files
-
-    if sys.platform == "linux":
-        descendant = run_code(
-            "import os, time\n"
-            "pid = os.fork()\n"
-            "if pid == 0:\n"
-            "    os.setsid()\n"
-            "    for fd in (0, 1, 2):\n"
-            "        try: os.close(fd)\n"
-            "        except OSError: pass\n"
-            "    time.sleep(30)\n"
-            "print(pid, flush=True)\n"
-            "os._exit(0)\n",
-        )
-        assert descendant.ok, descendant
-        detached_pid = int(descendant.stdout.strip())
+    assert secret["stdout"].strip() == "absent", secret
+    for request in (
+        {"code": "while True: pass", "limits": {"timeout_ms": 200}},
+        {"code": "print('x' * 200000)"},
+    ):
         try:
-            os.kill(detached_pid, 0)
-        except ProcessLookupError:
+            execute(request)
+        except (TimeoutError, ValueError):
             pass
         else:
-            raise AssertionError("detached child survived cleanup")
-
-        shared_temp = run_code(
-            "import tempfile\n"
-            "from pathlib import Path\n"
-            "for path in ('/tmp/nexaflow-fixed', '/dev/shm/nexaflow-fixed'):\n"
-            "    try:\n"
-            "        open(path, 'w').write('x')\n"
-            "    except PermissionError:\n"
-            "        print('blocked')\n"
-            "temp_path = Path(tempfile.mkstemp()[1])\n"
-            "print('temp-ok' if temp_path.parent == Path.cwd() else temp_path)\n"
+            raise AssertionError("A bounded program exceeded its limit")
+    for skill, fmt, inputs in (
+        ("documents", "docx", {"content": "# Functional check\n\nHello OpenSandbox"}),
+        ("pdf", "pdf", {"content": "# Functional check\n\nHello OpenSandbox"}),
+        (
+            "spreadsheets",
+            "xlsx",
+            {
+                "workbook": {
+                    "sheets": [{"name": "Data", "rows": [["Name", "Value"], ["A", 3]]}]
+                }
+            },
+        ),
+        (
+            "pptx",
+            "pptx",
+            {
+                "presentation": {
+                    "title": "Functional check",
+                    "slides": [
+                        {
+                            "layout": "bullets",
+                            "title": "Result",
+                            "bullets": ["Hello OpenSandbox"],
+                        }
+                    ],
+                }
+            },
+        ),
+    ):
+        result = execute(
+            {
+                "skill": skill,
+                "stdin": json.dumps(inputs),
+                "artifact": {"filename": "check." + fmt, "format": fmt},
+                "limits": {"timeout_ms": 10000},
+            }
         )
-        assert shared_temp.ok, shared_temp
-        assert shared_temp.stdout.splitlines() == ["blocked", "blocked", "temp-ok"]
-
-        memory = run_code(
-            "try:\n"
-            "    bytearray(512 * 1024 * 1024)\n"
-            "except MemoryError:\n"
-            "    print('memory-limit')\n",
-            limits=Limits(memory_bytes=128 * 1024 * 1024),
+        assert result["ok"], result
+        content = base64.b64decode(result["artifact"]["content_base64"])
+        assert 0 < len(content) <= MAX_FILE
+        assert content.startswith(b"%PDF" if fmt == "pdf" else b"PK")
+    for code in (
+        "import os; os.symlink('/etc/passwd', output_path)",
+        "import os; os.mkfifo(output_path)",
+        "open(output_path, 'wb').write(b'x' * (5 * 1024 * 1024 + 1))",
+    ):
+        try:
+            result = execute(
+                {
+                    "code": "import os; output_path = os.environ['NEXAFLOW_OUTPUT_PATH']; "
+                    + code,
+                    "artifact": {"filename": "invalid.txt", "format": "txt"},
+                }
+            )
+        except (OSError, ValueError):
+            pass
+        else:
+            assert not result["ok"], "Unsafe artifact accepted"
+    # The configured image contains Python and Node; no host installations.
+    with tempfile.TemporaryDirectory() as temporary:
+        server = Path(temporary) / "server.py"
+        server.write_text(
+            "from mcp.server.mcpserver import MCPServer\ns = MCPServer('check', log_level='ERROR')\n"
+            "@s.tool()\ndef echo(value: str) -> dict:\n return {'value': value}\ns.run('stdio')\n"
         )
-        assert memory.ok and memory.stdout.strip() == "memory-limit", memory
-
-        processes = run_code(
-            "import subprocess\n"
-            "try:\n"
-            "    subprocess.run(['/bin/true'], check=True)\n"
-            "except OSError:\n"
-            "    print('process-limit')\n",
-            limits=Limits(max_processes=1),
+        config = {
+            "command": str(Path(os.sys.executable)),
+            "args": [str(server)],
+            "env": {},
+        }
+        discovered = execute(
+            {
+                "mcp": {"operation": "discover", "config": config, "timeout": 5},
+                "limits": {"timeout_ms": 5000},
+            }
         )
-        assert processes.ok and processes.stdout.strip() == "process-limit", processes
-
-    try:
-        run_code("print('ignored')", "x" * (MAX_STDIN_BYTES + 1))
-    except ValueError as exc:
-        assert "stdin exceeds" in str(exc)
-    else:
-        raise AssertionError("oversized stdin was accepted")
-
-    assert Limits.from_request({"timeout_ms": 99_999}).timeout_ms == 5_000
-    try:
-        Limits.from_request({"memory_mb": 128})
-    except ValueError as exc:
-        assert "unknown limits" in str(exc)
-    else:
-        raise AssertionError("unknown limit was accepted")
-
-    with tempfile.TemporaryDirectory() as directory:
-        socket_path = Path(directory) / "slow.sock"
-        thread = threading.Thread(
-            target=serve_probe_response,
-            args=(socket_path, b'{"version":1,"ok":true,"status":"ready"}\n'),
-            kwargs={"delay": PROBE_DEADLINE_SECONDS * 0.75},
-            daemon=True,
+        assert discovered["ok"], discovered
+        assert discovered["mcp"]["tools"][0]["name"] == "echo"
+        called = execute(
+            {
+                "mcp": {
+                    "operation": "call",
+                    "config": config,
+                    "timeout": 5,
+                    "name": "echo",
+                    "arguments": {"value": "isolated"},
+                },
+                "limits": {"timeout_ms": 5000},
+            }
         )
-        thread.start()
-        for _ in range(100):
-            if socket_path.exists():
-                break
-            time.sleep(0.01)
-        started = time.monotonic()
-        assert not probe(socket_path)
-        assert time.monotonic() - started < PROBE_DEADLINE_SECONDS * 1.5
-        thread.join(timeout=PROBE_DEADLINE_SECONDS * 2)
+        assert called["ok"], called
+        payload = called["mcp"].get("structuredContent")
+        if payload is None:
+            payload = json.loads(called["mcp"]["content"][0]["text"])
+        assert payload == {"value": "isolated"}, called
 
-    with tempfile.TemporaryDirectory() as directory:
-        socket_path = Path(directory) / "invalid.sock"
-        thread = threading.Thread(
-            target=serve_probe_response,
-            args=(socket_path, b"\xff\n"),
-            daemon=True,
-        )
-        thread.start()
-        for _ in range(100):
-            if socket_path.exists():
-                break
-            time.sleep(0.01)
-        assert not probe(socket_path)
-        thread.join(timeout=1)
 
-    with tempfile.TemporaryDirectory() as directory:
-        socket_path = Path(directory) / "sandbox.sock"
-        assert not probe(socket_path)
-        server = SandboxServer(socket_path)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        for _ in range(100):
-            if socket_path.exists():
-                break
-            time.sleep(0.01)
-        if not socket_path.exists():
-            server.shutdown()
-            thread.join(timeout=1)
-            server.server_close()
-            raise AssertionError("sandbox socket was not created")
-        assert probe(socket_path)
-        response = request(socket_path, {"code": "print(input())", "stdin": "socket-ok"})
-        server.shutdown()
-        thread.join(timeout=1)
-        server.server_close()
-        assert response["ok"] and response["stdout"].strip() == "socket-ok", response
-
-    print("sandbox self-check passed")
+def main():
+    assert os.geteuid() == 65532, (
+        "Run the image checks as the unprivileged execution UID"
+    )
+    check_execution()
+    print("EXECUTION_IMAGE_OK")
 
 
 if __name__ == "__main__":

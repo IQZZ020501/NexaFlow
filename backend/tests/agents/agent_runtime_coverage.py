@@ -2407,14 +2407,16 @@ async def assert_mcp_tool_paths(
             captured["tool_name"] = tool_name
             captured["arguments"] = arguments
             captured["idempotency_key"] = idempotency_key
-            return json.dumps({"release": "approved"}), False
+            from app.ports.mcp import McpCallResult
+
+            return McpCallResult(content=[], structured_content={"release": "approved"})
 
         agent_tools.call_mcp_tool = fake_call
         agent_tools.set_agent_tool_idempotency_key("idem-1")
         result = await tool.ainvoke({"topic": "release"})
         assert not result.is_error
         assert captured["idempotency_key"] == "idem-1"
-        assert result.output == {"release": "approved"}
+        assert result.output == {"content": [], "structuredContent": {"release": "approved"}, "isError": False}
 
         # call without idempotency key (413)
         agent_tools.set_agent_tool_idempotency_key(None)
@@ -2449,7 +2451,7 @@ async def assert_mcp_tool_paths(
         result = await read_tool.ainvoke({"topic": "release"})
         assert result.is_error and result.outcome_uncertain is False
 
-        # non-JSON output is truncated to string (424-425)
+        # Text blocks stay intact in the typed MCP envelope.
         async def text_call(
             connection,
             _settings,
@@ -2458,11 +2460,13 @@ async def assert_mcp_tool_paths(
             *,
             idempotency_key=None,
         ):
-            return "x" * 9000, False
+            from app.ports.mcp import McpCallResult
+
+            return McpCallResult(content=[{"type": "text", "text": "x" * 9000}])
 
         agent_tools.call_mcp_tool = text_call
         result = await tool.ainvoke({"topic": "release"})
-        assert result.output == "x" * 4000
+        assert result.output == {"content": [{"type": "text", "text": "x" * 9000}], "isError": False}
 
         # tool no longer resolvable (385)
         ghost = ResolvedMcpTool(
@@ -3914,7 +3918,9 @@ async def assert_durable_execution_paths(
         *,
         idempotency_key=None,
     ):
-        return json.dumps({"release": "approved"}), False
+        from app.ports.mcp import McpCallResult
+
+        return McpCallResult(content=[], structured_content={"release": "approved"})
 
     tool_adapters.call_mcp_tool = fake_mcp_call
     try:
@@ -4121,7 +4127,9 @@ async def assert_durable_execution_paths(
         idempotency_key=None,
     ):
         injected_calls.append((tool_name, arguments))
-        return injected, False
+        from app.ports.mcp import McpCallResult
+
+        return McpCallResult(content=[{"type": "text", "text": injected}])
 
     tool_adapters.call_mcp_tool = injecting_mcp_call
     try:
@@ -4159,7 +4167,10 @@ async def assert_durable_execution_paths(
             if message_to_dict(message)["type"] == "tool"
         ]
         assert tool_messages, "injected output must arrive as a tool message"
-        assert any(injected in str(item["data"]) for item in tool_messages)
+        assert any(
+            json.loads(item["data"]["content"])["content"][0]["text"] == injected
+            for item in tool_messages
+        )
         # The forbidden provider was never invoked: only the legitimate read
         # tool ran, exactly once.
         assert injected_calls == [

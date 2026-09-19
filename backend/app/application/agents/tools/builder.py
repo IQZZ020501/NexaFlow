@@ -817,12 +817,12 @@ def build_mcp_agent_tool(
                 )
                 idempotency_key = _tool_idempotency_key.get()
                 if idempotency_key:
-                    content, is_error = await call_mcp_tool(
+                    result = await call_mcp_tool(
                         *call_args,
                         idempotency_key=idempotency_key,
                     )
                 else:
-                    content, is_error = await call_mcp_tool(*call_args)
+                    result = await call_mcp_tool(*call_args)
             except McpClientError:
                 return AgentToolResult(
                     content="MCP tool request failed.",
@@ -830,16 +830,13 @@ def build_mcp_agent_tool(
                     is_error=True,
                     outcome_uncertain=effective_policy_mode != "read_only",
                 )
-        safe_output: Any
-        try:
-            safe_output = json.loads(content)
-        except json.JSONDecodeError:
-            safe_output = content[:4000]
+        safe_output = result.payload()
+        content = json.dumps(safe_output, ensure_ascii=False)
         return AgentToolResult(
             content=content,
             summary=f"{tool.server.name}: {definition.name} completed.",
             output=safe_output,
-            is_error=is_error,
+            is_error=result.is_error,
         )
 
     return create_agent_tool(

@@ -2,7 +2,6 @@
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
-SANDBOX_NETWORK ?= public
 COMPOSE ?= docker compose --env-file ../.env -f ../deploy/docker-compose.yml -f ../deploy/docker-compose.dev.yml
 
 dev:
@@ -14,8 +13,7 @@ migrate:
 	uv run python -m alembic upgrade head
 
 worker:
-	uv sync --project ../sandbox --no-install-project --frozen
-	SANDBOX_NETWORK=$(SANDBOX_NETWORK) uv run python scripts/worker.py
+	uv run python scripts/worker.py
 
 coverage:
 	uv run python scripts/coverage.py

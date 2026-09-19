@@ -46,6 +46,7 @@ export type McpSourceCreatePayload =
         args: string[]
         cwd?: string
         env: Record<string, string>
+        egress_domains?: string[]
       }
     }
 

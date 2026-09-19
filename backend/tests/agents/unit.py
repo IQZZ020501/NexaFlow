@@ -2678,7 +2678,7 @@ def test_mcp_stdio_configuration() -> None:
     validate_mcp_stdio_config_runtime(config)
 
     for invalid in (
-        {"command": "relative-command"},
+        {"command": "relative/command"},
         {"command": sys.executable, "shell": True},
         {"command": sys.executable, "env": {"BAD=NAME": "value"}},
         {"command": sys.executable, "env": {"KEY": "bad\0value"}},

@@ -3904,13 +3904,14 @@ def main() -> None:
         arguments,
         *,
         idempotency_key=None,
-    ) -> tuple[str, bool]:
+    ):
         nonlocal mcp_transport_failure
         assert connection.bearer_token == "mcp-secret-token"
         mcp_calls.append((connection.url, tool_name, arguments, idempotency_key))
         if mcp_transport_failure:
             raise McpClientError("transport interrupted")
-        return json.dumps({"release": "approved"}), False
+        from app.ports.mcp import McpCallResult
+        return McpCallResult(content=[], structured_content={"release": "approved"})
 
     agent_tools.retrieve_knowledge_base = fake_retrieve_knowledge_base
     mcp_services.discover_mcp_tools = fake_discover_mcp_tools
@@ -4628,7 +4629,7 @@ def main() -> None:
             assert mcp_event["tool_kind"] == "mcp"
             assert mcp_event["server_name"] == ""
             assert mcp_event["input"] == {"topic": "release"}
-            assert mcp_event["output"] == {"release": "approved"}
+            assert mcp_event["output"] == {"content": [], "isError": False, "structuredContent": {"release": "approved"}}
             assert len(mcp_calls) == 2
             assert mcp_calls[0][:3] == (
                 "http://127.0.0.1:9999/mcp",
