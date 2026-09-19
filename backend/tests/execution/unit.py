@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import tempfile
 import tomllib
 from contextlib import redirect_stderr, redirect_stdout
@@ -70,10 +71,20 @@ def runtime_settings():
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
 async def assert_execution_lifecycle():
     instance = sandbox()
-    scope = execution_scope.set(ExecutionScope("tenant-a", "invocation-a", "run-a"))
+    invocation_id = "1:call_00_fqd8NnkrNewASPzvj2pb9371"
+    scope = execution_scope.set(
+        ExecutionScope("tenant-a", invocation_id, "run/a")
+    )
+
+    async def create_sandbox(*_args, **kwargs):
+        for value in kwargs["metadata"].values():
+            assert len(value) <= 63
+            assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]", value)
+        return instance
+
     try:
         with patch.object(
-            adapter.Sandbox, "create", AsyncMock(return_value=instance)
+            adapter.Sandbox, "create", AsyncMock(side_effect=create_sandbox)
         ) as create:
             result = await adapter.OpenSandboxExecution(runtime_settings()).execute(
                 {"code": "print(1)"}, timeout_seconds=5, max_output_bytes=1000
@@ -81,7 +92,9 @@ async def assert_execution_lifecycle():
             assert result == {"ok": True}
             kwargs = create.call_args.kwargs
             assert kwargs["metadata"]["workspace"] == "tenant-a"
-            assert kwargs["metadata"]["invocation"] == "invocation-a"
+            assert kwargs["metadata"]["invocation"] != invocation_id
+            assert kwargs["metadata"]["invocation"].startswith("1-call_00_")
+            assert kwargs["metadata"]["run"].startswith("run-a-")
             assert kwargs["timeout"].total_seconds() == 65
             assert kwargs["network_policy"].default_action == "deny"
             assert all(

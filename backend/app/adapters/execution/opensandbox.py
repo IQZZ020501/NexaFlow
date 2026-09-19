@@ -2,8 +2,10 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
+import re
 from datetime import timedelta
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
@@ -22,6 +24,25 @@ from app.ports.execution import ExecutionError, execution_scope
 
 logger = logging.getLogger(__name__)
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
+MAX_METADATA_LABEL_LENGTH = 63
+_INVALID_METADATA_LABEL_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _metadata_label(value: str) -> str:
+    if (
+        0 < len(value) <= MAX_METADATA_LABEL_LENGTH
+        and value[0].isascii()
+        and value[0].isalnum()
+        and value[-1].isascii()
+        and value[-1].isalnum()
+        and _INVALID_METADATA_LABEL_CHARS.search(value) is None
+    ):
+        return value
+    normalized = _INVALID_METADATA_LABEL_CHARS.sub("-", value).strip("._-")
+    digest = hashlib.sha256(value.encode()).hexdigest()[:12]
+    prefix_length = MAX_METADATA_LABEL_LENGTH - len(digest) - 1
+    prefix = normalized[:prefix_length].rstrip("._-") or "value"
+    return f"{prefix}-{digest}"
 
 
 class OpenSandboxExecution:
@@ -54,10 +75,11 @@ class OpenSandboxExecution:
         metadata = {"owner": "nexaflow", "execution": str(uuid4())}
         if scope:
             metadata.update(
-                workspace=scope.workspace_id, invocation=scope.invocation_id
+                workspace=_metadata_label(scope.workspace_id),
+                invocation=_metadata_label(scope.invocation_id),
             )
             if scope.run_id:
-                metadata["run"] = scope.run_id
+                metadata["run"] = _metadata_label(scope.run_id)
         domains = request.get("network_domains", [])
         if not isinstance(domains, list) or any(
             domain not in settings.opensandbox_egress_domains for domain in domains
