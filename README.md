@@ -153,7 +153,7 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml down
 make dev
 ```
 
-首次运行会自动创建私有 `.env`、生成缺失的本地密钥、同步后端/前端依赖、构建执行镜像、生成普通 Docker 的 OpenSandbox 开发配置、启动 PostgreSQL/Redis/Qdrant，并应用 Alembic 迁移。随后由同一终端统一托管 OpenSandbox、API、Celery Worker 与前端，日志带进程前缀。开发配置保存在 `~/.local/share/nexaflow-opensandbox`，不会覆盖已有配置。
+首次运行会自动创建私有 `.env`、生成缺失的本地密钥、同步后端/前端依赖、构建 PostgreSQL 与执行镜像、生成普通 Docker 的 OpenSandbox 开发配置、启动 PostgreSQL/Redis/Qdrant，并应用 Alembic 迁移。后续启动仅在对应镜像不存在或构建输入变化时重新构建；需要显式重跑镜像构建时使用 `make dev-rebuild`。随后由同一终端统一托管 OpenSandbox、API、Celery Worker 与前端，日志带进程前缀。开发配置保存在 `~/.local/share/nexaflow-opensandbox`，不会覆盖已有配置。
 
 启动完成后访问 <http://localhost:3000>；API 健康检查和文档分别位于 <http://localhost:8000/health> 与 <http://localhost:8000/docs>。按 `Ctrl+C` 会停止本次托管的 OpenSandbox、API、Worker 和前端，但保留基础容器及数据，便于下次快速启动。若 OpenSandbox 已在运行且密钥匹配，启动器会直接复用。
 

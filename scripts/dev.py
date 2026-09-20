@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import os
 import re
 import secrets
@@ -32,6 +34,8 @@ OPEN_SANDBOX_CONFIG = OPEN_SANDBOX_STATE_DIR / "server.toml"
 OPEN_SANDBOX_DEFAULT_URL = "http://127.0.0.1:8088"
 OPEN_SANDBOX_DEFAULT_IMAGE = "nexaflow/execution:local"
 OPEN_SANDBOX_HEADER = "OPEN-SANDBOX-API-KEY"
+POSTGRES_DEFAULT_IMAGE = "nexaflow/postgres-pg-search:0.25.2"
+BUILD_INPUTS_LABEL = "io.nexaflow.dev.build-inputs-sha256"
 SENSITIVE_BACKEND_ENV_KEYS = {
     "DATABASE_URL",
     "JWT_SECRET_KEY",
@@ -45,6 +49,17 @@ _PRINT_LOCK = threading.Lock()
 
 class DevError(RuntimeError):
     """A local-development setup error with an actionable message."""
+
+
+@dataclass(frozen=True)
+class LocalImageBuild:
+    """A locally built image and the repository inputs that determine it."""
+
+    name: str
+    image: str
+    dockerfile: Path
+    inputs: tuple[Path, ...]
+    target: str | None = None
 
 
 def log(message: str) -> None:
@@ -158,6 +173,101 @@ def run(command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = No
         raise DevError(f"Command failed with exit code {exc.returncode}: {shlex.join(command)}") from exc
 
 
+def _is_ignored_build_input(path: Path) -> bool:
+    return (
+        "__pycache__" in path.parts
+        or ".venv" in path.parts
+        or path.suffix == ".pyc"
+    )
+
+
+def build_inputs_fingerprint(inputs: tuple[Path, ...]) -> str:
+    """Hash the files and modes copied into a local development image."""
+    candidates: set[Path] = set()
+    for path in inputs:
+        if not path.exists() and not path.is_symlink():
+            raise DevError(f"Missing local image build input: {path}")
+        candidates.add(path)
+        if path.is_dir():
+            candidates.update(path.rglob("*"))
+
+    digest = hashlib.sha256()
+    for path in sorted(candidates, key=lambda candidate: candidate.as_posix()):
+        relative = path.relative_to(ROOT).as_posix()
+        if _is_ignored_build_input(Path(relative)):
+            continue
+        metadata = path.lstat()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(f"{metadata.st_mode & 0o777:o}".encode("ascii"))
+        digest.update(b"\0")
+        if path.is_symlink():
+            digest.update(b"link\0")
+            digest.update(os.readlink(path).encode("utf-8"))
+        elif path.is_dir():
+            digest.update(b"directory")
+        else:
+            digest.update(b"file\0")
+            with path.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def docker_image_label(image: str, label: str) -> str | None:
+    result = subprocess.run(
+        [
+            "docker",
+            "image",
+            "inspect",
+            image,
+            "--format",
+            f'{{{{ index .Config.Labels "{label}" }}}}',
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value if value and value != "<no value>" else None
+
+
+def ensure_local_image(build: LocalImageBuild, *, force: bool = False) -> bool:
+    """Build an image only when its declared repository inputs changed."""
+    if "@sha256:" in build.image:
+        raise DevError(f"Local development {build.name} image must use a buildable tag.")
+
+    fingerprint = build_inputs_fingerprint(build.inputs)
+    if not force and docker_image_label(build.image, BUILD_INPUTS_LABEL) == fingerprint:
+        log(f"[setup] Reusing {build.name} image {build.image} (inputs unchanged)")
+        return False
+
+    command = [
+        "docker",
+        "build",
+        "-f",
+        str(build.dockerfile),
+    ]
+    if build.target:
+        command.extend(["--target", build.target])
+    command.extend(
+        [
+            "--label",
+            f"{BUILD_INPUTS_LABEL}={fingerprint}",
+            "-t",
+            build.image,
+            str(ROOT),
+        ]
+    )
+    run(command)
+    return True
+
+
 def require_commands() -> None:
     missing = [name for name in ("docker", "uv", "bun") if shutil.which(name) is None]
     if missing:
@@ -220,9 +330,24 @@ def ensure_local_opensandbox(values: dict[str, str]) -> tuple[dict[str, str], bo
     return read_env(ENV_FILE), True
 
 
-def prepare(values: dict[str, str], *, local_opensandbox: bool) -> None:
+def prepare(
+    values: dict[str, str],
+    *,
+    local_opensandbox: bool,
+    rebuild_images: bool = False,
+) -> None:
     run(["uv", "sync", "--dev", "--frozen"], cwd=BACKEND)
     run(["bun", "install", "--frozen-lockfile"], cwd=FRONTEND)
+    ensure_local_image(
+        LocalImageBuild(
+            name="PostgreSQL",
+            image=values.get("NEXAFLOW_POSTGRES_IMAGE", "").strip()
+            or POSTGRES_DEFAULT_IMAGE,
+            dockerfile=ROOT / "deploy" / "dockerfiles" / "postgres.Dockerfile",
+            inputs=(ROOT / "deploy" / "dockerfiles" / "postgres.Dockerfile",),
+        ),
+        force=rebuild_images,
+    )
     run(
         [
             "docker",
@@ -235,7 +360,6 @@ def prepare(values: dict[str, str], *, local_opensandbox: bool) -> None:
             str(ROOT / "deploy" / "docker-compose.dev.yml"),
             "up",
             "-d",
-            "--build",
             "--wait",
             "db",
             "redis",
@@ -244,20 +368,24 @@ def prepare(values: dict[str, str], *, local_opensandbox: bool) -> None:
     )
     if local_opensandbox:
         image = values.get("OPENSANDBOX_IMAGE", "").strip() or OPEN_SANDBOX_DEFAULT_IMAGE
-        if "@sha256:" in image:
-            raise DevError("Local development OPENSANDBOX_IMAGE must be a buildable image tag.")
-        run(
-            [
-                "docker",
-                "build",
-                "-f",
-                str(ROOT / "deploy" / "dockerfiles" / "app.Dockerfile"),
-                "--target",
-                "sandbox-runtime",
-                "-t",
-                image,
-                str(ROOT),
-            ]
+        ensure_local_image(
+            LocalImageBuild(
+                name="OpenSandbox runtime",
+                image=image,
+                dockerfile=ROOT / "deploy" / "dockerfiles" / "app.Dockerfile",
+                target="sandbox-runtime",
+                inputs=(
+                    ROOT / ".dockerignore",
+                    ROOT / "deploy" / "dockerfiles" / "app.Dockerfile",
+                    ROOT / "sandbox" / "pyproject.toml",
+                    ROOT / "sandbox" / "uv.lock",
+                    ROOT / "sandbox" / "job.py",
+                    ROOT / "sandbox" / "self_check.py",
+                    ROOT / "sandbox" / "renderer_checks",
+                    ROOT / "sandbox" / "skills",
+                ),
+            ),
+            force=rebuild_images,
         )
     run(["uv", "run", "python", "-m", "alembic", "upgrade", "head"], cwd=BACKEND)
 
@@ -504,7 +632,14 @@ def start_stack(
             item.stop()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--rebuild-images",
+        action="store_true",
+        help="re-run local PostgreSQL and OpenSandbox image builds",
+    )
+    args = parser.parse_args(argv)
     if sys.platform == "win32":
         log("Native Windows is unsupported; run make dev inside WSL2.")
         return 2
@@ -519,7 +654,11 @@ def main() -> int:
         require_development_ports(api_port, frontend_port)
         values = ensure_env_file()
         values, local_opensandbox = ensure_local_opensandbox(values)
-        prepare(values, local_opensandbox=local_opensandbox)
+        prepare(
+            values,
+            local_opensandbox=local_opensandbox,
+            rebuild_images=args.rebuild_images,
+        )
         return start_stack(
             values,
             local_opensandbox=local_opensandbox,

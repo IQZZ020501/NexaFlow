@@ -58,23 +58,17 @@ BUILTIN_SKILL_DEFINITIONS = (
         "pptx_skill",
         "PPTX Skill",
         (
-            "Create a new 16:9 PPTX from audience-facing structured slides. "
-            "Plan around the audience and purpose, give each slide one takeaway, "
-            "keep the cover minimal, and for teaching or training decks normally "
-            "use 8-12 content slides that show the problem, worked example, "
-            "reasoning/process, practice, and takeaway instead of copying a lesson "
-            "plan line-by-line. Do not use more than two consecutive bullets slides; "
-            "use steps for procedures and hero/two-column for worked examples. Vary "
-            "the supported layouts across section, bullets, two-column, icons, table, "
-            "hero, stats, steps, and quote, and put external sources in speaker notes. Keep "
-            "central arithmetic expressions in the slide copy so the renderer can "
-            "surface simple multiplication examples in an editable visual region. Keep "
-            "titles and body text at readable sizes; the renderer rejects "
-            "overlong slide titles. Create a coherent visual identity with the "
-            "declarative theme and optional per-slide style fields; built-in "
-            "templates are fallbacks, not the primary design choice. It supports "
-            "native icons, tables, click-triggered entrance animations, and page "
-            "transitions; it does not edit existing decks or fetch external media."
+            "Create a new 16:9 PPTX with the offline open-kimi-ppt PPTD renderer. "
+            "For new decks, choose the audience scenario and one of 30 named design "
+            "systems, then compose every page on the 960x540 canvas with editable "
+            "text, shapes, lines, and optional inline images. Include the cover as "
+            "the first free-form slide, give each page one takeaway, vary composition "
+            "instead of repeating a template, and put sources in speaker notes. Use "
+            "PPTD animations intentionally: normally 1-3 groups per page with "
+            "onClick, withPrevious, or afterPrevious triggers. The renderer supports "
+            "22 entrance, emphasis, exit, and motion-path effects plus page fades. "
+            "Existing layout-based calls remain compatible. It does not edit existing "
+            "decks, access the network, or fetch remote media."
         ),
     ),
     (
@@ -264,6 +258,285 @@ def _pptx_input_schema() -> dict[str, Any]:
             "presentation theme and use it only when the narrative needs contrast."
         ),
     }
+    bounds = {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "prefixItems": [
+            {"type": "number", "minimum": 0, "maximum": 960},
+            {"type": "number", "minimum": 0, "maximum": 540},
+            {"type": "number", "exclusiveMinimum": 0, "maximum": 960},
+            {"type": "number", "exclusiveMinimum": 0, "maximum": 540},
+        ],
+        "items": False,
+        "description": "PPTD canvas geometry [x, y, width, height] on a 960x540 page.",
+    }
+    color = {
+        "type": "string",
+        "pattern": r"^(#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?|\$[A-Za-z][A-Za-z0-9_-]{0,31})$",
+    }
+    border = {
+        "type": "object",
+        "properties": {
+            "style": {"type": "string", "enum": ["solid", "dash", "dot"]},
+            "width": {"type": "number", "minimum": 0, "maximum": 24},
+            "color": color,
+        },
+        "additionalProperties": False,
+    }
+    shadow = {
+        "type": "object",
+        "properties": {
+            "blur": {"type": "number", "minimum": 0, "maximum": 40},
+            "color": color,
+            "offset": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number", "minimum": -80, "maximum": 80},
+            },
+        },
+        "required": ["blur", "color"],
+        "additionalProperties": False,
+    }
+    solid_fill = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "solid"},
+            "color": color,
+        },
+        "required": ["type", "color"],
+        "additionalProperties": False,
+    }
+    gradient_fill = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "gradient"},
+            "gradientType": {"type": "string", "enum": ["linear", "radial"]},
+            "angle": {"type": "number", "minimum": 0, "exclusiveMaximum": 360},
+            "stops": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "position": {"type": "number", "minimum": 0, "maximum": 1},
+                        "color": color,
+                    },
+                    "required": ["position", "color"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["type", "gradientType", "stops"],
+        "additionalProperties": False,
+    }
+    image_fit = {
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string", "enum": ["fill", "contain", "cover"]}
+        },
+        "required": ["mode"],
+        "additionalProperties": False,
+    }
+    image_fill = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "image"},
+            "src": {
+                "type": "string",
+                "pattern": r"^media/[A-Za-z0-9][A-Za-z0-9._-]{0,95}\.(png|jpg|jpeg|gif)$",
+            },
+            "fit": image_fit,
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["type", "src"],
+        "additionalProperties": False,
+    }
+    fill = {"anyOf": [solid_fill, gradient_fill, image_fill]}
+    base_element_properties = {
+        "elementId": {
+            "type": "string",
+            "pattern": r"^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+        },
+        "bounds": bounds,
+        "rotation": {"type": "number", "minimum": -360, "maximum": 360},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+    }
+    text_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "text"},
+            "content": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12_000,
+                        "description": (
+                            "Plain text or PPTD rich text using p/span/li tags. "
+                            "Use one element per visual text region."
+                        ),
+                    },
+                    "style": {
+                        "type": "string",
+                        "enum": ["$title", "$body", "$label"],
+                    },
+                    "color": color,
+                    "fontSize": {"type": "number", "minimum": 8, "maximum": 120},
+                    "fontFamily": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "bold": {"type": "boolean"},
+                    "italic": {"type": "boolean"},
+                    "backgroundColor": color,
+                    "lineHeight": {"type": "number", "minimum": 0.8, "maximum": 3},
+                    "letterSpacing": {"type": "number", "minimum": -5, "maximum": 20},
+                    "wrap": {"type": "boolean"},
+                    "align": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "prefixItems": [
+                            {
+                                "type": "string",
+                                "enum": ["left", "center", "right", "justify", "distributed"],
+                            },
+                            {"type": "string", "enum": ["top", "middle", "bottom"]},
+                        ],
+                        "items": False,
+                    },
+                    "shadow": shadow,
+                },
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["elementId", "elementType", "bounds", "content"],
+        "additionalProperties": False,
+    }
+    shape_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "shape"},
+            "shapeName": {
+                "type": "string",
+                "enum": [
+                    "rect",
+                    "roundRect",
+                    "ellipse",
+                    "triangle",
+                    "diamond",
+                    "homePlate",
+                    "chevron",
+                    "donut",
+                    "star5",
+                    "rightArrow",
+                    "wedgeRectCallout",
+                    "bracePair",
+                ],
+            },
+            "adjustments": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {"type": "number", "minimum": -100_000, "maximum": 200_000},
+            },
+            "fill": fill,
+            "border": border,
+            "shadow": shadow,
+        },
+        "required": ["elementId", "elementType", "bounds", "shapeName"],
+        "additionalProperties": False,
+    }
+    line_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "line"},
+            "viewBox": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10_000},
+            },
+            "points": {"type": "string", "minLength": 7, "maxLength": 2_000},
+            "curve": {"type": "string", "enum": ["sharp", "round", "smooth"]},
+            "border": border,
+        },
+        "required": ["elementId", "elementType", "bounds", "viewBox", "points"],
+        "additionalProperties": False,
+    }
+    image_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "image"},
+            "src": image_fill["properties"]["src"],
+            "fit": image_fit,
+            "border": border,
+            "shadow": shadow,
+        },
+        "required": ["elementId", "elementType", "bounds", "src"],
+        "additionalProperties": False,
+    }
+    animation = {
+        "type": "object",
+        "properties": {
+            "elementId": {
+                "type": "string",
+                "pattern": r"^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            },
+            "effect": {
+                "type": "string",
+                "enum": [
+                    "appear",
+                    "fade-in",
+                    "fly-in",
+                    "zoom-in",
+                    "wipe-in",
+                    "float-in",
+                    "peek-in",
+                    "rise-in",
+                    "pulse",
+                    "grow-shrink",
+                    "spin",
+                    "teeter",
+                    "fill-color",
+                    "transparency",
+                    "color-pulse",
+                    "disappear",
+                    "fade-out",
+                    "fly-out",
+                    "zoom-out",
+                    "wipe-out",
+                    "float-out",
+                    "motion-path",
+                ],
+            },
+            "trigger": {
+                "type": "string",
+                "enum": ["onClick", "withPrevious", "afterPrevious"],
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["up", "down", "left", "right"],
+            },
+            "durationMs": {"type": "integer", "minimum": 1, "maximum": 30_000},
+            "delayMs": {"type": "integer", "minimum": 0, "maximum": 30_000},
+            "easing": {
+                "type": "string",
+                "enum": ["linear", "ease-in", "ease-out", "ease-in-out"],
+            },
+            "repeat": {"type": "integer", "minimum": 1, "maximum": 20},
+            "path": {"type": "string", "minLength": 5, "maxLength": 2_000},
+            "color": color,
+            "amount": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["elementId", "effect"],
+        "additionalProperties": False,
+    }
     slide = {
         "type": "object",
         "properties": {
@@ -352,12 +625,43 @@ def _pptx_input_schema() -> dict[str, Any]:
                 ),
             },
             "style": slide_style,
+            "page_type": {
+                "type": "string",
+                "enum": ["cover", "table_of_contents", "chapter", "content", "final"],
+                "description": "Semantic page role for a free-form PPTD slide.",
+            },
+            "background": fill,
+            "elements": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 80,
+                "items": {
+                    "anyOf": [text_element, shape_element, line_element, image_element]
+                },
+                "description": (
+                    "Free-form PPTD elements in back-to-front layer order. Use the "
+                    "960x540 canvas and keep every element inside it."
+                ),
+            },
+            "animations": {
+                "type": "array",
+                "maxItems": 24,
+                "items": animation,
+                "description": (
+                    "PPTD animation sequence. Keep to 1-3 groups per page and use "
+                    "onClick/withPrevious/afterPrevious deliberately."
+                ),
+            },
         },
-        "required": ["layout", "title"],
+        "anyOf": [
+            {"required": ["layout", "title"]},
+            {"required": ["elements"]},
+        ],
         "additionalProperties": False,
         "description": (
-            "Provide only the content field used by the selected layout: subtitle, "
-            "bullets, left/right, items, table, stats, steps, quote, or source."
+            "Use either one legacy layout plus its content field, or free-form PPTD "
+            "elements plus optional background/animations. Do not mix the two modes "
+            "within one deck."
         ),
     }
     return {
@@ -373,6 +677,65 @@ def _pptx_input_schema() -> dict[str, Any]:
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
+            },
+            "scenario": {
+                "type": "string",
+                "enum": [
+                    "analysis-decision",
+                    "business-plan",
+                    "management-report",
+                    "academic-research",
+                    "education-training",
+                    "tech-engineering",
+                    "brand-creative",
+                ],
+                "description": (
+                    "Narrative pattern for a PPTD deck. Defaults to management-report."
+                ),
+            },
+            "design_system": {
+                "type": "string",
+                "enum": [
+                    "apricot-white-brief",
+                    "indigo-due-diligence",
+                    "marine-blue-research",
+                    "moss-green-transformation",
+                    "pine-green-strategy",
+                    "red-black-growth",
+                    "black-gold-ledger",
+                    "ebony-ledger",
+                    "honey-orange-memo",
+                    "lake-blue-memo",
+                    "prospect-annual",
+                    "rice-paper-annual",
+                    "blue-flame-brand",
+                    "electric-violet-business",
+                    "moon-white-imagery",
+                    "sky-blue-wayfinding",
+                    "warm-clay-works",
+                    "warm-jade-annual-report",
+                    "aqua-charity-report",
+                    "cream-collage",
+                    "pine-soot-pictorial",
+                    "silk-yellow-magazine",
+                    "silver-gray-luxury-magazine",
+                    "travel-green-handbook",
+                    "blue-line-courseware",
+                    "deep-blue-atlas",
+                    "paper-white-courseware",
+                    "pastel-derivation",
+                    "teal-green-academic-defense",
+                    "wine-red-data",
+                ],
+                "description": (
+                    "Named open-kimi-ppt visual system. Defaults to blue-line-courseware; "
+                    "choose one that matches the audience instead of repeating one style."
+                ),
+            },
+            "page_transition": {
+                "type": "string",
+                "enum": ["fade", "none"],
+                "description": "Deck-wide page transition for PPTD slides; defaults to fade.",
             },
             "template": {
                 "type": "string",
@@ -473,6 +836,30 @@ def _pptx_input_schema() -> dict[str, Any]:
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 100,
+            },
+            "media": {
+                "type": "array",
+                "maxItems": 24,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {
+                            "type": "string",
+                            "pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\.(png|jpg|jpeg|gif)$",
+                        },
+                        "content_base64": {
+                            "type": "string",
+                            "minLength": 4,
+                            "maxLength": 2_800_000,
+                        },
+                    },
+                    "required": ["filename", "content_base64"],
+                    "additionalProperties": False,
+                },
+                "description": (
+                    "Optional inline local images for PPTD pages. Reference each as "
+                    "media/<filename>; remote URLs are rejected. Total decoded media is 4 MiB."
+                ),
             },
             "slides": {
                 "type": "array",

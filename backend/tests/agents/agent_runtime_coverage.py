@@ -774,33 +774,34 @@ def assert_graph_error_branches() -> None:
         overflow_provider = SequenceProvider(
             [ok_completion("Answer after stopping the extra searches.")]
         )
-        try:
-            await run_agent(
-                overflow_provider,
-                [{"role": "user", "content": "hi"}],
-                [knowledge_tool],
-                checkpoint=await checkpoint_state(
-                    turn=1,
-                    tool_call_count=11,
-                    pending_tool_calls=[
-                        {"id": "call-1", "name": "search_knowledge", "arguments": "{}"},
-                        {"id": "call-2", "name": "search_knowledge", "arguments": "{}"},
-                    ],
-                    events=[
-                        {
-                            "type": "tool",
-                            "tool_kind": "knowledge",
-                            "status": "succeeded",
-                        }
-                    ],
-                    evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
-                ),
-                max_tool_calls=12,
-            )
-        except AgentRunnerError as exc:
-            assert "tool call limit" in str(exc)
-        else:
-            raise AssertionError("Knowledge bypassed the shared tool budget.")
+        overflow_result = await run_agent(
+            overflow_provider,
+            [{"role": "user", "content": "hi"}],
+            [knowledge_tool],
+            checkpoint=await checkpoint_state(
+                turn=1,
+                tool_call_count=11,
+                pending_tool_calls=[
+                    {"id": "call-1", "name": "search_knowledge", "arguments": "{}"},
+                    {"id": "call-2", "name": "search_knowledge", "arguments": "{}"},
+                ],
+                events=[
+                    {
+                        "type": "tool",
+                        "tool_kind": "knowledge",
+                        "status": "succeeded",
+                    }
+                ],
+                evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
+            ),
+            max_tool_calls=12,
+        )
+        assert overflow_result.content == "Answer after stopping the extra searches."
+        assert len(overflow_result.events) == 3
+        assert all(event["status"] == "failed" for event in overflow_result.events[1:])
+        assert "tool-call budget is exhausted" in str(
+            overflow_provider.requests[0][-1].content
+        )
 
     asyncio.run(run_tool_budget_finalization())
 

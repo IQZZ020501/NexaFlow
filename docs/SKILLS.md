@@ -105,13 +105,17 @@ MCP 走已授权 Tool，不向脚本注入业务凭据。
 
 ## 固定文件渲染 Tools
 
-`sandbox/skills/{documents,pdf,pptx,spreadsheets}` 是 NexaFlow 自编固定渲染器，
-预装于执行镜像，并非上传后即可自动注册的第三方包。它们继续在
+`sandbox/skills/{documents,pdf,pptx,spreadsheets}` 是 NexaFlow 维护的固定渲染器
+（PPTX 包含经适配的 MIT 开源组件），预装于执行镜像，并非上传后即可自动
+注册的第三方包。它们继续在
 Agent/Workflow 工具选择器中提供同一输入契约：
 
 - `documents_skill`：DOCX 文件名与 Markdown，可继承参考 DOCX 格式。
 - `pdf_skill`：PDF 文件名与 Markdown。
-- `pptx_skill`：PPTX 文件名与结构化幻灯片、表格和讲者备注。
+- `pptx_skill`：PPTX 文件名与演示场景、30 套命名设计系统、960×540
+  自由画布元素、讲者备注和 22 种可编排动画。新请求通过适配后的
+  open-kimi-ppt PPTD/WASM 离线导出；旧的结构化布局请求继续兼容。
+  图片只接受有总量限制的内联本地媒体，固定 Skill 不访问网络。
 - `spreadsheets_skill`：XLSX 文件名与结构化工作表/行。
 
 调用方只能传内容/数据，不能替换 renderer 代码。这四项功能和 Workflow

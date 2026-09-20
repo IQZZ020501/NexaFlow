@@ -165,9 +165,11 @@ not trigger unrelated cleanup.
   and progress writes must remain in one lease-checked transaction.
 - Root `make dev` is the complete local development entrypoint. Its standard-library
   Python supervisor creates missing private local configuration, syncs dependencies,
-  starts PostgreSQL/Redis/Qdrant, builds and starts the development OpenSandbox,
-  applies Alembic migrations, then supervises Uvicorn, Celery and Next.js with one
-  shutdown boundary. `cd backend && make dev` remains the API-only entrypoint.
+  builds the local PostgreSQL and OpenSandbox images when their inputs change, starts
+  PostgreSQL/Redis/Qdrant and the development OpenSandbox, applies Alembic migrations,
+  then supervises Uvicorn, Celery and Next.js with one shutdown boundary. Use root
+  `make dev-rebuild` to force both local image builds. `cd backend && make dev` remains
+  the API-only entrypoint.
 - `cd backend && make worker` starts Celery without a local execution broker,
   root requirement, or sandbox dependencies. It requires `OPENSANDBOX_API_KEY`;
   code execution fails closed if the external execution plane is unavailable.
@@ -220,17 +222,20 @@ not trigger unrelated cleanup.
   rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds
   program/file/output/time limits inside the platform's container/VM boundary.
   The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
-  python-pptx, Pillow, and the standard library. Business secrets and mounts are
+  python-pptx, Pillow, the adapted offline open-kimi-ppt PPTD/WASM exporter,
+  and the standard library. Business secrets and mounts are
   never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
   authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
   native TTL cleanup. Effective `dns+nft` default-deny policy is required before
   staging code or secrets; private/metadata ranges stay denied. Only stdio MCP
   may request a subset of deployment-approved public egress domains.
-  NexaFlow-authored `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live
-  under `sandbox/skills`; each declares a read-only renderer entrypoint and
-  artifact format in `SKILL.md` and is registered as a fixed selectable
-  built-in Tool. Fixed Skill Tools accept content/data rather than
-  caller-supplied Python.
+  Fixed `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live under
+  `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
+  format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
+  The PPTX Skill keeps legacy layout calls compatible while new calls use the
+  vendored, MIT-licensed open-kimi-ppt PPTD/WASM exporter offline with bounded
+  inline media and model-selected animations. Fixed Skill Tools accept
+  content/data rather than caller-supplied Python.
   Workspace Skills are immutable schema-v2 SKILL.md/file bundles with lazy
   loading, live ACL checks and unified-ledger script execution. They cannot
   clamp an entire Run's budgets or grant tools themselves. Their scripts may

@@ -59,6 +59,7 @@ def _use_address_space_limit(request):
     shell = request.get("shell")
     return (
         "mcp" not in request
+        and request.get("skill") != "pptx"
         and not str(request.get("script", "")).endswith(".js")
         and not (isinstance(shell, dict) and shell.get("manager") == "node")
     )
@@ -266,6 +267,10 @@ def execute(request):
             "NEXAFLOW_OUTPUT_PATH": str(output),
             "NEXAFLOW_SKILLS_DIR": str(SKILLS_DIR),
         }
+        if skill == "pptx":
+            node_binary = shutil.which("node")
+            if node_binary is not None:
+                env["NEXAFLOW_NODE_BINARY"] = node_binary
         # Only version-pinned package files arrive here, never host paths.
         bundle_files = request.get("files", {})
         if not isinstance(bundle_files, dict) or len(bundle_files) > 64:

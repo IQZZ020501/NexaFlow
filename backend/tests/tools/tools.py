@@ -372,12 +372,12 @@ def test_artifact_contract_downgrade_rejects_durable_references() -> None:
                 raise AssertionError("Artifact Tool ledger downgrade was accepted.")
 
 
-def load_pptx_schema_migration():
+def load_open_kimi_ppt_migration():
     path = (
         Path(__file__).parents[2]
-        / "alembic/versions/202608300003_builtin_pptx_skill_schema.py"
+        / "alembic/versions/202609190002_open_kimi_ppt_skill.py"
     )
-    spec = spec_from_file_location("pptx_skill_schema", path)
+    spec = spec_from_file_location("open_kimi_ppt_skill", path)
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -572,15 +572,15 @@ def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
         ) == desired_version.id
 
 
-def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
+def test_open_kimi_ppt_migration_refreshes_stale_versions() -> None:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
     from sqlalchemy import create_engine
 
     from app.domain.tools.catalog.service import build_skill_artifact_tool
 
-    migration = load_pptx_schema_migration()
-    assert migration.down_revision == "202608300002"
+    migration = load_open_kimi_ppt_migration()
+    assert migration.down_revision == "202609190001"
 
     workspace_id = "workspace-migration"
     desired_tool, desired_version, _desired_policy = build_skill_artifact_tool(
@@ -782,6 +782,12 @@ def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
             "properties"
         ]
         assert "theme" in presentation_properties
+        assert len(presentation_properties["design_system"]["enum"]) == 30
+        assert "elements" in presentation_properties["slides"]["items"]["properties"]
+        assert len(
+            presentation_properties["slides"]["items"]["properties"]["animations"]
+            ["items"]["properties"]["effect"]["enum"]
+        ) == 22
         assert "style" in presentation_properties["slides"]["items"]["properties"]
         assert set(slide_layout["enum"]) == {
             "section",
@@ -6567,7 +6573,7 @@ def main() -> None:
     test_artifact_contract_downgrade_rejects_durable_references()
     test_documents_formal_legal_migration_refreshes_stale_versions()
     test_documents_reference_migration_targets_current_catalog()
-    test_pptx_skill_schema_migration_refreshes_stale_versions()
+    test_open_kimi_ppt_migration_refreshes_stale_versions()
     test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()

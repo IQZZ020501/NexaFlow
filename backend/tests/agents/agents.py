@@ -751,10 +751,18 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
         [
             ModelCompletion(
                 content="",
-                tool_calls=(ModelToolCall("call-1", "test_tool", '{"value":'),),
+                tool_calls=(
+                    ModelToolCall(
+                        "call-1",
+                        "pptx_skill",
+                        '{"filename":"deck.pptx","presentation":{"slides":[',
+                    ),
+                ),
                 finish_reason="length",
             ),
-            ModelCompletion(content="Stopped safely.", tool_calls=(), finish_reason="stop"),
+            ModelCompletion(
+                content="Stopped safely.", tool_calls=(), finish_reason="stop"
+            ),
         ]
     )
     result = await run_agent(
@@ -762,7 +770,7 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
         [{"role": "user", "content": "Run it"}],
         [
             create_agent_tool(
-                name="test_tool",
+                name="pptx_skill",
                 description="Test tool",
                 parameters={"type": "object"},
                 execute=execute,
@@ -772,6 +780,11 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
     assert result.content == "Stopped safely."
     assert result.events[0]["status"] == "failed"
     assert executions == 0
+    recovery = next(
+        message.content for message in provider.requests[1] if message.type == "tool"
+    )
+    assert "compact legacy" in str(recovery).lower()
+    assert "layout" in str(recovery).lower()
 
 
 async def assert_invalid_tool_arguments_are_not_executed() -> None:
@@ -1822,27 +1835,30 @@ async def assert_runtime_budgets_are_enforced() -> None:
         parameters={"type": "object"},
         execute=execute,
     )
-    try:
-        await run_agent(
-            SequenceProvider(
-                [
-                    ModelCompletion(
-                        content="",
-                        tool_calls=tuple(
-                            ModelToolCall(f"call-{index}", "test_tool", "{}")
-                            for index in range(13)
-                        ),
-                        finish_reason="tool_calls",
-                    )
-                ]
-            ),  # type: ignore[arg-type]
-            [{"role": "user", "content": "Run it"}],
-            [ordinary_tool],
-        )
-    except AgentRunnerError as exc:
-        assert str(exc) == "Agent tool call limit reached."
-    else:
-        raise AssertionError("Agent tool call budget was not enforced.")
+    overflow_result = await run_agent(
+        SequenceProvider(
+            [
+                ModelCompletion(
+                    content="",
+                    tool_calls=tuple(
+                        ModelToolCall(f"call-{index}", "test_tool", "{}")
+                        for index in range(13)
+                    ),
+                    finish_reason="tool_calls",
+                ),
+                ModelCompletion(
+                    content="Stopped after reaching the tool budget.",
+                    tool_calls=(),
+                    finish_reason="stop",
+                ),
+            ]
+        ),  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [ordinary_tool],
+    )
+    assert overflow_result.content == "Stopped after reaching the tool budget."
+    assert len(overflow_result.events) == 13
+    assert all(event["status"] == "failed" for event in overflow_result.events)
     assert executions == 0
 
     try:

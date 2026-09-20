@@ -6,6 +6,7 @@ from dataclasses import asdict
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 
 from app.entities.tools import Tool, ToolPolicy, ToolSnapshot, ToolSource, ToolVersion
 
@@ -13,7 +14,25 @@ from app.entities.tools import Tool, ToolPolicy, ToolSnapshot, ToolSource, ToolV
 MAX_TOOL_INPUT_BYTES = 512 * 1024
 # Documents Skill reference DOCX input is bounded separately from ordinary tools.
 MAX_DOCUMENT_TOOL_INPUT_BYTES = 8 * 1024 * 1024
+# PPTD decks may carry bounded inline media; the sandbox request has the same cap.
+MAX_PPTX_TOOL_INPUT_BYTES = 8 * 1024 * 1024
 MAX_TOOL_RESULT_BYTES = 32 * 1024
+PPTX_THEME_COMPATIBILITY_FIELDS = (
+    "background_color",
+    "text_color",
+    "accent_color",
+    "panel_color",
+    "muted_text_color",
+    "rule_color",
+    "font_family",
+    "heading_font_family",
+    "cover_title_size",
+    "slide_title_size",
+    "body_size",
+    "panel_radius",
+    "cover_accent_width",
+    "title_alignment",
+)
 TOOL_APPROVAL_AUTO = "auto"
 TOOL_APPROVAL_DISABLED = "disabled"
 TOOL_APPROVAL_EACH_CALL = "each_call"
@@ -76,9 +95,7 @@ def build_tool_snapshot(
 
 
 def tool_snapshot_payload(snapshot: ToolSnapshot) -> dict[str, Any]:
-    return json.loads(
-        json.dumps(asdict(snapshot), ensure_ascii=False, allow_nan=False)
-    )
+    return json.loads(json.dumps(asdict(snapshot), ensure_ascii=False, allow_nan=False))
 
 
 def tool_snapshot_from_payload(payload: Any) -> ToolSnapshot:
@@ -109,6 +126,15 @@ def tool_input_size_limit(snapshot: ToolSnapshot) -> int:
         and "reference_docx_base64" in properties
     ):
         return MAX_DOCUMENT_TOOL_INPUT_BYTES
+    presentation = (
+        properties.get("presentation") if isinstance(properties, dict) else None
+    )
+    if (
+        snapshot.function_name == "pptx_skill"
+        and isinstance(presentation, dict)
+        and "media" in presentation.get("properties", {})
+    ):
+        return MAX_PPTX_TOOL_INPUT_BYTES
     return MAX_TOOL_INPUT_BYTES
 
 
@@ -181,6 +207,10 @@ def normalize_tool_arguments(
         "brand",
         "theme",
         "footer",
+        "scenario",
+        "design_system",
+        "page_transition",
+        "media",
     ):
         if field in normalized:
             if presentation is not None and field not in presentation:
@@ -188,6 +218,40 @@ def normalize_tool_arguments(
             normalized.pop(field, None)
 
     if presentation is not None:
+        theme_fields = {
+            field: presentation.pop(field)
+            for field in PPTX_THEME_COMPATIBILITY_FIELDS
+            if field in presentation
+        }
+        if theme_fields:
+            theme = presentation.get("theme")
+            if theme is None:
+                theme = {}
+            if isinstance(theme, dict):
+                presentation["theme"] = {**theme_fields, **theme}
+
+        slides = presentation.get("slides")
+        legacy_slides = (
+            isinstance(slides, list)
+            and bool(slides)
+            and all(
+                isinstance(slide, dict)
+                and "layout" in slide
+                and "elements" not in slide
+                for slide in slides
+            )
+        )
+        if legacy_slides:
+            # A truncated free-form PPTD call may be retried with the compact
+            # compatibility layout. Remove modern-only presentation hints that
+            # the frozen legacy renderer cannot consume, without changing slide
+            # content or silently accepting a mixed elements/layout deck.
+            for field in ("scenario", "design_system", "page_transition"):
+                presentation.pop(field, None)
+            presentation["slides"] = [
+                {key: value for key, value in slide.items() if key != "page_type"}
+                for slide in slides
+            ]
         normalized["presentation"] = presentation
     return normalized
 
@@ -254,16 +318,45 @@ def _validate_schema(schema: dict[str, Any], value: Any, message: str) -> None:
     except Exception as exc:
         raise ValueError("Tool schema could not be resolved.") from exc
     if error is not None:
-        path = ".".join(str(part) for part in error.absolute_path) or "root"
-        detail = f"{message} at {path}: {error.message}."
+        path, error_message = schema_validation_error_detail(error)
+        detail = f"{message} at {path}: {error_message}."
         properties = schema.get("properties")
         if path == "root" and isinstance(properties, dict):
             detail += f" Expected fields: {', '.join(str(key) for key in properties)}."
         raise ValueError(detail[:1000])
 
 
+def schema_validation_error_detail(error: ValidationError) -> tuple[str, str]:
+    """Return a bounded, actionable message for nested union-schema failures."""
+    path = ".".join(str(part) for part in error.absolute_path) or "root"
+    if not error.context:
+        return path, error.message
+
+    leaves: list[ValidationError] = []
+    pending = list(error.context)
+    while pending:
+        current = pending.pop(0)
+        if current.context:
+            pending[0:0] = list(current.context)
+        else:
+            leaves.append(current)
+
+    details: list[str] = []
+    for leaf in sorted(leaves, key=lambda item: len(item.absolute_path), reverse=True):
+        leaf_path = ".".join(str(part) for part in leaf.absolute_path) or "root"
+        rendered = f"at {leaf_path}: {leaf.message}"
+        if rendered not in details:
+            details.append(rendered)
+        if len(details) == 6:
+            break
+    if not details:
+        return path, error.message
+    return path, "value does not match a supported shape; " + "; ".join(details)
+
+
 __all__ = [
     "MAX_DOCUMENT_TOOL_INPUT_BYTES",
+    "MAX_PPTX_TOOL_INPUT_BYTES",
     "MAX_TOOL_INPUT_BYTES",
     "MAX_TOOL_RESULT_BYTES",
     "TOOL_APPROVAL_AUTO",
@@ -283,6 +376,7 @@ __all__ = [
     "build_tool_snapshot",
     "exhausted_tool_invocation_terminal_state",
     "normalize_tool_arguments",
+    "schema_validation_error_detail",
     "tool_arguments_hash",
     "tool_input_size_limit",
     "tool_snapshot_from_payload",

@@ -68,6 +68,12 @@ def skill():
 async def assert_capabilities_and_lazy_skills():
     calls = []
 
+    empty_registry = CapabilityRegistry(ExtensionRuntime([]), [])
+    assert [tool.name for tool in empty_registry.management_tools] == [
+        "search_tools",
+        "activate_tools",
+    ]
+
     async def echo(raw):
         calls.append(raw)
         return AgentToolResult(content=raw, summary="Echo done.")
@@ -85,6 +91,10 @@ async def assert_capabilities_and_lazy_skills():
     )
     extensions = ExtensionRuntime([AgentExtension("echo_plugin", "1", (tool,))])
     registry = CapabilityRegistry(extensions, [skill()])
+    load_skill = next(
+        tool for tool in registry.management_tools if tool.name == "load_skill"
+    )
+    assert load_skill.args_schema["properties"]["version_id"]["enum"] == ["v1"]
     catalog = skill_execution_context([skill()])
     assert "PRIVATE_FULL_SKILL_INSTRUCTIONS" not in catalog
     assert "v1" in catalog

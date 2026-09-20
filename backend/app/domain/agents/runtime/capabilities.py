@@ -209,7 +209,7 @@ class CapabilityRegistry:
                 policy_mode="harness_internal",
             )
 
-        return [
+        tools = [
             management(
                 "search_tools",
                 "Search the authorized tool catalog by capability or task. Discovery does not grant new permissions.",
@@ -239,36 +239,54 @@ class CapabilityRegistry:
                 },
                 activate,
             ),
-            management(
-                "load_skill",
-                "Load the full instructions of an authorized pinned Skill version before using it. Use version_id from the Skill catalog.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "version_id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 36,
-                        }
-                    },
-                    "required": ["version_id"],
-                    "additionalProperties": False,
-                },
-                load,
-            ),
-            management(
-                "read_skill_file",
-                "Read one file from a loaded, authorized pinned Skill package. Text files only, at most 12,000 characters per read.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "version_id": {"type": "string", "maxLength": 36},
-                        "path": {"type": "string", "maxLength": 255},
-                        "offset": {"type": "integer", "minimum": 0, "maximum": 2000000},
-                    },
-                    "required": ["version_id", "path"],
-                    "additionalProperties": False,
-                },
-                read_file,
-            ),
         ]
+        if not self.skills:
+            return tools
+
+        version_ids = list(self.skills)
+        tools.extend(
+            [
+                management(
+                    "load_skill",
+                    "Load the full instructions of an authorized pinned Skill version before using it. Use version_id from the Skill catalog.",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "version_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 36,
+                                "enum": version_ids,
+                            }
+                        },
+                        "required": ["version_id"],
+                        "additionalProperties": False,
+                    },
+                    load,
+                ),
+                management(
+                    "read_skill_file",
+                    "Read one file from a loaded, authorized pinned Skill package. Text files only, at most 12,000 characters per read.",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "version_id": {
+                                "type": "string",
+                                "maxLength": 36,
+                                "enum": version_ids,
+                            },
+                            "path": {"type": "string", "maxLength": 255},
+                            "offset": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 2000000,
+                            },
+                        },
+                        "required": ["version_id", "path"],
+                        "additionalProperties": False,
+                    },
+                    read_file,
+                ),
+            ]
+        )
+        return tools

@@ -444,6 +444,131 @@ def test_documents_skill_reference_input_uses_bounded_large_payload_limit() -> N
     )
     assert tool_input_size_limit(ordinary_snapshot) == MAX_TOOL_INPUT_BYTES
 
+
+def test_pptx_skill_exposes_pptd_design_animation_and_media_contract() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.domain.agents.runtime import AgentToolResult, create_agent_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
+    from app.domain.tools.runtime import (
+        MAX_PPTX_TOOL_INPUT_BYTES,
+        normalize_tool_arguments,
+        tool_input_size_limit,
+        validate_tool_arguments,
+    )
+
+    _tool, version, _policy = build_skill_artifact_tool("workspace-1", "pptx")
+    presentation = version.input_schema["properties"]["presentation"]
+    properties = presentation["properties"]
+    assert len(properties["design_system"]["enum"]) == 30
+    assert (
+        len(
+            properties["slides"]["items"]["properties"]["animations"]["items"][
+                "properties"
+            ]["effect"]["enum"]
+        )
+        == 22
+    )
+    assert "open-kimi-ppt" in version.description
+    snapshot = SimpleNamespace(
+        function_name="pptx_skill", input_schema=version.input_schema
+    )
+    assert tool_input_size_limit(snapshot) == MAX_PPTX_TOOL_INPUT_BYTES
+
+    arguments = normalize_tool_arguments(
+        "pptx_skill",
+        version.input_schema,
+        {
+            "filename": "modern.pptx",
+            "scenario": "tech-engineering",
+            "design_system": "blue-flame-brand",
+            "slides": [
+                {
+                    "page_type": "cover",
+                    "elements": [
+                        {
+                            "elementId": "title",
+                            "elementType": "text",
+                            "bounds": [80, 180, 800, 100],
+                            "content": {"style": "$title", "text": "PPTD"},
+                        }
+                    ],
+                    "animations": [
+                        {
+                            "elementId": "title",
+                            "effect": "zoom-in",
+                            "trigger": "onClick",
+                        }
+                    ],
+                }
+            ],
+            "title": "Modern deck",
+        },
+    )
+    validate_tool_arguments(snapshot, arguments)
+    assert arguments["presentation"]["scenario"] == "tech-engineering"
+    assert "scenario" not in arguments
+
+    legacy_arguments = normalize_tool_arguments(
+        "pptx_skill",
+        version.input_schema,
+        {
+            "filename": "legal-reading.pptx",
+            "presentation": {
+                "title": "读懂法律条文",
+                "cover_title_size": 46,
+                "design_system": "deep-blue-atlas",
+                "scenario": "education-training",
+                "page_transition": "fade",
+                "slides": [
+                    {
+                        "page_type": "final",
+                        "layout": "quote",
+                        "title": "结语",
+                        "quote": "定位最小单位 · 核对适用条件 · 写清规范依据",
+                    }
+                ],
+            },
+        },
+    )
+    validate_tool_arguments(snapshot, legacy_arguments)
+    normalized_presentation = legacy_arguments["presentation"]
+    assert normalized_presentation["theme"]["cover_title_size"] == 46
+    assert "cover_title_size" not in normalized_presentation
+    assert "scenario" not in normalized_presentation
+    assert "design_system" not in normalized_presentation
+    assert "page_transition" not in normalized_presentation
+    assert "page_type" not in normalized_presentation["slides"][0]
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        raise AssertionError("invalid PPTX arguments must not execute")
+
+    invalid_arguments = {
+        "filename": "invalid.pptx",
+        "presentation": {
+            "title": "Invalid",
+            "slides": [{"layout": "quote", "quote": "Missing title"}],
+        },
+    }
+    try:
+        validate_tool_arguments(snapshot, invalid_arguments)
+    except ValueError as exc:
+        assert "'title' is a required property" in str(exc)
+    else:
+        raise AssertionError("invalid durable PPTX arguments were accepted")
+
+    tool = create_agent_tool(
+        name="pptx_skill",
+        description="PPTX",
+        parameters=version.input_schema,
+        execute=execute,
+    )
+    invalid = asyncio.run(tool.ainvoke(invalid_arguments))
+    assert invalid.is_error is True
+    assert "'title' is a required property" in invalid.content
+
+
 def test_normalize_mcp_url() -> None:
     from app.ports.mcp import McpClientError, normalize_mcp_url
 
@@ -479,6 +604,7 @@ def main() -> None:
     test_python_tool_code_is_limited_to_eight_kibibytes()
     test_artifact_tool_accepts_sandbox_sized_content()
     test_documents_skill_formal_legal_contract_is_versioned()
+    test_pptx_skill_exposes_pptd_design_animation_and_media_contract()
     test_normalize_mcp_url()
     print("TOOLS_UNIT_OK")
 

@@ -180,6 +180,7 @@ class JobTests(unittest.TestCase):
             )
         )
         self.assertFalse(job._use_address_space_limit({"script": "main.js"}))
+        self.assertFalse(job._use_address_space_limit({"skill": "pptx"}))
         self.assertFalse(job._use_address_space_limit({"mcp": {}}))
         with patch.object(job.resource, "setrlimit") as apply_limit:
             self.real_limits(0.2)
@@ -195,6 +196,60 @@ class JobTests(unittest.TestCase):
                 job.resource.RLIMIT_AS,
                 {call.args[0] for call in apply_limit.call_args_list},
             )
+
+    def test_pptd_rejects_remote_media_and_invalid_animation_targets(self):
+        base = {
+            "title": "Rejected deck",
+            "slides": [
+                {
+                    "elements": [
+                        {
+                            "elementId": "photo",
+                            "elementType": "image",
+                            "bounds": [0, 0, 960, 540],
+                            "src": "https://example.com/photo.png",
+                        }
+                    ]
+                }
+            ],
+        }
+        remote = job.execute(
+            {
+                "skill": "pptx",
+                "stdin": json.dumps({"presentation": base}),
+                "artifact": {"filename": "remote.pptx", "format": "pptx"},
+            }
+        )
+        self.assertFalse(remote["ok"], remote)
+        self.assertIn("non-local media", remote["stderr"])
+
+        invalid_animation = {
+            "title": "Rejected animation",
+            "slides": [
+                {
+                    "elements": [
+                        {
+                            "elementId": "title",
+                            "elementType": "text",
+                            "bounds": [80, 180, 800, 100],
+                            "content": {"text": "Title"},
+                        }
+                    ],
+                    "animations": [
+                        {"elementId": "missing", "effect": "fade-in"}
+                    ],
+                }
+            ],
+        }
+        animation = job.execute(
+            {
+                "skill": "pptx",
+                "stdin": json.dumps({"presentation": invalid_animation}),
+                "artifact": {"filename": "animation.pptx", "format": "pptx"},
+            }
+        )
+        self.assertFalse(animation["ok"], animation)
+        self.assertIn("same slide", animation["stderr"])
 
     def test_result_protocol_errors(self):
         with tempfile.TemporaryDirectory() as temporary:

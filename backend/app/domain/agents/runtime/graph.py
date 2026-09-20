@@ -824,9 +824,16 @@ async def tool_node(
     runtime: Runtime[AgentRuntimeContext],
 ) -> dict[str, Any]:
     calls = state["pending_tool_calls"]
-    tool_call_count = state["tool_call_count"] + len(calls)
-    if tool_call_count > runtime.context.max_tool_calls:
-        raise AgentRunnerError("Agent tool call limit reached.")
+    requested_tool_call_count = state["tool_call_count"] + len(calls)
+    tool_budget_overflow = requested_tool_call_count > runtime.context.max_tool_calls
+    # Reject an overflowing batch atomically, but acknowledge every model tool
+    # call below so the next provider request retains a valid message history.
+    # Saturating the counter also guarantees that the next turn has no tools.
+    tool_call_count = (
+        runtime.context.max_tool_calls
+        if tool_budget_overflow
+        else requested_tool_call_count
+    )
     session = runtime.context.session
     tools = {
         tool.name: tool
@@ -855,11 +862,32 @@ async def tool_node(
             }
         )
         parsed_arguments = parsed_arguments_by_index[call_index]
-        if state["finish_reason"] == "length":
+        if tool_budget_overflow:
+            blocked_result = AgentToolResult(
+                content=(
+                    "Tool call was not executed because the requested batch would "
+                    "exceed the Agent tool-call budget. Continue using the results "
+                    "already available and do not call more tools."
+                ),
+                summary="Tool call skipped because the Agent tool budget is exhausted.",
+                is_error=True,
+            )
+        elif state["finish_reason"] == "length":
+            recovery = (
+                " Retry with one smaller, complete tool call. For pptx_skill, use "
+                "compact legacy layout mode: every slide must include layout and title; "
+                "use section, bullets, two_column, icons, table, hero, stats, steps, "
+                "or quote; omit page_type, elements, animations, scenario, "
+                "design_system, and page_transition; put typography and color fields "
+                "such as cover_title_size inside presentation.theme. Reduce the slide "
+                "count or copy length if the call still cannot fit."
+                if call["name"] == "pptx_skill"
+                else " Retry with a smaller, complete argument object or finish without the tool."
+            )
             blocked_result = AgentToolResult(
                 content=(
                     "Tool call was not executed because the model response was "
-                    "truncated."
+                    f"truncated.{recovery}"
                 ),
                 summary="Truncated tool call rejected.",
                 is_error=True,
