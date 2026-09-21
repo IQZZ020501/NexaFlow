@@ -86,6 +86,16 @@ describe("tool display helpers", () => {
         t
       )
     ).toBe("Excel")
+    expect(
+      toolDisplayName(
+        {
+          function_name: "generate_image",
+          display_name: "Generate image",
+          description: "Creates an image",
+        },
+        t
+      )
+    ).toBe("图片生成")
   })
 
   test("falls back to the configured display name for custom tools", () => {
@@ -234,6 +244,148 @@ describe("tool display helpers", () => {
     ])
 
     expect(value).toContain(`[review.pptx](${url})`)
+  })
+
+  test("shows a generated image preview and its downloadable filename", () => {
+    const url = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const signedUrl = "/api/v1/artifacts/eyJhbGciOiJIUzI1NiJ9.signed"
+    const value = withArtifactDownloadLinks(
+      [
+        "画好了。",
+        "- 文件名：`generated-image-a1b2.png`",
+        `- 预览链接：[点击预览](${signedUrl}/preview)`,
+        `- 下载链接：[generated-image-a1b2.png](${signedUrl})`,
+      ].join("\n"),
+      [
+        {
+          tool_name: "generate_image",
+          status: "succeeded",
+          output: {
+            artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+            filename: "generated-image-a1b2.png",
+            download_url: signedUrl,
+            preview_url: `${signedUrl}/preview`,
+          },
+        },
+      ]
+    )
+    expect(value).toContain(`![generated-image.png](${url}/preview)`)
+    expect(value).toContain(`[generated-image.png](${url})`)
+    expect(value).not.toContain("generated-image-a1b2.png")
+    expect(value).not.toContain("预览链接")
+    expect(value).not.toContain("点击预览")
+    expect(value).not.toContain(signedUrl)
+  })
+
+  test("keeps an image already embedded by the agent without duplicating or rewriting it", () => {
+    const url = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const value = withArtifactDownloadLinks(
+      `- 预览链接：点击预览\n\n![生成图片](${url}/preview)`,
+      [
+        {
+          tool_name: "generate_image",
+          status: "succeeded",
+          output: {
+            artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+            filename: "generated.png",
+            download_url: url,
+            preview_url: `${url}/preview`,
+          },
+        },
+      ]
+    )
+
+    expect(value).not.toContain("预览链接")
+    expect(value).toContain(`![生成图片](${url}/preview)`)
+    expect(value).toContain(`[generated-image.png](${url})`)
+    expect(value.match(/\/preview/g)).toHaveLength(1)
+  })
+
+  test("keeps multiple generated images that share the friendly filename", () => {
+    const firstId = "83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const secondId = "9f71a7fe-2752-4ee2-8c63-d1fc8780e7bd"
+    const events = [firstId, secondId].map((artifactId) => ({
+      tool_name: "generate_image",
+      status: "succeeded",
+      output: {
+        artifact_id: artifactId,
+        filename: "generated-image.png",
+        download_url: `/api/v1/artifacts/${artifactId}`,
+        preview_url: `/api/v1/artifacts/${artifactId}/preview`,
+      },
+    }))
+
+    const value = withArtifactDownloadLinks("两张图片都生成好了。", events)
+
+    expect(value).toContain(
+      `[generated-image.png](/api/v1/artifacts/${firstId})`
+    )
+    expect(value).toContain(
+      `[generated-image.png](/api/v1/artifacts/${secondId})`
+    )
+    expect(value.match(/!\[generated-image\.png\]/g)).toHaveLength(2)
+  })
+
+  test("leaves a preview URL untouched without a verified tool event", () => {
+    const previewUrl =
+      "/api/v1/artifacts/d027f57a-d1e2-411e-9aef-692362dfe8ba/preview"
+    const content = `- 预览：${previewUrl}`
+
+    const value = withArtifactDownloadLinks(content, [])
+
+    expect(value).toBe(content)
+  })
+
+  test("does not duplicate a bare UUID image preview when its tool event is present", () => {
+    const artifactId = "d027f57a-d1e2-411e-9aef-692362dfe8ba"
+    const downloadUrl = `/api/v1/artifacts/${artifactId}`
+    const previewUrl = `${downloadUrl}/preview`
+    const value = withArtifactDownloadLinks(`- 预览：${previewUrl}`, [
+      {
+        tool_name: "generate_image",
+        status: "succeeded",
+        output: {
+          artifact_id: artifactId,
+          filename: "generated-image.png",
+          download_url: downloadUrl,
+          preview_url: previewUrl,
+        },
+      },
+    ])
+
+    expect(value.match(/!\[generated-image\.png\]/g)).toHaveLength(1)
+    expect(value).not.toContain(`预览：${previewUrl}`)
+    expect(value).toContain(`[generated-image.png](${downloadUrl})`)
+  })
+
+  test("embeds a UUID preview written as a Markdown link in the answer", () => {
+    const artifactId = "d027f57a-d1e2-411e-9aef-692362dfe8ba"
+    const downloadUrl = `/api/v1/artifacts/${artifactId}`
+    const previewUrl =
+      "/api/v1/artifacts/d027f57a-d1e2-411e-9aef-692362dfe8ba/preview"
+    const content = `- 预览：[${previewUrl}](${previewUrl})`
+
+    const value = withArtifactDownloadLinks(content, [
+      {
+        tool_name: "generate_image",
+        status: "succeeded",
+        output: {
+          artifact_id: artifactId,
+          filename: "generated-image.png",
+          download_url: downloadUrl,
+          preview_url: previewUrl,
+        },
+      },
+    ])
+
+    expect(value).toContain(`![generated-image.png](${previewUrl})`)
+    expect(value).not.toContain(`预览：[${previewUrl}]`)
+  })
+
+  test("does not turn arbitrary preview links into images", () => {
+    const content =
+      "- 预览：https://example.com/image.png\n- 预览：/api/v1/artifacts/not-a-uuid/preview"
+    expect(withArtifactDownloadLinks(content, [])).toBe(content)
   })
 
   test("replaces a copied artifact token with the verified filename link", () => {

@@ -18,8 +18,10 @@ from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
 )
+from app.domain.tools.catalog.service import build_skill_dependency_installer_tool
 from app.domain.tools.runtime import tool_snapshot_from_payload
 from app.entities.defaults import utc_now
+from app.entities.tools import ApplicationToolBinding
 from app.infra.db.repositories.agent_skills import repository as skills
 from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.repositories.tools import repository as tool_repository
@@ -365,6 +367,50 @@ def test_agent_skill_lifecycle() -> None:
         assert agent.json()["skills"] == [
             {"skill_id": skill["id"], "version_id": published.json()["id"]}
         ]
+        installer, installer_version, _ = build_skill_dependency_installer_tool(
+            workspace_id
+        )
+
+        async def bind_legacy_installer(agent_id: str):
+            async with get_session_factory()() as db:
+                await tool_repository.sync_application_tool_bindings(
+                    db,
+                    workspace_id,
+                    agent_id,
+                    [
+                        ApplicationToolBinding(
+                            workspace_id=workspace_id,
+                            application_id=agent_id,
+                            tool_id=installer.id,
+                            tool_version_id=installer_version.id,
+                            bound_by_user_id=me["id"],
+                        )
+                    ],
+                )
+                await db.commit()
+
+        asyncio.run(bind_legacy_installer(agent.json()["id"]))
+        listed_agent = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{agent.json()['id']}",
+            headers=auth_headers(token),
+        )
+        assert listed_agent.status_code == 200, listed_agent.text
+        assert listed_agent.json()["tools"] == []
+        published_agent = client.patch(
+            f"/api/v1/workspaces/{workspace_id}/agents/{agent.json()['id']}",
+            headers=auth_headers(token),
+            json={"published": True},
+        )
+        assert published_agent.status_code == 200, published_agent.text
+        assert published_agent.json()["tools"] == []
+
+        async def assert_no_manual_binding():
+            async with get_session_factory()() as db:
+                assert not await tool_repository.list_application_tool_bindings(
+                    db, workspace_id, agent.json()["id"]
+                )
+
+        asyncio.run(assert_no_manual_binding())
         with patch(
             "app.application.agents.runs.service.enqueue_prepared_agent_run",
             new=AsyncMock(),
@@ -384,6 +430,46 @@ def test_agent_skill_lifecycle() -> None:
         assert downloaded.status_code == 200 and downloaded.content == content
         assert downloaded.headers["x-content-type-options"] == "nosniff"
         assert "attachment" in downloaded.headers["content-disposition"]
+
+        saved = client.patch(
+            f"/api/v1/workspaces/{workspace_id}/agents/{agent.json()['id']}",
+            headers=auth_headers(token),
+            json={
+                "tools": [{"tool_id": installer.id, "version_id": installer_version.id}]
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["tools"] == []
+        asyncio.run(assert_no_manual_binding())
+
+        plain_agent = client.post(
+            f"/api/v1/workspaces/{workspace_id}/agents",
+            headers=auth_headers(token),
+            json={"name": "No Skill Agent", "model_id": model.json()["id"]},
+        )
+        assert plain_agent.status_code == 201, plain_agent.text
+        asyncio.run(bind_legacy_installer(plain_agent.json()["id"]))
+        with patch(
+            "app.application.agents.runs.service.enqueue_prepared_agent_run",
+            new=AsyncMock(),
+        ):
+            plain_run = client.post(
+                f"/api/v1/workspaces/{workspace_id}/agents/{plain_agent.json()['id']}/runs",
+                headers=auth_headers(token),
+                json={"goal": "No Skill is attached"},
+            )
+        assert plain_run.status_code == 201, plain_run.text
+
+        async def assert_no_implicit_tool_without_skill():
+            async with get_session_factory()() as db:
+                run = await runs.get_agent_run_by_id(db, plain_run.json()["id"])
+                assert run is not None
+                assert all(
+                    item["function_name"] != "install_skill_dependencies"
+                    for item in run.tool_snapshots
+                )
+
+        asyncio.run(assert_no_implicit_tool_without_skill())
 
 
 def main() -> None:

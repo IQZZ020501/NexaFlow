@@ -91,7 +91,7 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 
 - Agent 内核不预设 RAG 路径。知识库检索、MCP、内置/自定义工具和可执行 Skills 都以 StructuredTool 接入同一模型/工具循环，由模型根据任务选择是否调用；知识工具的来源说明和引用格式随工具描述提供，不注入通用 Agent 系统协议。没有前置强制检索、证据充分性/来源多样性门控、重复检索拦截、grounding manifest、后置核验或失败替换答案。来源卡片从成功的知识工具事件直接生成，并不代表所有检索片段都被答案引用。
 - 每个 Run 都属于一个 `conversation_id`，并以 `access_source + consumer_id` 区分登录用户、公开访客和 API 凭据；同一工作区、Agent、来源主体、会话最多只有一个活动 Run。未传会话 ID 的旧登录客户端复用最近会话，前端把当前会话写入 URL，并可显式开始新会话。
-- AgentSession 把输入消费、CapabilityRegistry、轮次间 ContextManager 和受信任扩展生命周期组合成 harness。小目录默认启用有界 loadout（最多 8 个工具、Schema 合计 16 KiB）；大目录通过 search_tools/activate_tools 渐进选择。Skills 初始仅目录，通过 load_skill/read_skill_file 读取固定版本正文和 UTF-8 文件。管理工具只改变内存/下一 checkpoint；run_skill_script 是普通 ledger-backed Tool，真实动作经过审批/幂等/租约策略与外部 OpenSandbox。
+- AgentSession 把输入消费、CapabilityRegistry、轮次间 ContextManager 和受信任扩展生命周期组合成 harness。最多 8 个工具的小目录按配置顺序装入 16 KiB 的初始 Schema 预算；超出剩余预算的单个工具延迟加载，但不清空其他已配置工具。更大的目录通过 search_tools/activate_tools 渐进选择。Skills 初始仅目录，通过 load_skill/read_skill_file 读取固定版本正文和 UTF-8 文件。管理工具只改变内存/下一 checkpoint；run_skill_script 是普通 ledger-backed Tool，真实动作经过审批/幂等/租约策略与外部 OpenSandbox。
 - 运行中输入通过各来源 POST runs/{run_id}/inputs 追加到既有事件表：steer 下一模型轮次生效，follow_up 普通答案后继续；input_id 幂等、最大 32 条/每条 4000 字符，消费 ID 随 checkpoint 保存。输入与成功终态共用 RunState 行锁，已接受但未消费的指令阻止成功收尾；失败/取消仍保留可读指令。它们不会重置整次执行预算或解除工具审批。Console 提供按钮/Alt+Enter，公开和 API Key 仅有接口。
 - 执行中的消息也在每轮前检查窗口；旧消息可摘要，系统协议和最近工具消息组保持完整。若当前交互或工具 schema 已无法容纳，则显式报错，原始 durable 记录不删除；这与历史轮次准备阶段的最佳努力摘要是两个不同边界。不是无限上下文，也没有引入 pi 的树形分支或用户扩展安装。
 - 历史成功 Run 以真实 `user`/`assistant` 角色恢复。上下文在保守 token 预算内直接复用；超预算时用当前注册模型压缩较旧轮次，摘要持久化在最后被覆盖的成功 Run 上，同时保留最近 6 轮。摘要调用失败时回退到截断历史，不阻断当前问题，原始 Run 记录始终保留。

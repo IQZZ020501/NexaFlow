@@ -44,9 +44,16 @@ def payload_with(**fields):
 def test_model_type_normalization() -> None:
     assert normalize_model_type("llm") == "LLM"
     assert normalize_model_type("vision") == "VISION"
+    assert normalize_model_type("image") == "IMAGE"
     assert normalize_model_type(" embeddings ") == "EMBEDDING"
     assert normalize_model_type("rerank") == "RERANKER"
     expect_http_error(lambda: normalize_model_type("audio"), 422)
+
+
+def test_image_model_registration_skips_paid_connection_tests() -> None:
+    from app.application.models.registry import run_model_test
+
+    assert run_model_test("openai_compatible", {}, "gpt-image-1", "IMAGE") == {}
 
 def test_status_validation() -> None:
     assert validate_status("active") == "active"

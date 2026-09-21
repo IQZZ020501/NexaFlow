@@ -768,6 +768,86 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.queryByText(downloadUrl)).toBeNull()
   })
 
+  test("shows an image preview without a separate preview link and downloads by UUID", () => {
+    const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const run = makeRun({
+      result: `画好了。\n- 文件名：\`generated-image-a1b2.png\`\n- 预览链接：[点击预览](${downloadUrl}/preview)`,
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "generate_image",
+          status: "succeeded",
+          summary: "Image generated.",
+          call_id: "image-call",
+          tool_label: "Generate image",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: {
+            artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+            filename: "generated-image-a1b2.png",
+            download_url: downloadUrl,
+            preview_url: `${downloadUrl}/preview`,
+          },
+          duration_ms: 10,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    expect(screen.queryByText("预览链接")).toBeNull()
+    expect(screen.queryByText("generated-image-a1b2.png")).toBeNull()
+    expect(
+      screen
+        .getByRole("link", { name: "generated-image.png" })
+        .getAttribute("href")
+    ).toBe(downloadUrl)
+    fireEvent.click(
+      screen.getByRole("button", { name: "预览：generated-image.png" })
+    )
+    expect(screen.getByRole("dialog")).toBeTruthy()
+  })
+
+  test("renders a Markdown preview link from a verified image tool event", () => {
+    const downloadUrl = "/api/v1/artifacts/d027f57a-d1e2-411e-9aef-692362dfe8ba"
+    const run = makeRun({
+      result: [
+        "- 文件名：`generated-image.png`（约 2.5 MB，PNG）",
+        `- 下载：[generated-image.png](${downloadUrl})`,
+        `- 预览：[${downloadUrl}/preview](${downloadUrl}/preview)`,
+      ].join("\n"),
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "generate_image",
+          status: "succeeded",
+          summary: "Image generated.",
+          call_id: "image-call",
+          tool_label: "Generate image",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: {
+            artifact_id: "d027f57a-d1e2-411e-9aef-692362dfe8ba",
+            filename: "generated-image.png",
+            download_url: downloadUrl,
+            preview_url: `${downloadUrl}/preview`,
+          },
+          duration_ms: 10,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    expect(screen.getByRole("link", { name: "generated-image.png" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "预览：generated-image.png" })).toBeTruthy()
+    expect(screen.queryByText(`${downloadUrl}/preview`)).toBeNull()
+  })
+
   test("preserves and wraps multiline user messages", () => {
     const goal = [
       "scc .",

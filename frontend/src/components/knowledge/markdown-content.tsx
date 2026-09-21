@@ -1,10 +1,18 @@
 "use client"
 
 import * as React from "react"
+import { XIcon } from "lucide-react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkCjkFriendly from "remark-cjk-friendly/parseOnly"
 import remarkGfm from "remark-gfm"
 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { IconButton } from "@/components/ui/icon-button"
 import { MarkdownCodeBlock } from "@/components/knowledge/markdown-code-block"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/contexts/language-provider"
@@ -38,7 +46,9 @@ function MarkdownImage(
   props: React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown },
 ) {
   const { t } = useLanguage()
+  const [previewOpen, setPreviewOpen] = React.useState(false)
   const src = String(props.src ?? "")
+  const imageLabel = props.alt || t("图片")
   if (
     !src ||
     src.startsWith("data:") ||
@@ -50,7 +60,7 @@ function MarkdownImage(
     )
   }
   const { className, ...restProps } = omitMarkdownNode(props)
-  return (
+  const image = (
     // Markdown may contain arbitrary external URLs that are not configured for next/image.
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -62,6 +72,48 @@ function MarkdownImage(
       decoding="async"
       {...restProps}
     />
+  )
+  if (!/^\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+\/preview$/.test(src)) {
+    return image
+  }
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={`${t("预览")}：${imageLabel}`}
+        className="inline-block max-w-full cursor-zoom-in rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        onClick={() => setPreviewOpen(true)}
+      >
+        {image}
+      </button>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent
+          aria-describedby={undefined}
+          className="max-h-[calc(100svh-1rem)] w-fit max-w-[calc(100vw-1rem)] gap-0 overflow-hidden bg-card p-0 text-card-foreground shadow-xl sm:max-w-5xl"
+        >
+          <DialogHeader className="flex-row items-center justify-between gap-3 border-b bg-card px-3 py-2.5 text-left sm:px-4">
+            <DialogTitle className="min-w-0 truncate text-sm leading-5 font-medium">
+              {imageLabel}
+            </DialogTitle>
+            <IconButton
+              label={t("关闭")}
+              className="-mr-1 size-7 text-muted-foreground"
+              onClick={() => setPreviewOpen(false)}
+            >
+              <XIcon className="size-4" />
+            </IconButton>
+          </DialogHeader>
+          <div className="flex min-h-0 items-center justify-center bg-muted/40 p-2 sm:p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt={imageLabel}
+              className="max-h-[calc(100svh-6.5rem)] max-w-[calc(100vw-2rem)] rounded-md border bg-background object-contain shadow-sm sm:max-w-[calc(100vw-4rem)]"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

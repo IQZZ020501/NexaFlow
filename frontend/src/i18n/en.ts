@@ -606,6 +606,9 @@ export const en = {
   没有匹配的工具: "No matching tools",
   暂无可用工具: "No tools available",
   选择工具: "Select tools",
+  工具分类: "Tool categories",
+  全部工具: "All tools",
+  已选但不可用: "Selected but unavailable",
   "选择有使用权限且已发布的工具，最多 {value} 个。":
     "Select published tools you have permission to use, up to {value}.",
   "按名称、描述或来源搜索工具": "Search tools by name, description, or source",
@@ -839,6 +842,14 @@ export const en = {
   命中测试: "Hit test",
   大语言模型: "LLM",
   视觉模型: "Vision model",
+  生图模型: "Image generation model",
+  生图模型已更新: "Image generation model updated",
+  生图模型已添加: "Image generation model added",
+  图片生成: "Generate image",
+  "使用工作空间的生图模型生成图片；每次调用需要确认。":
+    "Generate an image with the workspace image model; each call requires approval.",
+  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。":
+    "Saving an image model does not make a paid test call. The connection is checked on the first Agent call. Keep exactly one image model active in this workspace.",
   失败: "Failed",
   "已上传 {value} 个文件": "Uploaded {value} files",
   "已上传 {value} 个文件，{value} 个上传失败":

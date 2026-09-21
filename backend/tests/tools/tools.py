@@ -1704,6 +1704,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         tools = await repository.list_tools(db, workspace_id)
         assert {tool.stable_key for tool in tools} == {
             "current_time",
+            "image_generation",
             "install_skill_dependencies",
             "inline_python",
             "skill_documents",
@@ -1885,6 +1886,7 @@ def test_generated_artifact_link_serves_static_html() -> None:
         assert "default-src 'none'" in response.headers["content-security-policy"]
         assert "page.html" in response.headers["content-disposition"]
         assert response.headers["x-content-type-options"] == "nosniff"
+        assert client.get(f"/api/v1/artifacts/{first.artifact_id}").status_code == 404
         token = first.download_url.rsplit("/", 1)[-1]
         body_response = client.post(
             "/api/v1/artifacts/download",
@@ -1892,6 +1894,62 @@ def test_generated_artifact_link_serves_static_html() -> None:
         )
         assert body_response.status_code == 200, body_response.text
         assert body_response.content == response.content
+        assert client.get(f"{first.download_url}/preview").status_code == 404
+
+
+def test_generated_image_preview_keeps_download_as_attachment() -> None:
+    from unittest.mock import patch
+    from uuid import UUID
+
+    from app.adapters.llm.runtime import VISION_TEST_IMAGE
+    from app.application.artifacts.service import create_generated_artifact
+    from app.infra.security.auth import create_artifact_download_token
+
+    with test_client() as client:
+        _admin_token, workspace_id = activate_admin(client)
+
+        async def create():
+            async with get_session_factory()() as db:
+                link = await create_generated_artifact(
+                    db,
+                    test_settings(),
+                    workspace_id=workspace_id,
+                    run_id="run-image",
+                    idempotency_key="image-preview",
+                    artifact_format="png",
+                    filename="generated-image.png",
+                    content=VISION_TEST_IMAGE,
+                )
+                await db.commit()
+                return link
+
+        link = asyncio.run(create())
+        assert link.download_url == f"/api/v1/artifacts/{link.artifact_id}"
+        assert UUID(link.artifact_id).version == 4
+        preview = client.get(f"{link.download_url}/preview")
+        assert preview.status_code == 200, preview.text
+        assert preview.content == VISION_TEST_IMAGE
+        assert preview.headers["content-disposition"] == "inline"
+        assert preview.headers["content-type"].startswith("image/png")
+        assert preview.headers["cache-control"] == "private, no-store"
+        download = client.get(link.download_url)
+        assert download.status_code == 200
+        assert download.headers["content-disposition"].startswith("attachment")
+        legacy_token = create_artifact_download_token(
+            link.artifact_id, link.expires_at, test_settings()
+        )
+        assert client.get(f"/api/v1/artifacts/{legacy_token}/preview").status_code == 200
+        assert client.get(f"/api/v1/artifacts/{legacy_token}").status_code == 200
+        assert client.post(
+            "/api/v1/artifacts/download", json={"token": link.artifact_id}
+        ).content == VISION_TEST_IMAGE
+        assert client.get("/api/v1/artifacts/invalid/preview").status_code == 404
+        assert client.get(
+            "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e/preview"
+        ).status_code == 404
+        with patch("app.application.artifacts.service.utc_now", return_value=link.expires_at):
+            assert client.get(f"{link.download_url}/preview").status_code == 404
+            assert client.get(link.download_url).status_code == 404
 
 def test_generated_artifact_rejects_source_as_docx() -> None:
     from app.domain.artifacts.services import validate_generated_artifact
@@ -5987,6 +6045,7 @@ def test_workspace_creation_initializes_system_catalog() -> None:
         assert {item["function_name"] for item in response.json()} == {
             "current_time",
             "documents_skill",
+            "generate_image",
             "install_skill_dependencies",
             "pdf_skill",
             "pptx_skill",
@@ -6596,6 +6655,7 @@ def main() -> None:
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
     test_generated_artifact_link_serves_static_html()
+    test_generated_image_preview_keeps_download_as_attachment()
     test_generated_artifact_rejects_source_as_docx()
     test_generated_artifact_downloads_common_formats()
     test_python_tool_http_lifecycle_and_private_grants()

@@ -65,7 +65,8 @@ skill/version 引用，Run 冻结快照及非敏感执行镜像/网络指纹。�
 - Tool 仍经过统一审批、幂等、租约和 `tool_invocations` 账本；
   需要审批的外部写入不会因加载 Skill 获得自动执行权限。
 
-初始小规模工具 loadout 最多 8 个且 Schema 总大小有界；大型目录通过
+初始小规模工具 loadout 最多 8 个且 Schema 总大小有界；单个超大工具会
+延迟加载，但不会清空其他已配置工具。大型目录通过
 `search_tools`/`activate_tools` 渐进选择。激活不能越过授权目录。
 活跃工具与已加载 Skills 随 checkpoint 保存和恢复。
 
@@ -88,8 +89,9 @@ Path(os.environ["NEXAFLOW_OUTPUT_PATH"]).write_text(data)
 ```
 
 提供 filename 时须写出单个 1 字节至 5 MiB 普通文件。返回 stdout/exit_code
-和签名下载链接；保存/下载继续使用租户范围、幂等键、24 小时有效期、
-attachment/nosniff 与 HTML CSP。脚本默认超时 30 秒，可声明 0.1–120 秒；
+和下载链接（普通文件为签名链接，PNG 为随机 UUIDv4 链接）；保存/下载继续
+使用租户范围、幂等键、24 小时有效期、attachment/nosniff 与 HTML CSP。
+脚本默认超时 30 秒，可声明 0.1–120 秒；
 整个调用仍受 Tool/Run 总截止时间限制。
 
 包不能选镜像、挂载宿主目录、提供安装命令或直接安装

@@ -29,23 +29,22 @@ class CapabilityRegistry:
         self.skills = {skill.version_id: skill for skill in skills}
         # Keep a small selected loadout immediately usable, like a harness's
         # core tools. Large catalogs/schemas stay behind discovery/activation.
-        schema_bytes = sum(
-            len(
+        self.initial_names: list[str] = []
+        schema_bytes = 0
+        initial_candidates = self.catalog.items() if len(self.catalog) <= 8 else ()
+        for name, tool in initial_candidates:
+            tool_schema_bytes = len(
                 json.dumps(
                     tool.args_schema
                     if isinstance(tool.args_schema, dict)
                     else tool.args_schema.model_json_schema(),
                     ensure_ascii=False,
                 ).encode()
-            )
-            + len(tool.description.encode())
-            for tool in self.catalog.values()
-        )
-        self.initial_names = (
-            list(self.catalog)
-            if len(self.catalog) <= 8 and schema_bytes <= 16384
-            else []
-        )
+            ) + len(tool.description.encode())
+            if schema_bytes + tool_schema_bytes > 16384:
+                continue
+            self.initial_names.append(name)
+            schema_bytes += tool_schema_bytes
         self.active_names = self.initial_names[:]
         self.authorize_skill = authorize_skill
         self.loaded_skills: list[str] = []
@@ -212,7 +211,7 @@ class CapabilityRegistry:
         tools = [
             management(
                 "search_tools",
-                "Search the authorized tool catalog by capability or task. Discovery does not grant new permissions.",
+                "Search the authorized tool catalog by capability or task. Every result is already authorized for this Run. If a relevant result is inactive, call activate_tools with its exact name before deciding the capability is unavailable. Discovery does not grant new permissions or bypass approval.",
                 {
                     "type": "object",
                     "properties": {"query": {"type": "string", "maxLength": 200}},

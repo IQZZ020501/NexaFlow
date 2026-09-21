@@ -59,3 +59,24 @@ async def download_generated_artifact(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
     return await _download_response(token, settings, db)
+
+
+@router.get("/{token}/preview", response_class=Response)
+async def preview_generated_image(
+    token: str,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    artifact = await get_generated_artifact(db, settings, token)
+    if artifact is None or artifact.format != "png" or artifact.media_type != "image/png":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Image not found.")
+    return Response(
+        content=artifact.content,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "private, no-store",
+        },
+    )

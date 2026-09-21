@@ -29,6 +29,7 @@ from app.infra.sandbox.client import (
     execute_skill_artifact,
     execute_workflow_code,
 )
+from app.ports.llm import ModelProviderError, ModelProviderStatusError
 
 
 class BuiltinToolAdapter:
@@ -44,6 +45,27 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "image_generation":
+            from app.application.tools.runtime.adapters.image_generation import (
+                generate_image_artifact,
+            )
+
+            try:
+                return await generate_image_artifact(self.settings, arguments, context)
+            except (KeyError, TypeError, ValueError) as exc:
+                return _failure("image_generation_unavailable", str(exc)[:1000])
+            except ModelProviderError as exc:
+                message = (
+                    f"Image provider returned status {exc.status_code}."
+                    if isinstance(exc, ModelProviderStatusError)
+                    else "Image generation failed or returned an unusable image."
+                )
+                uncertain = not isinstance(exc, ModelProviderStatusError) or exc.status_code >= 500
+                return ToolRuntimeResult(
+                    ok=False, data=None, summary=message,
+                    error_code="image_generation_failed", error_message=message,
+                    outcome="uncertain" if uncertain else "confirmed", usage={},
+                )
         if builtin == "skill_script":
             from app.application.agent_skills.scripts import execute_skill_script
 

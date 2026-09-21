@@ -178,8 +178,10 @@ not trigger unrelated cleanup.
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
 - Agent-generated files use safe filenames with arbitrary common extensions,
   are capped at 5 MiB, stored in PostgreSQL for at most 24 hours, and downloaded
-  through scoped signed bearer URLs. Every response is an attachment with
-  `nosniff`; HTML additionally receives a restrictive CSP.
+  through scoped signed bearer URLs. Generated PNGs use random UUIDv4 bearer
+  URLs instead, limited to image content and the same 24-hour lifetime; older
+  signed PNG URLs remain valid until expiration. Every download response is an
+  attachment with `nosniff`; HTML additionally receives a restrictive CSP.
 - Identity email uses the global administrator SMTP settings and trusted site
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset

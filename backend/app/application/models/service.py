@@ -108,6 +108,7 @@ def list_model_types(provider: str) -> list[ModelTypeOptionResponse]:
         "VISION": "Vision",
         "EMBEDDING": "Embedding",
         "RERANKER": "Rerank",
+        "IMAGE": "Image generation",
     }
     return [
         ModelTypeOptionResponse(key=labels[item], value=item)

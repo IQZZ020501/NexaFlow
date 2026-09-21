@@ -1380,6 +1380,9 @@ def assert_tool_routing_context_is_explicit() -> None:
     )
     system = messages[0]["content"]
     assert "Tools are optional capabilities" in system
+    assert "Configured tools are authorized capabilities" in system
+    assert "do not refuse solely because the request is outside that role" in system
+    assert "let the approval flow pause the Run" in system
     assert "search_knowledge: first choice" not in system
     assert "MCP tools: use only" not in system
     assert "Release Docs" not in system

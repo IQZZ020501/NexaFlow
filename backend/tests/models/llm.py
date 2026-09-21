@@ -714,6 +714,37 @@ def main() -> None:
         )
         assert deleted_vision_model.status_code == 204
 
+        calls_before_image_registration = len(ModelTestHandler.calls)
+        image_model = client.post(
+            models_url(workspace_id),
+            headers=auth_headers(admin_token),
+            json={
+                "name": "Image Model",
+                "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
+                "model_type": "IMAGE",
+                "model_name": "gpt-image-1",
+                "credential": {
+                    "api_base": model_base_url,
+                    "api_key": "sk-image-test",
+                },
+            },
+        )
+        assert image_model.status_code == 201, image_model.text
+        assert len(ModelTestHandler.calls) == calls_before_image_registration
+        assert image_model.json()["model_type"] == "IMAGE"
+        assert client.delete(
+            models_url(workspace_id, f"/{image_model.json()['id']}"),
+            headers=auth_headers(admin_token),
+        ).status_code == 204
+
+        unsupported_image = client.post(
+            models_url(workspace_id),
+            headers=auth_headers(admin_token),
+            json={**model_payload(model_base_url), "name": "DeepSeek Image", "model_type": "IMAGE"},
+        )
+        assert unsupported_image.status_code == 422
+
         invalid_url = client.post(
             models_url(workspace_id),
             headers=auth_headers(admin_token),

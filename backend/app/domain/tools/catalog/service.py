@@ -1901,6 +1901,104 @@ def build_artifact_tool(
     )
 
 
+def build_image_generation_tool(
+    workspace_id: str,
+    created_at: datetime | None = None,
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:generate_image")
+    description = (
+        "Generate one PNG image from a text prompt using the workspace's single "
+        "active OpenAI-compatible IMAGE model. Use this for requested artwork or illustrations, "
+        "not for drawing charts or editing uploaded images. A user must approve each "
+        "paid generation. The resulting image can be previewed and downloaded for "
+        "24 hours; include its filename and download link in the response."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "size": {
+                "type": "string",
+                "enum": ["square", "landscape", "portrait"],
+                "description": "Image orientation; defaults to square.",
+            },
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string", "maxLength": 36},
+            "format": {"const": "png"},
+            "filename": {"type": "string", "maxLength": 120},
+            "mime_type": {"const": "image/png"},
+            "download_url": {"type": "string", "maxLength": 4096},
+            "preview_url": {"type": "string", "maxLength": 4096},
+            "expires_at": {"type": "string", "maxLength": 64},
+            "size_bytes": {"type": "integer", "minimum": 1, "maximum": 5242880},
+        },
+        "required": [
+            "artifact_id", "format", "filename", "mime_type", "download_url",
+            "preview_url", "expires_at", "size_bytes",
+        ],
+        "additionalProperties": False,
+    }
+    execution_spec = {"builtin": "image_generation"}
+    definition_hash = canonical_definition_hash({
+        "name": "generate_image",
+        "description": description,
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+        "execution_spec": execution_spec,
+    })
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=stable_catalog_id(f"source:{workspace_id}:builtin"),
+            kind="builtin",
+            stable_key="image_generation",
+            function_name="generate_image",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Generate image",
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="each_call",
+            effect="external_write",
+            allowed_access_sources=["console"],
+            workflow_callable=False,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
 def build_skill_artifact_tool(
     workspace_id: str,
     skill_name: str,
@@ -1988,6 +2086,7 @@ async def ensure_workspace_system_catalog(
     await ensure_tool(*build_inline_python_tool(workspace_id))
     await ensure_tool(*build_skill_script_tool(workspace_id))
     await ensure_tool(*build_skill_dependency_installer_tool(workspace_id))
+    await ensure_tool(*build_image_generation_tool(workspace_id))
     for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:
         await ensure_tool(*build_skill_artifact_tool(workspace_id, skill_name))
 

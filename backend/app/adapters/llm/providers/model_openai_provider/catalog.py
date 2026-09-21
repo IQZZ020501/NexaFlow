@@ -7,7 +7,8 @@ CATALOG = {
     "model_types": [
         "LLM",
         "VISION",
-        "EMBEDDING"
+        "EMBEDDING",
+        "IMAGE"
     ],
     "models": {
         "LLM": [
@@ -64,6 +65,13 @@ CATALOG = {
                 "name": "text-embedding-3-large",
                 "desc": "OpenAI large embedding model",
                 "model_type": "EMBEDDING"
+            }
+        ],
+        "IMAGE": [
+            {
+                "name": "gpt-image-1",
+                "desc": "OpenAI image generation",
+                "model_type": "IMAGE"
             }
         ]
     }

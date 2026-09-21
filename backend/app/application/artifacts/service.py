@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +33,13 @@ def _artifact_link(
     artifact: GeneratedArtifact,
     settings: Settings,
 ) -> GeneratedArtifactLink:
-    token = create_artifact_download_token(artifact.id, artifact.expires_at, settings)
+    # A random v4 UUID is the short-lived bearer for generated PNGs. Other
+    # formats keep their signed tokens; existing signed image links still work.
+    token = (
+        artifact.id
+        if artifact.format == "png" and artifact.media_type == "image/png"
+        else create_artifact_download_token(artifact.id, artifact.expires_at, settings)
+    )
     return GeneratedArtifactLink(
         artifact_id=artifact.id,
         format=artifact.format,
@@ -90,6 +97,19 @@ async def get_generated_artifact(
     settings: Settings,
     token: str,
 ) -> GeneratedArtifact | None:
+    try:
+        image_id = UUID(token)
+    except ValueError:
+        image_id = None
+    if image_id is not None and image_id.version == 4 and str(image_id) == token:
+        artifact = await repository.get_active_artifact(db, token, utc_now())
+        return (
+            artifact
+            if artifact is not None
+            and artifact.format == "png"
+            and artifact.media_type == "image/png"
+            else None
+        )
     artifact_id = decode_artifact_download_token(token, settings)
     if artifact_id is None:
         return None

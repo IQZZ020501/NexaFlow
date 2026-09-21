@@ -73,9 +73,20 @@ async def queue_tool_invocation(
     arguments_hash = tool_arguments_hash(
         arguments, max_bytes=tool_input_size_limit(snapshot)
     )
+    resource_snapshot = context.resource_snapshot
+    if snapshot.execution_spec.get("builtin") == "image_generation":
+        from app.application.tools.runtime.adapters.image_generation import (
+            build_image_model_resource_snapshot,
+        )
+
+        resource_snapshot = await build_image_model_resource_snapshot(
+            db,
+            context.workspace_id,
+        )
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),
         "deadline_at": context.deadline_at.isoformat(),
+        "resource_snapshot": resource_snapshot,
     }
     candidate = ToolInvocation(
         workspace_id=context.workspace_id,
@@ -511,6 +522,9 @@ def _load_invocation_contract(
     deadline = datetime.fromisoformat(deadline_value)
     if deadline.tzinfo is None:
         raise ValueError("Tool invocation deadline is invalid.")
+    resource_snapshot = invocation.policy_snapshot.get("resource_snapshot", {})
+    if not isinstance(resource_snapshot, dict):
+        raise ValueError("Tool invocation resource snapshot is invalid.")
     context = ToolInvocationContext(
         workspace_id=invocation.workspace_id,
         origin=invocation.origin,
@@ -521,6 +535,7 @@ def _load_invocation_contract(
         access_source=invocation.access_source,
         deadline_at=deadline,
         idempotency_key=invocation.idempotency_key,
+        resource_snapshot=resource_snapshot,
     )
     _validate_context(context)
     return snapshot, context

@@ -147,12 +147,71 @@ describe("ToolPicker", () => {
     const changes: ToolRef[][] = []
     renderPage(picker([], (value) => changes.push(value)))
     await screen.findByText("PDF")
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: "PDF" })
-    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "PDF" }))
     expect(changes.at(-1)).toEqual([
       { tool_id: "skill-pdf", version_id: "skill-pdf-v1" },
     ])
+  })
+
+  test("groups tools by kind, filters within categories, and hides the implicit installer", async () => {
+    const imageTool: ToolSummary = {
+      ...tools[2]!,
+      id: "image-tool",
+      function_name: "generate_image",
+      display_name: "Image generation",
+      description: "Generate images",
+    }
+    response = async () =>
+      jsonResponse([
+        tools[0],
+        {
+          ...tools[1]!,
+          can_use: true,
+          permission: "use",
+        },
+        imageTool,
+        {
+          ...imageTool,
+          id: "skill-installer",
+          function_name: "install_skill_dependencies",
+          display_name: "Install Skill dependencies",
+        },
+      ])
+
+    function Harness() {
+      const [value, setValue] = useState<ToolRef[]>([])
+      return picker(value, setValue)
+    }
+
+    renderPage(<Harness />)
+    await screen.findByText("图片生成")
+    const categories = within(screen.getByRole("group", { name: "工具分类" }))
+    expect(screen.getByRole("region", { name: "内置工具" })).toBeTruthy()
+    expect(screen.getByRole("region", { name: "MCP 工具" })).toBeTruthy()
+    expect(screen.getByRole("region", { name: "Python" })).toBeTruthy()
+    expect(screen.queryByText("Install Skill dependencies")).toBeNull()
+    expect(
+      categories.getByRole("button", { name: "全部工具" }).textContent
+    ).toContain("3")
+
+    fireEvent.click(categories.getByRole("button", { name: "MCP 工具" }))
+    expect(screen.queryByText("图片生成")).toBeNull()
+    expect(screen.queryByText("Lookup account")).toBeNull()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Private report" }))
+    expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
+
+    fireEvent.click(categories.getByRole("button", { name: "内置工具" }))
+    expect(screen.getByText("图片生成")).toBeTruthy()
+    expect(screen.queryByText("Private report")).toBeNull()
+    expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "finance" },
+    })
+    expect(screen.getByText("没有匹配的工具")).toBeTruthy()
+    fireEvent.click(categories.getByRole("button", { name: "全部工具" }))
+    expect(screen.getByText("Lookup account")).toBeTruthy()
+    expect(screen.queryByText("Install Skill dependencies")).toBeNull()
   })
 
   test("retains unavailable bindings, allows removal, and never upgrades implicitly", async () => {

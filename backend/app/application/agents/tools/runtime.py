@@ -106,7 +106,7 @@ class UnifiedAgentToolRuntime:
             invocation_id=invocation_id,
             execution_user_id=self.run.execution_user_id,
             access_source=self.run.access_source,
-            deadline_at=self._tool_deadline(),
+            deadline_at=self._tool_deadline(snapshot),
             idempotency_key=idempotency_key,
         )
         try:
@@ -163,9 +163,17 @@ class UnifiedAgentToolRuntime:
             )
         return mapped
 
-    def _tool_deadline(self) -> datetime:
+    def _tool_deadline(self, snapshot: ToolSnapshot | None = None) -> datetime:
+        # Approval and image generation share a deadline; allow time for a
+        # person to approve before the image provider's slower response.
+        timeout_seconds = (
+            max(self.settings.agent_tool_timeout_seconds, 300)
+            if snapshot is not None
+            and snapshot.execution_spec.get("builtin") == "image_generation"
+            else self.settings.agent_tool_timeout_seconds
+        )
         deadline = utc_now() + timedelta(
-            seconds=self.settings.agent_tool_timeout_seconds
+            seconds=timeout_seconds
         )
         run_deadline = getattr(self.run, "execution_deadline_at", None)
         if run_deadline is not None and run_deadline.tzinfo is None:

@@ -225,6 +225,36 @@ async def assert_skill_file_reads_and_revocation():
         == []
     )
 
+    generate_image = replace_tool_name(tools[1], "generate_image")
+    mixed_registry = CapabilityRegistry(
+        ExtensionRuntime(
+            [
+                AgentExtension(
+                    "configured",
+                    "1",
+                    (huge, generate_image, *tools[2:7]),
+                )
+            ]
+        ),
+        [],
+    )
+    assert "generate_image" in mixed_registry.active_names
+    assert huge.name not in mixed_registry.active_names
+    result = await mixed_registry.management_tools[0].ainvoke(
+        {"query": "generate_image"}
+    )
+    assert result.output == [
+        {
+            "name": "generate_image",
+            "description": "optional capability",
+            "active": True,
+        }
+    ]
+    assert (
+        "call activate_tools with its exact name"
+        in mixed_registry.management_tools[0].description
+    )
+
 
 async def assert_steering_and_followup():
     inputs = [

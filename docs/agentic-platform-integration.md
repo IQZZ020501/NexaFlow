@@ -40,7 +40,7 @@ Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill
 ## Harness
 
 - AgentSession 复用 conversation_id、Run 四表和 checkpoint，不建立第二套会话或工具账本。checkpoint.harness 保存已消费的输入 ID/内容、启用工具、已加载 Skill 版本与压缩次数。
-- CapabilityRegistry 统一承载知识、MCP 和其他工具。search_tools 发现已授权能力，activate_tools 设置后续轮次的启用集合；不能新增授权或绕过审批。为保持现有 Agent 行为，默认启用全部已绑定工具，三个 harness 管理工具始终可用。
+- CapabilityRegistry 统一承载知识、MCP 和其他工具。search_tools 发现已授权能力，activate_tools 设置后续轮次的启用集合；不能新增授权或绕过审批。最多 8 个工具的小目录按配置顺序装入 16 KiB 的初始 Schema 预算，单个超大工具延迟加载但不会连带禁用其他已配置工具；harness 管理工具始终可用。
 - AgentContextManager 在每次模型轮次前检查上下文，超阈值时摘要旧消息、保留系统协议及最近消息，并保持 assistant 工具声明与 tool 结果成组。摘要计入 model_usage；当前工具结果或工具 schema 本身无法容纳时显式失败，不伪装成无限上下文。
 - ExtensionRuntime 提供受信任、项目代码管理的 context、before_tool、after_tool 生命周期；知识、MCP、其他工具从扩展注册进入统一 registry。不是用户可上传任意代码的插件执行器，实际动作仍通过原有 durable 审批/幂等边界。
 - steer 在下一模型轮次前生效；follow_up 等当前任务产生普通答案后生效。两种输入均追加进 agent_run_events，以 input_id 幂等，消费状态随下一 checkpoint 持久化。输入提交与成功终态争用同一 RunState 行锁：终态先完成则拒绝新输入，输入先接受则继续处理或显式失败，避免成功收尾时静默丢失。失败/取消后仍能读取已接受的队列内容。

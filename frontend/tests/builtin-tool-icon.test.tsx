@@ -17,3 +17,8 @@ test("uses the matching file icon for each built-in file Skill", () => {
     expect(icon.props.src).toBe(src)
   }
 })
+
+test("uses an image icon for the image generation Tool", () => {
+  const icon = BuiltinToolIcon({ functionName: "generate_image" })
+  expect(icon.type).not.toBe("img")
+})

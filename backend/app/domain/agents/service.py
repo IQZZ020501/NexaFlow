@@ -35,7 +35,7 @@ from app.domain.tools.access.bindings import (
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
-from app.domain.tools.catalog.service import get_tool_catalog_detail
+from app.domain.tools.catalog.service import get_tool_catalog_detail, stable_catalog_id
 from app.domain.tools.mcp.service import resolve_mcp_tools
 from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.runtime.engine import graph_hash
@@ -72,6 +72,20 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 )
 
 
+def is_agent_implicit_tool(workspace_id: str, tool_id: str) -> bool:
+    return tool_id == stable_catalog_id(
+        f"tool:{workspace_id}:builtin:install_skill_dependencies"
+    )
+
+
+def configurable_agent_tools(
+    workspace_id: str, tools: list[ToolSnapshot]
+) -> list[ToolSnapshot]:
+    return [
+        tool for tool in tools if not is_agent_implicit_tool(workspace_id, tool.tool_id)
+    ]
+
+
 def validate_agent_status(value: str) -> str:
     if value not in AGENT_STATUSES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid agent status.")
@@ -100,7 +114,11 @@ def agent_to_response(
         instructions=agent.instructions,
         model_id=agent.model_id,
         knowledge_base_ids=knowledge_base_ids,
-        tools=[{"tool_id": item.tool_id, "version_id": item.version_id} for item in tools],
+        tools=[
+            {"tool_id": item.tool_id, "version_id": item.version_id}
+            for item in tools
+            if not is_agent_implicit_tool(agent.workspace_id, item.tool_id)
+        ],
         skills=[{"skill_id": item.skill_id, "version_id": item.version_id} for item in skills],
         mcp_tools=legacy_mcp_tools,
         status=agent.status,
@@ -224,6 +242,11 @@ async def resolve_requested_agent_tools(
         ]
     else:
         references = []
+    references = [
+        reference
+        for reference in references
+        if not is_agent_implicit_tool(workspace_id, reference.tool_id)
+    ]
     return await resolve_tool_refs_for_actor(
         db,
         workspace_id,
@@ -290,7 +313,11 @@ def _agent_has_unpublished_changes(
     if version is None or version.agent_id != agent.id or tools is None:
         return True
     configuration = build_agent_configuration_snapshot(agent)
-    resources = build_agent_resource_snapshot(knowledge_base_ids, tools, skills)
+    resources = build_agent_resource_snapshot(
+        knowledge_base_ids,
+        configurable_agent_tools(agent.workspace_id, tools),
+        skills,
+    )
     return agent_publication_hash(configuration, resources) != version.configuration_hash
 
 
@@ -668,6 +695,17 @@ async def apply_agent_publication(
             agent.workspace_id,
             agent.id,
         )
+        publication_tools = configurable_agent_tools(
+            agent.workspace_id, publication_tools
+        )
+        if len(publication_tools) != len(
+            await tools_repository.list_application_tool_bindings(
+                db, agent.workspace_id, agent.id
+            )
+        ):
+            await sync_application_tool_bindings(
+                db, agent.workspace_id, agent.id, publication_tools, actor.id
+            )
         publication_skills = await resolve_application_agent_skill_snapshots(
             db,
             agent.workspace_id,
@@ -860,6 +898,9 @@ async def update_agent(
         healed_refs: list[ToolRef] = []
         drifted = False
         for binding in current_tool_bindings:
+            if is_agent_implicit_tool(agent.workspace_id, binding.tool_id):
+                drifted = True
+                continue
             detail = await get_tool_catalog_detail(
                 db,
                 agent.workspace_id,

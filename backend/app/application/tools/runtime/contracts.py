@@ -1,6 +1,6 @@
 """Provider-neutral contracts for unified Tool execution."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -22,6 +22,14 @@ class ToolInvocationContext:
     access_source: str
     deadline_at: datetime
     idempotency_key: str
+    resource_snapshot: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "resource_snapshot",
+            freeze_json(self.resource_snapshot),
+        )
 
 
 @dataclass(frozen=True)

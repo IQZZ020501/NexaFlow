@@ -26,7 +26,7 @@ ACTIVE_STATUS = "active"
 DISABLED_STATUS = "disabled"
 STATUSES = {ACTIVE_STATUS, DISABLED_STATUS}
 PROVIDER_TYPES = SUPPORTED_PROVIDER_TYPES
-MODEL_TYPES = {"LLM", "VISION", "EMBEDDING", "RERANKER"}
+MODEL_TYPES = {"LLM", "VISION", "EMBEDDING", "RERANKER", "IMAGE"}
 RESERVED_MODEL_REQUEST_PARAMS = {
     "api_base",
     "api_key",
@@ -85,6 +85,7 @@ MODEL_TYPE_ALIASES = {
     "embeddings": "EMBEDDING",
     "rerank": "RERANKER",
     "reranker": "RERANKER",
+    "image": "IMAGE",
 }
 
 
@@ -384,6 +385,10 @@ def run_model_test(
     model_type: str,
     request_params: dict[str, Any] | None = None,
 ) -> dict[str, bool]:
+    # Image generation itself is billed; registration validates the shape and
+    # credentials but never spends credits on a paid test request.
+    if model_type == "IMAGE":
+        return {}
     try:
         return test_model_connection(
             provider_type,

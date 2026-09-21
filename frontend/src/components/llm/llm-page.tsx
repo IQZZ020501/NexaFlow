@@ -95,6 +95,7 @@ const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
   VISION: "视觉模型",
   EMBEDDING: "向量模型",
   RERANKER: "重排模型",
+  IMAGE: "生图模型",
 }
 
 const CREDENTIAL_FIELD_LABELS: Record<string, TranslationKey> = {
@@ -640,7 +641,14 @@ export function LlmPage() {
         setModels((current) =>
           current.map((item) => (item.id === model.id ? model : item))
         )
-        notify("success", t("模型测试通过，模型已更新"))
+        notify(
+          "success",
+          t(
+            modelForm.model_type === "IMAGE"
+              ? "生图模型已更新"
+              : "模型测试通过，模型已更新"
+          )
+        )
       } else {
         const model = await createRegisteredModel(
           token,
@@ -648,7 +656,14 @@ export function LlmPage() {
           payload
         )
         setModels((current) => [...current, model])
-        notify("success", t("模型测试通过，模型已添加"))
+        notify(
+          "success",
+          t(
+            modelForm.model_type === "IMAGE"
+              ? "生图模型已添加"
+              : "模型测试通过，模型已添加"
+          )
+        )
       }
       setIsDialogOpen(false)
       setIsProviderPickerOpen(false)
@@ -1286,7 +1301,9 @@ function ModelDialog({
         <DialogHeader>
           <DialogTitle>{t(isEditing ? "编辑模型" : "接入模型")}</DialogTitle>
           <DialogDescription>
-            {t("选择供应商和基础模型，填写连接参数；保存前会测试模型调用。")}
+            {form.model_type === "IMAGE"
+              ? t("保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。")
+              : t("选择供应商和基础模型，填写连接参数；保存前会测试模型调用。")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit}>

@@ -35,6 +35,7 @@ const usable: ToolSummary = {
 const secondUsable: ToolSummary = {
   ...usable,
   id: "tool-b",
+  kind: "mcp",
   function_name: "report",
   display_name: "Weekly report",
   description: "Generate a report",
@@ -111,6 +112,8 @@ describe("ToolPicker extra", () => {
     const options = within(dialog).getAllByRole("checkbox")
     expect(options).toHaveLength(2)
     const [first, second] = options
+    expect(first?.getAttribute("aria-label")).toBe("Weekly report")
+    expect(second?.getAttribute("aria-label")).toBe("Lookup account")
 
     const search = within(dialog).getByRole("searchbox")
     search.focus()
@@ -137,7 +140,7 @@ describe("ToolPicker extra", () => {
 
     fireEvent.keyDown(second, { key: "Enter" })
     expect(changes.at(-1)).toEqual([
-      { tool_id: "tool-b", version_id: "version-1" },
+      { tool_id: "tool-a", version_id: "version-2" },
     ])
   })
 
