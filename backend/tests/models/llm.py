@@ -34,6 +34,7 @@ from app.adapters.llm.runtime import (
     build_reranker,
     extract_registered_image_text,
 )
+from app.domain.knowledge.models import KnowledgeBase
 from app.domain.models.registered import RegisteredModel
 from app.infra.db.session import get_session_factory
 
@@ -498,6 +499,102 @@ def assert_provider_catalog_contract() -> None:
     assert "glm-5.3" in models_by_provider["model_zhipu_provider"]["LLM"]
 
 
+async def set_legacy_graph_extraction_model(
+    knowledge_base_id: str, model_id: str
+) -> None:
+    async with get_session_factory()() as db:
+        await db.execute(
+            text(
+                "UPDATE knowledge SET graph_extraction_model_id = :model_id "
+                "WHERE id = :knowledge_base_id"
+            ),
+            {"model_id": model_id, "knowledge_base_id": knowledge_base_id},
+        )
+        await db.commit()
+
+
+async def assert_legacy_graph_model_cleared(
+    knowledge_base_id: str, model_id: str
+) -> None:
+    async with get_session_factory()() as db:
+        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+        assert knowledge_base is not None
+        assert knowledge_base.graph_extraction_model_id is None
+        assert await db.get(RegisteredModel, model_id) is None
+
+
+def test_delete_model_with_legacy_graph_reference() -> None:
+    with test_client() as client, model_test_server() as model_base_url:
+        admin_token, workspace_id = activate_admin(client)
+        headers = auth_headers(admin_token)
+        model = client.post(
+            models_url(workspace_id),
+            headers=headers,
+            json={**model_payload(model_base_url), "name": "Legacy Graph LLM"},
+        )
+        assert model.status_code == 201, model.text
+        model_id = model.json()["id"]
+        knowledge_base = client.post(
+            f"/api/v1/workspaces/{workspace_id}/knowledge-bases",
+            headers=headers,
+            json={"name": "Legacy Graph Knowledge"},
+        )
+        assert knowledge_base.status_code == 201, knowledge_base.text
+        knowledge_base_id = knowledge_base.json()["id"]
+        asyncio.run(set_legacy_graph_extraction_model(knowledge_base_id, model_id))
+
+        deleted = client.delete(
+            models_url(workspace_id, f"/{model_id}"), headers=headers
+        )
+        assert deleted.status_code == 204, deleted.text
+        asyncio.run(assert_legacy_graph_model_cleared(knowledge_base_id, model_id))
+
+
+async def assert_active_knowledge_model_preserved(
+    knowledge_base_id: str, model_id: str
+) -> None:
+    async with get_session_factory()() as db:
+        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+        assert knowledge_base is not None
+        assert knowledge_base.embedding_model_id == model_id
+        assert await db.get(RegisteredModel, model_id) is not None
+
+
+def test_delete_model_with_active_knowledge_reference() -> None:
+    with test_client() as client, model_test_server() as model_base_url:
+        admin_token, workspace_id = activate_admin(client)
+        headers = auth_headers(admin_token)
+        model = client.post(
+            models_url(workspace_id),
+            headers=headers,
+            json={
+                **model_payload(model_base_url),
+                "name": "Active Embedding",
+                "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
+                "model_type": "EMBEDDING",
+                "model_name": "text-embedding-3-small",
+            },
+        )
+        assert model.status_code == 201, model.text
+        model_id = model.json()["id"]
+        knowledge_base = client.post(
+            f"/api/v1/workspaces/{workspace_id}/knowledge-bases",
+            headers=headers,
+            json={"name": "Active Knowledge", "embedding_model_id": model_id},
+        )
+        assert knowledge_base.status_code == 201, knowledge_base.text
+
+        deleted = client.delete(
+            models_url(workspace_id, f"/{model_id}"), headers=headers
+        )
+        assert deleted.status_code == 409, deleted.text
+        assert deleted.json()["detail"] == "Model is in use."
+        asyncio.run(
+            assert_active_knowledge_model_preserved(knowledge_base.json()["id"], model_id)
+        )
+
+
 def main() -> None:
     assert_provider_factories()
     assert_provider_catalog_contract()
@@ -832,6 +929,9 @@ def main() -> None:
         assert "model.create" in actions
         assert "model.update" in actions
         assert "model.delete" in actions
+
+    test_delete_model_with_legacy_graph_reference()
+    test_delete_model_with_active_knowledge_reference()
 
 
 if __name__ == "__main__":

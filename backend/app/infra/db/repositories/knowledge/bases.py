@@ -172,6 +172,22 @@ async def set_knowledge_base_embedding_model_id(
         )
     )
 
+
+async def clear_legacy_graph_extraction_model_reference(
+    db: AsyncSession,
+    workspace_id: str,
+    model_id: str,
+) -> None:
+    await db.execute(
+        update(KnowledgeBaseORM)
+        .where(
+            KnowledgeBaseORM.workspace_id == workspace_id,
+            KnowledgeBaseORM.graph_extraction_model_id == model_id,
+        )
+        .values(graph_extraction_model_id=None)
+    )
+
+
 async def refresh_knowledge_base(
     db: AsyncSession,
     entity: KnowledgeBase,
