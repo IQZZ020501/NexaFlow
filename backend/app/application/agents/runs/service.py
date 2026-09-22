@@ -35,6 +35,11 @@ from app.domain.agents.access.publications import (
     build_agent_configuration_snapshot,
     build_agent_resource_snapshot,
 )
+from app.domain.agents.approval import (
+    DEFAULT_AGENT_APPROVAL_MODE,
+    AgentApprovalMode,
+    normalize_agent_approval_mode,
+)
 from app.domain.agents.models import (
     AGENT_RUN_SUCCEEDED_STATUS,
     agent_run_generation,
@@ -379,7 +384,7 @@ async def validate_regeneration_source(
         if {
             key: value
             for key, value in source.application_snapshot.items()
-            if key not in {"attachments", "execution_profile"}
+            if key not in {"attachments", "approval_mode", "execution_profile"}
         } != {
             "schema_version": version.schema_version,
             "configuration": version.configuration_snapshot,
@@ -665,7 +670,13 @@ def tool_invocation_to_response(invocation: Any) -> AgentToolCallResponse:
         server_name="",
         arguments=invocation.arguments,
         status=invocation.status,
-        approval_required=snapshot.approval == TOOL_APPROVAL_EACH_CALL,
+        approval_required=(
+            invocation.policy_snapshot.get("approval_required")
+            if isinstance(
+                invocation.policy_snapshot.get("approval_required"), bool
+            )
+            else snapshot.approval == TOOL_APPROVAL_EACH_CALL
+        ),
         last_error=invocation.error_message,
         approved_at=invocation.approved_at,
         started_at=invocation.started_at,
@@ -972,6 +983,7 @@ async def prepare_agent_run(
     allow_pinned_publication: bool = False,
     authorized_by_parent: bool = False,
     settings: Settings | None = None,
+    approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
 ) -> tuple[AgentRun, Any]:
     """
     Prepare a queued agent run using the selected agent configuration, resources, model, tools, and conversation.
@@ -994,6 +1006,11 @@ async def prepare_agent_run(
     """
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid Agent run access source.")
+    approval_mode = (
+        DEFAULT_AGENT_APPROVAL_MODE
+        if access_source == "api"
+        else normalize_agent_approval_mode(approval_mode)
+    )
     if access_source == "console":
         consumer_id = actor.id
     elif not consumer_id:
@@ -1222,6 +1239,7 @@ async def prepare_agent_run(
             "configuration": configuration_snapshot,
             "resources": resource_snapshot,
             "attachments": attachments or [],
+            "approval_mode": approval_mode,
             "execution_profile": execution_profile(
                 settings or Settings.from_env(require_bootstrap=False)
             ),
@@ -1424,6 +1442,7 @@ async def create_agent_run(
     settings: Settings,
     conversation_id: str | None = None,
     file_ids: list[str] | None = None,
+    approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
 ) -> Any:
     attachment_context = ""
     attachments: list[dict[str, Any]] = []
@@ -1452,6 +1471,7 @@ async def create_agent_run(
         attachment_context=attachment_context,
         attachments=attachments,
         settings=settings,
+        approval_mode=approval_mode,
     )
     await enqueue_prepared_agent_run(
         run.id,

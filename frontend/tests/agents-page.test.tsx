@@ -2980,11 +2980,16 @@ describe("AgentsPage run flows", () => {
     const textarea = screen.getByLabelText(
       "向 Agent 提问"
     ) as HTMLTextAreaElement
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "执行权限：帮我批准" })
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
     await waitFor(() => expect(screen.getByText("Final answer")).toBeTruthy())
     await waitFor(() => expect(JSON.parse(runBody).file_ids).toEqual(["up-1"]))
+    expect(JSON.parse(runBody).approval_mode).toBe("full_access")
     expect(screen.getByText("report.pdf").closest("li")?.className).toContain(
       "max-w-[min(22rem,78vw)]"
     )

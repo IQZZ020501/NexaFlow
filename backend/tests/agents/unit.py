@@ -19,7 +19,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 
 import asyncio
 import json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC
 from types import SimpleNamespace
 from typing import ClassVar
@@ -661,6 +661,68 @@ def test_tool_adapter_contract_is_provider_neutral() -> None:
     assert result.ok is True
     assert result.outcome == "confirmed"
 
+def test_agent_approval_modes_only_change_interactive_consent() -> None:
+    from pydantic import ValidationError
+
+    from app.domain.agents.approval import (
+        agent_mcp_requires_approval,
+        agent_tool_requires_approval,
+        normalize_agent_approval_mode,
+        run_agent_approval_mode,
+    )
+    from app.entities.runs import AgentRun
+    from app.entities.tools import ToolSnapshot
+    from app.schemas.agents.contracts import AgentRunCreateRequest
+
+    pure = ToolSnapshot(
+        schema_version=1,
+        tool_id="tool-1",
+        version_id="version-1",
+        source_id="source-1",
+        kind="builtin",
+        function_name="current_time",
+        display_name="Current time",
+        description="Returns the current time.",
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema=None,
+        definition_hash="hash-1",
+        policy_id="policy-1",
+        policy_revision=1,
+        bound_by_user_id="user-1",
+        approval="auto",
+        effect="pure",
+        allowed_access_sources=("console",),
+        workflow_callable=True,
+        parallel_safe=True,
+        execution_spec={"builtin": "current_time"},
+    )
+    external_read = replace(pure, effect="external_read")
+    risky = replace(pure, approval="each_call", effect="external_write")
+
+    assert agent_tool_requires_approval("always_ask", pure) is False
+    assert agent_tool_requires_approval("always_ask", external_read) is True
+    assert agent_tool_requires_approval("ask_risky", external_read) is False
+    assert agent_tool_requires_approval("ask_risky", risky) is True
+    assert agent_tool_requires_approval("full_access", risky) is False
+    assert agent_mcp_requires_approval("always_ask", "read_only") is True
+    assert agent_mcp_requires_approval("ask_risky", "read_only") is False
+    assert agent_mcp_requires_approval("full_access", "approval_required") is False
+    assert agent_mcp_requires_approval("always_ask", "disabled") is False
+
+    run = AgentRun(application_snapshot={"approval_mode": "full_access"})
+    assert run_agent_approval_mode(run) == "full_access"
+    assert normalize_agent_approval_mode("invalid") == "ask_risky"
+    request = AgentRunCreateRequest(goal="Run", approval_mode="always_ask")
+    assert request.approval_mode == "always_ask"
+    try:
+        AgentRunCreateRequest(  # type: ignore[arg-type]
+            goal="Run", approval_mode="invalid"
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Invalid Agent approval mode was accepted.")
+
 def test_agent_tool_definition_comes_from_unified_snapshot() -> None:
     from app.application.agents.tools.builder import build_unified_agent_tool
     from app.entities.tools import ToolSnapshot
@@ -1148,7 +1210,11 @@ def test_stale_mcp_policy_requires_approval() -> None:
 
     async def assert_paused() -> None:
         ledger = agent_executor.DurableToolLedger(
-            AgentRun(id="run-1", workspace_id="ws-1"),
+            AgentRun(
+                id="run-1",
+                workspace_id="ws-1",
+                application_snapshot={"approval_mode": "full_access"},
+            ),
             "worker-1",
             SimpleNamespace(),
             asyncio.Event(),
@@ -1170,7 +1236,7 @@ def test_stale_mcp_policy_requires_approval() -> None:
         except AgentExecutionPaused as exc:
             assert exc.call_id == "call-1"
             return
-        raise AssertionError("stale read-only policy did not require approval")
+        raise AssertionError("full access bypassed renewed MCP definition approval")
 
     try:
         asyncio.run(assert_paused())
@@ -1892,7 +1958,8 @@ def test_run_to_response_maps_run_fields() -> None:
                     "size_bytes": 12,
                     "category": "document",
                 }
-            ]
+            ],
+            "approval_mode": "full_access",
         },
     )
     response = run_to_response(run, trace_id="trace-1")
@@ -1909,6 +1976,7 @@ def test_run_to_response_maps_run_fields() -> None:
     assert len(response.events) == 1
     assert response.model_usage["total_tokens"] == 12
     assert response.attachments[0].filename == "report.pdf"
+    assert response.approval_mode == "full_access"
     assert response.sources[0].document == "社保制度.pdf"
     assert len(response.sources) == 2
     assert response.sources[0].source_ref == knowledge_source_ref("chunk-1")
@@ -2786,6 +2854,7 @@ def main() -> None:
     test_tool_contracts_deep_freeze_nested_json()
     test_freeze_json_rejects_non_json_values()
     test_tool_adapter_contract_is_provider_neutral()
+    test_agent_approval_modes_only_change_interactive_consent()
     test_agent_tool_definition_comes_from_unified_snapshot()
     test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope()
     test_agent_tool_call_migration_preserves_approval_gate()

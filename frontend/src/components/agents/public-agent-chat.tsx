@@ -3,6 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
+  ArrowUpIcon,
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -18,7 +19,7 @@ import {
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
-  PaperclipIcon,
+  PlusIcon,
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
@@ -32,6 +33,7 @@ import {
   feedbackConfirmationLabel,
   RunActionBar,
 } from "@/components/app/run-action-bar"
+import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
@@ -72,7 +74,7 @@ import {
   sessionInputsAfterAnswerHandoff,
   splitAgentSessionEvents,
 } from "@/lib/agent-session-handoff"
-import type { AgentToolCall } from "@/lib/api/agents"
+import type { AgentApprovalMode, AgentToolCall } from "@/lib/api/agents"
 import {
   cancelPublicAgentRun,
   initializePublicAgent,
@@ -1144,6 +1146,8 @@ export function PublicAgentChat({
   >(initialConversationId)
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
   const [question, setQuestion] = React.useState("")
+  const [approvalMode, setApprovalMode] =
+    React.useState<AgentApprovalMode>("ask_risky")
   const [files, setFiles] = React.useState<File[]>([])
   const [isInitializing, setIsInitializing] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
@@ -1822,7 +1826,8 @@ export function PublicAgentChat({
         },
         controller.signal,
         activeConversationId,
-        uploaded.map((item) => item.id)
+        uploaded.map((item) => item.id),
+        approvalMode
       )
       setFiles([])
       await refreshConversations()
@@ -2259,13 +2264,13 @@ export function PublicAgentChat({
           {sendError ? (
             <p
               role="alert"
-              className="mx-auto mb-2 max-w-5xl text-xs text-destructive 2xl:max-w-6xl"
+              className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
             >
               {sendError}
             </p>
           ) : null}
           <form
-            className="relative mx-auto max-w-5xl rounded-xl border bg-background p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40 2xl:max-w-6xl"
+            className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/20"
             onSubmit={handleAsk}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes("Files")) {
@@ -2321,7 +2326,7 @@ export function PublicAgentChat({
                   event.currentTarget.form?.requestSubmit()
                 }
               }}
-              className={`max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 outline-none placeholder:text-muted-foreground sm:min-h-28 sm:text-sm ${files.length ? "pb-2" : "pb-2 sm:pb-14"}`}
+              className="max-h-32 min-h-12 w-full resize-none bg-transparent px-2.5 pt-1.5 pb-1 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-14 sm:text-sm"
               placeholder={t("请输入问题")}
               aria-label={t("请输入问题")}
               enterKeyHint="send"
@@ -2338,77 +2343,88 @@ export function PublicAgentChat({
               }
               t={t}
             />
-            <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
-              {isSending ? (
-                <>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={!question.trim()}
-                    onClick={() => void handleSessionInput("follow_up")}
-                  >
-                    {t("追加后续任务")}
-                  </Button>
-                  {question.trim() ? (
+            <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+              <div className="flex min-w-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-md text-muted-foreground hover:text-foreground"
+                  aria-label={t("添加附件")}
+                  title={t("添加附件")}
+                  disabled={isSending}
+                  onClick={() => {
+                    if (!fileInputRef.current) return
+                    fileInputRef.current.value = ""
+                    fileInputRef.current.click()
+                  }}
+                >
+                  <PlusIcon />
+                </Button>
+                <AgentApprovalModeMenu
+                  value={approvalMode}
+                  onChange={setApprovalMode}
+                  disabled={isSending}
+                  t={t}
+                />
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {isSending ? (
+                  <>
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon-lg"
-                      aria-label={t("停止生成")}
-                      title={t("停止生成")}
-                      onClick={handleCancelAsk}
+                      size="sm"
+                      disabled={!question.trim()}
+                      onClick={() => void handleSessionInput("follow_up")}
                     >
-                      <SquareIcon className="fill-current" />
+                      {t("追加后续任务")}
                     </Button>
-                  ) : null}
-                </>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-lg"
-                className="rounded-lg"
-                aria-label={t("添加附件")}
-                title={t("添加附件")}
-                disabled={isSending}
-                onClick={() => {
-                  if (!fileInputRef.current) return
-                  fileInputRef.current.value = ""
-                  fileInputRef.current.click()
-                }}
-              >
-                <PaperclipIcon />
-              </Button>
-              <Button
-                type={isSending && !question.trim() ? "button" : "submit"}
-                size="icon-lg"
-                className="rounded-lg"
-                aria-label={t(
-                  isSending
-                    ? question.trim()
-                      ? "调整当前任务"
-                      : "停止生成"
-                    : "发送问题"
-                )}
-                title={t(
-                  isSending
-                    ? question.trim()
-                      ? "调整当前任务"
-                      : "停止生成"
-                    : "发送问题"
-                )}
-                onClick={
-                  isSending && !question.trim() ? handleCancelAsk : undefined
-                }
-                disabled={!isSending && !question.trim()}
-              >
-                {isSending && !question.trim() ? (
-                  <SquareIcon className="fill-current" />
-                ) : (
-                  <SendIcon />
-                )}
-              </Button>
+                    {question.trim() ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        aria-label={t("停止生成")}
+                        title={t("停止生成")}
+                        onClick={handleCancelAsk}
+                      >
+                        <SquareIcon className="fill-current" />
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+                <Button
+                  type={isSending && !question.trim() ? "button" : "submit"}
+                  size="icon"
+                  className="rounded-lg"
+                  aria-label={t(
+                    isSending
+                      ? question.trim()
+                        ? "调整当前任务"
+                        : "停止生成"
+                      : "发送问题"
+                  )}
+                  title={t(
+                    isSending
+                      ? question.trim()
+                        ? "调整当前任务"
+                        : "停止生成"
+                      : "发送问题"
+                  )}
+                  onClick={
+                    isSending && !question.trim() ? handleCancelAsk : undefined
+                  }
+                  disabled={!isSending && !question.trim()}
+                >
+                  {isSending && !question.trim() ? (
+                    <SquareIcon className="fill-current" />
+                  ) : (
+                    <ArrowUpIcon />
+                  )}
+                </Button>
+              </div>
             </div>
           </form>
         </div>

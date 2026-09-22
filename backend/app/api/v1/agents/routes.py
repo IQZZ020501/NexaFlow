@@ -457,6 +457,7 @@ async def create_workspace_agent_run(
         settings,
         conversation_id=payload.conversation_id,
         file_ids=payload.file_ids,
+        approval_mode=payload.approval_mode,
     )
 
 
@@ -611,6 +612,7 @@ async def stream_workspace_agent_run(
         attachment_context=attachment_context,
         attachments=attachments,
         settings=settings,
+        approval_mode=payload.approval_mode,
     )
     await enqueue_prepared_agent_run(
         run.id,

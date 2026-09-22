@@ -30,6 +30,10 @@ from app.application.agents.tools.builder import (
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.workspaces.service import build_workspace_context
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
+from app.domain.agents.approval import (
+    agent_mcp_requires_approval,
+    run_agent_approval_mode,
+)
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -315,7 +319,11 @@ class DurableToolLedger:
             raise AgentToolBusy(call["id"], "Agent run lease was lost.")
         arguments_hash = _arguments_hash(arguments)
         approval_required = (
-            metadata["kind"] == "mcp" and metadata.get("policy_mode") != "read_only"
+            metadata["kind"] == "mcp"
+            and agent_mcp_requires_approval(
+                run_agent_approval_mode(self.run),
+                metadata.get("policy_mode", ""),
+            )
         )
         idempotency_key = hashlib.sha256(
             f"{self.run.id}:{turn}:{call['id']}:{arguments_hash}".encode()
@@ -354,10 +362,22 @@ class DurableToolLedger:
                     policy,
                     current_definition_hash,
                 )
-                approval_required = (
-                    metadata["kind"] == "mcp"
-                    and policy_mode != "read_only"
-                    and self.run.access_source != "api"
+                snapshot_definition_hash = metadata.get("definition_hash", "")
+                definition_changed = policy_mode != "disabled" and (
+                    (
+                        policy is not None
+                        and policy.definition_hash != snapshot_definition_hash
+                    )
+                    or (
+                        current_definition_hash is not None
+                        and current_definition_hash != snapshot_definition_hash
+                    )
+                )
+                approval_required = self.run.access_source != "api" and (
+                    definition_changed
+                    or agent_mcp_requires_approval(
+                        run_agent_approval_mode(self.run), policy_mode
+                    )
                 )
             existing = await agent_repository.get_agent_tool_call(
                 db,

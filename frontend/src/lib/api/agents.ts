@@ -125,6 +125,8 @@ export type AgentRunStatus =
   | "planning"
   | "planned"
 
+export type AgentApprovalMode = "always_ask" | "ask_risky" | "full_access"
+
 export type AgentRun = {
   id: string
   workspace_id: string
@@ -135,6 +137,7 @@ export type AgentRun = {
   goal: string
   session_inputs?: AgentSessionInput[]
   attachments?: AgentRunAttachment[]
+  approval_mode?: AgentApprovalMode
   model_id: string
   model_name: string
   status: AgentRunStatus
@@ -587,7 +590,8 @@ export function createAgentRun(
   goal: string,
   signal?: AbortSignal,
   conversationId?: string | null,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
     method: "POST",
@@ -596,6 +600,7 @@ export function createAgentRun(
       goal,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
+      approval_mode: approvalMode,
     }),
     signal,
   })
@@ -802,7 +807,8 @@ export async function streamAgentRun(
   onEvent: (event: AgentRunStreamEvent) => void,
   signal?: AbortSignal,
   conversationId?: string | null,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   const run = await createAgentRun(
     token,
@@ -811,7 +817,8 @@ export async function streamAgentRun(
     goal,
     signal,
     conversationId,
-    fileIds
+    fileIds,
+    approvalMode
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_RUN_STATUSES.has(run.status)) {

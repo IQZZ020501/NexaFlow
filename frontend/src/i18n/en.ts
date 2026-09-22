@@ -1,6 +1,14 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "应如何批准工具调用？": "How should tool calls be approved?",
+  请求批准: "Request approval",
+  帮我批准: "Approve for me",
+  完全访问: "Full access",
+  外部读取或副作用操作前询问: "Ask for external reads or side effects",
+  仅风险操作需批准: "Ask only for risky operations",
+  "自动运行已授权工具，仍受安全限制": "Auto-run authorized tools; limits apply",
+  "执行权限：{mode}": "Execution permission: {mode}",
   "编辑 Skill": "Edit Skill",
   "技能指令": "Skill instructions",
   "包文件": "Package files",

@@ -89,6 +89,7 @@ import {
   uploadAgentFiles,
   updateAgent,
   type Agent,
+  type AgentApprovalMode,
   type AgentInteractionConfig,
   type AgentPermission,
   type AppType,
@@ -663,6 +664,8 @@ export function AgentsPage({
     null
   )
   const [question, setQuestion] = React.useState("")
+  const [approvalMode, setApprovalMode] =
+    React.useState<AgentApprovalMode>("ask_risky")
   const [agentFiles, setAgentFiles] = React.useState<File[]>([])
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null
@@ -1815,7 +1818,8 @@ export function AgentsPage({
         },
         askAbortController.signal,
         conversationId,
-        uploaded.map((item) => item.id)
+        uploaded.map((item) => item.id),
+        approvalMode
       )
       setAgentFiles([])
     } catch (error) {
@@ -2168,6 +2172,8 @@ export function AgentsPage({
             resolvingCallId={resolvingCallId}
             question={question}
             setQuestion={setQuestion}
+            approvalMode={approvalMode}
+            onApprovalModeChange={setApprovalMode}
             files={agentFiles}
             setFiles={setAgentFiles}
             pendingQuestion={pendingQuestion}

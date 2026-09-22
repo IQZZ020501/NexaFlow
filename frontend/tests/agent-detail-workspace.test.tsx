@@ -20,6 +20,7 @@ import { stripAgentSourceLinks } from "@/components/agents/agent-source-referenc
 import { LanguageProvider, useLanguage } from "@/contexts/language-provider"
 import type {
   Agent,
+  AgentApprovalMode,
   AgentRun,
   AgentRunEvent,
   AgentToolCall,
@@ -330,6 +331,8 @@ function Harness(props: HarnessProps = {}) {
   )
   const [question, setQuestion] = useState(props.question ?? "")
   const [files, setFiles] = useState<File[]>(props.files ?? [])
+  const [approvalMode, setApprovalMode] =
+    useState<AgentApprovalMode>("ask_risky")
   const callbacks = {
     onBack: props.onBack ?? (() => undefined),
     onDelete: props.onDelete ?? (() => undefined),
@@ -359,6 +362,8 @@ function Harness(props: HarnessProps = {}) {
       resolvingCallId={props.resolvingCallId ?? null}
       question={question}
       setQuestion={setQuestion}
+      approvalMode={approvalMode}
+      onApprovalModeChange={setApprovalMode}
       files={files}
       setFiles={setFiles}
       pendingQuestion={props.pendingQuestion ?? null}
@@ -641,6 +646,33 @@ describe("AgentDetailWorkspace preview", () => {
   test("shows the empty conversation state", () => {
     renderPage(<Harness activeView="settings" />)
     expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+  })
+
+  test("changes the approval mode from the composer", async () => {
+    renderPage(<Harness activeView="settings" />)
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "执行权限：帮我批准" })
+    )
+    const menuLabel = await screen.findByText("应如何批准工具调用？")
+    expect(
+      menuLabel.closest("[data-slot='dropdown-menu-content']")?.className
+    ).toContain("w-[min(21rem,calc(100vw-1rem))]")
+    for (const description of [
+      "外部读取或副作用操作前询问",
+      "仅风险操作需批准",
+      "自动运行已授权工具，仍受安全限制",
+    ]) {
+      expect(screen.getByText(description).className).toContain("truncate")
+    }
+    fireEvent.click(
+      screen.getByRole("menuitem", {
+        name: /完全访问.*仍受安全限制/,
+      })
+    )
+
+    const trigger = screen.getByRole("button", { name: "执行权限：完全访问" })
+    expect(trigger.dataset.variant).toBe("destructive")
   })
 
   test("shows the loading state", () => {

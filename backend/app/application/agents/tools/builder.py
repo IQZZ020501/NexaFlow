@@ -16,6 +16,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, ValidationError
 
 from app.application.knowledge.retrieval.service import retrieve_knowledge_base
+from app.domain.agents.approval import run_agent_approval_mode
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime import (
     AgentRunnerError,
@@ -464,6 +465,7 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         goal=run.goal,
         session_inputs=session_inputs_to_response(run),
         attachments=run.application_snapshot.get("attachments", []),
+        approval_mode=run_agent_approval_mode(run),
         model_id=run.model_id,
         model_name=run.model_name,
         status=agent_run_display_status(run.status),

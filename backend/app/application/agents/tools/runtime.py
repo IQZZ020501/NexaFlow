@@ -16,6 +16,10 @@ from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
 )
+from app.domain.agents.approval import (
+    agent_tool_requires_approval,
+    run_agent_approval_mode,
+)
 from app.domain.agents.runtime import (
     AgentExecutionPaused,
     AgentRunnerError,
@@ -108,6 +112,10 @@ class UnifiedAgentToolRuntime:
             access_source=self.run.access_source,
             deadline_at=self._tool_deadline(snapshot),
             idempotency_key=idempotency_key,
+            approval_required=agent_tool_requires_approval(
+                run_agent_approval_mode(self.run),
+                snapshot,
+            ),
         )
         try:
             async with get_session_factory()() as db:

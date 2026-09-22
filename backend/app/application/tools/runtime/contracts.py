@@ -23,6 +23,7 @@ class ToolInvocationContext:
     deadline_at: datetime
     idempotency_key: str
     resource_snapshot: dict[str, Any] = field(default_factory=dict)
+    approval_required: bool | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(

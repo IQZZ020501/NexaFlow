@@ -1,6 +1,10 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
-import type { AgentSessionInput, AgentToolCall } from "@/lib/api/agents"
+import type {
+  AgentApprovalMode,
+  AgentSessionInput,
+  AgentToolCall,
+} from "@/lib/api/agents"
 import type { AgentInteractionConfig, AgentRunSource } from "@/lib/api/agents"
 
 export type PublicAgentProfile = {
@@ -71,6 +75,7 @@ export type ExternalAgentRun = {
   question: string
   session_inputs?: AgentSessionInput[]
   attachments?: AgentRunAttachment[]
+  approval_mode?: AgentApprovalMode
   status: string
   result: string
   sources?: AgentRunSource[]
@@ -252,7 +257,8 @@ export function createPublicAgentRun(
   goal: string,
   conversationId?: string | null,
   signal?: AbortSignal,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   return request<ExternalAgentRun>(publicAgentPath(agentId, "/runs"), {
     method: "POST",
@@ -260,6 +266,7 @@ export function createPublicAgentRun(
       goal,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
+      approval_mode: approvalMode,
     }),
     signal,
     token,
@@ -468,7 +475,8 @@ export async function streamPublicAgentRun(
   onEvent: (event: PublicAgentRunStreamEvent) => void,
   signal?: AbortSignal,
   conversationId?: string | null,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   const run = await createPublicAgentRun(
     agentId,
@@ -476,7 +484,8 @@ export async function streamPublicAgentRun(
     goal,
     conversationId,
     signal,
-    fileIds
+    fileIds,
+    approvalMode
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_STATUSES.has(run.status)) {

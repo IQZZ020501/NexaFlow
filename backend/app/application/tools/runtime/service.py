@@ -89,7 +89,13 @@ async def queue_tool_invocation(
         "tool_snapshot": tool_snapshot_payload(snapshot),
         "deadline_at": context.deadline_at.isoformat(),
         "resource_snapshot": resource_snapshot,
+        "approval_required": (
+            context.approval_required
+            if context.approval_required is not None
+            else snapshot.approval == TOOL_APPROVAL_EACH_CALL
+        ),
     }
+    approval_required = bool(payload["approval_required"])
     candidate = ToolInvocation(
         workspace_id=context.workspace_id,
         origin=context.origin,
@@ -106,7 +112,7 @@ async def queue_tool_invocation(
         idempotency_key=context.idempotency_key,
         status=(
             TOOL_INVOCATION_AWAITING_APPROVAL
-            if snapshot.approval == TOOL_APPROVAL_EACH_CALL
+            if approval_required
             else TOOL_INVOCATION_QUEUED
         ),
     )
@@ -542,6 +548,13 @@ def _load_invocation_contract(
         deadline_at=deadline,
         idempotency_key=invocation.idempotency_key,
         resource_snapshot=resource_snapshot,
+        approval_required=(
+            invocation.policy_snapshot.get("approval_required")
+            if isinstance(
+                invocation.policy_snapshot.get("approval_required"), bool
+            )
+            else None
+        ),
     )
     _validate_context(context)
     return snapshot, context

@@ -3246,6 +3246,7 @@ def assert_external_agent_access() -> None:
                 "goal",
                 "conversation_id",
                 "file_ids",
+                "approval_mode",
             }
             public_schema_ref = openapi_payload["paths"][
                 "/api/v1/public/agents/{agent_id}/runs"
@@ -3323,6 +3324,7 @@ def assert_external_agent_access() -> None:
                 "regenerated_from_run_id",
                 "question",
                 "attachments",
+                "approval_mode",
                 "status",
                 "result",
                 "error",
@@ -4208,11 +4210,15 @@ def main() -> None:
             member_question = client.post(
                 agents_url(workspace_id, f"/{agent_id}/runs"),
                 headers=auth_headers(member_token),
-                json={"goal": "Prepare the release"},
+                json={
+                    "goal": "Prepare the release",
+                    "approval_mode": "full_access",
+                },
             )
             assert member_question.status_code == 201, member_question.text
             member_run = member_question.json()
             assert member_run["status"] == "succeeded"
+            assert member_run["approval_mode"] == "full_access"
             assert member_run["conversation_id"]
             assert member_run["model_usage"]["model_calls"] == 1
             assert member_run["plan"] == []

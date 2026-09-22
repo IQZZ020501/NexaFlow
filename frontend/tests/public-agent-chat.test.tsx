@@ -1575,20 +1575,22 @@ describe("PublicAgentChat", () => {
     expect(screen.getAllByText("这是一个公开助手。").length).toBeGreaterThan(0)
     expect(screen.getByText("暂无历史记录")).toBeTruthy()
     const composer = screen.getByLabelText("请输入问题").closest("form")
-    expect(composer?.className).toContain("max-w-5xl")
-    expect(composer?.className).toContain("2xl:max-w-6xl")
+    expect(composer?.className).toContain("max-w-3xl")
+    expect(composer?.className).toContain("border-input")
+    expect(composer?.className).toContain("bg-muted/20")
+    expect(composer?.className).toContain("shadow-xs")
     expect(composer?.closest("main")?.className).toContain("h-dvh")
     expect(composer?.closest("main")?.className).toContain("overflow-hidden")
     expect(composer?.closest("main")?.className).toContain(
       "lg:grid-cols-[240px_minmax(0,1fr)]"
     )
-    expect(screen.getByLabelText("请输入问题").className).toContain("min-h-11")
+    expect(screen.getByLabelText("请输入问题").className).toContain("min-h-12")
     expect(screen.getByLabelText("请输入问题").className).toContain(
-      "sm:min-h-28"
+      "sm:min-h-14"
     )
     expect(
-      screen.getByLabelText("发送问题").parentElement?.className
-    ).toContain("sm:absolute")
+      screen.getByLabelText("发送问题").parentElement?.parentElement?.className
+    ).toContain("justify-between")
     expect(screen.getByLabelText("打开历史记录").className).toContain(
       "lg:hidden"
     )
@@ -2294,6 +2296,7 @@ describe("PublicAgentChat", () => {
     expect(createBodies[0]).toEqual({
       goal: "什么是 NexaFlow？",
       conversation_id: "conv-1",
+      approval_mode: "ask_risky",
     })
     expect(
       requests.some(
@@ -2373,10 +2376,17 @@ describe("PublicAgentChat", () => {
     renderPage(<PublicAgentChat agentId="agent-1" />)
     await screen.findByText("开始新对话")
 
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "执行权限：帮我批准" })
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
     sendMessage("开始吧")
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()
-    expect(createBodies[0]).toEqual({ goal: "开始吧" })
+    expect(createBodies[0]).toEqual({
+      goal: "开始吧",
+      approval_mode: "full_access",
+    })
     expect(
       new URLSearchParams(window.location.search).get("conversation_id")
     ).toBe("conv-new")

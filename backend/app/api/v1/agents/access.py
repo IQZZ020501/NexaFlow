@@ -233,6 +233,7 @@ async def create_public_agent_run(
         settings,
         payload.conversation_id,
         payload.file_ids,
+        payload.approval_mode,
     )
 
 

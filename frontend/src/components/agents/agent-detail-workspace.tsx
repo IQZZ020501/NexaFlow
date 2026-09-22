@@ -4,6 +4,7 @@ import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
+  ArrowUpIcon,
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -15,7 +16,7 @@ import {
   LoaderCircleIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
-  PaperclipIcon,
+  PlusIcon,
   ChartNoAxesColumnIcon,
   LayoutDashboardIcon,
   PanelLeftCloseIcon,
@@ -35,12 +36,18 @@ import {
 } from "lucide-react"
 
 import { RunActionBar } from "@/components/app/run-action-bar"
+import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
-import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
+import type {
+  Agent,
+  AgentApprovalMode,
+  AgentRun,
+  AgentToolCall,
+} from "@/lib/api/agents"
 import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
@@ -86,6 +93,8 @@ type AgentDetailWorkspaceProps = {
   resolvingCallId: string | null
   question: string
   setQuestion: React.Dispatch<React.SetStateAction<string>>
+  approvalMode: AgentApprovalMode
+  onApprovalModeChange: (value: AgentApprovalMode) => void
   files: File[]
   setFiles: React.Dispatch<React.SetStateAction<File[]>>
   pendingQuestion: string | null
@@ -945,6 +954,8 @@ export function AgentDetailWorkspace({
   resolvingCallId,
   question,
   setQuestion,
+  approvalMode,
+  onApprovalModeChange,
   files,
   setFiles,
   pendingQuestion,
@@ -1395,7 +1406,7 @@ export function AgentDetailWorkspace({
 
                   <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                     <form
-                      className="relative mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
+                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/20"
                       onSubmit={(event) => {
                         shouldFollowPreviewRef.current = true
                         onAsk(event)
@@ -1469,7 +1480,7 @@ export function AgentDetailWorkspace({
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className={`max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed sm:min-h-28 sm:text-sm ${files.length ? "pb-2" : "pb-2 sm:pb-14"}`}
+                        className="max-h-32 min-h-12 w-full resize-none bg-transparent px-2.5 pt-1.5 pb-1 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-14 sm:text-sm"
                         placeholder={
                           isDirty
                             ? t("请先保存配置后再调试")
@@ -1498,94 +1509,111 @@ export function AgentDetailWorkspace({
                         }
                         t={t}
                       />
-                      <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
-                        {isAsking && onSessionInput && (
-                          <>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              disabled={!question.trim()}
-                              onClick={() => onSessionInput("follow_up")}
-                            >
-                              {t("追加后续任务")}
-                            </Button>
-                            {question.trim() && (
+                      <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="rounded-md text-muted-foreground hover:text-foreground"
+                            aria-label={t("添加附件")}
+                            title={t("添加附件")}
+                            disabled={
+                              isDirty ||
+                              isAsking ||
+                              isRunsLoading ||
+                              agent.status !== "active"
+                            }
+                            onClick={() => {
+                              if (!fileInputRef.current) return
+                              fileInputRef.current.value = ""
+                              fileInputRef.current.click()
+                            }}
+                          >
+                            <PlusIcon />
+                          </Button>
+                          <AgentApprovalModeMenu
+                            value={approvalMode}
+                            onChange={onApprovalModeChange}
+                            disabled={
+                              isDirty ||
+                              isAsking ||
+                              isRunsLoading ||
+                              agent.status !== "active"
+                            }
+                            t={t}
+                          />
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {isAsking && onSessionInput && (
+                            <>
                               <Button
                                 type="button"
                                 variant="ghost"
-                                size="icon-lg"
-                                aria-label={t("停止生成")}
-                                title={t("停止生成")}
-                                onClick={onCancelAsk}
+                                size="sm"
+                                disabled={!question.trim()}
+                                onClick={() => onSessionInput("follow_up")}
                               >
-                                <SquareIcon className="fill-current" />
+                                {t("追加后续任务")}
                               </Button>
+                              {question.trim() && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="text-muted-foreground"
+                                  aria-label={t("停止生成")}
+                                  title={t("停止生成")}
+                                  onClick={onCancelAsk}
+                                >
+                                  <SquareIcon className="fill-current" />
+                                </Button>
+                              )}
+                            </>
+                          )}
+                          <Button
+                            type={
+                              isAsking && (!onSessionInput || !question.trim())
+                                ? "button"
+                                : "submit"
+                            }
+                            size="icon"
+                            className="rounded-lg"
+                            aria-label={t(
+                              isAsking
+                                ? onSessionInput && question.trim()
+                                  ? "调整当前任务"
+                                  : "停止生成"
+                                : "发送问题"
                             )}
-                          </>
-                        )}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-lg"
-                          className="rounded-xl"
-                          aria-label={t("添加附件")}
-                          title={t("添加附件")}
-                          disabled={
-                            isDirty ||
-                            isAsking ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          }
-                          onClick={() => {
-                            if (!fileInputRef.current) return
-                            fileInputRef.current.value = ""
-                            fileInputRef.current.click()
-                          }}
-                        >
-                          <PaperclipIcon />
-                        </Button>
-                        <Button
-                          type={
-                            isAsking && (!onSessionInput || !question.trim())
-                              ? "button"
-                              : "submit"
-                          }
-                          size="icon-lg"
-                          className="rounded-xl"
-                          aria-label={t(
-                            isAsking
-                              ? onSessionInput && question.trim()
-                                ? "调整当前任务"
-                                : "停止生成"
-                              : "发送问题"
-                          )}
-                          title={t(
-                            isAsking
-                              ? onSessionInput && question.trim()
-                                ? "调整当前任务"
-                                : "停止生成"
-                              : "发送问题"
-                          )}
-                          onClick={
-                            isAsking && (!onSessionInput || !question.trim())
-                              ? onCancelAsk
-                              : undefined
-                          }
-                          disabled={
-                            !isAsking &&
-                            (!question.trim() ||
-                              isDirty ||
-                              isRunsLoading ||
-                              agent.status !== "active")
-                          }
-                        >
-                          {isAsking && (!onSessionInput || !question.trim()) ? (
-                            <SquareIcon className="fill-current" />
-                          ) : (
-                            <SendIcon />
-                          )}
-                        </Button>
+                            title={t(
+                              isAsking
+                                ? onSessionInput && question.trim()
+                                  ? "调整当前任务"
+                                  : "停止生成"
+                                : "发送问题"
+                            )}
+                            onClick={
+                              isAsking && (!onSessionInput || !question.trim())
+                                ? onCancelAsk
+                                : undefined
+                            }
+                            disabled={
+                              !isAsking &&
+                              (!question.trim() ||
+                                isDirty ||
+                                isRunsLoading ||
+                                agent.status !== "active")
+                            }
+                          >
+                            {isAsking &&
+                            (!onSessionInput || !question.trim()) ? (
+                              <SquareIcon className="fill-current" />
+                            ) : (
+                              <ArrowUpIcon />
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     </form>
                   </div>

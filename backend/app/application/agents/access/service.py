@@ -31,6 +31,11 @@ from app.application.agents.tools.builder import (
 from app.application.workflows.uploads.service import resolve_public_agent_files
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
 from app.domain.agents.access.permissions import require_agent_ops
+from app.domain.agents.approval import (
+    DEFAULT_AGENT_APPROVAL_MODE,
+    AgentApprovalMode,
+    normalize_agent_approval_mode,
+)
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime.callbacks import safe_event_value
 from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
@@ -399,6 +404,14 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
         question=str(value.get("goal") or value.get("question") or ""),
         session_inputs=session_inputs_to_response(value),
         attachments=attachments or [],
+        approval_mode=normalize_agent_approval_mode(
+            value.get("approval_mode")
+            or (
+                snapshot.get("approval_mode")
+                if isinstance(snapshot, dict)
+                else None
+            )
+        ),
         status=run_status,
         result=normalize_agent_source_links(
             clean_model_text(str(value.get("result") or "")),
@@ -922,6 +935,7 @@ async def create_external_agent_run(
     settings: Settings,
     conversation_id: str | None = None,
     file_ids: list[str] | None = None,
+    approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
 ) -> ExternalAgentRunResponse:
     await _enforce_rate_limit(settings, context.agent.id, access_source, consumer_id)
     if context.publication is None:
@@ -956,6 +970,7 @@ async def create_external_agent_run(
         attachment_context=attachment_context,
         attachments=attachments,
         settings=settings,
+        approval_mode=approval_mode,
     )
     await enqueue_prepared_agent_run(
         run.id,

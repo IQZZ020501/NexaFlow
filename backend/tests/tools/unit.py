@@ -19,6 +19,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 
 import asyncio
 import base64
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -162,6 +163,12 @@ def test_image_tool_queue_freezes_its_model_configuration() -> None:
         deadline_at=datetime.now(UTC),
         idempotency_key="image-key",
     )
+    preapproved_context = replace(
+        context,
+        invocation_id="call-2",
+        idempotency_key="image-key-preapproved",
+        approval_required=False,
+    )
     db = SimpleNamespace()
     resource_snapshot = {
         "image_model": {
@@ -185,6 +192,11 @@ def test_image_tool_queue_freezes_its_model_configuration() -> None:
             "create_or_get_tool_invocation",
             new=AsyncMock(side_effect=keep_candidate),
         ),
+        patch.object(
+            tool_repository,
+            "refresh_tool_invocation_deadline",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         invocation = asyncio.run(
             queue_tool_invocation(
@@ -194,10 +206,21 @@ def test_image_tool_queue_freezes_its_model_configuration() -> None:
                 context,
             )
         )
+        preapproved = asyncio.run(
+            queue_tool_invocation(
+                db,
+                snapshot,
+                {"prompt": "A mountain"},
+                preapproved_context,
+            )
+        )
 
-    freeze_model.assert_awaited_once_with(db, "workspace-1")
+    assert freeze_model.await_count == 2
     assert invocation.policy_snapshot["resource_snapshot"] == resource_snapshot
+    assert invocation.policy_snapshot["approval_required"] is True
     assert invocation.status == "awaiting_approval"
+    assert preapproved.policy_snapshot["approval_required"] is False
+    assert preapproved.status == "queued"
 
 
 def test_image_provider_decodes_only_embedded_png() -> None:

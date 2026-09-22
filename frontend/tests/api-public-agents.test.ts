@@ -168,18 +168,23 @@ describe("public agent API", () => {
       "continue research",
       "conv-1",
       undefined,
-      ["file-1"]
+      ["file-1"],
+      "full_access"
     )
 
     expect(requests.map(({ url, method }) => [method, url])).toEqual([
       ["POST", "/api/v1/public/agents/agent-1/runs"],
       ["POST", "/api/v1/public/agents/agent-1/runs"],
     ])
-    expect(requests[0]?.body).toEqual({ goal: "research" })
+    expect(requests[0]?.body).toEqual({
+      goal: "research",
+      approval_mode: "ask_risky",
+    })
     expect(requests[1]?.body).toEqual({
       goal: "continue research",
       conversation_id: "conv-1",
       file_ids: ["file-1"],
+      approval_mode: "full_access",
     })
   })
 
