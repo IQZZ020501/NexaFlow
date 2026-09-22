@@ -212,6 +212,7 @@ async def create_registered_model(
         model_name,
         model_type,
         request_params,
+        timeout_seconds=settings.model_request_timeout_seconds,
     )
 
     model = RegisteredModel(
@@ -340,6 +341,7 @@ async def update_registered_model(
         model_name,
         model_type,
         request_params,
+        timeout_seconds=settings.model_request_timeout_seconds,
     )
 
     model.name = name

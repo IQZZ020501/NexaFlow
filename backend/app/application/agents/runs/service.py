@@ -24,6 +24,7 @@ from app.application.agents.tools.builder import (
     run_to_response,
 )
 from app.application.governance.service import enforce_workspace_run_quota
+from app.application.tools.runtime.contracts import ToolRuntimeResult
 from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
 from app.domain.agent_skills.service import resolve_application_agent_skill_snapshots
@@ -64,6 +65,7 @@ from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
 from app.entities.runs import AgentRun
 from app.entities.tools import ToolRef
+from app.entities.tools.models import ToolSnapshot
 from app.infra.agents.live_stream import (
     LIVE_EVENT_TYPES,
     AgentLiveStreamReader,
@@ -308,6 +310,18 @@ async def get_agent_run_entity(
     return run
 
 
+def _tool_preflight_detail(
+    snapshot: ToolSnapshot,
+    failure: ToolRuntimeResult,
+    access_source: str,
+) -> str:
+    """Explain which bound Tool cannot run and why, for a failed run preflight."""
+    return (
+        f"Tool '{snapshot.display_name}' cannot run for access source "
+        f"'{access_source}': {failure.summary} ({failure.error_code})."
+    )
+
+
 async def validate_regeneration_source(
     db: AsyncSession,
     source: AgentRun,
@@ -390,17 +404,18 @@ async def validate_regeneration_source(
             "The source run snapshot is invalid.",
         ) from exc
     for snapshot in snapshots:
-        if await preflight_tool_snapshot(
+        failure = await preflight_tool_snapshot(
             db,
             snapshot,
             origin=origin,
             workspace_id=source.workspace_id,
             execution_user_id=source.execution_user_id,
             access_source=source.access_source,
-        ) is not None:
+        )
+        if failure is not None:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "A source Tool is no longer executable.",
+                _tool_preflight_detail(snapshot, failure, source.access_source),
             )
 
 
@@ -709,10 +724,10 @@ async def resolve_agent_run_tool_approval(
 ) -> AgentRun:
     """Resolve a pending tool call approval for an already-authorized run."""
     if run.configuration_source in {"draft", "published"}:
-        if run.access_source != "console":
+        if run.access_source == "api":
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Published Agent Tool calls cannot require interactive approval.",
+                "Agent API Tool calls cannot require interactive approval.",
             )
         invocations = await tool_repository.list_tool_invocations(
             db,
@@ -1081,7 +1096,7 @@ async def prepare_agent_run(
 
         script_tool, script_version, _ = build_skill_script_tool(workspace_id)
         skill_tool_refs[script_tool.id] = ToolRef(script_tool.id, script_version.id)
-        if not authorized_by_parent and access_source == "console":
+        if not authorized_by_parent and access_source in {"console", "public"}:
             installer, installer_version, _ = build_skill_dependency_installer_tool(
                 workspace_id
             )
@@ -1131,7 +1146,7 @@ async def prepare_agent_run(
         if failure is not None:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
-                "Agent Tool configuration is no longer executable.",
+                _tool_preflight_detail(snapshot, failure, access_source),
             )
     if publication_version is not None:
         configuration_snapshot = publication_version.configuration_snapshot

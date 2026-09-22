@@ -1133,7 +1133,15 @@ def test_run_model_test() -> None:
 
 def test_test_registered_model() -> None:
     with patch.object(llm_registry, "test_model_connection", return_value={STREAM_USAGE_SUPPORTED_META_KEY: False}):
-        assert run(llm_registry.test_registered_model("openai_compatible", {}, "m", "LLM")) == {
+        assert run(
+            llm_registry.test_registered_model(
+                "openai_compatible",
+                {},
+                "m",
+                "LLM",
+                timeout_seconds=1,
+            )
+        ) == {
             STREAM_USAGE_SUPPORTED_META_KEY: False
         }
 

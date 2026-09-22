@@ -328,6 +328,49 @@ async def list_versions(
     return [to_entity(WorkflowVersionEntity, row) for row in rows.all()]
 
 
+async def map_graph_hashes(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_ids: list[str],
+) -> dict[str, tuple[str | None, str | None]]:
+    """Map each workflow to its draft graph hash and newest published graph hash."""
+    hashes: dict[str, tuple[str | None, str | None]] = {
+        agent_id: (None, None) for agent_id in agent_ids
+    }
+    if not agent_ids:
+        return hashes
+    draft_rows = await db.execute(
+        select(WorkflowDefinition.agent_id, WorkflowDefinition.graph_hash).where(
+            WorkflowDefinition.workspace_id == workspace_id,
+            WorkflowDefinition.agent_id.in_(agent_ids),
+        )
+    )
+    ranked = (
+        select(
+            WorkflowVersion.agent_id.label("agent_id"),
+            WorkflowVersion.graph_hash.label("graph_hash"),
+            func.row_number()
+            .over(
+                partition_by=WorkflowVersion.agent_id,
+                order_by=WorkflowVersion.version_number.desc(),
+            )
+            .label("rank"),
+        )
+        .where(
+            WorkflowVersion.workspace_id == workspace_id,
+            WorkflowVersion.agent_id.in_(agent_ids),
+        )
+        .subquery()
+    )
+    published_rows = await db.execute(
+        select(ranked.c.agent_id, ranked.c.graph_hash).where(ranked.c.rank == 1)
+    )
+    published = {agent_id: graph_hash for agent_id, graph_hash in published_rows.all()}
+    for agent_id, draft_hash in draft_rows.all():
+        hashes[agent_id] = (draft_hash, published.get(agent_id))
+    return hashes
+
+
 async def get_version(
     db: AsyncSession,
     workspace_id: str,

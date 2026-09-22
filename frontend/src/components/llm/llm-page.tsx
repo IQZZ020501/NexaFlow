@@ -1296,7 +1296,12 @@ function ModelDialog({
   )
   const modelTypeOptions = selectedProvider?.model_types ?? ["LLM"]
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isSaving) onOpenChange(nextOpen)
+      }}
+    >
       <DialogContent side="right">
         <DialogHeader>
           <DialogTitle>{t(isEditing ? "编辑模型" : "接入模型")}</DialogTitle>
@@ -1551,10 +1556,24 @@ function ModelDialog({
             ) : null}
           </FieldGroup>
 
+          {form.model_type !== "IMAGE" ? (
+            <FieldDescription
+              className="pt-4"
+              role={isSaving ? "status" : undefined}
+            >
+              {t(
+                isSaving
+                  ? "正在测试模型连接；测试完成或超时前请保持此窗口打开。"
+                  : "连接测试受系统超时限制；只有测试通过后才会保存模型。"
+              )}
+            </FieldDescription>
+          ) : null}
+
           <DialogFooter className="pt-5">
             <Button
               type="button"
               variant="outline"
+              disabled={isSaving}
               onClick={() => onOpenChange(false)}
             >
               {t("取消")}

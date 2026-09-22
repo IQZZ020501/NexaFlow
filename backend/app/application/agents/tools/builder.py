@@ -423,6 +423,7 @@ def session_inputs_to_response(run: AgentRun | dict[str, Any]) -> list[dict[str,
             "content": item["content"],
             "status": "applied",
             "previous_answer": item.get("previous_answer"),
+            "previous_answer_turn": item.get("previous_answer_turn"),
         }
         for item in (value.get("checkpoint") or {}).get("harness", {}).get("inputs", [])
     ]

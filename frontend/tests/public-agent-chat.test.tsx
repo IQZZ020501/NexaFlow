@@ -1,11 +1,5 @@
 /* @jsxImportSource react */
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   cleanup,
   configure,
@@ -20,6 +14,7 @@ import {
   cancelPublicAgentStream,
   hasPublicToolDetails,
   mergePublicRunEvent,
+  splitPublicRunProgress,
   publicToolName,
 } from "@/components/agents/public-agent-chat"
 import { AgentAnswer } from "@/components/agents/agent-source-references"
@@ -91,10 +86,7 @@ const PROFILE: PublicAgentProfile = {
   },
 }
 
-function conversation(
-  id: string,
-  question: string
-): PublicAgentConversation {
+function conversation(id: string, question: string): PublicAgentConversation {
   return {
     conversation_id: id,
     question,
@@ -256,9 +248,7 @@ const FULL_PROGRESS: ExternalAgentProgressEvent[] = [
 ]
 
 function ndjsonResponse(events: unknown[]): Response {
-  const body = events
-    .map((event) => `${JSON.stringify(event)}\n`)
-    .join("")
+  const body = events.map((event) => `${JSON.stringify(event)}\n`).join("")
   return new Response(body, { status: 200 })
 }
 
@@ -295,9 +285,7 @@ function workflowRun(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function meResponse(
-  overrides: Partial<MeResponse> = {}
-): MeResponse {
+function meResponse(overrides: Partial<MeResponse> = {}): MeResponse {
   return {
     user: {
       id: "u-1",
@@ -345,10 +333,7 @@ beforeEach(() => {
   replaced.length = 0
   // Re-install the fetch stub after the previous test restored it. Requests
   // are dispatched through `fetchHandler`, which every test replaces.
-  globalThis.fetch = ((
-    input: RequestInfo | URL,
-    init?: RequestInit
-  ) => {
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
       typeof input === "string"
         ? input
@@ -362,23 +347,17 @@ beforeEach(() => {
 type AgentFetchRoutes = {
   profile?: unknown
   conversations?: { items: PublicAgentConversation[] }
-  history?:
-    | { items: ExternalAgentRun[] }
-    | (() => Response | Promise<Response>)
-  createRun?: (
-    body: Record<string, unknown>
-  ) => Response | Promise<Response>
+  history?: { items: ExternalAgentRun[] } | (() => Response | Promise<Response>)
+  createRun?: (body: Record<string, unknown>) => Response | Promise<Response>
   cancelRun?: () => Response | Promise<Response>
   streamResponses?: Array<() => Response | Promise<Response>>
   toolCalls?: () => Response | Promise<Response>
   resolveRun?: () => Response | Promise<Response>
+  sessionInput?: (body: Record<string, unknown>) => Response | Promise<Response>
   uploads?: unknown
 }
 
-function agentFetchHandler(
-  routes: AgentFetchRoutes,
-  requests: string[] = []
-) {
+function agentFetchHandler(routes: AgentFetchRoutes, requests: string[] = []) {
   let streamCalls = 0
   return (url: string, init?: RequestInit): Response | Promise<Response> => {
     const method = init?.method ?? "GET"
@@ -419,6 +398,11 @@ function agentFetchHandler(
     if (url.includes("/tool-calls")) {
       const respond = routes.toolCalls ?? (() => jsonResponse([]))
       return respond()
+    }
+    if (method === "POST" && url.endsWith("/inputs")) {
+      return routes.sessionInput
+        ? routes.sessionInput(JSON.parse(String(init?.body ?? "{}")))
+        : jsonResponse({})
     }
     if (method === "POST" && url.includes("/runs")) {
       const create =
@@ -470,9 +454,9 @@ function sendMessage(text: string) {
 
 describe("display helpers", () => {
   test("formats model labels and initials", () => {
-    expect(
-      modelLabel({ name: "deepseek-chat" } as RegisteredModel)
-    ).toBe("deepseek-chat")
+    expect(modelLabel({ name: "deepseek-chat" } as RegisteredModel)).toBe(
+      "deepseek-chat"
+    )
     expect(initials("NexaFlow Admin")).toBe("NE")
     expect(initials("  ")).toBe("NE")
     expect(initials("ab")).toBe("AB")
@@ -491,9 +475,9 @@ describe("display helpers", () => {
     expect(
       displayWorkspaceName({ name: "研发空间", is_default: true }, t)
     ).toBe("研发空间")
-    expect(
-      displayTeamName({ name: "Default Team", is_default: true }, t)
-    ).toBe("默认团队")
+    expect(displayTeamName({ name: "Default Team", is_default: true }, t)).toBe(
+      "默认团队"
+    )
     expect(displayTeamName({ name: "数据组", is_default: false }, t)).toBe(
       "数据组"
     )
@@ -501,9 +485,7 @@ describe("display helpers", () => {
 
   test("detects workspace membership", () => {
     expect(hasWorkspaceMembership(null, "ws-1")).toBe(false)
-    expect(
-      hasWorkspaceMembership(meResponse(), "ws-1")
-    ).toBe(false)
+    expect(hasWorkspaceMembership(meResponse(), "ws-1")).toBe(false)
     expect(
       hasWorkspaceMembership(
         meResponse({ user: { ...meResponse().user, is_global_admin: true } }),
@@ -590,9 +572,9 @@ describe("clipboard", () => {
 describe("getErrorMessage", () => {
   test("maps ApiError, plain errors, and unknown values", () => {
     expect(getErrorMessage(new ApiError(401, "expired"), t)).toBe("请重新登录")
-    expect(
-      getErrorMessage(new ApiError(401, "Invalid credentials."), t)
-    ).toBe("用户名或密码错误")
+    expect(getErrorMessage(new ApiError(401, "Invalid credentials."), t)).toBe(
+      "用户名或密码错误"
+    )
     expect(getErrorMessage(new ApiError(403, "forbidden"), t)).toBe(
       "资源不存在或无权访问"
     )
@@ -602,10 +584,7 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(new ApiError(503, "离线"), t)).toBe("离线")
     expect(
       getErrorMessage(
-        new ApiError(
-          422,
-          "Vision model is not configured for this workspace."
-        ),
+        new ApiError(422, "Vision model is not configured for this workspace."),
         t
       )
     ).toBe("视觉模型尚未配置，暂时不支持图片解析")
@@ -749,10 +728,7 @@ describe("public agent API", () => {
 
   test("normalizes an immediately failed public run into an error event", async () => {
     fetchHandler = () =>
-      jsonResponse(
-        run({ status: "failed", result: "", error: "早失败" }),
-        201
-      )
+      jsonResponse(run({ status: "failed", result: "", error: "早失败" }), 201)
 
     const events: string[] = []
     await streamPublicAgentRun("agent-1", "token", "q", (event) =>
@@ -792,9 +768,11 @@ describe("public workflow API", () => {
 
     const result = await initializePublicWorkflow("wf-1", "token")
 
-    expect(requests.map((url) => (url.includes("/conversations") ? "conv" : "profile"))).toEqual(
-      ["profile", "conv"]
-    )
+    expect(
+      requests.map((url) =>
+        url.includes("/conversations") ? "conv" : "profile"
+      )
+    ).toEqual(["profile", "conv"])
     expect(result.conversations.items).toEqual([])
   })
 
@@ -807,9 +785,7 @@ describe("public workflow API", () => {
 
     const result = await listPublicWorkflowRuns("wf-1", "conv-1", "token")
 
-    expect(requests[0]).toContain(
-      "/runs?limit=200&conversation_id=conv-1"
-    )
+    expect(requests[0]).toContain("/runs?limit=200&conversation_id=conv-1")
     expect(result.items[0]?.id).toBe("wf-run-1")
   })
 
@@ -966,7 +942,13 @@ describe("observeNdjsonStream edge cases", () => {
     }
 
     await expect(
-      observePublicAgentRun("agent-1", "token", "run-1", () => {}, controller.signal)
+      observePublicAgentRun(
+        "agent-1",
+        "token",
+        "run-1",
+        () => {},
+        controller.signal
+      )
     ).rejects.toThrow(/abort/i)
   })
 
@@ -978,7 +960,13 @@ describe("observeNdjsonStream edge cases", () => {
     }
 
     await expect(
-      observePublicAgentRun("agent-1", "token", "run-1", () => {}, controller.signal)
+      observePublicAgentRun(
+        "agent-1",
+        "token",
+        "run-1",
+        () => {},
+        controller.signal
+      )
     ).rejects.toThrow(/abort/i)
   })
 
@@ -990,7 +978,13 @@ describe("observeNdjsonStream edge cases", () => {
     }
 
     await expect(
-      observePublicWorkflowRun("wf-1", "token", "wf-run-1", () => {}, controller.signal)
+      observePublicWorkflowRun(
+        "wf-1",
+        "token",
+        "wf-run-1",
+        () => {},
+        controller.signal
+      )
     ).rejects.toThrow(/abort/i)
   })
 
@@ -1002,7 +996,13 @@ describe("observeNdjsonStream edge cases", () => {
     }
 
     await expect(
-      observePublicAgentRun("agent-1", "token", "run-1", () => {}, controller.signal)
+      observePublicAgentRun(
+        "agent-1",
+        "token",
+        "run-1",
+        () => {},
+        controller.signal
+      )
     ).rejects.toThrow(/abort/i)
   })
 
@@ -1136,7 +1136,12 @@ describe("public-agent-chat helpers", () => {
       {
         type: "run",
         sequence: 0,
-        run: run({ id: "run-1", status: "running", result: "开场", progress: [] }),
+        run: run({
+          id: "run-1",
+          status: "running",
+          result: "开场",
+          progress: [],
+        }),
       },
       "pending-1"
     )[0]
@@ -1334,6 +1339,101 @@ describe("public-agent-chat helpers", () => {
     )[0]
     expect(reset.result).toBe("")
     expect(reset.live_stream_cursor).toBe("1700000000002-0")
+
+    const settled = mergePublicRunEvent(
+      [
+        run({
+          id: "run-1",
+          status: "running",
+          result: "First answer",
+          session_inputs: [
+            {
+              sequence: 42,
+              run_id: "run-1",
+              input_id: "follow",
+              mode: "follow_up",
+              content: "Second question",
+              status: "queued",
+              previous_answer: null,
+            },
+          ],
+        }),
+      ],
+      "run-1",
+      {
+        type: "answer_reset",
+        applied_inputs: [
+          {
+            sequence: 42,
+            input_id: "follow",
+            mode: "follow_up",
+            content: "Second question",
+            previous_answer_turn: 3,
+          },
+        ],
+      },
+      "pending-1"
+    )[0]
+    expect(settled.result).toBe("")
+    expect(settled.session_inputs?.[0]).toMatchObject({
+      sequence: 42,
+      status: "applied",
+      previous_answer: "First answer",
+      previous_answer_turn: 3,
+    })
+
+    const handoffBeforeInputResponse = mergePublicRunEvent(
+      [run({ id: "run-1", status: "running", result: "First answer" })],
+      "run-1",
+      {
+        type: "answer_reset",
+        applied_inputs: [
+          {
+            sequence: 42,
+            input_id: "follow",
+            mode: "follow_up",
+            content: "Second question",
+            previous_answer_turn: 3,
+          },
+        ],
+      },
+      "pending-1"
+    )[0]
+    expect(handoffBeforeInputResponse.session_inputs?.[0]).toMatchObject({
+      input_id: "follow",
+      previous_answer: "First answer",
+      previous_answer_turn: 3,
+      status: "applied",
+    })
+  })
+
+  test("keeps provisional answer and tool work with the completed question", () => {
+    const progress = [
+      { id: "draft", type: "answer", turn: 1 },
+      { id: "tool", type: "tool", turn: 2 },
+      { id: "final", type: "answer", turn: 3 },
+      { id: "follow-up", type: "analysis", turn: 4 },
+    ] as ReturnType<typeof run>["progress"]
+    const segments = splitPublicRunProgress(
+      run({
+        progress,
+        session_inputs: [
+          {
+            sequence: 42,
+            run_id: "run-1",
+            input_id: "follow",
+            mode: "follow_up",
+            content: "Second question",
+            status: "applied",
+            previous_answer: "First answer",
+            previous_answer_turn: 3,
+          },
+        ],
+      })
+    )
+    expect(segments.map((segment) => segment.map((event) => event.id))).toEqual(
+      [["draft", "tool", "final"], ["follow-up"]]
+    )
   })
 
   test("cancels the active public stream", () => {
@@ -1357,7 +1457,10 @@ describe("PublicWorkflowChat", () => {
       happyDOM: { setURL: (url: string) => void }
     }
     testWindow.happyDOM.setURL("https://nexaflow.example/chat/wf-1")
-    const workflowConversation = (conversationId: string, question: string) => ({
+    const workflowConversation = (
+      conversationId: string,
+      question: string
+    ) => ({
       conversation_id: conversationId,
       inputs: { question },
       outputs: {},
@@ -1381,7 +1484,9 @@ describe("PublicWorkflowChat", () => {
     }
 
     renderPage(<PublicWorkflowChat workflowId="wf-1" />)
-    expect(await screen.findByRole("heading", { name: "公开流程" })).toBeTruthy()
+    expect(
+      await screen.findByRole("heading", { name: "公开流程" })
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: /第二个流程/ }))
 
@@ -1392,9 +1497,9 @@ describe("PublicWorkflowChat", () => {
           .getAttribute("aria-current")
       ).toBe("page")
     )
-    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
-      "conv-2"
-    )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).toBe("conv-2")
     expect(replaced).toEqual([])
   })
 
@@ -1408,12 +1513,18 @@ describe("PublicWorkflowChat", () => {
     renderPage(<PublicWorkflowChat workflowId="wf-1" />)
     await screen.findByRole("heading", { name: "公开流程" })
 
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const input = document.querySelector(
+      'input[type="file"]'
+    ) as HTMLInputElement
     fireEvent.change(input, {
-      target: { files: [new File(["a"], "a.pdf", { type: "application/pdf" })] },
+      target: {
+        files: [new File(["a"], "a.pdf", { type: "application/pdf" })],
+      },
     })
     fireEvent.change(input, {
-      target: { files: [new File(["b"], "b.pdf", { type: "application/pdf" })] },
+      target: {
+        files: [new File(["b"], "b.pdf", { type: "application/pdf" })],
+      },
     })
 
     expect(screen.getByText("a.pdf")).toBeTruthy()
@@ -1472,10 +1583,12 @@ describe("PublicAgentChat", () => {
       "lg:grid-cols-[240px_minmax(0,1fr)]"
     )
     expect(screen.getByLabelText("请输入问题").className).toContain("min-h-11")
-    expect(screen.getByLabelText("请输入问题").className).toContain("sm:min-h-28")
-    expect(screen.getByLabelText("发送问题").parentElement?.className).toContain(
-      "sm:absolute"
+    expect(screen.getByLabelText("请输入问题").className).toContain(
+      "sm:min-h-28"
     )
+    expect(
+      screen.getByLabelText("发送问题").parentElement?.className
+    ).toContain("sm:absolute")
     expect(screen.getByLabelText("打开历史记录").className).toContain(
       "lg:hidden"
     )
@@ -1528,7 +1641,9 @@ describe("PublicAgentChat", () => {
       },
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
 
     const link = await screen.findByRole("link", {
       name: "公司内部管理制度汇编.docx",
@@ -1695,8 +1810,8 @@ describe("PublicAgentChat", () => {
     renderPage(
       <AgentAnswer
         content={
-          "依据该规定处理。[source](#nexaflow-source-550e8400-e29b-41d4-a716-446655440000)"
-            + "[source](https://example.test/#nexaflow-source-550e8400-e29b-41d4-a716-446655440000)"
+          "依据该规定处理。[source](#nexaflow-source-550e8400-e29b-41d4-a716-446655440000)" +
+          "[source](https://example.test/#nexaflow-source-550e8400-e29b-41d4-a716-446655440000)"
         }
         sources={[
           {
@@ -1754,7 +1869,9 @@ describe("PublicAgentChat", () => {
       const method = init?.method ?? "GET"
       if (url.endsWith("/profile")) return jsonResponse(PROFILE)
       if (url.includes("/conversations")) {
-        return jsonResponse({ items: [conversation("conv-1", "First question")] })
+        return jsonResponse({
+          items: [conversation("conv-1", "First question")],
+        })
       }
       if (url.includes("/runs/run-edited/stream")) {
         return ndjsonResponse([
@@ -1801,7 +1918,9 @@ describe("PublicAgentChat", () => {
       return jsonResponse({})
     }
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
 
     await screen.findByText("Second answer")
     expect(screen.getAllByRole("button", { name: "编辑消息" })).toHaveLength(1)
@@ -1884,13 +2003,17 @@ describe("PublicAgentChat", () => {
       if (url.endsWith("/profile")) return jsonResponse(PROFILE)
       if (url.includes("/conversations")) {
         return jsonResponse({
-          items: [conversation("conv-1", "第一个会话"), conversation("conv-2", "第二个会话")],
+          items: [
+            conversation("conv-1", "第一个会话"),
+            conversation("conv-2", "第二个会话"),
+          ],
         })
       }
       if (url.includes("/runs") && (init?.method ?? "GET") === "GET") {
-        const conversationId = new URL(url, "http://localhost").searchParams.get(
-          "conversation_id"
-        )
+        const conversationId = new URL(
+          url,
+          "http://localhost"
+        ).searchParams.get("conversation_id")
         return jsonResponse({
           items: historyByConversation[conversationId ?? ""] ?? [],
           total: 0,
@@ -1909,7 +2032,9 @@ describe("PublicAgentChat", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /第一个会话/ }))
 
-    expect(await screen.findByRole("heading", { name: "历史回答" })).toBeTruthy()
+    expect(
+      await screen.findByRole("heading", { name: "历史回答" })
+    ).toBeTruthy()
     expect(screen.getByText("列表")).toBeTruthy()
     expect(screen.getByText("历史失败")).toBeTruthy()
     expect(screen.getByText("运行已取消")).toBeTruthy()
@@ -1919,9 +2044,9 @@ describe("PublicAgentChat", () => {
     // An answer-only timeline synthesizes an analysis step before it.
     expect(screen.getByText("已完成分析")).toBeTruthy()
     expect(screen.getByText("回答已生成")).toBeTruthy()
-    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
-      "conv-1"
-    )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).toBe("conv-1")
     const currentConversationButton = screen
       .getByText("第一个会话")
       .closest("button")!
@@ -1936,9 +2061,9 @@ describe("PublicAgentChat", () => {
     fireEvent.click(screen.getByRole("button", { name: /第二个会话/ }))
     expect(await screen.findByText("第二个会话的问题")).toBeTruthy()
     expect(screen.queryByText("第一个问题")).toBeNull()
-    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
-      "conv-2"
-    )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).toBe("conv-2")
 
     // Start a brand-new conversation.
     fireEvent.click(screen.getByTitle("新建对话"))
@@ -1968,7 +2093,15 @@ describe("PublicAgentChat", () => {
         streamResponses: [
           () =>
             ndjsonResponse([
-              { type: "run", sequence: 0, run: run({ status: "running", question: "什么是 NexaFlow？", result: "" }) },
+              {
+                type: "run",
+                sequence: 0,
+                run: run({
+                  status: "running",
+                  question: "什么是 NexaFlow？",
+                  result: "",
+                }),
+              },
               {
                 type: "reasoning_delta",
                 turn: 1,
@@ -1983,16 +2116,98 @@ describe("PublicAgentChat", () => {
                 stream_epoch: "w1",
                 live_sequence: "2-0",
               },
-              { type: "progress", sequence: 1, event: knowledgeEvent("k1", "running") },
-              { type: "progress", sequence: 2, event: knowledgeEvent("k2", "succeeded", { count: 2, hits: [{ knowledge_base: "kb-1", document: "doc-1", content: "片段内容" }] }) },
-              { type: "progress", sequence: 3, event: knowledgeEvent("k3", "succeeded", { count: 0 }) },
-              { type: "progress", sequence: 4, event: toolEvent("t1", "running", { tool_name: "search", tool_label: "Search", tool_kind: "mcp", server_name: "Tavily", input: { q: "x" } }) },
-              { type: "progress", sequence: 5, event: toolEvent("t2", "succeeded", { tool_name: "web_search", tool_label: "Web search", tool_kind: "mcp", server_name: "Tavily", input: { query: "NexaFlow" }, output: { results: ["r1"] } }) },
-              { type: "progress", sequence: 6, event: toolEvent("f1", "failed", { tool_name: "db_query", tool_label: "DB Query" }) },
-              { type: "progress", sequence: 7, event: toolEvent("g1", "succeeded") },
-              { type: "progress", sequence: 8, event: { id: "a1", type: "answer", status: "running", stage: "analyzing", turn: 1, count: null, hits: [] } },
-              { type: "progress", sequence: 9, event: { id: "a2", type: "answer", status: "succeeded", stage: "succeeded", turn: 1, count: null, hits: [] } },
-              { type: "answer_delta", delta: "## 回答标题\n**加粗**内容", stream_epoch: "w1", live_sequence: "3-0" },
+              {
+                type: "progress",
+                sequence: 1,
+                event: knowledgeEvent("k1", "running"),
+              },
+              {
+                type: "progress",
+                sequence: 2,
+                event: knowledgeEvent("k2", "succeeded", {
+                  count: 2,
+                  hits: [
+                    {
+                      knowledge_base: "kb-1",
+                      document: "doc-1",
+                      content: "片段内容",
+                    },
+                  ],
+                }),
+              },
+              {
+                type: "progress",
+                sequence: 3,
+                event: knowledgeEvent("k3", "succeeded", { count: 0 }),
+              },
+              {
+                type: "progress",
+                sequence: 4,
+                event: toolEvent("t1", "running", {
+                  tool_name: "search",
+                  tool_label: "Search",
+                  tool_kind: "mcp",
+                  server_name: "Tavily",
+                  input: { q: "x" },
+                }),
+              },
+              {
+                type: "progress",
+                sequence: 5,
+                event: toolEvent("t2", "succeeded", {
+                  tool_name: "web_search",
+                  tool_label: "Web search",
+                  tool_kind: "mcp",
+                  server_name: "Tavily",
+                  input: { query: "NexaFlow" },
+                  output: { results: ["r1"] },
+                }),
+              },
+              {
+                type: "progress",
+                sequence: 6,
+                event: toolEvent("f1", "failed", {
+                  tool_name: "db_query",
+                  tool_label: "DB Query",
+                }),
+              },
+              {
+                type: "progress",
+                sequence: 7,
+                event: toolEvent("g1", "succeeded"),
+              },
+              {
+                type: "progress",
+                sequence: 8,
+                event: {
+                  id: "a1",
+                  type: "answer",
+                  status: "running",
+                  stage: "analyzing",
+                  turn: 1,
+                  count: null,
+                  hits: [],
+                },
+              },
+              {
+                type: "progress",
+                sequence: 9,
+                event: {
+                  id: "a2",
+                  type: "answer",
+                  status: "succeeded",
+                  stage: "succeeded",
+                  turn: 1,
+                  count: null,
+                  hits: [],
+                },
+              },
+              {
+                type: "answer_delta",
+                delta: "## 回答标题\n**加粗**内容",
+                stream_epoch: "w1",
+                live_sequence: "3-0",
+              },
               {
                 type: "complete",
                 sequence: 10,
@@ -2009,12 +2224,16 @@ describe("PublicAgentChat", () => {
       requests
     )
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await screen.findByText("开始新对话")
 
     sendMessage("什么是 NexaFlow？")
 
-    expect(await screen.findByRole("heading", { name: "回答标题" })).toBeTruthy()
+    expect(
+      await screen.findByRole("heading", { name: "回答标题" })
+    ).toBeTruthy()
     expect(screen.getByText("加粗")).toBeTruthy()
     expect(screen.getByText(/让我想想/)).toBeTruthy()
     expect(screen.getAllByText("正在分析问题").length).toBeGreaterThanOrEqual(1)
@@ -2040,17 +2259,13 @@ describe("PublicAgentChat", () => {
     expect(screen.getAllByTitle("复制").length).toBe(2)
 
     // Expand the successful knowledge row to reveal its hits.
-    fireEvent.click(
-      screen.getByRole("button", { name: /已检索 2 个知识片段/ })
-    )
+    fireEvent.click(screen.getByRole("button", { name: /已检索 2 个知识片段/ }))
     expect(screen.getByText("doc-1")).toBeTruthy()
     expect(screen.getByText("kb-1")).toBeTruthy()
     expect(screen.getByText("片段内容")).toBeTruthy()
 
     // Expand the empty knowledge row.
-    fireEvent.click(
-      screen.getByRole("button", { name: /已检索 0 个知识片段/ })
-    )
+    fireEvent.click(screen.getByRole("button", { name: /已检索 0 个知识片段/ }))
     expect(screen.getByText("未检索到相关知识片段")).toBeTruthy()
 
     // Expand the succeeded tool row to reveal input and output.
@@ -2081,9 +2296,15 @@ describe("PublicAgentChat", () => {
       conversation_id: "conv-1",
     })
     expect(
-      requests.some((request) => request.startsWith("POST") && request.includes("/runs"))
+      requests.some(
+        (request) => request.startsWith("POST") && request.includes("/runs")
+      )
     ).toBe(true)
-    expect(requests.some((request) => request.includes("/stream?after=0&live_after=0-0"))).toBe(true)
+    expect(
+      requests.some((request) =>
+        request.includes("/stream?after=0&live_after=0-0")
+      )
+    ).toBe(true)
   })
 
   test("starts a conversation from the empty state and records the new id", async () => {
@@ -2156,9 +2377,9 @@ describe("PublicAgentChat", () => {
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()
     expect(createBodies[0]).toEqual({ goal: "开始吧" })
-    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
-      "conv-new"
-    )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).toBe("conv-new")
   })
 
   test("surfaces stream errors only in the run bubble", async () => {
@@ -2167,8 +2388,16 @@ describe("PublicAgentChat", () => {
       streamResponses: [
         () =>
           ndjsonResponse([
-            { type: "run", sequence: 0, run: run({ status: "running", result: "" }) },
-            { type: "error", sequence: 1, run: run({ status: "failed", result: "", error: "模型超时" }) },
+            {
+              type: "run",
+              sequence: 0,
+              run: run({ status: "running", result: "" }),
+            },
+            {
+              type: "error",
+              sequence: 1,
+              run: run({ status: "failed", result: "", error: "模型超时" }),
+            },
           ]),
       ],
     })
@@ -2195,7 +2424,9 @@ describe("PublicAgentChat", () => {
       createRun: () => jsonResponse({ detail: "创建失败" }, 500),
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await screen.findByText("历史内容")
 
     sendMessage("无法创建")
@@ -2260,9 +2491,7 @@ describe("PublicAgentChat", () => {
     expect(await screen.findByLabelText("停止生成")).toBeTruthy()
     fireEvent.click(screen.getByLabelText("停止生成"))
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("发送问题")).toBeTruthy()
-    )
+    await waitFor(() => expect(screen.getByLabelText("发送问题")).toBeTruthy())
     await waitFor(() =>
       expect(
         requests.some(
@@ -2316,10 +2545,7 @@ describe("PublicAgentChat", () => {
       )
     ).toBe(false)
     resolveCreate(
-      jsonResponse(
-        run({ id: "run-late", status: "running", result: "" }),
-        201
-      )
+      jsonResponse(run({ id: "run-late", status: "running", result: "" }), 201)
     )
 
     await waitFor(() =>
@@ -2329,9 +2555,7 @@ describe("PublicAgentChat", () => {
         )
       ).toBe(true)
     )
-    await waitFor(() =>
-      expect(screen.getByText("运行已取消")).toBeTruthy()
-    )
+    await waitFor(() => expect(screen.getByText("运行已取消")).toBeTruthy())
   })
 
   test("approves a tool call and resumes observing the run", async () => {
@@ -2360,9 +2584,21 @@ describe("PublicAgentChat", () => {
         streamResponses: [
           () =>
             ndjsonResponse([
-              { type: "run", sequence: 0, run: run({ status: "running", result: "" }) },
-              { type: "approval_required", call_id: "call-1", reason: "需要确认" },
-              { type: "complete", sequence: 1, run: run({ status: "awaiting_approval", result: "" }) },
+              {
+                type: "run",
+                sequence: 0,
+                run: run({ status: "running", result: "" }),
+              },
+              {
+                type: "approval_required",
+                call_id: "call-1",
+                reason: "需要确认",
+              },
+              {
+                type: "complete",
+                sequence: 1,
+                run: run({ status: "awaiting_approval", result: "" }),
+              },
             ]),
           () =>
             ndjsonResponse([
@@ -2411,8 +2647,11 @@ describe("PublicAgentChat", () => {
     // While resolving, the decision buttons are disabled.
     await waitFor(() =>
       expect(
-        (screen.getByRole("button", { name: "批准并执行" }) as HTMLButtonElement)
-          .disabled
+        (
+          screen.getByRole("button", {
+            name: "批准并执行",
+          }) as HTMLButtonElement
+        ).disabled
       ).toBe(true)
     )
 
@@ -2425,12 +2664,173 @@ describe("PublicAgentChat", () => {
     ).toBe(true)
   })
 
+  test("keeps an approved tool visible and the composer usable while execution continues", async () => {
+    const encoder = new TextEncoder()
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null =
+      null
+    const inputs: Array<Record<string, unknown>> = []
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [] },
+      createRun: () =>
+        jsonResponse(run({ id: "run-1", status: "running", result: "" }), 201),
+      streamResponses: [
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                streamController = controller
+                controller.enqueue(
+                  encoder.encode(
+                    `${JSON.stringify({
+                      type: "approval_required",
+                      call_id: "call-1",
+                      reason: "需要确认",
+                    })}\n`
+                  )
+                )
+              },
+            }),
+            { status: 200 }
+          ),
+      ],
+      toolCalls: () => jsonResponse([TOOL_CALL]),
+      resolveRun: () =>
+        jsonResponse(run({ id: "run-1", status: "running", result: "" })),
+      sessionInput: (body) => {
+        inputs.push(body)
+        return jsonResponse(
+          {
+            ...body,
+            run_id: "run-1",
+            sequence: inputs.length,
+            status: "queued",
+          },
+          202
+        )
+      },
+    })
+
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("开始新对话")
+    sendMessage("生成一张图片")
+
+    expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
+
+    await waitFor(() =>
+      expect(screen.queryByText("工具调用需要确认")).toBeNull()
+    )
+    expect(screen.getByText(/web_search/)).toBeTruthy()
+    expect(
+      (screen.getByLabelText("请输入问题") as HTMLTextAreaElement).disabled
+    ).toBe(false)
+    const textarea = screen.getByLabelText("请输入问题") as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "然后解释图片" } })
+    fireEvent.click(screen.getByRole("button", { name: "追加后续任务" }))
+    await waitFor(() => expect(inputs).toHaveLength(1))
+    expect(inputs[0]?.mode).toBe("follow_up")
+    const followUp = screen.getByText("然后解释图片")
+    const articleText = followUp.closest("article")?.textContent ?? ""
+    expect(articleText.indexOf("然后解释图片")).toBeGreaterThan(
+      articleText.indexOf("web_search")
+    )
+    await waitFor(() => expect(textarea.value).toBe(""))
+
+    streamController?.close()
+  }, 10_000)
+
+  test("keeps the first process and answer before a follow-up in public history", async () => {
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "第一问")] },
+      history: {
+        items: [
+          run({
+            id: "run-1",
+            conversation_id: "conv-1",
+            question: "第一问",
+            result: "第二个回答",
+            status: "succeeded",
+            session_inputs: [
+              {
+                input_id: "input-1",
+                mode: "follow_up",
+                content: "第二问",
+                sequence: 1,
+                run_id: "run-1",
+                status: "applied",
+                previous_answer: "第一个回答",
+              },
+            ],
+            progress: [
+              {
+                id: "analysis-1",
+                type: "analysis",
+                status: "succeeded",
+                stage: "analyzing",
+                turn: 1,
+                count: null,
+                reasoning: "首问思维",
+                hits: [],
+              },
+              {
+                id: "answer-1",
+                type: "answer",
+                status: "succeeded",
+                stage: "succeeded",
+                turn: 1,
+                count: null,
+                hits: [],
+              },
+              {
+                id: "analysis-2",
+                type: "analysis",
+                status: "succeeded",
+                stage: "analyzing",
+                turn: 2,
+                count: null,
+                reasoning: "追问思维",
+                hits: [],
+              },
+              {
+                id: "answer-2",
+                type: "answer",
+                status: "succeeded",
+                stage: "succeeded",
+                turn: 2,
+                count: null,
+                hits: [],
+              },
+            ],
+          }),
+        ],
+      },
+    })
+
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+    const article = (await screen.findByText("第一个回答")).closest("article")!
+    await waitFor(() =>
+      expect(within(article).getAllByText("执行过程")).toHaveLength(2)
+    )
+    const processes = within(article)
+      .getAllByText("执行过程")
+      .map((heading) => heading.closest("details")!)
+    expect(within(processes[0]).getByText("首问思维")).toBeTruthy()
+    expect(within(processes[0]).queryByText("追问思维")).toBeNull()
+    expect(within(processes[1]).getByText("追问思维")).toBeTruthy()
+    expect(within(processes[1]).queryByText("首问思维")).toBeNull()
+    expect(within(article).getByText("第二问")).toBeTruthy()
+  })
+
   test("rejects a tool call and reports resolve failures", async () => {
     fetchHandler = agentFetchHandler({
       conversations: { items: [] },
       history: () =>
         jsonResponse({
-          items: [run({ id: "run-1", status: "awaiting_approval", result: "" })],
+          items: [
+            run({ id: "run-1", status: "awaiting_approval", result: "" }),
+          ],
           total: 1,
           offset: 0,
           limit: 200,
@@ -2438,9 +2838,21 @@ describe("PublicAgentChat", () => {
       streamResponses: [
         () =>
           ndjsonResponse([
-            { type: "run", sequence: 0, run: run({ status: "running", result: "" }) },
-            { type: "approval_required", call_id: "call-1", reason: "需要确认" },
-            { type: "complete", sequence: 1, run: run({ status: "awaiting_approval", result: "" }) },
+            {
+              type: "run",
+              sequence: 0,
+              run: run({ status: "running", result: "" }),
+            },
+            {
+              type: "approval_required",
+              call_id: "call-1",
+              reason: "需要确认",
+            },
+            {
+              type: "complete",
+              sequence: 1,
+              run: run({ status: "awaiting_approval", result: "" }),
+            },
           ]),
       ],
       toolCalls: () => jsonResponse([TOOL_CALL]),
@@ -2476,7 +2888,9 @@ describe("PublicAgentChat", () => {
       streamResponses: [() => new Response("", { status: 403 })],
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
@@ -2522,7 +2936,9 @@ describe("PublicAgentChat", () => {
       ],
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
@@ -2562,7 +2978,9 @@ describe("PublicAgentChat", () => {
       ],
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
@@ -2603,12 +3021,16 @@ describe("PublicAgentChat", () => {
       return jsonResponse({})
     }
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await screen.findByText("历史回答")
 
     const fileInput = document.querySelector('input[type="file"]')
     fireEvent.change(fileInput as HTMLInputElement, {
-      target: { files: [new File(["x"], "broken.txt", { type: "text/plain" })] },
+      target: {
+        files: [new File(["x"], "broken.txt", { type: "text/plain" })],
+      },
     })
     sendMessage("带附件发送")
 
@@ -2629,7 +3051,9 @@ describe("PublicAgentChat", () => {
       history: () => jsonResponse({ detail: "历史加载失败" }, 500),
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
 
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toContain("历史加载失败")
@@ -2656,7 +3080,9 @@ describe("PublicAgentChat", () => {
       toolCalls: () => jsonResponse({ detail: "boom" }, 500),
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
 
     // A failed tool-call fetch is silent: no approval card, no error banner.
     expect(await screen.findByText("你好")).toBeTruthy()
@@ -2763,13 +3189,15 @@ describe("PublicAgentChat", () => {
     sendMessage("带上附件")
 
     expect(await screen.findByText("已处理附件")).toBeTruthy()
-    await waitFor(() =>
-      expect(screen.getAllByText("notes.md")).toHaveLength(1)
-    )
+    await waitFor(() => expect(screen.getAllByText("notes.md")).toHaveLength(1))
     expect(screen.getByText("notes.md").closest("li")?.className).toContain(
       "max-w-[min(22rem,78vw)]"
     )
-    expect(requests.some((request) => request.startsWith("POST") && request.includes("/uploads"))).toBe(true)
+    expect(
+      requests.some(
+        (request) => request.startsWith("POST") && request.includes("/uploads")
+      )
+    ).toBe(true)
     expect(createBodies[0]?.file_ids).toEqual(["f1"])
   })
 
@@ -2837,8 +3265,16 @@ describe("PublicAgentChat", () => {
         streamResponses: [
           () =>
             ndjsonResponse([
-              { type: "run", sequence: 0, run: run({ status: "running", result: "" }) },
-              { type: "complete", sequence: 1, run: run({ status: "succeeded", result: "无附件" }) },
+              {
+                type: "run",
+                sequence: 0,
+                run: run({ status: "running", result: "" }),
+              },
+              {
+                type: "complete",
+                sequence: 1,
+                run: run({ status: "succeeded", result: "无附件" }),
+              },
             ]),
         ],
       },
@@ -2860,9 +3296,7 @@ describe("PublicAgentChat", () => {
     sendMessage("发送纯文本")
 
     expect(await screen.findByText("无附件")).toBeTruthy()
-    expect(
-      requests.some((request) => request.includes("/uploads"))
-    ).toBe(false)
+    expect(requests.some((request) => request.includes("/uploads"))).toBe(false)
   })
 
   test("copies messages and reflects success or failure", async () => {
@@ -2888,7 +3322,9 @@ describe("PublicAgentChat", () => {
       configurable: true,
     })
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await screen.findByText("可复制的回答")
 
     // Failure keeps the copy label.
@@ -2912,19 +3348,29 @@ describe("PublicAgentChat", () => {
     testWindow.happyDOM.setURL("https://nexaflow.example/chat/agent-1")
     const historyByConversation: Record<string, ExternalAgentRun[]> = {
       "conv-1": [run({ result: "来自对话的记录" })],
-      "conv-2": [run({ id: "run-2", question: "第二个问题", result: "第二个会话的记录" })],
+      "conv-2": [
+        run({
+          id: "run-2",
+          question: "第二个问题",
+          result: "第二个会话的记录",
+        }),
+      ],
     }
     fetchHandler = (url, init) => {
       if (url.endsWith("/profile")) return jsonResponse(PROFILE)
       if (url.includes("/conversations")) {
         return jsonResponse({
-          items: [conversation("conv-1", "第一个会话"), conversation("conv-2", "第二个会话")],
+          items: [
+            conversation("conv-1", "第一个会话"),
+            conversation("conv-2", "第二个会话"),
+          ],
         })
       }
       if (url.includes("/runs") && (init?.method ?? "GET") === "GET") {
-        const conversationId = new URL(url, "http://localhost").searchParams.get(
-          "conversation_id"
-        )
+        const conversationId = new URL(
+          url,
+          "http://localhost"
+        ).searchParams.get("conversation_id")
         return jsonResponse({
           items: historyByConversation[conversationId ?? ""] ?? [],
           total: 0,
@@ -2935,7 +3381,9 @@ describe("PublicAgentChat", () => {
       return jsonResponse({})
     }
 
-    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
     await screen.findByText("来自对话的记录")
 
     fireEvent.click(screen.getByLabelText("打开历史记录"))
@@ -2948,7 +3396,9 @@ describe("PublicAgentChat", () => {
     expect(dialogContent).toBeTruthy()
     expect(dialogContent.className).toContain("overflow-hidden")
     expect(dialogContent.className).toContain("max-sm:max-w-none")
-    expect(within(dialogContent).getByRole("button", { name: "关闭" })).toBeTruthy()
+    expect(
+      within(dialogContent).getByRole("button", { name: "关闭" })
+    ).toBeTruthy()
 
     fireEvent.click(
       within(dialogContent).getByRole("button", { name: /第二个会话/ })
@@ -2958,8 +3408,8 @@ describe("PublicAgentChat", () => {
     await waitFor(() =>
       expect(document.querySelector('[data-slot="dialog-content"]')).toBeNull()
     )
-    expect(new URLSearchParams(window.location.search).get("conversation_id")).toBe(
-      "conv-2"
-    )
+    expect(
+      new URLSearchParams(window.location.search).get("conversation_id")
+    ).toBe("conv-2")
   })
 })

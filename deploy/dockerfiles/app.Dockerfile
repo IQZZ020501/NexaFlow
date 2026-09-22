@@ -73,4 +73,4 @@ RUN chmod -R o-rwx /app /opt/frontend /opt/node
 
 WORKDIR /app
 EXPOSE 3000 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "8"]

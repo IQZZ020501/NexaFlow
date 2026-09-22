@@ -35,7 +35,11 @@ class AgentSession:
             return state, False
         if settled and state.get("final_answer"):
             inputs = [
-                {**inputs[0], "previous_answer": state["final_answer"]},
+                {
+                    **inputs[0],
+                    "previous_answer": state["final_answer"],
+                    "previous_answer_turn": state["turn"],
+                },
                 *inputs[1:],
             ]
         harness["input_ids"] = [*consumed, *(item["id"] for item in inputs)]

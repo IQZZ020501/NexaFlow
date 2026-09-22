@@ -214,6 +214,10 @@ export type AgentRunStreamEvent =
       sequence?: number
       live_sequence?: string
       stream_epoch?: string
+      applied_inputs?: Pick<
+        AgentSessionInput,
+        "sequence" | "input_id" | "mode" | "content" | "previous_answer_turn"
+      >[]
     }
   | {
       type: "tool_input_delta"
@@ -238,6 +242,13 @@ export type AgentRunStreamEvent =
       sequence: number
       call_id: string
       decision: "approved" | "rejected"
+    }
+  | {
+      type: "session_input"
+      sequence: number
+      input_id: string
+      mode: "steer" | "follow_up"
+      content: string
     }
   | { type: "complete" | "error"; sequence: number; run: AgentRun }
 
@@ -767,6 +778,7 @@ export type AgentSessionInput = {
   run_id: string
   status?: "queued" | "applied"
   previous_answer?: string | null
+  previous_answer_turn?: number | null
 }
 
 export async function sendAgentSessionInput(

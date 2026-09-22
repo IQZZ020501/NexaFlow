@@ -436,6 +436,27 @@ async def sanitize_external_agent_stream(
         elif event_type == "answer_reset":
             text_filter = ModelTextStreamFilter()
             sanitized = {"type": "answer_reset"}
+            applied_inputs = event.get("applied_inputs")
+            if isinstance(applied_inputs, list):
+                sanitized["applied_inputs"] = [
+                    {
+                        "sequence": item["sequence"],
+                        "input_id": item["input_id"][:200],
+                        "mode": item["mode"],
+                        "content": item["content"][:4000],
+                        **(
+                            {"previous_answer_turn": item["previous_answer_turn"]}
+                            if isinstance(item.get("previous_answer_turn"), int)
+                            else {}
+                        ),
+                    }
+                    for item in applied_inputs[:32]
+                    if isinstance(item, dict)
+                    and isinstance(item.get("sequence"), int)
+                    and isinstance(item.get("input_id"), str)
+                    and item.get("mode") in {"steer", "follow_up"}
+                    and isinstance(item.get("content"), str)
+                ]
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
         elif event_type == "reasoning_delta":

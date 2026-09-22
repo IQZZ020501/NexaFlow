@@ -198,6 +198,9 @@ class AgentSessionInputResponse(AgentSessionInputRequest):
     previous_answer: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    previous_answer_turn: int | None = Field(
+        default=None, ge=0, exclude_if=lambda value: value is None
+    )
 
 
 class RunFeedbackRequest(BaseModel):

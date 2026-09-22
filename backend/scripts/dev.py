@@ -5,6 +5,12 @@ import socket
 import subprocess
 import sys
 
+# Long-lived SSE connections (the message center stream) never finish on their
+# own, so an unbounded graceful shutdown blocks the reloader forever and leaves
+# the API port bound without a serving worker. Bound the wait so reloads and
+# shutdowns always complete; browsers reconnect their event streams.
+GRACEFUL_SHUTDOWN_SECONDS = 5
+
 
 def _stop(process: subprocess.Popen[bytes] | None) -> None:
     if process is None or process.poll() is not None:
@@ -52,6 +58,8 @@ def main() -> int:
                 args.host,
                 "--port",
                 str(args.port),
+                "--timeout-graceful-shutdown",
+                str(GRACEFUL_SHUTDOWN_SECONDS),
             ]
         )
         return api.wait()

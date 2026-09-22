@@ -143,6 +143,16 @@ def test_worker_database_rejects_in_memory_sqlite() -> None:
         return
     raise AssertionError("expected in-memory SQLite worker database to be rejected")
 
+
+def test_worker_execution_profile_matches_test_client() -> None:
+    from tests.support import settings
+
+    from app.infra.config.settings import Settings
+    from app.infra.execution.profile import execution_profile
+
+    # Eager workers load Settings.from_env(), while TestClient uses settings().
+    assert execution_profile(Settings.from_env()) == execution_profile(settings())
+
 def test_windows_event_loop_policy_is_selector_based() -> None:
     import sys
 
@@ -169,6 +179,7 @@ def main() -> None:
     test_celery_registers_one_task_per_job_type()
     test_celery_nonfork_pool_runs_tasks_concurrently()
     test_worker_database_rejects_in_memory_sqlite()
+    test_worker_execution_profile_matches_test_client()
     test_windows_event_loop_policy_is_selector_based()
     print("INFRA_UNIT_OK")
 

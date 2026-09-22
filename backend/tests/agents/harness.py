@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from tests.agents.agents import (
     AgentModelHandler,
+    StreamingProvider,
     agent_model_server,
     agents_url,
     model_payload,
@@ -18,6 +19,7 @@ from tests.agents.evaluation import ScriptedModel, answer_message
 from tests.support import activate_admin, auth_headers, create_active_user, test_client
 from tests.support import settings as test_settings
 
+from app.adapters.llm.runtime import ModelCompletion
 from app.application.agents.runs.executor import run_durable_agent_run
 from app.application.agents.runs.memory import _run_messages
 from app.application.agents.runs.service import skill_execution_context
@@ -275,13 +277,25 @@ async def assert_steering_and_followup():
         ]
 
     registry = CapabilityRegistry(ExtensionRuntime([]), [])
-    model = ScriptedModel(
-        [answer_message("First answer"), answer_message("Final summary")]
+    model = StreamingProvider(
+        [
+            ModelCompletion(
+                content="First answer", tool_calls=(), finish_reason="stop"
+            ),
+            ModelCompletion(
+                content="Final summary", tool_calls=(), finish_reason="stop"
+            ),
+        ],
+        [[], []],
     )
     checkpoints = []
+    emitted = []
 
     async def save(state, phase):
         checkpoints.append((state, phase))
+
+    async def emit(event):
+        emitted.append(event)
 
     result = await run_agent(
         model,
@@ -289,10 +303,24 @@ async def assert_steering_and_followup():
         registry.tools,
         session=AgentSession(registry, input_source=source),
         on_checkpoint=save,
+        on_event=emit,
     )
     assert result.content == "Final summary"
     assert result.harness["input_ids"] == [2, 1]
     assert result.harness["inputs"][1]["previous_answer"] == "First answer"
+    assert result.harness["inputs"][1]["previous_answer_turn"] == 1
+    assert {
+        "type": "answer_reset",
+        "applied_inputs": [
+            {
+                "sequence": 1,
+                "input_id": "follow",
+                "mode": "follow_up",
+                "content": "Then summarize",
+                "previous_answer_turn": 1,
+            }
+        ],
+    } in emitted
     history = _run_messages(
         AgentRun(
             status="succeeded",
@@ -644,6 +672,7 @@ def assert_session_input_api_isolation():
             assert (
                 finished.json()["session_inputs"][1]["previous_answer"] == "Completed."
             )
+            assert finished.json()["session_inputs"][1]["previous_answer_turn"] == 1
             assert len(AgentModelHandler.calls) == 2
             assert "Use Chinese" in str(AgentModelHandler.calls[0])
             assert "Then summarize" not in str(AgentModelHandler.calls[0])

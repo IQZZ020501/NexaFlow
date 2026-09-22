@@ -15,6 +15,7 @@ import {
   mergeInitialAgentRun,
   type AgentFormState,
 } from "@/components/agents/agents-page"
+import { mergeAgentSessionInputReceipt } from "@/lib/agent-session-handoff"
 import type {
   Agent,
   AgentRun,
@@ -173,7 +174,11 @@ describe("mergeInitialAgentRun", () => {
     for (const status of ["queued", "running", "awaiting_approval"]) {
       const merged = mergeInitialAgentRun(
         pending,
-        makeRun({ id: "run-1", status: status as AgentRun["status"], result: "" })
+        makeRun({
+          id: "run-1",
+          status: status as AgentRun["status"],
+          result: "",
+        })
       )
       expect(merged.result).toBe("Pending answer")
       expect(merged.events).toEqual(pending.events)
@@ -250,7 +255,11 @@ describe("mergeAgentRunSnapshot", () => {
 
   test("replaces by id without a placeholder", () => {
     const original = makeRun({ id: "run-1", status: "running", result: "old" })
-    const snapshot = makeRun({ id: "run-1", status: "succeeded", result: "new" })
+    const snapshot = makeRun({
+      id: "run-1",
+      status: "succeeded",
+      result: "new",
+    })
     const replaced = mergeAgentRunSnapshot([original], snapshot)
     expect(replaced).toHaveLength(1)
     expect(replaced[0].result).toBe("new")
@@ -273,11 +282,16 @@ describe("mergeAgentRunStreamEvent", () => {
       result: "draft",
     })
     const snapshot = makeRun({ id: "run-1", status: "succeeded", result: "ok" })
-    const merged = mergeAgentRunStreamEvent([placeholder], "run-1", {
-      type: "run",
-      sequence: 1,
-      run: snapshot,
-    } as AgentRunStreamEvent, "pending-1")
+    const merged = mergeAgentRunStreamEvent(
+      [placeholder],
+      "run-1",
+      {
+        type: "run",
+        sequence: 1,
+        run: snapshot,
+      } as AgentRunStreamEvent,
+      "pending-1"
+    )
     expect(merged.map((run) => run.id)).toEqual(["run-1"])
     expect(merged[0].result).toBe("ok")
   })
@@ -489,6 +503,91 @@ describe("mergeAgentRunStreamEvent", () => {
     } as AgentRunStreamEvent)
     expect(reset[0].result).toBe("")
 
+    const settled = mergeAgentRunStreamEvent(
+      [
+        makeRun({
+          status: "running",
+          result: "First answer",
+          events: [],
+          session_inputs: [
+            {
+              sequence: 42,
+              run_id: "run-1",
+              input_id: "follow",
+              mode: "follow_up",
+              content: "Second question",
+              status: "queued",
+              previous_answer: null,
+            },
+          ],
+        }),
+      ],
+      "run-1",
+      {
+        type: "answer_reset",
+        sequence: 3,
+        applied_inputs: [
+          {
+            sequence: 42,
+            input_id: "follow",
+            mode: "follow_up",
+            content: "Second question",
+            previous_answer_turn: 3,
+          },
+        ],
+      } as AgentRunStreamEvent
+    )
+    expect(settled[0].result).toBe("")
+    expect(settled[0].session_inputs).toEqual([
+      {
+        sequence: 42,
+        run_id: "run-1",
+        input_id: "follow",
+        mode: "follow_up",
+        content: "Second question",
+        status: "applied",
+        previous_answer: "First answer",
+        previous_answer_turn: 3,
+      },
+    ])
+
+    const handoffBeforeInputResponse = mergeAgentRunStreamEvent(
+      [makeRun({ status: "running", result: "First answer", events: [] })],
+      "run-1",
+      {
+        type: "answer_reset",
+        applied_inputs: [
+          {
+            sequence: 42,
+            input_id: "follow",
+            mode: "follow_up",
+            content: "Second question",
+            previous_answer_turn: 3,
+          },
+        ],
+      } as AgentRunStreamEvent
+    )[0]
+    expect(handoffBeforeInputResponse.session_inputs?.[0]).toMatchObject({
+      input_id: "follow",
+      previous_answer: "First answer",
+      previous_answer_turn: 3,
+      status: "applied",
+    })
+    expect(
+      mergeAgentSessionInputReceipt(handoffBeforeInputResponse.session_inputs, {
+        sequence: 42,
+        run_id: "run-1",
+        input_id: "follow",
+        mode: "follow_up",
+        content: "Second question",
+        status: "queued",
+      })[0]
+    ).toMatchObject({
+      previous_answer: "First answer",
+      previous_answer_turn: 3,
+      status: "applied",
+    })
+
     const takeover = mergeAgentRunStreamEvent(
       [
         makeRun({
@@ -545,6 +644,34 @@ describe("mergeAgentRunStreamEvent", () => {
     expect(resolved[0].last_error).toBeNull()
   })
 
+  test("merges durable session-input events without expecting a run snapshot", () => {
+    const run = makeRun({
+      id: "run-1",
+      status: "running",
+      session_inputs: [],
+    })
+
+    const merged = mergeAgentRunStreamEvent([run], "run-1", {
+      type: "session_input",
+      sequence: 7,
+      input_id: "input-1",
+      mode: "steer",
+      content: "Use Chinese",
+    } as AgentRunStreamEvent)
+
+    expect(merged[0].session_inputs).toEqual([
+      {
+        input_id: "input-1",
+        mode: "steer",
+        content: "Use Chinese",
+        sequence: 7,
+        run_id: "run-1",
+        status: "queued",
+        previous_answer: null,
+      },
+    ])
+  })
+
   test("terminal events replace the matching run only", () => {
     const runs = [
       makeRun({ id: "run-1", status: "running", result: "", events: [] }),
@@ -573,7 +700,10 @@ describe("isAgentFormDirty", () => {
     expect(isAgentFormDirty({ ...base, description: "  " }, agent)).toBe(true)
     expect(
       isAgentFormDirty(
-        { ...base, interactionConfig: { ...base.interactionConfig, prologue: "x" } },
+        {
+          ...base,
+          interactionConfig: { ...base.interactionConfig, prologue: "x" },
+        },
         agent
       )
     ).toBe(true)

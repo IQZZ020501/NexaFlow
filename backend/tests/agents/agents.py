@@ -4782,8 +4782,8 @@ def main() -> None:
             assert member_approval.json()["status"] == "succeeded"
             assert len(mcp_calls) == 5
 
-            # Public/API runs fail closed before creation when a frozen Tool
-            # is no longer automatic and externally safe.
+            # Public chat can pause for caller approval, while Agent API
+            # remains restricted to automatic, externally safe Tools.
             published_agent = client.patch(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}"),
                 headers=auth_headers(admin_token),
@@ -4799,8 +4799,22 @@ def main() -> None:
                 headers=auth_headers(member_token),
                 json={"goal": "Check the release"},
             )
-            assert public_run.status_code == 409, public_run.text
+            assert public_run.status_code == 201, public_run.text
+            assert public_run.json()["status"] == "awaiting_approval"
             assert len(mcp_calls) == calls_before_public
+            public_tool_calls = client.get(
+                f"{public_base}/runs/{public_run.json()['id']}/tool-calls",
+                headers=auth_headers(member_token),
+            )
+            assert public_tool_calls.status_code == 200, public_tool_calls.text
+            assert public_tool_calls.json()[0]["status"] == "awaiting_approval"
+            public_approval = client.post(
+                f"{public_base}/runs/{public_run.json()['id']}/tool-calls/call-mcp/approve",
+                headers=auth_headers(member_token),
+            )
+            assert public_approval.status_code == 200, public_approval.text
+            assert public_approval.json()["status"] == "succeeded"
+            assert len(mcp_calls) == calls_before_public + 1
 
             read_only_public_policy = client.put(
                 mcp_url(

@@ -45,6 +45,7 @@ import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
+import { splitAgentSessionEvents } from "@/lib/agent-session-handoff"
 import {
   AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
@@ -334,12 +335,83 @@ export function processTimeline(run: AgentRun) {
   return deduplicated.map((event) => ({ event, count: 1 }))
 }
 
+export function splitAgentRunTimeline(run: AgentRun) {
+  return splitAgentSessionEvents(
+    run.events,
+    run.session_inputs,
+    (event) => event.summary === "agent.answer_ready"
+  ).map((events) => processTimeline({ ...run, events }))
+}
+
+function visibleProcessTimeline(
+  timeline: ReturnType<typeof processTimeline>,
+  inlineCallIds: Set<string>
+) {
+  return timeline.filter(
+    ({ event }) =>
+      event.summary !== "agent.analysis_plan" &&
+      !event.summary.startsWith("agent.grounding_") &&
+      ![
+        "agent.knowledge_duplicate_query",
+        "agent.knowledge_evidence_sufficient",
+      ].includes(event.summary) &&
+      !(
+        event.summary === "agent.preparing_tool_call" &&
+        inlineCallIds.has(event.call_id)
+      )
+  )
+}
+
+function ProcessTimelineRows({
+  timeline,
+  run,
+  t,
+}: {
+  timeline: ReturnType<typeof processTimeline>
+  run: AgentRun
+  t: TFunction
+}) {
+  return timeline.map(({ event }, index) =>
+    event.type === "tool" ? (
+      <ToolEventDetails
+        key={`${event.call_id || `${event.turn}-${event.tool_name}`}-${index}`}
+        event={event}
+        run={run}
+        t={t}
+      />
+    ) : (
+      <div
+        key={`${event.type}-${event.turn}-${index}`}
+        className="relative px-1 text-xs leading-5 text-muted-foreground"
+      >
+        <div className="flex items-start gap-2">
+          {effectiveProcessStatus(event.status, run.status) === "running" ? (
+            <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+          ) : effectiveProcessStatus(event.status, run.status) ===
+            "succeeded" ? (
+            <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+          ) : (
+            <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+          )}
+          <span>{processSummary(event, run, t)}</span>
+        </div>
+        {event.reasoning ? (
+          <ReasoningContent reasoning={event.reasoning} />
+        ) : null}
+      </div>
+    )
+  )
+}
+
 export function unrenderedAgentToolCalls(
   timeline: ReturnType<typeof processTimeline>,
   calls: AgentToolCall[]
 ) {
   const renderedCallIds = new Set(
-    timeline.map(({ event }) => event.call_id).filter(Boolean)
+    timeline
+      .filter(({ event }) => event.type === "tool")
+      .map(({ event }) => event.call_id)
+      .filter(Boolean)
   )
   return calls.filter(
     (call) =>
@@ -520,27 +592,40 @@ function RunExchange({
   editable?: boolean
   t: TFunction
 }) {
-  const timeline = processTimeline(run)
-  const approvalCallIds = new Set(
+  const timelineSegments = splitAgentRunTimeline(run)
+  const timeline = timelineSegments.at(-1) ?? []
+  const completedTimelines = timelineSegments.slice(0, -1)
+  let completedTimelineIndex = 0
+  const sessionInputs = (run.session_inputs ?? []).map((input) => ({
+    input,
+    timeline: input.previous_answer
+      ? (completedTimelines[completedTimelineIndex++] ?? [])
+      : [],
+  }))
+  const pendingFollowUpIds = new Set(
+    sessionInputs
+      .filter(
+        ({ input }) =>
+          input.mode === "follow_up" &&
+          input.status !== "applied" &&
+          !input.previous_answer
+      )
+      .map(({ input }) => input.input_id)
+  )
+  const inlineCallIds = new Set(
     toolCalls
       .filter((call) =>
-        ["awaiting_approval", "uncertain"].includes(call.status)
+        [
+          "pending",
+          "awaiting_approval",
+          "approved",
+          "running",
+          "uncertain",
+        ].includes(call.status)
       )
       .map((call) => call.call_id)
   )
-  const visibleTimeline = timeline.filter(
-    ({ event }) =>
-      event.summary !== "agent.analysis_plan" &&
-      !event.summary.startsWith("agent.grounding_") &&
-      ![
-        "agent.knowledge_duplicate_query",
-        "agent.knowledge_evidence_sufficient",
-      ].includes(event.summary) &&
-      !(
-        event.summary === "agent.preparing_tool_call" &&
-        approvalCallIds.has(event.call_id)
-      )
-  )
+  const visibleTimeline = visibleProcessTimeline(timeline, inlineCallIds)
   const runCancelled = run.status === "cancelled"
   const inlineToolCalls = runCancelled
     ? []
@@ -565,7 +650,7 @@ function RunExchange({
   )?.created_at
   return (
     <article className="flex flex-col gap-5">
-      <div className="ml-auto flex min-w-0 max-w-[85%] flex-col items-end gap-1">
+      <div className="ml-auto flex max-w-[85%] min-w-0 flex-col items-end gap-1">
         <RunAttachmentCards attachments={run.attachments} t={t} />
         {editDraft === null ? (
           <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
@@ -639,34 +724,59 @@ function RunExchange({
           ) : null}
         </div>
       </div>
-      {(run.session_inputs ?? []).map((input) => (
-        <React.Fragment key={input.input_id}>
-          {input.previous_answer && (
-            <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
-                <BotIcon className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
-                <AgentAnswer
-                  content={input.previous_answer}
-                  sources={run.sources}
-                  t={t}
-                  className="text-sm leading-6"
-                />
+      {sessionInputs
+        .filter(({ input }) => !pendingFollowUpIds.has(input.input_id))
+        .map(({ input, timeline: completedTimeline }) => (
+          <React.Fragment key={input.input_id}>
+            {input.previous_answer && (
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
+                  <BotIcon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+                  {visibleProcessTimeline(completedTimeline, inlineCallIds)
+                    .length > 0 ? (
+                    <details
+                      className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+                      open
+                    >
+                      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                        <BrainIcon className="size-4" />
+                        <span className="flex-1">{t("执行过程")}</span>
+                        <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+                      </summary>
+                      <div className="mt-2 space-y-1.5 border-l pl-3">
+                        <ProcessTimelineRows
+                          timeline={visibleProcessTimeline(
+                            completedTimeline,
+                            inlineCallIds
+                          )}
+                          run={run}
+                          t={t}
+                        />
+                      </div>
+                    </details>
+                  ) : null}
+                  <AgentAnswer
+                    content={input.previous_answer}
+                    sources={run.sources}
+                    t={t}
+                    className="text-sm leading-6"
+                  />
+                </div>
               </div>
+            )}
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-xs text-muted-foreground">
+                {t(input.mode === "steer" ? "追加指令" : "后续任务")}
+              </span>
+              <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
+                {input.content}
+              </div>
+              <CopyMessageButton value={input.content} t={t} />
             </div>
-          )}
-          <div className="flex flex-col items-end gap-1.5">
-            <span className="text-xs text-muted-foreground">
-              {t(input.mode === "steer" ? "追加指令" : "后续任务")}
-            </span>
-            <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
-              {input.content}
-            </div>
-            <CopyMessageButton value={input.content} t={t} />
-          </div>
-        </React.Fragment>
-      ))}
+          </React.Fragment>
+        ))}
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
           <BotIcon className="size-4" />
@@ -685,39 +795,11 @@ function RunExchange({
                   <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="mt-2 space-y-1.5 border-l pl-3">
-                  {visibleTimeline.map(({ event }, index) =>
-                    event.type === "tool" ? (
-                      <ToolEventDetails
-                        key={`${event.call_id || `${event.turn}-${event.tool_name}`}-${index}`}
-                        event={event}
-                        run={run}
-                        t={t}
-                      />
-                    ) : (
-                      <div
-                        key={`${event.type}-${event.turn}-${index}`}
-                        className="relative px-1 text-xs leading-5 text-muted-foreground"
-                      >
-                        <div className="flex items-start gap-2">
-                          {effectiveProcessStatus(event.status, run.status) ===
-                          "running" ? (
-                            <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-                          ) : effectiveProcessStatus(
-                              event.status,
-                              run.status
-                            ) === "succeeded" ? (
-                            <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-                          ) : (
-                            <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-                          )}
-                          <span>{processSummary(event, run, t)}</span>
-                        </div>
-                        {event.reasoning ? (
-                          <ReasoningContent reasoning={event.reasoning} />
-                        ) : null}
-                      </div>
-                    )
-                  )}
+                  <ProcessTimelineRows
+                    timeline={visibleTimeline}
+                    run={run}
+                    t={t}
+                  />
                   {inlineToolCalls.map((call) =>
                     ["awaiting_approval", "uncertain"].includes(call.status) ? (
                       <InlineToolApproval
@@ -793,6 +875,19 @@ function RunExchange({
           ) : null}
         </div>
       </div>
+      {sessionInputs
+        .filter(({ input }) => pendingFollowUpIds.has(input.input_id))
+        .map(({ input }) => (
+          <div key={input.input_id} className="flex flex-col items-end gap-1.5">
+            <span className="text-xs text-muted-foreground">
+              {t("后续任务")}
+            </span>
+            <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
+              {input.content}
+            </div>
+            <CopyMessageButton value={input.content} t={t} />
+          </div>
+        ))}
     </article>
   )
 }
@@ -1141,10 +1236,13 @@ export function AgentDetailWorkspace({
         <div className="flex min-w-0 flex-1 flex-col">
           <nav
             ref={tabStripRef}
-            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden"
+            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden [&::-webkit-scrollbar]:hidden"
             aria-label={t("Agent 详情导航")}
           >
-            {renderNavItems("shrink-0 max-sm:min-h-10 max-sm:px-2.5", activeTabRef)}
+            {renderNavItems(
+              "shrink-0 max-sm:min-h-10 max-sm:px-2.5",
+              activeTabRef
+            )}
           </nav>
 
           {visibleActiveView === "settings" ? (

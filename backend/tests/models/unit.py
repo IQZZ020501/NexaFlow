@@ -17,7 +17,10 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
     uv run python -m tests.unit
 """
 
+import asyncio
+import time
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
@@ -48,6 +51,41 @@ def test_model_type_normalization() -> None:
     assert normalize_model_type(" embeddings ") == "EMBEDDING"
     assert normalize_model_type("rerank") == "RERANKER"
     expect_http_error(lambda: normalize_model_type("audio"), 422)
+
+
+def test_siliconflow_embedding_catalog_includes_existing_bge_model() -> None:
+    from app.application.models.service import list_base_models
+
+    models = list_base_models("model_siliconflow_provider", "EMBEDDING")
+    assert "BAAI/bge-m3" in {model.name for model in models}
+
+
+def test_registered_model_connection_test_has_a_hard_deadline() -> None:
+    from app.application.models.registry import test_registered_model
+
+    def slow_model_test(*_args, **_kwargs):
+        time.sleep(0.03)
+        return {}
+
+    with patch(
+        "app.application.models.registry.run_model_test",
+        side_effect=slow_model_test,
+    ):
+        try:
+            asyncio.run(
+                test_registered_model(
+                    "openai_compatible",
+                    {},
+                    "slow-model",
+                    "LLM",
+                    timeout_seconds=0.001,
+                )
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 504
+            assert exc.detail == "Model connection test timed out."
+        else:
+            raise AssertionError("Slow model test did not time out.")
 
 
 def test_image_model_registration_skips_paid_connection_tests() -> None:
@@ -156,6 +194,8 @@ def test_run_knowledge_model_test_uses_injected_providers() -> None:
 
 def main() -> None:
     test_model_type_normalization()
+    test_siliconflow_embedding_catalog_includes_existing_bge_model()
+    test_registered_model_connection_test_has_a_hard_deadline()
     test_status_validation()
     test_url_credential_validation()
     test_masked_secret_detection()

@@ -1193,6 +1193,7 @@ class ToolCatalogItem:
     source: ToolSource
     version: ToolVersion | None
     draft: ToolDraft | None
+    policy: ToolPolicy | None
     access: ToolAccess
     permission: ToolPermissionLabel | None
 
@@ -1301,7 +1302,7 @@ async def list_tool_catalog(
         excluded_builtin_function_names=INTERNAL_BUILTIN_FUNCTION_NAMES,
     )
     items: list[ToolCatalogItem] = []
-    for tool, source, version, draft, grant in rows:
+    for tool, source, version, draft, policy, grant in rows:
         authorization = evaluate_tool_authorization(
             tool,
             actor,
@@ -1314,6 +1315,7 @@ async def list_tool_catalog(
                 source=source,
                 version=version,
                 draft=draft,
+                policy=policy,
                 access=authorization.access,
                 permission=authorization.permission,
             )
@@ -1716,7 +1718,7 @@ def build_skill_dependency_installer_tool(
             revision=1,
             approval="each_call",
             effect="external_write",
-            allowed_access_sources=["console"],
+            allowed_access_sources=["console", "public"],
             workflow_callable=False,
             parallel_safe=False,
             created_at=timestamp,
@@ -1990,7 +1992,7 @@ def build_image_generation_tool(
             revision=1,
             approval="each_call",
             effect="external_write",
-            allowed_access_sources=["console"],
+            allowed_access_sources=["console", "public"],
             workflow_callable=False,
             parallel_safe=False,
             created_at=timestamp,

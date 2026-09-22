@@ -386,6 +386,31 @@ def test_agent_tool_binding_requires_current_available_policy() -> None:
         422,
     )
 
+
+def test_console_tool_access_also_allows_public_chat_but_not_api() -> None:
+    from app.domain.tools.catalog.service import build_image_generation_tool
+    from app.domain.tools.runtime import (
+        build_tool_snapshot,
+        tool_access_source_allowed,
+    )
+    from app.entities.tools import ToolSource
+
+    tool, version, policy = build_image_generation_tool("workspace-1")
+    snapshot = build_tool_snapshot(
+        tool,
+        ToolSource(id=tool.source_id, workspace_id=tool.workspace_id, kind="builtin"),
+        version,
+        policy,
+        "user-1",
+    )
+    assert snapshot.allowed_access_sources == ("console", "public")
+    assert tool_access_source_allowed(snapshot.allowed_access_sources, "console")
+    assert tool_access_source_allowed(snapshot.allowed_access_sources, "public")
+    assert not tool_access_source_allowed(snapshot.allowed_access_sources, "api")
+
+    assert tool_access_source_allowed(("console",), "public")
+    assert not tool_access_source_allowed(("console",), "api")
+
 def test_tool_snapshot_is_an_immutable_internal_contract() -> None:
     from app.entities.tools import ToolSnapshot
 
@@ -2756,6 +2781,7 @@ def main() -> None:
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
     test_agent_runtime_snapshots_are_versioned_and_fail_closed()
     test_agent_tool_binding_requires_current_available_policy()
+    test_console_tool_access_also_allows_public_chat_but_not_api()
     test_tool_snapshot_is_an_immutable_internal_contract()
     test_tool_contracts_deep_freeze_nested_json()
     test_freeze_json_rejects_non_json_values()

@@ -98,10 +98,42 @@ def test_workspace_daily_quota_uses_shanghai_day_boundary() -> None:
     )
 
 
+def test_message_stream_releases_reader_at_lifetime_limit() -> None:
+    from app.application.announcements.live import stream_message_updates
+
+    reader = SimpleNamespace(available=True, read=AsyncMock(), close=AsyncMock())
+
+    async def wait_for_event(**_kwargs):
+        await asyncio.sleep(0.05)
+        return []
+
+    reader.read.side_effect = wait_for_event
+
+    async def consume() -> list:
+        with patch(
+            "app.application.announcements.live.build_announcement_live_stream_reader",
+            return_value=reader,
+        ):
+            return [
+                update
+                async for update in stream_message_updates(
+                    object(),
+                    workspace_id=None,
+                    global_after=None,
+                    workspace_after=None,
+                    max_lifetime_seconds=0.01,
+                )
+            ]
+
+    assert asyncio.run(consume()) == []
+    reader.close.assert_awaited_once()
+
+
 def main() -> None:
     test_resource_folder_descendants_cover_nested_children()
     test_team_to_response()
     test_workspace_daily_quota_uses_shanghai_day_boundary()
+    test_message_stream_releases_reader_at_lifetime_limit()
     print("PLATFORM_UNIT_OK")
 
 

@@ -265,6 +265,9 @@ async def _attach_session_inputs(db: AsyncSession, entities: list[AgentRunEntity
                 "content": event["content"],
                 "status": "applied" if applied else "queued",
                 "previous_answer": consumed[run_id].get(sequence, {}).get("previous_answer"),
+                "previous_answer_turn": consumed[run_id]
+                .get(sequence, {})
+                .get("previous_answer_turn"),
             }
         )
     for entity in entities:

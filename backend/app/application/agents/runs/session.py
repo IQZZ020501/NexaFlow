@@ -30,6 +30,14 @@ async def append_session_input(
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await db.commit()
     assert stored.id is not None
+    consumed_input = next(
+        (
+            item
+            for item in session_inputs_to_response(run)
+            if item["sequence"] == stored.id
+        ),
+        {},
+    )
     return AgentSessionInputResponse(
         sequence=stored.id,
         run_id=run.id,
@@ -42,14 +50,8 @@ async def append_session_input(
             in (run.checkpoint or {}).get("harness", {}).get("input_ids", [])
             else "queued"
         ),
-        previous_answer=next(
-            (
-                item.get("previous_answer")
-                for item in session_inputs_to_response(run)
-                if item["sequence"] == stored.id
-            ),
-            None,
-        ),
+        previous_answer=consumed_input.get("previous_answer"),
+        previous_answer_turn=consumed_input.get("previous_answer_turn"),
     )
 
 

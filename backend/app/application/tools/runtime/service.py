@@ -28,7 +28,9 @@ from app.domain.tools.runtime import (
     TOOL_INVOCATION_UNCERTAIN,
     TOOL_SAFE_EXTERNAL_EFFECTS,
     TOOL_UNCERTAIN_EFFECTS,
+    effective_tool_access_sources,
     normalize_tool_arguments,
+    tool_access_source_allowed,
     tool_arguments_hash,
     tool_input_size_limit,
     tool_snapshot_from_payload,
@@ -361,7 +363,8 @@ async def _validate_live_state(
             and policy.definition_hash == snapshot.definition_hash
             and policy.approval == snapshot.approval
             and policy.effect == snapshot.effect
-            and tuple(policy.allowed_access_sources) == snapshot.allowed_access_sources
+            and effective_tool_access_sources(policy.allowed_access_sources)
+            == effective_tool_access_sources(snapshot.allowed_access_sources)
             and policy.workflow_callable == snapshot.workflow_callable
             and policy.parallel_safe == snapshot.parallel_safe
         )
@@ -369,9 +372,12 @@ async def _validate_live_state(
         return _failure("tool_policy_changed", "Tool policy changed."), None
     if snapshot.approval == TOOL_APPROVAL_DISABLED:
         return _failure("tool_disabled", "Tool is disabled."), None
-    if invocation.access_source not in snapshot.allowed_access_sources:
+    if not tool_access_source_allowed(
+        snapshot.allowed_access_sources,
+        invocation.access_source,
+    ):
         return _failure("tool_access_source_denied", "Tool access source is denied."), None
-    if invocation.access_source in {"public", "api"} and (
+    if invocation.access_source == "api" and (
         snapshot.approval != TOOL_APPROVAL_AUTO
         or snapshot.effect not in TOOL_SAFE_EXTERNAL_EFFECTS
     ):

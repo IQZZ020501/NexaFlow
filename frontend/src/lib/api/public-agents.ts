@@ -1,6 +1,6 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
-import type { AgentToolCall } from "@/lib/api/agents"
+import type { AgentSessionInput, AgentToolCall } from "@/lib/api/agents"
 import type { AgentInteractionConfig, AgentRunSource } from "@/lib/api/agents"
 
 export type PublicAgentProfile = {
@@ -69,6 +69,7 @@ export type ExternalAgentRun = {
   conversation_id: string
   regenerated_from_run_id?: string | null
   question: string
+  session_inputs?: AgentSessionInput[]
   attachments?: AgentRunAttachment[]
   status: string
   result: string
@@ -97,7 +98,13 @@ export type PublicAgentRunStreamEvent =
       type: "answer_delta"
       delta: string
     })
-  | (PublicAgentStreamCursor & { type: "answer_reset" })
+  | (PublicAgentStreamCursor & {
+      type: "answer_reset"
+      applied_inputs?: Pick<
+        AgentSessionInput,
+        "sequence" | "input_id" | "mode" | "content" | "previous_answer_turn"
+      >[]
+    })
   | (PublicAgentStreamCursor & {
       type: "reasoning_delta"
       turn: number
@@ -121,6 +128,12 @@ export type PublicAgentRunStreamEvent =
       type: "approval_required"
       call_id: string
       reason: string
+    })
+  | (PublicAgentStreamCursor & {
+      type: "session_input"
+      input_id: string
+      mode: "steer" | "follow_up"
+      content: string
     })
   | (PublicAgentStreamCursor & {
       type: "complete" | "error"
@@ -385,6 +398,19 @@ export function resolvePublicAgentRunToolCall(
       method: "POST",
       token,
     }
+  )
+}
+
+/** Queues steering or follow-up input on an active public Agent run. */
+export function sendPublicAgentSessionInput(
+  agentId: string,
+  token: string,
+  runId: string,
+  input: Pick<AgentSessionInput, "input_id" | "mode" | "content">
+) {
+  return request<AgentSessionInput>(
+    publicAgentPath(agentId, `/runs/${runId}/inputs`),
+    { method: "POST", token, body: JSON.stringify(input) }
   )
 }
 

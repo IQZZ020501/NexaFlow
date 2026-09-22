@@ -594,6 +594,15 @@ async def assert_sanitize_external_agent_stream() -> None:
         }
         yield {
             "type": "answer_reset",
+            "applied_inputs": [
+                {
+                    "sequence": 42,
+                    "input_id": "follow",
+                    "mode": "follow_up",
+                    "content": "Second question",
+                    "previous_answer_turn": 3,
+                }
+            ],
             "live_sequence": "2-0",
             "stream_epoch": "epoch-1",
         }
@@ -655,6 +664,15 @@ async def assert_sanitize_external_agent_stream() -> None:
     assert len(answer["stream_epoch"]) == 32
 
     reset = sanitized[1]
+    assert reset["applied_inputs"] == [
+        {
+            "sequence": 42,
+            "input_id": "follow",
+            "mode": "follow_up",
+            "content": "Second question",
+            "previous_answer_turn": 3,
+        }
+    ]
     assert reset["live_sequence"] == "2-0"
     assert reset["stream_epoch"] == answer["stream_epoch"]
 

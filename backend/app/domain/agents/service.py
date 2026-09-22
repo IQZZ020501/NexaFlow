@@ -275,6 +275,8 @@ async def agent_has_unpublished_changes(
 ) -> bool:
     if not agent.published:
         return False
+    if agent.app_type == "workflow":
+        return await _workflow_has_unpublished_changes(db, agent)
     if agent.current_published_version_id is None:
         return True
     version = await agent_repository.get_agent_publication_version(
@@ -319,6 +321,47 @@ def _agent_has_unpublished_changes(
         skills,
     )
     return agent_publication_hash(configuration, resources) != version.configuration_hash
+
+
+async def _workflow_has_unpublished_changes(db: AsyncSession, agent: Agent) -> bool:
+    """Report whether a published workflow differs from its published snapshot and graph.
+
+    Workflows publish through the workflow version endpoint, so they record their
+    publication in the stored Agent snapshot plus the newest WorkflowVersion
+    instead of an Agent publication version row.
+    """
+    knowledge_base_ids = (await agent_repository.list_binding_map(db, [agent.id]))[
+        agent.id
+    ]
+    mcp_tools = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[agent.id]
+    graph_hashes = (
+        await workflow_repository.map_graph_hashes(db, agent.workspace_id, [agent.id])
+    )[agent.id]
+    return _workflow_publication_differs(
+        agent,
+        knowledge_base_ids,
+        mcp_tools,
+        graph_hashes,
+    )
+
+
+def _workflow_publication_differs(
+    agent: Agent,
+    knowledge_base_ids: list[str],
+    mcp_tools: list[dict[str, str]],
+    graph_hashes: tuple[str | None, str | None],
+) -> bool:
+    """Compare a workflow's live configuration and draft graph with its publication."""
+    if agent.published_snapshot is None:
+        return True
+    if agent_publication_snapshot(agent, knowledge_base_ids, mcp_tools) != dict(
+        agent.published_snapshot
+    ):
+        return True
+    draft_hash, published_hash = graph_hashes
+    if draft_hash is None or published_hash is None:
+        return True
+    return draft_hash != published_hash
 
 
 async def accessible_agent_knowledge_bases(
@@ -445,6 +488,11 @@ async def list_agents(
             if (version_id := agent.current_published_version_id) is not None
         ],
     )
+    workflow_graph_hashes = await workflow_repository.map_graph_hashes(
+        db,
+        workspace_id,
+        [agent.id for agent in agents if agent.app_type == "workflow"],
+    )
     tool_snapshot_map = await resolve_application_tool_snapshot_map(
         db,
         workspace_id,
@@ -480,12 +528,23 @@ async def list_agents(
                 skill_ref_map[agent.id],
                 actor,
                 creator=creators.get(agent.created_by_user_id),
-                has_unpublished_changes=_agent_has_unpublished_changes(
-                    agent,
-                    bindings[agent.id],
-                    publication_versions.get(agent.current_published_version_id or ""),
-                    tool_snapshot_map[agent.id],
-                    agent_skills,
+                has_unpublished_changes=(
+                    _workflow_publication_differs(
+                        agent,
+                        bindings[agent.id],
+                        legacy_mcp_bindings[agent.id],
+                        workflow_graph_hashes[agent.id],
+                    )
+                    if agent.app_type == "workflow"
+                    else _agent_has_unpublished_changes(
+                        agent,
+                        bindings[agent.id],
+                        publication_versions.get(
+                            agent.current_published_version_id or ""
+                        ),
+                        tool_snapshot_map[agent.id],
+                        agent_skills,
+                    )
                 ),
             )
         )

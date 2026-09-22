@@ -1754,7 +1754,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         }
         assert installer_policy.approval == "each_call"
         assert installer_policy.effect == "external_write"
-        assert installer_policy.allowed_access_sources == ["console"]
+        assert installer_policy.allowed_access_sources == ["console", "public"]
         assert installer_policy.workflow_callable is False
         assert installer_policy.parallel_safe is False
 
@@ -4472,15 +4472,18 @@ async def assert_tool_runtime_edge_branches(
     failure = await preflight(console_denied)
     assert failure is not None and failure.error_code == "tool_access_source_denied"
 
-    # Live-state: unsafe effect through a public source (tool_runtime.py:343).
-    public_denied = await set_policy(
-        approval="auto",
+    # Public chat inherits console tools and can pause for interactive approval.
+    public_approved = await set_policy(
+        approval="each_call",
         effect="external_write",
-        allowed_access_sources=["console", "public"],
+        allowed_access_sources=["console"],
         workflow_callable=True,
         parallel_safe=True,
     )
-    failure = await preflight(public_denied, access_source="public")
+    assert await preflight(public_approved, access_source="public") is None
+
+    # Machine-to-machine API access remains automatic and read-only.
+    failure = await preflight(public_approved, access_source="api")
     assert failure is not None and failure.error_code == "tool_access_source_denied"
 
     # Live-state: not workflow callable (tool_runtime.py:345).

@@ -549,6 +549,12 @@ export const en = {
   "保存时会先测试模型调用，测试通过后才会保存。":
     "Saving tests the model call first; the config is saved only after the test passes.",
   "测试并保存中...": "Testing and saving...",
+  "连接测试受系统超时限制；只有测试通过后才会保存模型。":
+    "Connection tests have a system timeout; the model is saved only after a successful test.",
+  "正在测试模型连接；测试完成或超时前请保持此窗口打开。":
+    "Testing the model connection; keep this window open until it completes or times out.",
+  "模型连接测试超时，请检查供应商后重试":
+    "The model connection test timed out. Check the provider and try again.",
   模型类型: "Model type",
   上下文: "Context",
   上下文长度: "Context length",
@@ -596,6 +602,7 @@ export const en = {
   我的工具: "My tools",
   共享给我的: "Shared with me",
   内置工具: "Built-in tools",
+  上游未发现该工具: "No longer found upstream",
   "统一管理 Python、MCP 与内置工具，以及它们的版本和授权。":
     "Manage Python, MCP, and built-in tools, together with their versions and permissions.",
   "添加 Python 工具或连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。":
@@ -2002,6 +2009,11 @@ export const en = {
   邀请已撤销: "Invitation revoked",
   邀请已删除: "Invitation deleted",
   邀请链接: "Invitation link",
+  邀请链接无效或已过期: "The invitation link is invalid or expired",
+  "输入内容过短，请检查后重试": "The value is too short. Check it and try again",
+  撤销该用户全部会话: "Revoke all sessions for this user",
+  确认撤销该用户全部会话: "Revoke all sessions for this user?",
+  该用户的全部会话已撤销: "All sessions for this user were revoked",
   配额策略: "Quota policy",
   向量数据库: "Vector database",
   "后台 Worker": "Background worker",

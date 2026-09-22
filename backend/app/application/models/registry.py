@@ -414,12 +414,21 @@ async def test_registered_model(
     model_name: str,
     model_type: str,
     request_params: dict[str, Any] | None = None,
+    *,
+    timeout_seconds: float,
 ) -> dict[str, bool]:
-    return await asyncio.to_thread(
-        run_model_test,
-        provider_type,
-        credentials,
-        model_name,
-        model_type,
-        request_params,
-    )
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            return await asyncio.to_thread(
+                run_model_test,
+                provider_type,
+                credentials,
+                model_name,
+                model_type,
+                request_params,
+            )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "Model connection test timed out.",
+        ) from exc

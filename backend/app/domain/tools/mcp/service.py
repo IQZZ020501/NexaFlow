@@ -700,7 +700,7 @@ async def set_mcp_tool_policy(
     else:
         approval = "each_call"
         effect = "unknown"
-        allowed_access_sources = ["console"]
+        allowed_access_sources = ["console", "public"]
         workflow_callable = False
         parallel_safe = False
 

@@ -73,6 +73,38 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
     assert summary.updated_at > summary.created_at
 
 
+def test_tool_summary_projects_effective_public_access_and_mcp_policy() -> None:
+    from app.application.tools.management.service import _summary_response
+    from app.domain.tools.access.permissions import ToolAccess
+    from app.domain.tools.catalog.service import (
+        ToolCatalogItem,
+        build_image_generation_tool,
+    )
+    from app.entities.tools import ToolSource
+
+    tool, version, policy = build_image_generation_tool("workspace-1")
+    policy.allowed_access_sources = ["console"]
+    summary = _summary_response(
+        ToolCatalogItem(
+            tool=tool,
+            source=ToolSource(
+                id=tool.source_id,
+                workspace_id=tool.workspace_id,
+                kind="builtin",
+                name="Built-in",
+            ),
+            version=version,
+            draft=None,
+            policy=policy,
+            access=ToolAccess(can_view=True, can_use=True, can_manage=False),
+            permission=None,
+        )
+    )
+
+    assert summary.allowed_access_sources == ["console", "public"]
+    assert summary.policy_mode is None
+
+
 def test_image_generation_is_a_bounded_approval_backed_builtin() -> None:
     from app.domain.tools.catalog.service import build_image_generation_tool
     from app.domain.tools.runtime import build_tool_snapshot, validate_tool_arguments
@@ -880,6 +912,7 @@ def test_normalize_mcp_url() -> None:
 
 def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
+    test_tool_summary_projects_effective_public_access_and_mcp_policy()
     test_image_generation_is_a_bounded_approval_backed_builtin()
     test_image_tool_queue_freezes_its_model_configuration()
     test_image_provider_decodes_only_embedded_png()

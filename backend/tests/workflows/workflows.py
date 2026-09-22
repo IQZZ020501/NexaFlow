@@ -1772,6 +1772,14 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert published.status_code == 201, published.text
         assert published.json()["version_number"] == 1
         assert published.json()["definition_revision"] == 3
+        # A published workflow whose draft matches the newest version is clean.
+        published_agent = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}",
+            headers=headers,
+        )
+        assert published_agent.status_code == 200, published_agent.text
+        assert published_agent.json()["published"] is True
+        assert published_agent.json()["has_unpublished_changes"] is False
 
         member_id, temporary_password = create_workspace_user(
             client, token, workspace_id
@@ -1806,6 +1814,13 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         )
         assert next_draft.status_code == 200, next_draft.text
         assert next_draft.json()["revision"] == 4
+        # Editing the draft after publishing marks the workflow as unpublished again.
+        diverged_agent = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}",
+            headers=headers,
+        )
+        assert diverged_agent.status_code == 200, diverged_agent.text
+        assert diverged_agent.json()["has_unpublished_changes"] is True
 
         draft_run = client.post(
             f"{base}/runs",

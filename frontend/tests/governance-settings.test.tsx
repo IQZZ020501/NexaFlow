@@ -795,7 +795,7 @@ describe("session security panel", () => {
     expect(notifications).toContainEqual(["success", "会话已撤销"])
     await waitFor(() => expect(screen.queryByText("Safari/17")).toBeNull())
 
-    fireEvent.click(screen.getByRole("button", { name: "撤销其他会话" }))
+    fireEvent.click(screen.getByRole("button", { name: "撤销该用户全部会话" }))
     respondToConfirm("撤销")
     await waitFor(() =>
       expect(
@@ -807,7 +807,7 @@ describe("session security panel", () => {
       ).toBe(true)
     )
     await waitFor(() =>
-      expect(notifications).toContainEqual(["success", "其他会话已撤销"])
+      expect(notifications).toContainEqual(["success", "该用户的全部会话已撤销"])
     )
 
     const refreshButton = screen.getByRole("button", { name: "刷新" })

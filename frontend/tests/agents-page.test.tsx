@@ -2712,6 +2712,118 @@ describe("AgentsPage run flows", () => {
     expect(submitted).toBe(1)
   })
 
+  test("keeps each execution process with the question that produced it", async () => {
+    const run = makeRun({
+      id: "run-1",
+      goal: "First question",
+      result: "Second answer",
+      session_inputs: [
+        {
+          input_id: "input-1",
+          mode: "follow_up",
+          content: "Second question",
+          sequence: 1,
+          run_id: "run-1",
+          status: "applied",
+          previous_answer: "First answer",
+        },
+      ],
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the first question",
+        },
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the first question",
+        },
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the second question",
+        },
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the second question",
+        },
+      ],
+    })
+    await renderDetail({
+      agent: makeAgent(),
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([run]),
+        },
+      ],
+    })
+
+    const exchange = screen.getByText("First question").closest("article")!
+    const processes = within(exchange)
+      .getAllByText("执行过程")
+      .map((heading) => heading.closest("details")!)
+    expect(processes).toHaveLength(2)
+    expect(
+      within(processes[0]).getByText("Reasoning for the first question")
+    ).toBeTruthy()
+    expect(
+      within(processes[0]).queryByText("Reasoning for the second question")
+    ).toBeNull()
+    expect(
+      within(processes[1]).getByText("Reasoning for the second question")
+    ).toBeTruthy()
+    expect(
+      within(processes[1]).queryByText("Reasoning for the first question")
+    ).toBeNull()
+  })
+
   test("stopping generation cancels the run on the backend", async () => {
     const agent = makeAgent()
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })

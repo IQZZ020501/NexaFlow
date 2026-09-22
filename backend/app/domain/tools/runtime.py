@@ -54,6 +54,29 @@ TOOL_INVOCATION_CLAIMABLE_STATUSES = (
 )
 
 
+def effective_tool_access_sources(
+    allowed_access_sources: tuple[str, ...] | list[str],
+) -> tuple[str, ...]:
+    """Treat public chat as an interactive extension of console access.
+
+    Older immutable Tool snapshots and existing workspace policies may only
+    record ``console``. Public chat has its own authenticated approval flow, so
+    console access also grants public access without widening machine-to-machine
+    API access.
+    """
+    sources = list(dict.fromkeys(allowed_access_sources))
+    if "console" in sources and "public" not in sources:
+        sources.append("public")
+    return tuple(sources)
+
+
+def tool_access_source_allowed(
+    allowed_access_sources: tuple[str, ...] | list[str],
+    access_source: str,
+) -> bool:
+    return access_source in effective_tool_access_sources(allowed_access_sources)
+
+
 def build_tool_snapshot(
     tool: Tool,
     source: ToolSource,
@@ -374,9 +397,11 @@ __all__ = [
     "TOOL_SAFE_EXTERNAL_EFFECTS",
     "TOOL_UNCERTAIN_EFFECTS",
     "build_tool_snapshot",
+    "effective_tool_access_sources",
     "exhausted_tool_invocation_terminal_state",
     "normalize_tool_arguments",
     "schema_validation_error_detail",
+    "tool_access_source_allowed",
     "tool_arguments_hash",
     "tool_input_size_limit",
     "tool_snapshot_from_payload",

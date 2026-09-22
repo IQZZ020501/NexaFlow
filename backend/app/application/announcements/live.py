@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -12,6 +13,8 @@ from app.ports.announcements import build_announcement_live_stream_reader
 
 if TYPE_CHECKING:
     from app.infra.config.settings import Settings
+
+MESSAGE_STREAM_LIFETIME_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,7 @@ async def stream_message_updates(
     workspace_id: str | None,
     global_after: str | None,
     workspace_after: str | None,
+    max_lifetime_seconds: float = MESSAGE_STREAM_LIFETIME_SECONDS,
 ) -> AsyncIterator[MessageStreamUpdate]:
     reader = build_announcement_live_stream_reader(
         settings,
@@ -43,12 +47,20 @@ async def stream_message_updates(
     )
     current_global_after = global_after
     current_workspace_after = workspace_after
+    deadline = asyncio.get_running_loop().time() + max_lifetime_seconds
     try:
         while True:
-            entries = await reader.read(
-                global_after=current_global_after,
-                workspace_after=current_workspace_after,
-            )
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                return
+            try:
+                async with asyncio.timeout(remaining):
+                    entries = await reader.read(
+                        global_after=current_global_after,
+                        workspace_after=current_workspace_after,
+                    )
+            except TimeoutError:
+                return
             if not reader.available:
                 yield MessageStreamUpdate(
                     kind="unavailable",

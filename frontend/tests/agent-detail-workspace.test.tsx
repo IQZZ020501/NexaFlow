@@ -13,6 +13,7 @@ import {
   collapsedProcessStatusKey,
   isNearScrollBottom,
   processTimeline,
+  splitAgentRunTimeline,
   unrenderedAgentToolCalls,
 } from "@/components/agents/agent-detail-workspace"
 import { stripAgentSourceLinks } from "@/components/agents/agent-source-references"
@@ -604,6 +605,39 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("First task completed")).toBeTruthy()
   })
 
+  test("keeps a queued follow-up below the response still being generated", () => {
+    const { container } = renderPage(
+      <Harness
+        activeView="settings"
+        runs={[
+          makeRun({
+            status: "running",
+            result: "First answer is still streaming",
+            session_inputs: [
+              {
+                sequence: 1,
+                run_id: "run-1",
+                input_id: "follow",
+                mode: "follow_up",
+                content: "Second question is queued",
+                status: "queued",
+                previous_answer: null,
+              },
+            ],
+          }),
+        ]}
+      />
+    )
+
+    const content = container.textContent ?? ""
+    expect(content.indexOf("First answer is still streaming")).toBeGreaterThan(
+      content.indexOf("Summarize the latest releases")
+    )
+    expect(content.indexOf("Second question is queued")).toBeGreaterThan(
+      content.indexOf("First answer is still streaming")
+    )
+  })
+
   test("shows the empty conversation state", () => {
     renderPage(<Harness activeView="settings" />)
     expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
@@ -843,8 +877,12 @@ describe("AgentDetailWorkspace preview", () => {
 
     renderPage(<Harness activeView="settings" runs={[run]} />)
 
-    expect(screen.getByRole("link", { name: "generated-image.png" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "预览：generated-image.png" })).toBeTruthy()
+    expect(
+      screen.getByRole("link", { name: "generated-image.png" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "预览：generated-image.png" })
+    ).toBeTruthy()
     expect(screen.queryByText(`${downloadUrl}/preview`)).toBeNull()
   })
 
@@ -1164,6 +1202,38 @@ describe("AgentDetailWorkspace preview", () => {
       />
     )
     expect(screen.getAllByText(/execute_sql/).length).toBeGreaterThan(0)
+  })
+
+  test("renders an approved call in place of its preparing thought", () => {
+    const run = makeRun({
+      status: "running",
+      result: "",
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "execute_sql",
+          status: "succeeded",
+          summary: "agent.preparing_tool_call",
+          call_id: "call-1",
+          tool_label: "",
+          tool_kind: "mcp",
+          server_name: "Database",
+          input: {},
+          output: null,
+          duration_ms: 0,
+        },
+      ],
+    })
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[run]}
+        toolCallsByRun={{ "run-1": [makeToolCall({ status: "approved" })] }}
+      />
+    )
+    expect(screen.getAllByText(/execute_sql/).length).toBeGreaterThan(0)
+    expect(screen.queryByText("正在准备工具调用")).toBeNull()
   })
 
   test("shows collapsed process status for approvals", async () => {
@@ -2068,6 +2138,49 @@ describe("AgentConversationUsersPanel", () => {
 })
 
 describe("AgentDetailWorkspace edge behavior", () => {
+  test("keeps tool retries in the first response until its completed turn", () => {
+    const event = (turn: number, summary: string): AgentRunEvent => ({
+      type: "thought",
+      turn,
+      tool_name: "",
+      status: "succeeded",
+      summary,
+      call_id: "",
+      tool_label: "",
+      tool_kind: "unknown",
+      server_name: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+    })
+    const run = makeRun({
+      events: [
+        event(1, "agent.answer_ready"),
+        event(2, "agent.tools_selected"),
+        event(3, "agent.answer_ready"),
+        event(4, "agent.analyzing"),
+      ],
+      session_inputs: [
+        {
+          sequence: 42,
+          run_id: "run-1",
+          input_id: "follow",
+          mode: "follow_up",
+          content: "Second question",
+          status: "applied",
+          previous_answer: "First answer",
+          previous_answer_turn: 3,
+        },
+      ],
+    })
+
+    expect(
+      splitAgentRunTimeline(run).map((segment) =>
+        segment.map(({ event }) => event.turn)
+      )
+    ).toEqual([[1, 2, 3], [4]])
+  })
+
   test("isNearScrollBottom compares the remaining scroll distance", () => {
     const near = { clientHeight: 400, scrollHeight: 440, scrollTop: 0 }
     expect(isNearScrollBottom(near)).toBe(true)
@@ -2214,6 +2327,40 @@ describe("AgentDetailWorkspace edge behavior", () => {
     ]
     const pending = unrenderedAgentToolCalls(timeline, calls)
     expect(pending.map((call) => call.call_id)).toEqual(["call-2"])
+  })
+
+  test("keeps an approved tool card until its tool event replaces the preparing thought", () => {
+    const call = makeToolCall({
+      call_id: "call-image",
+      tool_name: "generate_image",
+      status: "approved",
+    })
+    const preparing = {
+      type: "thought" as const,
+      turn: 1,
+      tool_name: "generate_image",
+      status: "succeeded" as const,
+      summary: "agent.preparing_tool_call",
+      call_id: "call-image",
+      tool_label: "",
+      tool_kind: "unknown" as const,
+      server_name: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+    }
+    expect(
+      unrenderedAgentToolCalls(
+        processTimeline(makeRun({ events: [preparing] })),
+        [call]
+      ).map((item) => item.call_id)
+    ).toEqual(["call-image"])
+    expect(
+      unrenderedAgentToolCalls(
+        processTimeline(makeRun({ events: [{ ...preparing, type: "tool" }] })),
+        [call]
+      )
+    ).toHaveLength(0)
   })
 
   test("collapsedProcessStatusKey covers the collapsed states", () => {

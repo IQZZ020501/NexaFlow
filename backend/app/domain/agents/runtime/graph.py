@@ -687,6 +687,7 @@ async def agent_node(
         "harness": state.get("harness", {}),
     }
     if runtime.context.session is not None:
+        previous_input_ids = set(result.get("harness", {}).get("input_ids", []))
         result, continued = await runtime.context.session.apply_inputs(
             {**state, **result}, settled=True
         )
@@ -695,7 +696,22 @@ async def agent_node(
                 raise AgentRunnerError(
                     "Queued session input exceeds the Agent turn budget."
                 )
-            await callback.answer_reset()
+            applied_inputs = [
+                {
+                    "sequence": item["id"],
+                    "input_id": item["input_id"],
+                    "mode": item["mode"],
+                    "content": item["content"],
+                    **(
+                        {"previous_answer_turn": item["previous_answer_turn"]}
+                        if "previous_answer_turn" in item
+                        else {}
+                    ),
+                }
+                for item in result.get("harness", {}).get("inputs", [])
+                if item.get("id") not in previous_input_ids and item.get("input_id")
+            ]
+            await callback.answer_reset(applied_inputs=applied_inputs)
     return result
 
 

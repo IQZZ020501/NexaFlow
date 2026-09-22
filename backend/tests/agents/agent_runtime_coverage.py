@@ -3219,14 +3219,17 @@ async def assert_approval_paths(
             status: str,
             *,
             approved_by: str | None = None,
+            target_run=None,
+            access_source: str = "console",
         ) -> ToolInvocation:
+            invocation_run = target_run or canonical_run
             invocation = ToolInvocation(
                 workspace_id=workspace_id,
                 origin="agent",
-                root_run_id=canonical_run.root_run_id,
-                run_id=canonical_run.id,
+                root_run_id=invocation_run.root_run_id,
+                run_id=invocation_run.id,
                 execution_user_id=actor.id,
-                access_source="console",
+                access_source=access_source,
                 tool_id=live_tool.id,
                 tool_version_id=live_tool.current_version_id,
                 invocation_id=f"1:{call_id}",
@@ -3242,8 +3245,9 @@ async def assert_approval_paths(
             )
             return await tool_repository.save_tool_invocation(db, invocation)
 
-        # non-console runs cannot require interactive approval (399); use a
-        # fresh agent with no tool bindings so the tool preflight passes.
+        # Public chat supports interactive approval, while machine-to-machine
+        # API runs remain non-interactive. Use a fresh agent with no tool
+        # bindings so setup is independent of the canonical Tool fixture.
         tool_less_agent = Agent(
             workspace_id=workspace_id,
             name="Tool-less Agent",
@@ -3264,10 +3268,41 @@ async def assert_approval_paths(
             access_source="public",
             consumer_id="canonical-consumer",
         )
+        public_invocation = await make_invocation(
+            "call-public",
+            "awaiting_approval",
+            target_run=public_run,
+            access_source="public",
+        )
+        resolved_public = await agent_runs.resolve_agent_run_tool_approval(
+            db,
+            public_run,
+            "call-public",
+            actor,
+            settings,
+            approve=True,
+        )
+        assert resolved_public.id == public_run.id
+        stored_public = await tool_repository.get_tool_invocation_by_id(
+            db,
+            public_invocation.id,
+        )
+        assert stored_public is not None and stored_public.status == "approved"
+
+        api_run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            tool_less_agent.id,
+            "api canonical",
+            actor,
+            "admin",
+            access_source="api",
+            consumer_id="canonical-api-consumer",
+        )
         try:
             await agent_runs.resolve_agent_run_tool_approval(
                 db,
-                public_run,
+                api_run,
                 "call-anything",
                 actor,
                 settings,
@@ -3277,7 +3312,7 @@ async def assert_approval_paths(
             assert exc.status_code == 409
             assert "interactive approval" in exc.detail
         else:
-            raise AssertionError("Non-console run requested interactive approval.")
+            raise AssertionError("API run requested interactive approval.")
 
         # no matching invocation (420)
         try:

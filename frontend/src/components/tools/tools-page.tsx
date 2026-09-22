@@ -324,6 +324,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     locale,
     displayToolName
   )
+  const builtinTools = filteredTools.filter(
+    (tool) => tool.kind === "builtin" && !isBuiltinSkillTool(tool.function_name)
+  )
   const movableToolIds = filteredTools
     .filter((tool) => tool.can_manage)
     .map((tool) => tool.id)
@@ -802,12 +805,42 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           </Button>
         </div>
       ) : isSkillsTab ? (
-        query && builtinSkillTools.length === 0 && filteredWorkspaceSkills.length === 0 ? (
+        query && builtinSkillTools.length === 0 && builtinTools.length === 0 && filteredWorkspaceSkills.length === 0 ? (
           <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
             {t("没有匹配的工具")}
           </div>
         ) : (
           <div className="space-y-8">
+            {builtinTools.length ? (
+              <section aria-labelledby="builtin-tools-heading">
+                <div className="mb-3 flex items-center gap-2">
+                  <h2 id="builtin-tools-heading" className="text-sm font-semibold">
+                    {t("内置工具")}
+                  </h2>
+                  <Badge variant="secondary">{builtinTools.length}</Badge>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                  {builtinTools.map((tool) => (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      className="flex min-h-40 min-w-0 flex-col rounded-md border p-3 text-left transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => void openDetail(tool)}
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted/70">
+                          <BuiltinToolIcon functionName={tool.function_name} className="size-5" />
+                        </span>
+                        <span className="truncate text-sm font-semibold">{displayToolName(tool)}</span>
+                      </span>
+                      <span className="mt-3 line-clamp-2 text-sm text-muted-foreground">
+                        {displayToolDescription(tool) || t("暂无描述")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
             <section aria-labelledby="builtin-skills-heading">
               <div className="mb-3 flex items-center gap-2">
                 <h2
@@ -1038,6 +1071,20 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                   <Badge variant="outline">
                                     {t(permissionLabel(tool.permission))}
                                   </Badge>
+                                ) : null}
+                                {tool.kind === "mcp" && tool.policy_mode ? (
+                                  <Badge variant="outline">
+                                    {t(
+                                      tool.policy_mode === "read_only"
+                                        ? "只读自动执行"
+                                        : tool.policy_mode === "disabled"
+                                          ? "工具调用已禁用"
+                                          : "每次调用前审批"
+                                    )}
+                                  </Badge>
+                                ) : null}
+                                {tool.kind === "mcp" && tool.availability === "unavailable" && tool.status === "active" && source?.status === "active" ? (
+                                  <Badge variant="outline">{t("上游未发现该工具")}</Badge>
                                 ) : null}
                                 {source?.status === "disabled" ? (
                             <Badge variant="outline">{t("来源已禁用")}</Badge>

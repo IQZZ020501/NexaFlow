@@ -48,6 +48,7 @@ ToolCatalogRow = tuple[
     ToolSource,
     ToolVersion | None,
     ToolDraft | None,
+    ToolPolicy | None,
     ResourcePermission | None,
 ]
 ToolCatalogDetailRow = tuple[
