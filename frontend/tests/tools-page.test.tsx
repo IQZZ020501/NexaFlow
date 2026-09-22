@@ -113,6 +113,17 @@ beforeEach(() => {
     return Promise.resolve(jsonResponse([], 200))
   }) as typeof fetch
 })
+function sourceGroup(name: string) {
+  const toggle = screen.getByRole("button", {
+    name: new RegExp(`(展开|收起) ${name} 的工具`),
+  })
+  return toggle.closest("[data-slot='mcp-source-group']") as HTMLElement
+}
+
+function expandSource(name: string) {
+  fireEvent.click(screen.getByRole("button", { name: `展开 ${name} 的工具` }))
+}
+
 describe("ToolsPage", () => {
   test("searches workspace Skills independently of built-in tools and edits the pinned files", async () => {
     const skill: AgentSkill = {
@@ -385,6 +396,81 @@ describe("ToolsPage", () => {
     )
   })
 
+  test("batch manages MCP tools while their sources stay folded", async () => {
+    const requests: unknown[] = []
+    const remote = tool({
+      id: "tool-mcp",
+      kind: "mcp",
+      function_name: "remote_lookup",
+      display_name: "Remote lookup",
+      source: {
+        id: "source-mcp",
+        name: "Remote tools",
+        kind: "mcp",
+        transport: "streamable_http",
+      },
+    })
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      const url = String(input)
+      if (url.includes("/resource-folders/resources/move-batch")) {
+        requests.push(JSON.parse(String(init?.body)))
+        return new Response(null, { status: 204 })
+      }
+      if (url.includes("/resource-folders")) {
+        return jsonResponse([
+          {
+            id: "folder-1",
+            workspace_id: "ws-1",
+            resource_type: "tool",
+            parent_id: null,
+            name: "生产工具",
+            created_by_user_id: "u-1",
+            created_at: "2026-09-05T00:00:00Z",
+            updated_at: "2026-09-05T00:00:00Z",
+          },
+        ])
+      }
+      if (url.includes("/tool-sources?")) {
+        return jsonResponse([source({ tool_count: 1 })])
+      }
+      if (url.includes("/tools?")) return jsonResponse([remote])
+      return jsonResponse([])
+    }) as typeof fetch
+
+    renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expect(screen.queryByText("Remote lookup")).toBeNull()
+
+    // A folded source must not hide batch management.
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+    const sourceToggle = screen.getByRole("button", {
+      name: "收起 Remote tools 的工具",
+    })
+    expect(sourceToggle.hasAttribute("disabled")).toBe(true)
+
+    // Batch mode unfolds the source so its tools can be selected.
+    const card = (await screen.findByText("Remote lookup")).closest("article")!
+    fireEvent.click(card)
+    expect(screen.getByText("已选择 1 项")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
+    const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "生产工具" }))
+
+    await waitFor(() =>
+      expect(requests).toEqual([
+        {
+          resource_type: "tool",
+          resource_ids: ["tool-mcp"],
+          folder_id: "folder-1",
+        },
+      ])
+    )
+  })
+
   test("filters the current catalog with Skills, MCP, and Python tabs", async () => {
     const builtinTool = tool({
       id: "tool-skill",
@@ -450,6 +536,9 @@ describe("ToolsPage", () => {
     expect(screen.queryByText("当前时间")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "MCP" }))
+    await screen.findAllByText("Remote tools")
+    expect(screen.queryByText("Remote lookup")).toBeNull()
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
     expect(screen.queryByText("PDF")).toBeNull()
@@ -534,6 +623,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     const card = (await screen.findByText("Retired lookup")).closest("article")!
     expect(within(card).getByText("每次调用前审批")).toBeTruthy()
     expect(within(card).getByText("上游未发现该工具")).toBeTruthy()
@@ -623,12 +714,14 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage />)
     await screen.findByText("Empty MCP")
     expect(screen.queryByText("还没有工具")).toBeNull()
-    const emptySourceCard = screen.getByText("Empty MCP").closest("article")!
-    expect(within(emptySourceCard).getByText("工具")).toBeTruthy()
-    expect(within(emptySourceCard).getByText("0")).toBeTruthy()
+    const emptySourceCard = sourceGroup("Empty MCP")
+    expect(within(emptySourceCard).getByText("0 个工具")).toBeTruthy()
     expect(
       screen.getByRole("button", { name: "管理来源 Empty MCP" })
     ).toBeTruthy()
+    // A source without tools still opens an explicit empty state.
+    expandSource("Empty MCP")
+    expect(within(emptySourceCard).getByText("没有匹配的工具")).toBeTruthy()
   })
 
   test("lets an MCP owner choose safe policies without exposing disable", async () => {
@@ -664,6 +757,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -727,6 +822,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -970,9 +1067,9 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findByText("SSE tools")
-    const sseCard = screen.getByText("SSE tools").closest("article")!
+    const sseCard = sourceGroup("SSE tools")
     expect(within(sseCard).getByText("SSE")).toBeTruthy()
-    const stdioCard = screen.getByText("Local stdio").closest("article")!
+    const stdioCard = sourceGroup("Local stdio")
     expect(
       within(stdioCard).getByText(/stdio 命令：npx mcp-server/)
     ).toBeTruthy()
@@ -1080,6 +1177,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const card = screen.getByText("Remote lookup").closest("article")!
     expect(within(card).getByText("来源已禁用")).toBeTruthy()
@@ -1122,6 +1221,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1175,6 +1276,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1183,10 +1286,10 @@ describe("ToolsPage", () => {
     fireEvent.click(manage)
     fireEvent.click(await screen.findByRole("menuitem", { name: "刷新工具" }))
     await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
-    const sourceCard = screen
-      .getAllByText("Remote tools")[0]
-      .closest("article")!
-    await waitFor(() => expect(within(sourceCard).getByText("7")).toBeTruthy())
+    const sourceCard = sourceGroup("Remote tools")
+    await waitFor(() =>
+      expect(within(sourceCard).getByText("7 个工具")).toBeTruthy()
+    )
 
     // a failing refresh keeps the card and reports the error
     refreshFails = true
@@ -1196,7 +1299,7 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(notifications).toContainEqual(["error", "refresh failed"])
     )
-    expect(within(sourceCard).getByText("7")).toBeTruthy()
+    expect(within(sourceCard).getByText("7 个工具")).toBeTruthy()
   }, 20000)
 
   test("disables an MCP source with confirmation", async () => {
@@ -1233,7 +1336,7 @@ describe("ToolsPage", () => {
       )
     )
     await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
-    const sourceCard = screen.getByText("Remote tools").closest("article")!
+    const sourceCard = sourceGroup("Remote tools")
     await waitFor(() =>
       expect(within(sourceCard).getByText("已停用")).toBeTruthy()
     )
@@ -1271,7 +1374,7 @@ describe("ToolsPage", () => {
     fireEvent.click(manage)
     fireEvent.click(await screen.findByRole("menuitem", { name: "启用" }))
     await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
-    const sourceCard = screen.getByText("Remote tools").closest("article")!
+    const sourceCard = sourceGroup("Remote tools")
     await waitFor(() =>
       expect(within(sourceCard).getByText("已启用")).toBeTruthy()
     )
@@ -1383,9 +1486,7 @@ describe("ToolsPage", () => {
     await waitFor(() =>
       expect(notifications).toContainEqual(["error", "cannot disable"])
     )
-    const sourceCard = screen
-      .getAllByText("Remote tools")[0]
-      .closest("article")!
+    const sourceCard = sourceGroup("Remote tools")
     expect(within(sourceCard).getByText("已启用")).toBeTruthy()
 
     fireEvent.pointerDown(manage)
@@ -1577,6 +1678,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1654,6 +1757,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1793,6 +1898,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理来源 Remote tools",
@@ -1842,6 +1949,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
+    await screen.findAllByText("Remote tools")
+    expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",

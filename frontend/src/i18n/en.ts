@@ -1522,6 +1522,8 @@ export const en = {
   表达式: "Expression",
   展开: "Expand",
   收起: "Collapse",
+  "展开 {name} 的工具": "Show tools from {name}",
+  "收起 {name} 的工具": "Hide tools from {name}",
   拖动基本信息: "Move basic information",
   等于: "Equals",
   不等于: "Does not equal",
