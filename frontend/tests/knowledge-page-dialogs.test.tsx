@@ -649,7 +649,9 @@ describe("MarkdownContent", () => {
           'def greet(name):\n    return f"Hello {name}"',
         ])
       )
-      expect(screen.getByText("已复制")).toBeTruthy()
+      await waitFor(() =>
+        expect(screen.queryByText("已复制") !== null).toBe(true)
+      )
     } finally {
       Object.defineProperty(navigator, "clipboard", {
         value: originalClipboard,
