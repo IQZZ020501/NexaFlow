@@ -69,6 +69,41 @@ def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
     assert worker_pool_for_platform("win32") == "solo"
     assert worker_pool_for_platform("linux") == "prefork"
 
+
+def test_worker_command_consumes_all_application_queues() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parents[2] / "scripts/worker.py"
+    spec = importlib.util.spec_from_file_location("nexaflow_worker_script", path)
+    assert spec is not None and spec.loader is not None
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    command = worker.worker_command(["--autoscale=10,0"])
+    assert "--beat" in command
+    assert "--queues=celery,agents-legacy,agents-v2" in command
+    assert command[-1] == "--autoscale=10,0"
+
+
+def test_celery_registers_one_task_per_job_type() -> None:
+    from app.infra.queue.celery import celery_app
+
+    celery_app.loader.import_default_modules()
+    registered = {name for name in celery_app.tasks if name.startswith("app.")}
+    assert registered == {
+        "app.agents.run",
+        "app.email.send",
+        "app.knowledge.run_task",
+        "app.maintenance.run",
+        "app.storage.cleanup",
+        "app.tools.run",
+    }
+    assert {
+        entry["task"] for entry in celery_app.conf.beat_schedule.values()
+    } == {"app.maintenance.run"}
+
+
 def test_celery_nonfork_pool_runs_tasks_concurrently() -> None:
     import threading
 
@@ -108,6 +143,16 @@ def test_worker_database_rejects_in_memory_sqlite() -> None:
         return
     raise AssertionError("expected in-memory SQLite worker database to be rejected")
 
+
+def test_worker_execution_profile_matches_test_client() -> None:
+    from tests.support import settings
+
+    from app.infra.config.settings import Settings
+    from app.infra.execution.profile import execution_profile
+
+    # Eager workers load Settings.from_env(), while TestClient uses settings().
+    assert execution_profile(Settings.from_env()) == execution_profile(settings())
+
 def test_windows_event_loop_policy_is_selector_based() -> None:
     import sys
 
@@ -130,8 +175,11 @@ def test_windows_event_loop_policy_is_selector_based() -> None:
 def main() -> None:
     test_coverage_runner_times_out_suites()
     test_celery_worker_pool_is_fork_safe_without_prefork()
+    test_worker_command_consumes_all_application_queues()
+    test_celery_registers_one_task_per_job_type()
     test_celery_nonfork_pool_runs_tasks_concurrently()
     test_worker_database_rejects_in_memory_sqlite()
+    test_worker_execution_profile_matches_test_client()
     test_windows_event_loop_policy_is_selector_based()
     print("INFRA_UNIT_OK")
 

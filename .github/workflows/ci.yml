@@ -59,6 +59,9 @@ jobs:
       - name: Run unit tests
         run: |
           uv run python -m tests.agents.unit
+          uv run python -m tests.agents.harness
+          uv run python -m tests.agent_skills.unit
+          uv run python -m tests.execution.unit
           uv run python -m tests.knowledge.unit
           uv run python -m tests.tools.unit
           uv run python -m tests.workflows.unit
@@ -99,34 +102,26 @@ jobs:
       - name: Run agent tests
         run: uv run python -m tests.agents.agents
 
+      - name: Run Skill package and invocation tests
+        run: uv run python -m tests.agent_skills.api
+
+      - name: Run MCP transport tests
+        run: uv run python -m tests.infra.mcp_transports
+
       - name: Run workflow tests
         run: uv run python -m tests.workflows.workflows
 
-      - name: Run sandbox self-check
+      - name: Run OpenSandbox execution image checks
         working-directory: .
         run: |
-          docker build --file deploy/dockerfiles/app.Dockerfile --target sandbox-runtime --tag nexaflow-sandbox-ci .
-          docker run --rm --network none --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0 \
-            --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \
-            --tmpfs /run/sandbox:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=0,gid=65533 \
-            --entrypoint python nexaflow-sandbox-ci -m sandbox.self_check
-          docker run --rm --network none --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=0711,uid=0,gid=0 \
-            --tmpfs /dev/shm:rw,noexec,nosuid,nodev,size=16m,mode=0700,uid=0,gid=0 \
-            --tmpfs /run/sandbox:rw,noexec,nosuid,nodev,size=1m,mode=0750,uid=0,gid=65533 \
-            --entrypoint python nexaflow-sandbox-ci -m sandbox.tests
-          docker run --rm --network bridge \
-            --cap-drop ALL \
-            --cap-add CHOWN --cap-add KILL --cap-add SETGID --cap-add SETPCAP \
-            --cap-add SETUID --cap-add NET_ADMIN --cap-add SYS_ADMIN --cap-add SYS_CHROOT \
-            --security-opt apparmor=unconfined \
-            --security-opt no-new-privileges:true \
-            --env ENVIRONMENT=production \
-            --env SANDBOX_NETWORK=public \
-            --env DATABASE_URL=postgresql://sandbox-must-not-see-this \
-            --entrypoint python nexaflow-sandbox-ci \
-            /opt/sandbox/worker.py --sandbox-self-check
+          docker build --file deploy/dockerfiles/app.Dockerfile --target sandbox-runtime --tag nexaflow/execution:ci .
+          docker run --rm --network none --read-only --user 65532:65532 \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --memory 512m --pids-limit 96 \
+            --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+            --env DATABASE_URL=must-not-be-forwarded \
+            --entrypoint /opt/nexaflow/.venv/bin/python nexaflow/execution:ci \
+            -I /opt/nexaflow/self_check.py
 
       - name: Run architecture guard
         run: uv run python -m tests.infra.architecture

@@ -50,6 +50,10 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spec } from "@/components/ui/spec"
 import { copyText } from "@/lib/clipboard"
+import {
+  mergeAgentSessionInputReceipt,
+  sessionInputsAfterAnswerHandoff,
+} from "@/lib/agent-session-handoff"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { cn } from "@/lib/utils"
 import {
@@ -65,6 +69,7 @@ import { useSession } from "@/contexts/session-context"
 import { languageLocales } from "@/i18n"
 import {
   cancelAgentRun,
+  sendAgentSessionInput,
   compareLiveStreamIds,
   createAgent,
   deleteAgent,
@@ -84,6 +89,7 @@ import {
   uploadAgentFiles,
   updateAgent,
   type Agent,
+  type AgentApprovalMode,
   type AgentInteractionConfig,
   type AgentPermission,
   type AppType,
@@ -501,6 +507,10 @@ export function mergeAgentRunStreamEvent(
               ...run,
               status: run.status === "queued" ? "running" : run.status,
               result: "",
+              session_inputs: sessionInputsAfterAnswerHandoff(
+                run,
+                streamEvent.applied_inputs
+              ),
               live_stream_epoch:
                 streamEvent.stream_epoch ?? run.live_stream_epoch,
               live_stream_cursor:
@@ -528,6 +538,31 @@ export function mergeAgentRunStreamEvent(
         : run
     )
   }
+  if (streamEvent.type === "session_input") {
+    return runs.map((run) => {
+      if (run.id !== runId) return run
+      const existing = (run.session_inputs ?? []).find(
+        (input) => input.input_id === streamEvent.input_id
+      )
+      const sessionInput = {
+        input_id: streamEvent.input_id,
+        mode: "follow_up" as const,
+        content: streamEvent.content,
+        sequence: streamEvent.sequence,
+        run_id: runId,
+        status: existing?.status ?? ("queued" as const),
+        previous_answer: existing?.previous_answer ?? null,
+      }
+      return {
+        ...run,
+        session_inputs: existing
+          ? (run.session_inputs ?? []).map((input) =>
+              input.input_id === streamEvent.input_id ? sessionInput : input
+            )
+          : [...(run.session_inputs ?? []), sessionInput],
+      }
+    })
+  }
   if (streamEvent.type === "complete") {
     // Terminal events end the loading state even when the embedded run
     // snapshot is not yet terminal (e.g. an interrupted run the backend
@@ -552,9 +587,9 @@ export function mergeAgentRunStreamEvent(
         : run
     )
   }
-  return runs.map((run) =>
-    run.id === streamEvent.run.id ? streamEvent.run : run
-  )
+  // NDJSON is decoded at runtime, so ignore unknown future events instead of
+  // assuming every unrecognized payload contains a Run snapshot.
+  return runs
 }
 
 export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
@@ -629,6 +664,8 @@ export function AgentsPage({
     null
   )
   const [question, setQuestion] = React.useState("")
+  const [approvalMode, setApprovalMode] =
+    React.useState<AgentApprovalMode>("ask_risky")
   const [agentFiles, setAgentFiles] = React.useState<File[]>([])
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null
@@ -636,6 +673,12 @@ export function AgentsPage({
   const [askAbortController, setAskAbortController] =
     React.useState<AbortController | null>(null)
   const liveRunIdRef = React.useRef<string | null>(null)
+  const sessionInputRef = React.useRef<{
+    input_id: string
+    mode: "follow_up"
+    content: string
+  } | null>(null)
+  const sessionInputBusyRef = React.useRef(false)
   const [form, setForm] = React.useState<AgentFormState>(EMPTY_FORM)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
@@ -679,6 +722,7 @@ export function AgentsPage({
   const permissionRequestRef = React.useRef(0)
   const toolCatalogRequestRef = React.useRef(0)
   const workflowAgentsRequestRef = React.useRef(0)
+  const workspaceDataRequestRef = React.useRef(0)
   const agentsLoadingMoreRef = React.useRef(false)
   const activeConversationIdRef = React.useRef<string | null>(
     initialConversationId
@@ -871,6 +915,7 @@ export function AgentsPage({
   )
 
   const loadWorkspaceData = React.useCallback(async () => {
+    const requestId = ++workspaceDataRequestRef.current
     permissionRequestRef.current += 1
     setPermissionAgent(null)
     setPermissionMembers([])
@@ -893,17 +938,23 @@ export function AgentsPage({
     setIsLoading(true)
     setHasLoadedWorkspaceData(false)
     try {
-      const [listedAgents, nextModels, nextKnowledgeBases, nextMcpServers, nextAgentSkills] =
-        await Promise.all([
-          listAgents(token, selectedWorkspaceId, {
-            limit: CARD_BATCH_SIZE,
-            offset: 0,
-          }),
-          listRegisteredModels(token, selectedWorkspaceId),
-          listKnowledgeBases(token, selectedWorkspaceId),
-          listMcpServers(token, selectedWorkspaceId),
-          listAgentSkills(token, selectedWorkspaceId).catch(() => []),
-        ])
+      const [
+        listedAgents,
+        nextModels,
+        nextKnowledgeBases,
+        nextMcpServers,
+        nextAgentSkills,
+      ] = await Promise.all([
+        listAgents(token, selectedWorkspaceId, {
+          limit: CARD_BATCH_SIZE,
+          offset: 0,
+        }),
+        listRegisteredModels(token, selectedWorkspaceId),
+        listKnowledgeBases(token, selectedWorkspaceId),
+        listMcpServers(token, selectedWorkspaceId),
+        listAgentSkills(token, selectedWorkspaceId).catch(() => []),
+      ])
+      if (requestId !== workspaceDataRequestRef.current) return
       setAgents(listedAgents)
       setListedAgentsCount(listedAgents.length)
       setAgentsHasMore(listedAgents.length === CARD_BATCH_SIZE)
@@ -912,6 +963,7 @@ export function AgentsPage({
       setAgentSkills(nextAgentSkills)
       setMcpServers(nextMcpServers)
     } catch (error) {
+      if (requestId !== workspaceDataRequestRef.current) return
       setAgents([])
       setModels([])
       setKnowledgeBases([])
@@ -920,8 +972,10 @@ export function AgentsPage({
       setListedAgentsCount(0)
       reportError(error)
     } finally {
-      setIsLoading(false)
-      setHasLoadedWorkspaceData(true)
+      if (requestId === workspaceDataRequestRef.current) {
+        setIsLoading(false)
+        setHasLoadedWorkspaceData(true)
+      }
     }
   }, [reportError, selectedWorkspaceId, token])
 
@@ -934,11 +988,13 @@ export function AgentsPage({
     }
     agentsLoadingMoreRef.current = true
     setIsAgentsLoadingMore(true)
+    const requestId = workspaceDataRequestRef.current
     try {
       const batch = await listAgents(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
         offset: listedAgentsCount,
       })
+      if (requestId !== workspaceDataRequestRef.current) return
       setAgents((current) => {
         const existingIds = new Set(current.map((agent) => agent.id))
         return [
@@ -949,6 +1005,7 @@ export function AgentsPage({
       setListedAgentsCount((current) => current + batch.length)
       setAgentsHasMore(batch.length === CARD_BATCH_SIZE)
     } catch (error) {
+      if (requestId !== workspaceDataRequestRef.current) return
       reportError(error)
     } finally {
       agentsLoadingMoreRef.current = false
@@ -1334,7 +1391,9 @@ export function AgentsPage({
         const toolPayload =
           form.appType === "workflow" ? { tools: [] } : { tools: form.tools }
         const skillPayload =
-          form.appType === "workflow" ? { skills: [] } : { skills: form.skills ?? [] }
+          form.appType === "workflow"
+            ? { skills: [] }
+            : { skills: form.skills ?? [] }
         const updated = await updateAgent(token, selectedWorkspaceId, form.id, {
           ...payload,
           ...toolPayload,
@@ -1352,7 +1411,7 @@ export function AgentsPage({
         const created = await createAgent(token, selectedWorkspaceId, {
           ...payload,
           tools: form.appType === "workflow" ? [] : form.tools,
-          skills: form.appType === "workflow" ? [] : form.skills ?? [],
+          skills: form.appType === "workflow" ? [] : (form.skills ?? []),
         })
         setAgents((current) => [created, ...current])
         setForm(formFromAgent(created))
@@ -1578,8 +1637,64 @@ export function AgentsPage({
     }
   }
 
+  async function handleFollowUp() {
+    const runId = liveRunIdRef.current
+    const content = question.trim()
+    if (
+      !token ||
+      !selectedWorkspaceId ||
+      !selectedAgent ||
+      !runId ||
+      !content ||
+      agentFiles.length ||
+      sessionInputBusyRef.current
+    )
+      return
+    const previous = sessionInputRef.current
+    const input =
+      previous?.content === content
+        ? previous
+        : { input_id: crypto.randomUUID(), mode: "follow_up" as const, content }
+    sessionInputRef.current = input
+    sessionInputBusyRef.current = true
+    try {
+      const queued = await sendAgentSessionInput(
+        token,
+        selectedWorkspaceId,
+        selectedAgent.id,
+        runId,
+        input
+      )
+      if (liveRunIdRef.current !== runId) return
+      setRuns((current) =>
+        current.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                session_inputs: mergeAgentSessionInputReceipt(
+                  run.session_inputs,
+                  queued
+                ),
+              }
+            : run
+        )
+      )
+      setQuestion((current) => (current.trim() === content ? "" : current))
+      sessionInputRef.current = null
+      notify("success", t("后续任务已排队"))
+    } catch (error) {
+      if (liveRunIdRef.current === runId) reportError(error)
+    } finally {
+      sessionInputBusyRef.current = false
+    }
+  }
+
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (isAsking) {
+      await handleFollowUp()
+      return
+    }
     const nextQuestion = question.trim()
     if (
       !token ||
@@ -1700,7 +1815,8 @@ export function AgentsPage({
         },
         askAbortController.signal,
         conversationId,
-        uploaded.map((item) => item.id)
+        uploaded.map((item) => item.id),
+        approvalMode
       )
       setAgentFiles([])
     } catch (error) {
@@ -2053,6 +2169,8 @@ export function AgentsPage({
             resolvingCallId={resolvingCallId}
             question={question}
             setQuestion={setQuestion}
+            approvalMode={approvalMode}
+            onApprovalModeChange={setApprovalMode}
             files={agentFiles}
             setFiles={setAgentFiles}
             pendingQuestion={pendingQuestion}

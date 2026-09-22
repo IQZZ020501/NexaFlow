@@ -128,11 +128,14 @@ def _memory_run_query():
         AgentRunState.status,
         AgentRunState.result,
         AgentRunState.context_summary,
+        AgentRunState.checkpoint["harness"]["inputs"].label("input_history"),
     ).join(AgentRunState, AgentRunState.run_id == AgentRun.id)
 
 
 def _to_memory_run_entity(row: Any) -> AgentRunEntity:
-    return AgentRunEntity(**dict(row))
+    values = dict(row)
+    inputs = values.pop("input_history", None) or []
+    return AgentRunEntity(**values, checkpoint={"harness": {"inputs": inputs}})
 
 
 

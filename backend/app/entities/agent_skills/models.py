@@ -37,7 +37,7 @@ class AgentSkillVersion:
     workspace_id: str = ""
     skill_id: str = ""
     version_number: int = 1
-    schema_version: int = 1
+    schema_version: int = 2
     name: str = ""
     description: str = ""
     definition_snapshot: dict[str, Any] = field(default_factory=dict)

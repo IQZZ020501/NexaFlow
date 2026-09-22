@@ -21,6 +21,7 @@ from app.domain.agent_skills.contracts import (
     build_agent_skill_snapshot,
     validate_agent_skill_version,
 )
+from app.domain.agent_skills.packages import canonical_skill_files
 from app.domain.audit.services import record_audit_log
 from app.domain.knowledge.service import (
     get_knowledge_base,
@@ -54,6 +55,19 @@ from app.schemas.agent_skills.contracts import (
 from app.schemas.identity.contracts import user_to_response
 
 MAX_AGENT_SKILLS = 4
+
+
+def _canonical_definition(name: str, description: str, definition: dict) -> dict:
+    try:
+        return {
+            **definition,
+            "instructions": definition["instructions"].strip(),
+            "files": canonical_skill_files(
+                name, description, definition["instructions"], definition.get("files", {})
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -223,7 +237,11 @@ async def create_agent_skill(
         workspace_id=workspace_id,
         name=normalize_name(payload.name),
         description=payload.description.strip(),
-        draft_definition=payload.definition.model_dump(mode="json"),
+        draft_definition=_canonical_definition(
+            normalize_name(payload.name),
+            payload.description.strip(),
+            payload.definition.model_dump(mode="json"),
+        ),
         created_by_user_id=actor.id,
     )
     try:
@@ -268,6 +286,10 @@ async def update_agent_skill(
         skill.description = payload.description.strip()
     if payload.definition is not None:
         skill.draft_definition = payload.definition.model_dump(mode="json")
+    if any(value is not None for value in (payload.name, payload.description, payload.definition)):
+        skill.draft_definition = _canonical_definition(
+            skill.name, skill.description, skill.draft_definition
+        )
     if payload.status is not None:
         skill.status = payload.status
     try:

@@ -43,7 +43,11 @@
 
 ### mcp/
 
-- `client.py` — 统一 MCP 客户端（`MultiTransportMcpClient`）：Streamable HTTP、legacy SSE、加密持久化的 stdio 配置连接；HTTP URL/重定向/代理环境防护、stdio 运行时校验、工具发现/调用、结果截断与超时。
+- `client.py` — 统一 MCP 客户端（`MultiTransportMcpClient`）：Streamable HTTP、legacy SSE、加密 stdio 配置；HTTP DNS/重定向/代理防护，stdio 经 execution port 在 OpenSandbox 内执行；完整保留 content/structuredContent/_meta，超过上界明确失败而非截断为无效 JSON。
+
+### app/adapters/execution/
+
+- `opensandbox.py` — execution port 的私有实现：受信镜像/控制面、资源/TTL、有效网络策略核对、只读 staging、固定非 root 命令、有界结果读取、取消与 destroy；不依赖业务 domain/schema/application，无宿主回退。
 
 ### identity/
 

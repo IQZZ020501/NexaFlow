@@ -37,6 +37,11 @@ CATALOG = {
         ],
         "EMBEDDING": [
             {
+                "name": "BAAI/bge-m3",
+                "desc": "BGE-M3 multilingual embedding model",
+                "model_type": "EMBEDDING"
+            },
+            {
                 "name": "Qwen/Qwen3-Embedding-8B",
                 "desc": "Qwen3 8B embedding model",
                 "model_type": "EMBEDDING"

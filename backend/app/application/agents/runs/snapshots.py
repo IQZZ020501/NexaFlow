@@ -40,6 +40,8 @@ class AgentRuntimePolicy:
     # retrieval no longer enforces dedicated call or round caps.
     max_knowledge_calls: int
     max_knowledge_rounds: int
+    # Retained in frozen snapshots for backward compatibility; Agent execution
+    # no longer enforces a cumulative model-token cap.
     max_model_tokens: int
 
     @classmethod

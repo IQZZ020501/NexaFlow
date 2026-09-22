@@ -323,41 +323,7 @@ class RuntimeModelStub:
                 ],
             )
         if completion.content:
-            inline_grounding = any(
-                "Single-pass grounding protocol" in str(
-                    message.get("content", "")
-                    if isinstance(message, dict)
-                    else getattr(message, "content", "")
-                )
-                for message in messages
-            )
-            evidence_ids: list[str] = []
-            for message in messages:
-                if getattr(message, "type", "") != "tool":
-                    continue
-                try:
-                    output = json.loads(str(getattr(message, "content", "") or "{}"))
-                except ValueError:
-                    continue
-                evidence_ids.extend(
-                    str(hit["chunk_id"])
-                    for hit in output.get("hits", [])
-                    if isinstance(hit, dict) and hit.get("chunk_id")
-                )
-            manifest = (
-                "<nexaflow-grounding>"
-                + json.dumps(
-                    {
-                        "status": "grounded" if evidence_ids else "skipped",
-                        "evidence_ids": evidence_ids,
-                        "reason_codes": [],
-                    }
-                )
-                + "</nexaflow-grounding>\n"
-                if inline_grounding
-                else ""
-            )
-            yield AIMessageChunk(content=f"{manifest}{completion.content}")
+            yield AIMessageChunk(content=completion.content)
         yield AIMessageChunk(
             content="",
             response_metadata={"finish_reason": completion.finish_reason},
@@ -831,9 +797,10 @@ def assert_graph_error_branches() -> None:
             max_tool_calls=12,
         )
         assert overflow_result.content == "Answer after stopping the extra searches."
-        assert (
-            "tool-call budget is exhausted"
-            in overflow_provider.requests[0][-1].content
+        assert len(overflow_result.events) == 3
+        assert all(event["status"] == "failed" for event in overflow_result.events[1:])
+        assert "tool-call budget is exhausted" in str(
+            overflow_provider.requests[0][-1].content
         )
 
     asyncio.run(run_tool_budget_finalization())
@@ -1085,14 +1052,14 @@ def assert_graph_error_branches() -> None:
 
     asyncio.run(run_unknown_tool())
 
-    async def run_knowledge_stop() -> None:
+    async def run_knowledge_ignores_legacy_stop() -> None:
         events: list[dict] = []
 
         async def record(event: dict) -> None:
             events.append(event)
 
         async def retrieve(_arguments: str) -> AgentToolResult:
-            raise AssertionError("knowledge tool must not execute")
+            return AgentToolResult(content="normal tool result", summary="Knowledge plugin ran.")
 
         knowledge_tool = create_agent_tool(
             name="search_knowledge",
@@ -1124,11 +1091,11 @@ def assert_graph_error_branches() -> None:
         ]
         assert any(
             event["call_id"] == "call-knowledge"
-            and event["summary"] == "Knowledge search stopped after no new evidence."
+            and event["summary"] == "Knowledge plugin ran."
             for event in tool_events
         )
 
-    asyncio.run(run_knowledge_stop())
+    asyncio.run(run_knowledge_ignores_legacy_stop())
 
 
 def create_echo_tool() -> Any:
@@ -1190,8 +1157,8 @@ def assert_executor_checkpoint_paths() -> None:
             grounding_mode="agentic",
         )
         assert result.content == "draft answer"
-        assert result.grounding_status == "unavailable"
-        assert result.grounding_meta["error"] == "legacy_post_generation_checkpoint"
+        assert not hasattr(result, "grounding_status")
+        assert not hasattr(result, "grounding_meta")
         assert provider.requests == []
 
     asyncio.run(run_grounding_resume())
@@ -1217,7 +1184,9 @@ def assert_executor_checkpoint_paths() -> None:
         assert saved[0]["turn"] == 0
         restored = executor_module.deserialize_agent_state(saved[-1])
         assert restored["final_answer"] == "final"
-        assert restored["grounding_status"] == "skipped"
+        assert "grounding_status" not in restored
+        assert "evidence_packets" not in restored
+        assert "knowledge_call_count" not in restored
 
     asyncio.run(run_with_checkpoints())
 
@@ -2439,14 +2408,16 @@ async def assert_mcp_tool_paths(
             captured["tool_name"] = tool_name
             captured["arguments"] = arguments
             captured["idempotency_key"] = idempotency_key
-            return json.dumps({"release": "approved"}), False
+            from app.ports.mcp import McpCallResult
+
+            return McpCallResult(content=[], structured_content={"release": "approved"})
 
         agent_tools.call_mcp_tool = fake_call
         agent_tools.set_agent_tool_idempotency_key("idem-1")
         result = await tool.ainvoke({"topic": "release"})
         assert not result.is_error
         assert captured["idempotency_key"] == "idem-1"
-        assert result.output == {"release": "approved"}
+        assert result.output == {"content": [], "structuredContent": {"release": "approved"}, "isError": False}
 
         # call without idempotency key (413)
         agent_tools.set_agent_tool_idempotency_key(None)
@@ -2481,7 +2452,7 @@ async def assert_mcp_tool_paths(
         result = await read_tool.ainvoke({"topic": "release"})
         assert result.is_error and result.outcome_uncertain is False
 
-        # non-JSON output is truncated to string (424-425)
+        # Text blocks stay intact in the typed MCP envelope.
         async def text_call(
             connection,
             _settings,
@@ -2490,11 +2461,13 @@ async def assert_mcp_tool_paths(
             *,
             idempotency_key=None,
         ):
-            return "x" * 9000, False
+            from app.ports.mcp import McpCallResult
+
+            return McpCallResult(content=[{"type": "text", "text": "x" * 9000}])
 
         agent_tools.call_mcp_tool = text_call
         result = await tool.ainvoke({"topic": "release"})
-        assert result.output == "x" * 4000
+        assert result.output == {"content": [{"type": "text", "text": "x" * 9000}], "isError": False}
 
         # tool no longer resolvable (385)
         ghost = ResolvedMcpTool(
@@ -3246,14 +3219,17 @@ async def assert_approval_paths(
             status: str,
             *,
             approved_by: str | None = None,
+            target_run=None,
+            access_source: str = "console",
         ) -> ToolInvocation:
+            invocation_run = target_run or canonical_run
             invocation = ToolInvocation(
                 workspace_id=workspace_id,
                 origin="agent",
-                root_run_id=canonical_run.root_run_id,
-                run_id=canonical_run.id,
+                root_run_id=invocation_run.root_run_id,
+                run_id=invocation_run.id,
                 execution_user_id=actor.id,
-                access_source="console",
+                access_source=access_source,
                 tool_id=live_tool.id,
                 tool_version_id=live_tool.current_version_id,
                 invocation_id=f"1:{call_id}",
@@ -3269,8 +3245,9 @@ async def assert_approval_paths(
             )
             return await tool_repository.save_tool_invocation(db, invocation)
 
-        # non-console runs cannot require interactive approval (399); use a
-        # fresh agent with no tool bindings so the tool preflight passes.
+        # Public chat supports interactive approval, while machine-to-machine
+        # API runs remain non-interactive. Use a fresh agent with no tool
+        # bindings so setup is independent of the canonical Tool fixture.
         tool_less_agent = Agent(
             workspace_id=workspace_id,
             name="Tool-less Agent",
@@ -3291,10 +3268,41 @@ async def assert_approval_paths(
             access_source="public",
             consumer_id="canonical-consumer",
         )
+        public_invocation = await make_invocation(
+            "call-public",
+            "awaiting_approval",
+            target_run=public_run,
+            access_source="public",
+        )
+        resolved_public = await agent_runs.resolve_agent_run_tool_approval(
+            db,
+            public_run,
+            "call-public",
+            actor,
+            settings,
+            approve=True,
+        )
+        assert resolved_public.id == public_run.id
+        stored_public = await tool_repository.get_tool_invocation_by_id(
+            db,
+            public_invocation.id,
+        )
+        assert stored_public is not None and stored_public.status == "approved"
+
+        api_run, _ = await agent_runs.prepare_agent_run(
+            db,
+            workspace_id,
+            tool_less_agent.id,
+            "api canonical",
+            actor,
+            "admin",
+            access_source="api",
+            consumer_id="canonical-api-consumer",
+        )
         try:
             await agent_runs.resolve_agent_run_tool_approval(
                 db,
-                public_run,
+                api_run,
                 "call-anything",
                 actor,
                 settings,
@@ -3304,7 +3312,7 @@ async def assert_approval_paths(
             assert exc.status_code == 409
             assert "interactive approval" in exc.detail
         else:
-            raise AssertionError("Non-console run requested interactive approval.")
+            raise AssertionError("API run requested interactive approval.")
 
         # no matching invocation (420)
         try:
@@ -3852,11 +3860,10 @@ async def assert_durable_execution_paths(
     assert current.status == "succeeded"
     assert current.result == "Happy answer."
     assert current.grounding_status == "skipped"
-    assert current.grounding_meta["evidence_packet_count"] == 0
-    assert current.grounding_meta["mode"] == "inline"
+    assert current.grounding_meta == {}
     assert current.checkpoint_phase == "done"
     assert current.checkpoint.get("final_answer") == "Happy answer."
-    assert any(
+    assert not any(
         event.event.get("type") == "process"
         and str(event.event.get("event", {}).get("summary", "")).startswith(
             "agent.grounding_"
@@ -3947,7 +3954,9 @@ async def assert_durable_execution_paths(
         *,
         idempotency_key=None,
     ):
-        return json.dumps({"release": "approved"}), False
+        from app.ports.mcp import McpCallResult
+
+        return McpCallResult(content=[], structured_content={"release": "approved"})
 
     tool_adapters.call_mcp_tool = fake_mcp_call
     try:
@@ -4154,7 +4163,9 @@ async def assert_durable_execution_paths(
         idempotency_key=None,
     ):
         injected_calls.append((tool_name, arguments))
-        return injected, False
+        from app.ports.mcp import McpCallResult
+
+        return McpCallResult(content=[{"type": "text", "text": injected}])
 
     tool_adapters.call_mcp_tool = injecting_mcp_call
     try:
@@ -4192,7 +4203,10 @@ async def assert_durable_execution_paths(
             if message_to_dict(message)["type"] == "tool"
         ]
         assert tool_messages, "injected output must arrive as a tool message"
-        assert any(injected in str(item["data"]) for item in tool_messages)
+        assert any(
+            json.loads(item["data"]["content"])["content"][0]["text"] == injected
+            for item in tool_messages
+        )
         # The forbidden provider was never invoked: only the legitimate read
         # tool ran, exactly once.
         assert injected_calls == [

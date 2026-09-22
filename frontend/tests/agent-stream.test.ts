@@ -106,6 +106,7 @@ describe("streamAgentRun", () => {
     expect(JSON.parse(createBody)).toEqual({
       goal: "question",
       conversation_id: "conversation-1",
+      approval_mode: "ask_risky",
     })
     expect(events.map((event) => event.type)).toEqual([
       "run",

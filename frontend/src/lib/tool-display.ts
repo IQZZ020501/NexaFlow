@@ -19,12 +19,20 @@ type ToolOutputEvent = {
 
 const ARTIFACT_URL_PATTERN =
   /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+/g
+const IMAGE_PREVIEW_LINK_LINE =
+  /^[ \t]*(?:[-*+•]|\d+[.)])?[ \t]*(?:[*_]{1,2})?(?:预览链接|预览地址|preview (?:link|url))[ \t]*[：:][ \t]*(?:[*_]{1,2})?[^\r\n]*(?:\r?\n|$)/gim
+const IMAGE_PREVIEW_URL_LINE =
+  /^[ \t]*(?:[-*+•]|\d+[.)])?[ \t]*(?:[*_]{1,2})?(?:图片)?预览[ \t]*[：:][ \t]*(?:[*_]{1,2})?[^\r\n]*(?:\r?\n|$)/gim
+const UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const GENERATED_IMAGE_FILENAME = "generated-image.png"
 const ARTIFACT_TOOL_FUNCTIONS = new Set([
   "create_artifact",
   "documents_skill",
   "pdf_skill",
   "pptx_skill",
   "spreadsheets_skill",
+  "generate_image",
 ])
 
 function artifactLink(filename: string, downloadUrl: string) {
@@ -75,6 +83,7 @@ export function builtinToolDisplayName(functionName: string, t: TFunction) {
   if (functionName === "pdf_skill") return t("PDF")
   if (functionName === "pptx_skill") return t("PPTX")
   if (functionName === "spreadsheets_skill") return t("Excel")
+  if (functionName === "generate_image") return t("图片生成")
   return null
 }
 
@@ -83,7 +92,14 @@ export function withArtifactDownloadLinks(
   events: readonly ToolOutputEvent[]
 ) {
   let value = content
-  const artifacts: Array<{ filename: string; downloadUrl: string }> = []
+  const artifacts: Array<{
+    filename: string
+    sourceFilename: string
+    downloadUrl: string
+    sourceDownloadUrl: string
+    previewUrl?: string
+    sourcePreviewUrl?: string
+  }> = []
   const filenames = new Set<string>()
   const linkedUrls = new Set<string>()
 
@@ -97,36 +113,82 @@ export function withArtifactDownloadLinks(
     )
       continue
     const output = event.output as Record<string, unknown>
-    const filename =
+    const sourceFilename =
       typeof output.filename === "string" ? output.filename.trim() : ""
-    const downloadUrl =
+    const sourceDownloadUrl =
       typeof output.download_url === "string" ? output.download_url.trim() : ""
+    const isGeneratedImage = event.tool_name === "generate_image"
+    const filename = isGeneratedImage
+      ? GENERATED_IMAGE_FILENAME
+      : sourceFilename
     if (
-      !filename ||
-      !downloadUrl.startsWith("/api/v1/artifacts/") ||
-      filenames.has(filename) ||
-      linkedUrls.has(downloadUrl)
+      !sourceFilename ||
+      !sourceDownloadUrl.startsWith("/api/v1/artifacts/") ||
+      (!isGeneratedImage && filenames.has(filename)) ||
+      linkedUrls.has(sourceDownloadUrl)
     )
       continue
+    const artifactId =
+      typeof output.artifact_id === "string" ? output.artifact_id.trim() : ""
+    const downloadUrl =
+      isGeneratedImage && UUID_V4_PATTERN.test(artifactId)
+        ? `/api/v1/artifacts/${artifactId}`
+        : sourceDownloadUrl
     filenames.add(filename)
-    linkedUrls.add(downloadUrl)
-    artifacts.push({ filename, downloadUrl })
+    linkedUrls.add(sourceDownloadUrl)
+    const sourcePreviewUrl =
+      isGeneratedImage && output.preview_url === `${sourceDownloadUrl}/preview`
+        ? output.preview_url
+        : undefined
+    const previewUrl = sourcePreviewUrl ? `${downloadUrl}/preview` : undefined
+    artifacts.push({
+      filename,
+      sourceFilename,
+      downloadUrl,
+      sourceDownloadUrl,
+      previewUrl,
+      sourcePreviewUrl,
+    })
   }
 
-  for (const { filename, downloadUrl } of artifacts.reverse()) {
+  for (const {
+    filename,
+    sourceFilename,
+    downloadUrl,
+    sourceDownloadUrl,
+    previewUrl,
+    sourcePreviewUrl,
+  } of artifacts.reverse()) {
+    if (sourceFilename !== filename) {
+      value = value.replaceAll(sourceFilename, filename)
+    }
+    if (previewUrl) {
+      value = value.replace(IMAGE_PREVIEW_LINK_LINE, "")
+      value = value.replace(IMAGE_PREVIEW_URL_LINE, (line) =>
+        line.includes(previewUrl) ||
+        (sourcePreviewUrl && line.includes(sourcePreviewUrl))
+          ? ""
+          : line
+      )
+      if (sourcePreviewUrl && sourcePreviewUrl !== previewUrl) {
+        value = value.replaceAll(sourcePreviewUrl, previewUrl)
+      }
+    }
     const link = artifactLink(filename, downloadUrl)
-    const escapedUrl = downloadUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const artifactUrl = `(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?${escapedUrl}`
-    const wasMentioned =
-      new RegExp(artifactUrl).test(value) || value.includes(filename)
-    value = value.replace(
-      new RegExp(
-        `\\[[^\\]\\n]*\\]\\s*\\(\\s*${artifactUrl}\\s*\\)|<${artifactUrl}>|\\x60${artifactUrl}\\x60|${artifactUrl}`,
-        "g"
-      ),
-      link
-    )
-    if (wasMentioned && !value.includes(`](${downloadUrl})`)) {
+    let wasMentioned = value.includes(filename)
+    for (const referencedUrl of new Set([sourceDownloadUrl, downloadUrl])) {
+      const escapedUrl = referencedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const artifactUrl = `(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?${escapedUrl}(?!/preview)`
+      wasMentioned ||= new RegExp(artifactUrl).test(value)
+      value = value.replace(
+        new RegExp(
+          `\\[[^\\]\\n]*\\]\\s*\\(\\s*${artifactUrl}\\s*\\)|<${artifactUrl}>|\\x60${artifactUrl}\\x60|${artifactUrl}`,
+          "g"
+        ),
+        link
+      )
+    }
+    if ((wasMentioned || previewUrl) && !value.includes(`](${downloadUrl})`)) {
       value = `${value.trimEnd()}\n\n${link}`
     }
   }
@@ -134,7 +196,7 @@ export function withArtifactDownloadLinks(
   if (artifacts.length === 1) {
     const { filename, downloadUrl } = artifacts[0]!
     const artifactUrl =
-      "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+"
+      "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+(?![A-Za-z0-9._~-]|/preview)"
     value = value.replace(
       new RegExp(
         `\\[[^\\]\\n]*\\]\\s*\\(\\s*${artifactUrl}\\s*\\)|<${artifactUrl}>|\\x60${artifactUrl}\\x60|${artifactUrl}`,
@@ -142,6 +204,17 @@ export function withArtifactDownloadLinks(
       ),
       artifactLink(filename, downloadUrl)
     )
+  }
+  for (const { filename, previewUrl } of artifacts) {
+    if (!previewUrl) continue
+    const hasEmbeddedPreview = [
+      ...value.matchAll(
+        /!\[[^\]\r\n]*\]\((\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+\/preview)\)/g
+      ),
+    ].some((match) => match[1] === previewUrl)
+    if (!hasEmbeddedPreview) {
+      value = `${value.trimEnd()}\n\n![${filename.replace(/[\x5B\x5D]/g, "\\$&")}](${previewUrl})`
+    }
   }
   return value
 }
@@ -185,6 +258,9 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
   }
   if (tool.function_name === "spreadsheets_skill") {
     return t("创建 Excel 工作簿。")
+  }
+  if (tool.function_name === "generate_image") {
+    return t("使用工作空间的生图模型生成图片；每次调用需要确认。")
   }
   return tool.description
 }

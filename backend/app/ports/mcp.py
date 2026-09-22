@@ -34,11 +34,29 @@ class McpConnection:
     bearer_token: str | None = None
     stdio_config: McpStdioConfig | None = None
     network_policy: Literal["public_only", "deployment"] = "public_only"
+    workspace_id: str | None = None
 
 
 @dataclass(frozen=True)
 class McpDiscovery:
     tools: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class McpCallResult:
+    content: list[dict[str, Any]]
+    structured_content: Any | None = None
+    is_error: bool = False
+    meta: dict[str, Any] | None = None
+
+    def payload(self) -> dict[str, Any]:
+        """Keep MCP content blocks even when structuredContent is also present."""
+        value = {"content": self.content, "isError": self.is_error}
+        if self.structured_content is not None:
+            value["structuredContent"] = self.structured_content
+        if self.meta is not None:
+            value["_meta"] = self.meta
+        return value
 
 
 class McpClient(Protocol):
@@ -53,7 +71,7 @@ class McpClient(Protocol):
         tool_name: str,
         arguments: dict[str, Any],
         idempotency_key: str | None = None,
-    ) -> tuple[str, bool]: ...
+    ) -> McpCallResult: ...
 
 
 def normalize_mcp_url(value: str, *, preserve_trailing_slash: bool = False) -> str:
@@ -97,7 +115,7 @@ async def call_mcp_tool(
     tool_name: str,
     arguments: dict[str, Any],
     idempotency_key: str | None = None,
-) -> tuple[str, bool]:
+) -> McpCallResult:
     return await build_mcp_client(settings).call_mcp_tool(
         connection,
         tool_name,
@@ -110,6 +128,7 @@ __all__ = [
     "MAX_MCP_TOOL_PAGES",
     "McpClient",
     "McpClientError",
+    "McpCallResult",
     "McpConnection",
     "McpDiscovery",
     "McpTransport",

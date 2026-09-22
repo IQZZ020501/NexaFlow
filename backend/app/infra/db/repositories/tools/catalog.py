@@ -48,6 +48,7 @@ ToolCatalogRow = tuple[
     ToolSource,
     ToolVersion | None,
     ToolDraft | None,
+    ToolPolicy | None,
     ResourcePermission | None,
 ]
 ToolCatalogDetailRow = tuple[
@@ -259,7 +260,7 @@ async def list_tool_catalog_rows(
 ) -> list[ToolCatalogRow]:
     grant = ResourcePermissionOrm
     statement = (
-        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, ToolDraftOrm, grant)
+        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, ToolDraftOrm, ToolPolicyOrm, grant)
         .join(
             ToolSourceOrm,
             and_(
@@ -280,6 +281,13 @@ async def list_tool_catalog_rows(
             and_(
                 ToolDraftOrm.workspace_id == ToolOrm.workspace_id,
                 ToolDraftOrm.tool_id == ToolOrm.id,
+            ),
+        )
+        .outerjoin(
+            ToolPolicyOrm,
+            and_(
+                ToolPolicyOrm.workspace_id == ToolOrm.workspace_id,
+                ToolPolicyOrm.tool_id == ToolOrm.id,
             ),
         )
         .outerjoin(
@@ -327,11 +335,12 @@ async def list_tool_catalog_rows(
             to_entity(ToolSource, source),
             to_entity(ToolVersion, version) if version is not None else None,
             to_entity(ToolDraft, draft) if draft is not None else None,
+            to_entity(ToolPolicy, policy) if policy is not None else None,
             to_entity(ResourcePermission, permission)
             if permission is not None
             else None,
         )
-        for tool, source, version, draft, permission in rows.all()
+        for tool, source, version, draft, policy, permission in rows.all()
     ]
 
 async def get_tool_catalog_detail_row(

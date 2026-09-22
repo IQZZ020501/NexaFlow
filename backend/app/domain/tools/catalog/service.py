@@ -58,23 +58,17 @@ BUILTIN_SKILL_DEFINITIONS = (
         "pptx_skill",
         "PPTX Skill",
         (
-            "Create a new 16:9 PPTX from audience-facing structured slides. "
-            "Plan around the audience and purpose, give each slide one takeaway, "
-            "keep the cover minimal, and for teaching or training decks normally "
-            "use 8-12 content slides that show the problem, worked example, "
-            "reasoning/process, practice, and takeaway instead of copying a lesson "
-            "plan line-by-line. Do not use more than two consecutive bullets slides; "
-            "use steps for procedures and hero/two-column for worked examples. Vary "
-            "the supported layouts across section, bullets, two-column, icons, table, "
-            "hero, stats, steps, and quote, and put external sources in speaker notes. Keep "
-            "central arithmetic expressions in the slide copy so the renderer can "
-            "surface simple multiplication examples in an editable visual region. Keep "
-            "titles and body text at readable sizes; the renderer rejects "
-            "overlong slide titles. Create a coherent visual identity with the "
-            "declarative theme and optional per-slide style fields; built-in "
-            "templates are fallbacks, not the primary design choice. It supports "
-            "native icons, tables, click-triggered entrance animations, and page "
-            "transitions; it does not edit existing decks or fetch external media."
+            "Create a new 16:9 PPTX with the offline open-kimi-ppt PPTD renderer. "
+            "For new decks, choose the audience scenario and one of 30 named design "
+            "systems, then compose every page on the 960x540 canvas with editable "
+            "text, shapes, lines, and optional inline images. Include the cover as "
+            "the first free-form slide, give each page one takeaway, vary composition "
+            "instead of repeating a template, and put sources in speaker notes. Use "
+            "PPTD animations intentionally: normally 1-3 groups per page with "
+            "onClick, withPrevious, or afterPrevious triggers. The renderer supports "
+            "22 entrance, emphasis, exit, and motion-path effects plus page fades. "
+            "Existing layout-based calls remain compatible. It does not edit existing "
+            "decks, access the network, or fetch remote media."
         ),
     ),
     (
@@ -88,6 +82,7 @@ BUILTIN_SKILL_DEFINITIONS = (
 INTERNAL_BUILTIN_FUNCTION_NAMES = (
     "create_artifact",
     "inline_python",
+    "install_skill_dependencies",
 )
 
 
@@ -264,6 +259,285 @@ def _pptx_input_schema() -> dict[str, Any]:
             "presentation theme and use it only when the narrative needs contrast."
         ),
     }
+    bounds = {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "prefixItems": [
+            {"type": "number", "minimum": 0, "maximum": 960},
+            {"type": "number", "minimum": 0, "maximum": 540},
+            {"type": "number", "exclusiveMinimum": 0, "maximum": 960},
+            {"type": "number", "exclusiveMinimum": 0, "maximum": 540},
+        ],
+        "items": False,
+        "description": "PPTD canvas geometry [x, y, width, height] on a 960x540 page.",
+    }
+    color = {
+        "type": "string",
+        "pattern": r"^(#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?|\$[A-Za-z][A-Za-z0-9_-]{0,31})$",
+    }
+    border = {
+        "type": "object",
+        "properties": {
+            "style": {"type": "string", "enum": ["solid", "dash", "dot"]},
+            "width": {"type": "number", "minimum": 0, "maximum": 24},
+            "color": color,
+        },
+        "additionalProperties": False,
+    }
+    shadow = {
+        "type": "object",
+        "properties": {
+            "blur": {"type": "number", "minimum": 0, "maximum": 40},
+            "color": color,
+            "offset": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number", "minimum": -80, "maximum": 80},
+            },
+        },
+        "required": ["blur", "color"],
+        "additionalProperties": False,
+    }
+    solid_fill = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "solid"},
+            "color": color,
+        },
+        "required": ["type", "color"],
+        "additionalProperties": False,
+    }
+    gradient_fill = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "gradient"},
+            "gradientType": {"type": "string", "enum": ["linear", "radial"]},
+            "angle": {"type": "number", "minimum": 0, "exclusiveMaximum": 360},
+            "stops": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "position": {"type": "number", "minimum": 0, "maximum": 1},
+                        "color": color,
+                    },
+                    "required": ["position", "color"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["type", "gradientType", "stops"],
+        "additionalProperties": False,
+    }
+    image_fit = {
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string", "enum": ["fill", "contain", "cover"]}
+        },
+        "required": ["mode"],
+        "additionalProperties": False,
+    }
+    image_fill = {
+        "type": "object",
+        "properties": {
+            "type": {"const": "image"},
+            "src": {
+                "type": "string",
+                "pattern": r"^media/[A-Za-z0-9][A-Za-z0-9._-]{0,95}\.(png|jpg|jpeg|gif)$",
+            },
+            "fit": image_fit,
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["type", "src"],
+        "additionalProperties": False,
+    }
+    fill = {"anyOf": [solid_fill, gradient_fill, image_fill]}
+    base_element_properties = {
+        "elementId": {
+            "type": "string",
+            "pattern": r"^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+        },
+        "bounds": bounds,
+        "rotation": {"type": "number", "minimum": -360, "maximum": 360},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+    }
+    text_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "text"},
+            "content": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12_000,
+                        "description": (
+                            "Plain text or PPTD rich text using p/span/li tags. "
+                            "Use one element per visual text region."
+                        ),
+                    },
+                    "style": {
+                        "type": "string",
+                        "enum": ["$title", "$body", "$label"],
+                    },
+                    "color": color,
+                    "fontSize": {"type": "number", "minimum": 8, "maximum": 120},
+                    "fontFamily": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "bold": {"type": "boolean"},
+                    "italic": {"type": "boolean"},
+                    "backgroundColor": color,
+                    "lineHeight": {"type": "number", "minimum": 0.8, "maximum": 3},
+                    "letterSpacing": {"type": "number", "minimum": -5, "maximum": 20},
+                    "wrap": {"type": "boolean"},
+                    "align": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "prefixItems": [
+                            {
+                                "type": "string",
+                                "enum": ["left", "center", "right", "justify", "distributed"],
+                            },
+                            {"type": "string", "enum": ["top", "middle", "bottom"]},
+                        ],
+                        "items": False,
+                    },
+                    "shadow": shadow,
+                },
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["elementId", "elementType", "bounds", "content"],
+        "additionalProperties": False,
+    }
+    shape_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "shape"},
+            "shapeName": {
+                "type": "string",
+                "enum": [
+                    "rect",
+                    "roundRect",
+                    "ellipse",
+                    "triangle",
+                    "diamond",
+                    "homePlate",
+                    "chevron",
+                    "donut",
+                    "star5",
+                    "rightArrow",
+                    "wedgeRectCallout",
+                    "bracePair",
+                ],
+            },
+            "adjustments": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {"type": "number", "minimum": -100_000, "maximum": 200_000},
+            },
+            "fill": fill,
+            "border": border,
+            "shadow": shadow,
+        },
+        "required": ["elementId", "elementType", "bounds", "shapeName"],
+        "additionalProperties": False,
+    }
+    line_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "line"},
+            "viewBox": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 10_000},
+            },
+            "points": {"type": "string", "minLength": 7, "maxLength": 2_000},
+            "curve": {"type": "string", "enum": ["sharp", "round", "smooth"]},
+            "border": border,
+        },
+        "required": ["elementId", "elementType", "bounds", "viewBox", "points"],
+        "additionalProperties": False,
+    }
+    image_element = {
+        "type": "object",
+        "properties": {
+            **base_element_properties,
+            "elementType": {"const": "image"},
+            "src": image_fill["properties"]["src"],
+            "fit": image_fit,
+            "border": border,
+            "shadow": shadow,
+        },
+        "required": ["elementId", "elementType", "bounds", "src"],
+        "additionalProperties": False,
+    }
+    animation = {
+        "type": "object",
+        "properties": {
+            "elementId": {
+                "type": "string",
+                "pattern": r"^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            },
+            "effect": {
+                "type": "string",
+                "enum": [
+                    "appear",
+                    "fade-in",
+                    "fly-in",
+                    "zoom-in",
+                    "wipe-in",
+                    "float-in",
+                    "peek-in",
+                    "rise-in",
+                    "pulse",
+                    "grow-shrink",
+                    "spin",
+                    "teeter",
+                    "fill-color",
+                    "transparency",
+                    "color-pulse",
+                    "disappear",
+                    "fade-out",
+                    "fly-out",
+                    "zoom-out",
+                    "wipe-out",
+                    "float-out",
+                    "motion-path",
+                ],
+            },
+            "trigger": {
+                "type": "string",
+                "enum": ["onClick", "withPrevious", "afterPrevious"],
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["up", "down", "left", "right"],
+            },
+            "durationMs": {"type": "integer", "minimum": 1, "maximum": 30_000},
+            "delayMs": {"type": "integer", "minimum": 0, "maximum": 30_000},
+            "easing": {
+                "type": "string",
+                "enum": ["linear", "ease-in", "ease-out", "ease-in-out"],
+            },
+            "repeat": {"type": "integer", "minimum": 1, "maximum": 20},
+            "path": {"type": "string", "minLength": 5, "maxLength": 2_000},
+            "color": color,
+            "amount": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+        "required": ["elementId", "effect"],
+        "additionalProperties": False,
+    }
     slide = {
         "type": "object",
         "properties": {
@@ -352,12 +626,43 @@ def _pptx_input_schema() -> dict[str, Any]:
                 ),
             },
             "style": slide_style,
+            "page_type": {
+                "type": "string",
+                "enum": ["cover", "table_of_contents", "chapter", "content", "final"],
+                "description": "Semantic page role for a free-form PPTD slide.",
+            },
+            "background": fill,
+            "elements": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 80,
+                "items": {
+                    "anyOf": [text_element, shape_element, line_element, image_element]
+                },
+                "description": (
+                    "Free-form PPTD elements in back-to-front layer order. Use the "
+                    "960x540 canvas and keep every element inside it."
+                ),
+            },
+            "animations": {
+                "type": "array",
+                "maxItems": 24,
+                "items": animation,
+                "description": (
+                    "PPTD animation sequence. Keep to 1-3 groups per page and use "
+                    "onClick/withPrevious/afterPrevious deliberately."
+                ),
+            },
         },
-        "required": ["layout", "title"],
+        "anyOf": [
+            {"required": ["layout", "title"]},
+            {"required": ["elements"]},
+        ],
         "additionalProperties": False,
         "description": (
-            "Provide only the content field used by the selected layout: subtitle, "
-            "bullets, left/right, items, table, stats, steps, quote, or source."
+            "Use either one legacy layout plus its content field, or free-form PPTD "
+            "elements plus optional background/animations. Do not mix the two modes "
+            "within one deck."
         ),
     }
     return {
@@ -373,6 +678,65 @@ def _pptx_input_schema() -> dict[str, Any]:
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 240,
+            },
+            "scenario": {
+                "type": "string",
+                "enum": [
+                    "analysis-decision",
+                    "business-plan",
+                    "management-report",
+                    "academic-research",
+                    "education-training",
+                    "tech-engineering",
+                    "brand-creative",
+                ],
+                "description": (
+                    "Narrative pattern for a PPTD deck. Defaults to management-report."
+                ),
+            },
+            "design_system": {
+                "type": "string",
+                "enum": [
+                    "apricot-white-brief",
+                    "indigo-due-diligence",
+                    "marine-blue-research",
+                    "moss-green-transformation",
+                    "pine-green-strategy",
+                    "red-black-growth",
+                    "black-gold-ledger",
+                    "ebony-ledger",
+                    "honey-orange-memo",
+                    "lake-blue-memo",
+                    "prospect-annual",
+                    "rice-paper-annual",
+                    "blue-flame-brand",
+                    "electric-violet-business",
+                    "moon-white-imagery",
+                    "sky-blue-wayfinding",
+                    "warm-clay-works",
+                    "warm-jade-annual-report",
+                    "aqua-charity-report",
+                    "cream-collage",
+                    "pine-soot-pictorial",
+                    "silk-yellow-magazine",
+                    "silver-gray-luxury-magazine",
+                    "travel-green-handbook",
+                    "blue-line-courseware",
+                    "deep-blue-atlas",
+                    "paper-white-courseware",
+                    "pastel-derivation",
+                    "teal-green-academic-defense",
+                    "wine-red-data",
+                ],
+                "description": (
+                    "Named open-kimi-ppt visual system. Defaults to blue-line-courseware; "
+                    "choose one that matches the audience instead of repeating one style."
+                ),
+            },
+            "page_transition": {
+                "type": "string",
+                "enum": ["fade", "none"],
+                "description": "Deck-wide page transition for PPTD slides; defaults to fade.",
             },
             "template": {
                 "type": "string",
@@ -473,6 +837,30 @@ def _pptx_input_schema() -> dict[str, Any]:
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 100,
+            },
+            "media": {
+                "type": "array",
+                "maxItems": 24,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {
+                            "type": "string",
+                            "pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\.(png|jpg|jpeg|gif)$",
+                        },
+                        "content_base64": {
+                            "type": "string",
+                            "minLength": 4,
+                            "maxLength": 2_800_000,
+                        },
+                    },
+                    "required": ["filename", "content_base64"],
+                    "additionalProperties": False,
+                },
+                "description": (
+                    "Optional inline local images for PPTD pages. Reference each as "
+                    "media/<filename>; remote URLs are rejected. Total decoded media is 4 MiB."
+                ),
             },
             "slides": {
                 "type": "array",
@@ -806,6 +1194,7 @@ class ToolCatalogItem:
     source: ToolSource
     version: ToolVersion | None
     draft: ToolDraft | None
+    policy: ToolPolicy | None
     access: ToolAccess
     permission: ToolPermissionLabel | None
 
@@ -914,7 +1303,7 @@ async def list_tool_catalog(
         excluded_builtin_function_names=INTERNAL_BUILTIN_FUNCTION_NAMES,
     )
     items: list[ToolCatalogItem] = []
-    for tool, source, version, draft, grant in rows:
+    for tool, source, version, draft, policy, grant in rows:
         authorization = evaluate_tool_authorization(
             tool,
             actor,
@@ -927,6 +1316,7 @@ async def list_tool_catalog(
                 source=source,
                 version=version,
                 draft=draft,
+                policy=policy,
                 access=authorization.access,
                 permission=authorization.permission,
             )
@@ -1173,6 +1563,171 @@ def build_inline_python_tool(
     )
 
 
+def build_skill_script_tool(
+    workspace_id: str, created_at: datetime | None = None
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:run_skill_script")
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "version_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            "path": {"type": "string", "minLength": 1, "maxLength": 255},
+            "inputs": {"type": "object"},
+            "filename": {"type": "string", "maxLength": 255},
+        },
+        "required": ["version_id", "path", "inputs"],
+        "additionalProperties": False,
+    }
+    description = (
+        "Execute a .py or .js script from an authorized, pinned Skill package in an isolated OpenSandbox. "
+        "Load the Skill first. Scripts receive JSON inputs on stdin, package files under NEXAFLOW_SKILL_DIR, "
+        "and may write a file to NEXAFLOW_OUTPUT_PATH when filename is supplied. Network is denied."
+    )
+    execution_spec = {"builtin": "skill_script"}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "run_skill_script",
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": None,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=source_id,
+            kind="builtin",
+            stable_key="run_skill_script",
+            function_name="run_skill_script",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Skill script",
+            description=description,
+            input_schema=input_schema,
+            output_schema=None,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=["console", "public", "api"],
+            workflow_callable=False,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
+def build_skill_dependency_installer_tool(
+    workspace_id: str, created_at: datetime | None = None
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    tool_id = stable_catalog_id(
+        f"tool:{workspace_id}:builtin:install_skill_dependencies"
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "version_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            "manager": {"type": "string", "enum": ["python", "node"]},
+            "packages": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 3, "maxLength": 255},
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": True,
+            },
+        },
+        "required": ["version_id", "manager", "packages"],
+        "additionalProperties": False,
+    }
+    description = (
+        "Install exact-version Python or Node dependencies for one authorized, "
+        "pinned Skill in this Agent Run's isolated OpenSandbox. This call always "
+        "requires user approval. Use Python package==version or Node package@version; "
+        "URLs, paths, ranges, tags, lifecycle scripts, source builds, and host installs "
+        "are denied. After approval, retry run_skill_script."
+    )
+    execution_spec = {"builtin": "skill_dependency_install"}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "install_skill_dependencies",
+            "description": description,
+            "input_schema": input_schema,
+            "output_schema": None,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=source_id,
+            kind="builtin",
+            stable_key="install_skill_dependencies",
+            function_name="install_skill_dependencies",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Install Skill dependencies",
+            description=description,
+            input_schema=input_schema,
+            output_schema=None,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="each_call",
+            effect="external_write",
+            allowed_access_sources=["console", "public"],
+            workflow_callable=False,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
 def build_artifact_tool(
     workspace_id: str,
     created_at: datetime | None = None,
@@ -1194,9 +1749,9 @@ def build_artifact_tool(
         "python-pptx (`from pptx import Presentation`); images use Pillow "
         "(`from PIL import Image`). Managed Skills may be selected with `skills`: "
         "built-in bundles are `documents`, `pdf`, `pptx`, and `spreadsheets`; their files "
-        "are staged read-only below `NEXAFLOW_SKILLS_DIR`, and an optional "
-        "`requirements.txt` is installed into `NEXAFLOW_PACKAGES_DIR` through the "
-        "Worker public HTTP(S) proxy. Do not install packages yourself, use package "
+        "are read-only below `NEXAFLOW_SKILLS_DIR`. Dependencies are pinned in the "
+        "platform execution image, not installed from Skill requirements at runtime. "
+        "Execution is network-denied. Do not install packages yourself, use package "
         "URLs, or create diagnostic files. The Python standard library is also available. User "
         "attachment text is already included in the conversation and can be used "
         "to produce an edited copy. Enforce requested measurable constraints in "
@@ -1349,6 +1904,104 @@ def build_artifact_tool(
     )
 
 
+def build_image_generation_tool(
+    workspace_id: str,
+    created_at: datetime | None = None,
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:generate_image")
+    description = (
+        "Generate one PNG image from a text prompt using the workspace's single "
+        "active OpenAI-compatible IMAGE model. Use this for requested artwork or illustrations, "
+        "not for drawing charts or editing uploaded images. A user must approve each "
+        "paid generation. The resulting image can be previewed and downloaded for "
+        "24 hours; include its filename and download link in the response."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "size": {
+                "type": "string",
+                "enum": ["square", "landscape", "portrait"],
+                "description": "Image orientation; defaults to square.",
+            },
+        },
+        "required": ["prompt"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "artifact_id": {"type": "string", "maxLength": 36},
+            "format": {"const": "png"},
+            "filename": {"type": "string", "maxLength": 120},
+            "mime_type": {"const": "image/png"},
+            "download_url": {"type": "string", "maxLength": 4096},
+            "preview_url": {"type": "string", "maxLength": 4096},
+            "expires_at": {"type": "string", "maxLength": 64},
+            "size_bytes": {"type": "integer", "minimum": 1, "maximum": 5242880},
+        },
+        "required": [
+            "artifact_id", "format", "filename", "mime_type", "download_url",
+            "preview_url", "expires_at", "size_bytes",
+        ],
+        "additionalProperties": False,
+    }
+    execution_spec = {"builtin": "image_generation"}
+    definition_hash = canonical_definition_hash({
+        "name": "generate_image",
+        "description": description,
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+        "execution_spec": execution_spec,
+    })
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=stable_catalog_id(f"source:{workspace_id}:builtin"),
+            kind="builtin",
+            stable_key="image_generation",
+            function_name="generate_image",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Generate image",
+            description=description,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="each_call",
+            effect="external_write",
+            allowed_access_sources=["console", "public"],
+            workflow_callable=False,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )
+
+
 def build_skill_artifact_tool(
     workspace_id: str,
     skill_name: str,
@@ -1434,6 +2087,9 @@ async def ensure_workspace_system_catalog(
 
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
+    await ensure_tool(*build_skill_script_tool(workspace_id))
+    await ensure_tool(*build_skill_dependency_installer_tool(workspace_id))
+    await ensure_tool(*build_image_generation_tool(workspace_id))
     for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:
         await ensure_tool(*build_skill_artifact_tool(workspace_id, skill_name))
 

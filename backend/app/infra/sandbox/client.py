@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import binascii
 import hashlib
@@ -9,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.infra.config.settings import Settings
+from app.ports.execution import ExecutionError, build_execution_platform
 
 RESULT_MARKER = "__NEXAFLOW_RESULT__="
 MAX_RESPONSE_BYTES = 128 * 1024
@@ -70,10 +70,6 @@ def _program(user_code: str) -> str:
     marker = json.dumps(RESULT_MARKER)
     return (
         "import json, sys\n"
-        "import os\n"
-        "packages_dir = os.environ.get('NEXAFLOW_PACKAGES_DIR', '')\n"
-        "if packages_dir:\n"
-        "    sys.path.insert(0, packages_dir)\n"
         "inputs = json.loads(sys.stdin.read())\n"
         f"exec(compile({encoded}, '<workflow-code-node>', 'exec'), globals())\n"
         "if 'result' not in globals():\n"
@@ -89,9 +85,6 @@ def _artifact_program(user_code: str) -> str:
         "import os, sys\n"
         "output_path = os.environ['NEXAFLOW_OUTPUT_PATH']\n"
         "skills_dir = os.environ.get('NEXAFLOW_SKILLS_DIR', '')\n"
-        "packages_dir = os.environ.get('NEXAFLOW_PACKAGES_DIR', '')\n"
-        "if packages_dir:\n"
-        "    sys.path.insert(0, packages_dir)\n"
         f"exec(compile({encoded}, '<artifact-tool>', 'exec'), globals())\n"
     )
 
@@ -102,37 +95,17 @@ async def _exchange(
     max_response_bytes: int,
     timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    async def exchange() -> dict[str, Any]:
-        reader, writer = await asyncio.open_unix_connection(
-            settings.workflow_sandbox_socket,
-            limit=max_response_bytes,
-        )
-        try:
-            writer.write(
-                (json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
-            )
-            await writer.drain()
-            line = await reader.readline()
-            if not line or len(line) > max_response_bytes:
-                raise WorkflowSandboxError("Code sandbox returned an invalid response.")
-            value = json.loads(line)
-            if not isinstance(value, dict):
-                raise WorkflowSandboxError("Code sandbox returned an invalid response.")
-            return value
-        finally:
-            writer.close()
-            await writer.wait_closed()
-
     try:
-        return await asyncio.wait_for(
-            exchange(),
-            timeout=(
+        return await build_execution_platform(settings).execute(
+            request,
+            max_output_bytes=max_response_bytes,
+            timeout_seconds=(
                 timeout_seconds
                 if timeout_seconds is not None
                 else settings.workflow_sandbox_timeout_seconds + 1
             ),
         )
-    except (OSError, TimeoutError) as exc:
+    except (ExecutionError, OSError, TimeoutError) as exc:
         raise WorkflowSandboxError("Code sandbox is unavailable.") from exc
     except ValueError as exc:
         raise WorkflowSandboxError("Code sandbox returned invalid JSON.") from exc

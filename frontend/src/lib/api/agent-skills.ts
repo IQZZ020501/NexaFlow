@@ -8,31 +8,12 @@ export type AgentSkillDefinition = {
   output_schema: Record<string, unknown>
   knowledge_base_ids: string[]
   tools: ToolRef[]
-  retrieval: {
-    max_calls: number
-    max_rounds: number
-    min_evidence_items: number
-    require_source_diversity: boolean
-  }
-  budgets: {
-    max_runtime_seconds: number
-    max_turns: number
-    max_tool_calls: number
-    max_model_tokens: number
-  }
-  stop: {
-    max_no_progress_rounds: number
-    allow_best_effort: boolean
-  }
+  files: Record<string, string>
+  execution_timeout_seconds: number
   guardrails: {
     allow_external_reads: boolean
     allow_external_writes: boolean
     require_approval_for_external_writes: boolean
-  }
-  evaluation: {
-    require_grounding: boolean
-    min_evidence_count: number
-    max_tool_failures: number
   }
 }
 
@@ -61,6 +42,80 @@ export type AgentSkill = {
 
 function skillsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/agent-skills${suffix}`
+}
+
+export type SkillDraft = {
+  name: string
+  description: string
+  definition: AgentSkillDefinition
+}
+
+export type AgentSkillVersion = SkillDraft & {
+  id: string
+  version_number: number
+  definition_hash: string
+  created_at: string
+}
+
+export function inspectSkillImport(
+  token: string,
+  workspaceId: string,
+  file: File
+) {
+  const body = new FormData()
+  body.set("file", file)
+  return request<SkillDraft>(skillsPath(workspaceId, "/imports/inspect"), {
+    token,
+    method: "POST",
+    body,
+  })
+}
+
+export function createAgentSkill(
+  token: string,
+  workspaceId: string,
+  draft: SkillDraft
+) {
+  return request<AgentSkill>(skillsPath(workspaceId), {
+    token,
+    method: "POST",
+    body: JSON.stringify(draft),
+  })
+}
+
+export function updateAgentSkill(
+  token: string,
+  workspaceId: string,
+  skillId: string,
+  payload: Partial<SkillDraft> & { status?: "active" | "disabled" }
+) {
+  return request<AgentSkill>(skillsPath(workspaceId, `/${skillId}`), {
+    token,
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function publishAgentSkill(
+  token: string,
+  workspaceId: string,
+  skillId: string
+) {
+  return request<AgentSkillVersion>(
+    skillsPath(workspaceId, `/${skillId}/publish`),
+    { token, method: "POST" }
+  )
+}
+
+export function listAgentSkillVersions(
+  token: string,
+  workspaceId: string,
+  skillId: string
+) {
+  return request<AgentSkillVersion[]>(
+    skillsPath(workspaceId, `/${skillId}/versions`),
+    { token }
+  )
 }
 
 export function listAgentSkills(

@@ -1,6 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import WorkspaceContext, get_workspace_context_from_path
@@ -29,6 +37,19 @@ router = APIRouter(
     prefix="/workspaces/{workspace_id}/agent-skills",
     tags=["agent-skills"],
 )
+
+
+@router.post("/imports/inspect", response_model=AgentSkillCreateRequest)
+async def inspect_workspace_skill_import(
+    file: UploadFile,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+) -> AgentSkillCreateRequest:
+    from app.application.agent_skills.packages import inspect_import
+
+    try:
+        return inspect_import(file.filename or "", await file.read(2 * 1024 * 1024 + 1))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
 
 
 @router.get("", response_model=list[AgentSkillResponse])

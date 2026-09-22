@@ -26,10 +26,16 @@ from app.application.agents.tools.builder import (
     knowledge_sources_from_events,
     normalize_agent_source_links,
     safe_agent_run_error,
+    session_inputs_to_response,
 )
 from app.application.workflows.uploads.service import resolve_public_agent_files
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
 from app.domain.agents.access.permissions import require_agent_ops
+from app.domain.agents.approval import (
+    DEFAULT_AGENT_APPROVAL_MODE,
+    AgentApprovalMode,
+    normalize_agent_approval_mode,
+)
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime.callbacks import safe_event_value
 from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
@@ -301,39 +307,6 @@ def external_progress_events(
                         reasoning=str(event.get("reasoning") or ""),
                     )
                 )
-            elif summary in {
-                "agent.grounding_check",
-                "agent.grounding_verified",
-                "agent.grounding_revised",
-                "agent.grounding_inline",
-                "agent.grounding_insufficient",
-                "agent.grounding_unavailable",
-                "agent.grounding_skipped",
-            }:
-                grounding_stage = (
-                    "reviewing"
-                    if summary == "agent.grounding_check"
-                    else "completed"
-                    if summary
-                    in {
-                        "agent.grounding_verified",
-                        "agent.grounding_revised",
-                        "agent.grounding_inline",
-                        "agent.grounding_insufficient",
-                        "agent.grounding_skipped",
-                    }
-                    else "failed"
-                )
-                upsert(
-                    ExternalAgentProgressEventResponse(
-                        id=_external_progress_id(event, "grounding"),
-                        type="analysis",
-                        status=event_status,
-                        stage=grounding_stage,
-                        turn=turn,
-                        reasoning=str(event.get("reasoning") or ""),
-                    )
-                )
             continue
 
         if event_type != "tool":
@@ -429,16 +402,22 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
             else None
         ),
         question=str(value.get("goal") or value.get("question") or ""),
+        session_inputs=session_inputs_to_response(value),
         attachments=attachments or [],
+        approval_mode=normalize_agent_approval_mode(
+            value.get("approval_mode")
+            or (
+                snapshot.get("approval_mode")
+                if isinstance(snapshot, dict)
+                else None
+            )
+        ),
         status=run_status,
         result=normalize_agent_source_links(
             clean_model_text(str(value.get("result") or "")),
             value.get("events") or [],
         ),
-        sources=knowledge_sources_from_events(
-            value.get("events") or [],
-            value.get("grounding_meta"),
-        ),
+        sources=knowledge_sources_from_events(value.get("events") or []),
         error=generic_error,
         progress=external_progress_events(value.get("events") or [], run_status),
         created_at=value["created_at"],
@@ -470,6 +449,26 @@ async def sanitize_external_agent_stream(
         elif event_type == "answer_reset":
             text_filter = ModelTextStreamFilter()
             sanitized = {"type": "answer_reset"}
+            applied_inputs = event.get("applied_inputs")
+            if isinstance(applied_inputs, list):
+                sanitized["applied_inputs"] = [
+                    {
+                        "sequence": item["sequence"],
+                        "input_id": item["input_id"][:200],
+                        "mode": "follow_up",
+                        "content": item["content"][:4000],
+                        **(
+                            {"previous_answer_turn": item["previous_answer_turn"]}
+                            if isinstance(item.get("previous_answer_turn"), int)
+                            else {}
+                        ),
+                    }
+                    for item in applied_inputs[:32]
+                    if isinstance(item, dict)
+                    and isinstance(item.get("sequence"), int)
+                    and isinstance(item.get("input_id"), str)
+                    and isinstance(item.get("content"), str)
+                ]
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
         elif event_type == "reasoning_delta":
@@ -935,6 +934,7 @@ async def create_external_agent_run(
     settings: Settings,
     conversation_id: str | None = None,
     file_ids: list[str] | None = None,
+    approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
 ) -> ExternalAgentRunResponse:
     await _enforce_rate_limit(settings, context.agent.id, access_source, consumer_id)
     if context.publication is None:
@@ -969,6 +969,7 @@ async def create_external_agent_run(
         attachment_context=attachment_context,
         attachments=attachments,
         settings=settings,
+        approval_mode=approval_mode,
     )
     await enqueue_prepared_agent_run(
         run.id,

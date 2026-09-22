@@ -104,15 +104,9 @@ from app.schemas.knowledge import (
     KnowledgeModelTestRequest,
 )
 from app.tasks.knowledge import jobs as knowledge_tasks_module
-from app.tasks.knowledge.jobs import (
-    reconcile_knowledge_graphs_job,
-    recover_knowledge_storage_cleanups_job,
-    recover_knowledge_tasks_job,
-    recover_upload_storage_cleanups_job,
-    run_knowledge_storage_cleanup_job,
-    run_knowledge_task_job,
-    run_upload_storage_cleanup_job,
-)
+from app.tasks.knowledge.jobs import run_knowledge_task_job
+from app.tasks.maintenance import jobs as maintenance_tasks_module
+from app.tasks.storage.jobs import run_storage_cleanup_job
 
 MEMBER_PASSWORD = "Member@12345."
 
@@ -3076,20 +3070,29 @@ def run_celery_job_tests(
             raise AssertionError("busy outcome must request a retry")
     assert fake_self_busy.retry_kwargs
 
-    # recover_knowledge_tasks_job: only redispatches task ids selected by the
+    # Maintenance only redispatches task ids selected by the
     # durable lease-aware recovery query.
     with (
         patch.object(
-            knowledge_tasks_module,
+            maintenance_tasks_module,
             "list_recoverable_knowledge_task_ids",
             new=AsyncMock(return_value=["task-recover-1", "task-recover-2"]),
         ),
         patch.object(
-            knowledge_tasks_module.run_knowledge_task_job,
+            maintenance_tasks_module.run_knowledge_task_job,
             "apply_async",
         ) as apply_async,
+        patch.object(
+            maintenance_tasks_module,
+            "FREQUENT_MAINTENANCE_STEPS",
+            ((
+                "recover_knowledge_tasks",
+                maintenance_tasks_module._recover_knowledge_tasks,
+            ),),
+        ),
+        patch.object(maintenance_tasks_module, "configure_task_worker"),
     ):
-        recover_knowledge_tasks_job()
+        maintenance_tasks_module.run_maintenance_job.run("frequent")
     assert [call.kwargs for call in apply_async.call_args_list] == [
         {"args": ("task-recover-1",)},
         {"args": ("task-recover-2",)},
@@ -3097,32 +3100,42 @@ def run_celery_job_tests(
 
     with (
         patch.object(
-            knowledge_tasks_module,
+            maintenance_tasks_module,
             "reconcile_knowledge_graphs",
             new=AsyncMock(return_value=["graph-task-1", "graph-task-2"]),
         ),
         patch.object(
-            knowledge_tasks_module.run_knowledge_task_job,
+            maintenance_tasks_module.run_knowledge_task_job,
             "apply_async",
         ) as apply_async,
+        patch.object(
+            maintenance_tasks_module,
+            "MINUTELY_MAINTENANCE_STEPS",
+            ((
+                "reconcile_knowledge_graphs",
+                maintenance_tasks_module._reconcile_knowledge_graphs,
+            ),),
+        ),
+        patch.object(maintenance_tasks_module, "configure_task_worker"),
     ):
-        reconcile_knowledge_graphs_job()
+        maintenance_tasks_module.run_maintenance_job.run("minutely")
     assert [call.kwargs for call in apply_async.call_args_list] == [
         {"args": ("graph-task-1",)},
         {"args": ("graph-task-2",)},
     ]
 
-    # run_knowledge_storage_cleanup_job: success
+    # run_storage_cleanup_job: knowledge success
     cleanup_kb_id = _create_kb(client, research_token, workspace_id, "Cleanup Job KB")
     cleanup_id = asyncio.run(create_cleanup_record(workspace_id, cleanup_kb_id))
     fake_self_cleanup = _FakeTaskSelf()
-    run_knowledge_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
+    run_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
         fake_self_cleanup,
+        "knowledge",
         cleanup_id,
     )
     assert fake_self_cleanup.retry_kwargs == []
 
-    # run_knowledge_storage_cleanup_job: failure -> retry
+    # run_storage_cleanup_job: knowledge failure -> retry
     failing_kb_id = _create_kb(client, research_token, workspace_id, "Failing Cleanup KB")
     failing_cleanup_id = asyncio.run(
         create_cleanup_record(workspace_id, failing_kb_id)
@@ -3134,8 +3147,9 @@ def run_celery_job_tests(
     ):
         fake_self_fail = _FakeTaskSelf()
         try:
-            run_knowledge_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
+            run_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
                 fake_self_fail,
+                "knowledge",
                 failing_cleanup_id,
             )
         except _RetrySentinel:
@@ -3144,26 +3158,38 @@ def run_celery_job_tests(
             raise AssertionError("cleanup failure must request a retry")
     assert fake_self_fail.retry_kwargs
 
-    # recover_knowledge_storage_cleanups_job
+    # Maintenance recovers knowledge storage cleanups.
     recover_kb_id = _create_kb(client, research_token, workspace_id, "Recover Cleanup KB")
     recover_cleanup_id = asyncio.run(
         create_cleanup_record(workspace_id, recover_kb_id)
     )
-    recover_knowledge_storage_cleanups_job()
+    with (
+        patch.object(
+            maintenance_tasks_module,
+            "MINUTELY_MAINTENANCE_STEPS",
+            ((
+                "recover_knowledge_storage_cleanups",
+                maintenance_tasks_module._recover_knowledge_storage_cleanups,
+            ),),
+        ),
+        patch.object(maintenance_tasks_module, "configure_task_worker"),
+    ):
+        maintenance_tasks_module.run_maintenance_job.run("minutely")
     asyncio.run(_assert_cleanup_gone(recover_cleanup_id))
 
-    # run_upload_storage_cleanup_job: success
+    # run_storage_cleanup_job: upload success
     upload_cleanup_id = asyncio.run(
         _create_upload_cleanup(workspace_id, actor_user_id, "uploads/missing-file.bin")
     )
     fake_self_upload = _FakeTaskSelf()
-    run_upload_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
+    run_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
         fake_self_upload,
+        "upload",
         upload_cleanup_id,
     )
     assert fake_self_upload.retry_kwargs == []
 
-    # run_upload_storage_cleanup_job: failure -> retry
+    # run_storage_cleanup_job: upload failure -> retry
     failing_upload_cleanup_id = asyncio.run(
         _create_upload_cleanup(workspace_id, actor_user_id, "uploads/failing.bin")
     )
@@ -3178,8 +3204,9 @@ def run_celery_job_tests(
         )
         fake_self_upload_fail = _FakeTaskSelf()
         try:
-            run_upload_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
+            run_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
                 fake_self_upload_fail,
+                "upload",
                 failing_upload_cleanup_id,
             )
         except _RetrySentinel:
@@ -3188,11 +3215,33 @@ def run_celery_job_tests(
             raise AssertionError("upload cleanup failure must request a retry")
     assert fake_self_upload_fail.retry_kwargs
 
-    # recover_upload_storage_cleanups_job
+    try:
+        run_storage_cleanup_job.run.__func__(  # type: ignore[attr-defined]
+            _FakeTaskSelf(),
+            "unsupported",
+            "cleanup-invalid",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unsupported storage cleanup kind was accepted")
+
+    # Maintenance recovers upload storage cleanups.
     due_upload_cleanup_id = asyncio.run(
         _create_upload_cleanup(workspace_id, actor_user_id, "uploads/due.bin")
     )
-    recover_upload_storage_cleanups_job()
+    with (
+        patch.object(
+            maintenance_tasks_module,
+            "MINUTELY_MAINTENANCE_STEPS",
+            ((
+                "recover_upload_storage_cleanups",
+                maintenance_tasks_module._recover_upload_storage_cleanups,
+            ),),
+        ),
+        patch.object(maintenance_tasks_module, "configure_task_worker"),
+    ):
+        maintenance_tasks_module.run_maintenance_job.run("minutely")
     asyncio.run(_assert_upload_cleanup_gone(due_upload_cleanup_id))
 
     # enqueue_knowledge_task: non-eager dispatch failure

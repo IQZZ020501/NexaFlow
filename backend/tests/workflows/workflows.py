@@ -1476,11 +1476,13 @@ def test_workflow_engine_propagates_worker_cancellation() -> None:
 def test_upload_cleanup_tasks_are_registered() -> None:
     from app.infra.queue.celery import celery_app
 
-    assert "app.uploads.cleanup_storage" in celery_app.tasks
-    assert "app.uploads.recover_storage_cleanups" in celery_app.tasks
+    celery_app.loader.import_default_modules()
+    assert "app.storage.cleanup" in celery_app.tasks
+    assert "app.uploads.cleanup_storage" not in celery_app.tasks
+    assert "app.uploads.recover_storage_cleanups" not in celery_app.tasks
     assert (
         celery_app.conf.beat_schedule["recover-minutely-maintenance"]["task"]
-        == "app.maintenance.recover_minutely"
+        == "app.maintenance.run"
     )
 
 
@@ -1770,6 +1772,14 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert published.status_code == 201, published.text
         assert published.json()["version_number"] == 1
         assert published.json()["definition_revision"] == 3
+        # A published workflow whose draft matches the newest version is clean.
+        published_agent = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}",
+            headers=headers,
+        )
+        assert published_agent.status_code == 200, published_agent.text
+        assert published_agent.json()["published"] is True
+        assert published_agent.json()["has_unpublished_changes"] is False
 
         member_id, temporary_password = create_workspace_user(
             client, token, workspace_id
@@ -1804,6 +1814,13 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         )
         assert next_draft.status_code == 200, next_draft.text
         assert next_draft.json()["revision"] == 4
+        # Editing the draft after publishing marks the workflow as unpublished again.
+        diverged_agent = client.get(
+            f"/api/v1/workspaces/{workspace_id}/agents/{workflow_id}",
+            headers=headers,
+        )
+        assert diverged_agent.status_code == 200, diverged_agent.text
+        assert diverged_agent.json()["has_unpublished_changes"] is True
 
         draft_run = client.post(
             f"{base}/runs",

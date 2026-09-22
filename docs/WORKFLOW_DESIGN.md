@@ -52,8 +52,8 @@ flowchart LR
     TOOL --> LEDGER["tool_invocations"]
     TOOL --> MCP["MCP servers"]
     NODES --> CHILD["durable Agent child Run"]
-    NODES --> SOCKET["Worker 内私有 Unix socket"]
-    SOCKET --> SANDBOX["受监管源码 Python sandbox"]
+    NODES --> EXECUTION["Execution port"]
+    EXECUTION --> SANDBOX["独立 OpenSandbox / Kata"]
     ENGINE -->|"checkpoint、节点审计、事件"| PG
 ```
 
@@ -215,7 +215,7 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 - 整个进程组在超时或输出超限时强制终止；请求只能降低、不能提高硬限制；
 - 沙箱不可用、超时、超限、无 `result`、结果不是 JSON 时节点失败并中止工作流。
 
-基础沙箱不提供跨运行文件或解释器状态持久化。启用 `SANDBOX_NETWORK=public` 时，代码只能通过 Worker 代理访问公网 HTTP/HTTPS（80/443），代理拒绝内网、回环、链路本地和 metadata 地址；`SANDBOX_NETWORK=none` 保持完全无网络。Skill 可携带受限的 `requirements.txt`，依赖仅在当前运行的临时目录中通过 Worker 公网代理安装。固定文件 Skill 在 `SKILL.md` 中声明只读入口脚本和产物格式，调用方仅传 Markdown 或结构化数据，不能提交替代入口的 Python 代码。
+执行环境不提供跨运行文件/解释器状态持久化。每个代码/渲染任务通过 execution port 创建独立 OpenSandbox，程序默认无外网，无业务挂载/环境继承。依赖预装于锁定镜像，不接受 requirements 动态安装。四个固定文件 Skill 保留只读 renderer 和输入契约，调用方只传 Markdown/结构化数据，不能替换入口。stdio MCP 可请求部署批准的公网域名子集，dns+nft 拒绝私网/metadata；Worker 无 namespace 特权或本地回退。
 
 ## 8. API
 
@@ -301,8 +301,8 @@ Worker 内嵌的 Celery Beat 每 30 秒扫描 queued 或租约过期的 `agent_r
 ## 11. 安全与运维注意事项
 
 - 内嵌 Beat 的 worker 与 API 必须使用同一 PostgreSQL/Redis 配置；Compose 必须显式传入相同数据库组件并覆盖容器内主机名；
-- Sandbox socket 只存在于 Worker 进程树；沙箱 namespace/chroot 不得映射应用源码或业务数据卷。公网模式只映射同目录的 egress Unix socket，不能把 Compose 网络直接交给沙箱；
-- MCP 管理员仍具备项目既有的 worker 进程级 stdio 执行权限；Workflow 只接受当前可用、允许调用且不需要逐次审批的固定 ToolSnapshot；
+- OpenSandbox 在独立执行平面管理容器/VM，业务 Compose 无执行服务、Docker socket 或沙箱卷。Kata 与 dns+nft 是生产配置要求；Docker 自检不证明 VM 隔离；
+- stdio MCP 配置只在执行镜像内使用，不能启动 Worker 子进程；Workflow 仍只接受当前可用、允许调用且不需要逐次审批的固定 ToolSnapshot；
 - Redis 负责队列，不作为审计真源；运行、checkpoint、事件和节点记录均以 PostgreSQL 为准；
 - 事件协议是 `application/x-ndjson`，不是 SSE。客户端用 `after` 游标重放，不依赖进程内内存；
 - 当前 Alembic metadata 与历史数据库存在既有漂移，交付迁移以独立 PostgreSQL fresh upgrade/downgrade/upgrade 为准，不把无关全库漂移混入本功能。

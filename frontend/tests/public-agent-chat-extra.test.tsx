@@ -574,6 +574,33 @@ describe("public chat pure helpers", () => {
     expect(terminal[0].live_stream_epoch).toBeUndefined()
   })
 
+  test("mergePublicRunEvent records session inputs without waiting for a run snapshot", () => {
+    const runs = [run({ id: "run-1", status: "running" })]
+    const merged = mergePublicRunEvent(
+      runs,
+      "run-1",
+      {
+        type: "session_input",
+        sequence: 3,
+        input_id: "input-1",
+        mode: "follow_up",
+        content: "Continue",
+      } as Parameters<typeof mergePublicRunEvent>[2],
+      "pending-1"
+    )
+    expect(merged[0].session_inputs).toEqual([
+      {
+        input_id: "input-1",
+        mode: "follow_up",
+        content: "Continue",
+        sequence: 3,
+        run_id: "run-1",
+        status: "queued",
+        previous_answer: null,
+      },
+    ])
+  })
+
   test("cancelPublicAgentStream aborts the active controller and clears the ref", () => {
     const controller = new AbortController()
     const ref = { current: controller }

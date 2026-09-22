@@ -567,6 +567,32 @@ describe("MarkdownContent", () => {
     }
   })
 
+  test("opens generated images in a larger preview without treating other images as previews", () => {
+    renderPage(
+      <MarkdownContent
+        content={[
+          "![生成图片](/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e/preview)",
+          "![外部图片](https://example.com/image.png)",
+        ].join("\n\n")}
+      />
+    )
+
+    const image = screen.getByRole("img", { name: "生成图片" })
+    expect(screen.queryByRole("dialog")).toBeNull()
+    fireEvent.click(image)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-fit")
+    expect(dialog.className).toContain("gap-0")
+    const title = within(dialog).getByRole("heading", { name: "生成图片" })
+    expect(title.className).not.toContain("sr-only")
+    expect(within(dialog).getByRole("img", { name: "生成图片" })).toBeTruthy()
+    const closeButton = within(dialog).getByRole("button", { name: "关闭" })
+    expect(closeButton.querySelector("svg")).toBeTruthy()
+    fireEvent.click(closeButton)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(screen.getAllByRole("img", { name: "外部图片" })).toHaveLength(1)
+  })
+
   test("renders GFM tables", () => {
     renderPage(
       <MarkdownContent
@@ -623,7 +649,9 @@ describe("MarkdownContent", () => {
           'def greet(name):\n    return f"Hello {name}"',
         ])
       )
-      expect(screen.getByText("已复制")).toBeTruthy()
+      await waitFor(() =>
+        expect(screen.queryByText("已复制") !== null).toBe(true)
+      )
     } finally {
       Object.defineProperty(navigator, "clipboard", {
         value: originalClipboard,

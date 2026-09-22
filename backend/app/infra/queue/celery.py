@@ -16,38 +16,20 @@ logger = get_logger("celery")
 _GC_AFTER_TASKS = frozenset(
     {
         "app.agents.run",
-        "app.agents.run_v2",
         "app.knowledge.run_task",
     }
 )
 
 TASK_DISPLAY_NAMES = {
     "app.agents.run": "运行 Agent",
-    "app.agents.run_v2": "运行统一 Agent",
-    "app.agents.recover": "恢复 Agent 任务",
-    "app.agents.recover_legacy": "恢复旧版 Agent 任务",
-    "app.artifacts.cleanup_expired": "清理过期生成文件",
-    "app.email.recover": "恢复邮件发送",
     "app.email.send": "发送邮件",
-    "app.knowledge.cleanup_storage": "清理知识库文件",
-    "app.knowledge.recover": "恢复知识库任务",
-    "app.knowledge.recover_storage_cleanups": "恢复知识库文件清理",
-    "app.knowledge.reconcile_graphs": "同步知识图谱",
     "app.knowledge.run_task": "处理知识库任务",
-    "app.maintenance.recover_frequent": "恢复高频维护任务",
-    "app.maintenance.recover_minutely": "恢复每分钟维护任务",
-    "app.tools.recover": "恢复工具任务",
+    "app.maintenance.run": "执行周期维护",
+    "app.storage.cleanup": "清理持久化文件",
     "app.tools.run": "运行工具",
-    "app.uploads.cleanup_storage": "清理上传文件",
-    "app.uploads.recover_storage_cleanups": "恢复上传文件清理",
 }
 
-_HIDDEN_MAINTENANCE_TASKS = frozenset(
-    {
-        "app.maintenance.recover_frequent",
-        "app.maintenance.recover_minutely",
-    }
-)
+_HIDDEN_MAINTENANCE_TASKS = frozenset({"app.maintenance.run"})
 _HIDDEN_MAINTENANCE_LOG_NAMES = _HIDDEN_MAINTENANCE_TASKS | frozenset(
     TASK_DISPLAY_NAMES[name] for name in _HIDDEN_MAINTENANCE_TASKS
 )
@@ -152,6 +134,7 @@ def create_celery_app() -> Celery:
             "app.tasks.agents.jobs",
             "app.tasks.tools.jobs",
             "app.tasks.email.jobs",
+            "app.tasks.storage.jobs",
             "app.tasks.maintenance.jobs",
         ],
     )
@@ -165,12 +148,14 @@ def create_celery_app() -> Celery:
         worker_prefetch_multiplier=1,
         beat_schedule={
             "recover-frequent-maintenance": {
-                "task": "app.maintenance.recover_frequent",
+                "task": "app.maintenance.run",
                 "schedule": 30.0,
+                "args": ("frequent",),
             },
             "recover-minutely-maintenance": {
-                "task": "app.maintenance.recover_minutely",
+                "task": "app.maintenance.run",
                 "schedule": 60.0,
+                "args": ("minutely",),
             },
         },
     )

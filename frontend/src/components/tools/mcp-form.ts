@@ -22,6 +22,7 @@ const STDIO_CONFIG_FIELDS = new Set([
   "args",
   "cwd",
   "env",
+  "egress_domains",
   "transport",
 ])
 
@@ -52,8 +53,8 @@ function isPrivateIpv4(hostname: string) {
 
 export const STDIO_CONFIG_EXAMPLE = `{
   "command": "/usr/local/bin/node",
-  "args": ["server.js"],
-  "cwd": "/srv/mcp",
+  "args": ["/opt/mcp/server.js"],
+  "cwd": "/tmp",
   "env": {
     "API_KEY": "secret"
   }
@@ -72,15 +73,11 @@ export function isPrivateMcpUrl(value: string) {
   } catch {
     return false
   }
-  const mappedIpv4 = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(
-    hostname
-  )
+  const mappedIpv4 = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(hostname)
   if (mappedIpv4) {
     const high = Number.parseInt(mappedIpv4[1], 16)
     const low = Number.parseInt(mappedIpv4[2], 16)
-    return isPrivateIpv4(
-      `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`
-    )
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)
   }
   const isIpv6 = hostname.includes(":")
 
@@ -134,9 +131,11 @@ export function parseStdioConfig(
   const args = record.args ?? []
   const cwd = record.cwd
   const env = record.env ?? {}
+  const domains = record.egress_domains ?? []
   if (
     !command ||
     command.length > 1000 ||
+    (!command.startsWith("/") && !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(command)) ||
     !Array.isArray(args) ||
     args.length > 64 ||
     args.some(
@@ -145,7 +144,10 @@ export function parseStdioConfig(
     (cwd !== undefined && cwd !== null && typeof cwd !== "string") ||
     !env ||
     typeof env !== "object" ||
-    Array.isArray(env)
+    Array.isArray(env) ||
+    !Array.isArray(domains) ||
+    domains.length > 32 ||
+    domains.some((domain) => typeof domain !== "string" || domain.length > 253)
   ) {
     return null
   }
@@ -170,6 +172,7 @@ export function parseStdioConfig(
     args: args as string[],
     ...(normalizedCwd ? { cwd: normalizedCwd } : {}),
     env: Object.fromEntries(environment) as Record<string, string>,
+    ...(domains.length ? { egress_domains: domains as string[] } : {}),
   }
 }
 

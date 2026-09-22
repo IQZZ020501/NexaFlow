@@ -88,8 +88,13 @@ class NexaFlowCallback:
     async def answer_delta(self, delta: str) -> None:
         await self._event_bus.publish({"type": "answer_delta", "delta": delta})
 
-    async def answer_reset(self) -> None:
-        await self._event_bus.publish({"type": "answer_reset"})
+    async def answer_reset(
+        self, *, applied_inputs: list[dict[str, Any]] | None = None
+    ) -> None:
+        event: dict[str, Any] = {"type": "answer_reset"}
+        if applied_inputs:
+            event["applied_inputs"] = applied_inputs
+        await self._event_bus.publish(event)
 
     async def reasoning_delta(self, turn: int, delta: str) -> None:
         await self._event_bus.publish(

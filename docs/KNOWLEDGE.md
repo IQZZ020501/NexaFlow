@@ -135,13 +135,10 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`（并在文件尾�
 
 ### Celery 任务
 
-- `backend/app/tasks/knowledge/jobs.py` — Celery 任务定义与入队 helper（共用 `backend/app/tasks/runtime.py` 的 worker 配置与异步运行辅助）：
-  - `app.knowledge.run_task` — 知识任务执行（parse/index/rebuild/evaluate/graph_sync/graph_rebuild 分发）
-  - `app.knowledge.recover` — 恢复孤儿知识任务并重新入队
-  - `app.knowledge.reconcile_graphs` — Graph 源变更对账与 due 任务入队（Beat）
-  - `app.knowledge.cleanup_storage` / `app.knowledge.recover_storage_cleanups` — 知识库外部存储清理及恢复
-  - `app.uploads.cleanup_storage` / `app.uploads.recover_storage_cleanups` — 上传对象存储清理及恢复
-  - celery app 由 `backend/app/infra/queue/celery.py`（`celery_app`）提供，worker 以 `celery -A app.infra.queue.celery:celery_app` 启动
+- `backend/app/tasks/knowledge/jobs.py` — `app.knowledge.run_task` 执行 parse/index/rebuild/evaluate/graph_sync/graph_rebuild。
+- `backend/app/tasks/storage/jobs.py` — `app.storage.cleanup` 按 `knowledge` / `upload` 类型执行持久化外部存储清理。
+- `backend/app/tasks/maintenance/jobs.py` — `app.maintenance.run` 按 cadence 恢复孤儿任务、对账 Graph，并重新派发到期的存储清理。
+- Celery app 由 `backend/app/infra/queue/celery.py`（`celery_app`）提供，worker 以 `celery -A app.infra.queue.celery:celery_app` 启动。
 
 ## 相关测试（`backend/tests/knowledge/`）
 

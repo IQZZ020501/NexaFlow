@@ -96,11 +96,21 @@ not trigger unrelated cleanup.
   in `agent_run_events`. All Agent, Workflow, and test Tool executions use
   `tool_invocations`; do not recreate an `agent_tool_calls` table or dual-write
   ledger.
-- Agent Run execution budgets, non-secret model configuration fingerprints, and
-  knowledge resource metadata are frozen in `agent_run_snapshots`; the overall
-  execution deadline is initialized on first claim in `agent_run_states` and
-  is not reset by worker retries. Knowledge-backed answers run the durable
-  post-draft grounding verifier and record an evidence-input digest.
+- Agent Run execution budgets for runtime, turns, and tool calls, non-secret
+  model configuration fingerprints, and knowledge resource metadata are frozen
+  in `agent_run_snapshots`; the legacy `max_model_tokens` snapshot field remains
+  for compatibility but is not enforced as a cumulative Agent token ceiling.
+  The overall execution deadline is initialized on first claim in
+  `agent_run_states` and is not reset by worker retries.
+  The Agent core is a generic model/tool loop: knowledge retrieval,
+  MCP and executable Skills are optional tools, not mandatory RAG stages.
+  There is no grounding verifier, hidden answer manifest, or evidence gate.
+  `domain/agents/runtime/session.py` composes context compaction, trusted
+  extension hooks, and the authorized capability registry. Skill catalogs are
+  injected initially and pinned definitions are loaded through `load_skill`.
+  Session inputs are append-only `agent_run_events` records, with consumed IDs
+  in checkpoint; enqueue and successful finalization share the RunState lock.
+  Do not bypass the tool ledger or reset frozen budgets when adding input.
 - Pure unit suites (no DB, no HTTP, no network) for business rules and
   services with mocked ports/repositories live per feature under
   `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run
@@ -153,21 +163,25 @@ not trigger unrelated cleanup.
   task runner and reuses the production retrieval path. Evaluation is mutually
   exclusive with parse/index/rebuild work for the same knowledge base; result
   and progress writes must remain in one lease-checked transaction.
-- `cd backend && make dev` starts and waits for the development Compose PostgreSQL,
-  Redis, and Qdrant services, applies Alembic migrations, then starts Uvicorn.
-  It does not start the Worker. The API process orchestration lives in
-  `backend/scripts/dev.py` so the Make target does not depend on a POSIX shell.
-- `cd backend && make worker` syncs the separate `sandbox/` Python runtime and
-  starts the Celery worker plus its supervised source sandbox Broker. Linux uses
-  namespace/chroot isolation and requires root startup; macOS uses Seatbelt per
-  child; native Windows fails closed and must use WSL2.
+- Root `make dev` is the complete local development entrypoint. Its standard-library
+  Python supervisor creates missing private local configuration, syncs dependencies,
+  builds the local PostgreSQL and OpenSandbox images when their inputs change, starts
+  PostgreSQL/Redis/Qdrant and the development OpenSandbox, applies Alembic migrations,
+  then supervises Uvicorn, Celery and Next.js with one shutdown boundary. Use root
+  `make dev-rebuild` to force both local image builds. `cd backend && make dev` remains
+  the API-only entrypoint.
+- `cd backend && make worker` starts Celery without a local execution broker,
+  root requirement, or sandbox dependencies. It requires `OPENSANDBOX_API_KEY`;
+  code execution fails closed if the external execution plane is unavailable.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
 - Agent-generated files use safe filenames with arbitrary common extensions,
   are capped at 5 MiB, stored in PostgreSQL for at most 24 hours, and downloaded
-  through scoped signed bearer URLs. Every response is an attachment with
-  `nosniff`; HTML additionally receives a restrictive CSP.
+  through scoped signed bearer URLs. Generated PNGs use random UUIDv4 bearer
+  URLs instead, limited to image content and the same 24-hour lifetime; older
+  signed PNG URLs remain valid until expiration. Every download response is an
+  attachment with `nosniff`; HTML additionally receives a restrictive CSP.
 - Identity email uses the global administrator SMTP settings and trusted site
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset
@@ -190,9 +204,11 @@ not trigger unrelated cleanup.
   registrations. Remote Bearer tokens and full stdio configurations are
   encrypted; remote endpoints may use HTTP or HTTPS, while private and loopback
   addresses require `MCP_ALLOW_PRIVATE_NETWORKS=true`. Workspace admins submit
-  stdio commands, arguments, working directories, and environment values, so
-  deployments must trust MCP-managing admins with backend process-level code
-  execution.
+  stdio commands, arguments, working directories, environment values and egress
+  domains. These are execution-image paths, never business-host paths. stdio
+  discovery/calls run in ephemeral OpenSandbox executions with only that
+  integration's environment and approved egress; no backend process fallback.
+  MCP responses preserve content blocks, structured content and metadata.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `src/app/` route groups `(auth)`,
   `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for
@@ -203,32 +219,47 @@ not trigger unrelated cleanup.
   under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
   intentionally promoted to pages.
-- `sandbox/` is an independent Python execution service for Workflow code nodes
-  and Agent-generated downloadable files. It accepts bounded JSON-line requests
-  over a private Unix socket and runs each program with CPU, memory, process,
-  file, wall-clock, input, and output limits. Its Artifact runtime includes
-  python-docx, PyMuPDF, openpyxl, python-pptx, Pillow, and the standard library.
-  Optional `SANDBOX_NETWORK=public` uses a Worker-owned HTTP(S) egress proxy;
-  direct sockets and private/loopback/metadata destinations remain blocked.
-  NexaFlow-authored `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live
-  under `sandbox/skills`; each declares a read-only renderer entrypoint and
-  artifact format in `SKILL.md` and is registered as a fixed selectable
-  built-in Tool. Fixed Skill Tools accept content/data rather than
-  caller-supplied Python.
-  Selected `requirements.txt` files install into a temporary per-run directory
-  through that proxy.
-  Keep it independent from `backend/app/`; only the Worker supervisor may start
-  or reach its socket.
+- `sandbox/` builds the independent OpenSandbox execution image, not a local
+  service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
+  rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds
+  program/file/output/time limits inside the platform's container/VM boundary.
+  The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
+  python-pptx, Pillow, the adapted offline open-kimi-ppt PPTD/WASM exporter,
+  and the standard library. Business secrets and mounts are
+  never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
+  authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
+  native TTL cleanup. Effective `dns+nft` default-deny policy is required before
+  staging code or secrets; private/metadata ranges stay denied. Only stdio MCP
+  may request a subset of deployment-approved public egress domains.
+  Fixed `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live under
+  `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
+  format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
+  The PPTX Skill keeps legacy layout calls compatible while new calls use the
+  vendored, MIT-licensed open-kimi-ppt PPTD/WASM exporter offline with bounded
+  inline media and model-selected animations. Fixed Skill Tools accept
+  content/data rather than caller-supplied Python.
+  Workspace Skills are immutable schema-v2 SKILL.md/file bundles with lazy
+  loading, live ACL checks and unified-ledger script execution. They cannot
+  clamp an entire Run's budgets or grant tools themselves. Their scripts may
+  request exact-version PyPI/npm dependencies only through the per-call-approved
+  built-in installer. Installation runs in the Run-private OpenSandbox session,
+  with temporary deployment-allowlisted registry egress, Python binary wheels,
+  npm lifecycle scripts disabled, bounded storage and a recorded environment
+  lock; Skill uploads cannot supply setup commands or dependency files. Fixed
+  renderer dependencies remain baked into the locked execution image.
+  Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
 - `deploy/` holds the Docker Compose topology, the unified application
   Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
-  Dockerfile, and Nginx examples. The production Worker supervises the sandbox
-  source inside its own container and creates a private network/mount/PID/IPC/UTS
-  namespace plus chroot before starting Celery. `NET_ADMIN` is used only to
-  bring up namespace-local loopback for the egress relay, then dropped. Its outer Docker AppArmor
-  profile is unconfined so those mount operations are permitted; default seccomp
-  and `no-new-privileges` remain enabled. There is no sandbox service or socket
-  volume. `scripts/setup-hooks.sh` enables the repository Git hooks.
+  Dockerfile, and Nginx examples. The business Worker drops all capabilities
+  and retains default AppArmor/seccomp plus `no-new-privileges`; there is no
+  Docker socket, execution runtime or sandbox volume in business containers.
+  `deploy/opensandbox/` documents the separate pinned execution plane and
+  generates a private Kata + dns+nft production configuration; ordinary Docker
+  requires an explicit development profile, never an automatic downgrade.
+  Production execution images use immutable digests. Agent runs freeze the
+  non-secret image/network fingerprint so retries cannot silently switch it.
+  `scripts/setup-hooks.sh` enables the repository Git hooks.
 - Use `rg` / `rg --files` for code search. Do not invent project commands;
   inspect local scripts first.
 
@@ -403,7 +434,7 @@ examples.
   Next.js 16 configures `tsconfig.json` with the `react-jsx` runtime.
 - `backend/` Python changes: use the project's Python tooling. Run `compileall`
   over the touched packages, then run the affected suite from `backend/` with
-  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.agent_access,
+  `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.harness, agents.agent_access,
   agents.agent_services_coverage, agents.agent_runtime_coverage, workflows.workflows,
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
   knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
@@ -413,7 +444,8 @@ examples.
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,
   platform.teams, platform.system_governance, platform.resource_folders,
   models.llm, models.unit, infra.infra_unit_coverage, infra.unit, infra.logger,
-  infra.mcp_transports, infra.architecture, smoke.test_main). For migration changes,
+  infra.mcp_transports, infra.architecture, execution.unit, agent_skills.unit,
+  agent_skills.api, agents.harness, smoke.test_main). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
@@ -421,8 +453,10 @@ examples.
   pull-only server configurations and verify the image list. Build an image
   only when its build inputs or wiring changed. When the unified application
   image or sandbox wiring changes, also run the `sandbox-runtime` direct
-  container checks and embedded-Worker hard-isolation self-check, including
-  public egress mode when affected.
+  container checks and `tests.execution.opensandbox_smoke` against an explicit
+  isolated OpenSandbox test server. Verify effective dns+nft filtering, timeout,
+  package isolation and cleanup; production VM isolation must also be validated
+  on Linux/Kata, not inferred from a local ordinary-Docker smoke.
 - Run full coverage only for coverage work, release/CI validation, or changes
   broad enough to put a repository gate at risk. Do not claim a percentage
   unless it was measured in the current task. The configured gates and commands
@@ -432,12 +466,11 @@ examples.
     in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), trace TestClient
     threads and SQLAlchemy greenlets, and merge with coverage.py; the gate is
     97%.
-  - Sandbox: `sandbox/run_coverage.sh` — `sandbox/tests.py` extends
-    `self_check.py`; `sandbox/child.py` and the Linux-only `sandbox/launcher.py`
-    are excluded from measurement because their exec/chroot boundary cannot
-    retain a coverage tracer. Their limits and namespace isolation are verified
-    behaviorally by the CI Docker runs. Other root/Linux-gated lines carry
-    `# pragma: no cover`.
+  - Execution image: `uv run --project sandbox python -m sandbox.tests` and
+    `sandbox/run_coverage.sh` measure the job protocol (excluding test code).
+    Renderer quality, child-process resource limits, cgroups and VM/network
+    isolation are verified behaviorally by direct image and live OpenSandbox
+    checks, not inferred from the host coverage tracer.
   - Frontend: `frontend/scripts/coverage.sh` — runs `bun test --isolate
     --coverage` (serial + per-file fresh globals; bun's parallel-worker lcov
     aggregation under-reports and inflates the line denominator); the gate is

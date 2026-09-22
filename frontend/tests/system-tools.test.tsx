@@ -707,7 +707,7 @@ describe("McpToolsPage", () => {
         }),
       },
     })
-    await waitFor(() => expect(screen.getByText("stdio 配置会加密保存，之后不会返回明文。")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("stdio 配置加密保存，不返回明文。命令和目录指向执行镜像；出站域名须在部署白名单内。")).toBeTruthy())
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "添加 MCP Server" }))
     await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true))
     const post = calls.find((c) => c.init?.method === "POST")!

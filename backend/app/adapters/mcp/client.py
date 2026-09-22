@@ -2,7 +2,6 @@ import asyncio
 import ipaddress
 import json
 import logging
-import os
 import socket
 import time
 from collections.abc import AsyncIterator
@@ -16,18 +15,25 @@ import httpcore2
 import httpx2
 from mcp import Client
 from mcp.client.sse import sse_client
-from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult, ListToolsResult
 
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.tools.mcp_stdio import (
     McpStdioConfigError,
+    serialize_mcp_stdio_config,
     validate_mcp_stdio_config_runtime,
+)
+from app.ports.execution import (
+    ExecutionScope,
+    build_execution_platform,
+    execution_scope,
 )
 from app.ports.mcp import (
     MAX_MCP_TOOL_PAGES,
+    McpCallResult,
     McpClientError,
     McpConnection,
     McpDiscovery,
@@ -226,22 +232,10 @@ async def mcp_client(
                         validate_mcp_stdio_config_runtime(config)
                     except McpStdioConfigError as exc:
                         raise McpClientError(str(exc)) from exc
-                    errlog = await asyncio.to_thread(
-                        open,
-                        os.devnull,
-                        "w",
-                        encoding="utf-8",
-                    )
-                    stack.callback(errlog.close)
-                    transport = stdio_client(
-                        StdioServerParameters(
-                            command=config.command,
-                            args=list(config.args),
-                            env=dict(config.env),
-                            cwd=config.cwd,
-                        ),
-                        errlog=errlog,
-                    )
+                    # Only the image-local runner starts processes. API/Worker
+                    # never execute registrations or inherit their environment.
+                    yield _SandboxMcpClient(connection, settings, timeout_seconds)
+                    return
                 else:
                     raise McpClientError("Unsupported MCP transport.")
 
@@ -341,7 +335,7 @@ async def call_mcp_tool(
     tool_name: str,
     arguments: dict[str, Any],
     idempotency_key: str | None = None,
-) -> tuple[str, bool]:
+) -> McpCallResult:
     started_at = time.perf_counter()
     async with mcp_client(
         connection,
@@ -359,15 +353,20 @@ async def call_mcp_tool(
             ),
         )
 
-    payload: Any = result.structured_content
-    if payload is None:
-        payload = [
+    call_result = McpCallResult(
+        structured_content=result.structured_content,
+        content=[
             item.model_dump(mode="json", by_alias=True, exclude_none=True)
             for item in result.content
-        ]
-    content = json.dumps(payload, ensure_ascii=False)
+        ],
+        is_error=bool(result.is_error),
+        meta=getattr(result, "meta", None),
+    )
+    content = json.dumps(call_result.payload(), ensure_ascii=False, allow_nan=False)
     if len(content) > MAX_MCP_RESULT_CHARS:
-        content = content[:MAX_MCP_RESULT_CHARS] + "\n[truncated]"
+        raise McpClientError(
+            "MCP tool result exceeds 20,000 characters; request a smaller result."
+        )
     log_event(
         logger,
         logging.INFO,
@@ -376,7 +375,59 @@ async def call_mcp_tool(
         is_error=bool(result.is_error),
         duration_ms=round((time.perf_counter() - started_at) * 1000),
     )
-    return content, bool(result.is_error)
+    return call_result
+
+
+class _SandboxMcpClient:
+    def __init__(self, connection, settings, timeout_seconds):
+        self.connection = connection
+        self.settings = settings
+        self.timeout_seconds = timeout_seconds
+
+    async def _request(self, operation, **arguments):
+        config = json.loads(serialize_mcp_stdio_config(self.connection.stdio_config))
+        domains = config.pop("egress_domains", [])
+        scope = None
+        if execution_scope.get() is None and self.connection.workspace_id:
+            from uuid import uuid4
+
+            scope = execution_scope.set(
+                ExecutionScope(
+                    self.connection.workspace_id, f"mcp-{operation}-{uuid4()}"
+                )
+            )
+        try:
+            response = await self._execute(operation, config, domains, arguments)
+        finally:
+            if scope is not None:
+                execution_scope.reset(scope)
+        if not response.get("ok") or not isinstance(response.get("mcp"), dict):
+            raise McpClientError("Sandboxed MCP server request failed.")
+        return response["mcp"]
+
+    async def _execute(self, operation, config, domains, arguments):
+        return await build_execution_platform(self.settings).execute(
+            {
+                "mcp": {
+                    "operation": operation,
+                    "config": config,
+                    "timeout": self.timeout_seconds,
+                    **arguments,
+                },
+                "network_domains": domains,
+                "limits": {"timeout_ms": round(self.timeout_seconds * 1000)},
+            },
+            timeout_seconds=self.timeout_seconds,
+            max_output_bytes=2 * 1024 * 1024,
+        )
+
+    async def list_tools(self, cursor=None, cache_mode=None):
+        return ListToolsResult.model_validate(await self._request("discover"))
+
+    async def call_tool(self, name, arguments, read_timeout_seconds=None, meta=None):
+        return CallToolResult.model_validate(
+            await self._request("call", name=name, arguments=arguments, meta=meta)
+        )
 
 
 class MultiTransportMcpClient:
@@ -397,7 +448,7 @@ class MultiTransportMcpClient:
         tool_name: str,
         arguments: dict[str, Any],
         idempotency_key: str | None = None,
-    ) -> tuple[str, bool]:
+    ) -> McpCallResult:
         return await call_mcp_tool(
             connection,
             self.settings,

@@ -121,6 +121,17 @@ def extract_image_text(
     return extract_registered_image_text(model, settings, media_type, image_bytes)
 
 
+async def generate_image(
+    settings: Settings,
+    model: RegisteredModel,
+    prompt: str,
+    size: str,
+) -> bytes:
+    from app.adapters.llm.image import generate_registered_image
+
+    return await generate_registered_image(model, settings, prompt, size)
+
+
 def test_model_connection(
     provider_type: str,
     credentials: dict[str, str],
@@ -157,5 +168,6 @@ __all__ = [
     "build_embeddings",
     "build_reranker",
     "extract_image_text",
+    "generate_image",
     "test_model_connection",
 ]

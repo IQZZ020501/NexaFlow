@@ -146,7 +146,6 @@ def observation_from_run(
     return AgentEvaluationObservation(
         status=str(run.get("status") or "unknown"),
         answer=str(run.get("result") or ""),
-        grounding_status=str(run.get("grounding_status") or "not_started"),
         successful_tool_names=successful,
         observed_tool_names=observed,
         source_count=len(sources) if isinstance(sources, list) else 0,

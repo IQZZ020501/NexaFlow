@@ -372,12 +372,12 @@ def test_artifact_contract_downgrade_rejects_durable_references() -> None:
                 raise AssertionError("Artifact Tool ledger downgrade was accepted.")
 
 
-def load_pptx_schema_migration():
+def load_open_kimi_ppt_migration():
     path = (
         Path(__file__).parents[2]
-        / "alembic/versions/202608300003_builtin_pptx_skill_schema.py"
+        / "alembic/versions/202609190002_open_kimi_ppt_skill.py"
     )
-    spec = spec_from_file_location("pptx_skill_schema", path)
+    spec = spec_from_file_location("open_kimi_ppt_skill", path)
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -572,15 +572,15 @@ def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
         ) == desired_version.id
 
 
-def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
+def test_open_kimi_ppt_migration_refreshes_stale_versions() -> None:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
     from sqlalchemy import create_engine
 
     from app.domain.tools.catalog.service import build_skill_artifact_tool
 
-    migration = load_pptx_schema_migration()
-    assert migration.down_revision == "202608300002"
+    migration = load_open_kimi_ppt_migration()
+    assert migration.down_revision == "202609190001"
 
     workspace_id = "workspace-migration"
     desired_tool, desired_version, _desired_policy = build_skill_artifact_tool(
@@ -782,6 +782,12 @@ def test_pptx_skill_schema_migration_refreshes_stale_versions() -> None:
             "properties"
         ]
         assert "theme" in presentation_properties
+        assert len(presentation_properties["design_system"]["enum"]) == 30
+        assert "elements" in presentation_properties["slides"]["items"]["properties"]
+        assert len(
+            presentation_properties["slides"]["items"]["properties"]["animations"]
+            ["items"]["properties"]["effect"]["enum"]
+        ) == 22
         assert "style" in presentation_properties["slides"]["items"]["properties"]
         assert set(slide_layout["enum"]) == {
             "section",
@@ -1698,11 +1704,14 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         tools = await repository.list_tools(db, workspace_id)
         assert {tool.stable_key for tool in tools} == {
             "current_time",
+            "image_generation",
+            "install_skill_dependencies",
             "inline_python",
             "skill_documents",
             "skill_pdf",
             "skill_pptx",
             "skill_spreadsheets",
+            "run_skill_script",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
         python_source = next(source for source in sources if source.kind == "python")
@@ -1722,6 +1731,32 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert policy.approval == "auto"
         assert policy.effect == "pure"
         assert policy.parallel_safe is False
+
+        installer = next(
+            item
+            for item in tools
+            if item.stable_key == "install_skill_dependencies"
+        )
+        installer_version = await repository.get_tool_version(
+            db,
+            workspace_id,
+            installer.current_version_id or "",
+        )
+        installer_policy = await repository.get_tool_policy(
+            db,
+            workspace_id,
+            installer.id,
+        )
+        assert installer_version is not None
+        assert installer_policy is not None
+        assert installer_version.execution_spec == {
+            "builtin": "skill_dependency_install"
+        }
+        assert installer_policy.approval == "each_call"
+        assert installer_policy.effect == "external_write"
+        assert installer_policy.allowed_access_sources == ["console", "public"]
+        assert installer_policy.workflow_callable is False
+        assert installer_policy.parallel_safe is False
 
         for skill_name in ("documents", "pdf", "pptx", "spreadsheets"):
             skill_tool = next(
@@ -1851,6 +1886,7 @@ def test_generated_artifact_link_serves_static_html() -> None:
         assert "default-src 'none'" in response.headers["content-security-policy"]
         assert "page.html" in response.headers["content-disposition"]
         assert response.headers["x-content-type-options"] == "nosniff"
+        assert client.get(f"/api/v1/artifacts/{first.artifact_id}").status_code == 404
         token = first.download_url.rsplit("/", 1)[-1]
         body_response = client.post(
             "/api/v1/artifacts/download",
@@ -1858,6 +1894,62 @@ def test_generated_artifact_link_serves_static_html() -> None:
         )
         assert body_response.status_code == 200, body_response.text
         assert body_response.content == response.content
+        assert client.get(f"{first.download_url}/preview").status_code == 404
+
+
+def test_generated_image_preview_keeps_download_as_attachment() -> None:
+    from unittest.mock import patch
+    from uuid import UUID
+
+    from app.adapters.llm.runtime import VISION_TEST_IMAGE
+    from app.application.artifacts.service import create_generated_artifact
+    from app.infra.security.auth import create_artifact_download_token
+
+    with test_client() as client:
+        _admin_token, workspace_id = activate_admin(client)
+
+        async def create():
+            async with get_session_factory()() as db:
+                link = await create_generated_artifact(
+                    db,
+                    test_settings(),
+                    workspace_id=workspace_id,
+                    run_id="run-image",
+                    idempotency_key="image-preview",
+                    artifact_format="png",
+                    filename="generated-image.png",
+                    content=VISION_TEST_IMAGE,
+                )
+                await db.commit()
+                return link
+
+        link = asyncio.run(create())
+        assert link.download_url == f"/api/v1/artifacts/{link.artifact_id}"
+        assert UUID(link.artifact_id).version == 4
+        preview = client.get(f"{link.download_url}/preview")
+        assert preview.status_code == 200, preview.text
+        assert preview.content == VISION_TEST_IMAGE
+        assert preview.headers["content-disposition"] == "inline"
+        assert preview.headers["content-type"].startswith("image/png")
+        assert preview.headers["cache-control"] == "private, no-store"
+        download = client.get(link.download_url)
+        assert download.status_code == 200
+        assert download.headers["content-disposition"].startswith("attachment")
+        legacy_token = create_artifact_download_token(
+            link.artifact_id, link.expires_at, test_settings()
+        )
+        assert client.get(f"/api/v1/artifacts/{legacy_token}/preview").status_code == 200
+        assert client.get(f"/api/v1/artifacts/{legacy_token}").status_code == 200
+        assert client.post(
+            "/api/v1/artifacts/download", json={"token": link.artifact_id}
+        ).content == VISION_TEST_IMAGE
+        assert client.get("/api/v1/artifacts/invalid/preview").status_code == 404
+        assert client.get(
+            "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e/preview"
+        ).status_code == 404
+        with patch("app.application.artifacts.service.utc_now", return_value=link.expires_at):
+            assert client.get(f"{link.download_url}/preview").status_code == 404
+            assert client.get(link.download_url).status_code == 404
 
 def test_generated_artifact_rejects_source_as_docx() -> None:
     from app.domain.artifacts.services import validate_generated_artifact
@@ -4380,15 +4472,18 @@ async def assert_tool_runtime_edge_branches(
     failure = await preflight(console_denied)
     assert failure is not None and failure.error_code == "tool_access_source_denied"
 
-    # Live-state: unsafe effect through a public source (tool_runtime.py:343).
-    public_denied = await set_policy(
-        approval="auto",
+    # Public chat inherits console tools and can pause for interactive approval.
+    public_approved = await set_policy(
+        approval="each_call",
         effect="external_write",
-        allowed_access_sources=["console", "public"],
+        allowed_access_sources=["console"],
         workflow_callable=True,
         parallel_safe=True,
     )
-    failure = await preflight(public_denied, access_source="public")
+    assert await preflight(public_approved, access_source="public") is None
+
+    # Machine-to-machine API access remains automatic and read-only.
+    failure = await preflight(public_approved, access_source="api")
     assert failure is not None and failure.error_code == "tool_access_source_denied"
 
     # Live-state: not workflow callable (tool_runtime.py:345).
@@ -5412,7 +5507,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         WorkflowSandboxError,
         WorkflowSandboxResult,
     )
-    from app.ports.mcp import McpClientError
+    from app.ports.mcp import McpCallResult, McpClientError
 
     settings = Settings.from_env(require_bootstrap=False)
     context = ToolInvocationContext(
@@ -5792,21 +5887,21 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     # MCP adapter happy path (tool_adapters.py:123-129, 141-145, 145-153).
     with patch(
         "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
-        new=AsyncMock(return_value=('{"ok": true}', False)),
+        new=AsyncMock(return_value=McpCallResult(content=[], structured_content={"ok": True})),
     ) as call:
         result = await mcp.invoke(mcp_snapshot, {}, context)
     assert result.ok is True
-    assert result.data == {"ok": True}
+    assert result.data == {"content": [], "isError": False, "structuredContent": {"ok": True}}
     assert call.await_count == 1
     # MCP adapter non-JSON error content (tool_adapters.py:142-144, 147-150).
     with patch(
         "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
-        new=AsyncMock(return_value=("plain failure", True)),
+        new=AsyncMock(return_value=McpCallResult(content=[{"type": "text", "text": "plain failure"}], is_error=True)),
     ):
         result = await mcp.invoke(mcp_snapshot, {}, context)
     assert result.ok is False
     assert result.error_code == "mcp_tool_error"
-    assert result.data == "plain failure"
+    assert result.data == {"content": [{"type": "text", "text": "plain failure"}], "isError": True}
     # MCP adapter client error, confirmed outcome (tool_adapters.py:130-140).
     with patch(
         "app.application.tools.runtime.adapters.mcp.call_mcp_tool",
@@ -5953,9 +6048,11 @@ def test_workspace_creation_initializes_system_catalog() -> None:
         assert {item["function_name"] for item in response.json()} == {
             "current_time",
             "documents_skill",
+            "generate_image",
             "pdf_skill",
             "pptx_skill",
             "spreadsheets_skill",
+            "run_skill_script",
         }
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
         run(assert_mcp_discovery_materializes_first_leaf(workspace_id))
@@ -6314,8 +6411,6 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
 
     original_configure = tool_tasks.configure_task_worker
     original_execute = tool_tasks.execute_tool_invocation
-    original_recover = tool_tasks.list_recoverable_tool_test_invocation_ids
-    original_apply_async = tool_tasks.run_tool_invocation_job.apply_async
     original_send_task = tool_dispatch.celery_app.send_task
     original_log_error = tool_dispatch.log_error
     original_broker_url = tool_dispatch.celery_app.conf.broker_url
@@ -6367,21 +6462,7 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         else:
             raise AssertionError("A busy Tool invocation must be retried.")
 
-        async def recoverable():
-            return ["invocation-3", "invocation-4"]
-
         dispatched: list[dict] = []
-        tool_tasks.list_recoverable_tool_test_invocation_ids = recoverable
-        tool_tasks.run_tool_invocation_job.apply_async = lambda **kwargs: dispatched.append(
-            kwargs
-        )
-        tool_tasks.recover_tool_invocations_job()
-        assert dispatched == [
-            {"args": ("invocation-3",)},
-            {"args": ("invocation-4",)},
-        ]
-
-        dispatched.clear()
         tool_dispatch.celery_app.conf.task_always_eager = True
         tool_dispatch.celery_app.send_task = lambda *args, **kwargs: dispatched.append(
             {"task": args[0], **kwargs}
@@ -6409,8 +6490,6 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
     finally:
         tool_tasks.configure_task_worker = original_configure
         tool_tasks.execute_tool_invocation = original_execute
-        tool_tasks.list_recoverable_tool_test_invocation_ids = original_recover
-        tool_tasks.run_tool_invocation_job.apply_async = original_apply_async
         tool_dispatch.celery_app.send_task = original_send_task
         tool_dispatch.log_error = original_log_error
         tool_dispatch.celery_app.conf.broker_url = original_broker_url
@@ -6538,14 +6617,14 @@ def test_tool_boundaries_reject_unsafe_payloads() -> None:
 
 def test_tool_tasks_are_registered() -> None:
     from app.infra.queue.celery import celery_app
-    from app.tasks.maintenance.jobs import cleanup_expired_generated_artifacts_job
 
+    celery_app.loader.import_default_modules()
     assert "app.tools.run" in celery_app.tasks
-    assert "app.tools.recover" in celery_app.tasks
-    assert cleanup_expired_generated_artifacts_job.name in celery_app.tasks
+    assert "app.tools.recover" not in celery_app.tasks
+    assert "app.maintenance.run" in celery_app.tasks
     assert (
         celery_app.conf.beat_schedule["recover-frequent-maintenance"]["task"]
-        == "app.maintenance.recover_frequent"
+        == "app.maintenance.run"
     )
 
 
@@ -6555,7 +6634,7 @@ def main() -> None:
     test_artifact_contract_downgrade_rejects_durable_references()
     test_documents_formal_legal_migration_refreshes_stale_versions()
     test_documents_reference_migration_targets_current_catalog()
-    test_pptx_skill_schema_migration_refreshes_stale_versions()
+    test_open_kimi_ppt_migration_refreshes_stale_versions()
     test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
@@ -6578,6 +6657,7 @@ def main() -> None:
     test_mcp_resolution_rejects_missing_authorization_context()
     test_workspace_creation_initializes_system_catalog()
     test_generated_artifact_link_serves_static_html()
+    test_generated_image_preview_keeps_download_as_attachment()
     test_generated_artifact_rejects_source_as_docx()
     test_generated_artifact_downloads_common_formats()
     test_python_tool_http_lifecycle_and_private_grants()

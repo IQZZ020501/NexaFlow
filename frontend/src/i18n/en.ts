@@ -1,6 +1,23 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "应如何批准工具调用？": "How should tool calls be approved?",
+  请求批准: "Request approval",
+  按策略审批: "Policy approval",
+  完全访问: "Full access",
+  外部读取或副作用操作前询问: "Ask for external reads or side effects",
+  仅风险操作需批准: "Ask only for risky operations",
+  "自动运行已授权工具，仍受安全限制": "Auto-run authorized tools; limits apply",
+  "执行权限：{mode}": "Execution permission: {mode}",
+  "编辑 Skill": "Edit Skill",
+  "技能指令": "Skill instructions",
+  "包文件": "Package files",
+  "保存并发布": "Save and publish",
+  "Skill 包不能超过 2 MiB": "Skill packages cannot exceed 2 MiB",
+  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。": "Skills are instruction and file packages loaded on demand. They do not automatically create or authorize external tools.",
+  追加后续任务: "Queue follow-up",
+  后续任务已排队: "Follow-up queued",
+  后续任务: "Follow-up task",
   语言: "Language",
   "切换语言，当前为 {language}": "Change language, currently {language}",
   主题: "Theme",
@@ -537,6 +554,12 @@ export const en = {
   "保存时会先测试模型调用，测试通过后才会保存。":
     "Saving tests the model call first; the config is saved only after the test passes.",
   "测试并保存中...": "Testing and saving...",
+  "连接测试受系统超时限制；只有测试通过后才会保存模型。":
+    "Connection tests have a system timeout; the model is saved only after a successful test.",
+  "正在测试模型连接；测试完成或超时前请保持此窗口打开。":
+    "Testing the model connection; keep this window open until it completes or times out.",
+  "模型连接测试超时，请检查供应商后重试":
+    "The model connection test timed out. Check the provider and try again.",
   模型类型: "Model type",
   上下文: "Context",
   上下文长度: "Context length",
@@ -584,6 +607,7 @@ export const en = {
   我的工具: "My tools",
   共享给我的: "Shared with me",
   内置工具: "Built-in tools",
+  上游未发现该工具: "No longer found upstream",
   "统一管理 Python、MCP 与内置工具，以及它们的版本和授权。":
     "Manage Python, MCP, and built-in tools, together with their versions and permissions.",
   "添加 Python 工具或连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。":
@@ -594,6 +618,9 @@ export const en = {
   没有匹配的工具: "No matching tools",
   暂无可用工具: "No tools available",
   选择工具: "Select tools",
+  工具分类: "Tool categories",
+  全部工具: "All tools",
+  已选但不可用: "Selected but unavailable",
   "选择有使用权限且已发布的工具，最多 {value} 个。":
     "Select published tools you have permission to use, up to {value}.",
   "按名称、描述或来源搜索工具": "Search tools by name, description, or source",
@@ -827,6 +854,16 @@ export const en = {
   命中测试: "Hit test",
   大语言模型: "LLM",
   视觉模型: "Vision model",
+  生图模型: "Image generation model",
+  生图模型已更新: "Image generation model updated",
+  生图模型已添加: "Image generation model added",
+  图片生成: "Generate image",
+  暂无可用的图片生成工具: "Image generation is unavailable",
+  "最多只能关联 12 个工具": "No more than 12 tools can be linked",
+  "使用工作空间的生图模型生成图片；每次调用需要确认。":
+    "Generate an image with the workspace image model; each call requires approval.",
+  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。":
+    "Saving an image model does not make a paid test call. The connection is checked on the first Agent call. Keep exactly one image model active in this workspace.",
   失败: "Failed",
   "已上传 {value} 个文件": "Uploaded {value} files",
   "已上传 {value} 个文件，{value} 个上传失败":
@@ -1136,7 +1173,8 @@ export const en = {
   回答已生成: "Answer generated",
   "已检索 {value} 个知识片段": "Retrieved {value} knowledge chunks",
   已跳过重复知识检索: "Skipped duplicate knowledge search",
-  "知识依据已足够，停止继续检索": "Enough evidence retrieved; stopped searching",
+  "知识依据已足够，停止继续检索":
+    "Enough evidence retrieved; stopped searching",
   调用输入: "Input",
   调用结果: "Result",
   内容过长已截断: "Content too long, truncated",
@@ -1202,12 +1240,12 @@ export const en = {
   SSE: "SSE",
   "兼容旧版远程 Server": "Compatible with legacy remote Servers",
   stdio: "stdio",
-  "运行本地 stdio Server": "Run a local stdio Server",
+  "运行本地 stdio Server": "Run stdio inside OpenSandbox",
   "stdio 命令：{command}": "stdio command: {command}",
   "stdio 配置（JSON）": "stdio configuration (JSON)",
   "请输入有效的 stdio JSON 配置。": "Enter a valid stdio JSON configuration.",
   "stdio 配置会加密保存，之后不会返回明文。":
-    "The stdio configuration is encrypted and is never returned in plaintext.",
+    "Configuration is encrypted and never returned in plaintext. Paths refer to the execution image; egress domains must be deployment-allowlisted.",
   "例如：业务工具": "Example: Business tools",
   "MCP 地址": "MCP URL",
   "支持 HTTP 和 HTTPS；内网地址需由部署管理员启用，HTTP 不加密。":
@@ -1978,6 +2016,11 @@ export const en = {
   邀请已撤销: "Invitation revoked",
   邀请已删除: "Invitation deleted",
   邀请链接: "Invitation link",
+  邀请链接无效或已过期: "The invitation link is invalid or expired",
+  "输入内容过短，请检查后重试": "The value is too short. Check it and try again",
+  撤销该用户全部会话: "Revoke all sessions for this user",
+  确认撤销该用户全部会话: "Revoke all sessions for this user?",
+  该用户的全部会话已撤销: "All sessions for this user were revoked",
   配额策略: "Quota policy",
   向量数据库: "Vector database",
   "后台 Worker": "Background worker",

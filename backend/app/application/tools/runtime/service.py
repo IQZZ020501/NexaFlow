@@ -28,7 +28,9 @@ from app.domain.tools.runtime import (
     TOOL_INVOCATION_UNCERTAIN,
     TOOL_SAFE_EXTERNAL_EFFECTS,
     TOOL_UNCERTAIN_EFFECTS,
+    effective_tool_access_sources,
     normalize_tool_arguments,
+    tool_access_source_allowed,
     tool_arguments_hash,
     tool_input_size_limit,
     tool_snapshot_from_payload,
@@ -73,10 +75,27 @@ async def queue_tool_invocation(
     arguments_hash = tool_arguments_hash(
         arguments, max_bytes=tool_input_size_limit(snapshot)
     )
+    resource_snapshot = context.resource_snapshot
+    if snapshot.execution_spec.get("builtin") == "image_generation":
+        from app.application.tools.runtime.adapters.image_generation import (
+            build_image_model_resource_snapshot,
+        )
+
+        resource_snapshot = await build_image_model_resource_snapshot(
+            db,
+            context.workspace_id,
+        )
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),
         "deadline_at": context.deadline_at.isoformat(),
+        "resource_snapshot": resource_snapshot,
+        "approval_required": (
+            context.approval_required
+            if context.approval_required is not None
+            else snapshot.approval == TOOL_APPROVAL_EACH_CALL
+        ),
     }
+    approval_required = bool(payload["approval_required"])
     candidate = ToolInvocation(
         workspace_id=context.workspace_id,
         origin=context.origin,
@@ -93,7 +112,7 @@ async def queue_tool_invocation(
         idempotency_key=context.idempotency_key,
         status=(
             TOOL_INVOCATION_AWAITING_APPROVAL
-            if snapshot.approval == TOOL_APPROVAL_EACH_CALL
+            if approval_required
             else TOOL_INVOCATION_QUEUED
         ),
     )
@@ -210,11 +229,21 @@ async def execute_tool_invocation(
         remaining = max(0.001, (context.deadline_at - utc_now()).total_seconds())
         try:
             async with asyncio.timeout(remaining):
-                result = await selected_adapter.invoke(
-                    snapshot,
-                    invocation.arguments,
-                    context,
+                from app.ports.execution import ExecutionScope, execution_scope
+
+                scope_token = execution_scope.set(
+                    ExecutionScope(
+                        context.workspace_id, context.invocation_id, context.run_id
+                    )
                 )
+                try:
+                    result = await selected_adapter.invoke(
+                        snapshot,
+                        invocation.arguments,
+                        context,
+                    )
+                finally:
+                    execution_scope.reset(scope_token)
         except ToolAdapterBusy:
             if invocation.attempts + 1 < invocation.max_attempts:
                 async with get_session_factory()() as db:
@@ -340,7 +369,8 @@ async def _validate_live_state(
             and policy.definition_hash == snapshot.definition_hash
             and policy.approval == snapshot.approval
             and policy.effect == snapshot.effect
-            and tuple(policy.allowed_access_sources) == snapshot.allowed_access_sources
+            and effective_tool_access_sources(policy.allowed_access_sources)
+            == effective_tool_access_sources(snapshot.allowed_access_sources)
             and policy.workflow_callable == snapshot.workflow_callable
             and policy.parallel_safe == snapshot.parallel_safe
         )
@@ -348,9 +378,12 @@ async def _validate_live_state(
         return _failure("tool_policy_changed", "Tool policy changed."), None
     if snapshot.approval == TOOL_APPROVAL_DISABLED:
         return _failure("tool_disabled", "Tool is disabled."), None
-    if invocation.access_source not in snapshot.allowed_access_sources:
+    if not tool_access_source_allowed(
+        snapshot.allowed_access_sources,
+        invocation.access_source,
+    ):
         return _failure("tool_access_source_denied", "Tool access source is denied."), None
-    if invocation.access_source in {"public", "api"} and (
+    if invocation.access_source == "api" and (
         snapshot.approval != TOOL_APPROVAL_AUTO
         or snapshot.effect not in TOOL_SAFE_EXTERNAL_EFFECTS
     ):
@@ -501,6 +534,9 @@ def _load_invocation_contract(
     deadline = datetime.fromisoformat(deadline_value)
     if deadline.tzinfo is None:
         raise ValueError("Tool invocation deadline is invalid.")
+    resource_snapshot = invocation.policy_snapshot.get("resource_snapshot", {})
+    if not isinstance(resource_snapshot, dict):
+        raise ValueError("Tool invocation resource snapshot is invalid.")
     context = ToolInvocationContext(
         workspace_id=invocation.workspace_id,
         origin=invocation.origin,
@@ -511,6 +547,14 @@ def _load_invocation_contract(
         access_source=invocation.access_source,
         deadline_at=deadline,
         idempotency_key=invocation.idempotency_key,
+        resource_snapshot=resource_snapshot,
+        approval_required=(
+            invocation.policy_snapshot.get("approval_required")
+            if isinstance(
+                invocation.policy_snapshot.get("approval_required"), bool
+            )
+            else None
+        ),
     )
     _validate_context(context)
     return snapshot, context

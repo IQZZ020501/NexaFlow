@@ -235,23 +235,6 @@ def test_email_task_wrappers() -> None:
         email_tasks.run_email_delivery_job.run("failed-id")
     log_error.assert_called_once()
 
-    with (
-        patch("app.tasks.email.jobs.Settings.from_env", return_value=settings),
-        patch("app.tasks.email.jobs.configure_task_worker") as configure_worker,
-        patch(
-            "app.tasks.email.jobs.list_due_email_delivery_ids",
-            new=AsyncMock(return_value=["one", "two"]),
-        ),
-        patch.object(email_tasks.run_email_delivery_job, "apply_async") as apply_async,
-    ):
-        email_tasks.recover_email_deliveries_job.run()
-    configure_worker.assert_called_once_with(settings)
-    assert apply_async.call_args_list == [
-        call(args=("one",)),
-        call(args=("two",)),
-    ]
-
-
 async def test_delivery_edge_cases() -> None:
     settings = test_settings()
 
@@ -916,10 +899,10 @@ def main() -> None:
         from app.infra.queue.celery import celery_app
 
         assert "app.email.send" in celery_app.tasks
-        assert "app.email.recover" in celery_app.tasks
+        assert "app.email.recover" not in celery_app.tasks
         assert (
             celery_app.conf.beat_schedule["recover-frequent-maintenance"]["task"]
-            == "app.maintenance.recover_frequent"
+            == "app.maintenance.run"
         )
 
     print("email tests passed")

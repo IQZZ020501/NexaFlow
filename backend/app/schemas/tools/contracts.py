@@ -57,6 +57,8 @@ class ToolSummaryResponse(_PublicToolResponse):
     current_version_id: str | None
     status: str
     availability: Literal["available", "unavailable"]
+    policy_mode: Literal["approval_required", "read_only", "disabled"] | None = None
+    allowed_access_sources: list[str] | None = None
     source: ToolSourceSummaryResponse
     created_by_user_id: str | None
     created_at: datetime

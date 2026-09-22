@@ -35,7 +35,7 @@ from app.domain.tools.access.bindings import (
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
-from app.domain.tools.catalog.service import get_tool_catalog_detail
+from app.domain.tools.catalog.service import get_tool_catalog_detail, stable_catalog_id
 from app.domain.tools.mcp.service import resolve_mcp_tools
 from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.runtime.engine import graph_hash
@@ -72,6 +72,20 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 )
 
 
+def is_agent_implicit_tool(workspace_id: str, tool_id: str) -> bool:
+    return tool_id == stable_catalog_id(
+        f"tool:{workspace_id}:builtin:install_skill_dependencies"
+    )
+
+
+def configurable_agent_tools(
+    workspace_id: str, tools: list[ToolSnapshot]
+) -> list[ToolSnapshot]:
+    return [
+        tool for tool in tools if not is_agent_implicit_tool(workspace_id, tool.tool_id)
+    ]
+
+
 def validate_agent_status(value: str) -> str:
     if value not in AGENT_STATUSES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid agent status.")
@@ -100,7 +114,11 @@ def agent_to_response(
         instructions=agent.instructions,
         model_id=agent.model_id,
         knowledge_base_ids=knowledge_base_ids,
-        tools=[{"tool_id": item.tool_id, "version_id": item.version_id} for item in tools],
+        tools=[
+            {"tool_id": item.tool_id, "version_id": item.version_id}
+            for item in tools
+            if not is_agent_implicit_tool(agent.workspace_id, item.tool_id)
+        ],
         skills=[{"skill_id": item.skill_id, "version_id": item.version_id} for item in skills],
         mcp_tools=legacy_mcp_tools,
         status=agent.status,
@@ -224,6 +242,11 @@ async def resolve_requested_agent_tools(
         ]
     else:
         references = []
+    references = [
+        reference
+        for reference in references
+        if not is_agent_implicit_tool(workspace_id, reference.tool_id)
+    ]
     return await resolve_tool_refs_for_actor(
         db,
         workspace_id,
@@ -252,6 +275,8 @@ async def agent_has_unpublished_changes(
 ) -> bool:
     if not agent.published:
         return False
+    if agent.app_type == "workflow":
+        return await _workflow_has_unpublished_changes(db, agent)
     if agent.current_published_version_id is None:
         return True
     version = await agent_repository.get_agent_publication_version(
@@ -290,8 +315,53 @@ def _agent_has_unpublished_changes(
     if version is None or version.agent_id != agent.id or tools is None:
         return True
     configuration = build_agent_configuration_snapshot(agent)
-    resources = build_agent_resource_snapshot(knowledge_base_ids, tools, skills)
+    resources = build_agent_resource_snapshot(
+        knowledge_base_ids,
+        configurable_agent_tools(agent.workspace_id, tools),
+        skills,
+    )
     return agent_publication_hash(configuration, resources) != version.configuration_hash
+
+
+async def _workflow_has_unpublished_changes(db: AsyncSession, agent: Agent) -> bool:
+    """Report whether a published workflow differs from its published snapshot and graph.
+
+    Workflows publish through the workflow version endpoint, so they record their
+    publication in the stored Agent snapshot plus the newest WorkflowVersion
+    instead of an Agent publication version row.
+    """
+    knowledge_base_ids = (await agent_repository.list_binding_map(db, [agent.id]))[
+        agent.id
+    ]
+    mcp_tools = (await agent_repository.list_mcp_binding_map(db, [agent.id]))[agent.id]
+    graph_hashes = (
+        await workflow_repository.map_graph_hashes(db, agent.workspace_id, [agent.id])
+    )[agent.id]
+    return _workflow_publication_differs(
+        agent,
+        knowledge_base_ids,
+        mcp_tools,
+        graph_hashes,
+    )
+
+
+def _workflow_publication_differs(
+    agent: Agent,
+    knowledge_base_ids: list[str],
+    mcp_tools: list[dict[str, str]],
+    graph_hashes: tuple[str | None, str | None],
+) -> bool:
+    """Compare a workflow's live configuration and draft graph with its publication."""
+    if agent.published_snapshot is None:
+        return True
+    if agent_publication_snapshot(agent, knowledge_base_ids, mcp_tools) != dict(
+        agent.published_snapshot
+    ):
+        return True
+    draft_hash, published_hash = graph_hashes
+    if draft_hash is None or published_hash is None:
+        return True
+    return draft_hash != published_hash
 
 
 async def accessible_agent_knowledge_bases(
@@ -418,6 +488,11 @@ async def list_agents(
             if (version_id := agent.current_published_version_id) is not None
         ],
     )
+    workflow_graph_hashes = await workflow_repository.map_graph_hashes(
+        db,
+        workspace_id,
+        [agent.id for agent in agents if agent.app_type == "workflow"],
+    )
     tool_snapshot_map = await resolve_application_tool_snapshot_map(
         db,
         workspace_id,
@@ -453,12 +528,23 @@ async def list_agents(
                 skill_ref_map[agent.id],
                 actor,
                 creator=creators.get(agent.created_by_user_id),
-                has_unpublished_changes=_agent_has_unpublished_changes(
-                    agent,
-                    bindings[agent.id],
-                    publication_versions.get(agent.current_published_version_id or ""),
-                    tool_snapshot_map[agent.id],
-                    agent_skills,
+                has_unpublished_changes=(
+                    _workflow_publication_differs(
+                        agent,
+                        bindings[agent.id],
+                        legacy_mcp_bindings[agent.id],
+                        workflow_graph_hashes[agent.id],
+                    )
+                    if agent.app_type == "workflow"
+                    else _agent_has_unpublished_changes(
+                        agent,
+                        bindings[agent.id],
+                        publication_versions.get(
+                            agent.current_published_version_id or ""
+                        ),
+                        tool_snapshot_map[agent.id],
+                        agent_skills,
+                    )
                 ),
             )
         )
@@ -668,6 +754,17 @@ async def apply_agent_publication(
             agent.workspace_id,
             agent.id,
         )
+        publication_tools = configurable_agent_tools(
+            agent.workspace_id, publication_tools
+        )
+        if len(publication_tools) != len(
+            await tools_repository.list_application_tool_bindings(
+                db, agent.workspace_id, agent.id
+            )
+        ):
+            await sync_application_tool_bindings(
+                db, agent.workspace_id, agent.id, publication_tools, actor.id
+            )
         publication_skills = await resolve_application_agent_skill_snapshots(
             db,
             agent.workspace_id,
@@ -860,6 +957,9 @@ async def update_agent(
         healed_refs: list[ToolRef] = []
         drifted = False
         for binding in current_tool_bindings:
+            if is_agent_implicit_tool(agent.workspace_id, binding.tool_id):
+                drifted = True
+                continue
             detail = await get_tool_catalog_detail(
                 db,
                 agent.workspace_id,

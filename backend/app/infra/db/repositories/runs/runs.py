@@ -226,10 +226,59 @@ async def _to_agent_run_entities(
     rows: list[tuple[AgentRun, AgentRunState, AgentRunSnapshot]],
 ) -> list[AgentRunEntity]:
     projections = await _run_event_projections(db, [row[0].id for row in rows])
-    return [
+    entities = [
         _to_agent_run_entity(run, state, snapshot, events=projections.get(run.id))
         for run, state, snapshot in rows
     ]
+    await _attach_session_inputs(db, entities)
+    return entities
+
+
+async def _attach_session_inputs(db: AsyncSession, entities: list[AgentRunEntity]) -> None:
+    if not entities:
+        return
+    by_id = {entity.id: entity for entity in entities}
+    rows = await db.execute(
+        select(AgentRunEvent.run_id, AgentRunEvent.id, AgentRunEvent.event)
+        .where(
+            AgentRunEvent.run_id.in_(by_id),
+            AgentRunEvent.event["type"].as_string() == "session_input",
+        )
+        .order_by(AgentRunEvent.id)
+    )
+    consumed = {
+        entity.id: {
+            item["id"]: item
+            for item in entity.checkpoint.get("harness", {}).get("inputs", [])
+        }
+        for entity in entities
+    }
+    for run_id, sequence, event in rows:
+        entity = by_id[run_id]
+        applied = sequence in entity.checkpoint.get("harness", {}).get("input_ids", [])
+        entity.session_inputs.append(
+            {
+                "sequence": sequence,
+                "run_id": run_id,
+                "input_id": event["input_id"],
+                "mode": "follow_up",
+                "content": event["content"],
+                "status": "applied" if applied else "queued",
+                "previous_answer": consumed[run_id].get(sequence, {}).get("previous_answer"),
+                "previous_answer_turn": consumed[run_id]
+                .get(sequence, {})
+                .get("previous_answer_turn"),
+            }
+        )
+    for entity in entities:
+        applied_ids = list(consumed[entity.id])
+        entity.session_inputs.sort(
+            key=lambda item: (
+                applied_ids.index(item["sequence"])
+                if item["sequence"] in applied_ids
+                else len(applied_ids) + item["sequence"]
+            )
+        )
 
 def _worker_generation(configuration_source: str) -> str:
     return "unified" if configuration_source in {"draft", "published"} else "legacy"
@@ -276,7 +325,9 @@ async def get_agent_run_by_id(
     if row is None:
         return None
     projections = await _run_event_projections(db, [run_id])
-    return _to_agent_run_entity(*row, events=projections.get(run_id))
+    entity = _to_agent_run_entity(*row, events=projections.get(run_id))
+    await _attach_session_inputs(db, [entity])
+    return entity
 
 async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
     run = AgentRun(**_entity_values(entity, _RUN_CORE_FIELDS))
@@ -353,8 +404,27 @@ async def finalize_agent_run(
     model_usage: dict | None = None,
     grounding_status: str | None = None,
     grounding_meta: dict | None = None,
+    session_input_ids: list[int] | None = None,
 ) -> bool:
     del events
+    if session_input_ids is not None:
+        # Queue writers take the same lock. An accepted input can never race
+        # past successful finalization and be silently abandoned.
+        state = await db.scalar(
+            select(AgentRunState)
+            .where(
+                AgentRunState.run_id == run_id,
+                AgentRunState.status.in_(AGENT_RUN_RUNNING_STATUSES),
+                AgentRunState.worker_task_id == worker_task_id,
+            )
+            .with_for_update()
+        )
+        if state is None:
+            return False
+        from app.infra.db.repositories.runs.session_inputs import pending_session_inputs
+
+        if await pending_session_inputs(db, run_id, session_input_ids):
+            return False
     values = {
         "status": status,
         "result": result,

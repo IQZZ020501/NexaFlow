@@ -17,10 +17,13 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
     "密码重置暂时不可用，请稍后重试",
   "Too many password reset requests.": "密码重置请求过于频繁，请稍后重试",
   "Password reset link is invalid or expired.": "密码重置链接无效或已过期",
+  "Invitation is invalid or expired.": "邀请链接无效或已过期",
+  "String should have at least 20 characters": "输入内容过短，请检查后重试",
   "New password must be different.": "新密码不能与原密码相同",
   "Knowledge base name already exists.": "知识库名称已存在",
   "Vision model is not configured for this workspace.":
     "视觉模型尚未配置，暂时不支持图片解析",
+  "Model connection test timed out.": "模型连接测试超时，请检查供应商后重试",
 }
 
 /**

@@ -39,6 +39,7 @@ class McpStdioConfigRequest(BaseModel):
     args: list[str] = Field(default_factory=list, max_length=64)
     cwd: str | None = Field(default=None, max_length=1000)
     env: dict[str, str] = Field(default_factory=dict, max_length=32)
+    egress_domains: list[str] = Field(default_factory=list, max_length=32)
 
 
 class McpServerCreateRequest(BaseModel):

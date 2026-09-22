@@ -12,6 +12,14 @@ import {
 import type { TFunction } from "@/i18n"
 import type { AgentRunSource } from "@/lib/api/agents"
 
+type AgentSourceEvent = {
+  type?: string
+  tool_kind?: string
+  status?: string
+  output?: unknown
+  hits?: unknown
+}
+
 const SOURCE_HREF_PATTERN = /(?:^|#)nex(?:aflow|faow)-source-([^\s)>'"]+)$/i
 const SOURCE_HREF_MARKER_PATTERN = /(?:^|#)nex(?:aflow|faow)-source-/i
 const SOURCE_LINK_PATTERN =
@@ -32,6 +40,69 @@ function normalizeSourceRef(value: string) {
     // Keep the original token when a legacy answer contains malformed escapes.
   }
   return decoded.toLowerCase()
+}
+
+function sourceHitSignature(value: Record<string, unknown>) {
+  const document =
+    typeof value.document === "string" ? value.document.trim() : ""
+  const content = typeof value.content === "string" ? value.content : ""
+  if (!document || !content) return null
+  const knowledgeBase =
+    typeof value.knowledge_base === "string" ? value.knowledge_base.trim() : ""
+  return JSON.stringify([knowledgeBase, document, content])
+}
+
+export function agentSourcesForEvents(
+  sources: AgentRunSource[] | undefined,
+  events: readonly AgentSourceEvent[]
+) {
+  if (!sources?.length) return []
+
+  const sourceRefs = new Set<string>()
+  const sourceSignatures = new Set<string>()
+  for (const event of events) {
+    if (
+      event.status !== "succeeded" ||
+      (event.tool_kind !== "knowledge" && event.type !== "knowledge")
+    ) {
+      continue
+    }
+    const output =
+      event.output && typeof event.output === "object"
+        ? (event.output as Record<string, unknown>)
+        : null
+    const hits = Array.isArray(event.hits)
+      ? event.hits
+      : Array.isArray(output?.hits)
+        ? output.hits
+        : []
+    for (const hit of hits) {
+      if (!hit || typeof hit !== "object") continue
+      const value = hit as Record<string, unknown>
+      if (typeof value.source_ref === "string" && value.source_ref.trim()) {
+        sourceRefs.add(normalizeSourceRef(value.source_ref))
+      }
+      const signature = sourceHitSignature(value)
+      if (signature) sourceSignatures.add(signature)
+    }
+  }
+
+  const seen = new Set<string>()
+  return sources.filter((source) => {
+    const sourceRef = normalizeSourceRef(source.source_ref)
+    const matches =
+      sourceRefs.has(sourceRef) ||
+      sourceSignatures.has(
+        sourceHitSignature({
+          knowledge_base: source.knowledge_base,
+          document: source.document,
+          content: source.content,
+        }) ?? ""
+      )
+    if (!matches || seen.has(sourceRef)) return false
+    seen.add(sourceRef)
+    return true
+  })
 }
 
 function sourceRefFromHref(href?: string) {

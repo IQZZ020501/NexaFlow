@@ -40,6 +40,19 @@ async def get_registered_model_by_id(
     return await db.get(RegisteredModel, model_id)
 
 
+async def list_active_image_models(
+    db: AsyncSession, workspace_id: str
+) -> list[RegisteredModel]:
+    result = await db.scalars(
+        select(RegisteredModel).where(
+            RegisteredModel.workspace_id == workspace_id,
+            RegisteredModel.model_type == "IMAGE",
+            RegisteredModel.status == "active",
+        ).order_by(RegisteredModel.id).limit(2)
+    )
+    return list(result.all())
+
+
 async def find_registered_model_id_by_name(
     db: AsyncSession,
     workspace_id: str,

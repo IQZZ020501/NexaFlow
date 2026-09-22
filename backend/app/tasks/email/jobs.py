@@ -1,7 +1,4 @@
-from app.application.email.delivery import (
-    list_due_email_delivery_ids,
-    run_email_delivery,
-)
+from app.application.email.delivery import run_email_delivery
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
@@ -25,11 +22,3 @@ def run_email_delivery_job(delivery_id: str) -> None:
             exc,
             delivery_id=delivery_id,
         )
-
-
-@celery_app.task(name="app.email.recover", ignore_result=True)
-def recover_email_deliveries_job() -> None:
-    settings = Settings.from_env(require_bootstrap=False)
-    configure_task_worker(settings)
-    for delivery_id in run_task_async(list_due_email_delivery_ids()):
-        run_email_delivery_job.apply_async(args=(delivery_id,))

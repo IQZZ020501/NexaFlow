@@ -28,6 +28,8 @@ os.environ.update(
         "CELERY_TASK_ALWAYS_EAGER": "true",
         "QDRANT_URL": ":memory:",
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "OPENSANDBOX_IMAGE": "nexaflow/execution:local",
+        "OPENSANDBOX_EGRESS_DOMAINS": "",
         "KNOWLEDGE_STORAGE_DIR": os.environ.get(
             "KNOWLEDGE_STORAGE_DIR", "/tmp/app-test-knowledge-storage"
         ),

@@ -1,6 +1,10 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
-import type { AgentToolCall } from "@/lib/api/agents"
+import type {
+  AgentApprovalMode,
+  AgentSessionInput,
+  AgentToolCall,
+} from "@/lib/api/agents"
 import type { AgentInteractionConfig, AgentRunSource } from "@/lib/api/agents"
 
 export type PublicAgentProfile = {
@@ -69,7 +73,9 @@ export type ExternalAgentRun = {
   conversation_id: string
   regenerated_from_run_id?: string | null
   question: string
+  session_inputs?: AgentSessionInput[]
   attachments?: AgentRunAttachment[]
+  approval_mode?: AgentApprovalMode
   status: string
   result: string
   sources?: AgentRunSource[]
@@ -97,7 +103,13 @@ export type PublicAgentRunStreamEvent =
       type: "answer_delta"
       delta: string
     })
-  | (PublicAgentStreamCursor & { type: "answer_reset" })
+  | (PublicAgentStreamCursor & {
+      type: "answer_reset"
+      applied_inputs?: Pick<
+        AgentSessionInput,
+        "sequence" | "input_id" | "mode" | "content" | "previous_answer_turn"
+      >[]
+    })
   | (PublicAgentStreamCursor & {
       type: "reasoning_delta"
       turn: number
@@ -121,6 +133,12 @@ export type PublicAgentRunStreamEvent =
       type: "approval_required"
       call_id: string
       reason: string
+    })
+  | (PublicAgentStreamCursor & {
+      type: "session_input"
+      input_id: string
+      mode: "follow_up"
+      content: string
     })
   | (PublicAgentStreamCursor & {
       type: "complete" | "error"
@@ -239,7 +257,8 @@ export function createPublicAgentRun(
   goal: string,
   conversationId?: string | null,
   signal?: AbortSignal,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   return request<ExternalAgentRun>(publicAgentPath(agentId, "/runs"), {
     method: "POST",
@@ -247,6 +266,7 @@ export function createPublicAgentRun(
       goal,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
+      approval_mode: approvalMode,
     }),
     signal,
     token,
@@ -388,6 +408,19 @@ export function resolvePublicAgentRunToolCall(
   )
 }
 
+/** Queues a follow-up on an active public Agent run. */
+export function sendPublicAgentSessionInput(
+  agentId: string,
+  token: string,
+  runId: string,
+  input: Pick<AgentSessionInput, "input_id" | "mode" | "content">
+) {
+  return request<AgentSessionInput>(
+    publicAgentPath(agentId, `/runs/${runId}/inputs`),
+    { method: "POST", token, body: JSON.stringify(input) }
+  )
+}
+
 /**
  * Observes events emitted by a public agent run.
  *
@@ -442,7 +475,8 @@ export async function streamPublicAgentRun(
   onEvent: (event: PublicAgentRunStreamEvent) => void,
   signal?: AbortSignal,
   conversationId?: string | null,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   const run = await createPublicAgentRun(
     agentId,
@@ -450,7 +484,8 @@ export async function streamPublicAgentRun(
     goal,
     conversationId,
     signal,
-    fileIds
+    fileIds,
+    approvalMode
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_STATUSES.has(run.status)) {

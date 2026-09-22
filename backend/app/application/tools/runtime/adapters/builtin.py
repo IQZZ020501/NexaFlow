@@ -29,6 +29,7 @@ from app.infra.sandbox.client import (
     execute_skill_artifact,
     execute_workflow_code,
 )
+from app.ports.llm import ModelProviderError, ModelProviderStatusError
 
 
 class BuiltinToolAdapter:
@@ -44,6 +45,47 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "image_generation":
+            from app.application.tools.runtime.adapters.image_generation import (
+                generate_image_artifact,
+            )
+
+            try:
+                return await generate_image_artifact(self.settings, arguments, context)
+            except (KeyError, TypeError, ValueError) as exc:
+                return _failure("image_generation_unavailable", str(exc)[:1000])
+            except ModelProviderError as exc:
+                message = (
+                    f"Image provider returned status {exc.status_code}."
+                    if isinstance(exc, ModelProviderStatusError)
+                    else "Image generation failed or returned an unusable image."
+                )
+                uncertain = not isinstance(exc, ModelProviderStatusError) or exc.status_code >= 500
+                return ToolRuntimeResult(
+                    ok=False, data=None, summary=message,
+                    error_code="image_generation_failed", error_message=message,
+                    outcome="uncertain" if uncertain else "confirmed", usage={},
+                )
+        if builtin == "skill_script":
+            from app.application.agent_skills.scripts import execute_skill_script
+
+            try:
+                return await execute_skill_script(self.settings, arguments, context)
+            except (ValueError, WorkflowSandboxError) as exc:
+                return _failure("skill_script_failed", str(exc)[:1000])
+        if builtin == "skill_dependency_install":
+            from app.application.agent_skills.dependencies import (
+                execute_skill_dependency_install,
+            )
+
+            try:
+                return await execute_skill_dependency_install(
+                    self.settings,
+                    arguments,
+                    context,
+                )
+            except (ValueError, WorkflowSandboxError) as exc:
+                return _failure("skill_dependency_install_failed", str(exc)[:1000])
         if builtin in {"artifact", "python_artifact", "skill"}:
             failure_code = {
                 "artifact": "artifact_failed",
@@ -106,8 +148,7 @@ class BuiltinToolAdapter:
                         or len(set(skills)) != len(skills)
                         or any(
                             not isinstance(skill, str)
-                            or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", skill)
-                            is None
+                            or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", skill) is None
                             for skill in skills
                         )
                     ):

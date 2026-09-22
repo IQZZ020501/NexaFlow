@@ -62,11 +62,10 @@ async def enqueue_agent_run(
         )
         return
 
-    task_name = "app.agents.run_v2" if generation == "unified" else "app.agents.run"
     try:
         await publish_task(
-            task_name,
-            (run_id,),
+            "app.agents.run",
+            (run_id, generation),
             settings=settings,
             queue=queue,
         )

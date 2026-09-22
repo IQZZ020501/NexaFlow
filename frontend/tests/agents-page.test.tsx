@@ -1586,6 +1586,76 @@ describe("AgentsPage detail view", () => {
     expect(payload.app_type).toBe("agent")
   })
 
+  test("saves the separate image-generation switch as an Agent Tool binding", async () => {
+    const agent = makeAgent()
+    const regularTool = makeTool()
+    const imageTool = makeTool({
+      id: "tool-image",
+      kind: "builtin",
+      function_name: "generate_image",
+      display_name: "Generate image",
+      current_version_id: "image-v1",
+      version_id: "image-v1",
+      source: {
+        id: "source-builtin",
+        name: "Builtin",
+        kind: "builtin",
+        transport: null,
+      },
+    })
+    let patchBody = ""
+    await renderDetail({
+      agent,
+      tools: [regularTool, imageTool],
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/tools/tool-1`,
+          exact: true,
+          respond: () => jsonResponse(regularTool),
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/tools/tool-image`,
+          exact: true,
+          respond: () => jsonResponse(imageTool),
+        },
+        {
+          method: "PATCH",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
+          exact: true,
+          respond: (init) => {
+            patchBody = String(init?.body ?? "")
+            return jsonResponse({ ...agent, ...JSON.parse(patchBody) })
+          },
+        },
+      ],
+    })
+    fireEvent.click(
+      screen
+        .getAllByRole("button", { name: "设置" })
+        .find((button) => Boolean(button.closest("nav")))!
+    )
+    const imageSwitch = (await screen.findByRole("switch", {
+      name: "图片生成",
+    })) as HTMLInputElement
+    await waitFor(() => expect(imageSwitch.disabled).toBe(false))
+    expect(imageSwitch.checked).toBe(false)
+    fireEvent.click(imageSwitch)
+    await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
+    fireEvent.click(
+      document.querySelector(
+        'button[form="agent-settings-form"]'
+      ) as HTMLButtonElement
+    )
+    await waitFor(() => expect(patchBody).not.toBe(""))
+    expect(JSON.parse(patchBody).tools).toEqual([
+      { tool_id: "tool-1", version_id: "version-1" },
+      { tool_id: "tool-image", version_id: "image-v1" },
+    ])
+    expect(imageSwitch.checked).toBe(true)
+  })
+
   test("migrates legacy MCP bindings only through canonical Tool refs", async () => {
     const agent = makeAgent({
       tools: undefined,
@@ -2464,7 +2534,7 @@ describe("AgentsPage card menu: permissions and delete", () => {
 })
 
 describe("AgentsPage run flows", () => {
-  test("renders an agentic no-evidence grounding result as a neutral state", async () => {
+  test("hides retired skipped grounding events on historical runs", async () => {
     const run = makeRun({
       grounding_status: "skipped",
       grounding_meta: { reason: "no_evidence" },
@@ -2499,11 +2569,13 @@ describe("AgentsPage run flows", () => {
       ],
     })
 
-    expect(await screen.findByText("本次回答未使用知识依据")).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(run.result)).toBeTruthy())
+    expect(screen.queryByText("本次回答未使用知识依据")).toBeNull()
+    expect(screen.queryByText("agent.grounding_skipped")).toBeNull()
     expect(screen.queryByText("暂时无法完成依据核验")).toBeNull()
   })
 
-  test("renders inline grounding as completed before the answer", async () => {
+  test("hides retired inline grounding events without hiding the answer", async () => {
     const run = makeRun({
       grounding_status: "grounded",
       grounding_meta: { mode: "inline", evidence_ids: ["chunk-1"] },
@@ -2538,7 +2610,9 @@ describe("AgentsPage run flows", () => {
       ],
     })
 
-    expect(await screen.findByText("已基于知识依据生成回答")).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(run.result)).toBeTruthy())
+    expect(screen.queryByText("已基于知识依据生成回答")).toBeNull()
+    expect(screen.queryByText("agent.grounding_inline")).toBeNull()
     expect(screen.queryByText("正在核验回答依据")).toBeNull()
   })
 
@@ -2632,6 +2706,195 @@ describe("AgentsPage run flows", () => {
     )
     expect(screen.getByText("Summarize the latest releases")).toBeTruthy()
     expect(screen.getByText("回答已生成")).toBeTruthy()
+  })
+
+  test("queues follow-ups with Enter on the live run without submitting another run", async () => {
+    const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
+    const inputs: Array<{ input_id: string; mode: string; content: string }> =
+      []
+    let submitted = 0
+    await renderDetail({
+      agent: makeAgent(),
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => {
+            submitted += 1
+            return jsonResponse(queuedRun, 201)
+          },
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
+          exact: false,
+          respond: () => new Promise<Response>(() => undefined),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/inputs`,
+          exact: true,
+          respond: (init) => {
+            const input = JSON.parse(String(init?.body))
+            inputs.push(input)
+            return jsonResponse(
+              {
+                ...input,
+                sequence: inputs.length,
+                run_id: "run-1",
+                status: "queued",
+              },
+              202
+            )
+          },
+        },
+      ],
+    })
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    const textarea = screen.getByLabelText(
+      "向 Agent 提问"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "Start the task" } })
+    fireEvent.click(screen.getByLabelText("发送问题"))
+    await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
+    fireEvent.change(textarea, { target: { value: "Use Chinese" } })
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    await waitFor(() => expect(inputs).toHaveLength(1))
+    await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByText("Use Chinese")).toBeTruthy()
+    fireEvent.change(textarea, { target: { value: "Then summarize" } })
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    await waitFor(() => expect(inputs).toHaveLength(2))
+    await waitFor(() => expect(textarea.value).toBe(""))
+    expect(inputs.map((input) => input.mode)).toEqual([
+      "follow_up",
+      "follow_up",
+    ])
+    expect(inputs[0].input_id).not.toBe(inputs[1].input_id)
+    expect(screen.getByText("Then summarize")).toBeTruthy()
+    expect(submitted).toBe(1)
+  })
+
+  test("keeps each execution process with the question that produced it", async () => {
+    const run = makeRun({
+      id: "run-1",
+      goal: "First question",
+      result: "Second answer",
+      session_inputs: [
+        {
+          input_id: "input-1",
+          mode: "follow_up",
+          content: "Second question",
+          sequence: 1,
+          run_id: "run-1",
+          status: "applied",
+          previous_answer: "First answer",
+        },
+      ],
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the first question",
+        },
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the first question",
+        },
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.analyzing",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the second question",
+        },
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+          reasoning: "Reasoning for the second question",
+        },
+      ],
+    })
+    await renderDetail({
+      agent: makeAgent(),
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([run]),
+        },
+      ],
+    })
+
+    const exchange = screen.getByText("First question").closest("article")!
+    const processes = within(exchange)
+      .getAllByText("执行过程")
+      .map((heading) => heading.closest("details")!)
+    expect(processes).toHaveLength(2)
+    expect(
+      within(processes[0]).getByText("Reasoning for the first question")
+    ).toBeTruthy()
+    expect(
+      within(processes[0]).queryByText("Reasoning for the second question")
+    ).toBeNull()
+    expect(
+      within(processes[1]).getByText("Reasoning for the second question")
+    ).toBeTruthy()
+    expect(
+      within(processes[1]).queryByText("Reasoning for the first question")
+    ).toBeNull()
   })
 
   test("stopping generation cancels the run on the backend", async () => {
@@ -2790,11 +3053,16 @@ describe("AgentsPage run flows", () => {
     const textarea = screen.getByLabelText(
       "向 Agent 提问"
     ) as HTMLTextAreaElement
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "执行权限：按策略审批" })
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
     await waitFor(() => expect(screen.getByText("Final answer")).toBeTruthy())
     await waitFor(() => expect(JSON.parse(runBody).file_ids).toEqual(["up-1"]))
+    expect(JSON.parse(runBody).approval_mode).toBe("full_access")
     expect(screen.getByText("report.pdf").closest("li")?.className).toContain(
       "max-w-[min(22rem,78vw)]"
     )

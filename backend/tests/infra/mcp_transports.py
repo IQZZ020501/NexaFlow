@@ -1,12 +1,9 @@
-"""Real-process regression checks for all supported MCP transports."""
+"""Real HTTP transports and isolated stdio execution-port regression checks."""
 
 import asyncio
-import json
-import os
 import socket
 import subprocess
 import sys
-import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,7 +16,6 @@ from app.adapters.mcp.client import (
     call_mcp_tool,
     discover_mcp_tools,
 )
-from app.infra.tools.mcp_stdio import McpStdioConfig, parse_mcp_stdio_config
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 TEST_MODULE = "tests.support.mcp_test_server"
@@ -93,14 +89,14 @@ async def assert_remote_transport(transport: str) -> None:
         )
         discovery = await discover_mcp_tools(connection, runtime_settings)
         assert {tool["name"] for tool in discovery.tools} == {"echo", "wait"}
-        content, is_error = await call_mcp_tool(
+        result = await call_mcp_tool(
             connection,
             runtime_settings,
             "echo",
             {"message": transport},
         )
-        assert not is_error
-        assert json.loads(content)["message"] == transport
+        assert not result.is_error
+        assert result.structured_content["message"] == transport
 
         try:
             await discover_mcp_tools(
@@ -114,119 +110,23 @@ async def assert_remote_transport(transport: str) -> None:
         stop_process(process)
 
 
-def stdio_config(*extra_args: str, pid_file: str | None = None) -> McpStdioConfig:
-    args = ["-m", TEST_MODULE, "--transport", "stdio", *extra_args]
-    if pid_file is not None:
-        args.extend(["--pid-file", pid_file])
-    return parse_mcp_stdio_config(
-        {
-            "command": sys.executable,
-            "args": args,
-            "cwd": str(BACKEND_DIR),
-            "env": {"NEXAFLOW_TEST_MCP_CONFIG_SECRET": "configured-in-form"},
-        }
-    )
-
-
 async def assert_stdio_transport() -> None:
-    env_name = "NEXAFLOW_TEST_MCP_CONFIG_SECRET"
-    unlisted_env_name = "NEXAFLOW_TEST_MCP_UNLISTED_SECRET"
-    previous_value = os.environ.get(env_name)
-    previous_unlisted_value = os.environ.get(unlisted_env_name)
-    os.environ[env_name] = "first-value"
-    os.environ[unlisted_env_name] = "must-not-be-forwarded"
-    try:
-        runtime_settings = replace(
-            settings(),
-            mcp_request_timeout_seconds=5,
-        )
-        connection = McpConnection(transport="stdio", stdio_config=stdio_config())
-        discovery = await discover_mcp_tools(connection, runtime_settings)
-        assert {tool["name"] for tool in discovery.tools} == {"echo", "wait"}
+    from tests.execution.unit import assert_stdio_dispatch
 
-        content, is_error = await call_mcp_tool(
-            connection,
-            runtime_settings,
-            "echo",
-            {"message": "stdio"},
-        )
-        assert not is_error
-        assert json.loads(content) == {
-            "message": "stdio",
-            "config_secret_present": True,
-            "unlisted_secret_present": False,
-        }
-    finally:
-        if previous_value is None:
-            os.environ.pop(env_name, None)
-        else:
-            os.environ[env_name] = previous_value
-        if previous_unlisted_value is None:
-            os.environ.pop(unlisted_env_name, None)
-        else:
-            os.environ[unlisted_env_name] = previous_unlisted_value
+    await assert_stdio_dispatch()
 
 
-def process_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
+async def assert_execution_cancellation() -> None:
+    from tests.execution.unit import assert_failure_and_cancellation_cleanup
 
-
-async def assert_stdio_timeout_reaps_process() -> None:
-    env_name = "NEXAFLOW_TEST_MCP_CONFIG_SECRET"
-    previous_value = os.environ.get(env_name)
-    os.environ[env_name] = "timeout-test"
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            pid_file = str(Path(temp_dir) / "server.pid")
-            runtime_settings = replace(
-                settings(),
-                mcp_request_timeout_seconds=0.2,
-            )
-            try:
-                await discover_mcp_tools(
-                    McpConnection(
-                        transport="stdio",
-                        stdio_config=stdio_config(
-                            "--startup-delay",
-                            "10",
-                            pid_file=pid_file,
-                        ),
-                    ),
-                    runtime_settings,
-                )
-            except McpClientError:
-                pass
-            else:
-                raise AssertionError("Slow stdio server did not time out")
-
-            pid_path = Path(pid_file)
-            for _ in range(100):
-                if pid_path.exists():
-                    break
-                await asyncio.sleep(0.05)
-            assert pid_path.exists(), "Slow stdio server did not start"
-            pid = int(pid_path.read_text(encoding="utf-8"))
-            for _ in range(40):
-                if not process_exists(pid):
-                    break
-                await asyncio.sleep(0.05)
-            assert not process_exists(pid), "Timed-out stdio process was not reaped"
-    finally:
-        if previous_value is None:
-            os.environ.pop(env_name, None)
-        else:
-            os.environ[env_name] = previous_value
+    await assert_failure_and_cancellation_cleanup()
 
 
 async def run_suite() -> None:
     await assert_remote_transport("streamable-http")
     await assert_remote_transport("sse")
     await assert_stdio_transport()
-    await assert_stdio_timeout_reaps_process()
+    await assert_execution_cancellation()
 
 
 def main() -> None:

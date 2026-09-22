@@ -186,6 +186,7 @@ def mcp_server_connection(
     settings: Settings,
 ) -> McpConnection:
     return McpConnection(
+        workspace_id=server.workspace_id,
         transport=cast(McpTransport, server.transport),
         url=server.url,
         bearer_token=bearer_token(server, settings),
@@ -338,6 +339,7 @@ async def create_mcp_server(
             server.bearer_token_hint = secret_hint(token)
         discovery = await discover_mcp_tools(
             McpConnection(
+                workspace_id=workspace_id,
                 transport=cast(McpTransport, server.transport),
                 url=server.url,
                 bearer_token=token,
@@ -698,7 +700,7 @@ async def set_mcp_tool_policy(
     else:
         approval = "each_call"
         effect = "unknown"
-        allowed_access_sources = ["console"]
+        allowed_access_sources = ["console", "public"]
         workflow_callable = False
         parallel_safe = False
 

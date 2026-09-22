@@ -4,6 +4,7 @@ import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
+  ArrowUpIcon,
   BotIcon,
   BrainIcon,
   CheckIcon,
@@ -15,7 +16,7 @@ import {
   LoaderCircleIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
-  PaperclipIcon,
+  PlusIcon,
   ChartNoAxesColumnIcon,
   LayoutDashboardIcon,
   PanelLeftCloseIcon,
@@ -35,16 +36,23 @@ import {
 } from "lucide-react"
 
 import { RunActionBar } from "@/components/app/run-action-bar"
+import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
-import type { Agent, AgentRun, AgentToolCall } from "@/lib/api/agents"
+import type {
+  Agent,
+  AgentApprovalMode,
+  AgentRun,
+  AgentToolCall,
+} from "@/lib/api/agents"
 import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
+import { splitAgentSessionEvents } from "@/lib/agent-session-handoff"
 import {
   AGENT_FILE_UPLOAD_SETTING,
   acceptedUploadExtensions,
@@ -53,6 +61,7 @@ import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
 } from "@/lib/tool-display"
+import { isRegularTool } from "@/lib/tool-visibility"
 
 import { AgentConfigFields } from "./agent-config-fields"
 import {
@@ -62,7 +71,11 @@ import {
   transferredFiles,
 } from "./agent-attachment-list"
 import { MessageTimestamp } from "./message-timestamp"
-import { AgentAnswer, stripAgentSourceLinks } from "./agent-source-references"
+import {
+  AgentAnswer,
+  agentSourcesForEvents,
+  stripAgentSourceLinks,
+} from "./agent-source-references"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -85,6 +98,8 @@ type AgentDetailWorkspaceProps = {
   resolvingCallId: string | null
   question: string
   setQuestion: React.Dispatch<React.SetStateAction<string>>
+  approvalMode: AgentApprovalMode
+  onApprovalModeChange: (value: AgentApprovalMode) => void
   files: File[]
   setFiles: React.Dispatch<React.SetStateAction<File[]>>
   pendingQuestion: string | null
@@ -162,22 +177,6 @@ function processSummary(
   if (event.summary === "agent.preparing_tool_call")
     return t("正在准备工具调用")
   if (event.summary === "agent.tools_selected") return t("已完成分析")
-  if (event.summary === "agent.grounding_check") return t("正在核验回答依据")
-  if (event.summary === "agent.grounding_verified") return t("已完成依据核验")
-  if (event.summary === "agent.grounding_revised")
-    return t("已根据依据修正回答")
-  if (event.summary === "agent.grounding_inline")
-    return t("已基于知识依据生成回答")
-  if (event.summary === "agent.grounding_insufficient")
-    return t("依据不足，回答将标注为未核实")
-  if (event.summary === "agent.grounding_unavailable")
-    return t("暂时无法完成依据核验")
-  if (event.summary === "agent.grounding_skipped")
-    return t("本次回答未使用知识依据")
-  if (event.summary === "agent.knowledge_duplicate_query")
-    return t("已跳过重复知识检索")
-  if (event.summary === "agent.knowledge_evidence_sufficient")
-    return t("知识依据已足够，停止继续检索")
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready")
@@ -349,12 +348,83 @@ export function processTimeline(run: AgentRun) {
   return deduplicated.map((event) => ({ event, count: 1 }))
 }
 
+export function splitAgentRunTimeline(run: AgentRun) {
+  return splitAgentSessionEvents(
+    run.events,
+    run.session_inputs,
+    (event) => event.summary === "agent.answer_ready"
+  ).map((events) => processTimeline({ ...run, events }))
+}
+
+function visibleProcessTimeline(
+  timeline: ReturnType<typeof processTimeline>,
+  inlineCallIds: Set<string>
+) {
+  return timeline.filter(
+    ({ event }) =>
+      event.summary !== "agent.analysis_plan" &&
+      !event.summary.startsWith("agent.grounding_") &&
+      ![
+        "agent.knowledge_duplicate_query",
+        "agent.knowledge_evidence_sufficient",
+      ].includes(event.summary) &&
+      !(
+        event.summary === "agent.preparing_tool_call" &&
+        inlineCallIds.has(event.call_id)
+      )
+  )
+}
+
+function ProcessTimelineRows({
+  timeline,
+  run,
+  t,
+}: {
+  timeline: ReturnType<typeof processTimeline>
+  run: AgentRun
+  t: TFunction
+}) {
+  return timeline.map(({ event }, index) =>
+    event.type === "tool" ? (
+      <ToolEventDetails
+        key={`${event.call_id || `${event.turn}-${event.tool_name}`}-${index}`}
+        event={event}
+        run={run}
+        t={t}
+      />
+    ) : (
+      <div
+        key={`${event.type}-${event.turn}-${index}`}
+        className="relative px-1 text-xs leading-5 text-muted-foreground"
+      >
+        <div className="flex items-start gap-2">
+          {effectiveProcessStatus(event.status, run.status) === "running" ? (
+            <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
+          ) : effectiveProcessStatus(event.status, run.status) ===
+            "succeeded" ? (
+            <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+          ) : (
+            <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+          )}
+          <span>{processSummary(event, run, t)}</span>
+        </div>
+        {event.reasoning ? (
+          <ReasoningContent reasoning={event.reasoning} />
+        ) : null}
+      </div>
+    )
+  )
+}
+
 export function unrenderedAgentToolCalls(
   timeline: ReturnType<typeof processTimeline>,
   calls: AgentToolCall[]
 ) {
   const renderedCallIds = new Set(
-    timeline.map(({ event }) => event.call_id).filter(Boolean)
+    timeline
+      .filter(({ event }) => event.type === "tool")
+      .map(({ event }) => event.call_id)
+      .filter(Boolean)
   )
   return calls.filter(
     (call) =>
@@ -535,26 +605,58 @@ function RunExchange({
   editable?: boolean
   t: TFunction
 }) {
-  const timeline = processTimeline(run)
-  const approvalCallIds = new Set(
+  const timelineSegments = splitAgentRunTimeline(run)
+  const timeline = timelineSegments.at(-1) ?? []
+  const completedTimelines = timelineSegments.slice(0, -1)
+  const hasAnswerHandoffs = completedTimelines.length > 0
+  const sourcesForTimeline = (value: ReturnType<typeof processTimeline>) =>
+    hasAnswerHandoffs
+      ? agentSourcesForEvents(
+          run.sources,
+          value.map(({ event }) => event)
+        )
+      : run.sources
+  let completedTimelineIndex = 0
+  const sessionInputs = (run.session_inputs ?? []).map((input) => {
+    const inputTimeline = input.previous_answer
+      ? (completedTimelines[completedTimelineIndex++] ?? [])
+      : []
+    return {
+      input,
+      timeline: inputTimeline,
+      sources: sourcesForTimeline(inputTimeline),
+    }
+  })
+  const pendingFollowUpIds = new Set(
+    sessionInputs
+      .filter(
+        ({ input }) => input.status !== "applied" && !input.previous_answer
+      )
+      .map(({ input }) => input.input_id)
+  )
+  const inlineCallIds = new Set(
     toolCalls
       .filter((call) =>
-        ["awaiting_approval", "uncertain"].includes(call.status)
+        [
+          "pending",
+          "awaiting_approval",
+          "approved",
+          "running",
+          "uncertain",
+        ].includes(call.status)
       )
       .map((call) => call.call_id)
   )
-  const visibleTimeline = timeline.filter(
-    ({ event }) =>
-      event.summary !== "agent.analysis_plan" &&
-      !(
-        event.summary === "agent.preparing_tool_call" &&
-        approvalCallIds.has(event.call_id)
-      )
-  )
+  const visibleTimeline = visibleProcessTimeline(timeline, inlineCallIds)
   const runCancelled = run.status === "cancelled"
   const inlineToolCalls = runCancelled
     ? []
-    : unrenderedAgentToolCalls(visibleTimeline, toolCalls)
+    : unrenderedAgentToolCalls(
+        // Approval receipts can remain stale after a follow-up starts. A tool
+        // rendered in an earlier answer must not reappear in the current one.
+        visibleProcessTimeline(timelineSegments.flat(), inlineCallIds),
+        toolCalls
+      )
   const hasProcess = visibleTimeline.length > 0 || inlineToolCalls.length > 0
   const hasActiveToolCall =
     !runCancelled &&
@@ -569,13 +671,15 @@ function RunExchange({
     hasActiveToolCall,
     isProcessOpen
   )
-  const answer = withArtifactDownloadLinks(run.result, run.events)
+  const currentEvents = timeline.map(({ event }) => event)
+  const answer = withArtifactDownloadLinks(run.result, currentEvents)
+  const currentSources = sourcesForTimeline(timeline)
   const answerStartedAt = run.events.findLast(
     (event) => event.summary === "agent.answer_ready"
   )?.created_at
   return (
     <article className="flex flex-col gap-5">
-      <div className="ml-auto flex min-w-0 max-w-[85%] flex-col items-end gap-1">
+      <div className="ml-auto flex max-w-[85%] min-w-0 flex-col items-end gap-1">
         <RunAttachmentCards attachments={run.attachments} t={t} />
         {editDraft === null ? (
           <div className="rounded-2xl rounded-br-md bg-foreground px-4 py-3 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-background shadow-sm">
@@ -649,6 +753,62 @@ function RunExchange({
           ) : null}
         </div>
       </div>
+      {sessionInputs
+        .filter(({ input }) => !pendingFollowUpIds.has(input.input_id))
+        .map(({ input, timeline: completedTimeline, sources }) => (
+          <React.Fragment key={input.input_id}>
+            {input.previous_answer && (
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
+                  <BotIcon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
+                  {visibleProcessTimeline(completedTimeline, inlineCallIds)
+                    .length > 0 ? (
+                    <details
+                      className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+                      open
+                    >
+                      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                        <BrainIcon className="size-4" />
+                        <span className="flex-1">{t("执行过程")}</span>
+                        <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+                      </summary>
+                      <div className="mt-2 space-y-1.5 border-l pl-3">
+                        <ProcessTimelineRows
+                          timeline={visibleProcessTimeline(
+                            completedTimeline,
+                            inlineCallIds
+                          )}
+                          run={run}
+                          t={t}
+                        />
+                      </div>
+                    </details>
+                  ) : null}
+                  <AgentAnswer
+                    content={withArtifactDownloadLinks(
+                      input.previous_answer,
+                      completedTimeline.map(({ event }) => event)
+                    )}
+                    sources={sources}
+                    t={t}
+                    className="text-sm leading-6"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-xs text-muted-foreground">
+                {t("后续任务")}
+              </span>
+              <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
+                {input.content}
+              </div>
+              <CopyMessageButton value={input.content} t={t} />
+            </div>
+          </React.Fragment>
+        ))}
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
           <BotIcon className="size-4" />
@@ -667,39 +827,11 @@ function RunExchange({
                   <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="mt-2 space-y-1.5 border-l pl-3">
-                  {visibleTimeline.map(({ event }, index) =>
-                    event.type === "tool" ? (
-                      <ToolEventDetails
-                        key={`${event.call_id || `${event.turn}-${event.tool_name}`}-${index}`}
-                        event={event}
-                        run={run}
-                        t={t}
-                      />
-                    ) : (
-                      <div
-                        key={`${event.type}-${event.turn}-${index}`}
-                        className="relative px-1 text-xs leading-5 text-muted-foreground"
-                      >
-                        <div className="flex items-start gap-2">
-                          {effectiveProcessStatus(event.status, run.status) ===
-                          "running" ? (
-                            <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-                          ) : effectiveProcessStatus(
-                              event.status,
-                              run.status
-                            ) === "succeeded" ? (
-                            <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-                          ) : (
-                            <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-                          )}
-                          <span>{processSummary(event, run, t)}</span>
-                        </div>
-                        {event.reasoning ? (
-                          <ReasoningContent reasoning={event.reasoning} />
-                        ) : null}
-                      </div>
-                    )
-                  )}
+                  <ProcessTimelineRows
+                    timeline={visibleTimeline}
+                    run={run}
+                    t={t}
+                  />
                   {inlineToolCalls.map((call) =>
                     ["awaiting_approval", "uncertain"].includes(call.status) ? (
                       <InlineToolApproval
@@ -728,7 +860,7 @@ function RunExchange({
             {run.result ? (
               <AgentAnswer
                 content={answer}
-                sources={run.sources}
+                sources={currentSources}
                 t={t}
                 className="text-sm leading-6"
               />
@@ -775,6 +907,19 @@ function RunExchange({
           ) : null}
         </div>
       </div>
+      {sessionInputs
+        .filter(({ input }) => pendingFollowUpIds.has(input.input_id))
+        .map(({ input }) => (
+          <div key={input.input_id} className="flex flex-col items-end gap-1.5">
+            <span className="text-xs text-muted-foreground">
+              {t("后续任务")}
+            </span>
+            <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
+              {input.content}
+            </div>
+            <CopyMessageButton value={input.content} t={t} />
+          </div>
+        ))}
     </article>
   )
 }
@@ -832,6 +977,8 @@ export function AgentDetailWorkspace({
   resolvingCallId,
   question,
   setQuestion,
+  approvalMode,
+  onApprovalModeChange,
   files,
   setFiles,
   pendingQuestion,
@@ -1122,10 +1269,13 @@ export function AgentDetailWorkspace({
         <div className="flex min-w-0 flex-1 flex-col">
           <nav
             ref={tabStripRef}
-            className="flex shrink-0 gap-1 overflow-x-auto border-b bg-background p-2 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden"
+            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden [&::-webkit-scrollbar]:hidden"
             aria-label={t("Agent 详情导航")}
           >
-            {renderNavItems("shrink-0 max-sm:min-h-10 max-sm:px-2.5", activeTabRef)}
+            {renderNavItems(
+              "shrink-0 max-sm:min-h-10 max-sm:px-2.5",
+              activeTabRef
+            )}
           </nav>
 
           {visibleActiveView === "settings" ? (
@@ -1170,7 +1320,14 @@ export function AgentDetailWorkspace({
                       </span>
                       <span className="flex items-center gap-1.5">
                         <WrenchIcon className="size-3.5" />
-                        {form.tools.length}
+                        {
+                          form.tools.filter((reference) => {
+                            const tool = tools.find(
+                              (item) => item.id === reference.tool_id
+                            )
+                            return !tool || isRegularTool(tool.function_name)
+                          }).length
+                        }
                       </span>
                     </div>
                   </div>
@@ -1278,7 +1435,7 @@ export function AgentDetailWorkspace({
 
                   <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                     <form
-                      className="relative mx-auto max-w-3xl rounded-2xl border bg-background p-2 shadow-sm transition-shadow focus-within:shadow-md"
+                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/20"
                       onSubmit={(event) => {
                         shouldFollowPreviewRef.current = true
                         onAsk(event)
@@ -1330,6 +1487,7 @@ export function AgentDetailWorkspace({
                         value={question}
                         onChange={(event) => setQuestion(event.target.value)}
                         onPaste={(event) => {
+                          if (isAsking) return
                           const pasted = transferredFiles(event.clipboardData)
                           if (!pasted.length) return
                           event.preventDefault()
@@ -1347,7 +1505,7 @@ export function AgentDetailWorkspace({
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className={`max-h-40 min-h-11 w-full resize-none bg-transparent px-3 pt-2 text-base leading-6 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed sm:min-h-28 sm:text-sm ${files.length ? "pb-2" : "pb-2 sm:pb-14"}`}
+                        className="max-h-32 min-h-12 w-full resize-none bg-transparent px-2.5 pt-1.5 pb-1 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-14 sm:text-sm"
                         placeholder={
                           isDirty
                             ? t("请先保存配置后再调试")
@@ -1357,10 +1515,7 @@ export function AgentDetailWorkspace({
                         enterKeyHint="send"
                         autoComplete="off"
                         disabled={
-                          isDirty ||
-                          isRunsLoading ||
-                          isAsking ||
-                          agent.status !== "active"
+                          isDirty || isRunsLoading || agent.status !== "active"
                         }
                         maxLength={4000}
                         rows={1}
@@ -1376,49 +1531,95 @@ export function AgentDetailWorkspace({
                         }
                         t={t}
                       />
-                      <div className="flex items-center justify-end gap-2 px-1 pb-1 sm:absolute sm:right-2 sm:bottom-2 sm:p-0">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-lg"
-                          className="rounded-xl"
-                          aria-label={t("添加附件")}
-                          title={t("添加附件")}
-                          disabled={
-                            isDirty ||
-                            isAsking ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          }
-                          onClick={() => {
-                            if (!fileInputRef.current) return
-                            fileInputRef.current.value = ""
-                            fileInputRef.current.click()
-                          }}
-                        >
-                          <PaperclipIcon />
-                        </Button>
-                        <Button
-                          type={isAsking ? "button" : "submit"}
-                          size="icon-lg"
-                          className="rounded-xl"
-                          aria-label={t(isAsking ? "停止生成" : "发送问题")}
-                          title={t(isAsking ? "停止生成" : "发送问题")}
-                          onClick={isAsking ? onCancelAsk : undefined}
-                          disabled={
-                            !isAsking &&
-                            (!question.trim() ||
+                      <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="rounded-md text-muted-foreground hover:text-foreground"
+                            aria-label={t("添加附件")}
+                            title={t("添加附件")}
+                            disabled={
                               isDirty ||
+                              isAsking ||
                               isRunsLoading ||
-                              agent.status !== "active")
-                          }
-                        >
-                          {isAsking ? (
-                            <SquareIcon className="fill-current" />
-                          ) : (
-                            <SendIcon />
+                              agent.status !== "active"
+                            }
+                            onClick={() => {
+                              if (!fileInputRef.current) return
+                              fileInputRef.current.value = ""
+                              fileInputRef.current.click()
+                            }}
+                          >
+                            <PlusIcon />
+                          </Button>
+                          <AgentApprovalModeMenu
+                            value={approvalMode}
+                            onChange={onApprovalModeChange}
+                            disabled={
+                              isDirty ||
+                              isAsking ||
+                              isRunsLoading ||
+                              agent.status !== "active"
+                            }
+                            t={t}
+                          />
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {isAsking && question.trim() && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-muted-foreground"
+                              aria-label={t("停止生成")}
+                              title={t("停止生成")}
+                              onClick={onCancelAsk}
+                            >
+                              <SquareIcon className="fill-current" />
+                            </Button>
                           )}
-                        </Button>
+                          <Button
+                            type={
+                              isAsking && !question.trim() ? "button" : "submit"
+                            }
+                            size="icon"
+                            className="rounded-lg"
+                            aria-label={t(
+                              isAsking
+                                ? question.trim()
+                                  ? "追加后续任务"
+                                  : "停止生成"
+                                : "发送问题"
+                            )}
+                            title={t(
+                              isAsking
+                                ? question.trim()
+                                  ? "追加后续任务"
+                                  : "停止生成"
+                                : "发送问题"
+                            )}
+                            onClick={
+                              isAsking && !question.trim()
+                                ? onCancelAsk
+                                : undefined
+                            }
+                            disabled={
+                              !isAsking &&
+                              (!question.trim() ||
+                                isDirty ||
+                                isRunsLoading ||
+                                agent.status !== "active")
+                            }
+                          >
+                            {isAsking && !question.trim() ? (
+                              <SquareIcon className="fill-current" />
+                            ) : (
+                              <ArrowUpIcon />
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     </form>
                   </div>

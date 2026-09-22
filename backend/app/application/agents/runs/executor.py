@@ -24,13 +24,16 @@ from app.application.agents.tools.builder import (
     build_knowledge_search_tool,
     build_mcp_agent_tool,
     build_unified_agent_tool,
-    describe_knowledge_sources,
     safe_agent_error,
     set_agent_tool_idempotency_key,
 )
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.workspaces.service import build_workspace_context
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
+from app.domain.agents.approval import (
+    agent_mcp_requires_approval,
+    run_agent_approval_mode,
+)
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -48,7 +51,6 @@ from app.domain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
-from app.domain.agents.runtime.graph import MAX_AGENT_NO_PROGRESS_ROUNDS
 from app.domain.agents.runtime.state import PendingToolCall
 from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
@@ -171,118 +173,6 @@ def _remaining_run_seconds(deadline: datetime) -> float:
     if remaining <= 0:
         raise AgentRunnerError("Agent execution deadline exceeded.")
     return remaining
-
-
-def _apply_skill_runtime_limits(
-    deadline: datetime,
-    max_turns: int,
-    max_tool_calls: int,
-    max_knowledge_calls: int,
-    max_knowledge_rounds: int,
-    max_no_progress_rounds: int,
-    max_model_tokens: int,
-    skills: list[AgentSkillSnapshot],
-) -> tuple[datetime, int, int, int, int, int, int]:
-    """Apply the strictest pinned SkillBundle budgets to a run."""
-    skill_runtime_seconds: float | None = None
-    for skill in skills:
-        definition = skill.definition
-        budgets = definition.get("budgets", {})
-        retrieval = definition.get("retrieval", {})
-        if isinstance(budgets, dict):
-            runtime_value = budgets.get("max_runtime_seconds")
-            if isinstance(runtime_value, (int, float)) and not isinstance(
-                runtime_value, bool
-            ):
-                skill_runtime_seconds = (
-                    runtime_value
-                    if skill_runtime_seconds is None
-                    else min(skill_runtime_seconds, runtime_value)
-                )
-            for key, current in (
-                ("max_turns", max_turns),
-                ("max_tool_calls", max_tool_calls),
-                ("max_model_tokens", max_model_tokens),
-            ):
-                value = budgets.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    if key == "max_turns":
-                        max_turns = min(current, value)
-                    elif key == "max_tool_calls":
-                        max_tool_calls = min(current, value)
-                    else:
-                        max_model_tokens = min(current, value)
-        if isinstance(retrieval, dict):
-            calls = retrieval.get("max_calls")
-            rounds = retrieval.get("max_rounds")
-            if isinstance(calls, int) and not isinstance(calls, bool):
-                max_knowledge_calls = min(max_knowledge_calls, calls)
-            if isinstance(rounds, int) and not isinstance(rounds, bool):
-                max_knowledge_rounds = min(max_knowledge_rounds, rounds)
-        stop = definition.get("stop", {})
-        if isinstance(stop, dict):
-            no_progress = stop.get("max_no_progress_rounds")
-            if isinstance(no_progress, int) and not isinstance(no_progress, bool):
-                max_no_progress_rounds = min(max_no_progress_rounds, no_progress)
-    if skill_runtime_seconds is not None:
-        deadline = min(deadline, utc_now() + timedelta(seconds=skill_runtime_seconds))
-    # Keep the same cross-budget invariants enforced for Agent settings after
-    # applying each pinned SkillBundle's stricter limits.
-    max_knowledge_calls = min(max_knowledge_calls, max_tool_calls)
-    max_knowledge_rounds = min(max_knowledge_rounds, max_turns)
-    return (
-        deadline,
-        max_turns,
-        max_tool_calls,
-        max_knowledge_calls,
-        max_knowledge_rounds,
-        max_no_progress_rounds,
-        max_model_tokens,
-    )
-
-
-def _skill_evaluation_requirements(
-    skills: list[AgentSkillSnapshot],
-) -> tuple[bool, int]:
-    require_grounding = False
-    min_evidence_count = 0
-    for skill in skills:
-        retrieval = skill.definition.get("retrieval", {})
-        if isinstance(retrieval, dict):
-            retrieval_count = retrieval.get("min_evidence_items", 0)
-            if isinstance(retrieval_count, int) and not isinstance(
-                retrieval_count, bool
-            ):
-                min_evidence_count = max(min_evidence_count, retrieval_count)
-        evaluation = skill.definition.get("evaluation", {})
-        if not isinstance(evaluation, dict):
-            continue
-        require_grounding = require_grounding or bool(
-            evaluation.get("require_grounding", False)
-        )
-        evidence_count = evaluation.get("min_evidence_count", 0)
-        if isinstance(evidence_count, int) and not isinstance(evidence_count, bool):
-            min_evidence_count = max(min_evidence_count, evidence_count)
-    return require_grounding, min_evidence_count
-
-
-def _skill_retrieval_stop_requirements(
-    skills: list[AgentSkillSnapshot],
-) -> tuple[int, bool]:
-    """Return the strictest evidence sufficiency gates from pinned Skills."""
-    min_evidence_items = 0
-    require_source_diversity = False
-    for skill in skills:
-        retrieval = skill.definition.get("retrieval", {})
-        if not isinstance(retrieval, dict):
-            continue
-        evidence_count = retrieval.get("min_evidence_items", 0)
-        if isinstance(evidence_count, int) and not isinstance(evidence_count, bool):
-            min_evidence_items = max(min_evidence_items, evidence_count)
-        require_source_diversity = require_source_diversity or bool(
-            retrieval.get("require_source_diversity", False)
-        )
-    return min_evidence_items, require_source_diversity
 
 
 @dataclass(frozen=True)
@@ -429,7 +319,11 @@ class DurableToolLedger:
             raise AgentToolBusy(call["id"], "Agent run lease was lost.")
         arguments_hash = _arguments_hash(arguments)
         approval_required = (
-            metadata["kind"] == "mcp" and metadata.get("policy_mode") != "read_only"
+            metadata["kind"] == "mcp"
+            and agent_mcp_requires_approval(
+                run_agent_approval_mode(self.run),
+                metadata.get("policy_mode", ""),
+            )
         )
         idempotency_key = hashlib.sha256(
             f"{self.run.id}:{turn}:{call['id']}:{arguments_hash}".encode()
@@ -468,10 +362,22 @@ class DurableToolLedger:
                     policy,
                     current_definition_hash,
                 )
-                approval_required = (
-                    metadata["kind"] == "mcp"
-                    and policy_mode != "read_only"
-                    and self.run.access_source != "api"
+                snapshot_definition_hash = metadata.get("definition_hash", "")
+                definition_changed = policy_mode != "disabled" and (
+                    (
+                        policy is not None
+                        and policy.definition_hash != snapshot_definition_hash
+                    )
+                    or (
+                        current_definition_hash is not None
+                        and current_definition_hash != snapshot_definition_hash
+                    )
+                )
+                approval_required = self.run.access_source != "api" and (
+                    definition_changed
+                    or agent_mcp_requires_approval(
+                        run_agent_approval_mode(self.run), policy_mode
+                    )
                 )
             existing = await agent_repository.get_agent_tool_call(
                 db,
@@ -904,32 +810,21 @@ async def _execute_claimed_agent_run(
     """
     scope = await _load_execution_scope(run_id)
     run = scope.run
+    from app.infra.execution.profile import require_execution_profile
+
+    if "execution_profile" in run.application_snapshot:
+        try:
+            require_execution_profile(settings, run.application_snapshot["execution_profile"])
+        except ValueError as exc:
+            raise AgentRunnerError(str(exc)) from exc
     (
         run_deadline,
         max_turns,
         max_tool_calls,
-        max_knowledge_calls,
-        max_knowledge_rounds,
-        max_model_tokens,
+        _legacy_knowledge_calls,
+        _legacy_knowledge_rounds,
+        _legacy_model_tokens,
     ) = _run_limits(run, settings)
-    (
-        run_deadline,
-        max_turns,
-        max_tool_calls,
-        max_knowledge_calls,
-        max_knowledge_rounds,
-        max_no_progress_rounds,
-        max_model_tokens,
-    ) = _apply_skill_runtime_limits(
-        run_deadline,
-        max_turns,
-        max_tool_calls,
-        max_knowledge_calls,
-        max_knowledge_rounds,
-        MAX_AGENT_NO_PROGRESS_ROUNDS,
-        max_model_tokens,
-        scope.skill_snapshots,
-    )
     if run.depth == 1 and any(
         snapshot.approval != "auto"
         or snapshot.effect not in {"pure", "external_read"}
@@ -959,22 +854,52 @@ async def _execute_claimed_agent_run(
         for tool, policy_mode in scope.mcp_tools
     )
     tools.extend(build_unified_agent_tool(snapshot) for snapshot in scope.tool_snapshots)
-    has_application_tools = bool(scope.mcp_tools or scope.tool_snapshots)
+    from app.application.agents.runs.memory import _configured_context_window
     from app.application.agents.runs.service import (
         execution_messages,
         skill_execution_context,
     )
+    from app.domain.agents.runtime.capabilities import CapabilityRegistry
+    from app.domain.agents.runtime.context import AgentContextManager
+    from app.domain.agents.runtime.extensions import AgentExtension, ExtensionRuntime
+    from app.domain.agents.runtime.session import AgentSession
+    from app.infra.db.repositories.runs.session_inputs import pending_session_inputs
 
+    capability_groups = {"knowledge": [], "mcp": [], "tools": []}
+    for tool in tools:
+        kind = (tool.metadata or {}).get("kind")
+        group = kind if kind in {"knowledge", "mcp"} else "tools"
+        capability_groups[group].append(tool)
+    extensions = ExtensionRuntime(
+        [
+            AgentExtension(name, "1", tuple(group))
+            for name, group in capability_groups.items()
+        ]
+    )
+
+    async def authorize_skill(snapshot):
+        from app.application.agent_skills.execution import require_pinned_skill_access
+
+        async with get_session_factory()() as db:
+            await require_pinned_skill_access(db, run.workspace_id, snapshot)
+
+    registry = CapabilityRegistry(extensions, scope.skill_snapshots, authorize_skill)
     chat_model = build_chat_model(settings, scope.model)
+
+    async def session_inputs(consumed: list[int]):
+        async with get_session_factory()() as db:
+            return await pending_session_inputs(db, run.id, consumed)
+
+    session = AgentSession(
+        registry,
+        AgentContextManager(
+            chat_model, _configured_context_window(scope.model, chat_model)
+        ),
+        session_inputs,
+    )
+    tools = registry.tools
     base_messages = execution_messages(
         run,
-        knowledge_tool is not None,
-        has_application_tools,
-        knowledge_scope=(
-            describe_knowledge_sources(scope.knowledge_bases)
-            if scope.knowledge_bases
-            else ""
-        ),
         skill_context=skill_execution_context(scope.skill_snapshots),
     )
     memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
@@ -1005,31 +930,9 @@ async def _execute_claimed_agent_run(
             memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
     messages = execution_messages(
         run,
-        knowledge_tool is not None,
-        has_application_tools,
-        knowledge_scope=(
-            describe_knowledge_sources(scope.knowledge_bases)
-            if scope.knowledge_bases
-            else ""
-        ),
         skill_context=skill_execution_context(scope.skill_snapshots),
         context_messages=memory.messages,
     )
-    skill_requires_grounding, skill_min_evidence_count = _skill_evaluation_requirements(
-        scope.skill_snapshots
-    )
-    (
-        skill_min_retrieval_evidence,
-        skill_require_source_diversity,
-    ) = _skill_retrieval_stop_requirements(scope.skill_snapshots)
-    grounding_mode = (
-        "required"
-        if skill_requires_grounding
-        else "agentic"
-        if knowledge_tool is not None
-        else None
-    )
-
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
             run,
@@ -1087,6 +990,20 @@ async def _execute_claimed_agent_run(
             )
             if metadata.get("kind") == "knowledge":
                 await _require_current_knowledge_snapshot(scope)
+
+    durable_before = before_tool_call
+    durable_after = after_tool_call
+
+    async def before_tool_call(turn, call, metadata, arguments):
+        if metadata.get("policy_mode") == "harness_internal":
+            return None
+        return await durable_before(turn, call, metadata, arguments)
+
+    async def after_tool_call(turn, call, metadata, arguments, result):
+        if metadata.get("policy_mode") == "harness_internal":
+            return
+        await durable_after(turn, call, metadata, arguments, result)
+
     live_stream = AgentLiveStreamPublisher(settings, run.id)
 
     async def record_event(event: dict[str, Any]) -> None:
@@ -1121,6 +1038,7 @@ async def _execute_claimed_agent_run(
             lease_lost.set()
             raise AgentToolBusy("", "Agent run checkpoint lease was lost.")
 
+    terminal = False
     try:
         try:
             async with asyncio.timeout(_remaining_run_seconds(run_deadline)):
@@ -1137,31 +1055,10 @@ async def _execute_claimed_agent_run(
                     initial_usage=memory.model_usage,
                     max_turns=max_turns,
                     max_tool_calls=max_tool_calls,
-                    max_knowledge_calls=max_knowledge_calls,
-                    max_knowledge_rounds=max_knowledge_rounds,
-                    max_no_progress_rounds=max_no_progress_rounds,
-                    adaptive_retrieval=True,
-                    knowledge_min_evidence_items=skill_min_retrieval_evidence,
-                    knowledge_require_source_diversity=skill_require_source_diversity,
-                    max_model_tokens=max_model_tokens,
-                    grounding_mode=grounding_mode,
+                    session=session,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
-        result_grounding_status = result.grounding_status
-        result_grounding_meta = result.grounding_meta or {}
-        if skill_min_evidence_count:
-            evidence_ids = result_grounding_meta.get("evidence_ids", [])
-            evidence_count = len(evidence_ids) if isinstance(evidence_ids, list) else 0
-            if evidence_count < skill_min_evidence_count:
-                result_grounding_status = "insufficient"
-                result_grounding_meta = {
-                    **result_grounding_meta,
-                    "decision": "insufficient",
-                    "error": "skill_min_evidence_count",
-                    "required_evidence_count": skill_min_evidence_count,
-                    "actual_evidence_count": evidence_count,
-                }
         async with get_session_factory()() as db:
             finalized = await agent_repository.finalize_agent_run(
                 db,
@@ -1173,12 +1070,14 @@ async def _execute_claimed_agent_run(
                 last_error=None,
                 finished_at=utc_now(),
                 model_usage=result.model_usage,
-                grounding_status=result_grounding_status,
-                grounding_meta=result_grounding_meta,
+                grounding_status="skipped",
+                grounding_meta={},
+                session_input_ids=result.harness.get("input_ids", []),
             )
             await db.commit()
         if not finalized:
             raise AgentToolBusy("", "Agent run finalization lease was lost.")
+        terminal = True
         current = await _current_run(run.id)
         await _append_event(
             run,
@@ -1230,12 +1129,8 @@ async def _execute_claimed_agent_run(
                 events=_completed_process_events(process_events),
                 last_error=error,
                 finished_at=utc_now(),
-                grounding_status=(
-                    "unavailable"
-                    if run.grounding_status in {"pending", "not_started"}
-                    else run.grounding_status
-                ),
-                grounding_meta={"error": type(exc).__name__},
+                grounding_status="skipped",
+                grounding_meta={},
             )
             await db.commit()
         try:
@@ -1262,6 +1157,7 @@ async def _execute_claimed_agent_run(
         except Exception as log_exc:
             log_error(logger, "Failed to record agent execution error.", log_exc)
         if finalized:
+            terminal = True
             current = await _current_run(run.id)
             await _append_event(
                 run,
@@ -1269,6 +1165,19 @@ async def _execute_claimed_agent_run(
             )
         return RUN_FINISHED
     finally:
+        if terminal:
+            try:
+                from app.ports.execution import close_execution_session
+
+                await close_execution_session(settings, run.workspace_id, run.id)
+            except Exception as exc:
+                log_error(
+                    logger,
+                    "Failed to close Agent execution session.",
+                    exc,
+                    agent_run_id=run.id,
+                    workspace_id=run.workspace_id,
+                )
         await live_stream.close()
 
 
@@ -1316,12 +1225,8 @@ async def _fail_unhandled_claimed_run(
             events=_completed_process_events(process_events),
             last_error=error,
             finished_at=utc_now(),
-            grounding_status=(
-                "unavailable"
-                if run.grounding_status in {"pending", "not_started"}
-                else run.grounding_status
-            ),
-            grounding_meta={"error": type(exc).__name__},
+            grounding_status="skipped",
+            grounding_meta={},
         )
         if finalized:
             record_system_log(

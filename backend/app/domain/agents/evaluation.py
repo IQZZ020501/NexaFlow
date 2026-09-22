@@ -39,7 +39,6 @@ def _observed_non_negative_int(value: Any) -> int | None:
 @dataclass(frozen=True)
 class AgentEvaluationExpectation:
     status: str = "succeeded"
-    grounding_statuses: tuple[str, ...] = ()
     answer_contains: tuple[str, ...] = ()
     answer_not_contains: tuple[str, ...] = ()
     required_tool_names: tuple[str, ...] = ()
@@ -65,10 +64,6 @@ class AgentEvaluationExpectation:
             raise ValueError("expect.min_sources must be a non-negative integer.")
         return cls(
             status=status.strip(),
-            grounding_statuses=_strings(
-                value.get("grounding_statuses"),
-                "expect.grounding_statuses",
-            ),
             answer_contains=_strings(
                 value.get("answer_contains"),
                 "expect.answer_contains",
@@ -169,7 +164,6 @@ class AgentEvaluationSuite:
 class AgentEvaluationObservation:
     status: str
     answer: str
-    grounding_status: str
     successful_tool_names: tuple[str, ...] = ()
     observed_tool_names: tuple[str, ...] = ()
     source_count: int = 0
@@ -198,11 +192,6 @@ def evaluate_agent_observation(
     failures: list[str] = []
     if observation.status != expected.status:
         failures.append(f"status:{observation.status}")
-    if (
-        expected.grounding_statuses
-        and observation.grounding_status not in expected.grounding_statuses
-    ):
-        failures.append(f"grounding_status:{observation.grounding_status}")
     for index, text in enumerate(expected.answer_contains, start=1):
         if text not in observation.answer:
             failures.append(f"answer_missing:{index}")

@@ -125,6 +125,8 @@ export type AgentRunStatus =
   | "planning"
   | "planned"
 
+export type AgentApprovalMode = "always_ask" | "ask_risky" | "full_access"
+
 export type AgentRun = {
   id: string
   workspace_id: string
@@ -133,7 +135,9 @@ export type AgentRun = {
   conversation_id: string
   regenerated_from_run_id?: string | null
   goal: string
+  session_inputs?: AgentSessionInput[]
   attachments?: AgentRunAttachment[]
+  approval_mode?: AgentApprovalMode
   model_id: string
   model_name: string
   status: AgentRunStatus
@@ -142,6 +146,7 @@ export type AgentRun = {
   result: string
   sources?: AgentRunSource[]
   model_usage: Record<string, unknown>
+  /** @deprecated Historical run compatibility only; no verifier is executed. */
   grounding_status?:
     | "not_started"
     | "pending"
@@ -151,6 +156,7 @@ export type AgentRun = {
     | "insufficient"
     | "unavailable"
     | "skipped"
+  /** @deprecated Historical run compatibility only. */
   grounding_meta?: Record<string, unknown>
   feedback?: "positive" | "negative" | null
   feedback_updated_at?: string | null
@@ -211,6 +217,10 @@ export type AgentRunStreamEvent =
       sequence?: number
       live_sequence?: string
       stream_epoch?: string
+      applied_inputs?: Pick<
+        AgentSessionInput,
+        "sequence" | "input_id" | "mode" | "content" | "previous_answer_turn"
+      >[]
     }
   | {
       type: "tool_input_delta"
@@ -235,6 +245,13 @@ export type AgentRunStreamEvent =
       sequence: number
       call_id: string
       decision: "approved" | "rejected"
+    }
+  | {
+      type: "session_input"
+      sequence: number
+      input_id: string
+      mode: "follow_up"
+      content: string
     }
   | { type: "complete" | "error"; sequence: number; run: AgentRun }
 
@@ -573,7 +590,8 @@ export function createAgentRun(
   goal: string,
   signal?: AbortSignal,
   conversationId?: string | null,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
     method: "POST",
@@ -582,6 +600,7 @@ export function createAgentRun(
       goal,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
+      approval_mode: approvalMode,
     }),
     signal,
   })
@@ -756,6 +775,30 @@ export async function cancelAgentRun(
   )
 }
 
+export type AgentSessionInput = {
+  input_id: string
+  mode: "follow_up"
+  content: string
+  sequence: number
+  run_id: string
+  status?: "queued" | "applied"
+  previous_answer?: string | null
+  previous_answer_turn?: number | null
+}
+
+export async function sendAgentSessionInput(
+  token: string,
+  workspaceId: string,
+  agentId: string,
+  runId: string,
+  input: Pick<AgentSessionInput, "input_id" | "mode" | "content">
+) {
+  return request<AgentSessionInput>(
+    agentsPath(workspaceId, `/${agentId}/runs/${runId}/inputs`),
+    { method: "POST", token, body: JSON.stringify(input) }
+  )
+}
+
 export async function streamAgentRun(
   token: string,
   workspaceId: string,
@@ -764,7 +807,8 @@ export async function streamAgentRun(
   onEvent: (event: AgentRunStreamEvent) => void,
   signal?: AbortSignal,
   conversationId?: string | null,
-  fileIds: string[] = []
+  fileIds: string[] = [],
+  approvalMode: AgentApprovalMode = "ask_risky"
 ) {
   const run = await createAgentRun(
     token,
@@ -773,7 +817,8 @@ export async function streamAgentRun(
     goal,
     signal,
     conversationId,
-    fileIds
+    fileIds,
+    approvalMode
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_RUN_STATUSES.has(run.status)) {

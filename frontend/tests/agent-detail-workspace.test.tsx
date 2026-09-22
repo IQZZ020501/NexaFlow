@@ -13,12 +13,14 @@ import {
   collapsedProcessStatusKey,
   isNearScrollBottom,
   processTimeline,
+  splitAgentRunTimeline,
   unrenderedAgentToolCalls,
 } from "@/components/agents/agent-detail-workspace"
 import { stripAgentSourceLinks } from "@/components/agents/agent-source-references"
 import { LanguageProvider, useLanguage } from "@/contexts/language-provider"
 import type {
   Agent,
+  AgentApprovalMode,
   AgentRun,
   AgentRunEvent,
   AgentToolCall,
@@ -315,10 +317,7 @@ type HarnessProps = {
     decision: "approve" | "reject"
   ) => void
   onRegenerateRun?: (runId: string, goal?: string) => void
-  onRunFeedback?: (
-    runId: string,
-    value: "positive" | "negative" | null
-  ) => void
+  onRunFeedback?: (runId: string, value: "positive" | "negative" | null) => void
   regeneratingRunId?: string | null
   feedbackPendingRunId?: string | null
 }
@@ -331,6 +330,8 @@ function Harness(props: HarnessProps = {}) {
   )
   const [question, setQuestion] = useState(props.question ?? "")
   const [files, setFiles] = useState<File[]>(props.files ?? [])
+  const [approvalMode, setApprovalMode] =
+    useState<AgentApprovalMode>("ask_risky")
   const callbacks = {
     onBack: props.onBack ?? (() => undefined),
     onDelete: props.onDelete ?? (() => undefined),
@@ -360,6 +361,8 @@ function Harness(props: HarnessProps = {}) {
       resolvingCallId={props.resolvingCallId ?? null}
       question={question}
       setQuestion={setQuestion}
+      approvalMode={approvalMode}
+      onApprovalModeChange={setApprovalMode}
       files={files}
       setFiles={setFiles}
       pendingQuestion={props.pendingQuestion ?? null}
@@ -544,9 +547,130 @@ describe("AgentDetailWorkspace header and navigation", () => {
 })
 
 describe("AgentDetailWorkspace preview", () => {
+  test("submits a follow-up with Enter while keeping cancellation available", () => {
+    let submitted = 0
+    let cancelled = false
+    renderPage(
+      <Harness
+        activeView="settings"
+        isAsking
+        onAsk={() => {
+          submitted += 1
+        }}
+        onCancelAsk={() => {
+          cancelled = true
+        }}
+      />
+    )
+    const textarea = screen.getByPlaceholderText("向 Agent 提问...")
+    expect((textarea as HTMLTextAreaElement).disabled).toBe(false)
+    fireEvent.change(textarea, { target: { value: "Then summarize" } })
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(submitted).toBe(1)
+    expect(screen.queryByText("追加后续任务")).toBeNull()
+    expect(screen.getByRole("button", { name: "追加后续任务" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }))
+    expect(cancelled).toBe(true)
+  })
+
+  test("renders accepted session inputs alongside the original goal", () => {
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[
+          makeRun({
+            session_inputs: [
+              {
+                sequence: 1,
+                run_id: "run-1",
+                input_id: "follow-first",
+                mode: "follow_up",
+                content: "Use Chinese",
+                status: "applied",
+              },
+              {
+                sequence: 2,
+                run_id: "run-1",
+                input_id: "follow",
+                mode: "follow_up",
+                content: "Then summarize",
+                status: "queued",
+                previous_answer: "First task completed",
+              },
+            ],
+          }),
+        ]}
+      />
+    )
+    expect(screen.getByText("Use Chinese")).toBeTruthy()
+    expect(screen.getByText("Then summarize")).toBeTruthy()
+    expect(screen.getAllByText("后续任务")).toHaveLength(2)
+    expect(screen.getByText("First task completed")).toBeTruthy()
+  })
+
+  test("keeps a queued follow-up below the response still being generated", () => {
+    const { container } = renderPage(
+      <Harness
+        activeView="settings"
+        runs={[
+          makeRun({
+            status: "running",
+            result: "First answer is still streaming",
+            session_inputs: [
+              {
+                sequence: 1,
+                run_id: "run-1",
+                input_id: "follow",
+                mode: "follow_up",
+                content: "Second question is queued",
+                status: "queued",
+                previous_answer: null,
+              },
+            ],
+          }),
+        ]}
+      />
+    )
+
+    const content = container.textContent ?? ""
+    expect(content.indexOf("First answer is still streaming")).toBeGreaterThan(
+      content.indexOf("Summarize the latest releases")
+    )
+    expect(content.indexOf("Second question is queued")).toBeGreaterThan(
+      content.indexOf("First answer is still streaming")
+    )
+  })
+
   test("shows the empty conversation state", () => {
     renderPage(<Harness activeView="settings" />)
     expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+  })
+
+  test("changes the approval mode from the composer", async () => {
+    renderPage(<Harness activeView="settings" />)
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "执行权限：按策略审批" })
+    )
+    const menuLabel = await screen.findByText("应如何批准工具调用？")
+    expect(
+      menuLabel.closest("[data-slot='dropdown-menu-content']")?.className
+    ).toContain("w-[min(21rem,calc(100vw-1rem))]")
+    for (const description of [
+      "外部读取或副作用操作前询问",
+      "仅风险操作需批准",
+      "自动运行已授权工具，仍受安全限制",
+    ]) {
+      expect(screen.getByText(description).className).toContain("truncate")
+    }
+    fireEvent.click(
+      screen.getByRole("menuitem", {
+        name: /完全访问.*仍受安全限制/,
+      })
+    )
+
+    const trigger = screen.getByRole("button", { name: "执行权限：完全访问" })
+    expect(trigger.dataset.variant).toBe("destructive")
   })
 
   test("shows the loading state", () => {
@@ -668,9 +792,7 @@ describe("AgentDetailWorkspace preview", () => {
     const timestamps = container.querySelectorAll("time")
 
     expect(timestamps).toHaveLength(1)
-    expect(timestamps[0]?.getAttribute("datetime")).toBe(
-      "2026-08-04T00:00:01Z"
-    )
+    expect(timestamps[0]?.getAttribute("datetime")).toBe("2026-08-04T00:00:01Z")
   })
 
   test("renders generated artifacts as filename download links", () => {
@@ -710,6 +832,271 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.queryByText(downloadUrl)).toBeNull()
   })
 
+  test("shows an image preview without a separate preview link and downloads by UUID", () => {
+    const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const run = makeRun({
+      result: `画好了。\n- 文件名：\`generated-image-a1b2.png\`\n- 预览链接：[点击预览](${downloadUrl}/preview)`,
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "generate_image",
+          status: "succeeded",
+          summary: "Image generated.",
+          call_id: "image-call",
+          tool_label: "Generate image",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: {
+            artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+            filename: "generated-image-a1b2.png",
+            download_url: downloadUrl,
+            preview_url: `${downloadUrl}/preview`,
+          },
+          duration_ms: 10,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    expect(screen.queryByText("预览链接")).toBeNull()
+    expect(screen.queryByText("generated-image-a1b2.png")).toBeNull()
+    expect(
+      screen
+        .getByRole("link", { name: "generated-image.png" })
+        .getAttribute("href")
+    ).toBe(downloadUrl)
+    fireEvent.click(
+      screen.getByRole("button", { name: "预览：generated-image.png" })
+    )
+    expect(screen.getByRole("dialog")).toBeTruthy()
+  })
+
+  test("renders a Markdown preview link from a verified image tool event", () => {
+    const downloadUrl = "/api/v1/artifacts/d027f57a-d1e2-411e-9aef-692362dfe8ba"
+    const run = makeRun({
+      result: [
+        "- 文件名：`generated-image.png`（约 2.5 MB，PNG）",
+        `- 下载：[generated-image.png](${downloadUrl})`,
+        `- 预览：[${downloadUrl}/preview](${downloadUrl}/preview)`,
+      ].join("\n"),
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "generate_image",
+          status: "succeeded",
+          summary: "Image generated.",
+          call_id: "image-call",
+          tool_label: "Generate image",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: {
+            artifact_id: "d027f57a-d1e2-411e-9aef-692362dfe8ba",
+            filename: "generated-image.png",
+            download_url: downloadUrl,
+            preview_url: `${downloadUrl}/preview`,
+          },
+          duration_ms: 10,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    expect(
+      screen.getByRole("link", { name: "generated-image.png" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "预览：generated-image.png" })
+    ).toBeTruthy()
+    expect(screen.queryByText(`${downloadUrl}/preview`)).toBeNull()
+  })
+
+  test("keeps artifacts and sources with the answer turn that produced them", () => {
+    const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const source = {
+      source_ref: "law-source",
+      knowledge_base: "法律条文",
+      document: "中华人民共和国刑法.docx",
+      parent_title: "死刑",
+      section_path: [],
+      chunk_index: 1,
+      content: "死刑只适用于罪行极其严重的犯罪分子。",
+    }
+    const event = (overrides: Partial<AgentRunEvent>): AgentRunEvent => ({
+      type: "thought",
+      turn: 1,
+      tool_name: "",
+      status: "succeeded",
+      summary: "agent.answer_ready",
+      call_id: "",
+      tool_label: "",
+      tool_kind: "unknown",
+      server_name: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+      ...overrides,
+    })
+    const run = makeRun({
+      events: [
+        event({
+          type: "tool",
+          turn: 1,
+          tool_name: "generate_image",
+          summary: "Image generated.",
+          call_id: "image-call",
+          output: {
+            artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+            filename: "generated-image.png",
+            download_url: downloadUrl,
+            preview_url: `${downloadUrl}/preview`,
+          },
+        }),
+        event({ turn: 2 }),
+        event({
+          type: "tool",
+          turn: 3,
+          tool_name: "knowledge_retrieval",
+          tool_kind: "knowledge",
+          summary: "agent.knowledge_chunks_returned:1",
+          call_id: "knowledge-call",
+          output: { hits: [source] },
+        }),
+        event({ turn: 4 }),
+      ],
+      result: "死刑只适用于罪行极其严重的犯罪分子。",
+      sources: [source],
+      session_inputs: [
+        {
+          sequence: 1,
+          run_id: "run-1",
+          input_id: "follow-up",
+          mode: "follow_up",
+          content: "帮我检索一下什么罪会被判死刑",
+          status: "applied",
+          previous_answer: "图片已生成。",
+          previous_answer_turn: 2,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    const imageAnswer = screen
+      .getByText("图片已生成。")
+      .closest(".rounded-2xl") as HTMLElement
+    const legalAnswer = screen
+      .getByText("死刑只适用于罪行极其严重的犯罪分子。")
+      .closest(".rounded-2xl") as HTMLElement
+    expect(
+      within(imageAnswer).getByRole("button", {
+        name: "预览：generated-image.png",
+      })
+    ).toBeTruthy()
+    expect(
+      within(imageAnswer).queryByRole("button", {
+        name: "来源：中华人民共和国刑法.docx · 死刑",
+      })
+    ).toBeNull()
+    expect(
+      within(legalAnswer).getByRole("button", {
+        name: "来源：中华人民共和国刑法.docx · 死刑",
+      })
+    ).toBeTruthy()
+    expect(
+      within(legalAnswer).queryByRole("button", {
+        name: "预览：generated-image.png",
+      })
+    ).toBeNull()
+  })
+
+  test.each(["approved", "running", "awaiting_approval", "uncertain"] as const)(
+    "keeps a cached %s image call out of the RAG follow-up process",
+    (status) => {
+      const imageCall = makeToolCall({
+        call_id: "image-call",
+        tool_name: "generate_image",
+        tool_kind: "unknown",
+        server_name: "",
+        status,
+      })
+      const event = (overrides: Partial<AgentRunEvent>): AgentRunEvent => ({
+        type: "thought",
+        turn: 1,
+        status: "succeeded",
+        summary: "agent.answer_ready",
+        tool_name: "",
+        call_id: "",
+        tool_label: "",
+        tool_kind: "unknown",
+        server_name: "",
+        input: {},
+        output: null,
+        duration_ms: 0,
+        ...overrides,
+      })
+      const followUpRun = makeRun({
+        status: "running",
+        result: "正在回答租房问题",
+        events: [
+          event({
+            type: "tool",
+            call_id: imageCall.call_id,
+            tool_name: "generate_image",
+            summary: "Image generated.",
+          }),
+          event({ turn: 2 }),
+          event({
+            type: "tool",
+            turn: 3,
+            call_id: "rag-call",
+            tool_name: "search_knowledge",
+            tool_kind: "knowledge",
+            summary: "agent.knowledge_chunks_returned:6",
+          }),
+        ],
+        session_inputs: [
+          {
+            sequence: 1,
+            run_id: "run-1",
+            input_id: "follow-up",
+            mode: "follow_up",
+            content: "关于租房的条例有哪些",
+            status: "applied",
+            previous_answer: "图片已生成。",
+            previous_answer_turn: 2,
+          },
+        ],
+      })
+      renderPage(
+        <Harness
+          activeView="settings"
+          runs={[followUpRun]}
+          toolCallsByRun={{ "run-1": [imageCall] }}
+        />
+      )
+
+      const firstAnswer = screen
+        .getByText("图片已生成。")
+        .closest(".rounded-2xl") as HTMLElement
+      const followUpAnswer = screen
+        .getByText("正在回答租房问题")
+        .closest(".rounded-2xl") as HTMLElement
+      expect(within(firstAnswer).getByText("图片生成")).toBeTruthy()
+      expect(within(followUpAnswer).getByText("知识库检索")).toBeTruthy()
+      expect(within(followUpAnswer).queryByText("图片生成") === null).toBe(true)
+      expect(
+        within(followUpAnswer).queryByText("工具调用需要确认") === null
+      ).toBe(true)
+      expect(followUpAnswer.textContent).not.toContain("generate_image")
+    }
+  )
+
   test("preserves and wraps multiline user messages", () => {
     const goal = [
       "scc .",
@@ -719,9 +1106,9 @@ describe("AgentDetailWorkspace preview", () => {
     const { container } = renderPage(
       <Harness activeView="settings" runs={[makeRun({ goal })]} />
     )
-    const message = Array.from(container.querySelectorAll(".bg-foreground")).find(
-      (element) => element.textContent === goal
-    )
+    const message = Array.from(
+      container.querySelectorAll(".bg-foreground")
+    ).find((element) => element.textContent === goal)
 
     expect(message).toBeTruthy()
     expect(message!.className).toContain("whitespace-pre-wrap")
@@ -756,7 +1143,9 @@ describe("AgentDetailWorkspace preview", () => {
     expect(regenerated).toEqual([])
     expect(feedback).toEqual([["run-1", null]])
     expect(screen.getByRole("button", { name: "点踩" })).toBeTruthy()
-    expect(screen.getAllByRole("button", { name: "复制" }).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByRole("button", { name: "复制" }).length
+    ).toBeGreaterThan(0)
   })
 
   test("renders a failed run with the error message", () => {
@@ -1024,6 +1413,38 @@ describe("AgentDetailWorkspace preview", () => {
       />
     )
     expect(screen.getAllByText(/execute_sql/).length).toBeGreaterThan(0)
+  })
+
+  test("renders an approved call in place of its preparing thought", () => {
+    const run = makeRun({
+      status: "running",
+      result: "",
+      events: [
+        {
+          type: "thought",
+          turn: 1,
+          tool_name: "execute_sql",
+          status: "succeeded",
+          summary: "agent.preparing_tool_call",
+          call_id: "call-1",
+          tool_label: "",
+          tool_kind: "mcp",
+          server_name: "Database",
+          input: {},
+          output: null,
+          duration_ms: 0,
+        },
+      ],
+    })
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[run]}
+        toolCallsByRun={{ "run-1": [makeToolCall({ status: "approved" })] }}
+      />
+    )
+    expect(screen.getAllByText(/execute_sql/).length).toBeGreaterThan(0)
+    expect(screen.queryByText("正在准备工具调用")).toBeNull()
   })
 
   test("shows collapsed process status for approvals", async () => {
@@ -1606,7 +2027,9 @@ describe("AgentLogsPanel", () => {
     fireEvent.click(screen.getByLabelText("查看日志详情"))
     await waitFor(() => expect(screen.getByText("对话详情")).toBeTruthy())
     expect(screen.getByText("Step one")).toBeTruthy()
-    expect(screen.getAllByRole("img", { name: "点赞" }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("img", { name: "点赞" }).length).toBeGreaterThan(
+      0
+    )
     expect(screen.getByText("暂无错误")).toBeTruthy()
     expect(screen.getByText(/"prompt_tokens"/)).toBeTruthy()
   })
@@ -1926,6 +2349,49 @@ describe("AgentConversationUsersPanel", () => {
 })
 
 describe("AgentDetailWorkspace edge behavior", () => {
+  test("keeps tool retries in the first response until its completed turn", () => {
+    const event = (turn: number, summary: string): AgentRunEvent => ({
+      type: "thought",
+      turn,
+      tool_name: "",
+      status: "succeeded",
+      summary,
+      call_id: "",
+      tool_label: "",
+      tool_kind: "unknown",
+      server_name: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+    })
+    const run = makeRun({
+      events: [
+        event(1, "agent.answer_ready"),
+        event(2, "agent.tools_selected"),
+        event(3, "agent.answer_ready"),
+        event(4, "agent.analyzing"),
+      ],
+      session_inputs: [
+        {
+          sequence: 42,
+          run_id: "run-1",
+          input_id: "follow",
+          mode: "follow_up",
+          content: "Second question",
+          status: "applied",
+          previous_answer: "First answer",
+          previous_answer_turn: 3,
+        },
+      ],
+    })
+
+    expect(
+      splitAgentRunTimeline(run).map((segment) =>
+        segment.map(({ event }) => event.turn)
+      )
+    ).toEqual([[1, 2, 3], [4]])
+  })
+
   test("isNearScrollBottom compares the remaining scroll distance", () => {
     const near = { clientHeight: 400, scrollHeight: 440, scrollTop: 0 }
     expect(isNearScrollBottom(near)).toBe(true)
@@ -2072,6 +2538,40 @@ describe("AgentDetailWorkspace edge behavior", () => {
     ]
     const pending = unrenderedAgentToolCalls(timeline, calls)
     expect(pending.map((call) => call.call_id)).toEqual(["call-2"])
+  })
+
+  test("keeps an approved tool card until its tool event replaces the preparing thought", () => {
+    const call = makeToolCall({
+      call_id: "call-image",
+      tool_name: "generate_image",
+      status: "approved",
+    })
+    const preparing = {
+      type: "thought" as const,
+      turn: 1,
+      tool_name: "generate_image",
+      status: "succeeded" as const,
+      summary: "agent.preparing_tool_call",
+      call_id: "call-image",
+      tool_label: "",
+      tool_kind: "unknown" as const,
+      server_name: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+    }
+    expect(
+      unrenderedAgentToolCalls(
+        processTimeline(makeRun({ events: [preparing] })),
+        [call]
+      ).map((item) => item.call_id)
+    ).toEqual(["call-image"])
+    expect(
+      unrenderedAgentToolCalls(
+        processTimeline(makeRun({ events: [{ ...preparing, type: "tool" }] })),
+        [call]
+      )
+    ).toHaveLength(0)
   })
 
   test("collapsedProcessStatusKey covers the collapsed states", () => {

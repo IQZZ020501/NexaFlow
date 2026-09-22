@@ -11,6 +11,10 @@ from pathlib import Path
 SUITES = (
     "knowledge.unit",
     "agents.unit",
+    "agents.harness",
+    "agent_skills.unit",
+    "agent_skills.api",
+    "execution.unit",
     "agents.evaluation",
     "tools.unit",
     "workflows.unit",

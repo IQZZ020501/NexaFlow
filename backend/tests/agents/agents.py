@@ -283,11 +283,6 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             (name for name in tool_names if name.startswith("mcp_")),
             None,
         )
-        inline_grounding = any(
-            item.get("role") == "system"
-            and "Single-pass grounding protocol" in item.get("content", "")
-            for item in body.get("messages", [])
-        )
         if "search_knowledge" in tool_names and not any(
             item.get("role") == "tool" for item in body.get("messages", [])
         ):
@@ -325,46 +320,7 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             }
             finish_reason = "tool_calls"
         else:
-            evidence_ids = []
-            for item in body.get("messages", []):
-                if item.get("role") != "tool":
-                    continue
-                try:
-                    output = json.loads(item.get("content") or "{}")
-                except (TypeError, ValueError):
-                    continue
-                evidence_ids.extend(
-                    hit.get("chunk_id")
-                    for hit in output.get("hits", [])
-                    if isinstance(hit, dict) and hit.get("chunk_id")
-                )
-            for item in body.get("messages", []):
-                content = item.get("content")
-                if not isinstance(content, str) or "Pre-retrieved workspace evidence" not in content:
-                    continue
-                try:
-                    output = json.loads(content.split("\n", 1)[1])
-                except (IndexError, ValueError):
-                    continue
-                evidence_ids.extend(
-                    hit.get("chunk_id")
-                    for hit in output.get("hits", [])
-                    if isinstance(hit, dict) and hit.get("chunk_id")
-                )
-            manifest = (
-                "<nexaflow-grounding>"
-                + json.dumps(
-                    {
-                        "status": "grounded" if evidence_ids else "skipped",
-                        "evidence_ids": evidence_ids,
-                        "reason_codes": [],
-                    }
-                )
-                + "</nexaflow-grounding>\n"
-                if inline_grounding
-                else ""
-            )
-            message = {"role": "assistant", "content": f"{manifest}Completed."}
+            message = {"role": "assistant", "content": "Completed."}
             finish_reason = "stop"
 
         if body.get("stream"):
@@ -795,10 +751,18 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
         [
             ModelCompletion(
                 content="",
-                tool_calls=(ModelToolCall("call-1", "test_tool", '{"value":'),),
+                tool_calls=(
+                    ModelToolCall(
+                        "call-1",
+                        "pptx_skill",
+                        '{"filename":"deck.pptx","presentation":{"slides":[',
+                    ),
+                ),
                 finish_reason="length",
             ),
-            ModelCompletion(content="Stopped safely.", tool_calls=(), finish_reason="stop"),
+            ModelCompletion(
+                content="Stopped safely.", tool_calls=(), finish_reason="stop"
+            ),
         ]
     )
     result = await run_agent(
@@ -806,7 +770,7 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
         [{"role": "user", "content": "Run it"}],
         [
             create_agent_tool(
-                name="test_tool",
+                name="pptx_skill",
                 description="Test tool",
                 parameters={"type": "object"},
                 execute=execute,
@@ -816,6 +780,11 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
     assert result.content == "Stopped safely."
     assert result.events[0]["status"] == "failed"
     assert executions == 0
+    recovery = next(
+        message.content for message in provider.requests[1] if message.type == "tool"
+    )
+    assert "compact legacy" in str(recovery).lower()
+    assert "layout" in str(recovery).lower()
 
 
 async def assert_invalid_tool_arguments_are_not_executed() -> None:
@@ -1404,24 +1373,24 @@ def assert_tool_routing_context_is_explicit() -> None:
     )
     messages = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
-        True,
-        True,
-        knowledge_scope=agent_tools.describe_knowledge_sources([knowledge_base]),
         context_messages=[
             {"role": "user", "content": "Earlier question"},
             {"role": "assistant", "content": "Earlier answer"},
         ],
     )
     system = messages[0]["content"]
-    assert "search_knowledge: first choice for workspace-specific" in system
-    assert "MCP tools: use only for current or external data" in system
-    assert "Release Docs" in system
-    assert "[source](#nexaflow-source-SOURCE_REF)" in system
+    assert "Tools are optional capabilities" in system
+    assert "Configured tools are authorized capabilities" in system
+    assert "do not refuse solely because the request is outside that role" in system
+    assert "let the approval flow pause the Run" in system
+    assert "search_knowledge: first choice" not in system
+    assert "MCP tools: use only" not in system
+    assert "Release Docs" not in system
+    assert "#nexaflow-source-" not in system
     assert "without manual section numbers" in system
     assert "own list line" in system
-    assert "after the sentence-final punctuation" in system
-    assert "Single-pass grounding protocol" in system
-    assert "<nexaflow-grounding>" in system
+    assert "Single-pass grounding protocol" not in system
+    assert "<nexaflow-grounding>" not in system
     assert "Start directly with the answer" in system
     assert "先说明检索结果" in system
     assert "answer immediately without tools" not in system
@@ -1434,8 +1403,6 @@ def assert_tool_routing_context_is_explicit() -> None:
     run.attachment_context = "--- release.txt ---\nShip on Friday."
     messages_with_attachment = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
-        False,
-        False,
     )
     assert messages_with_attachment[-2]["role"] == "user"
     assert "untrusted user-provided data" in messages_with_attachment[-2]["content"]
@@ -1454,11 +1421,9 @@ def assert_tool_routing_context_is_explicit() -> None:
 
     no_knowledge_system = agent_runs.execution_messages(
         run,  # type: ignore[arg-type]
-        False,
-        True,
     )[0]["content"]
     assert "workspace retrieval was performed" not in no_knowledge_system
-    assert "No workspace knowledge source is available" in no_knowledge_system
+    assert "Tools are optional capabilities" in no_knowledge_system
     assert "#nexaflow-source-" not in no_knowledge_system
 
     tool = agent_tools.build_knowledge_search_tool(
@@ -1469,6 +1434,8 @@ def assert_tool_routing_context_is_explicit() -> None:
         test_settings(),
     )
     assert "Release Docs" in tool.description
+    assert "[source](#nexaflow-source-SOURCE_REF)" in tool.description
+    assert "after the sentence-final punctuation" in tool.description
     assert (
         "Do not use for general knowledge or current external facts" in tool.description
     )
@@ -1871,27 +1838,30 @@ async def assert_runtime_budgets_are_enforced() -> None:
         parameters={"type": "object"},
         execute=execute,
     )
-    try:
-        await run_agent(
-            SequenceProvider(
-                [
-                    ModelCompletion(
-                        content="",
-                        tool_calls=tuple(
-                            ModelToolCall(f"call-{index}", "test_tool", "{}")
-                            for index in range(13)
-                        ),
-                        finish_reason="tool_calls",
-                    )
-                ]
-            ),  # type: ignore[arg-type]
-            [{"role": "user", "content": "Run it"}],
-            [ordinary_tool],
-        )
-    except AgentRunnerError as exc:
-        assert str(exc) == "Agent tool call limit reached."
-    else:
-        raise AssertionError("Agent tool call budget was not enforced.")
+    overflow_result = await run_agent(
+        SequenceProvider(
+            [
+                ModelCompletion(
+                    content="",
+                    tool_calls=tuple(
+                        ModelToolCall(f"call-{index}", "test_tool", "{}")
+                        for index in range(13)
+                    ),
+                    finish_reason="tool_calls",
+                ),
+                ModelCompletion(
+                    content="Stopped after reaching the tool budget.",
+                    tool_calls=(),
+                    finish_reason="stop",
+                ),
+            ]
+        ),  # type: ignore[arg-type]
+        [{"role": "user", "content": "Run it"}],
+        [ordinary_tool],
+    )
+    assert overflow_result.content == "Stopped after reaching the tool budget."
+    assert len(overflow_result.events) == 13
+    assert all(event["status"] == "failed" for event in overflow_result.events)
     assert executions == 0
 
     try:
@@ -1906,7 +1876,7 @@ async def assert_runtime_budgets_are_enforced() -> None:
         raise AssertionError("Agent turn budget was not enforced.")
 
 
-async def assert_retrieval_progress_uses_evidence_ids() -> None:
+async def assert_retrieval_does_not_inject_core_stop_policy() -> None:
     async def retrieve(arguments: str) -> AgentToolResult:
         query = json.loads(arguments)["query"]
         return AgentToolResult(
@@ -1969,13 +1939,13 @@ async def assert_retrieval_progress_uses_evidence_ids() -> None:
         [{"role": "user", "content": "Run it"}],
         [knowledge_tool],
     )
-    assert any(
+    assert not any(
         "No new evidence found" in message.text
         for message in repeated_provider.requests[-1]
     )
 
 
-async def assert_adaptive_retrieval_skips_duplicate_queries() -> None:
+async def assert_knowledge_plugin_allows_model_selected_repeated_queries() -> None:
     executions = 0
 
     async def retrieve(_arguments: str) -> AgentToolResult:
@@ -2041,9 +2011,10 @@ async def assert_adaptive_retrieval_skips_duplicate_queries() -> None:
         [knowledge_tool],
         adaptive_retrieval=True,
     )
-    assert executions == 1
+    assert executions == 2
     assert result.content == "Done."
-    assert any(
+    assert all(event["status"] == "succeeded" for event in result.events)
+    assert not any(
         event["summary"] == "agent.knowledge_duplicate_query"
         for event in result.events
     )
@@ -3275,6 +3246,7 @@ def assert_external_agent_access() -> None:
                 "goal",
                 "conversation_id",
                 "file_ids",
+                "approval_mode",
             }
             public_schema_ref = openapi_payload["paths"][
                 "/api/v1/public/agents/{agent_id}/runs"
@@ -3352,6 +3324,7 @@ def assert_external_agent_access() -> None:
                 "regenerated_from_run_id",
                 "question",
                 "attachments",
+                "approval_mode",
                 "status",
                 "result",
                 "error",
@@ -3834,8 +3807,8 @@ def main() -> None:
     asyncio.run(assert_streaming_tool_preamble_is_reset_on_failure())
     asyncio.run(assert_parallel_policy_is_enforced())
     asyncio.run(assert_runtime_budgets_are_enforced())
-    asyncio.run(assert_retrieval_progress_uses_evidence_ids())
-    asyncio.run(assert_adaptive_retrieval_skips_duplicate_queries())
+    asyncio.run(assert_retrieval_does_not_inject_core_stop_policy())
+    asyncio.run(assert_knowledge_plugin_allows_model_selected_repeated_queries())
     asyncio.run(assert_retrieval_stops_at_evidence_sufficiency())
     asyncio.run(assert_retrieval_source_diversity_keeps_searching())
     asyncio.run(assert_empty_knowledge_result_allows_best_effort_answer())
@@ -3952,13 +3925,14 @@ def main() -> None:
         arguments,
         *,
         idempotency_key=None,
-    ) -> tuple[str, bool]:
+    ):
         nonlocal mcp_transport_failure
         assert connection.bearer_token == "mcp-secret-token"
         mcp_calls.append((connection.url, tool_name, arguments, idempotency_key))
         if mcp_transport_failure:
             raise McpClientError("transport interrupted")
-        return json.dumps({"release": "approved"}), False
+        from app.ports.mcp import McpCallResult
+        return McpCallResult(content=[], structured_content={"release": "approved"})
 
     agent_tools.retrieve_knowledge_base = fake_retrieve_knowledge_base
     mcp_services.discover_mcp_tools = fake_discover_mcp_tools
@@ -4236,11 +4210,15 @@ def main() -> None:
             member_question = client.post(
                 agents_url(workspace_id, f"/{agent_id}/runs"),
                 headers=auth_headers(member_token),
-                json={"goal": "Prepare the release"},
+                json={
+                    "goal": "Prepare the release",
+                    "approval_mode": "full_access",
+                },
             )
             assert member_question.status_code == 201, member_question.text
             member_run = member_question.json()
             assert member_run["status"] == "succeeded"
+            assert member_run["approval_mode"] == "full_access"
             assert member_run["conversation_id"]
             assert member_run["model_usage"]["model_calls"] == 1
             assert member_run["plan"] == []
@@ -4274,14 +4252,13 @@ def main() -> None:
             assert executed["status"] == "succeeded"
             assert executed["conversation_id"] == member_run["conversation_id"]
             assert executed["result"] == "Completed."
-            assert executed["grounding_status"] == "grounded"
-            assert executed["grounding_meta"]["evidence_packet_count"] == 1
-            assert executed["grounding_meta"]["mode"] == "inline"
-            assert any(
+            assert executed["grounding_status"] == "skipped"
+            assert executed["grounding_meta"] == {}
+            assert not any(
                 str(event.get("summary", "")).startswith("agent.grounding_")
                 for event in executed["events"]
             )
-            assert any(
+            assert not any(
                 any(
                     item.get("role") == "system"
                     and "Single-pass grounding protocol" in item.get("content", "")
@@ -4289,14 +4266,6 @@ def main() -> None:
                 )
                 for call in AgentModelHandler.calls
             )
-            assert sum(
-                any(
-                    item.get("role") == "system"
-                    and "Single-pass grounding protocol" in item.get("content", "")
-                    for item in call.get("messages", [])
-                )
-                for call in AgentModelHandler.calls
-            ) == 2
             assert "citations" not in executed
             assert query_calls == [(knowledge_base_id, "release process")]
             knowledge_event = next(
@@ -4685,7 +4654,7 @@ def main() -> None:
             assert mcp_event["tool_kind"] == "mcp"
             assert mcp_event["server_name"] == ""
             assert mcp_event["input"] == {"topic": "release"}
-            assert mcp_event["output"] == {"release": "approved"}
+            assert mcp_event["output"] == {"content": [], "isError": False, "structuredContent": {"release": "approved"}}
             assert len(mcp_calls) == 2
             assert mcp_calls[0][:3] == (
                 "http://127.0.0.1:9999/mcp",
@@ -4819,8 +4788,8 @@ def main() -> None:
             assert member_approval.json()["status"] == "succeeded"
             assert len(mcp_calls) == 5
 
-            # Public/API runs fail closed before creation when a frozen Tool
-            # is no longer automatic and externally safe.
+            # Public chat can pause for caller approval, while Agent API
+            # remains restricted to automatic, externally safe Tools.
             published_agent = client.patch(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}"),
                 headers=auth_headers(admin_token),
@@ -4836,8 +4805,22 @@ def main() -> None:
                 headers=auth_headers(member_token),
                 json={"goal": "Check the release"},
             )
-            assert public_run.status_code == 409, public_run.text
+            assert public_run.status_code == 201, public_run.text
+            assert public_run.json()["status"] == "awaiting_approval"
             assert len(mcp_calls) == calls_before_public
+            public_tool_calls = client.get(
+                f"{public_base}/runs/{public_run.json()['id']}/tool-calls",
+                headers=auth_headers(member_token),
+            )
+            assert public_tool_calls.status_code == 200, public_tool_calls.text
+            assert public_tool_calls.json()[0]["status"] == "awaiting_approval"
+            public_approval = client.post(
+                f"{public_base}/runs/{public_run.json()['id']}/tool-calls/call-mcp/approve",
+                headers=auth_headers(member_token),
+            )
+            assert public_approval.status_code == 200, public_approval.text
+            assert public_approval.json()["status"] == "succeeded"
+            assert len(mcp_calls) == calls_before_public + 1
 
             read_only_public_policy = client.put(
                 mcp_url(

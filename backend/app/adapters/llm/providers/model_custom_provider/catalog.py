@@ -9,12 +9,14 @@ CATALOG = {
         "LLM",
         "VISION",
         "EMBEDDING",
-        "RERANKER"
+        "RERANKER",
+        "IMAGE"
     ],
     "models": {
         "LLM": [],
         "VISION": [],
         "EMBEDDING": [],
-        "RERANKER": []
+        "RERANKER": [],
+        "IMAGE": []
     }
 }

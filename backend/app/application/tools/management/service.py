@@ -16,9 +16,11 @@ from app.domain.tools.access.permissions import (
     upsert_tool_permission,
 )
 from app.domain.tools.catalog.service import (
+    McpCatalogLeaf,
     ToolCatalogDetail,
     ToolCatalogItem,
     get_tool_catalog_detail,
+    legacy_mcp_policy_mode,
     list_tool_catalog,
 )
 from app.domain.tools.mcp.service import (
@@ -38,7 +40,10 @@ from app.domain.tools.python.service import (
     set_python_tool_enabled,
     update_python_tool_draft,
 )
-from app.domain.tools.runtime import validate_tool_arguments
+from app.domain.tools.runtime import (
+    effective_tool_access_sources,
+    validate_tool_arguments,
+)
 from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
 from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
@@ -521,6 +526,18 @@ def _summary_response(item: ToolCatalogItem) -> ToolSummaryResponse:
         current_version_id=item.tool.current_version_id,
         status=item.tool.status,
         availability=item.tool.availability,
+        policy_mode=(
+            legacy_mcp_policy_mode(
+                McpCatalogLeaf(item.source, item.tool, item.version, item.policy)
+            )
+            if item.tool.kind == "mcp" and item.version is not None
+            else None
+        ),
+        allowed_access_sources=(
+            list(effective_tool_access_sources(item.policy.allowed_access_sources))
+            if item.policy
+            else None
+        ),
         source={
             "id": item.source.id,
             "name": item.source.name,
@@ -543,6 +560,7 @@ def _detail_response(detail: ToolCatalogDetail) -> ToolDetailResponse:
             source=detail.source,
             version=detail.version,
             draft=detail.draft,
+            policy=detail.policy,
             access=detail.access,
             permission=detail.permission,
         )

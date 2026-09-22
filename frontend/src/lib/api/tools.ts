@@ -46,6 +46,7 @@ export type McpSourceCreatePayload =
         args: string[]
         cwd?: string
         env: Record<string, string>
+        egress_domains?: string[]
       }
     }
 
@@ -60,6 +61,8 @@ export type ToolSummary = {
   current_version_id: string | null
   status: string
   availability: "available" | "unavailable"
+  policy_mode?: ToolPolicyMode | null
+  allowed_access_sources?: string[] | null
   source: ToolSourceSummary
   created_by_user_id: string | null
   created_at?: string

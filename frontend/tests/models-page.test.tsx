@@ -60,6 +60,16 @@ beforeEach(() => {
         ])
       )
     }
+    if (url.includes("/model-providers/base-models")) {
+      return Promise.resolve(
+        jsonResponse([
+          { name: "alpha-chat", desc: "Alpha Chat", model_type: "LLM" },
+        ])
+      )
+    }
+    if (url.includes("/model-providers/credential-form")) {
+      return Promise.resolve(jsonResponse([]))
+    }
     if (url.includes("/model-providers")) {
       return Promise.resolve(
         jsonResponse([
@@ -178,5 +188,40 @@ describe("LlmPage", () => {
     expect(screen.getByRole("dialog", { name: "编辑模型" })).toBeTruthy()
     expect(alphaCheckbox.checked).toBe(true)
     expect(screen.getByText("已选择 1 项")).toBeTruthy()
+  })
+
+  test("explains the bounded connection test and locks the dialog while saving", async () => {
+    renderPage(<LlmPage />)
+
+    const alphaHeading = await screen.findByText("Alpha")
+    const alphaCard = alphaHeading.closest<HTMLElement>(".min-h-40")!
+    fireEvent.click(within(alphaCard).getByRole("button", { name: "编辑" }))
+    const dialog = await screen.findByRole("dialog", { name: "编辑模型" })
+    expect(
+      within(dialog).getByText(
+        "连接测试受系统超时限制；只有测试通过后才会保存模型。"
+      )
+    ).toBeTruthy()
+
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        return new Promise<Response>(() => {})
+      }
+      return previousFetch(input, init)
+    }) as typeof fetch
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
+
+    expect((await within(dialog).findByRole("status")).textContent).toContain(
+      "正在测试模型连接"
+    )
+    expect(
+      (
+        within(dialog).getByRole("button", {
+          name: "取消",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
   })
 })

@@ -9,6 +9,8 @@ const BACKEND_ORIGIN = process.env.NEXAFLOW_API_PROXY ?? "http://127.0.0.1:8000"
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // Repository agent guidance is maintained in the root AGENTS.md.
+  agentRules: false,
   // Keep the proxy request-body ceiling aligned with the backend upload limit.
   experimental: {
     proxyClientMaxBodySize: "100mb",

@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -6,7 +7,7 @@ from urllib.parse import urlsplit
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
-ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
 
 def _database_url_from_env() -> str:
@@ -95,7 +96,10 @@ class Settings:
     agent_event_poll_seconds: float = 0.5
     agent_external_agent_runs_per_minute: int = 60
     agent_external_consumer_runs_per_minute: int = 10
-    workflow_sandbox_socket: str = "/run/sandbox/sandbox.sock"
+    opensandbox_url: str = "http://127.0.0.1:8088"
+    opensandbox_api_key: str = ""
+    opensandbox_image: str = "nexaflow/execution:local"
+    opensandbox_egress_domains: tuple[str, ...] = ()
     workflow_sandbox_timeout_seconds: float = 5.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
@@ -174,9 +178,17 @@ class Settings:
             agent_external_consumer_runs_per_minute=int(
                 os.getenv("AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE", "10")
             ),
-            workflow_sandbox_socket=os.getenv(
-                "WORKFLOW_SANDBOX_SOCKET",
-                "/run/sandbox/sandbox.sock",
+            opensandbox_url=os.getenv(
+                "OPENSANDBOX_URL", "http://127.0.0.1:8088"
+            ).rstrip("/"),
+            opensandbox_api_key=os.getenv("OPENSANDBOX_API_KEY", ""),
+            opensandbox_image=os.getenv(
+                "OPENSANDBOX_IMAGE", "nexaflow/execution:local"
+            ),
+            opensandbox_egress_domains=tuple(
+                value.strip()
+                for value in os.getenv("OPENSANDBOX_EGRESS_DOMAINS", "").split(",")
+                if value.strip()
             ),
             workflow_sandbox_timeout_seconds=float(
                 os.getenv("WORKFLOW_SANDBOX_TIMEOUT_SECONDS", "5")
@@ -275,8 +287,40 @@ class Settings:
             raise RuntimeError(
                 "AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE must be greater than zero."
             )
-        if not self.workflow_sandbox_socket.startswith("/"):
-            raise RuntimeError("WORKFLOW_SANDBOX_SOCKET must be an absolute path.")
+        from urllib.parse import urlparse
+
+        from app.infra.execution.network import validate_egress_domain
+
+        endpoint = urlparse(self.opensandbox_url)
+        try:
+            endpoint_port = endpoint.port
+        except ValueError as exc:
+            raise RuntimeError("OPENSANDBOX_URL contains an invalid port.") from exc
+        if (
+            endpoint.scheme not in {"http", "https"}
+            or not endpoint.hostname
+            or endpoint.username
+            or endpoint.password
+            or endpoint.query
+            or endpoint.fragment
+            or endpoint.path not in {"", "/"}
+            or endpoint_port == 0
+        ):
+            raise RuntimeError(
+                "OPENSANDBOX_URL must be a trusted HTTP(S) control-plane origin."
+            )
+        if self.environment == "production" and self.opensandbox_api_key and not re.fullmatch(
+            r"[^\s]+@sha256:[a-f0-9]{64}", self.opensandbox_image
+        ):
+            raise RuntimeError("OPENSANDBOX_IMAGE must use an immutable sha256 digest in production.")
+        try:
+            for domain in self.opensandbox_egress_domains:
+                if validate_egress_domain(domain) != domain:
+                    raise ValueError("Deployment egress domains must be lowercase.")
+        except ValueError as exc:
+            raise RuntimeError(
+                "OPENSANDBOX_EGRESS_DOMAINS must contain domain names, not URLs or IP ranges."
+            ) from exc
         if not 0.1 <= self.workflow_sandbox_timeout_seconds <= 30:
             raise RuntimeError(
                 "WORKFLOW_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 30."

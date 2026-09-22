@@ -17,7 +17,12 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
     uv run python -m tests.unit
 """
 
+import asyncio
+import base64
+from dataclasses import replace
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -67,6 +72,342 @@ def test_builtin_tool_summary_accepts_system_owner() -> None:
 
     assert summary.created_by_user_id is None
     assert summary.updated_at > summary.created_at
+
+
+def test_tool_summary_projects_effective_public_access_and_mcp_policy() -> None:
+    from app.application.tools.management.service import _summary_response
+    from app.domain.tools.access.permissions import ToolAccess
+    from app.domain.tools.catalog.service import (
+        ToolCatalogItem,
+        build_image_generation_tool,
+    )
+    from app.entities.tools import ToolSource
+
+    tool, version, policy = build_image_generation_tool("workspace-1")
+    policy.allowed_access_sources = ["console"]
+    summary = _summary_response(
+        ToolCatalogItem(
+            tool=tool,
+            source=ToolSource(
+                id=tool.source_id,
+                workspace_id=tool.workspace_id,
+                kind="builtin",
+                name="Built-in",
+            ),
+            version=version,
+            draft=None,
+            policy=policy,
+            access=ToolAccess(can_view=True, can_use=True, can_manage=False),
+            permission=None,
+        )
+    )
+
+    assert summary.allowed_access_sources == ["console", "public"]
+    assert summary.policy_mode is None
+
+
+def test_image_generation_is_a_bounded_approval_backed_builtin() -> None:
+    from app.domain.tools.catalog.service import build_image_generation_tool
+    from app.domain.tools.runtime import build_tool_snapshot, validate_tool_arguments
+    from app.entities.tools import ToolSource
+
+    tool, version, policy = build_image_generation_tool("workspace-1")
+    assert tool.function_name == "generate_image"
+    assert version.execution_spec == {"builtin": "image_generation"}
+    assert policy.approval == "each_call"
+    assert policy.effect == "external_write"
+    assert policy.workflow_callable is False
+    snapshot = build_tool_snapshot(
+        tool,
+        ToolSource(id=tool.source_id, workspace_id=tool.workspace_id, kind="builtin"),
+        version,
+        policy,
+        "user-1",
+    )
+    validate_tool_arguments(
+        snapshot, {"prompt": "A watercolor mountain", "size": "square"}
+    )
+    for arguments in ({"prompt": ""}, {"prompt": "hello", "size": "gigantic"}):
+        try:
+            validate_tool_arguments(snapshot, arguments)
+        except ValueError:
+            continue
+        raise AssertionError("Invalid image arguments were accepted.")
+
+
+def test_image_tool_queue_freezes_its_model_configuration() -> None:
+    from app.application.tools.runtime.adapters import image_generation
+    from app.application.tools.runtime.contracts import ToolInvocationContext
+    from app.application.tools.runtime.service import queue_tool_invocation
+    from app.domain.tools.catalog.service import build_image_generation_tool
+    from app.domain.tools.runtime import build_tool_snapshot
+    from app.entities.tools import ToolSource
+    from app.infra.db.repositories.tools import repository as tool_repository
+
+    tool, version, policy = build_image_generation_tool("workspace-1")
+    snapshot = build_tool_snapshot(
+        tool,
+        ToolSource(id=tool.source_id, workspace_id=tool.workspace_id, kind="builtin"),
+        version,
+        policy,
+        "user-1",
+    )
+    context = ToolInvocationContext(
+        workspace_id="workspace-1",
+        origin="agent",
+        root_run_id="run-1",
+        run_id="run-1",
+        invocation_id="call-1",
+        execution_user_id="user-1",
+        access_source="console",
+        deadline_at=datetime.now(UTC),
+        idempotency_key="image-key",
+    )
+    preapproved_context = replace(
+        context,
+        invocation_id="call-2",
+        idempotency_key="image-key-preapproved",
+        approval_required=False,
+    )
+    db = SimpleNamespace()
+    resource_snapshot = {
+        "image_model": {
+            "schema_version": 1,
+            "model_id": "image-model-1",
+            "fingerprint": "a" * 64,
+        }
+    }
+
+    async def keep_candidate(_db, candidate):
+        return candidate
+
+    with (
+        patch.object(
+            image_generation,
+            "build_image_model_resource_snapshot",
+            new=AsyncMock(return_value=resource_snapshot),
+        ) as freeze_model,
+        patch.object(
+            tool_repository,
+            "create_or_get_tool_invocation",
+            new=AsyncMock(side_effect=keep_candidate),
+        ),
+        patch.object(
+            tool_repository,
+            "refresh_tool_invocation_deadline",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        invocation = asyncio.run(
+            queue_tool_invocation(
+                db,
+                snapshot,
+                {"prompt": "A mountain"},
+                context,
+            )
+        )
+        preapproved = asyncio.run(
+            queue_tool_invocation(
+                db,
+                snapshot,
+                {"prompt": "A mountain"},
+                preapproved_context,
+            )
+        )
+
+    assert freeze_model.await_count == 2
+    assert invocation.policy_snapshot["resource_snapshot"] == resource_snapshot
+    assert invocation.policy_snapshot["approval_required"] is True
+    assert invocation.status == "awaiting_approval"
+    assert preapproved.policy_snapshot["approval_required"] is False
+    assert preapproved.status == "queued"
+
+
+def test_image_provider_decodes_only_embedded_png() -> None:
+    from app.adapters.llm import image as image_adapter
+    from app.ports.llm import ModelProviderError
+
+    png = image_adapter.PNG_SIGNATURE + b"test-image"
+    model = SimpleNamespace(provider="model_openai_provider", model_name="gpt-image-1")
+    settings = SimpleNamespace(model_request_timeout_seconds=60)
+    generated = SimpleNamespace(
+        data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
+    )
+    images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+
+    class FakeClient:
+        def __init__(self, **options):
+            assert options == {
+                "api_key": "test-key",
+                "base_url": "https://api.openai.com/v1",
+                "timeout": 300,
+                "max_retries": 0,
+            }
+            self.images = images
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    with (
+        patch.object(
+            image_adapter,
+            "_registered_model_credentials",
+            return_value={
+                "api_key": "test-key",
+                "api_base": "https://api.openai.com/v1",
+            },
+        ),
+        patch.object(image_adapter, "AsyncOpenAI", FakeClient),
+    ):
+        assert (
+            asyncio.run(
+                image_adapter.generate_registered_image(
+                    model, settings, "A mountain", "landscape"
+                )
+            )
+            == png
+        )
+        images.generate.assert_awaited_once_with(
+            model="gpt-image-1",
+            prompt="A mountain",
+            size="1536x1024",
+            output_format="png",
+            n=1,
+        )
+        images.generate.return_value = SimpleNamespace(
+            data=[SimpleNamespace(b64_json=base64.b64encode(b"not an image").decode())]
+        )
+        try:
+            asyncio.run(
+                image_adapter.generate_registered_image(
+                    model, settings, "A mountain", "square"
+                )
+            )
+        except ModelProviderError:
+            pass
+        else:
+            raise AssertionError("Non-PNG provider output was accepted.")
+
+
+def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
+    from app.application.agents.runs.snapshots import build_model_runtime_snapshot
+    from app.application.tools.runtime.adapters import image_generation
+    from app.application.tools.runtime.contracts import ToolInvocationContext
+
+    model = SimpleNamespace(
+        id="image-model-1",
+        workspace_id="workspace-1",
+        provider="model_openai_provider",
+        provider_type="openai_compatible",
+        model_type="IMAGE",
+        model_name="gpt-image-1",
+        api_base="https://api.openai.com/v1",
+        credential_config={"api_base": "https://api.openai.com/v1"},
+        api_key_updated_at=None,
+        status="active",
+        meta={},
+    )
+    context = ToolInvocationContext(
+        workspace_id="workspace-1",
+        origin="agent",
+        root_run_id="run-1",
+        run_id="run-1",
+        invocation_id="call-1",
+        execution_user_id="user-1",
+        access_source="console",
+        deadline_at=datetime.now(UTC),
+        idempotency_key="image-key",
+        resource_snapshot={"image_model": build_model_runtime_snapshot(model)},
+    )
+    db = SimpleNamespace(commit=AsyncMock())
+
+    class Session:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *_args):
+            return None
+
+    link = SimpleNamespace(
+        artifact_id="file-1",
+        format="png",
+        filename="generated-image.png",
+        media_type="image/png",
+        download_url="/api/v1/artifacts/signed",
+        expires_at=datetime.now(UTC),
+        size_bytes=12,
+    )
+    with (
+        patch.object(image_generation, "get_session_factory", return_value=Session),
+        patch.object(
+            image_generation.model_repository,
+            "list_active_image_models",
+            new=AsyncMock(return_value=[model]),
+        ) as lookup,
+        patch.object(
+            image_generation.model_repository,
+            "get_registered_model_by_id",
+            new=AsyncMock(return_value=model),
+        ) as get_model,
+        patch.object(
+            image_generation, "generate_image", new=AsyncMock(return_value=b"valid png")
+        ) as provider,
+        patch.object(
+            image_generation,
+            "create_generated_artifact",
+            new=AsyncMock(return_value=link),
+        ) as store,
+    ):
+        result = asyncio.run(
+            image_generation.generate_image_artifact(
+                SimpleNamespace(), {"prompt": "  A mountain  "}, context
+            )
+        )
+        get_model.assert_awaited_once_with(db, "image-model-1")
+        provider.assert_awaited_once_with(
+            SimpleNamespace(), model, "A mountain", "square"
+        )
+        assert store.await_args.kwargs["workspace_id"] == "workspace-1"
+        assert store.await_args.kwargs["idempotency_key"] == "image-key"
+        assert store.await_args.kwargs["filename"] == "generated-image.png"
+        assert result.data["preview_url"] == "/api/v1/artifacts/signed/preview"
+        assert result.ok is True
+
+        model.model_name = "gpt-image-2"
+        try:
+            asyncio.run(
+                image_generation.generate_image_artifact(
+                    SimpleNamespace(), {"prompt": "A mountain"}, context
+                )
+            )
+        except ValueError as exc:
+            assert "changed after this call was queued" in str(exc)
+        else:
+            raise AssertionError("A drifted image model was accepted.")
+
+        lookup.return_value = []
+        try:
+            asyncio.run(
+                image_generation.build_image_model_resource_snapshot(db, "workspace-1")
+            )
+        except ValueError as exc:
+            assert "Configure an active" in str(exc)
+        else:
+            raise AssertionError("Missing image model was accepted.")
+        lookup.return_value = [model, model]
+        try:
+            asyncio.run(
+                image_generation.build_image_model_resource_snapshot(db, "workspace-1")
+            )
+        except ValueError as exc:
+            assert "exactly one" in str(exc)
+        else:
+            raise AssertionError("Ambiguous image models were accepted.")
+        provider.assert_awaited_once()
+
 
 def test_tool_ref_schema_requires_canonical_ids() -> None:
     from pydantic import ValidationError
@@ -444,6 +785,131 @@ def test_documents_skill_reference_input_uses_bounded_large_payload_limit() -> N
     )
     assert tool_input_size_limit(ordinary_snapshot) == MAX_TOOL_INPUT_BYTES
 
+
+def test_pptx_skill_exposes_pptd_design_animation_and_media_contract() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.domain.agents.runtime import AgentToolResult, create_agent_tool
+    from app.domain.tools.catalog.service import build_skill_artifact_tool
+    from app.domain.tools.runtime import (
+        MAX_PPTX_TOOL_INPUT_BYTES,
+        normalize_tool_arguments,
+        tool_input_size_limit,
+        validate_tool_arguments,
+    )
+
+    _tool, version, _policy = build_skill_artifact_tool("workspace-1", "pptx")
+    presentation = version.input_schema["properties"]["presentation"]
+    properties = presentation["properties"]
+    assert len(properties["design_system"]["enum"]) == 30
+    assert (
+        len(
+            properties["slides"]["items"]["properties"]["animations"]["items"][
+                "properties"
+            ]["effect"]["enum"]
+        )
+        == 22
+    )
+    assert "open-kimi-ppt" in version.description
+    snapshot = SimpleNamespace(
+        function_name="pptx_skill", input_schema=version.input_schema
+    )
+    assert tool_input_size_limit(snapshot) == MAX_PPTX_TOOL_INPUT_BYTES
+
+    arguments = normalize_tool_arguments(
+        "pptx_skill",
+        version.input_schema,
+        {
+            "filename": "modern.pptx",
+            "scenario": "tech-engineering",
+            "design_system": "blue-flame-brand",
+            "slides": [
+                {
+                    "page_type": "cover",
+                    "elements": [
+                        {
+                            "elementId": "title",
+                            "elementType": "text",
+                            "bounds": [80, 180, 800, 100],
+                            "content": {"style": "$title", "text": "PPTD"},
+                        }
+                    ],
+                    "animations": [
+                        {
+                            "elementId": "title",
+                            "effect": "zoom-in",
+                            "trigger": "onClick",
+                        }
+                    ],
+                }
+            ],
+            "title": "Modern deck",
+        },
+    )
+    validate_tool_arguments(snapshot, arguments)
+    assert arguments["presentation"]["scenario"] == "tech-engineering"
+    assert "scenario" not in arguments
+
+    legacy_arguments = normalize_tool_arguments(
+        "pptx_skill",
+        version.input_schema,
+        {
+            "filename": "legal-reading.pptx",
+            "presentation": {
+                "title": "读懂法律条文",
+                "cover_title_size": 46,
+                "design_system": "deep-blue-atlas",
+                "scenario": "education-training",
+                "page_transition": "fade",
+                "slides": [
+                    {
+                        "page_type": "final",
+                        "layout": "quote",
+                        "title": "结语",
+                        "quote": "定位最小单位 · 核对适用条件 · 写清规范依据",
+                    }
+                ],
+            },
+        },
+    )
+    validate_tool_arguments(snapshot, legacy_arguments)
+    normalized_presentation = legacy_arguments["presentation"]
+    assert normalized_presentation["theme"]["cover_title_size"] == 46
+    assert "cover_title_size" not in normalized_presentation
+    assert "scenario" not in normalized_presentation
+    assert "design_system" not in normalized_presentation
+    assert "page_transition" not in normalized_presentation
+    assert "page_type" not in normalized_presentation["slides"][0]
+
+    async def execute(_arguments: str) -> AgentToolResult:
+        raise AssertionError("invalid PPTX arguments must not execute")
+
+    invalid_arguments = {
+        "filename": "invalid.pptx",
+        "presentation": {
+            "title": "Invalid",
+            "slides": [{"layout": "quote", "quote": "Missing title"}],
+        },
+    }
+    try:
+        validate_tool_arguments(snapshot, invalid_arguments)
+    except ValueError as exc:
+        assert "'title' is a required property" in str(exc)
+    else:
+        raise AssertionError("invalid durable PPTX arguments were accepted")
+
+    tool = create_agent_tool(
+        name="pptx_skill",
+        description="PPTX",
+        parameters=version.input_schema,
+        execute=execute,
+    )
+    invalid = asyncio.run(tool.ainvoke(invalid_arguments))
+    assert invalid.is_error is True
+    assert "'title' is a required property" in invalid.content
+
+
 def test_normalize_mcp_url() -> None:
     from app.ports.mcp import McpClientError, normalize_mcp_url
 
@@ -469,6 +935,11 @@ def test_normalize_mcp_url() -> None:
 
 def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
+    test_tool_summary_projects_effective_public_access_and_mcp_policy()
+    test_image_generation_is_a_bounded_approval_backed_builtin()
+    test_image_tool_queue_freezes_its_model_configuration()
+    test_image_provider_decodes_only_embedded_png()
+    test_image_tool_scopes_model_and_stores_one_artifact()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_grant_rules()
@@ -479,6 +950,7 @@ def main() -> None:
     test_python_tool_code_is_limited_to_eight_kibibytes()
     test_artifact_tool_accepts_sandbox_sized_content()
     test_documents_skill_formal_legal_contract_is_versioned()
+    test_pptx_skill_exposes_pptd_design_animation_and_media_contract()
     test_normalize_mcp_url()
     print("TOOLS_UNIT_OK")
 

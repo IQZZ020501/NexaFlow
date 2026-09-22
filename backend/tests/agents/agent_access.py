@@ -594,6 +594,15 @@ async def assert_sanitize_external_agent_stream() -> None:
         }
         yield {
             "type": "answer_reset",
+            "applied_inputs": [
+                {
+                    "sequence": 42,
+                    "input_id": "follow",
+                    "mode": "follow_up",
+                    "content": "Second question",
+                    "previous_answer_turn": 3,
+                }
+            ],
             "live_sequence": "2-0",
             "stream_epoch": "epoch-1",
         }
@@ -655,6 +664,15 @@ async def assert_sanitize_external_agent_stream() -> None:
     assert len(answer["stream_epoch"]) == 32
 
     reset = sanitized[1]
+    assert reset["applied_inputs"] == [
+        {
+            "sequence": 42,
+            "input_id": "follow",
+            "mode": "follow_up",
+            "content": "Second question",
+            "previous_answer_turn": 3,
+        }
+    ]
     assert reset["live_sequence"] == "2-0"
     assert reset["stream_epoch"] == answer["stream_epoch"]
 
@@ -1867,11 +1885,16 @@ def assert_http_external_access() -> None:
             public_run = client.post(
                 f"{public_base}/runs",
                 headers=auth_headers(admin_token),
-                json={"goal": "Public question", "file_ids": [upload_id]},
+                json={
+                    "goal": "Public question",
+                    "file_ids": [upload_id],
+                    "approval_mode": "full_access",
+                },
             )
             assert public_run.status_code == 201, public_run.text
             public_run_id = public_run.json()["id"]
             assert public_run.json()["question"] == "Public question"
+            assert public_run.json()["approval_mode"] == "full_access"
 
             public_list = client.get(
                 f"{public_base}/runs",
@@ -2006,10 +2029,11 @@ def assert_http_external_access() -> None:
             api_run = client.post(
                 f"{api_base}/runs",
                 headers={"Authorization": f"Bearer {token_a}"},
-                json={"goal": "API question"},
+                json={"goal": "API question", "approval_mode": "full_access"},
             )
             assert api_run.status_code == 201, api_run.text
             api_run_id = api_run.json()["id"]
+            assert api_run.json()["approval_mode"] == "ask_risky"
 
             api_get = client.get(
                 f"{api_base}/runs/{api_run_id}",
