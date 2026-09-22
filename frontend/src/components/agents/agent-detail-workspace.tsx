@@ -1435,7 +1435,7 @@ export function AgentDetailWorkspace({
 
                   <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                     <form
-                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/20"
+                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
                       onSubmit={(event) => {
                         shouldFollowPreviewRef.current = true
                         onAsk(event)
@@ -1505,7 +1505,7 @@ export function AgentDetailWorkspace({
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className="max-h-32 min-h-12 w-full resize-none bg-transparent px-2.5 pt-1.5 pb-1 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-14 sm:text-sm"
+                        className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-12 sm:text-sm"
                         placeholder={
                           isDirty
                             ? t("请先保存配置后再调试")

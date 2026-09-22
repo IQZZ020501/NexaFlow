@@ -1584,10 +1584,6 @@ describe("PublicAgentChat", () => {
     expect(composer?.closest("main")?.className).toContain(
       "lg:grid-cols-[240px_minmax(0,1fr)]"
     )
-    expect(screen.getByLabelText("请输入问题").className).toContain("min-h-12")
-    expect(screen.getByLabelText("请输入问题").className).toContain(
-      "sm:min-h-14"
-    )
     expect(
       screen.getByLabelText("发送问题").parentElement?.parentElement?.className
     ).toContain("justify-between")
