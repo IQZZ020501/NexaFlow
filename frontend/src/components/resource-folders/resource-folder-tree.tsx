@@ -7,12 +7,14 @@ import {
   FolderIcon,
   FolderOpenIcon,
   MoreHorizontalIcon,
+  PanelLeftCloseIcon,
   PencilIcon,
   PlusIcon,
   Trash2Icon,
 } from "lucide-react"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
+import { useResourceFolderPanel } from "@/components/resource-folders/resource-folder-panel"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -71,6 +73,7 @@ export function ResourceFolderTree({
   onFolderDeleted,
 }: Props) {
   const { t } = useLanguage()
+  const folderPanel = useResourceFolderPanel()
   const [dialog, setDialog] = React.useState<FolderDialogState>(null)
   const [isSaving, setIsSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -225,21 +228,39 @@ export function ResourceFolderTree({
           <p className="text-xs font-medium text-muted-foreground">
             {t("目录")}
           </p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t("新建子文件夹")}
-            onClick={() =>
-              setDialog({
-                mode: "create",
-                parentId: selectedFolderId,
-                name: "",
-              })
-            }
-          >
-            <PlusIcon />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("新建子文件夹")}
+              onClick={() =>
+                setDialog({
+                  mode: "create",
+                  parentId: selectedFolderId,
+                  name: "",
+                })
+              }
+            >
+              <PlusIcon />
+            </Button>
+            {folderPanel ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="hidden lg:inline-flex"
+                data-slot="folder-panel-collapse"
+                aria-label={t("收起目录")}
+                aria-expanded
+                aria-controls="resource-folder-panel"
+                title={t("收起目录")}
+                onClick={() => folderPanel.setCollapsed(true)}
+              >
+                <PanelLeftCloseIcon />
+              </Button>
+            ) : null}
+          </div>
         </div>
         <button
           type="button"
