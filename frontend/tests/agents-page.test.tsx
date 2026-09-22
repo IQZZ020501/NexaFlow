@@ -590,7 +590,7 @@ describe("AgentsPage list view", () => {
 
     await screen.findByText("Charlie")
     expect(visibleCardNames()).toEqual(["Charlie", "Bravo", "Alpha"])
-    expect(screen.getAllByText(/更新时间 ·/)).toHaveLength(3)
+    expect(screen.getAllByText(/创建者：\S+ · \d{4}\//)).toHaveLength(3)
 
     const sortTrigger = screen.getByRole("button", { name: "排序" })
     fireEvent.pointerDown(sortTrigger)
@@ -730,18 +730,18 @@ describe("AgentsPage list view", () => {
     expect(within(agentCard).getByText("Agent")).toBeTruthy()
     expect(within(agentCard).getByText("已启用")).toBeTruthy()
     expect(within(agentCard).getByText("DeepSeek Chat")).toBeTruthy()
-    expect(within(agentCard).getByText("创建者：我")).toBeTruthy()
-    const agentHeading = within(agentCard).getByRole("heading", {
-      name: "Research Assistant",
-    })
-    expect(agentHeading.nextElementSibling?.textContent).toContain("Agent")
-    expect(agentHeading.nextElementSibling?.textContent).toContain("已启用")
+    expect(within(agentCard).getByText(/^创建者：我 · /)).toBeTruthy()
+    expect(
+      within(agentCard).getByRole("heading", { name: "Research Assistant" })
+    ).toBeTruthy()
     expect(within(agentCard).getAllByText("1").length).toBe(2)
     expect(within(agentCard).getByText("工具")).toBeTruthy()
 
     const workflowCard = cardOf("Weekly Digest")
     expect(within(workflowCard).getByText("工作流")).toBeTruthy()
-    expect(within(workflowCard).getByText("创建者：Fuhua · Yang")).toBeTruthy()
+    expect(
+      within(workflowCard).getByText(/^创建者：Fuhua · Yang · /)
+    ).toBeTruthy()
     expect(within(workflowCard).getAllByText("0").length).toBe(2)
 
     expect(screen.getByText("已加载全部")).toBeTruthy()

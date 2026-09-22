@@ -344,7 +344,7 @@ describe("KnowledgeBasePage list view", () => {
 
     await screen.findByText("Charlie")
     expect(visibleKnowledgeBaseNames()).toEqual(["Charlie", "Bravo", "Alpha"])
-    expect(screen.getAllByText(/更新时间 ·/)).toHaveLength(3)
+    expect(screen.getAllByText(/创建者：\S+ · \d{4}\//)).toHaveLength(3)
 
     const sortTrigger = screen.getByRole("button", { name: "排序" })
     fireEvent.pointerDown(sortTrigger)
@@ -415,9 +415,7 @@ describe("KnowledgeBasePage list view", () => {
     fireEvent.change(screen.getByPlaceholderText("文件夹名称"), {
       target: { value: "我的目录" },
     })
-    fireEvent.submit(
-      screen.getByPlaceholderText("文件夹名称").closest("form")!
-    )
+    fireEvent.submit(screen.getByPlaceholderText("文件夹名称").closest("form")!)
 
     await waitFor(() =>
       expect(created).toEqual([
@@ -464,9 +462,7 @@ describe("KnowledgeBasePage list view", () => {
     renderPage(<KnowledgeBasePage />)
 
     await screen.findByText("KB Alpha")
-    expect(
-      screen.queryByRole("checkbox", { name: "选择 KB Alpha" })
-    ).toBeNull()
+    expect(screen.queryByRole("checkbox", { name: "选择 KB Alpha" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
     const alphaCard = cardElement("KB Alpha")
     const alphaCheckbox = screen.getByRole("checkbox", {
@@ -506,7 +502,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(screen.getByText("KB Alpha")).toBeTruthy()
     })
     expect(screen.getByText("Alpha docs")).toBeTruthy()
-    expect(screen.getByText("创建者：我")).toBeTruthy()
+    expect(screen.getByText(/^创建者：我 · /)).toBeTruthy()
     expect(screen.getByText("已启用")).toBeTruthy() // StatusBadge
     expect(screen.getByText("可编辑")).toBeTruthy() // PermissionBadge
     expect(screen.getByText("文档数")).toBeTruthy()
@@ -564,7 +560,7 @@ describe("KnowledgeBasePage list view", () => {
     const search = screen.getByPlaceholderText("搜索知识库...")
     fireEvent.change(search, { target: { value: "HR" } })
     expect(screen.getByText("HR Handbook")).toBeTruthy()
-    expect(screen.getByText("创建者：Fuhua · Yang")).toBeTruthy()
+    expect(screen.getByText(/^创建者：Fuhua · Yang · /)).toBeTruthy()
     expect(screen.queryByText("KB Alpha")).toBeNull()
 
     fireEvent.change(search, { target: { value: "zzz" } })
