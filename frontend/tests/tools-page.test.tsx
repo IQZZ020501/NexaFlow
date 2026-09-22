@@ -466,7 +466,7 @@ describe("ToolsPage", () => {
     ).toBe("true")
   })
 
-  test("exposes built-in runtime tools on the Skills catalog tab", async () => {
+  test("hides image generation and the Skill installer from the Tool catalog", async () => {
     const imageTool = tool({
       id: "tool-image",
       folder_id: null,
@@ -483,18 +483,30 @@ describe("ToolsPage", () => {
       created_by_user_id: null,
       can_manage: false,
     })
+    const pdfTool = tool({
+      ...imageTool,
+      id: "tool-pdf",
+      function_name: "pdf_skill",
+      display_name: "PDF Skill",
+    })
+    const installerTool = tool({
+      ...imageTool,
+      id: "tool-installer",
+      function_name: "install_skill_dependencies",
+      display_name: "Install Skill dependencies",
+    })
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes("/tools?")) return jsonResponse([imageTool])
-      if (url.endsWith("/tools/tool-image")) {
-        return jsonResponse(detail(imageTool))
-      }
+      if (url.includes("/tools?"))
+        return jsonResponse([imageTool, installerTool, pdfTool])
       return jsonResponse([])
     }) as typeof fetch
 
     renderPage(<ToolsPage initialKind="builtin" />)
-    fireEvent.click((await screen.findByText("图片生成")).closest("button")!)
-    expect(await screen.findByText("输入 Schema")).toBeTruthy()
+    await screen.findByText("PDF")
+    expect(screen.queryByText("图片生成")).toBeNull()
+    expect(screen.queryByText("Install Skill dependencies")).toBeNull()
+    expect(screen.queryByRole("heading", { name: "内置工具" })).toBeNull()
   })
 
   test("shows MCP policy and a retained upstream-missing state on the card", async () => {

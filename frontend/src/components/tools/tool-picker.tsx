@@ -34,6 +34,7 @@ import {
   toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
+import { isRegularTool } from "@/lib/tool-visibility"
 
 type ToolPickerProps = {
   open: boolean
@@ -147,7 +148,7 @@ export function ToolPicker({
       tool.availability === "available" &&
       tool.function_name !== "inline_python" &&
       tool.function_name !== "create_artifact" &&
-      tool.function_name !== "install_skill_dependencies" &&
+      isRegularTool(tool.function_name) &&
       (!query ||
         `${toolDisplayName(tool, t)} ${toolDisplayDescription(tool, t)} ${toolSourceDisplayName(tool.source, t)} ${t(toolCategoryLabels[tool.kind])}`
           .toLowerCase()
@@ -166,7 +167,7 @@ export function ToolPicker({
   const unavailableBindings = value.filter((reference) => {
     const tool = catalogById.get(reference.tool_id)
     return (
-      tool?.function_name !== "install_skill_dependencies" &&
+      (!tool || isRegularTool(tool.function_name)) &&
       (!tool ||
         !tool.can_use ||
         !tool.current_version_id ||
@@ -489,7 +490,12 @@ export function ToolPicker({
 
         <DialogFooter className="shrink-0 flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p className="text-xs text-muted-foreground">
-            {t("已选择 {value} 个工具", { value: value.length })}
+            {t("已选择 {value} 个工具", {
+              value: value.filter((reference) => {
+                const tool = catalogById.get(reference.tool_id)
+                return !tool || isRegularTool(tool.function_name)
+              }).length,
+            })}
           </p>
           <Button
             type="button"

@@ -1586,6 +1586,76 @@ describe("AgentsPage detail view", () => {
     expect(payload.app_type).toBe("agent")
   })
 
+  test("saves the separate image-generation switch as an Agent Tool binding", async () => {
+    const agent = makeAgent()
+    const regularTool = makeTool()
+    const imageTool = makeTool({
+      id: "tool-image",
+      kind: "builtin",
+      function_name: "generate_image",
+      display_name: "Generate image",
+      current_version_id: "image-v1",
+      version_id: "image-v1",
+      source: {
+        id: "source-builtin",
+        name: "Builtin",
+        kind: "builtin",
+        transport: null,
+      },
+    })
+    let patchBody = ""
+    await renderDetail({
+      agent,
+      tools: [regularTool, imageTool],
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/tools/tool-1`,
+          exact: true,
+          respond: () => jsonResponse(regularTool),
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/tools/tool-image`,
+          exact: true,
+          respond: () => jsonResponse(imageTool),
+        },
+        {
+          method: "PATCH",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
+          exact: true,
+          respond: (init) => {
+            patchBody = String(init?.body ?? "")
+            return jsonResponse({ ...agent, ...JSON.parse(patchBody) })
+          },
+        },
+      ],
+    })
+    fireEvent.click(
+      screen
+        .getAllByRole("button", { name: "设置" })
+        .find((button) => Boolean(button.closest("nav")))!
+    )
+    const imageSwitch = (await screen.findByRole("switch", {
+      name: "图片生成",
+    })) as HTMLInputElement
+    await waitFor(() => expect(imageSwitch.disabled).toBe(false))
+    expect(imageSwitch.checked).toBe(false)
+    fireEvent.click(imageSwitch)
+    await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
+    fireEvent.click(
+      document.querySelector(
+        'button[form="agent-settings-form"]'
+      ) as HTMLButtonElement
+    )
+    await waitFor(() => expect(patchBody).not.toBe(""))
+    expect(JSON.parse(patchBody).tools).toEqual([
+      { tool_id: "tool-1", version_id: "version-1" },
+      { tool_id: "tool-image", version_id: "image-v1" },
+    ])
+    expect(imageSwitch.checked).toBe(true)
+  })
+
   test("migrates legacy MCP bindings only through canonical Tool refs", async () => {
     const agent = makeAgent({
       tools: undefined,
@@ -2981,7 +3051,7 @@ describe("AgentsPage run flows", () => {
       "向 Agent 提问"
     ) as HTMLTextAreaElement
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：帮我批准" })
+      screen.getByRole("button", { name: "执行权限：按策略审批" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })

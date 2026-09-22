@@ -82,6 +82,7 @@ BUILTIN_SKILL_DEFINITIONS = (
 INTERNAL_BUILTIN_FUNCTION_NAMES = (
     "create_artifact",
     "inline_python",
+    "install_skill_dependencies",
 )
 
 

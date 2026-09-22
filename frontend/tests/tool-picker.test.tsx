@@ -153,13 +153,19 @@ describe("ToolPicker", () => {
     ])
   })
 
-  test("groups tools by kind, filters within categories, and hides the implicit installer", async () => {
+  test("groups regular tools and excludes image generation and the implicit installer", async () => {
     const imageTool: ToolSummary = {
       ...tools[2]!,
       id: "image-tool",
       function_name: "generate_image",
       display_name: "Image generation",
       description: "Generate images",
+    }
+    const pdfTool: ToolSummary = {
+      ...imageTool,
+      id: "skill-pdf",
+      function_name: "pdf_skill",
+      display_name: "PDF",
     }
     response = async () =>
       jsonResponse([
@@ -169,6 +175,7 @@ describe("ToolPicker", () => {
           can_use: true,
           permission: "use",
         },
+        pdfTool,
         imageTool,
         {
           ...imageTool,
@@ -184,12 +191,13 @@ describe("ToolPicker", () => {
     }
 
     renderPage(<Harness />)
-    await screen.findByText("图片生成")
+    await screen.findByText("PDF")
     const categories = within(screen.getByRole("group", { name: "工具分类" }))
     expect(screen.getByRole("region", { name: "内置工具" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "MCP 工具" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "Python" })).toBeTruthy()
     expect(screen.queryByText("Install Skill dependencies")).toBeNull()
+    expect(screen.queryByText("图片生成")).toBeNull()
     expect(
       categories.getByRole("button", { name: "全部工具" }).textContent
     ).toContain("3")
@@ -201,7 +209,8 @@ describe("ToolPicker", () => {
     expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
 
     fireEvent.click(categories.getByRole("button", { name: "内置工具" }))
-    expect(screen.getByText("图片生成")).toBeTruthy()
+    expect(screen.getByText("PDF")).toBeTruthy()
+    expect(screen.queryByText("图片生成")).toBeNull()
     expect(screen.queryByText("Private report")).toBeNull()
     expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
 
@@ -212,6 +221,31 @@ describe("ToolPicker", () => {
     fireEvent.click(categories.getByRole("button", { name: "全部工具" }))
     expect(screen.getByText("Lookup account")).toBeTruthy()
     expect(screen.queryByText("Install Skill dependencies")).toBeNull()
+  })
+
+  test("keeps a separately configured image binding when regular tools change", async () => {
+    const imageTool: ToolSummary = {
+      ...tools[2]!,
+      id: "image-tool",
+      function_name: "generate_image",
+      current_version_id: "image-version",
+    }
+    response = async () => jsonResponse([tools[0], imageTool])
+    const changes: ToolRef[][] = []
+    renderPage(
+      picker(
+        [{ tool_id: imageTool.id, version_id: "image-version" }],
+        (value) => changes.push(value)
+      )
+    )
+    await screen.findByText("Lookup account")
+    expect(screen.queryByText("图片生成")).toBeNull()
+    expect(screen.getByText("已选择 0 个工具")).toBeTruthy()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Lookup account" }))
+    expect(changes.at(-1)).toEqual([
+      { tool_id: "image-tool", version_id: "image-version" },
+      { tool_id: "tool-use", version_id: "version-2" },
+    ])
   })
 
   test("retains unavailable bindings, allows removal, and never upgrades implicitly", async () => {

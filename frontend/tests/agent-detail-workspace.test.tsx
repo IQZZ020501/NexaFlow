@@ -652,7 +652,7 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" />)
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：帮我批准" })
+      screen.getByRole("button", { name: "执行权限：按策略审批" })
     )
     const menuLabel = await screen.findByText("应如何批准工具调用？")
     expect(
@@ -916,6 +916,105 @@ describe("AgentDetailWorkspace preview", () => {
       screen.getByRole("button", { name: "预览：generated-image.png" })
     ).toBeTruthy()
     expect(screen.queryByText(`${downloadUrl}/preview`)).toBeNull()
+  })
+
+  test("keeps artifacts and sources with the answer turn that produced them", () => {
+    const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const source = {
+      source_ref: "law-source",
+      knowledge_base: "法律条文",
+      document: "中华人民共和国刑法.docx",
+      parent_title: "死刑",
+      section_path: [],
+      chunk_index: 1,
+      content: "死刑只适用于罪行极其严重的犯罪分子。",
+    }
+    const event = (overrides: Partial<AgentRunEvent>): AgentRunEvent => ({
+      type: "thought",
+      turn: 1,
+      tool_name: "",
+      status: "succeeded",
+      summary: "agent.answer_ready",
+      call_id: "",
+      tool_label: "",
+      tool_kind: "unknown",
+      server_name: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+      ...overrides,
+    })
+    const run = makeRun({
+      events: [
+        event({
+          type: "tool",
+          turn: 1,
+          tool_name: "generate_image",
+          summary: "Image generated.",
+          call_id: "image-call",
+          output: {
+            artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+            filename: "generated-image.png",
+            download_url: downloadUrl,
+            preview_url: `${downloadUrl}/preview`,
+          },
+        }),
+        event({ turn: 2 }),
+        event({
+          type: "tool",
+          turn: 3,
+          tool_name: "knowledge_retrieval",
+          tool_kind: "knowledge",
+          summary: "agent.knowledge_chunks_returned:1",
+          call_id: "knowledge-call",
+          output: { hits: [source] },
+        }),
+        event({ turn: 4 }),
+      ],
+      result: "死刑只适用于罪行极其严重的犯罪分子。",
+      sources: [source],
+      session_inputs: [
+        {
+          sequence: 1,
+          run_id: "run-1",
+          input_id: "follow-up",
+          mode: "follow_up",
+          content: "帮我检索一下什么罪会被判死刑",
+          status: "applied",
+          previous_answer: "图片已生成。",
+          previous_answer_turn: 2,
+        },
+      ],
+    })
+
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+
+    const imageAnswer = screen
+      .getByText("图片已生成。")
+      .closest(".rounded-2xl") as HTMLElement
+    const legalAnswer = screen
+      .getByText("死刑只适用于罪行极其严重的犯罪分子。")
+      .closest(".rounded-2xl") as HTMLElement
+    expect(
+      within(imageAnswer).getByRole("button", {
+        name: "预览：generated-image.png",
+      })
+    ).toBeTruthy()
+    expect(
+      within(imageAnswer).queryByRole("button", {
+        name: "来源：中华人民共和国刑法.docx · 死刑",
+      })
+    ).toBeNull()
+    expect(
+      within(legalAnswer).getByRole("button", {
+        name: "来源：中华人民共和国刑法.docx · 死刑",
+      })
+    ).toBeTruthy()
+    expect(
+      within(legalAnswer).queryByRole("button", {
+        name: "预览：generated-image.png",
+      })
+    ).toBeNull()
   })
 
   test("preserves and wraps multiline user messages", () => {

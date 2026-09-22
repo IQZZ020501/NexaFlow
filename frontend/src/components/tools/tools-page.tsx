@@ -89,6 +89,7 @@ import {
   toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
+import { isRegularTool } from "@/lib/tool-visibility"
 import { cn } from "@/lib/utils"
 
 const catalogTabs = [
@@ -287,9 +288,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const displaySourceName = (tool: ToolSummary) =>
     toolSourceDisplayName(tool.source, t)
 
-  const catalogTools = initialKind
-    ? tools.filter((tool) => tool.kind === activeKind)
-    : tools
+  const catalogTools = tools.filter(
+    (tool) =>
+      isRegularTool(tool.function_name) &&
+      (!initialKind || tool.kind === activeKind)
+  )
   const catalogSources = initialKind && activeKind !== "mcp" ? [] : sources
   const query = search.trim().toLowerCase()
   const filteredTools = sortToolResources(

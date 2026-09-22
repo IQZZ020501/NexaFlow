@@ -3,7 +3,7 @@ import type { TranslationKey } from "./zh-hans"
 export const en = {
   "应如何批准工具调用？": "How should tool calls be approved?",
   请求批准: "Request approval",
-  帮我批准: "Approve for me",
+  按策略审批: "Policy approval",
   完全访问: "Full access",
   外部读取或副作用操作前询问: "Ask for external reads or side effects",
   仅风险操作需批准: "Ask only for risky operations",
@@ -861,6 +861,8 @@ export const en = {
   生图模型已更新: "Image generation model updated",
   生图模型已添加: "Image generation model added",
   图片生成: "Generate image",
+  暂无可用的图片生成工具: "Image generation is unavailable",
+  "最多只能关联 12 个工具": "No more than 12 tools can be linked",
   "使用工作空间的生图模型生成图片；每次调用需要确认。":
     "Generate an image with the workspace image model; each call requires approval.",
   "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。":

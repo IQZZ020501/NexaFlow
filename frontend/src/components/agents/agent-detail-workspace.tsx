@@ -61,6 +61,7 @@ import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
 } from "@/lib/tool-display"
+import { isRegularTool } from "@/lib/tool-visibility"
 
 import { AgentConfigFields } from "./agent-config-fields"
 import {
@@ -70,7 +71,11 @@ import {
   transferredFiles,
 } from "./agent-attachment-list"
 import { MessageTimestamp } from "./message-timestamp"
-import { AgentAnswer, stripAgentSourceLinks } from "./agent-source-references"
+import {
+  AgentAnswer,
+  agentSourcesForEvents,
+  stripAgentSourceLinks,
+} from "./agent-source-references"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
@@ -604,13 +609,25 @@ function RunExchange({
   const timelineSegments = splitAgentRunTimeline(run)
   const timeline = timelineSegments.at(-1) ?? []
   const completedTimelines = timelineSegments.slice(0, -1)
+  const hasAnswerHandoffs = completedTimelines.length > 0
+  const sourcesForTimeline = (value: ReturnType<typeof processTimeline>) =>
+    hasAnswerHandoffs
+      ? agentSourcesForEvents(
+          run.sources,
+          value.map(({ event }) => event)
+        )
+      : run.sources
   let completedTimelineIndex = 0
-  const sessionInputs = (run.session_inputs ?? []).map((input) => ({
-    input,
-    timeline: input.previous_answer
+  const sessionInputs = (run.session_inputs ?? []).map((input) => {
+    const inputTimeline = input.previous_answer
       ? (completedTimelines[completedTimelineIndex++] ?? [])
-      : [],
-  }))
+      : []
+    return {
+      input,
+      timeline: inputTimeline,
+      sources: sourcesForTimeline(inputTimeline),
+    }
+  })
   const pendingFollowUpIds = new Set(
     sessionInputs
       .filter(
@@ -653,7 +670,9 @@ function RunExchange({
     hasActiveToolCall,
     isProcessOpen
   )
-  const answer = withArtifactDownloadLinks(run.result, run.events)
+  const currentEvents = timeline.map(({ event }) => event)
+  const answer = withArtifactDownloadLinks(run.result, currentEvents)
+  const currentSources = sourcesForTimeline(timeline)
   const answerStartedAt = run.events.findLast(
     (event) => event.summary === "agent.answer_ready"
   )?.created_at
@@ -735,7 +754,7 @@ function RunExchange({
       </div>
       {sessionInputs
         .filter(({ input }) => !pendingFollowUpIds.has(input.input_id))
-        .map(({ input, timeline: completedTimeline }) => (
+        .map(({ input, timeline: completedTimeline, sources }) => (
           <React.Fragment key={input.input_id}>
             {input.previous_answer && (
               <div className="flex items-start gap-3">
@@ -767,8 +786,11 @@ function RunExchange({
                     </details>
                   ) : null}
                   <AgentAnswer
-                    content={input.previous_answer}
-                    sources={run.sources}
+                    content={withArtifactDownloadLinks(
+                      input.previous_answer,
+                      completedTimeline.map(({ event }) => event)
+                    )}
+                    sources={sources}
                     t={t}
                     className="text-sm leading-6"
                   />
@@ -837,7 +859,7 @@ function RunExchange({
             {run.result ? (
               <AgentAnswer
                 content={answer}
-                sources={run.sources}
+                sources={currentSources}
                 t={t}
                 className="text-sm leading-6"
               />
@@ -1298,7 +1320,14 @@ export function AgentDetailWorkspace({
                       </span>
                       <span className="flex items-center gap-1.5">
                         <WrenchIcon className="size-3.5" />
-                        {form.tools.length}
+                        {
+                          form.tools.filter((reference) => {
+                            const tool = tools.find(
+                              (item) => item.id === reference.tool_id
+                            )
+                            return !tool || isRegularTool(tool.function_name)
+                          }).length
+                        }
                       </span>
                     </div>
                   </div>

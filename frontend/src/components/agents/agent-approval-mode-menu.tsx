@@ -49,7 +49,7 @@ function ModeIcon({
 function modeLabel(mode: AgentApprovalMode, t: TFunction) {
   if (mode === "always_ask") return t("请求批准")
   if (mode === "full_access") return t("完全访问")
-  return t("帮我批准")
+  return t("按策略审批")
 }
 
 function modeDescription(mode: AgentApprovalMode, t: TFunction) {

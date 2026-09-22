@@ -6049,7 +6049,6 @@ def test_workspace_creation_initializes_system_catalog() -> None:
             "current_time",
             "documents_skill",
             "generate_image",
-            "install_skill_dependencies",
             "pdf_skill",
             "pptx_skill",
             "spreadsheets_skill",

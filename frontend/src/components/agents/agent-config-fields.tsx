@@ -9,6 +9,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   DatabaseIcon,
+  ImagePlusIcon,
   PlusIcon,
   SearchIcon,
   SlidersHorizontalIcon,
@@ -47,6 +48,7 @@ import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
 import type { AgentSkill, AgentSkillRef } from "@/lib/api/agent-skills"
 import { toolDisplayName } from "@/lib/tool-display"
+import { isRegularTool } from "@/lib/tool-visibility"
 
 import type { AgentFormState } from "./agents-page"
 
@@ -128,10 +130,30 @@ export function AgentConfigFields({
   const selectedKnowledgeBaseNames = form.knowledgeBaseIds
     .map((id) => knowledgeBases.find((item) => item.id === id)?.name)
     .filter((name): name is string => Boolean(name))
-  const selectedToolNames = form.tools.map((reference) => {
+  const regularToolRefs = form.tools.filter((reference) => {
+    const tool = tools.find((item) => item.id === reference.tool_id)
+    return !tool || isRegularTool(tool.function_name)
+  })
+  const selectedToolNames = regularToolRefs.map((reference) => {
     const tool = tools.find((item) => item.id === reference.tool_id)
     return tool ? toolDisplayName(tool, t) : reference.tool_id
   })
+  const imageTool = tools.find(
+    (tool) => tool.function_name === "generate_image"
+  )
+  const isImageEnabled = Boolean(
+    imageTool &&
+    form.tools.some((reference) => reference.tool_id === imageTool.id)
+  )
+  const canEnableImage = Boolean(
+    imageTool?.can_use &&
+    imageTool.current_version_id &&
+    imageTool.status === "active" &&
+    imageTool.availability === "available"
+  )
+  const imageSwitchDisabled =
+    readOnly ||
+    (!isImageEnabled && (!canEnableImage || form.tools.length >= 12))
   const selectedSkillNames = (form.skills ?? []).map((reference) => {
     return (
       skills.find((skill) => skill.id === reference.skill_id)?.name ??
@@ -185,6 +207,36 @@ export function AgentConfigFields({
         knowledgeBaseIds: selected
           ? current.knowledgeBaseIds.filter((item) => item !== id)
           : [...current.knowledgeBaseIds, id],
+      }
+    })
+  }
+
+  function toggleImageGeneration() {
+    if (!imageTool) return
+    setForm((current) => {
+      if (
+        current.tools.some((reference) => reference.tool_id === imageTool.id)
+      ) {
+        return {
+          ...current,
+          tools: current.tools.filter(
+            (reference) => reference.tool_id !== imageTool.id
+          ),
+        }
+      }
+      if (
+        !canEnableImage ||
+        !imageTool.current_version_id ||
+        current.tools.length >= 12
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        tools: [
+          ...current.tools,
+          { tool_id: imageTool.id, version_id: imageTool.current_version_id },
+        ],
       }
     })
   }
@@ -537,7 +589,7 @@ export function AgentConfigFields({
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium">{t("工具")}</span>
                   <span className="block text-xs text-muted-foreground">
-                    {t("{value} 个工具", { value: form.tools.length })}
+                    {t("{value} 个工具", { value: regularToolRefs.length })}
                   </span>
                 </span>
                 <ChevronRightIcon
@@ -558,7 +610,7 @@ export function AgentConfigFields({
             </div>
             {isToolsOpen ? (
               <div className="border-t px-4 py-3">
-                {hasLegacyToolBindings && form.tools.length === 0 ? (
+                {hasLegacyToolBindings && regularToolRefs.length === 0 ? (
                   <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs leading-5 text-amber-800 dark:text-amber-300">
                     {t(
                       "此 Agent 仍绑定旧版 MCP 工具；旧绑定不会继续写入，请重新选择需要保留的工具。"
@@ -569,7 +621,7 @@ export function AgentConfigFields({
                   <div className="flex flex-wrap gap-1.5">
                     {selectedToolNames.map((name, index) => (
                       <Badge
-                        key={`${form.tools[index]?.tool_id}:${form.tools[index]?.version_id}`}
+                        key={`${regularToolRefs[index]?.tool_id}:${regularToolRefs[index]?.version_id}`}
                         variant="secondary"
                         className="font-normal"
                       >
@@ -584,6 +636,47 @@ export function AgentConfigFields({
                 )}
               </div>
             ) : null}
+          </section>
+        ) : null}
+
+        {form.id && form.appType === "agent" ? (
+          <section className="rounded-xl border bg-background shadow-xs">
+            <div className="flex items-center gap-3 px-4 py-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <ImagePlusIcon className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-medium">{t("图片生成")}</h3>
+              </div>
+              <label
+                className={`relative inline-flex shrink-0 items-center ${imageSwitchDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+                title={
+                  !isImageEnabled && form.tools.length >= 12
+                    ? t("最多只能关联 12 个工具")
+                    : !isImageEnabled && !canEnableImage
+                      ? t("暂无可用的图片生成工具")
+                      : undefined
+                }
+              >
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={t("图片生成")}
+                  checked={isImageEnabled}
+                  disabled={imageSwitchDisabled}
+                  onChange={toggleImageGeneration}
+                  className="peer sr-only"
+                />
+                <span
+                  aria-hidden="true"
+                  className="h-6 w-10 rounded-full border border-input bg-input transition-colors peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-disabled:opacity-50"
+                />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-0.5 left-0.5 size-5 rounded-full bg-background shadow-xs transition-transform peer-checked:translate-x-4 peer-disabled:opacity-50"
+                />
+              </label>
+            </div>
           </section>
         ) : null}
 

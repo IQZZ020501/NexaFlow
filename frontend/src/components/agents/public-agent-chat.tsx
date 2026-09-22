@@ -55,6 +55,7 @@ import {
 import { MessageTimestamp } from "@/components/agents/message-timestamp"
 import {
   AgentAnswer,
+  agentSourcesForEvents,
   stripAgentSourceLinks,
 } from "@/components/agents/agent-source-references"
 import { ToolInputPreview } from "@/components/agents/tool-input-preview"
@@ -1973,15 +1974,27 @@ export function PublicAgentChat({
                   const progressSegments = splitPublicRunProgress(run)
                   const currentProgress = progressSegments.at(-1) ?? []
                   const completedProgress = progressSegments.slice(0, -1)
+                  const hasAnswerHandoffs = completedProgress.length > 0
+                  const sourcesForProgress = (
+                    progress: ExternalAgentProgressEvent[]
+                  ) =>
+                    hasAnswerHandoffs
+                      ? agentSourcesForEvents(run.sources, progress)
+                      : run.sources
                   let completedProgressIndex = 0
                   const sessionInputs = (run.session_inputs ?? []).map(
-                    (input) => ({
-                      input,
-                      progress: input.previous_answer
+                    (input) => {
+                      const inputProgress = input.previous_answer
                         ? (completedProgress[completedProgressIndex++] ?? [])
-                        : [],
-                    })
+                        : []
+                      return {
+                        input,
+                        progress: inputProgress,
+                        sources: sourcesForProgress(inputProgress),
+                      }
+                    }
                   )
+                  const currentSources = sourcesForProgress(currentProgress)
                   const pendingFollowUpIds = new Set(
                     sessionInputs
                       .filter(
@@ -2104,7 +2117,7 @@ export function PublicAgentChat({
                         .filter(
                           ({ input }) => !pendingFollowUpIds.has(input.input_id)
                         )
-                        .map(({ input, progress }) => (
+                        .map(({ input, progress, sources }) => (
                           <React.Fragment key={input.input_id}>
                             {input.previous_answer ? (
                               <div className="flex items-start gap-3">
@@ -2122,7 +2135,7 @@ export function PublicAgentChat({
                                       input.previous_answer,
                                       progress
                                     )}
-                                    sources={run.sources}
+                                    sources={sources}
                                     t={t}
                                     className="text-sm leading-6"
                                   />
@@ -2190,7 +2203,7 @@ export function PublicAgentChat({
                                   run.result,
                                   currentProgress
                                 )}
-                                sources={run.sources}
+                                sources={currentSources}
                                 t={t}
                                 className="text-sm leading-6"
                               />

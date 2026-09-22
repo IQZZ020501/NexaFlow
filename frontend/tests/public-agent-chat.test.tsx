@@ -2377,7 +2377,7 @@ describe("PublicAgentChat", () => {
     await screen.findByText("开始新对话")
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：帮我批准" })
+      screen.getByRole("button", { name: "执行权限：按策略审批" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
     sendMessage("开始吧")
@@ -2831,6 +2831,114 @@ describe("PublicAgentChat", () => {
     expect(within(processes[1]).getByText("追问思维")).toBeTruthy()
     expect(within(processes[1]).queryByText("首问思维")).toBeNull()
     expect(within(article).getByText("第二问")).toBeTruthy()
+  })
+
+  test("keeps public artifacts and sources with their answer turns", async () => {
+    const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
+    const source = {
+      source_ref: "law-source",
+      knowledge_base: "法律条文",
+      document: "中华人民共和国刑法.docx",
+      parent_title: "死刑",
+      section_path: [],
+      chunk_index: 1,
+      content: "死刑只适用于罪行极其严重的犯罪分子。",
+    }
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "生成一张图片")] },
+      history: {
+        items: [
+          run({
+            result: "死刑只适用于罪行极其严重的犯罪分子。",
+            sources: [source],
+            session_inputs: [
+              {
+                input_id: "input-1",
+                mode: "follow_up",
+                content: "帮我检索一下什么罪会被判死刑",
+                sequence: 1,
+                run_id: "run-1",
+                status: "applied",
+                previous_answer: "图片已生成。",
+                previous_answer_turn: 2,
+              },
+            ],
+            progress: [
+              toolEvent("image", "succeeded", {
+                turn: 1,
+                tool_name: "generate_image",
+                output: {
+                  artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+                  filename: "generated-image.png",
+                  download_url: downloadUrl,
+                  preview_url: `${downloadUrl}/preview`,
+                },
+              }),
+              {
+                id: "answer-1",
+                type: "answer",
+                status: "succeeded",
+                stage: "succeeded",
+                turn: 2,
+                count: null,
+                hits: [],
+              },
+              knowledgeEvent("knowledge", "succeeded", {
+                turn: 3,
+                count: 1,
+                hits: [
+                  {
+                    knowledge_base: source.knowledge_base,
+                    document: source.document,
+                    content: source.content,
+                  },
+                ],
+              }),
+              {
+                id: "answer-2",
+                type: "answer",
+                status: "succeeded",
+                stage: "succeeded",
+                turn: 4,
+                count: null,
+                hits: [],
+              },
+            ],
+          }),
+        ],
+      },
+    })
+
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+
+    const imageAnswer = (await screen.findByText("图片已生成。")).closest(
+      ".rounded-2xl"
+    )!
+    const legalAnswer = screen
+      .getByText("死刑只适用于罪行极其严重的犯罪分子。")
+      .closest(".rounded-2xl")!
+    expect(
+      within(imageAnswer).getByRole("button", {
+        name: "预览：generated-image.png",
+      })
+    ).toBeTruthy()
+    expect(
+      within(imageAnswer).queryByRole("button", {
+        name: "来源：中华人民共和国刑法.docx · 死刑",
+      })
+    ).toBeNull()
+    expect(
+      within(legalAnswer).getByRole("button", {
+        name: "来源：中华人民共和国刑法.docx · 死刑",
+      })
+    ).toBeTruthy()
+    expect(
+      within(legalAnswer).queryByRole("button", {
+        name: "预览：generated-image.png",
+      })
+    ).toBeNull()
   })
 
   test("rejects a tool call and reports resolve failures", async () => {

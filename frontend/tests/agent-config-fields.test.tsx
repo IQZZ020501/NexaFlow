@@ -230,6 +230,7 @@ describe("AgentConfigFields", () => {
     expect(screen.queryByText("系统提示词")).toBeNull()
     expect(screen.queryByText("关联知识库")).toBeNull()
     expect(screen.queryByText("工具")).toBeNull()
+    expect(screen.queryByText("图片生成")).toBeNull()
     expect(screen.queryByText("状态")).toBeNull()
 
     openModelMenu()
@@ -252,6 +253,97 @@ describe("AgentConfigFields", () => {
 
     fireEvent.click(screen.getByText("工具").closest("button")!)
     expect(screen.getByText("Catalog search")).toBeTruthy()
+  })
+
+  test("configures image generation below Tools without listing it as a regular Tool", () => {
+    const imageTool = tool({
+      id: "tool-image",
+      kind: "builtin",
+      function_name: "generate_image",
+      display_name: "Generate image",
+      current_version_id: "image-v1",
+      source: {
+        id: "source-builtin",
+        name: "Builtin",
+        kind: "builtin",
+        transport: null,
+      },
+    })
+    const installerTool = tool({
+      ...imageTool,
+      id: "tool-installer",
+      function_name: "install_skill_dependencies",
+      display_name: "Install Skill dependencies",
+    })
+    function ImageHarness() {
+      const { t } = useLanguage()
+      const [form, setForm] = useState(
+        initialForm({
+          tools: [
+            { tool_id: "tool-search", version_id: "version-1" },
+            { tool_id: "tool-image", version_id: "image-v1" },
+          ],
+        })
+      )
+      return (
+        <>
+          <AgentConfigFields
+            form={form}
+            setForm={setForm}
+            models={models}
+            knowledgeBases={knowledgeBases}
+            tools={[...tools, imageTool, installerTool]}
+            token="token"
+            workspaceId={WS}
+            readOnly={false}
+            t={t}
+          />
+          <output data-testid="tool-bindings">
+            {JSON.stringify(form.tools)}
+          </output>
+        </>
+      )
+    }
+
+    renderPage(<ImageHarness />)
+    const toolsSection = screen.getByText("工具").closest("section")!
+    const imageSection = screen
+      .getByRole("heading", { name: "图片生成" })
+      .closest("section")!
+    expect(
+      toolsSection.compareDocumentPosition(imageSection) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(within(toolsSection).getByText("1 个工具")).toBeTruthy()
+    fireEvent.click(within(toolsSection).getByText("工具").closest("button")!)
+    expect(within(toolsSection).queryByText("图片生成")).toBeNull()
+    expect(
+      within(toolsSection).queryByText("Install Skill dependencies")
+    ).toBeNull()
+
+    const imageSwitch = screen.getByRole("switch", {
+      name: "图片生成",
+    }) as HTMLInputElement
+    expect(imageSwitch.checked).toBe(true)
+    expect(
+      within(imageSection).queryByText(
+        "使用工作空间的生图模型生成图片；每次调用需要确认。"
+      )
+    ).toBeNull()
+    expect(imageSection.querySelector("p")).toBeNull()
+    fireEvent.click(imageSwitch)
+    expect(imageSwitch.checked).toBe(false)
+    expect(
+      JSON.parse(screen.getByTestId("tool-bindings").textContent ?? "[]")
+    ).toEqual([{ tool_id: "tool-search", version_id: "version-1" }])
+    fireEvent.click(imageSwitch)
+    expect(imageSwitch.checked).toBe(true)
+    expect(
+      JSON.parse(screen.getByTestId("tool-bindings").textContent ?? "[]")
+    ).toEqual([
+      { tool_id: "tool-search", version_id: "version-1" },
+      { tool_id: "tool-image", version_id: "image-v1" },
+    ])
   })
 
   test("generates instructions from the current editor content", async () => {
@@ -396,6 +488,13 @@ describe("AgentConfigFields", () => {
         name: "AI 生成系统提示词",
       }) as HTMLButtonElement).disabled
     ).toBe(true)
+    expect(
+      (
+        screen.getByRole("switch", {
+          name: "图片生成",
+        }) as HTMLInputElement
+      ).disabled
+    ).toBe(true)
   })
 
   test("workflow app type hides knowledge and tool sections", () => {
@@ -411,6 +510,7 @@ describe("AgentConfigFields", () => {
     )
     expect(screen.queryByText("关联知识库")).toBeNull()
     expect(screen.queryByText("工具")).toBeNull()
+    expect(screen.queryByText("图片生成")).toBeNull()
   })
 })
 
