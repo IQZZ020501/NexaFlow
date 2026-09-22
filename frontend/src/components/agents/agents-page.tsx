@@ -546,7 +546,7 @@ export function mergeAgentRunStreamEvent(
       )
       const sessionInput = {
         input_id: streamEvent.input_id,
-        mode: streamEvent.mode,
+        mode: "follow_up" as const,
         content: streamEvent.content,
         sequence: streamEvent.sequence,
         run_id: runId,
@@ -675,7 +675,7 @@ export function AgentsPage({
   const liveRunIdRef = React.useRef<string | null>(null)
   const sessionInputRef = React.useRef<{
     input_id: string
-    mode: "steer" | "follow_up"
+    mode: "follow_up"
     content: string
   } | null>(null)
   const sessionInputBusyRef = React.useRef(false)
@@ -1637,7 +1637,7 @@ export function AgentsPage({
     }
   }
 
-  async function handleSessionInput(mode: "steer" | "follow_up") {
+  async function handleFollowUp() {
     const runId = liveRunIdRef.current
     const content = question.trim()
     if (
@@ -1652,9 +1652,9 @@ export function AgentsPage({
       return
     const previous = sessionInputRef.current
     const input =
-      previous?.content === content && previous.mode === mode
+      previous?.content === content
         ? previous
-        : { input_id: crypto.randomUUID(), mode, content }
+        : { input_id: crypto.randomUUID(), mode: "follow_up" as const, content }
     sessionInputRef.current = input
     sessionInputBusyRef.current = true
     try {
@@ -1681,10 +1681,7 @@ export function AgentsPage({
       )
       setQuestion((current) => (current.trim() === content ? "" : current))
       sessionInputRef.current = null
-      notify(
-        "success",
-        t(mode === "steer" ? "指令已排队，将在下一轮生效" : "后续任务已排队")
-      )
+      notify("success", t("后续任务已排队"))
     } catch (error) {
       if (liveRunIdRef.current === runId) reportError(error)
     } finally {
@@ -1695,7 +1692,7 @@ export function AgentsPage({
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (isAsking) {
-      await handleSessionInput("steer")
+      await handleFollowUp()
       return
     }
     const nextQuestion = question.trim()
@@ -2193,7 +2190,6 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             notify={notify}
             onAsk={handleAsk}
-            onSessionInput={handleSessionInput}
             onCancelAsk={handleCancelAsk}
             onRegenerateRun={(runId, goal) =>
               void handleRegenerateRun(runId, goal)

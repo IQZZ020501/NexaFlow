@@ -2736,7 +2736,7 @@ describe("PublicAgentChat", () => {
     ).toBe(false)
     const textarea = screen.getByLabelText("请输入问题") as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "然后解释图片" } })
-    fireEvent.click(screen.getByRole("button", { name: "追加后续任务" }))
+    fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(1))
     expect(inputs[0]?.mode).toBe("follow_up")
     const followUp = screen.getByText("然后解释图片")
@@ -2747,6 +2747,120 @@ describe("PublicAgentChat", () => {
     await waitFor(() => expect(textarea.value).toBe(""))
 
     streamController?.close()
+  }, 10_000)
+
+  test("does not revive an approved image call after a streamed RAG handoff", async () => {
+    let secondCall = false
+    const imageCall = {
+      ...TOOL_CALL,
+      call_id: "image-call",
+      tool_name: "generate_image",
+      tool_kind: "builtin",
+      server_name: "",
+    }
+    const encoder = new TextEncoder()
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const emit = (event: unknown) =>
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [] },
+      createRun: () =>
+        jsonResponse(run({ status: "running", result: "" }), 201),
+      streamResponses: [
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(value) {
+                controller = value
+                emit({
+                  type: "approval_required",
+                  call_id: "image-call",
+                  reason: "需要确认",
+                })
+              },
+            })
+          ),
+      ],
+      toolCalls: () =>
+        jsonResponse(
+          secondCall
+            ? [
+                { ...imageCall, status: "approved" },
+                { ...imageCall, call_id: "second-image-call", turn: 4 },
+              ]
+            : [imageCall]
+        ),
+      resolveRun: () => jsonResponse(run({ status: "running", result: "" })),
+    })
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("开始新对话")
+    sendMessage("生成一张图片")
+    fireEvent.click(await screen.findByRole("button", { name: "批准并执行" }))
+    await waitFor(() =>
+      expect(screen.queryByText("工具调用需要确认")).toBeNull()
+    )
+    expect(screen.getByText("等待执行")).toBeTruthy()
+
+    // Keep the approval cache stale, just as it is during a real live run.
+    emit({
+      type: "progress",
+      event: toolEvent("image-call", "succeeded", {
+        tool_name: "generate_image",
+        tool_kind: "builtin",
+      }),
+    })
+    emit({ type: "answer_delta", delta: "图片已生成。" })
+    await screen.findByText("图片已生成。")
+    emit({
+      type: "answer_reset",
+      applied_inputs: [
+        {
+          sequence: 42,
+          input_id: "follow-up",
+          mode: "follow_up",
+          content: "关于租房的条例有哪些",
+          previous_answer_turn: 2,
+        },
+      ],
+    })
+    emit({
+      type: "progress",
+      event: knowledgeEvent("rag-call", "succeeded", { turn: 3, count: 6 }),
+    })
+    emit({ type: "answer_delta", delta: "正在回答租房问题" })
+    const answer = await screen.findByText("正在回答租房问题")
+    const followUpAnswer = answer.closest(".rounded-2xl") as HTMLElement
+    expect(within(followUpAnswer).getByText("知识库检索")).toBeTruthy()
+    expect(within(followUpAnswer).queryByText("图片生成") === null).toBe(true)
+    expect(screen.getAllByText("图片生成")).toHaveLength(1)
+
+    // A genuinely new image call in the follow-up must still request approval.
+    secondCall = true
+    emit({
+      type: "approval_required",
+      call_id: "second-image-call",
+      reason: "需要确认",
+    })
+    const approve = await within(followUpAnswer).findByRole("button", {
+      name: "批准并执行",
+    })
+    fireEvent.click(approve)
+    await waitFor(() =>
+      expect(within(followUpAnswer).queryByText("工具调用需要确认")).toBeNull()
+    )
+    expect(within(followUpAnswer).getAllByText("图片生成")).toHaveLength(1)
+    emit({
+      type: "progress",
+      event: toolEvent("second-image-call", "running", {
+        turn: 4,
+        tool_name: "generate_image",
+        tool_kind: "builtin",
+      }),
+    })
+    await waitFor(() =>
+      expect(within(followUpAnswer).getAllByText("图片生成")).toHaveLength(1)
+    )
+    controller.close()
   }, 10_000)
 
   test("keeps the first process and answer before a follow-up in public history", async () => {

@@ -261,7 +261,7 @@ async def _attach_session_inputs(db: AsyncSession, entities: list[AgentRunEntity
                 "sequence": sequence,
                 "run_id": run_id,
                 "input_id": event["input_id"],
-                "mode": event["mode"],
+                "mode": "follow_up",
                 "content": event["content"],
                 "status": "applied" if applied else "queued",
                 "previous_answer": consumed[run_id].get(sequence, {}).get("previous_answer"),
@@ -423,7 +423,7 @@ async def finalize_agent_run(
             return False
         from app.infra.db.repositories.runs.session_inputs import pending_session_inputs
 
-        if await pending_session_inputs(db, run_id, session_input_ids, True):
+        if await pending_session_inputs(db, run_id, session_input_ids):
             return False
     values = {
         "status": status,

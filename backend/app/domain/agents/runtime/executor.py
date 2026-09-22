@@ -156,9 +156,7 @@ async def run_agent(
     if session is not None:
         session.capabilities.restore(initial_state.get("harness") or {})
         if initial_state["final_answer"]:
-            initial_state, continued = await session.apply_inputs(
-                initial_state, settled=True
-            )
+            initial_state, continued = await session.apply_follow_ups(initial_state)
             if continued and initial_state["turn"] >= max_turns:
                 raise AgentRunnerError(
                     "Queued session input exceeds the Agent turn budget."

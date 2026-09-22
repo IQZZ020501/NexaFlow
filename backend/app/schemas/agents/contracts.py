@@ -184,7 +184,7 @@ class AgentRunRegenerateRequest(BaseModel):
 
 class AgentSessionInputRequest(BaseModel):
     input_id: str = Field(min_length=1, max_length=64)
-    mode: Literal["steer", "follow_up"] = "steer"
+    mode: Literal["follow_up"] = "follow_up"
     content: str = Field(min_length=1, max_length=4000)
 
     @field_validator("content", "input_id")

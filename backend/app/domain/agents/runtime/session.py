@@ -10,7 +10,7 @@ from app.domain.agents.runtime.context import AgentContextManager
 from app.domain.agents.runtime.state import AgentState
 from app.domain.agents.runtime.usage import merge_usage
 
-SessionInputSource = Callable[[list[int], bool], Awaitable[list[dict[str, Any]]]]
+SessionInputSource = Callable[[list[int]], Awaitable[list[dict[str, Any]]]]
 
 
 class AgentSession:
@@ -24,16 +24,14 @@ class AgentSession:
         self.context = context
         self.input_source = input_source
 
-    async def apply_inputs(
-        self, state: AgentState, *, settled: bool
-    ) -> tuple[AgentState, bool]:
+    async def apply_follow_ups(self, state: AgentState) -> tuple[AgentState, bool]:
         harness = dict(state.get("harness") or {})
         consumed = list(harness.get("input_ids", []))
-        inputs = await self.input_source(consumed, settled) if self.input_source else []
+        inputs = await self.input_source(consumed) if self.input_source else []
         inputs = [item for item in inputs if item["id"] not in consumed]
         if not inputs:
             return state, False
-        if settled and state.get("final_answer"):
+        if state.get("final_answer"):
             inputs = [
                 {
                     **inputs[0],
@@ -56,7 +54,6 @@ class AgentSession:
 
     async def prepare_turn(self, state: AgentState) -> AgentState:
         self.capabilities.restore(state.get("harness") or {})
-        state, _ = await self.apply_inputs(state, settled=False)
         messages = await self.capabilities.extensions.prepare_context(state["messages"])
         usage = state["model_usage"]
         harness = {**state.get("harness", {}), **self.capabilities.snapshot()}

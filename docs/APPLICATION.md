@@ -70,7 +70,7 @@ app/application/
 - `agents/runs/executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布（对应旧 `agent_executor.py`）。
 - `agents/runs/children.py` — Workflow Agent 节点的固定发布版本、durable child Run 的创建/恢复/取消编排（对应旧 `agent_child_runs.py`）。
 - `agents/runs/memory.py` — Agent 对话记忆：按会话恢复角色消息，并在模型上下文预算内压缩旧轮次、持久化摘要（对应旧 `agent_memory.py`）。
-- `agents/runs/session.py` — Run 来源主体授权后的持久输入追加（steer / follow_up）；复用事件表与 RunState 终态锁，harness 消费状态进入 checkpoint。
+- `agents/runs/session.py` — Run 来源主体授权后的持久后续任务追加；复用事件表与 RunState 终态锁，harness 消费状态进入 checkpoint。
 - `agents/runs/snapshots.py` — Run 创建时冻结运行时长、轮次与工具调用预算、非敏感模型运行配置指纹和知识资源/可检索内容指纹，并提供执行前漂移校验；旧 `max_model_tokens` 字段仅为历史快照兼容。
 - `agents/access/service.py` — Agent 外部访问用例：发布资料、HttpOnly 访客会话、Agent 级 API Key 创建/轮换/撤销、公开/API 流安全投影（`sanitize_external_agent_stream`）与 Redis 成本限流；跨来源日志/用户/监控聚合（对应旧 `agent_access.py`）。
 - `agents/tools/builder.py` — 把 Agent 固定 `ToolRef` 解析为 `ToolSnapshot`，构造模型可调用工具，并提供 run→response 纯映射（对应旧 `agent_tools.py`）。

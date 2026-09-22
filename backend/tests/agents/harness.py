@@ -258,23 +258,18 @@ async def assert_skill_file_reads_and_revocation():
     )
 
 
-async def assert_steering_and_followup():
+async def assert_follow_up_queue():
     inputs = [
         {
             "id": 1,
             "input_id": "follow",
             "mode": "follow_up",
             "content": "Then summarize",
-        },
-        {"id": 2, "input_id": "steer", "mode": "steer", "content": "Use Chinese"},
+        }
     ]
 
-    async def source(consumed, settled):
-        return [
-            item
-            for item in inputs
-            if item["id"] not in consumed and (settled or item["mode"] == "steer")
-        ]
+    async def source(consumed):
+        return [item for item in inputs if item["id"] not in consumed]
 
     registry = CapabilityRegistry(ExtensionRuntime([]), [])
     model = StreamingProvider(
@@ -306,9 +301,9 @@ async def assert_steering_and_followup():
         on_event=emit,
     )
     assert result.content == "Final summary"
-    assert result.harness["input_ids"] == [2, 1]
-    assert result.harness["inputs"][1]["previous_answer"] == "First answer"
-    assert result.harness["inputs"][1]["previous_answer_turn"] == 1
+    assert result.harness["input_ids"] == [1]
+    assert result.harness["inputs"][0]["previous_answer"] == "First answer"
+    assert result.harness["inputs"][0]["previous_answer_turn"] == 1
     assert {
         "type": "answer_reset",
         "applied_inputs": [
@@ -331,14 +326,11 @@ async def assert_steering_and_followup():
     )
     assert [item["content"] for item in history] == [
         "Start",
-        "Use Chinese",
         "First answer",
         "Then summarize",
         "Final summary",
     ]
-    assert "Use Chinese" in str(model.requests[0]) and "Then summarize" not in str(
-        model.requests[0]
-    )
+    assert "Then summarize" not in str(model.requests[0])
     assert "Then summarize" in str(model.requests[1])
     restored = ScriptedModel([])
     await run_agent(
@@ -354,7 +346,7 @@ async def assert_steering_and_followup():
     # A late accepted input blocks finalization and resumes the completed
     # checkpoint without resetting turns or replaying prior actions.
     inputs.append(
-        {"id": 3, "input_id": "late", "mode": "follow_up", "content": "One more task"}
+        {"id": 2, "input_id": "late", "mode": "follow_up", "content": "One more task"}
     )
     resumed_model = ScriptedModel([answer_message("Late task completed")])
     resumed = await run_agent(
@@ -367,7 +359,7 @@ async def assert_steering_and_followup():
         ),
     )
     assert resumed.content == "Late task completed"
-    assert resumed.harness["input_ids"] == [2, 1, 3]
+    assert resumed.harness["input_ids"] == [1, 2]
     assert len(resumed_model.requests) == 1
 
 
@@ -463,23 +455,20 @@ async def assert_durable_input_finalization():
             )
             await db.commit()
             first = await enqueue_session_input(
-                db, "ws1", "run1", "input1", "follow_up", "Summarize"
+                db, "ws1", "run1", "input1", "Summarize"
             )
             await db.commit()
             duplicate = await enqueue_session_input(
-                db, "ws1", "run1", "input1", "follow_up", "Summarize"
+                db, "ws1", "run1", "input1", "Summarize"
             )
             assert duplicate.id == first.id
             try:
-                await enqueue_session_input(
-                    db, "ws1", "run1", "input1", "steer", "Different"
-                )
+                await enqueue_session_input(db, "ws1", "run1", "input1", "Different")
             except ValueError:
                 pass
             else:
                 raise AssertionError("Idempotency conflict was accepted")
-            assert await pending_session_inputs(db, "run1", [], False) == []
-            assert len(await pending_session_inputs(db, "run1", [], True)) == 1
+            assert len(await pending_session_inputs(db, "run1", [])) == 1
             finalized = await finalize_agent_run(
                 db,
                 "run1",
@@ -506,15 +495,13 @@ async def assert_durable_input_finalization():
             assert finalized
             await db.commit()
             try:
-                await enqueue_session_input(db, "ws1", "run1", "late", "steer", "Late")
+                await enqueue_session_input(db, "ws1", "run1", "late", "Late")
             except ValueError:
                 pass
             else:
                 raise AssertionError("Input accepted after finalization")
             assert (
-                await enqueue_session_input(
-                    db, "ws1", "run1", "input1", "follow_up", "Summarize"
-                )
+                await enqueue_session_input(db, "ws1", "run1", "input1", "Summarize")
             ).id == first.id
     finally:
         await engine.dispose()
@@ -538,8 +525,8 @@ async def assert_durable_session_memory(run_id):
         )
         assert history and [item["content"] for item in _run_messages(history[-1])] == [
             "Start",
-            "Use Chinese",
             "Completed.",
+            "Use Chinese",
             "Then summarize",
             "Completed.",
         ]
@@ -618,12 +605,22 @@ def assert_session_input_api_isolation():
             assert created.status_code == 201, created.text
             run_id = created.json()["id"]
             url = f"{base}/runs/{run_id}/inputs"
-            payload = {"input_id": "input1", "mode": "steer", "content": "Use Chinese"}
+            payload = {
+                "input_id": "input1",
+                "mode": "follow_up",
+                "content": "Use Chinese",
+            }
             denied = client.post(url, headers=stranger, json=payload)
             assert denied.status_code == 404, denied.text
             assert client.post(url, json=payload).status_code == 401
             accepted = client.post(url, headers=headers, json=payload)
             assert accepted.status_code == 202, accepted.text
+            unsupported = client.post(
+                url,
+                headers=headers,
+                json={**payload, "input_id": "unsupported", "mode": "immediate"},
+            )
+            assert unsupported.status_code == 422, unsupported.text
             repeated = client.post(url, headers=headers, json=payload)
             assert repeated.status_code == 202 and repeated.json() == accepted.json()
             conflict = client.post(
@@ -670,12 +667,13 @@ def assert_session_input_api_isolation():
                 for item in finished.json()["session_inputs"]
             )
             assert (
-                finished.json()["session_inputs"][1]["previous_answer"] == "Completed."
+                finished.json()["session_inputs"][0]["previous_answer"] == "Completed."
             )
-            assert finished.json()["session_inputs"][1]["previous_answer_turn"] == 1
+            assert finished.json()["session_inputs"][0]["previous_answer_turn"] == 1
             assert len(AgentModelHandler.calls) == 2
-            assert "Use Chinese" in str(AgentModelHandler.calls[0])
+            assert "Use Chinese" not in str(AgentModelHandler.calls[0])
             assert "Then summarize" not in str(AgentModelHandler.calls[0])
+            assert "Use Chinese" in str(AgentModelHandler.calls[1])
             assert "Then summarize" in str(AgentModelHandler.calls[1])
             asyncio.run(assert_durable_session_memory(run_id))
             late = client.post(
@@ -693,7 +691,7 @@ def assert_session_input_api_isolation():
 def main():
     asyncio.run(assert_capabilities_and_lazy_skills())
     asyncio.run(assert_skill_file_reads_and_revocation())
-    asyncio.run(assert_steering_and_followup())
+    asyncio.run(assert_follow_up_queue())
     asyncio.run(assert_context_compaction_and_hooks())
     asyncio.run(assert_durable_input_finalization())
     assert_session_input_api_isolation()

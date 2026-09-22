@@ -23,7 +23,6 @@ async def append_session_input(
             run.workspace_id,
             run.id,
             payload.input_id,
-            payload.mode,
             payload.content.strip(),
         )
     except ValueError as exc:
@@ -42,7 +41,7 @@ async def append_session_input(
         sequence=stored.id,
         run_id=run.id,
         input_id=payload.input_id,
-        mode=payload.mode,
+        mode="follow_up",
         content=payload.content.strip(),
         status=(
             "applied"

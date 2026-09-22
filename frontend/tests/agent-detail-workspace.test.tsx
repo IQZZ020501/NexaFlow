@@ -310,7 +310,6 @@ type HarnessProps = {
   onPublish?: () => void
   onAsk?: (event: unknown) => void
   onCancelAsk?: () => void
-  onSessionInput?: (mode: "steer" | "follow_up") => void
   onNewConversation?: () => void
   onToolCallDecision?: (
     runId: string,
@@ -383,7 +382,6 @@ function Harness(props: HarnessProps = {}) {
       onViewChange={callbacks.onViewChange as never}
       onAsk={callbacks.onAsk as never}
       onCancelAsk={callbacks.onCancelAsk}
-      onSessionInput={props.onSessionInput}
       onNewConversation={callbacks.onNewConversation}
       onToolCallDecision={callbacks.onToolCallDecision}
       onRegenerateRun={callbacks.onRegenerateRun}
@@ -549,14 +547,16 @@ describe("AgentDetailWorkspace header and navigation", () => {
 })
 
 describe("AgentDetailWorkspace preview", () => {
-  test("accepts steering and follow-up while keeping cancellation available", () => {
-    const inputs: string[] = []
+  test("submits a follow-up with Enter while keeping cancellation available", () => {
+    let submitted = 0
     let cancelled = false
     renderPage(
       <Harness
         activeView="settings"
         isAsking
-        onSessionInput={(mode) => inputs.push(mode)}
+        onAsk={() => {
+          submitted += 1
+        }}
         onCancelAsk={() => {
           cancelled = true
         }}
@@ -564,12 +564,11 @@ describe("AgentDetailWorkspace preview", () => {
     )
     const textarea = screen.getByPlaceholderText("向 Agent 提问...")
     expect((textarea as HTMLTextAreaElement).disabled).toBe(false)
-    fireEvent.change(textarea, { target: { value: "Use Chinese" } })
-    fireEvent.keyDown(textarea, { key: "Enter", altKey: true })
-    expect(inputs).toEqual(["follow_up"])
-    fireEvent.click(screen.getByRole("button", { name: "追加后续任务" }))
-    expect(inputs).toEqual(["follow_up", "follow_up"])
-    expect(screen.getByRole("button", { name: "调整当前任务" })).toBeTruthy()
+    fireEvent.change(textarea, { target: { value: "Then summarize" } })
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(submitted).toBe(1)
+    expect(screen.queryByText("追加后续任务")).toBeNull()
+    expect(screen.getByRole("button", { name: "追加后续任务" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "停止生成" }))
     expect(cancelled).toBe(true)
   })
@@ -584,8 +583,8 @@ describe("AgentDetailWorkspace preview", () => {
               {
                 sequence: 1,
                 run_id: "run-1",
-                input_id: "steer",
-                mode: "steer",
+                input_id: "follow-first",
+                mode: "follow_up",
                 content: "Use Chinese",
                 status: "applied",
               },
@@ -605,8 +604,7 @@ describe("AgentDetailWorkspace preview", () => {
     )
     expect(screen.getByText("Use Chinese")).toBeTruthy()
     expect(screen.getByText("Then summarize")).toBeTruthy()
-    expect(screen.getByText("追加指令")).toBeTruthy()
-    expect(screen.getByText("后续任务")).toBeTruthy()
+    expect(screen.getAllByText("后续任务")).toHaveLength(2)
     expect(screen.getByText("First task completed")).toBeTruthy()
   })
 
@@ -1016,6 +1014,88 @@ describe("AgentDetailWorkspace preview", () => {
       })
     ).toBeNull()
   })
+
+  test.each(["approved", "running", "awaiting_approval", "uncertain"] as const)(
+    "keeps a cached %s image call out of the RAG follow-up process",
+    (status) => {
+      const imageCall = makeToolCall({
+        call_id: "image-call",
+        tool_name: "generate_image",
+        tool_kind: "unknown",
+        server_name: "",
+        status,
+      })
+      const event = (overrides: Partial<AgentRunEvent>): AgentRunEvent => ({
+        type: "thought",
+        turn: 1,
+        status: "succeeded",
+        summary: "agent.answer_ready",
+        tool_name: "",
+        call_id: "",
+        tool_label: "",
+        tool_kind: "unknown",
+        server_name: "",
+        input: {},
+        output: null,
+        duration_ms: 0,
+        ...overrides,
+      })
+      const followUpRun = makeRun({
+        status: "running",
+        result: "正在回答租房问题",
+        events: [
+          event({
+            type: "tool",
+            call_id: imageCall.call_id,
+            tool_name: "generate_image",
+            summary: "Image generated.",
+          }),
+          event({ turn: 2 }),
+          event({
+            type: "tool",
+            turn: 3,
+            call_id: "rag-call",
+            tool_name: "search_knowledge",
+            tool_kind: "knowledge",
+            summary: "agent.knowledge_chunks_returned:6",
+          }),
+        ],
+        session_inputs: [
+          {
+            sequence: 1,
+            run_id: "run-1",
+            input_id: "follow-up",
+            mode: "follow_up",
+            content: "关于租房的条例有哪些",
+            status: "applied",
+            previous_answer: "图片已生成。",
+            previous_answer_turn: 2,
+          },
+        ],
+      })
+      renderPage(
+        <Harness
+          activeView="settings"
+          runs={[followUpRun]}
+          toolCallsByRun={{ "run-1": [imageCall] }}
+        />
+      )
+
+      const firstAnswer = screen
+        .getByText("图片已生成。")
+        .closest(".rounded-2xl") as HTMLElement
+      const followUpAnswer = screen
+        .getByText("正在回答租房问题")
+        .closest(".rounded-2xl") as HTMLElement
+      expect(within(firstAnswer).getByText("图片生成")).toBeTruthy()
+      expect(within(followUpAnswer).getByText("知识库检索")).toBeTruthy()
+      expect(within(followUpAnswer).queryByText("图片生成") === null).toBe(true)
+      expect(
+        within(followUpAnswer).queryByText("工具调用需要确认") === null
+      ).toBe(true)
+      expect(followUpAnswer.textContent).not.toContain("generate_image")
+    }
+  )
 
   test("preserves and wraps multiline user messages", () => {
     const goal = [

@@ -688,8 +688,8 @@ async def agent_node(
     }
     if runtime.context.session is not None:
         previous_input_ids = set(result.get("harness", {}).get("input_ids", []))
-        result, continued = await runtime.context.session.apply_inputs(
-            {**state, **result}, settled=True
+        result, continued = await runtime.context.session.apply_follow_ups(
+            {**state, **result}
         )
         if continued:
             if turn >= runtime.context.max_turns:

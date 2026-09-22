@@ -655,14 +655,14 @@ describe("mergeAgentRunStreamEvent", () => {
       type: "session_input",
       sequence: 7,
       input_id: "input-1",
-      mode: "steer",
+      mode: "follow_up",
       content: "Use Chinese",
     } as AgentRunStreamEvent)
 
     expect(merged[0].session_inputs).toEqual([
       {
         input_id: "input-1",
-        mode: "steer",
+        mode: "follow_up",
         content: "Use Chinese",
         sequence: 7,
         run_id: "run-1",

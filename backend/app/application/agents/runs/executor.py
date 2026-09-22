@@ -886,9 +886,9 @@ async def _execute_claimed_agent_run(
     registry = CapabilityRegistry(extensions, scope.skill_snapshots, authorize_skill)
     chat_model = build_chat_model(settings, scope.model)
 
-    async def session_inputs(consumed: list[int], settled: bool):
+    async def session_inputs(consumed: list[int]):
         async with get_session_factory()() as db:
-            return await pending_session_inputs(db, run.id, consumed, settled)
+            return await pending_session_inputs(db, run.id, consumed)
 
     session = AgentSession(
         registry,

@@ -137,7 +137,7 @@ export type PublicAgentRunStreamEvent =
   | (PublicAgentStreamCursor & {
       type: "session_input"
       input_id: string
-      mode: "steer" | "follow_up"
+      mode: "follow_up"
       content: string
     })
   | (PublicAgentStreamCursor & {
@@ -408,7 +408,7 @@ export function resolvePublicAgentRunToolCall(
   )
 }
 
-/** Queues steering or follow-up input on an active public Agent run. */
+/** Queues a follow-up on an active public Agent run. */
 export function sendPublicAgentSessionInput(
   agentId: string,
   token: string,

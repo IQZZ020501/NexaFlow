@@ -885,7 +885,7 @@ export function mergePublicRunEvent(
       )
       const sessionInput = {
         input_id: event.input_id,
-        mode: event.mode,
+        mode: "follow_up" as const,
         content: event.content,
         sequence: event.sequence ?? existing?.sequence ?? 0,
         run_id: runId,
@@ -1184,7 +1184,7 @@ export function PublicAgentChat({
   const sessionInputBusyRef = React.useRef(false)
   const sessionInputRef = React.useRef<{
     input_id: string
-    mode: "steer" | "follow_up"
+    mode: "follow_up"
     content: string
   } | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
@@ -1698,16 +1698,16 @@ export function PublicAgentChat({
     }
   }
 
-  async function handleSessionInput(mode: "steer" | "follow_up") {
+  async function handleFollowUp() {
     const runId = activeRunIdRef.current
     const content = question.trim()
     if (!token || !runId || !content || sessionInputBusyRef.current) return
 
     const previous = sessionInputRef.current
     const input =
-      previous?.content === content && previous.mode === mode
+      previous?.content === content
         ? previous
-        : { input_id: crypto.randomUUID(), mode, content }
+        : { input_id: crypto.randomUUID(), mode: "follow_up" as const, content }
     sessionInputRef.current = input
     sessionInputBusyRef.current = true
     setSendError(null)
@@ -1734,10 +1734,7 @@ export function PublicAgentChat({
       )
       setQuestion((current) => (current.trim() === content ? "" : current))
       sessionInputRef.current = null
-      notify(
-        "success",
-        t(mode === "steer" ? "指令已排队，将在下一轮生效" : "后续任务已排队")
-      )
+      notify("success", t("后续任务已排队"))
     } catch (error) {
       if (activeRunIdRef.current === runId) {
         setSendError(getErrorMessage(error, t))
@@ -1750,7 +1747,7 @@ export function PublicAgentChat({
   async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (isSending) {
-      await handleSessionInput("steer")
+      await handleFollowUp()
       return
     }
     const nextQuestion = question.trim()
@@ -1999,9 +1996,7 @@ export function PublicAgentChat({
                     sessionInputs
                       .filter(
                         ({ input }) =>
-                          input.mode === "follow_up" &&
-                          input.status !== "applied" &&
-                          !input.previous_answer
+                          input.status !== "applied" && !input.previous_answer
                       )
                       .map(({ input }) => input.input_id)
                   )
@@ -2144,11 +2139,7 @@ export function PublicAgentChat({
                             ) : null}
                             <div className="flex flex-col items-end gap-1.5">
                               <span className="text-xs text-muted-foreground">
-                                {t(
-                                  input.mode === "steer"
-                                    ? "追加指令"
-                                    : "后续任务"
-                                )}
+                                {t("后续任务")}
                               </span>
                               <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
                                 {input.content}
@@ -2168,7 +2159,7 @@ export function PublicAgentChat({
                               progress={currentProgress}
                             >
                               {unrenderedPublicToolCalls(
-                                currentProgress,
+                                run.progress,
                                 toolCallsByRun[run.id] ?? []
                               ).map((call) =>
                                 ["awaiting_approval", "uncertain"].includes(
@@ -2332,10 +2323,6 @@ export function PublicAgentChat({
                   !event.nativeEvent.isComposing
                 ) {
                   event.preventDefault()
-                  if (event.altKey && isSending) {
-                    void handleSessionInput("follow_up")
-                    return
-                  }
                   event.currentTarget.form?.requestSubmit()
                 }
               }}
@@ -2382,31 +2369,18 @@ export function PublicAgentChat({
                 />
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {isSending ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={!question.trim()}
-                      onClick={() => void handleSessionInput("follow_up")}
-                    >
-                      {t("追加后续任务")}
-                    </Button>
-                    {question.trim() ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="text-muted-foreground"
-                        aria-label={t("停止生成")}
-                        title={t("停止生成")}
-                        onClick={handleCancelAsk}
-                      >
-                        <SquareIcon className="fill-current" />
-                      </Button>
-                    ) : null}
-                  </>
+                {isSending && question.trim() ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    aria-label={t("停止生成")}
+                    title={t("停止生成")}
+                    onClick={handleCancelAsk}
+                  >
+                    <SquareIcon className="fill-current" />
+                  </Button>
                 ) : null}
                 <Button
                   type={isSending && !question.trim() ? "button" : "submit"}
@@ -2415,14 +2389,14 @@ export function PublicAgentChat({
                   aria-label={t(
                     isSending
                       ? question.trim()
-                        ? "调整当前任务"
+                        ? "追加后续任务"
                         : "停止生成"
                       : "发送问题"
                   )}
                   title={t(
                     isSending
                       ? question.trim()
-                        ? "调整当前任务"
+                        ? "追加后续任务"
                         : "停止生成"
                       : "发送问题"
                   )}

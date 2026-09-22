@@ -43,9 +43,9 @@ Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill
 - CapabilityRegistry 统一承载知识、MCP 和其他工具。search_tools 发现已授权能力，activate_tools 设置后续轮次的启用集合；不能新增授权或绕过审批。最多 8 个工具的小目录按配置顺序装入 16 KiB 的初始 Schema 预算，单个超大工具延迟加载但不会连带禁用其他已配置工具；harness 管理工具始终可用。
 - AgentContextManager 在每次模型轮次前检查上下文，超阈值时摘要旧消息、保留系统协议及最近消息，并保持 assistant 工具声明与 tool 结果成组。摘要计入 model_usage；当前工具结果或工具 schema 本身无法容纳时显式失败，不伪装成无限上下文。
 - ExtensionRuntime 提供受信任、项目代码管理的 context、before_tool、after_tool 生命周期；知识、MCP、其他工具从扩展注册进入统一 registry。不是用户可上传任意代码的插件执行器，实际动作仍通过原有 durable 审批/幂等边界。
-- steer 在下一模型轮次前生效；follow_up 等当前任务产生普通答案后生效。两种输入均追加进 agent_run_events，以 input_id 幂等，消费状态随下一 checkpoint 持久化。输入提交与成功终态争用同一 RunState 行锁：终态先完成则拒绝新输入，输入先接受则继续处理或显式失败，避免成功收尾时静默丢失。失败/取消后仍能读取已接受的队列内容。
+- follow_up 等当前任务产生普通答案后生效，并追加进 agent_run_events，以 input_id 幂等，消费状态随下一 checkpoint 持久化。输入提交与成功终态争用同一 RunState 行锁：终态先完成则拒绝新输入，输入先接受则继续处理或显式失败，避免成功收尾时静默丢失。失败/取消后仍能读取已接受的队列内容。
 - 追加任务前的普通答案保存于 checkpoint.harness.inputs 的 previous_answer，并按实际消费顺序投影到会话和历史记忆；最终 result 仍是最后一次答复，不覆盖前一任务的可读答复。
-- Console 调试面板支持运行中输入、调整当前任务、追加后续任务（Alt+Enter）及取消。公开和 API Key 提供输入接口，公开聊天 UI 尚未增加这些控件；审批等待不会因排入输入而自动解除。输入不会重置冻结的轮次、工具次数或整次截止时间，每个 Run 最多接受 32 条、每条 4000 字符。
+- Console 调试面板和公开聊天支持在运行中直接按回车追加后续任务及取消；API Key 提供同一输入接口。审批等待不会因排入输入而自动解除。输入不会重置冻结的轮次、工具次数或整次截止时间，每个 Run 最多接受 32 条、每条 4000 字符。
 - 这是当前 Python runtime 上的 harness 基础，不是 pi 的完整移植；没有新增树形会话分支、任意扩展安装或独立 TypeScript 服务。
 
 ## 已有接口
@@ -60,7 +60,7 @@ Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill
 - POST /api/v1/public/agents/{agent_id}/runs/{run_id}/inputs
 - POST /api/v1/agent-api/{agent_id}/runs/{run_id}/inputs
 
-输入接口返回 202，入参为 input_id（客户端生成的幂等 ID）、mode（steer / follow_up）和 content。仅当前 Run 的来源主体可写，访问和发布状态仍按现有控制台/公开/API Key 规则重验；完成的 Run 需提交新 prompt。
+输入接口返回 202，入参为 input_id（客户端生成的幂等 ID）、mode（仅允许 follow_up，省略时默认）和 content。仅当前 Run 的来源主体可写，访问和发布状态仍按现有控制台/公开/API Key 规则重验；完成的 Run 需提交新 prompt。
 
 ## 保留的生产边界
 

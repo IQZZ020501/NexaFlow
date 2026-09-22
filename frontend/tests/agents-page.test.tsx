@@ -2708,7 +2708,7 @@ describe("AgentsPage run flows", () => {
     expect(screen.getByText("回答已生成")).toBeTruthy()
   })
 
-  test("queues steering and follow-up on the live run without submitting another run", async () => {
+  test("queues follow-ups with Enter on the live run without submitting another run", async () => {
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
     const inputs: Array<{ input_id: string; mode: string; content: string }> =
       []
@@ -2768,15 +2768,18 @@ describe("AgentsPage run flows", () => {
     fireEvent.click(screen.getByLabelText("发送问题"))
     await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
     fireEvent.change(textarea, { target: { value: "Use Chinese" } })
-    fireEvent.click(screen.getByLabelText("调整当前任务"))
+    fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(1))
     await waitFor(() => expect(textarea.value).toBe(""))
     expect(screen.getByText("Use Chinese")).toBeTruthy()
     fireEvent.change(textarea, { target: { value: "Then summarize" } })
-    fireEvent.click(screen.getByText("追加后续任务"))
+    fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(2))
     await waitFor(() => expect(textarea.value).toBe(""))
-    expect(inputs.map((input) => input.mode)).toEqual(["steer", "follow_up"])
+    expect(inputs.map((input) => input.mode)).toEqual([
+      "follow_up",
+      "follow_up",
+    ])
     expect(inputs[0].input_id).not.toBe(inputs[1].input_id)
     expect(screen.getByText("Then summarize")).toBeTruthy()
     expect(submitted).toBe(1)

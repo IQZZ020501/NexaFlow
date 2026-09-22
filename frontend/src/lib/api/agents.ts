@@ -250,7 +250,7 @@ export type AgentRunStreamEvent =
       type: "session_input"
       sequence: number
       input_id: string
-      mode: "steer" | "follow_up"
+      mode: "follow_up"
       content: string
     }
   | { type: "complete" | "error"; sequence: number; run: AgentRun }
@@ -777,7 +777,7 @@ export async function cancelAgentRun(
 
 export type AgentSessionInput = {
   input_id: string
-  mode: "steer" | "follow_up"
+  mode: "follow_up"
   content: string
   sequence: number
   run_id: string

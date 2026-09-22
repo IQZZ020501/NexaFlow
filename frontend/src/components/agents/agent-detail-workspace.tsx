@@ -118,7 +118,6 @@ type AgentDetailWorkspaceProps = {
   onPublish: () => void
   onViewChange: (view: AgentDetailView) => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
-  onSessionInput?: (mode: "steer" | "follow_up") => void
   onCancelAsk: () => void
   onNewConversation: () => void
   onToolCallDecision: (
@@ -631,10 +630,7 @@ function RunExchange({
   const pendingFollowUpIds = new Set(
     sessionInputs
       .filter(
-        ({ input }) =>
-          input.mode === "follow_up" &&
-          input.status !== "applied" &&
-          !input.previous_answer
+        ({ input }) => input.status !== "applied" && !input.previous_answer
       )
       .map(({ input }) => input.input_id)
   )
@@ -655,7 +651,12 @@ function RunExchange({
   const runCancelled = run.status === "cancelled"
   const inlineToolCalls = runCancelled
     ? []
-    : unrenderedAgentToolCalls(visibleTimeline, toolCalls)
+    : unrenderedAgentToolCalls(
+        // Approval receipts can remain stale after a follow-up starts. A tool
+        // rendered in an earlier answer must not reappear in the current one.
+        visibleProcessTimeline(timelineSegments.flat(), inlineCallIds),
+        toolCalls
+      )
   const hasProcess = visibleTimeline.length > 0 || inlineToolCalls.length > 0
   const hasActiveToolCall =
     !runCancelled &&
@@ -799,7 +800,7 @@ function RunExchange({
             )}
             <div className="flex flex-col items-end gap-1.5">
               <span className="text-xs text-muted-foreground">
-                {t(input.mode === "steer" ? "追加指令" : "后续任务")}
+                {t("后续任务")}
               </span>
               <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
                 {input.content}
@@ -996,7 +997,6 @@ export function AgentDetailWorkspace({
   onPublish,
   onViewChange,
   onAsk,
-  onSessionInput,
   onCancelAsk,
   onNewConversation,
   onToolCallDecision,
@@ -1502,10 +1502,6 @@ export function AgentDetailWorkspace({
                             !event.nativeEvent.isComposing
                           ) {
                             event.preventDefault()
-                            if (event.altKey && isAsking && onSessionInput) {
-                              onSessionInput("follow_up")
-                              return
-                            }
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
@@ -1519,10 +1515,7 @@ export function AgentDetailWorkspace({
                         enterKeyHint="send"
                         autoComplete="off"
                         disabled={
-                          isDirty ||
-                          isRunsLoading ||
-                          (isAsking && !onSessionInput) ||
-                          agent.status !== "active"
+                          isDirty || isRunsLoading || agent.status !== "active"
                         }
                         maxLength={4000}
                         rows={1}
@@ -1574,56 +1567,41 @@ export function AgentDetailWorkspace({
                           />
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
-                          {isAsking && onSessionInput && (
-                            <>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                disabled={!question.trim()}
-                                onClick={() => onSessionInput("follow_up")}
-                              >
-                                {t("追加后续任务")}
-                              </Button>
-                              {question.trim() && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="text-muted-foreground"
-                                  aria-label={t("停止生成")}
-                                  title={t("停止生成")}
-                                  onClick={onCancelAsk}
-                                >
-                                  <SquareIcon className="fill-current" />
-                                </Button>
-                              )}
-                            </>
+                          {isAsking && question.trim() && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-muted-foreground"
+                              aria-label={t("停止生成")}
+                              title={t("停止生成")}
+                              onClick={onCancelAsk}
+                            >
+                              <SquareIcon className="fill-current" />
+                            </Button>
                           )}
                           <Button
                             type={
-                              isAsking && (!onSessionInput || !question.trim())
-                                ? "button"
-                                : "submit"
+                              isAsking && !question.trim() ? "button" : "submit"
                             }
                             size="icon"
                             className="rounded-lg"
                             aria-label={t(
                               isAsking
-                                ? onSessionInput && question.trim()
-                                  ? "调整当前任务"
+                                ? question.trim()
+                                  ? "追加后续任务"
                                   : "停止生成"
                                 : "发送问题"
                             )}
                             title={t(
                               isAsking
-                                ? onSessionInput && question.trim()
-                                  ? "调整当前任务"
+                                ? question.trim()
+                                  ? "追加后续任务"
                                   : "停止生成"
                                 : "发送问题"
                             )}
                             onClick={
-                              isAsking && (!onSessionInput || !question.trim())
+                              isAsking && !question.trim()
                                 ? onCancelAsk
                                 : undefined
                             }
@@ -1635,8 +1613,7 @@ export function AgentDetailWorkspace({
                                 agent.status !== "active")
                             }
                           >
-                            {isAsking &&
-                            (!onSessionInput || !question.trim()) ? (
+                            {isAsking && !question.trim() ? (
                               <SquareIcon className="fill-current" />
                             ) : (
                               <ArrowUpIcon />

@@ -455,7 +455,7 @@ async def sanitize_external_agent_stream(
                     {
                         "sequence": item["sequence"],
                         "input_id": item["input_id"][:200],
-                        "mode": item["mode"],
+                        "mode": "follow_up",
                         "content": item["content"][:4000],
                         **(
                             {"previous_answer_turn": item["previous_answer_turn"]}
@@ -467,7 +467,6 @@ async def sanitize_external_agent_stream(
                     if isinstance(item, dict)
                     and isinstance(item.get("sequence"), int)
                     and isinstance(item.get("input_id"), str)
-                    and item.get("mode") in {"steer", "follow_up"}
                     and isinstance(item.get("content"), str)
                 ]
             _copy_external_stream_metadata(event, sanitized)

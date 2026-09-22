@@ -35,7 +35,6 @@ async def enqueue_session_input(
     workspace_id: str,
     run_id: str,
     input_id: str,
-    mode: str,
     content: str,
 ) -> AgentRunEventEntity:
     state = await db.scalar(
@@ -50,7 +49,7 @@ async def enqueue_session_input(
     inputs = await list_session_inputs(db, run_id)
     for previous in inputs:
         if previous.event["input_id"] == input_id:
-            if previous.event["content"] != content or previous.event["mode"] != mode:
+            if previous.event["content"] != content:
                 raise ValueError(
                     "Session input ID was already used for different content."
                 )
@@ -65,7 +64,7 @@ async def enqueue_session_input(
         event={
             "type": "session_input",
             "input_id": input_id,
-            "mode": mode,
+            "mode": "follow_up",
             "content": content,
         },
         created_at=utc_now(),
@@ -76,10 +75,10 @@ async def enqueue_session_input(
 
 
 async def pending_session_inputs(
-    db: AsyncSession, run_id: str, consumed: list[int], settled: bool
+    db: AsyncSession, run_id: str, consumed: list[int]
 ) -> list[dict]:
     return [
-        {"id": item.id, **item.event}
+        {"id": item.id, **item.event, "mode": "follow_up"}
         for item in await list_session_inputs(db, run_id)
-        if item.id not in consumed and (settled or item.event["mode"] == "steer")
+        if item.id not in consumed
     ]
