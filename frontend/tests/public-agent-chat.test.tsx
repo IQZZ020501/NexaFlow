@@ -2728,7 +2728,7 @@ describe("PublicAgentChat", () => {
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
 
     await waitFor(() =>
-      expect(screen.queryByText("工具调用需要确认")).toBeNull()
+      expect(screen.queryByText("工具调用需要确认") === null).toBe(true)
     )
     expect(screen.getByText(/web_search/)).toBeTruthy()
     expect(
@@ -2797,7 +2797,7 @@ describe("PublicAgentChat", () => {
     sendMessage("生成一张图片")
     fireEvent.click(await screen.findByRole("button", { name: "批准并执行" }))
     await waitFor(() =>
-      expect(screen.queryByText("工具调用需要确认")).toBeNull()
+      expect(screen.queryByText("工具调用需要确认") === null).toBe(true)
     )
     expect(screen.getByText("等待执行")).toBeTruthy()
 
@@ -2846,7 +2846,9 @@ describe("PublicAgentChat", () => {
     })
     fireEvent.click(approve)
     await waitFor(() =>
-      expect(within(followUpAnswer).queryByText("工具调用需要确认")).toBeNull()
+      expect(
+        within(followUpAnswer).queryByText("工具调用需要确认") === null
+      ).toBe(true)
     )
     expect(within(followUpAnswer).getAllByText("图片生成")).toHaveLength(1)
     emit({
