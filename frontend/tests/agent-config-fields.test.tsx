@@ -354,9 +354,7 @@ describe("AgentConfigFields", () => {
     }) as typeof fetch
 
     renderPage(<FieldsHarness form={initialForm()} />)
-    fireEvent.click(
-      screen.getByRole("button", { name: "AI 生成系统提示词" })
-    )
+    fireEvent.click(screen.getByRole("button", { name: "AI 生成系统提示词" }))
 
     await waitFor(() =>
       expect(
@@ -379,7 +377,7 @@ describe("AgentConfigFields", () => {
     fireEvent.click(screen.getByLabelText("关联知识库"))
 
     const dialog = screen.getByRole("dialog")
-    expect(within(dialog).getByText("按需选择知识库，最多 4 个。")).toBeTruthy()
+    expect(within(dialog).getByText("按需选择要关联的知识库。")).toBeTruthy()
     expect(within(dialog).getByText("研发纪要")).toBeTruthy()
 
     fireEvent.click(within(dialog).getByText("研发纪要").closest("label")!)
@@ -401,7 +399,7 @@ describe("AgentConfigFields", () => {
     expect(screen.queryByRole("dialog")).toBeNull()
   })
 
-  test("disables the fifth knowledge base selection", () => {
+  test("keeps the fifth knowledge base selectable", () => {
     renderPage(
       <FieldsHarness
         form={initialForm({ knowledgeBaseIds: ["k1", "k2", "k3", "k4"] })}
@@ -409,11 +407,14 @@ describe("AgentConfigFields", () => {
     )
     fireEvent.click(screen.getByLabelText("关联知识库"))
     const dialog = screen.getByRole("dialog")
-    const checkbox = within(dialog)
-      .getByText("产品文档")
-      .closest("label")!
-      .querySelector('input[type="checkbox"]') as HTMLInputElement
-    expect(checkbox.disabled).toBe(true)
+    const option = within(dialog).getByText("产品文档").closest("label")!
+    const checkbox = option.querySelector(
+      'input[type="checkbox"]'
+    ) as HTMLInputElement
+    expect(checkbox.disabled).toBe(false)
+
+    fireEvent.click(option)
+    expect(screen.getAllByText("5 个知识库").length).toBeGreaterThan(0)
   })
 
   test("selects and removes unified tools from the picker", async () => {
@@ -484,9 +485,11 @@ describe("AgentConfigFields", () => {
       (screen.getByLabelText("选择模型") as HTMLButtonElement).disabled
     ).toBe(true)
     expect(
-      (screen.getByRole("button", {
-        name: "AI 生成系统提示词",
-      }) as HTMLButtonElement).disabled
+      (
+        screen.getByRole("button", {
+          name: "AI 生成系统提示词",
+        }) as HTMLButtonElement
+      ).disabled
     ).toBe(true)
     expect(
       (

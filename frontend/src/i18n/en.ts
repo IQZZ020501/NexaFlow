@@ -621,8 +621,8 @@ export const en = {
   工具分类: "Tool categories",
   全部工具: "All tools",
   已选但不可用: "Selected but unavailable",
-  "选择有使用权限且已发布的工具，最多 {value} 个。":
-    "Select published tools you have permission to use, up to {value}.",
+  "选择有使用权限且已发布的工具。":
+    "Select published tools you have permission to use.",
   "按名称、描述或来源搜索工具": "Search tools by name, description, or source",
   工具已不可用或授权已撤销:
     "This tool is unavailable or your permission was revoked",
@@ -859,7 +859,6 @@ export const en = {
   生图模型已添加: "Image generation model added",
   图片生成: "Generate image",
   暂无可用的图片生成工具: "Image generation is unavailable",
-  "最多只能关联 12 个工具": "No more than 12 tools can be linked",
   "使用工作空间的生图模型生成图片；每次调用需要确认。":
     "Generate an image with the workspace image model; each call requires approval.",
   "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。":
@@ -1204,7 +1203,7 @@ export const en = {
     "System prompt generation failed. Please try again.",
   "描述 Agent 的角色、回答方式和约束。":
     "Describe the Agent's role, response style, and constraints.",
-  "按需选择知识库，最多 {value} 个。": "Select up to {value} knowledge bases.",
+  "按需选择要关联的知识库。": "Select the knowledge bases to link.",
   暂无可用知识库: "No available knowledge bases",
   "MCP 工具": "MCP tools",
   "按需选择 MCP 工具，最多 {value} 个。": "Select up to {value} MCP tools.",

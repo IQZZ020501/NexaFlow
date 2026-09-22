@@ -97,12 +97,11 @@ class AgentCreateRequest(BaseModel):
     )
     instructions: str = Field(default="", max_length=8000)
     model_id: str = Field(min_length=1, max_length=36)
-    knowledge_base_ids: list[str] = Field(default_factory=list, max_length=4)
-    tools: list[ToolRefSchema] = Field(default_factory=list, max_length=12)
+    knowledge_base_ids: list[str] = Field(default_factory=list)
+    tools: list[ToolRefSchema] = Field(default_factory=list)
     skills: list[AgentSkillRefSchema] = Field(default_factory=list, max_length=4)
     mcp_tools: list[AgentMcpToolRef] = Field(
         default_factory=list,
-        max_length=12,
         deprecated=True,
     )
 
@@ -121,11 +120,10 @@ class AgentUpdateRequest(BaseModel):
     interaction_config: AgentInteractionConfig | None = None
     instructions: str | None = Field(default=None, max_length=8000)
     model_id: str | None = Field(default=None, min_length=1, max_length=36)
-    knowledge_base_ids: list[str] | None = Field(default=None, max_length=4)
-    tools: list[ToolRefSchema] | None = Field(default=None, max_length=12)
+    knowledge_base_ids: list[str] | None = Field(default=None)
+    tools: list[ToolRefSchema] | None = Field(default=None)
     mcp_tools: list[AgentMcpToolRef] | None = Field(
         default=None,
-        max_length=12,
         deprecated=True,
     )
     skills: list[AgentSkillRefSchema] | None = Field(default=None, max_length=4)
