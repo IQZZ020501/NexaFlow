@@ -182,7 +182,7 @@ class Agent(Base):
         String(36), nullable=True, index=True
     )
     published_by_user_id: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id", name="fk_agents_published_by_user_id"),
+        String(36),
         nullable=True,
         index=True,
     )
@@ -190,7 +190,7 @@ class Agent(Base):
         DateTime(timezone=True), nullable=True
     )
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -242,7 +242,7 @@ class AgentPublicationVersion(Base):
     resource_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     configuration_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -335,7 +335,7 @@ class AgentApiCredential(Base):
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     hint: Mapped[str] = mapped_column(String(20), nullable=False)
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -432,10 +432,10 @@ class AgentRun(Base):
     )
     agent_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     requested_by_user_id: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True, index=True
+        String(36), nullable=True, index=True
     )
     execution_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", name="fk_agent_runs_execution_user_id"),
+        String(36),
         nullable=False,
         index=True,
     )

@@ -274,36 +274,6 @@ async def list_agent_publication_version_map(
     return {version.id: version for version in versions}
 
 
-async def has_agent_publication_audit_references(
-    db: AsyncSession,
-    user_id: str,
-) -> bool:
-    publisher_reference = await db.scalar(
-        select(AgentPublicationVersion.id)
-        .where(AgentPublicationVersion.published_by_user_id == user_id)
-        .limit(1)
-    )
-    if publisher_reference is not None:
-        return True
-    # ponytail: user deletion is rare; use a portable scan until publication volume warrants JSON indexing.
-    resources = await db.scalars(select(AgentPublicationVersion.resource_snapshot))
-    for resource_snapshot in resources.all():
-        tools = resource_snapshot.get("tools", [])
-        if isinstance(tools, list) and any(
-            isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
-            for tool in tools
-        ):
-            return True
-    run_snapshots = await db.scalars(select(AgentRunSnapshot.tool_snapshots))
-    for tool_snapshots in run_snapshots.all():
-        if isinstance(tool_snapshots, list) and any(
-            isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
-            for tool in tool_snapshots
-        ):
-            return True
-    return False
-
-
 async def list_agent_api_credentials(
     db: AsyncSession,
     agent_id: str,

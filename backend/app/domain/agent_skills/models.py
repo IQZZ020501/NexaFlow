@@ -44,9 +44,7 @@ class AgentSkill(Base):
     current_published_version_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, index=True
     )
-    created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
-    )
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
@@ -90,7 +88,7 @@ class AgentSkillVersion(Base):
     definition_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now

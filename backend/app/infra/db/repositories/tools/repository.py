@@ -76,6 +76,7 @@ ApplicationToolSnapshotRow = tuple[
 
 
 from app.infra.db.repositories.tools.bindings import (
+    delete_application_tool_bindings_bound_by_user,
     get_application_tool_binding,
     list_application_mcp_reference_map,
     list_application_tool_bindings,
@@ -93,7 +94,6 @@ from app.infra.db.repositories.tools.catalog import (
     get_tool_source,
     get_tool_version,
     get_tool_version_by_hash,
-    has_retained_user_audit_references,
     list_application_tool_snapshot_rows,
     list_mcp_catalog_rows,
     list_mcp_tool_sources,

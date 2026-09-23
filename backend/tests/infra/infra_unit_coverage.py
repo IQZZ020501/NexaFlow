@@ -3667,31 +3667,6 @@ def test_mcp_tool_policy_services() -> None:
         )
 
 
-def test_retained_tool_user_reference_query() -> None:
-    from app.infra.db.repositories.tools import repository as tools_repo
-
-    binding_db = AsyncMock()
-    binding_db.scalar.side_effect = ["binding-1"]
-    assert run(tools_repo.has_retained_user_audit_references(binding_db, "u1"))
-    assert binding_db.scalar.await_count == 1
-
-    invocation_db = AsyncMock()
-    invocation_db.scalar.side_effect = [None, "invocation-1"]
-    assert run(tools_repo.has_retained_user_audit_references(invocation_db, "u1"))
-
-    snapshot_db = AsyncMock()
-    snapshot_db.scalar.side_effect = [None, None, "snapshot-invocation-1"]
-    assert run(tools_repo.has_retained_user_audit_references(snapshot_db, "u1"))
-
-    draft_db = AsyncMock()
-    draft_db.scalar.side_effect = [None, None, None, "draft-1"]
-    assert run(tools_repo.has_retained_user_audit_references(draft_db, "u1"))
-
-    empty_db = AsyncMock()
-    empty_db.scalar.side_effect = [None, None, None, None]
-    assert not run(tools_repo.has_retained_user_audit_references(empty_db, "u1"))
-
-
 # ================================================================ teams/services
 
 
@@ -4775,7 +4750,6 @@ def main() -> None:
     test_delete_mcp_server()
     test_resolve_mcp_tools()
     test_mcp_tool_policy_services()
-    test_retained_tool_user_reference_query()
 
     test_team_services_basics()
     test_create_team()

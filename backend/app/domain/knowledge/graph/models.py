@@ -88,7 +88,7 @@ class KnowledgeGraphSchema(Base):
         String(20), nullable=False, default="draft", index=True
     )
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
@@ -176,7 +176,7 @@ class KnowledgeGraphRevision(Base):
     )
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -833,10 +833,10 @@ class KnowledgeGraphReviewItem(Base):
     )
     revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     reviewed_by_user_id: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True, index=True
+        String(36), nullable=True, index=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

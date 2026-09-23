@@ -97,7 +97,7 @@ class KnowledgeBase(Base):
         ForeignKey("model.id"), nullable=True, index=True
     )
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"),
+        String(36),
         nullable=False,
         index=True,
     )
@@ -133,7 +133,7 @@ class KnowledgeAttachment(Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     object_key: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="available")
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -182,7 +182,7 @@ class KnowledgeDocument(Base):
         Boolean, nullable=False, default=True, server_default=true()
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -538,7 +538,7 @@ class KnowledgeTask(Base):
     processed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     options: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_by_user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     worker_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -582,7 +582,7 @@ class KnowledgeEvaluationCase(Base):
         server_default="{}",
     )
     created_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(

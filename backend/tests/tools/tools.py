@@ -170,6 +170,14 @@ def add_workspace_member(
     assert response.status_code == 201, response.text
 
 
+async def read_tool_draft_editor(workspace_id: str, tool_id: str) -> str | None:
+    from app.infra.db.repositories.tools import repository as tool_repository
+
+    async with get_session_factory()() as db:
+        draft = await tool_repository.get_tool_draft(db, workspace_id, tool_id)
+        return draft.updated_by_user_id if draft is not None else None
+
+
 async def seed_private_tool(
     workspace_id: str,
     owner_id: str,
@@ -6145,7 +6153,11 @@ def test_python_tool_http_lifecycle_and_private_grants() -> None:
             f"/api/v1/admin/users/{draft_owner_id}",
             headers=auth_headers(admin_token),
         )
-        assert retained_draft_owner.status_code == 409, retained_draft_owner.text
+        assert retained_draft_owner.status_code == 204, retained_draft_owner.text
+        assert (
+            run(read_tool_draft_editor(workspace_id, draft_only.json()["id"]))
+            == draft_owner_id
+        )
 
         created = client.post(
             f"{tools_url}/python",

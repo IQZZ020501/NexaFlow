@@ -237,3 +237,15 @@ async def has_agent_skill_bindings(
         )
     )
     return bool(count)
+
+
+async def delete_agent_skill_bindings_bound_by_user(
+    db: AsyncSession,
+    user_id: str,
+) -> int:
+    result = await db.execute(
+        delete(AgentSkillBindingOrm).where(
+            AgentSkillBindingOrm.bound_by_user_id == user_id,
+        )
+    )
+    return result.rowcount or 0

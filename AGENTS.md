@@ -90,6 +90,15 @@ not trigger unrelated cleanup.
   expose create/save/refresh/delete wrappers on the repository. ORM model
   modules and explicit model-registration imports are the narrow exceptions;
   they are not a pattern for business logic.
+- Permanent user deletion keeps authored content, execution history, and
+  immutable snapshots: those columns store the former account id as an opaque
+  `String(36)` without a `users` foreign key (`audit_logs.actor_user_id` is the
+  original example), so a departing account never blocks the delete. Rows that
+  belong to the account itself keep their foreign key and are removed by
+  `application/identity/service.py::delete_user_permanently` (refresh sessions,
+  workspace/team memberships, uploads, MCP servers created by the user, and
+  Agent Skill / Application Tool bindings the user authorized). New user
+  references must pick one of those two shapes deliberately.
 - Agent Run persistence separates identity/caller/lineage in `agent_runs`,
   mutable lease/checkpoint/result data in `agent_run_states`, immutable
   execution configuration in `agent_run_snapshots`, and append-only history

@@ -105,6 +105,7 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 - 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需工作区管理员），不参与资源授权；团队成员必须是工作区成员。
 - 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；资源权限只有创建者本人可管理（工作空间管理员不再代管别人的知识库）。
 - 删除工作区会在同一事务内级联删除知识库、Agent/运行记录、MCP、模型、团队/成员及资源授权；存在 queued/running 知识任务时返回 409。向量集合和对象存储文件由持久清理记录交给 Celery 异步删除，失败后自动重试。
+- 永久删除用户不再被审计/历史引用阻止：Agent 运行与工具调用历史、发布与运行快照、知识内容与各类创作归属把用户 id 作为**不带外键的字符串**保留（与 `audit_logs.actor_user_id` 一致），账号自身的数据（刷新会话、工作区/团队成员、上传文件、该用户创建的 MCP、该用户授权的 Agent Skill 与应用工具绑定）在同一事务内清理，Agent 随之失去这些授权，需由其他成员重新绑定。删除后，发布者是已注销账号的公开 Agent 会在公开入口按「未找到」失败关闭，需由其他成员重新发布。
 - 敏感写操作（创建/修改/删除）一律 `record_audit_log`。
 - Tool 默认 owner 私有：只有创建者或被授权者能查看、使用和管理；builtin 工具属工作区公共资源（所有成员可用、管理员可治理），MCP 服务器与工具策略治理仍限工作空间管理员。`view` 只能查看脱敏详情，`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
 - 普通成员可创建 Python Tool 与公网 HTTP/SSE MCP Source；stdio 和私网地址只允许工作空间管理员。Bearer token、stdio 参数/工作目录/环境值及 egress 域名加密保存且不返回明文；stdio discovery/call 只在独立 OpenSandbox 执行，不具备业务后端进程或宿主目录访问能力。域名请求必须属于部署 allowlist，stdio 配置不能放行私网/metadata。

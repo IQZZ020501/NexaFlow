@@ -44,7 +44,7 @@ class WorkflowDefinition(Base):
     graph: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     graph_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -95,7 +95,7 @@ class WorkflowVersion(Base):
     resource_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     resource_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

@@ -178,7 +178,7 @@ class ToolDraft(Base):
     execution_spec: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -438,7 +438,7 @@ class ToolInvocation(Base):
     run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     invocation_id: Mapped[str] = mapped_column(String(255), nullable=False)
     execution_user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id"), nullable=False, index=True
+        String(36), nullable=False, index=True
     )
     access_source: Mapped[str] = mapped_column(String(20), nullable=False)
     tool_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
