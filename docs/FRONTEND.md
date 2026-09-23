@@ -15,7 +15,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/eslint.config.js` — ESLint flat config（TS + React Hooks 规则）
 - `frontend/components.json` — shadcn 注册表配置
 - `frontend/next-env.d.ts` — Next.js 自动生成的类型引用（勿手改）
-- `frontend/src/app/globals.css` — 全局 Tailwind v4 主题 CSS 变量与暗色模式
+- `frontend/src/app/globals.css` — 全局 Tailwind v4 主题 CSS 变量、暗色模式与配色方案（`[data-palette]` 令牌块）
 - `frontend/src/types/css.d.ts` — CSS 模块类型声明
 
 ### app/ 路由组
@@ -113,7 +113,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/contexts/app-providers.tsx` — 组合 Language/Theme/Session Provider
 - `frontend/src/contexts/session-context.tsx` — 全局会话：token/me/工作空间/通知/强制改密/刷新
 - `frontend/src/contexts/language-provider.tsx` — 三语切换与 `t()` 翻译
-- `frontend/src/contexts/theme-provider.tsx` — 主题（light/dark/system）
+- `frontend/src/contexts/theme-provider.tsx` — 主题（light/dark/system）与配色方案偏好，均持久化于 localStorage 并作用于 `<html>`
 
 ### i18n/（三语词典，键即中文文案）
 
@@ -136,7 +136,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/lib/chunk-overlap.ts` — 分段重叠文本检测
 - `frontend/src/lib/constants.ts` — 默认密码、状态/审计标签键映射
 - `frontend/src/lib/display.ts` — 展示格式化工具
-- `frontend/src/lib/theme-options.ts` — 主题选项定义
+- `frontend/src/lib/theme-options.ts` — 主题与配色方案选项定义
 - `frontend/src/lib/use-media-query.ts` — `useMediaQuery()` 与 `PHONE_LIST_QUERY`（`< md`）/`PHONE_NAV_QUERY`（`< sm`）：按断点选择手机或桌面版式
 
 **lib/api/**（按域划分的 API 客户端）

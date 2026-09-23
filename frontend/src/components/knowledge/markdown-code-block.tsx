@@ -83,30 +83,67 @@ async function highlightCode(code: string, language: string) {
 
 type CopyState = "idle" | "copied" | "failed"
 type HighlightedCode = { code: string; language: string; html: string }
-type MermaidRender = { code: string; isDark: boolean; svg: string | null }
+type MermaidRender = { code: string; themeKey: string; svg: string | null }
 
 /**
- * Observes theme-related class changes on the document root.
+ * Observes theme-related attribute changes on the document root.
  *
- * @param onChange - Callback invoked when the document root's class attribute changes
+ * @param onChange - Callback invoked when the document root's theme attributes change
  * @returns A function that stops observing theme changes
  */
 function subscribeToTheme(onChange: () => void) {
   const observer = new MutationObserver(onChange)
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: ["class", "data-palette"],
   })
   return () => observer.disconnect()
 }
 
 /**
- * Determines whether the document is using the dark theme.
+ * Reads the resolved color scheme and palette as one comparable snapshot.
  *
- * @returns `true` if the document root has the `dark` class, `false` otherwise.
+ * @returns A key such as `"dark:ocean"` identifying the active theme
  */
-function isDarkTheme() {
-  return document.documentElement.classList.contains("dark")
+function themeSnapshot() {
+  const root = document.documentElement
+  const resolvedTheme = root.classList.contains("dark") ? "dark" : "light"
+
+  return `${resolvedTheme}:${root.dataset.palette ?? "neutral"}`
+}
+
+/**
+ * Resolves a design token to a plain color value.
+ *
+ * The rendered SVG is embedded as an image, where page styles do not apply, so
+ * the token is read through a hidden probe and painted once to read back a
+ * portable color. It falls back when the environment resolves neither.
+ *
+ * @param token - The custom property name, including the leading dashes
+ * @param fallback - The color used when the token cannot be resolved
+ * @returns The resolved color as `#rrggbb`
+ */
+function resolveTokenColor(token: string, fallback: string) {
+  const context = document.createElement("canvas").getContext("2d")
+  if (!context) {
+    return fallback
+  }
+
+  const probe = document.createElement("span")
+  probe.style.display = "none"
+  probe.style.color = `var(${token})`
+  document.body.append(probe)
+  const resolvedColor = window.getComputedStyle(probe).color
+  probe.remove()
+
+  context.fillStyle = fallback
+  context.fillStyle = resolvedColor
+  context.fillRect(0, 0, 1, 1)
+  const [red, green, blue] = context.getImageData(0, 0, 1, 1).data
+
+  return `#${[red, green, blue]
+    .map((channel) => channel.toString(16).padStart(2, "0"))
+    .join("")}`
 }
 
 function CopyFeedback({ state }: { state: CopyState }) {
@@ -264,37 +301,41 @@ function MermaidCodeBlock({ code }: MarkdownCodeBlockProps) {
   const { t } = useLanguage()
   const { state, copy } = useCopyState()
   const [showSource, setShowSource] = React.useState(false)
-  const isDark = React.useSyncExternalStore(
+  const themeKey = React.useSyncExternalStore(
     subscribeToTheme,
-    isDarkTheme,
-    () => false,
+    themeSnapshot,
+    () => "light:neutral",
   )
   const [rendered, setRendered] = React.useState<MermaidRender | null>(null)
-  const currentRender = rendered?.isDark === isDark ? rendered : null
+  const currentRender = rendered?.themeKey === themeKey ? rendered : null
 
   React.useEffect(() => {
     if (code.length > MAX_RICH_CODE_CHARS) return
     let active = true
+    const isDark = themeKey.startsWith("dark")
     void import("beautiful-mermaid")
       .then(({ renderMermaidSVG }) => {
         try {
           const svg = renderMermaidSVG(code, {
-            bg: isDark ? "#18181b" : "#ffffff",
-            fg: isDark ? "#fafafa" : "#27272a",
+            bg: resolveTokenColor("--card", isDark ? "#18181b" : "#ffffff"),
+            fg: resolveTokenColor(
+              "--foreground",
+              isDark ? "#fafafa" : "#27272a"
+            ),
             transparent: true,
           })
-          if (active) setRendered({ code, isDark, svg })
+          if (active) setRendered({ code, themeKey, svg })
         } catch {
-          if (active) setRendered({ code, isDark, svg: null })
+          if (active) setRendered({ code, themeKey, svg: null })
         }
       })
       .catch(() => {
-        if (active) setRendered({ code, isDark, svg: null })
+        if (active) setRendered({ code, themeKey, svg: null })
       })
     return () => {
       active = false
     }
-  }, [code, isDark])
+  }, [code, themeKey])
 
   if (!currentRender?.svg) {
     const failed =

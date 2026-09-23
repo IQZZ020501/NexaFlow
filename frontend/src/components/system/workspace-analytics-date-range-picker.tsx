@@ -371,7 +371,7 @@ export function WorkspaceAnalyticsDateRangePicker({
                           !isEnd &&
                           "ring-1 ring-border",
                         (isStart || isEnd) &&
-                          "bg-primary text-primary-foreground ring-0 hover:bg-primary/80"
+                          "bg-primary text-primary-foreground ring-0 hover:bg-primary/90"
                       )}
                     >
                       {date.getDate()}

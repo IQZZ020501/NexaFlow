@@ -55,7 +55,12 @@ mockNextNavigation({
 mockNextImage()
 mockNextLink()
 mock.module("@/contexts/theme-provider", () => ({
-  useTheme: () => ({ theme: "system", setTheme: () => undefined }),
+  useTheme: () => ({
+    theme: "system",
+    setTheme: () => undefined,
+    palette: "neutral",
+    setPalette: () => undefined,
+  }),
   ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
 }))
 

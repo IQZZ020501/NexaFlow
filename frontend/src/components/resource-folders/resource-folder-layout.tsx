@@ -89,6 +89,7 @@ export function ResourceFolderLayout({
       <div
         id="resource-folder-panel"
         ref={panelRef}
+        data-theme-sidebar-panel="true"
         className={cn(
           "min-w-0",
           !isFolderPanelOpen && "hidden",

@@ -228,6 +228,15 @@ not trigger unrelated cleanup.
   under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
   intentionally promoted to pages.
+- Appearance uses two orthogonal client-side axes: the light/dark/system mode and
+  the color palette. Both persist in local storage, apply to `<html>`, and are
+  bootstrapped before paint by the root layout script. A palette is a
+  `[data-palette]` token block in `frontend/src/app/globals.css` plus a matching
+  entry in `frontend/src/lib/theme-options.ts`; it overrides the neutral tokens
+  once per color scheme, and the dark selector also matches nested elements so a
+  menu can preview a palette that is not active. Do not express a palette with
+  `light-dark()`: a custom property carrying it does not resolve when a utility
+  substitutes the value.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
   service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
   rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds
