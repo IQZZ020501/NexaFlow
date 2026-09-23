@@ -1836,6 +1836,31 @@ def assert_http_external_access() -> None:
             )
             assert member_docs.status_code == 200, member_docs.text
 
+            # ---- a workspace admin who does not own the agent cannot mint keys ----
+            other_admin_id, other_temporary = create_workspace_user(
+                client, admin_token, workspace_id, "access-admin"
+            )
+            other_admin_token = activate_user(
+                client, "access-admin", other_temporary, MEMBER_PASSWORD
+            )
+            promoted = client.patch(
+                f"/api/v1/workspaces/{workspace_id}/members/{other_admin_id}",
+                headers=auth_headers(admin_token),
+                json={"role": "admin"},
+            )
+            assert promoted.status_code == 200, promoted.text
+            other_admin_create = client.post(
+                f"{management_base}/api-credentials",
+                headers=auth_headers(other_admin_token),
+                json={"name": "Foreign key"},
+            )
+            assert other_admin_create.status_code == 403, other_admin_create.text
+            other_admin_list = client.get(
+                f"{management_base}/api-credentials",
+                headers=auth_headers(other_admin_token),
+            )
+            assert other_admin_list.status_code == 403, other_admin_list.text
+
             # ---- credentials: create/list ----
             key_a = client.post(
                 f"{management_base}/api-credentials",
