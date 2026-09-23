@@ -242,6 +242,11 @@ export const en = {
   公告已更新: "Announcement updated",
   公告已发布: "Announcement published",
   公告已归档: "Announcement archived",
+  "确定删除公告“{title}”？此操作不可恢复。":
+    "Delete announcement “{title}”? This action cannot be undone.",
+  "删除公告：{value}": "Delete announcement: {value}",
+  删除公告: "Delete announcement",
+  公告已删除: "Announcement deleted",
   请先选择工作空间: "Select a workspace first",
   正在加载公告: "Loading announcements",
   无法加载公告: "Announcements could not be loaded",

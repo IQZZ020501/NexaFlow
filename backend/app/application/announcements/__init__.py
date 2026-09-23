@@ -6,6 +6,7 @@ from app.application.announcements.live import (
 from app.application.announcements.service import (
     archive_announcement,
     create_announcement,
+    delete_announcement,
     get_message_summary,
     list_announcements,
     list_messages,
@@ -19,6 +20,7 @@ __all__ = [
     "MessageStreamUpdate",
     "archive_announcement",
     "create_announcement",
+    "delete_announcement",
     "get_message_summary",
     "list_announcements",
     "list_messages",

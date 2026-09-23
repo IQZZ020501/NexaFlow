@@ -200,6 +200,28 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
         assert live_publisher.publish.await_count == 4
         assert live_publisher.close.await_count == 4
 
+        cannot_delete_published = client.delete(
+            f"/api/v1/admin/announcements/{global_id}",
+            headers=headers,
+        )
+        assert cannot_delete_published.status_code == 409, cannot_delete_published.text
+
+        deleted_workspace = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/announcements/{workspace_id_notice}",
+            headers=headers,
+        )
+        assert deleted_workspace.status_code == 204, deleted_workspace.text
+        remaining_workspace_announcements = client.get(
+            f"/api/v1/workspaces/{workspace_id}/announcements",
+            headers=headers,
+        )
+        assert remaining_workspace_announcements.status_code == 200, (
+            remaining_workspace_announcements.text
+        )
+        assert workspace_id_notice not in {
+            item["id"] for item in remaining_workspace_announcements.json()
+        }
+
         denied_global = client.get(
             "/api/v1/admin/announcements",
             headers=auth_headers(member_token),

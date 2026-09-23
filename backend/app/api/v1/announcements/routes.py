@@ -14,6 +14,7 @@ from app.api.deps import (
 from app.application.announcements import (
     archive_announcement,
     create_announcement,
+    delete_announcement,
     get_message_summary,
     list_announcements,
     list_messages,
@@ -241,6 +242,24 @@ async def archive_global_announcement(
     )
 
 
+@global_admin_router.delete(
+    "/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_global_announcement(
+    announcement_id: str,
+    actor: GlobalAdminDep,
+    db: DbSessionDep,
+) -> Response:
+    await delete_announcement(
+        db,
+        scope_type="global",
+        workspace_id=None,
+        announcement_id=announcement_id,
+        actor=actor,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @workspace_router.get("", response_model=list[AnnouncementResponse])
 async def list_workspace_announcements(
     context: WorkspaceAdminContextDep,
@@ -326,3 +345,19 @@ async def archive_workspace_announcement(
         actor=context.user,
         settings=settings,
     )
+
+
+@workspace_router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_announcement(
+    announcement_id: str,
+    context: WorkspaceAdminContextDep,
+    db: DbSessionDep,
+) -> Response:
+    await delete_announcement(
+        db,
+        scope_type="workspace",
+        workspace_id=context.workspace.id,
+        announcement_id=announcement_id,
+        actor=context.user,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
