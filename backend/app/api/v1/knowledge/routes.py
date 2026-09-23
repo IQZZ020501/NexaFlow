@@ -287,13 +287,18 @@ async def list_workspace_knowledge_document_chunks(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeDocumentChunkResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    await require_knowledge_base_permission(
+    permission = await require_knowledge_base_permission(
         db,
         knowledge_base,
         context.user,
         {"view", "edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db,
+        knowledge_base,
+        document_id,
+        include_staged=permission == "edit",
+    )
     return await list_knowledge_document_chunks(db, knowledge_base, document, limit, offset)
 
 
@@ -310,13 +315,18 @@ async def list_workspace_knowledge_document_tasks(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeTaskResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    await require_knowledge_base_permission(
+    permission = await require_knowledge_base_permission(
         db,
         knowledge_base,
         context.user,
         {"view", "edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db,
+        knowledge_base,
+        document_id,
+        include_staged=permission == "edit",
+    )
     return await list_knowledge_tasks(db, knowledge_base, document, limit, offset)
 
 
@@ -342,7 +352,9 @@ async def parse_workspace_knowledge_base_document(
         context.user,
         {"edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db, knowledge_base, document_id, include_staged=True
+    )
     task = await enqueue_parse_knowledge_document(db, knowledge_base, document, context.user, payload)
     await dispatch_knowledge_task(task.id, settings)
     return task
@@ -367,7 +379,9 @@ async def index_workspace_knowledge_base_document(
         context.user,
         {"edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db, knowledge_base, document_id, include_staged=True
+    )
     task = await enqueue_index_knowledge_document(db, knowledge_base, document, context.user)
     await dispatch_knowledge_task(task.id, settings)
     return task
@@ -407,13 +421,19 @@ async def list_workspace_knowledge_base_tasks(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[KnowledgeTaskResponse]:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
-    await require_knowledge_base_permission(
+    permission = await require_knowledge_base_permission(
         db,
         knowledge_base,
         context.user,
         {"view", "edit"},
     )
-    return await list_knowledge_tasks(db, knowledge_base, limit=limit, offset=offset)
+    return await list_knowledge_tasks(
+        db,
+        knowledge_base,
+        limit=limit,
+        offset=offset,
+        exclude_staged_documents=permission != "edit",
+    )
 
 
 @router.post(

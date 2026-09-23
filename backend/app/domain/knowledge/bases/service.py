@@ -272,6 +272,8 @@ async def update_knowledge_base(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
 
     details = payload.model_dump(exclude_unset=True)
+    if payload.status is not None and payload.status not in KNOWLEDGE_BASE_STATUSES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge base status.")
     if knowledge_base.status == ARCHIVED_STATUS:
         if details != {"status": ACTIVE_STATUS}:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Knowledge base is archived.")
@@ -283,14 +285,16 @@ async def update_knowledge_base(
             actor,
             {"edit"},
         )
+        if payload.status is not None and payload.status != knowledge_base.status:
+            # Archiving stays with the creator: an ``edit`` grantee must not be
+            # able to freeze a knowledge base that only the owner can restore.
+            require_can_manage_permissions(knowledge_base, actor)
 
     if payload.name is not None:
         knowledge_base.name = normalize_name(payload.name)
     if payload.description is not None:
         knowledge_base.description = payload.description.strip()
     if payload.status is not None:
-        if payload.status not in KNOWLEDGE_BASE_STATUSES:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge base status.")
         knowledge_base.status = payload.status
     if "embedding_model_id" in details:
         embedding_model = await get_knowledge_model(

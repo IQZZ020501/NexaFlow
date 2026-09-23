@@ -3424,34 +3424,34 @@ function KnowledgeBasePageContent({
                               ) : null}
                               <CardMoreMenu label={t("更多")}>
                                 {selectable ? (
-                                  <>
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        setMoveKnowledgeBaseTarget(
-                                          knowledgeBase
-                                        )
-                                      }
-                                    >
-                                      <FolderInputIcon />
-                                      {t("移动到文件夹")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onSelect={() =>
-                                        void handleToggleStatus(knowledgeBase)
-                                      }
-                                    >
-                                      {knowledgeBase.status === "active" ? (
-                                        <ArchiveIcon />
-                                      ) : (
-                                        <RotateCcwIcon />
-                                      )}
-                                      {t(
-                                        knowledgeBase.status === "active"
-                                          ? "归档知识库"
-                                          : "恢复知识库"
-                                      )}
-                                    </DropdownMenuItem>
-                                  </>
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      setMoveKnowledgeBaseTarget(
+                                        knowledgeBase
+                                      )
+                                    }
+                                  >
+                                    <FolderInputIcon />
+                                    {t("移动到文件夹")}
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {canManagePermissions(knowledgeBase) ? (
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      void handleToggleStatus(knowledgeBase)
+                                    }
+                                  >
+                                    {knowledgeBase.status === "active" ? (
+                                      <ArchiveIcon />
+                                    ) : (
+                                      <RotateCcwIcon />
+                                    )}
+                                    {t(
+                                      knowledgeBase.status === "active"
+                                        ? "归档知识库"
+                                        : "恢复知识库"
+                                    )}
+                                  </DropdownMenuItem>
                                 ) : null}
                                 {selectable &&
                                 canManagePermissions(knowledgeBase) ? (

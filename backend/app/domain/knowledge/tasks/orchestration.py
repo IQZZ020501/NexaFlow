@@ -227,6 +227,8 @@ async def get_knowledge_document(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document_id: str,
+    *,
+    include_staged: bool = False,
 ) -> KnowledgeDocument:
     document = await knowledge_base_repository.get_knowledge_document_by_id(db, document_id)
     if (
@@ -234,6 +236,7 @@ async def get_knowledge_document(
         or document.workspace_id != knowledge_base.workspace_id
         or document.knowledge_base_id != knowledge_base.id
         or document.status == DOCUMENT_DELETED_STATUS
+        or (not include_staged and bool((document.meta or {}).get(DOCUMENT_STAGED_META_KEY)))
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge document not found.")
     return document
@@ -283,6 +286,8 @@ async def list_knowledge_tasks(
     document: KnowledgeDocument | None = None,
     limit: int | None = None,
     offset: int = 0,
+    *,
+    exclude_staged_documents: bool = False,
 ) -> list[KnowledgeTaskResponse]:
     tasks = await knowledge_base_repository.list_knowledge_tasks(
         db,
@@ -290,6 +295,7 @@ async def list_knowledge_tasks(
         document.id if document else None,
         limit,
         offset,
+        exclude_staged_documents=exclude_staged_documents,
     )
     return [task_to_response(task) for task in tasks]
 
@@ -1030,7 +1036,9 @@ async def retry_knowledge_task(
         task.processed_items = 0
 
     if task.document_id is not None:
-        document = await get_knowledge_document(db, knowledge_base, task.document_id)
+        document = await get_knowledge_document(
+            db, knowledge_base, task.document_id, include_staged=True
+        )
         if task.task_type == TASK_PARSE:
             document.status = DOCUMENT_PARSE_QUEUED_STATUS
         elif task.task_type == TASK_INDEX:
@@ -1112,7 +1120,9 @@ async def stop_knowledge_task(
             cancellation_deadline,
         )
     if task.document_id is not None:
-        document = await get_knowledge_document(db, knowledge_base, task.document_id)
+        document = await get_knowledge_document(
+            db, knowledge_base, task.document_id, include_staged=True
+        )
         if task.task_type == TASK_PARSE:
             document.status = DOCUMENT_PARSE_FAILED_STATUS
             document.last_error = TASK_STOPPED_MESSAGE
