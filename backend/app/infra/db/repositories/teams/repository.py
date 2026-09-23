@@ -122,6 +122,21 @@ async def get_team_membership(
     return mapping.to_entity(TeamMembership, row) if row is not None else None
 
 
+async def list_team_admin_memberships_for_user(
+    db: AsyncSession,
+    workspace_id: str,
+    user_id: str,
+) -> list[TeamMembership]:
+    result = await db.scalars(
+        select(TeamMembershipOrm).where(
+            TeamMembershipOrm.workspace_id == workspace_id,
+            TeamMembershipOrm.user_id == user_id,
+            TeamMembershipOrm.role == "admin",
+        )
+    )
+    return [mapping.to_entity(TeamMembership, row) for row in result.all()]
+
+
 async def create_team_membership(
     db: AsyncSession,
     entity: TeamMembership,

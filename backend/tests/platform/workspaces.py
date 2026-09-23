@@ -820,12 +820,29 @@ async def seed_workspace_analytics(
             execution_spec={"builtin": "current_time"},
             definition_hash="1" * 64,
         )
+        archived_tool_source = ToolSource(
+            id="analytics-archived-tool-source",
+            workspace_id=workspace_id,
+            kind="python",
+            name="Archived Python",
+            status="active",
+        )
         other_tool_source = ToolSource(
             id="analytics-other-tool-source",
             workspace_id=other_workspace_id,
             kind="builtin",
             name="Builtin",
             status="active",
+        )
+        archived_tool = Tool(
+            id="analytics-archived-tool",
+            workspace_id=workspace_id,
+            source_id=archived_tool_source.id,
+            kind="python",
+            stable_key="analytics_archived_probe",
+            function_name="analytics_archived_probe",
+            status="archived",
+            availability="unavailable",
         )
         other_tool = Tool(
             id="analytics-other-tool",
@@ -851,12 +868,25 @@ async def seed_workspace_analytics(
         )
         # Tools, versions, and invocations reference each other by key only, so
         # each level is flushed before the next one is inserted.
-        db.add_all([tool_source, other_tool_source])
+        db.add_all([tool_source, archived_tool_source, other_tool_source])
         await db.flush()
-        db.add_all([tool, other_tool])
+        db.add_all([tool, archived_tool, other_tool])
         await db.flush()
-        db.add_all([tool_version, other_tool_version])
+        archived_tool_version = ToolVersion(
+            id="analytics-archived-tool-version",
+            workspace_id=workspace_id,
+            tool_id=archived_tool.id,
+            revision=1,
+            display_name="Archived probe",
+            description="",
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object", "additionalProperties": False},
+            execution_spec={"builtin": "current_time"},
+            definition_hash="3" * 64,
+        )
+        db.add_all([tool_version, archived_tool_version, other_tool_version])
         await db.flush()
+        archived_tool.current_version_id = archived_tool_version.id
         # The current version is a foreign key, so it is linked after insert.
         tool.current_version_id = tool_version.id
         other_tool.current_version_id = other_tool_version.id
@@ -952,6 +982,16 @@ async def seed_workspace_analytics(
                     tool=other_tool,
                     user_id=global_admin_id,
                     run_id=other.id,
+                    status="succeeded",
+                    approved=False,
+                    created_at=current_start + timedelta(days=1),
+                ),
+                # Archived tools no longer exist on the tools page.
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=archived_tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
                     status="succeeded",
                     approved=False,
                     created_at=current_start + timedelta(days=1),
@@ -1159,7 +1199,8 @@ def exercise_workspace_analytics() -> None:
             + tools_inventory["python"]
             + tools_inventory["mcp"]
         )
-        assert tools_inventory["active"] == tools_inventory["total"]
+        # Only the injected archived probe is inactive in this workspace.
+        assert tools_inventory["active"] == tools_inventory["total"] - 1
         assert tools_inventory["builtin"] >= 2
         assert payload["tool_usage"] == {
             "calls": {
@@ -1457,6 +1498,13 @@ def main() -> None:
             json={"user_id": super_admin_id, "role": "member"},
         )
         assert super_joined.status_code == 201, super_joined.text
+
+        # A platform admin keeps workspace-admin authority even with a member row.
+        super_governance = client.get(
+            f"/api/v1/workspaces/{research_workspace_id}/governance",
+            headers=auth_headers(admin_token),
+        )
+        assert super_governance.status_code == 200, super_governance.text
 
         member_knowledge_list = client.get(
             knowledge_url(research_workspace_id),

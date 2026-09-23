@@ -16,6 +16,7 @@ from app.application.knowledge.documents.service import (
 )
 from app.domain.audit.services import record_audit_log
 from app.domain.knowledge.service import delete_workspace_knowledge_bases
+from app.domain.teams.services import ensure_member_is_not_last_team_admin
 from app.domain.tools.catalog.service import (
     ensure_workspace_system_catalog,
     tombstone_workspace_mcp_catalog,
@@ -111,7 +112,10 @@ async def build_workspace_context(
     return WorkspaceContext(
         workspace=workspace,
         user=user,
-        membership_role=membership.role if membership else None,
+        # Platform administrators keep workspace-admin authority even when they
+        # also hold a plain member row; otherwise a workspace admin could demote
+        # them by adding a member membership and lock them out of the workspace.
+        membership_role="admin" if user.is_global_admin else membership.role,
     )
 
 
@@ -440,6 +444,7 @@ async def remove_workspace_member(
     if membership.role == "admin":
         require_global_admin_for_workspace_admin(actor)
     await ensure_not_last_workspace_admin(db, membership)
+    await ensure_member_is_not_last_team_admin(db, workspace.id, user.id)
     record_audit_log(
         db,
         actor,

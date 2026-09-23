@@ -214,6 +214,25 @@ async def ensure_not_last_team_admin(
         )
 
 
+async def ensure_member_is_not_last_team_admin(
+    db: AsyncSession,
+    workspace_id: str,
+    user_id: str,
+) -> None:
+    """Removing a workspace member must not strand one of its teams.
+
+    ``DELETE /workspaces/{id}/members/{uid}`` deletes the member's team
+    memberships through a different path than the team routes, so the
+    last-team-admin invariant has to be re-checked here as well.
+    """
+    for membership in await team_repository.list_team_admin_memberships_for_user(
+        db,
+        workspace_id,
+        user_id,
+    ):
+        await ensure_not_last_team_admin(db, membership)
+
+
 async def list_team_members(
     db: AsyncSession,
     team: Team,
