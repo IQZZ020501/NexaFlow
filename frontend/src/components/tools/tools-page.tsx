@@ -382,7 +382,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     )
   }
   const movableToolIds = filteredTools
-    .filter((tool) => tool.can_manage)
+    .filter((tool) => tool.can_manage && tool.kind !== "builtin")
     .map((tool) => tool.id)
   function upsertTool(updated: ToolSummary) {
     setTools((current) => {

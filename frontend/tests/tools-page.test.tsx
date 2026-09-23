@@ -471,6 +471,47 @@ describe("ToolsPage", () => {
     )
   })
 
+  test("does not batch manage fixed built-in Skills", async () => {
+    const builtinSkills = [
+      ["documents_skill", "Documents Skill"],
+      ["pdf_skill", "PDF Skill"],
+      ["pptx_skill", "PPTX Skill"],
+      ["spreadsheets_skill", "Spreadsheets Skill"],
+    ].map(([functionName, displayName], index) =>
+      tool({
+        id: `tool-builtin-skill-${index}`,
+        kind: "builtin",
+        function_name: functionName,
+        display_name: displayName,
+        source: {
+          id: "source-builtin",
+          name: "Builtin",
+          kind: "builtin",
+          transport: null,
+        },
+        created_by_user_id: null,
+        permission: "admin",
+        can_manage: true,
+      })
+    )
+    const pythonTool = tool()
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/tools?")) {
+        return jsonResponse([...builtinSkills, pythonTool])
+      }
+      return jsonResponse([])
+    }) as typeof fetch
+
+    renderPage(<ToolsPage initialKind="builtin" />)
+    await screen.findByRole("heading", { name: "内置 Skills" })
+    expect(screen.queryByRole("button", { name: "批量管理" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Python" }))
+    await screen.findByText("Owned formatter")
+    expect(screen.getByRole("button", { name: "批量管理" })).toBeTruthy()
+  })
+
   test("filters the current catalog with Skills, MCP, and Python tabs", async () => {
     const builtinTool = tool({
       id: "tool-skill",

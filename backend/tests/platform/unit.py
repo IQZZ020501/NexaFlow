@@ -23,8 +23,12 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from app.application.resource_folders.service import descendant_folder_ids
+from app.application.resource_folders.service import (
+    descendant_folder_ids,
+    move_resource,
+)
 from app.entities.resource_folders.models import ResourceFolder
+from app.schemas.resource_folders.contracts import ResourceFolderMoveRequest
 
 
 def expect_http_error(callback, status_code: int) -> None:
@@ -50,6 +54,46 @@ def test_resource_folder_descendants_cover_nested_children() -> None:
         "child",
         "grandchild",
     }
+
+
+def test_resource_folder_rejects_moving_builtin_tools() -> None:
+    db = SimpleNamespace(commit=AsyncMock())
+    set_resources_folder = AsyncMock()
+
+    async def move_builtin_tool() -> HTTPException:
+        with (
+            patch(
+                "app.application.resource_folders.service.require_managed_tool",
+                new=AsyncMock(return_value=SimpleNamespace(kind="builtin")),
+            ),
+            patch(
+                "app.application.resource_folders.service.repository.set_resources_folder",
+                new=set_resources_folder,
+            ),
+        ):
+            try:
+                await move_resource(
+                    db,
+                    "workspace-1",
+                    ResourceFolderMoveRequest(
+                        resource_type="tool",
+                        resource_id="builtin-tool-1",
+                        folder_id=None,
+                    ),
+                    SimpleNamespace(id="admin-1", is_global_admin=False),
+                    "admin",
+                )
+            except HTTPException as exc:
+                return exc
+        raise AssertionError("expected HTTPException")
+
+    error = asyncio.run(move_builtin_tool())
+
+    assert error.status_code == 422
+    assert error.detail == "Built-in tools cannot be moved."
+    set_resources_folder.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
 
 def test_team_to_response() -> None:
     from app.domain.teams.services import team_to_response
@@ -131,6 +175,7 @@ def test_message_stream_releases_reader_at_lifetime_limit() -> None:
 
 def main() -> None:
     test_resource_folder_descendants_cover_nested_children()
+    test_resource_folder_rejects_moving_builtin_tools()
     test_team_to_response()
     test_workspace_daily_quota_uses_shanghai_day_boundary()
     test_message_stream_releases_reader_at_lifetime_limit()
