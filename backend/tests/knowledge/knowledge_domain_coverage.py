@@ -4868,6 +4868,46 @@ async def run_direct_shareddomain_tests(
         )
         assert found.id == created_docs[1].id
 
+        # staged-document tasks stay hidden from readers without edit rights
+        staged_entity = await knowledge_repository.get_knowledge_document_by_id(
+            db,
+            created_docs[1].id,
+        )
+        assert staged_entity is not None
+        staged_task = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id=new_id(),
+                workspace_id=direct_kb.workspace_id,
+                knowledge_base_id=direct_kb.id,
+                document_id=staged_entity.id,
+                task_type=TASK_PARSE,
+                status=TASK_SUCCEEDED_STATUS,
+                attempts=1,
+                max_attempts=3,
+                total_items=0,
+                processed_items=0,
+                options={},
+                created_by_user_id=alice.id,
+            ),
+        )
+        await db.flush()
+        editor_tasks = await orchestration_service.list_knowledge_tasks(
+            db,
+            direct_kb,
+            staged_entity,
+        )
+        assert [task.id for task in editor_tasks] == [staged_task.id]
+        viewer_tasks = await orchestration_service.list_knowledge_tasks(
+            db,
+            direct_kb,
+            staged_entity,
+            exclude_staged_documents=True,
+        )
+        assert viewer_tasks == []
+        await knowledge_repository.delete_knowledge_task(db, staged_task)
+        await db.flush()
+
         # resolve_embedding_model sets kb model id when absent
         bare_kb = await knowledge_repository.get_knowledge_base_by_id(
             db,
