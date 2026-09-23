@@ -184,7 +184,7 @@ export function AnalyticsToolUsagePanel({
       <CardHeader className="px-5">
         <CardTitle>{t("工具调用")}</CardTitle>
         <CardDescription>
-          {t("所选周期内的工具执行情况与调用最多的工具")}
+          {t("所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）")}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-4 px-5">

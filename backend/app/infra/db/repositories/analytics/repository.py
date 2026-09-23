@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentRun as AgentRunOrm
@@ -186,6 +187,10 @@ async def list_workspace_analytics_tool_calls(
     start_at: datetime,
     end_at: datetime,
 ) -> list[WorkspaceAnalyticsToolCall]:
+    # A tool is reported only while the workspace catalog still lists it, so
+    # re-registered MCP servers and archived probes keep their history out of
+    # the ranking unless an active tool with the same key exists.
+    active_tool = aliased(ToolOrm)
     rows = await db.execute(
         select(
             ToolInvocationOrm.id,
@@ -217,6 +222,13 @@ async def list_workspace_analytics_tool_calls(
             # Agent-internal ledger entries carry no catalog tool reference and
             # would otherwise double-count agent steps as tool usage.
             ToolInvocationOrm.tool_id.is_not(None),
+            select(active_tool.id)
+            .where(
+                active_tool.workspace_id == ToolInvocationOrm.workspace_id,
+                active_tool.stable_key == ToolOrm.stable_key,
+                active_tool.status == "active",
+            )
+            .exists(),
             ToolInvocationOrm.created_at >= start_at,
             ToolInvocationOrm.created_at < end_at,
         )

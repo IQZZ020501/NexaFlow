@@ -256,8 +256,8 @@ export const en = {
   "MCP {mcp} · Python {python} · 内置 {builtin}":
     "MCP {mcp} · Python {python} · Built-in {builtin}",
   工具调用: "Tool calls",
-  "所选周期内的工具执行情况与调用最多的工具":
-    "Tool execution in the selected period and the busiest tools",
+  "所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）":
+    "Tool execution in the selected period and the busiest tools (existing tools only)",
   调用次数: "Calls",
   "上期 {value} 次": "{value} calls previously",
   调用成功率: "Call success rate",
