@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   ActivityIcon,
+  BarChart3Icon,
   Building2Icon,
   ChevronDownIcon,
   LoaderCircleIcon,
@@ -59,10 +60,12 @@ import {
   type AnalyticsRange,
   type RangePreset,
 } from "@/components/system/workspace-analytics-date-range-picker"
-import {
-  formatAnalyticsHour,
-} from "@/components/system/workspace-analytics-metrics"
+import { formatAnalyticsHour } from "@/components/system/workspace-analytics-metrics"
 import { WorkspaceAnalyticsOverview } from "@/components/system/workspace-analytics-overview"
+import {
+  AnalyticsInventoryPanel,
+  AnalyticsToolUsagePanel,
+} from "@/components/system/workspace-analytics-inventory"
 import {
   AnalyticsRankingPanel,
   FrequentQuestionsPanel,
@@ -158,13 +161,14 @@ function TrendChart({
   locale: string
   color: string
 }) {
-  const formatValue = (value: number) => formatTrendValue(value, dataKey, locale)
+  const formatValue = (value: number) =>
+    formatTrendValue(value, dataKey, locale)
   const formatAxisValue = (value: number) =>
     dataKey === "total_tokens"
       ? formatTokenCount(value)
       : formatCompactNumber(value, locale)
   return (
-    <Card className="min-w-0 gap-4 py-5 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
       <CardHeader className="px-5">
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -178,7 +182,13 @@ function TrendChart({
             margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
           >
             <defs>
-              <linearGradient id={`analytics-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+              <linearGradient
+                id={`analytics-${dataKey}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
                 <stop offset="0%" stopColor={color} stopOpacity={0.25} />
                 <stop offset="100%" stopColor={color} stopOpacity={0.03} />
               </linearGradient>
@@ -252,7 +262,7 @@ function HourlyTrendChart({
   const { t } = useLanguage()
   const description = t("所选周期内各小时的运行活跃度")
   return (
-    <Card className="min-w-0 gap-4 py-5 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
       <CardHeader className="px-5">
         <CardTitle>{t("时段活跃曲线")}</CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -362,7 +372,9 @@ export function WorkspaceAnalyticsPage() {
   const workspaceId =
     workspaceOptions.find(
       (workspace) => workspace.id === session.selectedWorkspaceId
-    )?.id ?? workspaceOptions[0]?.id ?? null
+    )?.id ??
+    workspaceOptions[0]?.id ??
+    null
   const selectedWorkspace =
     workspaceOptions.find((workspace) => workspace.id === workspaceId) ?? null
 
@@ -379,19 +391,16 @@ export function WorkspaceAnalyticsPage() {
     setData(null)
     setError(null)
     setLoading(true)
-    getWorkspaceAnalytics(
-      session.token,
-      workspaceId,
-      range,
-      controller.signal
-    )
+    getWorkspaceAnalytics(session.token, workspaceId, range, controller.signal)
       .then((payload) => {
         if (current) setData(payload)
       })
       .catch((loadError: unknown) => {
         if (
           current &&
-          !(loadError instanceof DOMException && loadError.name === "AbortError")
+          !(
+            loadError instanceof DOMException && loadError.name === "AbortError"
+          )
         ) {
           setError(getErrorMessage(loadError, t))
         }
@@ -406,11 +415,17 @@ export function WorkspaceAnalyticsPage() {
   }, [canAccess, range, reloadKey, session.token, t, workspaceId])
 
   if (!session.me || !canAccess) return null
+  const hasActivity =
+    data !== null &&
+    (data.summary.runs.value > 0 || data.summary.tokens.graph_total > 0)
 
   const chartVars = {
-    "--analytics-hourly": "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 190))",
-    "--analytics-runs": "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 245))",
-    "--analytics-tokens": "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.12 300))",
+    "--analytics-hourly":
+      "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 190))",
+    "--analytics-runs":
+      "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 245))",
+    "--analytics-tokens":
+      "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.12 300))",
   } as React.CSSProperties
 
   return (
@@ -418,12 +433,22 @@ export function WorkspaceAnalyticsPage() {
       className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-5"
       style={chartVars}
     >
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("数据大屏")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("按工作空间查看使用规模、活跃度与资源消耗。")}
-          </p>
+      <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+          >
+            <BarChart3Icon className="size-5" />
+          </span>
+          <div className="min-w-0 space-y-1">
+            <h1 className="text-xl font-semibold tracking-tight">
+              {t("数据大屏")}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {t("按工作空间查看使用规模、活跃度与资源消耗。")}
+            </p>
+          </div>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
@@ -440,7 +465,10 @@ export function WorkspaceAnalyticsPage() {
                       ? displayWorkspaceName(selectedWorkspace, t)
                       : t("暂无工作空间")}
                   </span>
-                  <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+                  <ChevronDownIcon
+                    aria-hidden="true"
+                    className="size-4 text-muted-foreground"
+                  />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-64">
@@ -475,24 +503,33 @@ export function WorkspaceAnalyticsPage() {
       </div>
 
       {!workspaceId ? (
-        <Card className="border-dashed py-12 shadow-none">
+        <Card className="rounded-xl border-dashed py-12 shadow-xs">
           <CardContent className="text-center text-sm text-muted-foreground">
             {t("暂无可查看的数据工作空间")}
           </CardContent>
         </Card>
       ) : loading && !data ? (
-        <Card className="py-16 shadow-none">
+        <Card className="rounded-xl py-16 shadow-xs">
           <CardContent className="flex items-center justify-center text-sm text-muted-foreground">
-            <LoaderCircleIcon aria-hidden="true" className="mr-2 size-4 animate-spin" />
+            <LoaderCircleIcon
+              aria-hidden="true"
+              className="mr-2 size-4 animate-spin"
+            />
             {t("正在加载")}
           </CardContent>
         </Card>
       ) : error && !data ? (
-        <Card className="border-destructive/40 py-12 shadow-none">
+        <Card className="rounded-xl border-destructive/40 py-12 shadow-xs">
           <CardContent className="flex flex-col items-center gap-3 text-center">
-            <TriangleAlertIcon aria-hidden="true" className="size-6 text-destructive" />
+            <TriangleAlertIcon
+              aria-hidden="true"
+              className="size-6 text-destructive"
+            />
             <p className="text-sm text-muted-foreground">{error}</p>
-            <Button variant="outline" onClick={() => setReloadKey((value) => value + 1)}>
+            <Button
+              variant="outline"
+              onClick={() => setReloadKey((value) => value + 1)}
+            >
               <RefreshCwIcon data-icon="inline-start" aria-hidden="true" />
               {t("重试")}
             </Button>
@@ -501,7 +538,10 @@ export function WorkspaceAnalyticsPage() {
       ) : data ? (
         <div className="flex min-w-0 flex-col gap-5" aria-busy={loading}>
           {error ? (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm"
+            >
               <span>{error}</span>
               <Button
                 size="sm"
@@ -515,20 +555,10 @@ export function WorkspaceAnalyticsPage() {
 
           <WorkspaceAnalyticsOverview data={data} locale={locale} />
 
-          {data.summary.runs.value === 0 && data.summary.tokens.graph_total === 0 ? (
-            <Card className="border-dashed py-14 shadow-none">
-              <CardContent className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
-                <ActivityIcon aria-hidden="true" className="size-6" />
-                {t("所选范围内暂无运行数据")}
-              </CardContent>
-            </Card>
-          ) : (
+          <AnalyticsInventoryPanel inventory={data.inventory} locale={locale} />
+
+          {hasActivity ? (
             <>
-              <HourlyTrendChart
-                data={data.hourly_runs}
-                locale={locale}
-                color="var(--analytics-hourly)"
-              />
               <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 <TrendChart
                   title={t("每日运行趋势")}
@@ -548,10 +578,18 @@ export function WorkspaceAnalyticsPage() {
                 />
               </div>
 
-              <RunDistributionPanel
-                data={data.distributions}
+              <HourlyTrendChart
+                data={data.hourly_runs}
+                locale={locale}
+                color="var(--analytics-hourly)"
+              />
+
+              <AnalyticsToolUsagePanel
+                usage={data.tool_usage}
                 locale={locale}
               />
+
+              <RunDistributionPanel data={data.distributions} locale={locale} />
 
               <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 <AnalyticsRankingPanel data={data.rankings} locale={locale} />
@@ -561,6 +599,19 @@ export function WorkspaceAnalyticsPage() {
                   locale={locale}
                 />
               </div>
+            </>
+          ) : (
+            <>
+              <AnalyticsToolUsagePanel
+                usage={data.tool_usage}
+                locale={locale}
+              />
+              <Card className="rounded-xl border-dashed py-14 shadow-xs">
+                <CardContent className="flex flex-col items-center gap-2 text-center text-sm text-muted-foreground">
+                  <ActivityIcon aria-hidden="true" className="size-6" />
+                  {t("所选范围内暂无运行数据")}
+                </CardContent>
+              </Card>
             </>
           )}
         </div>

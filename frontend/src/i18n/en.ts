@@ -247,6 +247,28 @@ export const en = {
   访问来源分布: "Access source distribution",
   运行状态分布: "Run status distribution",
   运行分布: "Run distribution",
+  资产概览: "Assets",
+  "工作空间内的应用、知识、工具与模型规模":
+    "Applications, knowledge, tools, and models in this workspace",
+  "Agent {agents} · 工作流 {workflows} · 已发布 {published}":
+    "Agents {agents} · Workflows {workflows} · Published {published}",
+  "文档 {documents} · 片段 {chunks}": "Documents {documents} · Chunks {chunks}",
+  "MCP {mcp} · Python {python} · 内置 {builtin}":
+    "MCP {mcp} · Python {python} · Built-in {builtin}",
+  工具调用: "Tool calls",
+  "所选周期内的工具执行情况与调用最多的工具":
+    "Tool execution in the selected period and the busiest tools",
+  调用次数: "Calls",
+  "上期 {value} 次": "{value} calls previously",
+  调用成功率: "Call success rate",
+  "失败 {failed} 次": "{failed} failed calls",
+  需审批调用: "Requiring approval",
+  调用最多的工具: "Busiest tools",
+  "所选范围内暂无工具调用": "No tool calls in the selected range",
+  "启用成员 {active} / {total}": "Active members {active} / {total}",
+  "公开与 API 运行 {runs} 次": "{runs} public and API runs",
+  "输入 {input} · 输出 {output}": "Input {input} · Output {output}",
+  "失败与取消 {value} 次": "{value} failed or cancelled runs",
   "按类型、来源和状态查看运行构成":
     "Run composition by type, source, and status",
   运行类型: "Run type",
@@ -1178,6 +1200,7 @@ export const en = {
   调用结果: "Result",
   内容过长已截断: "Content too long, truncated",
   未知文档: "Unknown document",
+  未知工具: "Unknown tool",
   未检索到相关知识片段: "No relevant knowledge fragments found",
   发送问题: "Send question",
   "智能 Agent": "Agent",

@@ -9,10 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.agents.models import agent_run_display_status
 from app.domain.audit.services import record_audit_log
+from app.domain.tools.runtime import (
+    TOOL_INVOCATION_FAILED,
+    TOOL_INVOCATION_SUCCEEDED,
+    TOOL_INVOCATION_UNCERTAIN,
+)
 from app.entities.analytics import (
     WorkspaceAnalyticsGraphBuild,
+    WorkspaceAnalyticsInventory,
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
+    WorkspaceAnalyticsToolCall,
 )
 from app.entities.defaults import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
 from app.entities.identity.user import User
@@ -27,6 +34,10 @@ from app.schemas.analytics import (
     WorkspaceAnalyticsDistributions,
     WorkspaceAnalyticsFrequentQuestion,
     WorkspaceAnalyticsHourlyPoint,
+    WorkspaceAnalyticsInventoryApplications,
+    WorkspaceAnalyticsInventoryKnowledge,
+    WorkspaceAnalyticsInventoryResponse,
+    WorkspaceAnalyticsInventoryTools,
     WorkspaceAnalyticsMemberSummary,
     WorkspaceAnalyticsMetadata,
     WorkspaceAnalyticsRankings,
@@ -34,6 +45,8 @@ from app.schemas.analytics import (
     WorkspaceAnalyticsSummary,
     WorkspaceAnalyticsTeamRankingItem,
     WorkspaceAnalyticsTokenSummary,
+    WorkspaceAnalyticsToolRankingItem,
+    WorkspaceAnalyticsToolUsage,
     WorkspaceAnalyticsTrendPoint,
     WorkspaceAnalyticsUserRankingItem,
 )
@@ -43,6 +56,7 @@ DEFAULT_ANALYTICS_DAYS = 30
 MAX_ANALYTICS_DAYS = 366
 FREQUENT_QUESTION_MIN_COUNT = 3
 FREQUENT_QUESTION_LIMIT = 20
+TOOL_RANKING_LIMIT = 8
 FREQUENT_QUESTION_MAX_LENGTH = 200
 TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled"}
 
@@ -469,6 +483,127 @@ def _build_rankings(
     )
 
 
+def _inventory_response(
+    inventory: WorkspaceAnalyticsInventory,
+) -> WorkspaceAnalyticsInventoryResponse:
+    """Map the inventory snapshot onto its response contract.
+
+    Parameters:
+    	inventory (WorkspaceAnalyticsInventory): Workspace-scoped resource counts.
+
+    Returns:
+    	WorkspaceAnalyticsInventoryResponse: Applications, knowledge, tools, and model counts.
+    """
+    return WorkspaceAnalyticsInventoryResponse(
+        applications=WorkspaceAnalyticsInventoryApplications(
+            total=inventory.applications.total,
+            agents=inventory.applications.agents,
+            workflows=inventory.applications.workflows,
+            published=inventory.applications.published,
+            active=inventory.applications.active,
+        ),
+        knowledge=WorkspaceAnalyticsInventoryKnowledge(
+            bases=inventory.knowledge.bases,
+            documents=inventory.knowledge.documents,
+            chunks=inventory.knowledge.chunks,
+        ),
+        tools=WorkspaceAnalyticsInventoryTools(
+            total=inventory.tools.total,
+            mcp=inventory.tools.mcp,
+            python=inventory.tools.python,
+            builtin=inventory.tools.builtin,
+            active=inventory.tools.active,
+        ),
+        models=inventory.models,
+    )
+
+
+def _build_tool_usage(
+    current_calls: list[WorkspaceAnalyticsToolCall],
+    previous_calls: list[WorkspaceAnalyticsToolCall],
+) -> WorkspaceAnalyticsToolUsage:
+    """Summarize tool invocations for the period and its comparison window.
+
+    Calls that never reached a terminal state stay in the call count but are
+    excluded from the success rate, mirroring how run success rate is derived.
+
+    Parameters:
+    	current_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the current period.
+    	previous_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the previous period.
+
+    Returns:
+    	WorkspaceAnalyticsToolUsage: Call volume comparison, success rate, approval count, and top tools.
+    """
+    current_succeeded = sum(
+        1 for call in current_calls if call.status == TOOL_INVOCATION_SUCCEEDED
+    )
+    current_failed = sum(
+        1
+        for call in current_calls
+        if call.status in {TOOL_INVOCATION_FAILED, TOOL_INVOCATION_UNCERTAIN}
+    )
+    previous_succeeded = sum(
+        1 for call in previous_calls if call.status == TOOL_INVOCATION_SUCCEEDED
+    )
+    previous_failed = sum(
+        1
+        for call in previous_calls
+        if call.status in {TOOL_INVOCATION_FAILED, TOOL_INVOCATION_UNCERTAIN}
+    )
+    current_terminal = current_succeeded + current_failed
+    previous_terminal = previous_succeeded + previous_failed
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for call in current_calls:
+        values = grouped.setdefault(
+            call.tool_id,
+            {
+                "name": call.tool_name,
+                "kind": call.tool_kind,
+                "calls": 0,
+                "failed": 0,
+                "terminal": 0,
+                "succeeded": 0,
+            },
+        )
+        values["calls"] += 1
+        if call.status in {TOOL_INVOCATION_FAILED, TOOL_INVOCATION_UNCERTAIN}:
+            values["failed"] += 1
+        if call.status in {TOOL_INVOCATION_SUCCEEDED, TOOL_INVOCATION_FAILED, TOOL_INVOCATION_UNCERTAIN}:
+            values["terminal"] += 1
+            values["succeeded"] += int(call.status == TOOL_INVOCATION_SUCCEEDED)
+
+    top_tools = sorted(
+        (
+            WorkspaceAnalyticsToolRankingItem(
+                tool_id=tool_id,
+                name=values["name"],
+                kind=values["kind"],
+                calls=values["calls"],
+                failed=values["failed"],
+                success_rate=(
+                    values["succeeded"] / values["terminal"]
+                    if values["terminal"]
+                    else None
+                ),
+            )
+            for tool_id, values in grouped.items()
+        ),
+        key=lambda item: (-item.calls, -item.failed, item.name.casefold()),
+    )[:TOOL_RANKING_LIMIT]
+
+    return WorkspaceAnalyticsToolUsage(
+        calls=_count_comparison(len(current_calls), len(previous_calls)),
+        failed=current_failed,
+        success_rate=_ratio_comparison(
+            current_succeeded / current_terminal if current_terminal else None,
+            previous_succeeded / previous_terminal if previous_terminal else None,
+        ),
+        approval_required=sum(1 for call in current_calls if call.approved),
+        top_tools=top_tools,
+    )
+
+
 def _build_frequent_questions(
     runs: list[WorkspaceAnalyticsRun],
 ) -> list[WorkspaceAnalyticsFrequentQuestion]:
@@ -526,6 +661,10 @@ async def get_workspace_analytics(
     """
     period = resolve_analytics_period(from_date, to_date)
     counts = await analytics_repository.get_workspace_analytics_counts(db, workspace.id)
+    inventory = await analytics_repository.get_workspace_analytics_inventory(
+        db,
+        workspace.id,
+    )
     team_members = await analytics_repository.list_workspace_analytics_team_members(
         db,
         workspace.id,
@@ -537,6 +676,12 @@ async def get_workspace_analytics(
         period.end_at,
     )
     all_graph_builds = await analytics_repository.list_workspace_analytics_graph_builds(
+        db,
+        workspace.id,
+        period.previous_start_at,
+        period.end_at,
+    )
+    all_tool_calls = await analytics_repository.list_workspace_analytics_tool_calls(
         db,
         workspace.id,
         period.previous_start_at,
@@ -561,6 +706,16 @@ async def get_workspace_analytics(
         build
         for build in all_graph_builds
         if build.created_at is not None and _utc(build.created_at) < period.start_at
+    ]
+    current_tool_calls = [
+        call
+        for call in all_tool_calls
+        if call.created_at is not None and _utc(call.created_at) >= period.start_at
+    ]
+    previous_tool_calls = [
+        call
+        for call in all_tool_calls
+        if call.created_at is not None and _utc(call.created_at) < period.start_at
     ]
     current = _summarize_period(current_runs)
     previous = _summarize_period(previous_runs)
@@ -604,6 +759,8 @@ async def get_workspace_analytics(
                 previous.average_duration_ms,
             ),
         ),
+        inventory=_inventory_response(inventory),
+        tool_usage=_build_tool_usage(current_tool_calls, previous_tool_calls),
         trends=_build_trends(current_runs, current_graph_builds, period),
         hourly_runs=_build_hourly_runs(current_runs),
         distributions=WorkspaceAnalyticsDistributions(

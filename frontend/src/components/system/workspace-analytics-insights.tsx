@@ -5,12 +5,7 @@ import {
   MessageCircleQuestionIcon,
   WorkflowIcon,
 } from "lucide-react"
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-} from "recharts"
+import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,6 +22,7 @@ import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import { APP_TIME_ZONE, formatTokenCount } from "@/lib/display"
 import {
   distributionTotal,
+  formatAnalyticsNumber as formatNumber,
 } from "@/components/system/workspace-analytics-metrics"
 
 type DistributionKind = "type" | "source" | "status"
@@ -69,10 +65,6 @@ const STATUS_LABELS: Record<string, TranslationKey> = {
  * @param locale - The locale used for formatting
  * @returns The locale-formatted number
  */
-function formatNumber(value: number, locale: string) {
-  return new Intl.NumberFormat(locale).format(value)
-}
-
 /**
  * Formats a fractional value as a localized percentage.
  *
@@ -111,11 +103,7 @@ function formatDateTime(value: string, locale: string) {
  * @param kind - The distribution category
  * @returns The localized label, or the original key when no status label is defined
  */
-function distributionLabel(
-  key: string,
-  kind: DistributionKind,
-  t: TFunction
-) {
+function distributionLabel(key: string, kind: DistributionKind, t: TFunction) {
   if (kind === "type") return key === "workflow" ? t("工作流") : t("Agent")
   if (kind === "source") {
     if (key === "public") return t("公开访问")
@@ -182,7 +170,8 @@ function DonutChart({
   const { t } = useLanguage()
   const total = distributionTotal(items)
   const dominant = dominantItem(items)
-  const successCount = items.find((item) => item.key === "succeeded")?.count ?? 0
+  const successCount =
+    items.find((item) => item.key === "succeeded")?.count ?? 0
   const centerItem = kind === "status" ? null : dominant
   const centerLabel =
     kind === "status"
@@ -193,7 +182,8 @@ function DonutChart({
   const centerValue =
     total && (kind === "status" || centerItem)
       ? `${Math.round(
-          ((kind === "status" ? successCount : centerItem?.count ?? 0) / total) *
+          ((kind === "status" ? successCount : (centerItem?.count ?? 0)) /
+            total) *
             100
         )}%`
       : "—"
@@ -229,10 +219,10 @@ function DonutChart({
           </ResponsiveContainer>
         ) : null}
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <strong className="text-xl font-semibold leading-none tabular-nums">
+          <strong className="text-xl leading-none font-semibold tabular-nums">
             {centerValue}
           </strong>
-          <span className="absolute left-1/2 top-1/2 mt-3 flex h-6 w-20 -translate-x-1/2 items-start justify-center text-center text-[10px] leading-3 text-muted-foreground">
+          <span className="absolute top-1/2 left-1/2 mt-3 flex h-6 w-20 -translate-x-1/2 items-start justify-center text-center text-[10px] leading-3 text-muted-foreground">
             {centerLabel}
           </span>
         </div>
@@ -250,7 +240,9 @@ function DonutChart({
                   <span
                     aria-hidden="true"
                     className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: itemColor(kind, item.key, index) }}
+                    style={{
+                      backgroundColor: itemColor(kind, item.key, index),
+                    }}
                   />
                   <span className="truncate" title={label}>
                     {label}
@@ -290,7 +282,7 @@ export function RunDistributionPanel({
 }) {
   const { t } = useLanguage()
   return (
-    <Card className="min-w-0 gap-0 py-0 shadow-none">
+    <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-xs">
       <CardHeader className="border-b px-5 py-5">
         <CardTitle>{t("运行分布")}</CardTitle>
         <CardDescription>{t("按类型、来源和状态查看运行构成")}</CardDescription>
@@ -302,7 +294,11 @@ export function RunDistributionPanel({
         </section>
         <section className="min-w-0 px-5 py-4">
           <h3 className="mb-4 text-sm font-medium">{t("访问来源")}</h3>
-          <DonutChart items={data.access_sources} kind="source" locale={locale} />
+          <DonutChart
+            items={data.access_sources}
+            kind="source"
+            locale={locale}
+          />
         </section>
         <section className="min-w-0 px-5 py-4">
           <h3 className="mb-4 text-sm font-medium">{t("运行状态")}</h3>
@@ -337,7 +333,7 @@ export function AnalyticsRankingPanel({
   ]
 
   return (
-    <Card className="min-w-0 gap-4 py-5 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
       <CardHeader className="gap-3 px-5">
         <CardTitle>{t("使用排行")}</CardTitle>
         <div
@@ -369,21 +365,29 @@ export function AnalyticsRankingPanel({
                 <span className="text-muted-foreground">{index + 1}</span>
                 <span className="flex min-w-0 items-center gap-2 font-medium">
                   {item.app_type === "workflow" ? (
-                    <WorkflowIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <WorkflowIcon
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground"
+                    />
                   ) : (
-                    <BotIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <BotIcon
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground"
+                    />
                   )}
                   <span className="truncate">{item.name}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  {t("运行 {runs} 次", { runs: formatNumber(item.run_count, locale) })}
+                  {t("运行 {runs} 次", {
+                    runs: formatNumber(item.run_count, locale),
+                  })}
                 </span>
                 <span className="tabular-nums">
                   {t("Tokens {tokens}", {
                     tokens: formatTokenCount(item.total_tokens),
                   })}
                 </span>
-                <span className="tabular-nums text-muted-foreground">
+                <span className="text-muted-foreground tabular-nums">
                   {formatPercent(item.success_rate, locale)}
                 </span>
               </div>
@@ -408,7 +412,9 @@ export function AnalyticsRankingPanel({
                 <span className="text-muted-foreground">{index + 1}</span>
                 <span className="truncate font-medium">{item.name}</span>
                 <span className="text-muted-foreground">
-                  {t("运行 {runs} 次", { runs: formatNumber(item.run_count, locale) })}
+                  {t("运行 {runs} 次", {
+                    runs: formatNumber(item.run_count, locale),
+                  })}
                 </span>
                 <span className="tabular-nums">
                   {t("Tokens {tokens}", {
@@ -428,7 +434,10 @@ export function AnalyticsRankingPanel({
                 >
                   <span className="text-muted-foreground">{index + 1}</span>
                   <span className="flex min-w-0 items-center gap-2 font-medium">
-                    <Building2Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    <Building2Icon
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground"
+                    />
                     <span className="truncate">{item.name}</span>
                   </span>
                   <span className="text-muted-foreground">
@@ -437,12 +446,16 @@ export function AnalyticsRankingPanel({
                     })}
                   </span>
                   <span className="tabular-nums">
-                    {t("运行 {runs} 次", { runs: formatNumber(item.run_count, locale) })}
+                    {t("运行 {runs} 次", {
+                      runs: formatNumber(item.run_count, locale),
+                    })}
                   </span>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">{t("暂无团队使用数据")}</p>
+              <p className="text-sm text-muted-foreground">
+                {t("暂无团队使用数据")}
+              </p>
             )}
           </div>
         )}
@@ -469,18 +482,20 @@ export function FrequentQuestionsPanel({
   const visibleItems = items.slice(0, visibleCount)
 
   return (
-    <Card className="min-w-0 gap-4 py-5 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
       <CardHeader className="gap-1 px-5">
         <CardTitle className="flex items-center gap-2">
           <MessageCircleQuestionIcon aria-hidden="true" className="size-4" />
           {t("高频问题")}
         </CardTitle>
-        <CardDescription>{t("仅展示当前工作空间内出现至少 3 次的问题")}</CardDescription>
+        <CardDescription>
+          {t("仅展示当前工作空间内出现至少 3 次的问题")}
+        </CardDescription>
       </CardHeader>
       <CardContent
         role="region"
         aria-label={t("高频问题")}
-        className="max-h-[37.5rem] min-w-0 overflow-y-auto px-5 overscroll-contain max-sm:max-h-[60svh]"
+        className="max-h-[37.5rem] min-w-0 overflow-y-auto overscroll-contain px-5 max-sm:max-h-[60svh]"
         onScroll={(event) => {
           const target = event.currentTarget
           if (
@@ -498,9 +513,13 @@ export function FrequentQuestionsPanel({
                 key={item.question}
                 className="flex min-h-14 min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
               >
-                <p className="min-w-0 whitespace-normal break-words">{item.question}</p>
+                <p className="min-w-0 break-words whitespace-normal">
+                  {item.question}
+                </p>
                 <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
-                  <Badge variant="secondary">{formatNumber(item.count, locale)}</Badge>
+                  <Badge variant="secondary">
+                    {formatNumber(item.count, locale)}
+                  </Badge>
                   <time className="text-xs text-muted-foreground">
                     {formatDateTime(item.latest_at, locale)}
                   </time>
@@ -509,7 +528,9 @@ export function FrequentQuestionsPanel({
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">{t("暂无达到阈值的高频问题")}</p>
+          <p className="text-sm text-muted-foreground">
+            {t("暂无达到阈值的高频问题")}
+          </p>
         )}
       </CardContent>
     </Card>

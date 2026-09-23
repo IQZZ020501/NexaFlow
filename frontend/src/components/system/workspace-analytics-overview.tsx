@@ -1,8 +1,11 @@
 import * as React from "react"
 import {
   ActivityIcon,
+  ArrowDownRightIcon,
+  ArrowUpRightIcon,
   BarChart3Icon,
   CheckCircle2Icon,
+  MinusIcon,
   UsersIcon,
 } from "lucide-react"
 
@@ -11,19 +14,17 @@ import { useLanguage } from "@/contexts/language-provider"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import {
   deriveAnalyticsKeyMetrics,
+  formatAnalyticsNumber as formatNumber,
 } from "@/components/system/workspace-analytics-metrics"
 import { formatTokenCount } from "@/lib/display"
+import { cn } from "@/lib/utils"
 
-/**
- * Formats a number according to locale-specific conventions.
- *
- * @param value - The number to format
- * @param locale - The locale to use for formatting
- * @returns The localized number string
- */
-function formatNumber(value: number, locale: string) {
-  return new Intl.NumberFormat(locale).format(value)
-}
+const TONE_TILE = {
+  sky: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+  violet: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  amber: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+} as const
 
 /**
  * Formats a number with up to one decimal place according to the specified locale.
@@ -58,53 +59,93 @@ function formatPercent(value: number | null, locale: string) {
  * Displays a localized period-over-period percentage comparison.
  *
  * @param value - The percentage change, or `null` when no comparable data is available
- * @returns The localized comparison text or no-comparable-data message
+ * @returns The localized comparison chip
  */
-function Comparison({
-  value,
-}: {
-  value: number | null
-}) {
+function Comparison({ value }: { value: number | null }) {
   const { t } = useLanguage()
-  if (value === null) return <span>{t("上期无可比数据")}</span>
+  if (value === null) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+        {t("上期无可比数据")}
+      </span>
+    )
+  }
   const formatted = `${value > 0 ? "+" : ""}${value.toFixed(1)}`
-  return <span>{t("较上期 {value}%", { value: formatted })}</span>
+  const Icon =
+    value > 0 ? ArrowUpRightIcon : value < 0 ? ArrowDownRightIcon : MinusIcon
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium tabular-nums",
+        value > 0
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          : value < 0
+            ? "bg-destructive/10 text-destructive"
+            : "bg-muted text-muted-foreground"
+      )}
+    >
+      <Icon aria-hidden="true" className="size-3 shrink-0" />
+      {t("较上期 {value}%", { value: formatted })}
+    </span>
+  )
 }
 
 /**
- * Renders a metric card with an icon, label, value, and optional period comparison.
+ * Renders a headline metric with a tinted icon, value, trend chip, and supporting detail.
  *
- * @param icon - Icon component displayed beside the metric
+ * @param icon - Icon component displayed in the metric tile
+ * @param tone - Accent used by the icon tile
  * @param label - Metric label
  * @param value - Formatted metric value
- * @param comparison - Period-over-period change displayed beneath the value.
+ * @param comparison - Period-over-period change displayed beside the value
+ * @param detail - Supporting text rendered beneath the value
  */
 export function CoreMetricCard({
   icon: Icon,
+  tone = "sky",
   label,
   value,
   comparison,
+  detail,
 }: {
   icon: React.ComponentType<{ className?: string }>
+  tone?: keyof typeof TONE_TILE
   label: string
   value: string
   comparison?: number | null
+  detail?: string
 }) {
   return (
-    <Card className="min-h-28 gap-2 py-4 shadow-none">
-      <CardContent className="flex h-full flex-col gap-2 px-4">
-        <div className="flex items-center justify-between gap-3 text-muted-foreground">
-          <span className="text-sm font-medium">{label}</span>
-          <span className="rounded-lg bg-muted p-2 text-muted-foreground">
-            <Icon aria-hidden="true" className="size-4" />
+    <Card className="min-w-0 gap-3 rounded-xl py-4 shadow-xs">
+      <CardContent className="flex flex-col gap-3 px-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm text-muted-foreground">{label}</p>
+            <p className="mt-1 truncate text-2xl font-semibold tracking-tight tabular-nums">
+              {value}
+            </p>
+          </div>
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex size-9 shrink-0 items-center justify-center rounded-lg",
+              TONE_TILE[tone]
+            )}
+          >
+            <Icon className="size-4" />
           </span>
         </div>
-        <strong className="text-2xl font-semibold tracking-tight">{value}</strong>
-        {comparison !== undefined ? (
-          <div className="mt-auto text-xs text-muted-foreground">
-            <Comparison value={comparison} />
-          </div>
-        ) : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          {comparison !== undefined ? <Comparison value={comparison} /> : null}
+          {detail ? (
+            <span
+              className="min-w-0 truncate text-muted-foreground"
+              title={detail}
+            >
+              {detail}
+            </span>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   )
@@ -115,7 +156,7 @@ export function CoreMetricCard({
  *
  * @param label - Metric label
  * @param value - Formatted metric value
- * @param detail - Supporting content displayed beneath the metric value
+ * @param detail - Supporting text displayed beneath the metric value
  * @param comparison - Period-over-period change displayed when `detail` is not provided
  */
 function KeyMetric({
@@ -130,11 +171,13 @@ function KeyMetric({
   comparison?: number | null
 }) {
   return (
-    <div className="min-w-0 border-b pb-3 last:border-b-0 last:pb-0 md:border-b-0 md:border-r md:pr-4 md:last:border-r-0 md:last:pr-0 xl:border-r xl:pb-0">
+    <div className="min-w-0 rounded-lg border bg-muted/20 p-3">
       <p className="truncate text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 truncate text-base font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 truncate text-base font-semibold tabular-nums">
+        {value}
+      </p>
       {detail || comparison !== undefined ? (
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 truncate text-xs text-muted-foreground">
           {detail ?? <Comparison value={comparison ?? null} />}
         </p>
       ) : null}
@@ -161,14 +204,14 @@ export function AnalyticsKeyMetricsPanel({
   const averageDuration = data.summary.average_duration_ms.value
 
   return (
-    <Card className="gap-4 py-5 shadow-none">
+    <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
       <CardHeader className="px-5">
         <CardTitle>{t("关键指标")}</CardTitle>
         <p className="text-sm text-muted-foreground">
           {t("成员、效率与调用概览")}
         </p>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-x-4 gap-y-4 px-5 md:grid-cols-4 xl:grid-cols-7">
+      <CardContent className="grid min-w-0 grid-cols-2 gap-3 px-5 md:grid-cols-4 xl:grid-cols-7">
         <KeyMetric
           label={t("工作空间成员")}
           value={t("{active} / {total}", {
@@ -242,32 +285,52 @@ export function WorkspaceAnalyticsOverview({
   locale: string
 }) {
   const { t } = useLanguage()
+  const derived = deriveAnalyticsKeyMetrics(data)
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <CoreMetricCard
           icon={UsersIcon}
+          tone="sky"
           label={t("活跃用户")}
           value={formatNumber(data.summary.active_users.value, locale)}
           comparison={data.summary.active_users.change_percent}
+          detail={t("启用成员 {active} / {total}", {
+            active: formatNumber(data.summary.members.active, locale),
+            total: formatNumber(data.summary.members.total, locale),
+          })}
         />
         <CoreMetricCard
           icon={BarChart3Icon}
+          tone="violet"
           label={t("运行次数")}
           value={formatNumber(data.summary.runs.value, locale)}
           comparison={data.summary.runs.change_percent}
+          detail={t("公开与 API 运行 {runs} 次", {
+            runs: formatNumber(data.rankings.anonymous.run_count, locale),
+          })}
         />
         <CoreMetricCard
           icon={ActivityIcon}
+          tone="amber"
           label={t("Token 消耗")}
           value={formatTokenCount(data.summary.tokens.total)}
+          comparison={data.summary.tokens.change_percent}
+          detail={t("输入 {input} · 输出 {output}", {
+            input: formatTokenCount(data.summary.tokens.input),
+            output: formatTokenCount(data.summary.tokens.output),
+          })}
         />
         <CoreMetricCard
           icon={CheckCircle2Icon}
+          tone="emerald"
           label={t("运行成功率")}
           value={formatPercent(data.summary.success_rate.value, locale)}
           comparison={data.summary.success_rate.change_percent}
+          detail={t("失败与取消 {value} 次", {
+            value: formatNumber(derived.failedCancelledRuns, locale),
+          })}
         />
       </div>
 

@@ -111,6 +111,52 @@ class WorkspaceAnalyticsFrequentQuestion(BaseModel):
     latest_at: datetime
 
 
+class WorkspaceAnalyticsInventoryApplications(BaseModel):
+    total: int
+    agents: int
+    workflows: int
+    published: int
+    active: int
+
+
+class WorkspaceAnalyticsInventoryKnowledge(BaseModel):
+    bases: int
+    documents: int
+    chunks: int
+
+
+class WorkspaceAnalyticsInventoryTools(BaseModel):
+    total: int
+    mcp: int
+    python: int
+    builtin: int
+    active: int
+
+
+class WorkspaceAnalyticsInventoryResponse(BaseModel):
+    applications: WorkspaceAnalyticsInventoryApplications
+    knowledge: WorkspaceAnalyticsInventoryKnowledge
+    tools: WorkspaceAnalyticsInventoryTools
+    models: int
+
+
+class WorkspaceAnalyticsToolRankingItem(BaseModel):
+    tool_id: str
+    name: str
+    kind: str
+    calls: int
+    failed: int
+    success_rate: float | None
+
+
+class WorkspaceAnalyticsToolUsage(BaseModel):
+    calls: AnalyticsCountComparison
+    failed: int
+    success_rate: AnalyticsRatioComparison
+    approval_required: int
+    top_tools: list[WorkspaceAnalyticsToolRankingItem]
+
+
 class WorkspaceAnalyticsMetadata(BaseModel):
     workspace_id: str
     timezone: Literal["Asia/Shanghai"]
@@ -124,6 +170,8 @@ class WorkspaceAnalyticsMetadata(BaseModel):
 
 class WorkspaceAnalyticsResponse(BaseModel):
     summary: WorkspaceAnalyticsSummary
+    inventory: WorkspaceAnalyticsInventoryResponse
+    tool_usage: WorkspaceAnalyticsToolUsage
     trends: list[WorkspaceAnalyticsTrendPoint]
     hourly_runs: list[WorkspaceAnalyticsHourlyPoint]
     distributions: WorkspaceAnalyticsDistributions
