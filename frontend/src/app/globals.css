@@ -676,8 +676,8 @@ html[data-content-width="wide"] {
 
 @layer components {
   .theme-settings-panel {
-    width: min(100vw, 40rem) !important;
-    max-width: min(100vw, 40rem) !important;
+    width: min(100vw, 28rem) !important;
+    max-width: min(100vw, 28rem) !important;
   }
 
   .theme-page-main {
@@ -691,18 +691,13 @@ html[data-content-width="wide"] {
     min-height: var(--theme-control-default-height);
   }
 
-  .theme-settings-card {
-    position: relative;
-    border: 1px solid var(--border);
+  .theme-settings-option {
+    overflow: visible;
+    background: var(--card);
     transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   }
 
-  .theme-settings-card[data-selected="true"] {
-    border-color: var(--theme-settings-accent);
-    box-shadow: 0 0 0 1px var(--theme-settings-accent);
-  }
-
-  .theme-settings-card:focus-visible {
+  .theme-settings-option:focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
@@ -713,7 +708,8 @@ html[data-content-width="wide"] {
   }
 
   .theme-preset-swatch {
-    min-height: 3.25rem;
+    height: 100%;
+    min-height: 0;
     border-radius: calc(var(--radius) * 0.85);
     border: 1px solid oklch(1 0 0 / 16%);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 12%);
@@ -769,8 +765,10 @@ html[data-content-width="wide"] {
     grid-template-columns: 28% 1fr;
     gap: 0.25rem;
     overflow: hidden;
-    min-height: 4.25rem;
-    padding: 0.4rem;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0.3rem;
     border: 1px solid var(--border);
     border-radius: calc(var(--radius) * 0.8);
     background: var(--preview-bg);
@@ -881,7 +879,8 @@ html[data-content-width="wide"] {
     display: grid;
     gap: 0.35rem;
     width: 100%;
-    min-height: 2.75rem;
+    height: 100%;
+    min-height: 0;
     padding: 0.3rem;
     border: 1px solid var(--border);
     border-radius: calc(var(--radius) * 0.55);

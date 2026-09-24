@@ -43,6 +43,7 @@ type SelectCardProps = {
   onSelect: () => void
   children: React.ReactNode
   className?: string
+  labelClassName?: string
 }
 
 function SelectCard({
@@ -51,6 +52,7 @@ function SelectCard({
   onSelect,
   children,
   className,
+  labelClassName,
 }: SelectCardProps) {
   return (
     <button
@@ -58,18 +60,27 @@ function SelectCard({
       aria-pressed={selected}
       data-selected={selected ? "true" : "false"}
       className={cn(
-        "theme-settings-card flex min-w-0 flex-col gap-1.5 rounded-lg bg-card p-1.5 text-left text-card-foreground hover:bg-accent/40",
+        "group flex min-w-0 flex-col items-stretch text-left outline-none",
         className
       )}
       onClick={onSelect}
     >
-      {children}
-      <span className="truncate px-1 text-xs font-medium">{label}</span>
-      {selected ? (
-        <span className="theme-settings-check absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border-2 border-background shadow-sm">
-          <CheckIcon className="size-3" strokeWidth={3} aria-hidden="true" />
-        </span>
-      ) : null}
+      <div
+        className="theme-settings-option relative h-12 rounded-md ring-1 ring-border transition duration-200 ease-in group-hover:ring-[var(--theme-settings-accent)] group-focus-visible:ring-2 group-focus-visible:ring-ring data-[selected=true]:ring-2 data-[selected=true]:ring-[var(--theme-settings-accent)]"
+        data-selected={selected ? "true" : "false"}
+      >
+        {children}
+        {selected ? (
+          <span className="theme-settings-check absolute -top-1.5 -right-1.5 z-10 flex size-5 items-center justify-center rounded-full border-2 border-background shadow-sm">
+            <CheckIcon className="size-3" strokeWidth={3} aria-hidden="true" />
+          </span>
+        ) : null}
+      </div>
+      <span
+        className={cn("mt-1.5 truncate text-center text-xs", labelClassName)}
+      >
+        {label}
+      </span>
     </button>
   )
 }
@@ -84,7 +95,7 @@ function SettingsSection({
   children: React.ReactNode
 }) {
   return (
-    <section className="space-y-3">
+    <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
         {action}
@@ -96,7 +107,11 @@ function SettingsSection({
 
 function ThemePreview({ value }: { value: "system" | "light" | "dark" }) {
   return (
-    <div className="theme-preview" data-preview-theme={value} aria-hidden="true">
+    <div
+      className="theme-preview"
+      data-preview-theme={value}
+      aria-hidden="true"
+    >
       <div className="theme-preview__sidebar" />
       <div className="theme-preview__content">
         <div className="space-y-1.5">
@@ -112,7 +127,7 @@ function ThemePreview({ value }: { value: "system" | "light" | "dark" }) {
 
 function FontPreview({ value }: { value: ThemeFont }) {
   return (
-    <div className="flex min-h-[3.25rem] items-center justify-center rounded-md border border-border bg-muted/30">
+    <div className="flex h-full min-h-0 items-center justify-center rounded-md bg-muted/30">
       <span
         className={cn(
           "text-2xl font-semibold",
@@ -142,7 +157,7 @@ function RadiusPreview({ value }: { value: ThemeRadius }) {
               : "0.625rem"
 
   return (
-    <div className="flex min-h-[2.75rem] items-center justify-center rounded-md border border-border bg-muted/30">
+    <div className="flex h-full min-h-0 items-center justify-center rounded-md bg-muted/30">
       <span
         className="theme-radius-preview"
         style={{ "--preview-radius": radius } as React.CSSProperties}
@@ -163,7 +178,7 @@ function DensityPreview({ value }: { value: ThemeDensity }) {
           : "0.42rem"
 
   return (
-    <div className="flex min-h-[2.75rem] items-center rounded-md border border-border bg-muted/30 px-2.5 text-muted-foreground">
+    <div className="flex h-full min-h-0 items-center rounded-md bg-muted/30 px-2.5 text-muted-foreground">
       <div
         className="theme-density-preview"
         style={{ "--preview-gap": gap } as React.CSSProperties}
@@ -240,16 +255,7 @@ export function ThemeSettingsDialog({
     setContentWidth,
   } = useTheme()
 
-  const resetPreferences = () => {
-    setTheme("system")
-    setPalette(DEFAULT_PALETTE)
-    setFont("auto")
-    setRadius("auto")
-    setDensity("default")
-    setSidebar("inset")
-    setLayout("default")
-    setContentWidth("wide")
-  }
+  const resetPalette = () => setPalette(DEFAULT_PALETTE)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -258,13 +264,13 @@ export function ThemeSettingsDialog({
         className="theme-settings-panel gap-0 overflow-hidden p-0"
       >
         <div className="flex h-full min-h-0 flex-col" data-theme-settings>
-          <DialogHeader className="shrink-0 border-b px-5 py-4">
+          <DialogHeader className="shrink-0 border-b px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0 space-y-1">
-                <DialogTitle className="text-xl tracking-tight">
+                <DialogTitle className="text-base font-medium">
                   {t("主题设置")}
                 </DialogTitle>
-                <DialogDescription className="text-xs">
+                <DialogDescription className="text-sm">
                   {t("调整外观和布局以适应您的偏好。")}
                 </DialogDescription>
               </div>
@@ -272,7 +278,7 @@ export function ThemeSettingsDialog({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="-mr-2 -mt-2 shrink-0"
+                className="-mt-1 -mr-1 shrink-0"
                 aria-label={t("关闭")}
                 onClick={() => onOpenChange(false)}
               >
@@ -281,16 +287,17 @@ export function ThemeSettingsDialog({
             </div>
           </DialogHeader>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 sm:py-5">
             <div className="space-y-6 pb-3">
               <SettingsSection title={t("主题")}>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="grid w-full grid-cols-3 gap-4">
                   {themeOptions.map((option) => (
                     <SelectCard
                       key={option.value}
                       label={t(option.labelKey)}
                       selected={theme === option.value}
                       onSelect={() => setTheme(option.value)}
+                      labelClassName="mt-1 text-left"
                     >
                       <ThemePreview value={option.value} />
                     </SelectCard>
@@ -308,13 +315,13 @@ export function ThemeSettingsDialog({
                     className="text-muted-foreground"
                     aria-label={t("恢复默认")}
                     title={t("恢复默认")}
-                    onClick={resetPreferences}
+                    onClick={resetPalette}
                   >
                     <RotateCcwIcon aria-hidden="true" />
                   </Button>
                 }
               >
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid w-full grid-cols-4 gap-3">
                   {paletteOptions.map((option) => (
                     <SelectCard
                       key={option.value}
@@ -323,7 +330,10 @@ export function ThemeSettingsDialog({
                       onSelect={() => setPalette(option.value)}
                     >
                       <div
-                        className={cn("theme-preset-swatch", option.swatchClassName)}
+                        className={cn(
+                          "theme-preset-swatch",
+                          option.swatchClassName
+                        )}
                         aria-hidden="true"
                       />
                     </SelectCard>
@@ -332,7 +342,7 @@ export function ThemeSettingsDialog({
               </SettingsSection>
 
               <SettingsSection title={t("字体")}>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="grid w-full grid-cols-3 gap-4">
                   {fontOptions.map((option) => (
                     <SelectCard
                       key={option.value}
@@ -347,7 +357,7 @@ export function ThemeSettingsDialog({
               </SettingsSection>
 
               <SettingsSection title={t("圆角")}>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                <div className="grid w-full grid-cols-6 gap-2">
                   {radiusOptions.map((option) => (
                     <SelectCard
                       key={option.value}
@@ -362,7 +372,7 @@ export function ThemeSettingsDialog({
               </SettingsSection>
 
               <SettingsSection title={t("密度")}>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid w-full grid-cols-4 gap-3">
                   {densityOptions.map((option) => (
                     <SelectCard
                       key={option.value}
@@ -377,13 +387,14 @@ export function ThemeSettingsDialog({
               </SettingsSection>
 
               <SettingsSection title={t("侧边栏")}>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="grid w-full grid-cols-3 gap-4">
                   {sidebarOptions.map((option) => (
                     <SelectCard
                       key={option.value}
                       label={t(option.labelKey)}
                       selected={sidebar === option.value}
                       onSelect={() => setSidebar(option.value)}
+                      labelClassName="mt-1 text-left"
                     >
                       <SidebarPreview value={option.value} />
                     </SelectCard>
@@ -392,13 +403,14 @@ export function ThemeSettingsDialog({
               </SettingsSection>
 
               <SettingsSection title={t("布局")}>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                <div className="grid w-full grid-cols-3 gap-4">
                   {layoutOptions.map((option) => (
                     <SelectCard
                       key={option.value}
                       label={t(option.labelKey)}
                       selected={layout === option.value}
                       onSelect={() => setLayout(option.value)}
+                      labelClassName="mt-1 text-left"
                     >
                       <LayoutPreview value={option.value} />
                     </SelectCard>
@@ -407,7 +419,7 @@ export function ThemeSettingsDialog({
               </SettingsSection>
 
               <SettingsSection title={t("内容宽度")}>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div className="grid w-full grid-cols-2 gap-4">
                   {contentWidthOptions.map((option) => (
                     <SelectCard
                       key={option.value}
