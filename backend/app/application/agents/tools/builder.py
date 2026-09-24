@@ -50,6 +50,10 @@ from app.schemas.agents.contracts import AgentRunResponse, AgentRunSourceRespons
 from app.schemas.knowledge import KnowledgeQueryRequest
 
 MAX_KNOWLEDGE_HITS_PER_CALL = 8
+# Normalized cosine floor applied when the model does not pass `similarity`.
+# The scale maps a cosine distance to [0, 1] (see `normalized_cosine_similarity`),
+# so 0.5 rejects only near-orthogonal matches.
+DEFAULT_KNOWLEDGE_SIMILARITY = 0.5
 MAX_KNOWLEDGE_CONTENT_CHARS = 12_000
 # Model-facing tool messages are deliberately smaller than the durable
 # evidence payload.  A full retrieval response is replayed in every later
@@ -121,7 +125,9 @@ class KnowledgeSearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=3, ge=1, le=MAX_KNOWLEDGE_HITS_PER_CALL)
     search_mode: Literal["embedding", "keywords", "blend"] = "blend"
-    similarity: float | None = Field(default=None, ge=0, le=1)
+    similarity: float | None = Field(
+        default=DEFAULT_KNOWLEDGE_SIMILARITY, ge=0, le=1
+    )
     graph_mode: Literal["off", "auto", "path", "neighborhood"] = "auto"
     source_entity: str | None = Field(default=None, max_length=500)
     target_entity: str | None = Field(default=None, max_length=500)
