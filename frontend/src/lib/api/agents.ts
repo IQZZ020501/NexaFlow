@@ -106,7 +106,7 @@ export type AgentRunEvent = {
   summary: string
   call_id: string
   tool_label: string
-  tool_kind: "knowledge" | "mcp" | "unknown"
+  tool_kind: "knowledge" | "builtin" | "python" | "mcp" | "unknown"
   server_name: string
   input: Record<string, unknown>
   output: unknown
@@ -175,7 +175,7 @@ export type AgentToolCall = {
   call_id: string
   turn: number
   tool_name: string
-  tool_kind: "knowledge" | "mcp" | "unknown"
+  tool_kind: "knowledge" | "builtin" | "python" | "mcp" | "unknown"
   server_name: string
   arguments: Record<string, unknown>
   status:

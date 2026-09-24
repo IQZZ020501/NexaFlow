@@ -400,21 +400,51 @@ export function unrenderedPublicToolCalls(
   progress: ExternalAgentProgressEvent[],
   calls: AgentToolCall[]
 ) {
-  return calls.filter(
-    (call) =>
-      [
+  return calls.filter((call) => {
+    if (
+      ![
         "pending",
         "awaiting_approval",
         "approved",
         "running",
         "uncertain",
-      ].includes(call.status) &&
-      !progress.some(
-        (event) =>
-          event.type === "tool" &&
-          event.turn === call.turn &&
-          event.tool_name === call.tool_name &&
-          event.server_name === call.server_name
+      ].includes(call.status)
+    ) {
+      return false
+    }
+    if (["awaiting_approval", "uncertain"].includes(call.status)) return true
+    return !progress.some(
+      (event) =>
+        event.type === "tool" &&
+        event.turn === call.turn &&
+        event.tool_name === call.tool_name &&
+        event.server_name === call.server_name
+    )
+  })
+}
+
+export function visiblePublicToolProgress(
+  progress: ExternalAgentProgressEvent[],
+  calls: AgentToolCall[]
+) {
+  return progress.filter(
+    (event) =>
+      !(
+        event.type === "tool" &&
+        event.stage === "preparing" &&
+        calls.some(
+          (call) =>
+            [
+              "pending",
+              "awaiting_approval",
+              "approved",
+              "running",
+              "uncertain",
+            ].includes(call.status) &&
+            event.turn === call.turn &&
+            event.tool_name === call.tool_name &&
+            event.server_name === call.server_name
+        )
       )
   )
 }
@@ -434,7 +464,10 @@ function PublicPendingToolCall({
     turn: call.turn,
     count: null,
     tool_name: call.tool_name,
-    tool_kind: call.tool_kind,
+    tool_kind:
+      call.tool_kind === "knowledge" || call.tool_kind === "mcp"
+        ? call.tool_kind
+        : "unknown",
     server_name: call.server_name,
     input: call.arguments,
     output: null,
@@ -1970,6 +2003,11 @@ export function PublicAgentChat({
                 {visibleRuns.map((run, index) => {
                   const progressSegments = splitPublicRunProgress(run)
                   const currentProgress = progressSegments.at(-1) ?? []
+                  const runToolCalls = toolCallsByRun[run.id] ?? []
+                  const visibleCurrentProgress = visiblePublicToolProgress(
+                    currentProgress,
+                    runToolCalls
+                  )
                   const completedProgress = progressSegments.slice(0, -1)
                   const hasAnswerHandoffs = completedProgress.length > 0
                   const sourcesForProgress = (
@@ -2156,11 +2194,11 @@ export function PublicAgentChat({
                           <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
                             <PublicExecutionProcess
                               run={run}
-                              progress={currentProgress}
+                              progress={visibleCurrentProgress}
                             >
                               {unrenderedPublicToolCalls(
                                 run.progress,
-                                toolCallsByRun[run.id] ?? []
+                                runToolCalls
                               ).map((call) =>
                                 ["awaiting_approval", "uncertain"].includes(
                                   call.status
