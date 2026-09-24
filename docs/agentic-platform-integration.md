@@ -33,7 +33,7 @@ flowchart LR
 
 Agent Skill 控制面仍提供不可变版本、权限和资源绑定。初始上下文只注入已授权 Skill 的名称、简介、意图与 version_id；模型通过 load_skill 按需读取该固定版本的指令、输入/输出 schema 与安全要求。可执行文档/PDF/PPTX/表格 Skills 继续通过统一工具运行时执行。
 
-Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill_snapshots。Skill 声明的知识库和工具在准备阶段做租户及主体权限校验，再纳入可选能力。通用运行时长、轮次与工具预算取严格值；旧 retrieval、stop 和 grounding 评估字段只保留用于旧定义/版本哈希兼容，不再控制核心循环或注入提示词。
+Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill_snapshots。Skill 声明的知识库和工具在准备阶段做租户及主体权限校验，再纳入可选能力。通用运行时长、轮次与工具预算取严格值；Agent Skill schema 固定为 v2（schema-v1 定义不受支持、旧 `retrieval`/`stop`/`evaluation`/`budgets` 字段被拒绝），旧 Run 的 grounding 字段仍可读但不再控制核心循环或注入提示词。
 
 当前渐进加载的是现有数据库 Skill 定义，不是任意文件系统 SKILL.md 包。没有新增动态插件安装、用户扩展代码加载、脚本或 assets 浏览系统。
 
@@ -51,9 +51,11 @@ Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill
 ## 已有接口
 
 - GET/POST /api/v1/workspaces/{workspace_id}/agent-skills
+- POST /api/v1/workspaces/{workspace_id}/agent-skills/imports/inspect
 - GET/PATCH /api/v1/workspaces/{workspace_id}/agent-skills/{skill_id}
 - POST /api/v1/workspaces/{workspace_id}/agent-skills/{skill_id}/publish
 - GET /api/v1/workspaces/{workspace_id}/agent-skills/{skill_id}/versions
+- GET /api/v1/workspaces/{workspace_id}/agent-skills/{skill_id}/permissions
 - GET/PUT/DELETE /api/v1/workspaces/{workspace_id}/agent-skills/{skill_id}/permissions/{user_id}
 - Agent 创建/更新绑定 skills: [{skill_id, version_id}]
 - POST /api/v1/workspaces/{workspace_id}/agents/{agent_id}/runs/{run_id}/inputs

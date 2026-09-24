@@ -40,8 +40,9 @@ uv run python -m scripts.agent_eval \
 
 ## 数据集契约
 
-每个用例支持：
+每个用例支持（`id`、`goal` 必填，`category` 默认 `general`，`expect.status` 默认 `succeeded`）：
 
+- `id` / `goal` / `category`：用例标识、发送给 Agent 的目标与分类；
 - `samples`：同一问题重复执行次数，用于发现模型波动；
 - `required`：默认为 `true`，任一必需样本失败都会阻断发布，即使总通过率达到阈值；
 - `expect.status`：预期 Run 终态；
@@ -49,6 +50,7 @@ uv run python -m scripts.agent_eval \
 - `required_tool_names` / `forbidden_tool_names`：成功调用和绝对禁止观察到的工具；
 - `min_sources`：API 返回的最少证据源数量；
 - `max_total_tokens` / `max_model_calls` / `max_duration_ms`：成本与延迟上限。
+- 数据集顶层 `gate.minimum_pass_rate`：总通过率阈值，默认 `1.0`（取值范围 `0 < x <= 1`）。
 
 设置 `max_total_tokens` 时，只要任一模型调用没有报告 usage，该样本就以 `usage:unreported` 失败，门禁不会猜测 token。在线运行遇到人工审批或输入等待会立即结束采样，并以当前 Run 状态参与断言；自动发布门禁使用的 Agent 应只绑定可自动执行的只读工具。
 

@@ -12,7 +12,7 @@ with RAG, LLM-powered agents, and MCP tool integration — with a trilingual UI
   retrieval ranking with parent-context windows; durable deletion cleanup
   through Celery
 - **LLM agents** — durable queued execution, checkpoints, replayable events,
-  explicit knowledge retrieval policy, MCP approval, and conversation memory
+  adaptive knowledge retrieval, tool approval modes, and conversation memory
 - **MCP integration** — workspace-scoped Streamable HTTP, legacy SSE, and
   operator-managed stdio registrations with transport-specific safety controls
 - **Admin audit logs** — admin actions tracked through a system log
@@ -46,25 +46,13 @@ When `DATABASE_URL` is empty, the backend safely constructs it from the shared
 `POSTGRES_*` components.
 
 ```bash
-uv run celery -A app.infra.queue.celery:celery_app worker --beat --loglevel=INFO
+make worker
 ```
 
-The app selects Celery's `threads` pool on macOS so Agent runs can overlap
-without prefork inheriting live HTTPS clients. Windows keeps the `solo` pool
-because `prefork` needs `os.fork()`; Linux workers use production `prefork`.
-
-On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
-so psycopg async connections work (Windows defaults to the Proactor loop,
-which psycopg rejects).
-
-The `dev` target starts and waits for the Compose PostgreSQL, Redis, and Qdrant
-services, applies Alembic migrations, and then starts the API through a Python
-standard-library script. It does not start the Worker. The `coverage` target also delegates process
-orchestration to Python, so GNU Make can run both targets from Windows
-PowerShell or Command Prompt without Bash. GNU Make itself must still be
-installed separately on Windows. Run the API and Worker inside WSL2 when code
-execution is required; the native Windows Worker fails closed.
-
+`make worker` runs `scripts/worker.py`, which execs
+`python -m celery -A app.infra.queue.celery:celery_app worker --beat
+--queues=celery,agents-legacy,agents-v2 --pool <platform pool>`. It requires
+`OPENSANDBOX_API_KEY` and exits otherwise: there is no host execution fallback.
 Set `CELERY_BROKER_URL` for Redis. The API process and every worker must share
 the configured `KNOWLEDGE_STORAGE_DIR` and connect to the same `QDRANT_URL`;
 otherwise workers can miss uploaded files or write vectors to a different
@@ -79,16 +67,28 @@ events, and terminal answers stay in PostgreSQL. Closing an Agent event stream
 only stops observation; it does not cancel the durable run. If Redis live reads
 fail, the client still receives the durable terminal answer.
 
-Python artifact Tools and Workflow code nodes use a private Unix socket owned by
-the Worker-supervised sandbox Broker. Start the source Worker from `backend/`:
+Python artifact Tools, Skill scripts, stdio MCP and Workflow code nodes run in
+the external OpenSandbox execution plane through `app/ports/execution.py`
+(`app/adapters/execution/opensandbox.py`); the business Worker keeps
+`cap_drop: ALL` plus default AppArmor/seccomp and `no-new-privileges`, holds no
+Docker socket, and has no local execution fallback. Program egress is denied by
+default (`dns+nft`); only deployment-approved stdio-MCP domains and temporary
+package-registry domains are allowed.
 
-```bash
-make worker
-```
+The app selects Celery's `threads` pool on macOS so Agent runs can overlap
+without prefork inheriting live HTTPS clients. Windows keeps the `solo` pool
+because `prefork` needs `os.fork()`; Linux workers use production `prefork`.
+On Windows the API and worker also install the `WindowsSelectorEventLoopPolicy`
+so psycopg async connections work.
 
-`make worker` syncs the separate `sandbox/` runtime and starts both the Broker
-and Celery. Linux uses namespace/chroot isolation and requires root startup;
-macOS uses Seatbelt per child. Native Windows is unsupported; use WSL2.
+The `dev` target starts and waits for the Compose PostgreSQL, Redis, and Qdrant
+services, applies Alembic migrations, and then starts the API through a Python
+standard-library script. It does not start the Worker. The `coverage` target
+also delegates process orchestration to Python, so GNU Make can run both targets
+from Windows PowerShell or Command Prompt without Bash; GNU Make itself must
+still be installed separately on Windows. The Worker requires
+`OPENSANDBOX_API_KEY` on every platform, and native Windows is not a supported
+development target — use WSL2.
 
 ## MCP transports
 
@@ -99,10 +99,11 @@ environment variables and redirects. Prefer HTTPS when credentials or sensitive
 data cross an untrusted network.
 
 Workspace admins enter each stdio Server's absolute command, arguments,
-optional absolute working directory, and environment variables in the MCP
-registration form. NexaFlow validates the executable before discovery and
-encrypts the full configuration at rest; list responses expose only the command
-path. The SDK starts the executable directly without a shell. Install the same
-pinned executable at the same path in every API and worker image. Because stdio
-commands run with the backend process's filesystem and network access, only
-trusted workspace admins should be allowed to manage MCP Servers.
+optional absolute working directory, environment variables, and egress domains
+in the MCP registration form. NexaFlow validates the stdio configuration shape
+and bounds, then encrypts the full configuration at rest; list responses expose
+only the command path. Command, working directory, and environment values are
+execution-image paths, never business-host paths: discovery and calls run in
+per-invocation OpenSandbox sessions with only that integration's environment and
+approved egress, and there is no backend-process fallback. Only trusted
+workspace admins should be allowed to manage stdio MCP Servers.

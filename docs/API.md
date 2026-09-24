@@ -2,24 +2,24 @@
 
 ## 职责
 
-FastAPI 薄路由层：只做参数解析、认证/授权依赖与响应组装，业务逻辑下沉到 `application`/`shareddomain`。所有路由挂在 `/api/v1` 前缀；认证与工作空间上下文依赖集中在 `api/deps.py`。Pydantic 请求/响应契约集中在 `schemas/`。
+FastAPI 薄路由层：只做参数解析、认证/授权依赖与响应组装，业务逻辑下沉到 `application`/`domain`（领域实体在 `entities/`，能力契约在 `ports/`，外部实现由 `adapters/` 提供）。除应用根路径的 `/health` 外，所有路由挂在 `/api/v1` 前缀；认证与工作空间上下文依赖集中在 `api/deps.py`。Pydantic 请求/响应契约集中在 `schemas/<feature>/`。
 
 ## 分层关系
 
 ```text
 HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
-     → endpoints/*（路由 + 权限依赖 + 响应组装）
-     → application / shareddomain 服务
-     → schemas/（请求/响应模型）
+     → api/v1/<feature>/*（路由 + 权限依赖 + 响应组装）
+     → application / domain 服务
+     → schemas/<feature>/（请求/响应模型）
 ```
 
 ## 接口约定（速查）
 
 - 工作空间上下文：路径参数 `/workspaces/{workspace_id}/...`；非成员按不可枚举策略返回 404，已确认成员但工作空间非 active 或操作权限不足时返回 403。
 - 状态码：创建 201、删除 204、异步任务 202；错误统一 FastAPI `{"detail": ...}`。
-- 分页：所有列表端点统一 `limit`（`ge=1 le=200`，默认 100）+ `offset`（`ge=0`）查询参数。
-- 鉴权：`/auth/login|refresh|logout`、`/health` 与已发布应用的 `/public/agents/{agent_id}/*`、`/public/workflows/{workflow_id}/*` 不要求登录；公开会话使用 HttpOnly 访客 Cookie 隔离。`/agent-api/{agent_id}/*` 与 `/workflow-api/{workflow_id}/*` 使用应用级 API Key Bearer 鉴权；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
-- API 文档：后端 `/docs` 与 `/openapi.json` 保留完整 FastAPI 文档。应用概览的专属文档入口使用 `/agent-api/{agent_id}/docs` 或 `/workflow-api/{workflow_id}/docs`，验证对应 API Key 后只展示该应用的 Run 创建、查询和流式订阅接口。
+- 分页：列表端点使用 `limit` + `offset`（`offset` 统一 `ge=0`）；`limit` 上界与默认值按模块不同——多数为 `ge=1 le=200` 默认 100，Agent 会话/日志与公开会话默认 50，评测运行默认 20、公告消息默认 50（均为 `le=100`），图谱实体/审查为 `le=100` 默认 50，评测用例列表为 `le=200` 默认 200。
+- 鉴权：`/auth/login|refresh|logout`、`/auth/password-reset/request|confirm`、`/auth/invitations/accept`、`/auth/enterprise/*`、`/health` 与已发布应用资料页的 `/public/agents/{agent_id}/*`、`/public/workflows/{workflow_id}/*` 不要求登录；公开资料页之外的应用访问（会话、Run 提交与流式）仍需登录 Bearer，且属于该工作空间的成员，消费方标识即登录用户 id（不存在访客 Cookie）。`/agent-api/{agent_id}/*` 与 `/workflow-api/{workflow_id}/*` 使用应用级 API Key Bearer 鉴权；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
+- API 文档：后端 `/docs` 与 `/openapi.json` 保留完整 FastAPI 文档。应用概览的专属文档入口使用 `/agent-api/{agent_id}/documentation` 或 `/workflow-api/{workflow_id}/documentation`，验证对应 API Key 后只展示该应用的 Run 创建、查询和流式订阅接口。
 - 流式：登录态 Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。公开/API Key 流复用同一 durable Run，只输出固定枚举的安全进度摘要、知识片段数量、答案增量、模型思考过程（`reasoning_delta` 增量与 progress 累积文本）和终态白名单，不返回工具名称/参数、检索原文、System Prompt 或 trace。终态 Run 快照始终覆盖实时片段，断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
 - 系统管理员可访问 `/admin/*`，并以管理员上下文治理所有工作空间；工作空间管理员只能治理自己所在空间的成员、团队和空间策略。
 
@@ -27,43 +27,52 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 
 ### app/api/
 
-- `backend/app/api/deps.py` — 认证与授权依赖：Bearer token 解析、当前用户、全局管理员、工作空间上下文（`WorkspaceContext`）与路径角色守卫
+- `backend/app/api/deps.py` — 认证与授权依赖：Bearer token 解析、当前用户、全局管理员、工作空间上下文（`WorkspaceContext`）与路径角色守卫；另提供 `require_team_admin_or_workspace_admin`、`require_context_role` 与 `AppSettingsDep`/`DbSessionDep`/`CurrentUserDep`/`GlobalAdminDep`/`WorkspaceAdminContextDep` 类型别名（`WorkspaceContext` 本身由 `application.workspaces.service` 导入）
 - `backend/app/api/v1/api.py` — 汇总所有子路由为 `/api/v1` 前缀并挂载 `/admin` 子路由的聚合入口
 
 ### app/api/v1/<feature>/
 
-- `backend/app/api/v1/identity/auth.py` — `/auth`：登录/刷新/登出/改密/当前用户（`/me`），refresh token 走 HttpOnly Cookie
-- `backend/app/api/v1/workspaces/routes.py` — `/workspaces`：工作区 CRUD、成员/团队管理、治理配额、资源盘点、邀请与工作区审计日志
+- `backend/app/api/v1/identity/auth.py` — `/auth`：登录/刷新/登出/改密/当前用户（`/me`）、密码重置请求与确认、邀请接受、会话列表与撤销（`/sessions*`），refresh token 走 HttpOnly Cookie
+- `backend/app/api/v1/identity/enterprise.py` — `/auth/enterprise`（公开：connection 列表、SSO/扫码登录发起与回调）与 `/admin/enterprise-identity`（企业身份连接与用户绑定治理）
+- `backend/app/api/v1/workspaces/routes.py` — `/workspaces`：工作区 CRUD、成员管理与成员开通（`/members/users`）、治理设置与配额、资源盘点（`/inventory`）、工作区统计（`/analytics`）、邀请（含永久删除）与工作区审计日志；团队管理归 `teams/routes.py`
 - `backend/app/api/v1/teams/routes.py` — `/workspaces/{workspace_id}/teams`：团队 CRUD（admin 角色限定）
-- `backend/app/api/v1/knowledge/routes.py` — `/workspaces/{workspace_id}/knowledge-bases` 主接口族：知识库 CRUD、普通文档/QA 表上传、分块/解析/索引、任务列表与重试、重建索引、模型测试、资源权限管理；文档创建通过 `import_mode=document|qa` 显式选择导入语义
+- `backend/app/api/v1/knowledge/routes.py` — `/workspaces/{workspace_id}/knowledge-bases` 主接口族：知识库 CRUD、普通文档/QA 表上传、分块/解析/索引、任务列表/重试/停止/单条与批量删除、附件上传与删除、重建索引、模型测试、资源权限管理；文档创建通过 `import_mode=document|qa` 显式选择导入语义
 - `backend/app/api/v1/knowledge/lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
 - `backend/app/api/v1/knowledge/retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
 - `backend/app/api/v1/knowledge/evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
+- `backend/app/api/v1/knowledge/graph.py` — 同前缀 `/{kb_id}/graph`：图谱 settings/schema/status/rebuild/entities/overview/path/neighborhood/import/reviews 与 review resolve（对应 Evidence Graph RAG；查询请求的 `graph_mode` 等字段见 `schemas/knowledge`）
 - `backend/app/api/v1/models/routes.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
 - `backend/app/api/v1/tools/sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
 - `backend/app/api/v1/tools/routes.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权
 - `backend/app/api/v1/tools/mcp.py` — 旧 MCP Server 契约兼容接口；新工具中心使用 `tool-sources` 与 `tools` 路由
-- `backend/app/api/v1/agents/routes.py` — Agent CRUD、发布、API 凭据、跨来源对话日志/用户/统计，以及登录态 Run 提交、工具账本、审批/拒绝与游标 NDJSON 订阅
-- `backend/app/api/v1/agents/access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、访客会话、对话历史和安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
-- `backend/app/api/v1/workflows/routes.py` — Workflow 草稿定义、资源校验、不可变版本、恢复、调试运行、表单恢复与节点审计
-- `backend/app/api/v1/workflows/access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、会话、API 文档、Run 和安全流
+- `backend/app/api/v1/agents/routes.py` — `/workspaces/{workspace_id}/agents`：Agent CRUD、发布、API 凭据、指令生成（`/generate-instructions`）、监控统计（`/monitoring`）、附件上传（`/uploads`）、跨来源对话日志/用户/统计，以及登录态 Run 提交（`POST /runs` 与兼容的 `POST /runs/stream`）、会话输入（`/runs/{run_id}/inputs`）、工具账本、审批/拒绝、反馈与游标 NDJSON 订阅
+- `backend/app/api/v1/agents/access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、文档页、会话与安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
+- `backend/app/api/v1/workflows/routes.py` — `/workspaces/{workspace_id}/workflows`（路径参数仍命名为 `{agent_id}`）：Workflow 草稿定义、资源校验、不可变版本、恢复、附件上传、调试运行、表单恢复与节点审计
+- `backend/app/api/v1/workflows/access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、文档页、API 文档、Run 和安全流
+- `backend/app/api/v1/artifacts/routes.py` — `/artifacts`：生成物下载链接签发、下载与预览（响应 `Cache-Control: private, no-store`）
+- `backend/app/api/v1/agent_skills/routes.py` — `/workspaces/{workspace_id}/agent-skills`：技能包导入检查、CRUD、发布、版本列表与 view/use 授权
+- `backend/app/api/v1/resource_folders/routes.py` — `/workspaces/{workspace_id}/resource-folders`：资源文件夹 CRUD 与资源移动（单条/批量）
+- `backend/app/api/v1/announcements/routes.py` — `/messages`（列表、未读数、SSE `/stream`、全部已读与单条已读）、`/admin/announcements` 与 `/workspaces/{workspace_id}/announcements`
 
 ### app/api/v1/admin/
 
-- `backend/app/api/v1/admin/users.py` — `/admin/users`：全局用户管理与会话撤销（仅系统管理员）
-- `backend/app/api/v1/admin/audit.py` — `/admin/audit-logs`：支持工作空间、操作者、动作、资源、时间和全文条件的审计列表（仅系统管理员）
-- `backend/app/api/v1/admin/system_logs.py` — `/admin/system-logs`：脱敏系统运行日志查询（仅系统管理员）
-- `backend/app/api/v1/admin/governance.py` — `/admin/governance/health`：数据库、依赖配置、任务积压和失败日志健康摘要（仅系统管理员）
+- `backend/app/api/v1/admin/users/routes.py` — `/admin/users`：全局用户管理与会话撤销（仅系统管理员）
+- `backend/app/api/v1/admin/audit/routes.py` — `/admin/audit-logs`：支持工作空间、操作者、动作、资源、时间和全文条件的审计列表（仅系统管理员）
+- `backend/app/api/v1/admin/system_logs/routes.py` — `/admin/system-logs`：脱敏系统运行日志查询（仅系统管理员）
+- `backend/app/api/v1/admin/governance/routes.py` — `/admin/governance/health`：数据库、依赖配置、任务积压和失败日志健康摘要（仅系统管理员）
+- `backend/app/api/v1/admin/smtp/routes.py` — `/admin/smtp`：SMTP 配置读取/更新与测试发送（仅系统管理员）
 
 ### app/schemas/（Pydantic 契约）
 
-- `backend/app/schemas/user.py` — 登录/Token/改密/用户信息/成员关系模型（含密码强度校验）
-- `backend/app/schemas/workspace.py` — 工作区及其成员、管理员创建请求的请求/响应模型
-- `backend/app/schemas/team.py` — 团队创建/更新/响应模型
-- `backend/app/schemas/knowledge.py` — 知识库、文档、QA 导入模式、分块、解析参数、任务、批量创建、检索命中/trace 与检索评测请求/响应模型
-- `backend/app/schemas/agent.py` — Agent 创建/更新/响应与运行/计划/事件/流式响应模型
-- `backend/app/schemas/tool.py` — 统一 Tool/Source/Version/Policy/Permission/Invocation 与固定 `ToolRef` 契约
-- `backend/app/schemas/workflow.py` — Workflow 图、节点配置、版本、运行、节点审计、表单恢复与 Tool/Agent 固定引用契约
-- `backend/app/schemas/model.py` — LLM 供应商目录（model-types/base-models/credential-form）与已注册模型模型
-- `backend/app/schemas/mcp.py` — MCP Server、三种传输互斥配置、stdio 配置与工具列表的请求/响应模型
-- `backend/app/schemas/audit.py` — 审计日志响应模型
+`backend/app/schemas/<feature>/` 按特性分包，包内 `__init__.py` 统一重导出契约：
+
+- `backend/app/schemas/identity/contracts.py` — 登录/Token/改密/用户信息/成员关系模型（含密码强度校验）；企业身份与邀请契约分别在 `identity/enterprise.py`、`identity/invitations.py`
+- `backend/app/schemas/workspaces/contracts.py` — 工作区及其成员、管理员创建请求的请求/响应模型
+- `backend/app/schemas/teams/contracts.py` — 团队创建/更新/响应模型
+- `backend/app/schemas/knowledge/contracts.py` — 知识库、文档、QA 导入模式、分块、解析参数、任务、检索命中/trace 与检索评测请求/响应模型；Graph 契约在 `knowledge/graph.py`
+- `backend/app/schemas/agents/contracts.py` — Agent 创建/更新/响应与运行/计划/事件/流式响应模型
+- `backend/app/schemas/tools/contracts.py` — 统一 Tool/Source/Version/Policy/Permission/Invocation 与固定 `ToolRefSchema` 契约；MCP Server 契约在 `tools/mcp.py`
+- `backend/app/schemas/workflows/contracts.py` — Workflow 图、节点配置、版本、运行、节点审计、表单恢复与 Tool/Agent 固定引用契约
+- `backend/app/schemas/models/contracts.py` — LLM 供应商目录（model-types/base-models/credential-form）与已注册模型模型
+- `backend/app/schemas/audit/contracts.py` — 审计日志响应模型；系统日志契约在 `audit/system_logs.py`
+- 其余契约包：`analytics/`、`governance/`、`agent_skills/`、`announcements/`、`artifacts/`、`resource_folders/`，以及 `email/smtp.py`
