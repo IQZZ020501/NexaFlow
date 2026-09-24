@@ -27,6 +27,7 @@ import {
   type ThemeDensity,
   type ThemeFont,
   type ThemeLayout,
+  type ThemePalette,
   type ThemeRadius,
   type ThemeSidebar,
 } from "@/lib/theme-options"
@@ -71,8 +72,8 @@ function SelectCard({
       >
         {children}
         {selected ? (
-          <span className="theme-settings-check absolute -top-1.5 -right-1.5 z-10 flex size-5 items-center justify-center rounded-full border-2 border-background shadow-sm">
-            <CheckIcon className="size-3" strokeWidth={3} aria-hidden="true" />
+          <span className="theme-settings-check absolute top-1 right-1 z-10 flex size-4 items-center justify-center rounded-full border border-background shadow-sm">
+            <CheckIcon className="size-2.5" strokeWidth={3} aria-hidden="true" />
           </span>
         ) : null}
       </div>
@@ -121,6 +122,29 @@ function ThemePreview({ value }: { value: "system" | "light" | "dark" }) {
         </div>
         <div className="theme-preview__chart" />
       </div>
+    </div>
+  )
+}
+
+/**
+ * Renders a palette swatch from the palette's own tokens: the nested
+ * `[data-palette]` blocks apply to this element, so the preview shows the real
+ * surface, card, text, and accent of that palette in the active color scheme.
+ */
+function PalettePreview({ value }: { value: ThemePalette }) {
+  return (
+    <div
+      className="theme-preset-preview"
+      data-palette={value}
+      aria-hidden="true"
+    >
+      <div className="theme-preset-preview__surface">
+        <div className="theme-preset-preview__lines">
+          <span />
+          <span />
+        </div>
+      </div>
+      <div className="theme-preset-preview__accent" />
     </div>
   )
 }
@@ -329,13 +353,7 @@ export function ThemeSettingsDialog({
                       selected={palette === option.value}
                       onSelect={() => setPalette(option.value)}
                     >
-                      <div
-                        className={cn(
-                          "theme-preset-swatch",
-                          option.swatchClassName
-                        )}
-                        aria-hidden="true"
-                      />
+                      <PalettePreview value={option.value} />
                     </SelectCard>
                   ))}
                 </div>

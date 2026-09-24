@@ -692,7 +692,6 @@ html[data-content-width="wide"] {
   }
 
   .theme-settings-option {
-    overflow: visible;
     background: var(--card);
     transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   }
@@ -707,52 +706,58 @@ html[data-content-width="wide"] {
     color: white;
   }
 
-  .theme-preset-swatch {
+  /*
+   * Palette swatches render the palette's own tokens: the nested
+   * `[data-palette]` attribute applies that palette's variable blocks to this
+   * element, so the swatch shows its real surface, card, text, and accent in
+   * the active color scheme instead of a hand-maintained gradient.
+   */
+  .theme-preset-preview {
+    display: flex;
     height: 100%;
-    min-height: 0;
-    border-radius: calc(var(--radius) * 0.85);
-    border: 1px solid oklch(1 0 0 / 16%);
-    box-shadow: inset 0 1px 0 oklch(1 0 0 / 12%);
+    flex-direction: column;
+    gap: 0.25rem;
+    overflow: hidden;
+    padding: 0.3rem;
+    border-radius: inherit;
+    background: var(--background);
   }
 
-  .theme-preset-swatch-neutral {
-    background: linear-gradient(135deg, oklch(0.98 0 0), oklch(0.24 0 0));
+  .theme-preset-preview__surface {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0.3rem;
+    border-radius: calc(var(--radius) * 0.6);
+    border: 1px solid var(--border);
+    background: var(--card);
   }
 
-  .theme-preset-swatch-anthropic {
-    background: linear-gradient(135deg, oklch(0.97 0.03 35), oklch(0.7 0.16 35));
+  .theme-preset-preview__lines {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
   }
 
-  .theme-preset-swatch-simple {
-    background: linear-gradient(135deg, oklch(0.1 0 0), oklch(0.96 0 0));
+  .theme-preset-preview__lines span {
+    height: 0.18rem;
+    border-radius: 999px;
+    background: var(--muted-foreground);
+    opacity: 0.75;
   }
 
-  .theme-preset-swatch-night {
-    background: linear-gradient(135deg, oklch(0.16 0.04 255), oklch(0.42 0.14 255));
+  .theme-preset-preview__lines span:last-child {
+    width: 55%;
+    opacity: 0.45;
   }
 
-  .theme-preset-swatch-rose {
-    background: linear-gradient(135deg, oklch(0.62 0.2 350), oklch(0.86 0.1 350));
-  }
-
-  .theme-preset-swatch-lake {
-    background: linear-gradient(135deg, oklch(0.46 0.14 190), oklch(0.75 0.11 190));
-  }
-
-  .theme-preset-swatch-amber {
-    background: linear-gradient(135deg, oklch(0.62 0.18 45), oklch(0.82 0.13 72));
-  }
-
-  .theme-preset-swatch-forest {
-    background: linear-gradient(135deg, oklch(0.45 0.11 152), oklch(0.7 0.1 152));
-  }
-
-  .theme-preset-swatch-ocean {
-    background: linear-gradient(135deg, oklch(0.46 0.15 250), oklch(0.72 0.12 205));
-  }
-
-  .theme-preset-swatch-violet {
-    background: linear-gradient(135deg, oklch(0.5 0.18 300), oklch(0.78 0.1 220));
+  .theme-preset-preview__accent {
+    width: 62%;
+    height: 0.35rem;
+    border-radius: 999px;
+    background: var(--primary);
   }
 
   .theme-preview {

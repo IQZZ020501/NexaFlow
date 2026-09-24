@@ -38,18 +38,17 @@ export const DEFAULT_PALETTE: ThemePalette = "neutral"
 export const paletteOptions: Array<{
   value: ThemePalette
   labelKey: TranslationKey
-  swatchClassName: string
 }> = [
-  { value: "neutral", labelKey: "默认", swatchClassName: "theme-preset-swatch-neutral" },
-  { value: "anthropic", labelKey: "Anthropic", swatchClassName: "theme-preset-swatch-anthropic" },
-  { value: "simple", labelKey: "超大字体简易", swatchClassName: "theme-preset-swatch-simple" },
-  { value: "night", labelKey: "暗夜", swatchClassName: "theme-preset-swatch-night" },
-  { value: "rose", labelKey: "玫瑰花园", swatchClassName: "theme-preset-swatch-rose" },
-  { value: "lake", labelKey: "湖光", swatchClassName: "theme-preset-swatch-lake" },
-  { value: "amber", labelKey: "日落霞光", swatchClassName: "theme-preset-swatch-amber" },
-  { value: "forest", labelKey: "森林低语", swatchClassName: "theme-preset-swatch-forest" },
-  { value: "ocean", labelKey: "海风", swatchClassName: "theme-preset-swatch-ocean" },
-  { value: "violet", labelKey: "薰衣草草梦", swatchClassName: "theme-preset-swatch-violet" },
+  { value: "neutral", labelKey: "默认" },
+  { value: "anthropic", labelKey: "Anthropic" },
+  { value: "simple", labelKey: "超大字体简易" },
+  { value: "night", labelKey: "暗夜" },
+  { value: "rose", labelKey: "玫瑰花园" },
+  { value: "lake", labelKey: "湖光" },
+  { value: "amber", labelKey: "日落霞光" },
+  { value: "forest", labelKey: "森林低语" },
+  { value: "ocean", labelKey: "海风" },
+  { value: "violet", labelKey: "薰衣草草梦" },
 ]
 
 export type ThemeFont = "auto" | "sans" | "serif"

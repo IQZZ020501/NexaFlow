@@ -234,10 +234,13 @@ not trigger unrelated cleanup.
   `[data-palette]` token block in `frontend/src/app/globals.css` plus a matching
   entry in `frontend/src/lib/theme-options.ts`; it overrides the neutral tokens
   once per color scheme, and the dark selector also matches nested elements so a
-  menu can preview a palette that is not active. Do not express a palette with
-  `light-dark()`: a custom property carrying it does not resolve when a utility
-  substitutes the value. The browser chrome color is written by that bootstrap
-  script and kept in sync by the theme provider; do not declare
+  menu can preview a palette that is not active. Theme settings render each
+  palette swatch by nesting `data-palette` and reading that palette's own
+  tokens instead of hand-drawn colors, so adding a palette needs no swatch
+  styling. Do not express a palette with `light-dark()`: a custom property
+  carrying it does not resolve when a utility substitutes the value. The
+  browser chrome color is written by that bootstrap script and kept in sync by
+  the theme provider; do not declare
   `viewport.themeColor`, because a metadata color cannot see the palette and
   React re-applies it after hydration, overwriting the palette-aware value.
   The density, layout, radius, font, sidebar, and content-width axes each
