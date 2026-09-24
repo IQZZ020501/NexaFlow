@@ -489,10 +489,10 @@ def _inventory_response(
     """Map the inventory snapshot onto its response contract.
 
     Parameters:
-    	inventory (WorkspaceAnalyticsInventory): Workspace-scoped resource counts.
+        inventory (WorkspaceAnalyticsInventory): Workspace-scoped resource counts.
 
     Returns:
-    	WorkspaceAnalyticsInventoryResponse: Applications, knowledge, tools, and model counts.
+        WorkspaceAnalyticsInventoryResponse: Applications, knowledge, tools, and model counts.
     """
     return WorkspaceAnalyticsInventoryResponse(
         applications=WorkspaceAnalyticsInventoryApplications(
@@ -528,11 +528,11 @@ def _build_tool_usage(
     excluded from the success rate, mirroring how run success rate is derived.
 
     Parameters:
-    	current_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the current period.
-    	previous_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the previous period.
+        current_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the current period.
+        previous_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the previous period.
 
     Returns:
-    	WorkspaceAnalyticsToolUsage: Call volume comparison, success rate, approval count, and top tools.
+        WorkspaceAnalyticsToolUsage: Call volume comparison, success rate, approval count, and top tools.
     """
     current_succeeded = sum(
         1 for call in current_calls if call.status == TOOL_INVOCATION_SUCCEEDED
