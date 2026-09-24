@@ -10,7 +10,7 @@
 
 ### app/infra/config/
 
-- `backend/app/infra/config/settings.py` — `Settings` dataclass 配置：从仓库根 `.env`（`ENV_FILE` 指向仓库根，宿主机与 Compose 共用）读取 PostgreSQL 组件并安全构造连接串（组件与 `DATABASE_URL` 不一致时强校验报错），以及数据库/JWT/Qdrant/Redis/Celery、Agent 外部请求限流、沙箱网络、引导管理员等全部环境配置与生产强校验（含 OpenSandbox 控制面 `OPENSANDBOX_URL`/`OPENSANDBOX_API_KEY`/`OPENSANDBOX_IMAGE`/`OPENSANDBOX_EGRESS_DOMAINS`、`WORKFLOW_SANDBOX_TIMEOUT_SECONDS`、`KNOWLEDGE_STORAGE_DIR`、`PUBLIC_APP_URL`/`CORS_ORIGINS`、`MANAGED_USER_INITIAL_PASSWORD`，以及 Agent 预算与执行器租约键 `AGENT_MAX_KNOWLEDGE_CALLS`/`AGENT_MAX_KNOWLEDGE_ROUNDS`/`AGENT_EXECUTOR_LEASE_SECONDS`/`AGENT_EXECUTOR_HEARTBEAT_SECONDS`/`AGENT_EVENT_POLL_SECONDS`）。
+- `backend/app/infra/config/settings.py` — `Settings` dataclass 配置：从仓库根 `.env`（`ENV_FILE` 指向仓库根，宿主机与 Compose 共用）读取 PostgreSQL/Qdrant 连接、密钥、引导账号和部署边界，安全构造 PostgreSQL 连接串（组件与 `DATABASE_URL` 不一致时强校验报错），并集中声明稳定服务地址、Agent 预算、执行器租约/轮询、限流和认证时长的代码默认值。既有高级环境覆盖继续兼容；普通 `.env` 不再复制整套运行策略。
 
 ### app/infra/db/
 

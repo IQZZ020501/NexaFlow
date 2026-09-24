@@ -2177,6 +2177,7 @@ def test_settings_defaults_and_validation() -> None:
     assert base.workflow_sandbox_timeout_seconds == 5.0
     assert base.jwt_expires_minutes == 1440
     assert base.refresh_token_expires_days == 30
+    assert config_mod.Settings.public_app_url == "http://localhost:8080"
     assert base.cors_origins == ()
     assert base.environment == "development"
     assert base.log_level == "INFO"
@@ -2316,6 +2317,29 @@ def test_settings_from_env() -> None:
     with patch.dict(os.environ, {**required, "CELERY_TASK_ALWAYS_EAGER": "no"}, clear=False):
         parsed = config_mod.Settings.from_env(require_bootstrap=False)
         assert parsed.celery_task_always_eager is False
+
+    deployment_boundary = {
+        key: value
+        for key, value in required.items()
+        if key
+        not in {
+            "KNOWLEDGE_STORAGE_DIR",
+            "QDRANT_URL",
+            "CELERY_BROKER_URL",
+        }
+    }
+    with patch.object(config_mod, "load_env_file"), patch.dict(
+        os.environ,
+        deployment_boundary,
+        clear=True,
+    ):
+        parsed = config_mod.Settings.from_env()
+        assert parsed.knowledge_storage_dir == Path("./storage/knowledge")
+        assert parsed.qdrant_url == "http://127.0.0.1:6333"
+        assert parsed.celery_broker_url == "redis://localhost:6379/0"
+        assert parsed.public_app_url == "http://localhost:8080"
+        assert parsed.agent_run_timeout_seconds == 300.0
+        assert parsed.jwt_expires_minutes == 1440
 
 
 # ================================================================ security

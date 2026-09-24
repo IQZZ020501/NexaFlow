@@ -143,6 +143,10 @@ not trigger unrelated cleanup.
   PostgreSQL image tags for pull-only deployments. Real `.env` files are
   local-only and gitignored; bootstrap admin credentials and managed-user
   initial passwords must come from env values, not Python constants.
+  Keep stable runtime policy defaults in `infra/config/settings.py` and omit
+  them from the template; keep operator-managed product settings in PostgreSQL.
+  Backward-compatible advanced environment overrides may remain supported
+  without being copied into every installation.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - The build-capable and pull-only Compose topologies both run Alembic through a

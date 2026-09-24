@@ -106,8 +106,13 @@ cp .env.example .env
 - `JWT_SECRET_KEY`
 - `MODEL_SECRET_KEY`
 - `BOOTSTRAP_ADMIN_PASSWORD`
+- `MANAGED_USER_INITIAL_PASSWORD`
+- 生产 OpenSandbox 的 `OPENSANDBOX_URL`、`OPENSANDBOX_API_KEY` 和 digest 镜像
 
-生产环境不要继续使用示例文件中的凭据。
+生产环境不要继续使用示例文件中的凭据。本地服务地址、执行预算和令牌有效期
+使用代码默认值；SMTP、企业身份、工作空间治理、模型和工具等可管理配置保存在
+数据库中，不需要复制进 `.env`。公开 Origin 默认是 `http://localhost:8080`；使用
+正式域名时通过 `PUBLIC_APP_URL` 覆盖。
 
 ### 2. 初始化并启动
 
@@ -124,7 +129,7 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
 - API 健康检查：<http://localhost:8080/health>
 - OpenAPI：<http://localhost:8080/docs>
 
-生产 Compose 只发布宿主机 `NEXAFLOW_PORT`（`.env.example` 默认 `8080`）端口，其余服务仅在内部网络访问。自定义镜像、外部数据库和 Nginx 配置见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
+生产 Compose 默认只发布宿主机 `8080` 端口，可用 `NEXAFLOW_PORT` 覆盖；其余服务仅在内部网络访问。自定义镜像、外部数据库和 Nginx 配置见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
 使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
