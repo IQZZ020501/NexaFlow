@@ -591,7 +591,7 @@ export function createAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "ask_risky"
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
     method: "POST",
@@ -808,7 +808,7 @@ export async function streamAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "ask_risky"
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   const run = await createAgentRun(
     token,

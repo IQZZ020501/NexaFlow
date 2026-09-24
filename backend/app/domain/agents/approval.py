@@ -12,7 +12,7 @@ AgentApprovalMode: TypeAlias = Literal[
     "full_access",
 ]
 
-DEFAULT_AGENT_APPROVAL_MODE: AgentApprovalMode = "ask_risky"
+DEFAULT_AGENT_APPROVAL_MODE: AgentApprovalMode = "always_ask"
 AGENT_APPROVAL_MODES = frozenset({"always_ask", "ask_risky", "full_access"})
 
 

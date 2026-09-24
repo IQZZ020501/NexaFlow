@@ -2323,7 +2323,7 @@ describe("PublicAgentChat", () => {
     expect(createBodies[0]).toEqual({
       goal: "什么是 NexaFlow？",
       conversation_id: "conv-1",
-      approval_mode: "ask_risky",
+      approval_mode: "always_ask",
     })
     expect(
       requests.some(
@@ -2404,9 +2404,12 @@ describe("PublicAgentChat", () => {
     await screen.findByText("开始新对话")
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：按策略审批" })
+      screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "启用完全访问" })
+    )
     sendMessage("开始吧")
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()

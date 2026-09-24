@@ -178,7 +178,7 @@ describe("public agent API", () => {
     ])
     expect(requests[0]?.body).toEqual({
       goal: "research",
-      approval_mode: "ask_risky",
+      approval_mode: "always_ask",
     })
     expect(requests[1]?.body).toEqual({
       goal: "continue research",

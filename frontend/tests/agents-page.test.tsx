@@ -3107,9 +3107,12 @@ describe("AgentsPage run flows", () => {
       "向 Agent 提问"
     ) as HTMLTextAreaElement
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：按策略审批" })
+      screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "启用完全访问" })
+    )
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 

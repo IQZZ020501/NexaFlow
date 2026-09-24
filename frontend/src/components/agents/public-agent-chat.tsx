@@ -1181,7 +1181,7 @@ export function PublicAgentChat({
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
   const [question, setQuestion] = React.useState("")
   const [approvalMode, setApprovalMode] =
-    React.useState<AgentApprovalMode>("ask_risky")
+    React.useState<AgentApprovalMode>("always_ask")
   const [files, setFiles] = React.useState<File[]>([])
   const [isInitializing, setIsInitializing] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)

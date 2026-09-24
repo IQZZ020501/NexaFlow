@@ -5,6 +5,10 @@ export const en = {
   请求批准: "Request approval",
   按策略审批: "Policy approval",
   完全访问: "Full access",
+  "启用完全访问？": "Enable full access?",
+  "完全访问会自动运行已授权的工具，不再逐步询问。请确认你了解该模式的安全影响。":
+    "Full access runs authorized tools automatically without asking first. Confirm that you understand the security impact of this mode.",
+  启用完全访问: "Enable full access",
   外部读取或副作用操作前询问: "Ask for external reads or side effects",
   仅风险操作需批准: "Ask only for risky operations",
   "自动运行已授权工具，仍受安全限制": "Auto-run authorized tools; limits apply",

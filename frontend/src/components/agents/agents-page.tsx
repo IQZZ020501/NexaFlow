@@ -675,7 +675,7 @@ export function AgentsPage({
   )
   const [question, setQuestion] = React.useState("")
   const [approvalMode, setApprovalMode] =
-    React.useState<AgentApprovalMode>("ask_risky")
+    React.useState<AgentApprovalMode>("always_ask")
   const [agentFiles, setAgentFiles] = React.useState<File[]>([])
   const [pendingQuestion, setPendingQuestion] = React.useState<string | null>(
     null

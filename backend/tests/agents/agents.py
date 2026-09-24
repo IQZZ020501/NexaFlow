@@ -4688,7 +4688,12 @@ def main() -> None:
             read_only_question = client.post(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
                 headers=auth_headers(admin_token),
-                json={"goal": "Check the release again"},
+                # The policy mode is what auto-runs a read-only tool; the run
+                # default asks for approval on every call.
+                json={
+                    "goal": "Check the release again",
+                    "approval_mode": "ask_risky",
+                },
             )
             assert read_only_question.status_code == 201, read_only_question.text
             assert read_only_question.json()["status"] == "succeeded"
@@ -4847,7 +4852,10 @@ def main() -> None:
             read_only_public_run = client.post(
                 f"{public_base}/runs",
                 headers=auth_headers(member_token),
-                json={"goal": "Check the release"},
+                json={
+                    "goal": "Check the release",
+                    "approval_mode": "ask_risky",
+                },
             )
             assert read_only_public_run.status_code == 201, (
                 read_only_public_run.text

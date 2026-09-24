@@ -169,7 +169,7 @@ class AgentRunCreateRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
     file_ids: list[str] = Field(default_factory=list)
-    approval_mode: AgentApprovalMode = "ask_risky"
+    approval_mode: AgentApprovalMode = "always_ask"
     preview: bool = Field(
         default=False,
         description="Deprecated compatibility field; runs are always durable.",
@@ -216,7 +216,7 @@ class ExternalAgentRunCreateRequest(BaseModel):
 
 class PublicAgentRunCreateRequest(ExternalAgentRunCreateRequest):
     file_ids: list[str] = Field(default_factory=list)
-    approval_mode: AgentApprovalMode = "ask_risky"
+    approval_mode: AgentApprovalMode = "always_ask"
 
 
 class AgentApiDocumentationResponse(BaseModel):
@@ -282,7 +282,7 @@ class AgentRunResponse(BaseModel):
         default_factory=list, exclude_if=lambda value: not value
     )
     attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
-    approval_mode: AgentApprovalMode = "ask_risky"
+    approval_mode: AgentApprovalMode = "always_ask"
     model_id: str
     model_name: str
     status: str
@@ -417,7 +417,7 @@ class ExternalAgentRunResponse(BaseModel):
         default_factory=list, exclude_if=lambda value: not value
     )
     attachments: list[AgentRunAttachmentResponse] = Field(default_factory=list)
-    approval_mode: AgentApprovalMode = "ask_risky"
+    approval_mode: AgentApprovalMode = "always_ask"
     status: str
     result: str
     sources: list[AgentRunSourceResponse] = Field(
