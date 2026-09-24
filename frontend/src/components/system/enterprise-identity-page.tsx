@@ -258,6 +258,7 @@ export function EnterpriseIdentityPage() {
               size="icon"
               onClick={() => void load()}
               aria-label={t("刷新")}
+              title={t("刷新")}
             >
               <RefreshCwIcon className={loading ? "animate-spin" : ""} />
             </Button>
@@ -423,6 +424,7 @@ export function EnterpriseIdentityPage() {
                   size="icon-xs"
                   onClick={() => void handleCopy(current.callback_url)}
                   aria-label={t("复制回调地址")}
+                  title={t("复制回调地址")}
                 >
                   <CopyIcon />
                 </Button>
@@ -440,6 +442,7 @@ export function EnterpriseIdentityPage() {
                   size="icon-xs"
                   onClick={() => void handleCopy(current.login_url)}
                   aria-label={t("复制登录地址")}
+                  title={t("复制登录地址")}
                 >
                   <CopyIcon />
                 </Button>

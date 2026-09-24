@@ -58,6 +58,15 @@ async def save(
     return mapping.to_entity(Announcement, row)
 
 
+async def delete(
+    db: AsyncSession,
+    announcement: Announcement,
+) -> None:
+    row = await db.get(AnnouncementOrm, announcement.id)
+    if row is not None:
+        await db.delete(row)
+
+
 async def get_by_id(
     db: AsyncSession,
     announcement_id: str,

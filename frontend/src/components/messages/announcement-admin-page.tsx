@@ -3,16 +3,22 @@
 import * as React from "react"
 import {
   ArchiveIcon,
+  CalendarClockIcon,
   CheckIcon,
   ChevronDownIcon,
+  FileTextIcon,
   MegaphoneIcon,
   PencilIcon,
+  PinIcon,
   PlusIcon,
+  RefreshCwIcon,
   SendIcon,
+  Trash2Icon,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
+import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { AnnouncementExpirationField } from "@/components/messages/announcement-expiration-field"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -53,9 +59,11 @@ import {
 } from "@/components/system/pagination-footer"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
+import type { TFunction } from "@/i18n"
 import {
   archiveAnnouncement,
   createAnnouncement,
+  deleteAnnouncement,
   listAnnouncements,
   publishAnnouncement,
   updateAnnouncement,
@@ -80,6 +88,24 @@ function statusVariant(status: Announcement["status"]) {
   if (status === "published") return "default" as const
   if (status === "archived") return "outline" as const
   return "secondary" as const
+}
+
+function statusLabel(status: Announcement["status"], t: TFunction) {
+  return t(
+    status === "draft" ? "草稿" : status === "published" ? "已发布" : "已归档"
+  )
+}
+
+function severityLabel(severity: AnnouncementSeverity, t: TFunction) {
+  return t(
+    severity === "info" ? "信息" : severity === "warning" ? "警告" : "严重"
+  )
+}
+
+const severityDotClass: Record<AnnouncementSeverity, string> = {
+  info: "bg-emerald-500",
+  warning: "bg-amber-400",
+  critical: "bg-red-500",
 }
 
 function AnnouncementSelector({
@@ -136,6 +162,7 @@ export function AnnouncementAdminPage() {
   const { language, t } = useLanguage()
   const session = useSession()
   const router = useRouter()
+  const [confirmAction, confirmDialog] = useConfirmDialog()
   const titleInputRef = React.useRef<HTMLInputElement>(null)
   const isGlobalAdmin = Boolean(session.me?.user.is_global_admin)
   const isWorkspaceAdmin = Boolean(
@@ -152,6 +179,7 @@ export function AnnouncementAdminPage() {
   const [total, setTotal] = React.useState(0)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isSaving, setIsSaving] = React.useState(false)
+  const [deletingId, setDeletingId] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [selectedAnnouncement, setSelectedAnnouncement] =
@@ -277,7 +305,7 @@ export function AnnouncementAdminPage() {
     resetForm()
     titleInputRef.current?.scrollIntoView({
       behavior: "smooth",
-      block: "center",
+      block: "start",
     })
     window.requestAnimationFrame(() => titleInputRef.current?.focus())
   }
@@ -289,7 +317,11 @@ export function AnnouncementAdminPage() {
     setSeverity(item.severity)
     setPinned(item.pinned)
     setExpiresAt(toLocalDateTimeInput(item.expires_at))
-    window.scrollTo({ top: 0, behavior: "smooth" })
+    titleInputRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    })
+    window.requestAnimationFrame(() => titleInputRef.current?.focus())
   }
 
   const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -366,6 +398,40 @@ export function AnnouncementAdminPage() {
     }
   }
 
+  const handleDelete = async (item: Announcement) => {
+    if (!session.token || item.status !== "archived") return
+    if (
+      !(await confirmAction({
+        description: t("确定删除公告“{title}”？此操作不可恢复。", {
+          title: item.title,
+        }),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
+    ) {
+      return
+    }
+
+    setDeletingId(item.id)
+    try {
+      await deleteAnnouncement(
+        session.token,
+        scope,
+        effectiveWorkspaceId,
+        item.id
+      )
+      if (selectedAnnouncement?.id === item.id) {
+        setSelectedAnnouncement(null)
+      }
+      session.notify("success", t("公告已删除"))
+      await loadAnnouncements()
+    } catch (cause) {
+      session.notify("error", getErrorMessage(cause, t))
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   if (!session.me || !session.token || (!isGlobalAdmin && !isWorkspaceAdmin)) {
     return null
   }
@@ -386,358 +452,434 @@ export function AnnouncementAdminPage() {
   }))
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <MegaphoneIcon className="size-6" />
-            {t("公告管理")}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("管理全局和工作空间公告。")}
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          {isGlobalAdmin ? (
-            <AnnouncementSelector
-              label={t("切换公告范围")}
-              value={scope}
-              options={scopeOptions}
-              className="max-sm:w-full"
-              onChange={(value) => {
-                setRequestedScope(value as AnnouncementScope)
-                setPage(1)
-                resetForm()
-              }}
-            />
-          ) : null}
-          {scope === "workspace" ? (
-            <AnnouncementSelector
-              label={t("工作空间")}
-              value={effectiveWorkspaceId ?? ""}
-              options={workspaceOptions}
-              className="max-sm:w-full"
-              onChange={(value) => {
-                setWorkspaceId(value)
-                setPage(1)
-                resetForm()
-              }}
-            />
-          ) : null}
-        </div>
-      </div>
-
-      {error ? (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {t("无法加载公告")}：{error}
-        </div>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{editingId ? t("保存公告") : t("新建公告")}</CardTitle>
-          <CardDescription>
-            {t("草稿发布后会实时推送给可见范围内的用户。")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form className="flex flex-col gap-5" onSubmit={handleSave}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="announcement-title">
-                  {t("公告标题")}
-                </FieldLabel>
-                <Input
-                  ref={titleInputRef}
-                  id="announcement-title"
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder={t("请输入公告标题")}
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="announcement-body">
-                  {t("公告正文")}
-                </FieldLabel>
-                <textarea
-                  id="announcement-body"
-                  value={body}
-                  onChange={(event) => setBody(event.target.value)}
-                  placeholder={t("使用Markdown编写公告内容")}
-                  className="min-h-36 w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  required
-                />
-                <FieldDescription>
-                  {t("使用Markdown编写公告内容")}
-                </FieldDescription>
-              </Field>
-            </FieldGroup>
-            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[11rem_14rem] lg:grid-cols-[11rem_14rem_auto_1fr]">
-              <Field className="min-w-0">
-                <FieldLabel>{t("公告级别")}</FieldLabel>
-                <AnnouncementSelector
-                  label={t("公告级别")}
-                  value={severity}
-                  options={severityOptions}
-                  className="w-full min-w-0"
-                  onChange={(value) =>
-                    setSeverity(value as AnnouncementSeverity)
-                  }
-                />
-              </Field>
-              <AnnouncementExpirationField
-                value={expiresAt}
-                onChange={setExpiresAt}
-              />
-              <label className="flex h-9 items-center gap-2 text-sm max-sm:min-h-11 lg:mt-7">
-                <input
-                  type="checkbox"
-                  checked={pinned}
-                  onChange={(event) => setPinned(event.target.checked)}
-                  className="size-4 accent-primary"
-                />
-                {t("是否置顶")}
-              </label>
-              <div className="flex items-center justify-end gap-2 max-sm:w-full lg:mt-7">
-                {editingId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="max-sm:flex-1"
-                    onClick={resetForm}
-                  >
-                    {t("取消")}
-                  </Button>
-                ) : null}
-                <Button
-                  type="submit"
-                  className="max-sm:flex-1"
-                  disabled={isSaving || !title.trim() || !body.trim()}
-                >
-                  {editingId ? (
-                    <CheckIcon data-icon="inline-start" />
-                  ) : (
-                    <PlusIcon data-icon="inline-start" />
-                  )}
-                  {editingId ? t("保存公告") : t("创建草稿")}
-                </Button>
+    <>
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5">
+        <header className="rounded-2xl border bg-card/80 p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+                <MegaphoneIcon className="size-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-2xl font-semibold tracking-tight">
+                    {t("公告管理")}
+                  </h1>
+                  <Badge variant="secondary" className="rounded-full">
+                    {scope === "global"
+                      ? t("全局公告")
+                      : selectedWorkspace
+                        ? displayWorkspaceName(selectedWorkspace, t)
+                        : t("工作空间公告")}
+                  </Badge>
+                </div>
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  {t("管理全局和工作空间公告。")}
+                </p>
               </div>
             </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <section className="flex w-full max-w-6xl flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">
-            {scope === "global"
-              ? t("全局公告")
-              : selectedWorkspace
-                ? displayWorkspaceName(selectedWorkspace, t)
-                : t("工作空间公告")}
-          </h2>
-          <div className="flex flex-wrap items-center gap-2 max-sm:w-full sm:w-auto">
-            <Button type="button" size="sm" className="max-sm:flex-1" onClick={startAdding}>
-              <PlusIcon data-icon="inline-start" />
-              {t("添加公告")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 max-sm:flex-1"
-              onClick={() => void loadAnnouncements()}
-              disabled={isLoading}
+            <div
+              className={cn(
+                "grid w-full gap-3 xl:w-auto",
+                isGlobalAdmin && scope === "workspace"
+                  ? "sm:grid-cols-2 xl:min-w-[28rem]"
+                  : "sm:max-w-64 xl:min-w-64"
+              )}
             >
-              {t("刷新")}
-            </Button>
+              {isGlobalAdmin ? (
+                <div className="min-w-0 space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t("切换公告范围")}
+                  </p>
+                  <AnnouncementSelector
+                    label={t("切换公告范围")}
+                    value={scope}
+                    options={scopeOptions}
+                    className="w-full min-w-0"
+                    onChange={(value) => {
+                      setRequestedScope(value as AnnouncementScope)
+                      setPage(1)
+                      resetForm()
+                    }}
+                  />
+                </div>
+              ) : null}
+              {scope === "workspace" ? (
+                <div className="min-w-0 space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t("工作空间")}
+                  </p>
+                  <AnnouncementSelector
+                    label={t("工作空间")}
+                    value={effectiveWorkspaceId ?? ""}
+                    options={workspaceOptions}
+                    className="w-full min-w-0"
+                    onChange={(value) => {
+                      setWorkspaceId(value)
+                      setPage(1)
+                      resetForm()
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
-        {isLoading ? (
-          <div className="rounded-xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
-            {t("正在加载公告")}
+        </header>
+
+        {error ? (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {t("无法加载公告")}：{error}
           </div>
-        ) : items.length ? (
-          <div className="flex flex-col gap-2">
-            {items.map((item) => (
-              <Card
-                key={item.id}
-                className={cn(
-                  "border-border/70 py-0 shadow-sm transition-[border-color,box-shadow,opacity] hover:border-foreground/20 hover:shadow-md",
-                  item.status === "archived" && "opacity-70"
-                )}
-              >
-                <CardContent className="p-0">
-                  <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-6">
-                    <button
-                      type="button"
-                      aria-haspopup="dialog"
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      onClick={() => setSelectedAnnouncement(item)}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          "size-2 shrink-0 rounded-full",
-                          item.severity === "critical"
-                            ? "bg-destructive"
-                            : item.severity === "warning"
-                              ? "bg-amber-500"
-                              : "bg-sky-500"
-                        )}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold sm:text-base">
-                            {item.title}
-                          </span>
-                          <Badge
-                            variant={statusVariant(item.status)}
-                            className="rounded-full"
-                          >
-                            {t(
-                              item.status === "draft"
-                                ? "草稿"
-                                : item.status === "published"
-                                  ? "已发布"
-                                  : "已归档"
-                            )}
-                          </Badge>
-                          {item.pinned ? (
-                            <Badge variant="outline" className="rounded-full">
-                              {t("置顶")}
-                            </Badge>
-                          ) : null}
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {new Intl.DateTimeFormat(language, {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          }).format(new Date(item.updated_at))}
-                        </span>
-                      </span>
-                    </button>
-                    <div className="flex flex-wrap items-center gap-1 max-sm:justify-end sm:shrink-0">
-                      {item.status !== "archived" ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => startEditing(item)}
-                          className="h-8 px-2 max-sm:flex-1"
-                        >
-                          <PencilIcon data-icon="inline-start" />
-                          {t("编辑")}
-                        </Button>
-                      ) : null}
-                      {item.status === "draft" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void handleAction("publish", item)}
-                          className="h-8 px-2.5 max-sm:flex-1"
-                        >
-                          <SendIcon data-icon="inline-start" />
-                          {t("发布")}
-                        </Button>
-                      ) : null}
-                      {item.status === "published" ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void handleAction("archive", item)}
-                          className="h-8 px-2 max-sm:flex-1"
-                        >
-                          <ArchiveIcon data-icon="inline-start" />
-                          {t("归档")}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-            <SystemPagination
-              page={page}
-              pageSize={pageSize}
-              itemCount={items.length}
-              total={total}
-              hasNext={page * pageSize < total}
-              onPageChange={setPage}
-              onPageSizeChange={(nextPageSize) => {
-                setPageSize(nextPageSize)
-                setPage(1)
-              }}
-            />
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
-            {t("暂无公告")}
-          </div>
-        )}
-      </section>
-      <Dialog
-        open={Boolean(selectedAnnouncement)}
-        onOpenChange={(open) => {
-          if (!open) setSelectedAnnouncement(null)
-        }}
-      >
-        <DialogContent className="max-h-[min(80svh,48rem)] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-          {selectedAnnouncement ? (
-            <>
-              <DialogHeader className="border-b px-6 py-5">
-                <DialogTitle className="pr-6 text-xl leading-snug">
-                  {selectedAnnouncement.title}
-                </DialogTitle>
-                <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
-                  <Badge variant={statusVariant(selectedAnnouncement.status)}>
-                    {t(
-                      selectedAnnouncement.status === "draft"
-                        ? "草稿"
-                        : selectedAnnouncement.status === "published"
-                          ? "已发布"
-                          : "已归档"
-                    )}
+        ) : null}
+
+        <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(19rem,0.82fr)_minmax(0,1.18fr)]">
+          <Card className="min-w-0 gap-0 overflow-hidden py-0 xl:sticky xl:top-4">
+            <CardHeader className="border-b bg-muted/20 px-4 py-4 sm:px-5">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-base">
+                  {editingId ? t("保存公告") : t("新建公告")}
+                </CardTitle>
+                {editingId ? (
+                  <Badge variant="outline" className="rounded-full">
+                    {t("编辑")}
                   </Badge>
-                  <Badge variant="secondary">
-                    {t(
-                      selectedAnnouncement.severity === "info"
-                        ? "信息"
-                        : selectedAnnouncement.severity === "warning"
-                          ? "警告"
-                          : "严重"
-                    )}
-                  </Badge>
-                  {selectedAnnouncement.pinned ? (
-                    <Badge variant="outline">{t("置顶")}</Badge>
-                  ) : null}
-                  <span>
-                    {new Intl.DateTimeFormat(language, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    }).format(new Date(selectedAnnouncement.updated_at))}
-                  </span>
-                </DialogDescription>
-              </DialogHeader>
-              <div className="min-h-0 overflow-y-auto px-6 py-5">
-                <MarkdownContent content={selectedAnnouncement.body} />
+                ) : null}
               </div>
-              <DialogFooter className="border-t px-6 py-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setSelectedAnnouncement(null)}
-                >
-                  {t("关闭")}
-                </Button>
-              </DialogFooter>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-    </div>
+              <CardDescription className="max-w-md leading-5">
+                {t("草稿发布后会实时推送给可见范围内的用户。")}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-5">
+              <form className="flex flex-col" onSubmit={handleSave}>
+                <FieldGroup className="gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="announcement-title">
+                      {t("公告标题")}
+                    </FieldLabel>
+                    <Input
+                      ref={titleInputRef}
+                      id="announcement-title"
+                      value={title}
+                      onChange={(event) => setTitle(event.target.value)}
+                      placeholder={t("请输入公告标题")}
+                      required
+                    />
+                  </Field>
+                  <Field>
+                    <div className="flex items-center justify-between gap-3">
+                      <FieldLabel htmlFor="announcement-body">
+                        {t("公告正文")}
+                      </FieldLabel>
+                      <FileTextIcon
+                        className="size-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <textarea
+                      id="announcement-body"
+                      value={body}
+                      onChange={(event) => setBody(event.target.value)}
+                      placeholder={t("使用Markdown编写公告内容")}
+                      className="max-h-72 min-h-44 w-full resize-y rounded-xl border border-input bg-background px-3 py-2.5 text-sm leading-6 shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                      required
+                    />
+                    <FieldDescription className="leading-5">
+                      {t("使用Markdown编写公告内容")}
+                    </FieldDescription>
+                  </Field>
+                </FieldGroup>
+
+                <div className="mt-5 rounded-xl border bg-muted/20 p-3">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                    <span className="flex size-6 items-center justify-center rounded-md bg-background">
+                      <CalendarClockIcon
+                        className="size-3.5"
+                        aria-hidden="true"
+                      />
+                    </span>
+                    <span>{t("公告级别")}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{t("公告过期时间")}</span>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field className="min-w-0">
+                      <FieldLabel>{t("公告级别")}</FieldLabel>
+                      <AnnouncementSelector
+                        label={t("公告级别")}
+                        value={severity}
+                        options={severityOptions}
+                        className="w-full min-w-0"
+                        onChange={(value) =>
+                          setSeverity(value as AnnouncementSeverity)
+                        }
+                      />
+                    </Field>
+                    <AnnouncementExpirationField
+                      value={expiresAt}
+                      onChange={setExpiresAt}
+                    />
+                  </div>
+                  <label className="mt-4 flex min-h-9 items-center gap-2 rounded-lg border border-transparent px-2 text-sm transition-colors hover:border-border hover:bg-background">
+                    <input
+                      type="checkbox"
+                      checked={pinned}
+                      onChange={(event) => setPinned(event.target.checked)}
+                      className="size-4 accent-primary"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <PinIcon
+                        className="size-3.5 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      {t("是否置顶")}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  {editingId ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="sm:min-w-20"
+                      onClick={resetForm}
+                    >
+                      {t("取消")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="submit"
+                    className="sm:min-w-32"
+                    disabled={isSaving || !title.trim() || !body.trim()}
+                  >
+                    {editingId ? (
+                      <CheckIcon data-icon="inline-start" />
+                    ) : (
+                      <PlusIcon data-icon="inline-start" />
+                    )}
+                    {editingId ? t("保存公告") : t("创建草稿")}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <section
+            className="flex min-w-0 flex-col gap-3"
+            aria-labelledby="announcement-list-title"
+          >
+            <Card className="min-w-0 gap-0 overflow-hidden py-0">
+              <CardHeader className="border-b bg-muted/20 px-4 py-4 sm:px-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle
+                      id="announcement-list-title"
+                      className="truncate text-base"
+                    >
+                      {scope === "global"
+                        ? t("全局公告")
+                        : selectedWorkspace
+                          ? displayWorkspaceName(selectedWorkspace, t)
+                          : t("工作空间公告")}
+                    </CardTitle>
+                  </div>
+                  <div className="flex w-full items-center gap-2 sm:w-auto">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="flex-1 sm:flex-none"
+                      onClick={startAdding}
+                    >
+                      <PlusIcon data-icon="inline-start" />
+                      {t("添加公告")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 sm:flex-none"
+                      onClick={() => void loadAnnouncements()}
+                      disabled={isLoading}
+                    >
+                      <RefreshCwIcon
+                        className={cn(isLoading && "animate-spin")}
+                        data-icon="inline-start"
+                      />
+                      {t("刷新")}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-4">
+                {isLoading ? (
+                  <div className="rounded-xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
+                    {t("正在加载公告")}
+                  </div>
+                ) : items.length ? (
+                  <div className="flex flex-col gap-2.5" role="list">
+                    {items.map((item) => (
+                      <article
+                        key={item.id}
+                        role="listitem"
+                        className={cn(
+                          "rounded-lg border bg-background/70 px-3 py-2 transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm",
+                          item.status === "archived" && "bg-muted/20"
+                        )}
+                      >
+                        <div className="flex min-h-9 items-center gap-2">
+                          <span
+                            className={cn(
+                              "size-2.5 shrink-0 rounded-full",
+                              severityDotClass[item.severity]
+                            )}
+                            role="img"
+                            aria-label={severityLabel(item.severity, t)}
+                            title={severityLabel(item.severity, t)}
+                          />
+                          <button
+                            type="button"
+                            aria-haspopup="dialog"
+                            className="min-w-0 flex-1 truncate py-1 text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:text-[0.9375rem]"
+                            onClick={() => setSelectedAnnouncement(item)}
+                          >
+                            <span className="block truncate">{item.title}</span>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-0.5">
+                            {item.status !== "archived" ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={t("编辑")}
+                                title={t("编辑")}
+                                onClick={() => startEditing(item)}
+                              >
+                                <PencilIcon />
+                              </Button>
+                            ) : null}
+                            {item.status === "draft" ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-sm"
+                                aria-label={t("发布")}
+                                title={t("发布")}
+                                onClick={() =>
+                                  void handleAction("publish", item)
+                                }
+                              >
+                                <SendIcon />
+                              </Button>
+                            ) : null}
+                            {item.status === "published" ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={t("归档")}
+                                title={t("归档")}
+                                onClick={() =>
+                                  void handleAction("archive", item)
+                                }
+                              >
+                                <ArchiveIcon />
+                              </Button>
+                            ) : null}
+                            {item.status === "archived" ? (
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon-sm"
+                                aria-label={t("删除公告：{value}", {
+                                  value: item.title,
+                                })}
+                                title={t("删除公告")}
+                                disabled={deletingId === item.id}
+                                onClick={() => void handleDelete(item)}
+                              >
+                                <Trash2Icon
+                                  className={cn(
+                                    deletingId === item.id && "animate-pulse"
+                                  )}
+                                />
+                              </Button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                    <SystemPagination
+                      page={page}
+                      pageSize={pageSize}
+                      itemCount={items.length}
+                      total={total}
+                      hasNext={page * pageSize < total}
+                      onPageChange={setPage}
+                      onPageSizeChange={(nextPageSize) => {
+                        setPageSize(nextPageSize)
+                        setPage(1)
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
+                    {t("暂无公告")}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        </div>
+
+        <Dialog
+          open={Boolean(selectedAnnouncement)}
+          onOpenChange={(open) => {
+            if (!open) setSelectedAnnouncement(null)
+          }}
+        >
+          <DialogContent className="max-h-[min(80svh,48rem)] gap-0 overflow-hidden p-0 sm:max-w-3xl">
+            {selectedAnnouncement ? (
+              <>
+                <DialogHeader className="border-b px-6 py-5">
+                  <DialogTitle className="pr-6 text-xl leading-snug">
+                    {selectedAnnouncement.title}
+                  </DialogTitle>
+                  <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge variant={statusVariant(selectedAnnouncement.status)}>
+                      {statusLabel(selectedAnnouncement.status, t)}
+                    </Badge>
+                    <Badge variant="secondary">
+                      {severityLabel(selectedAnnouncement.severity, t)}
+                    </Badge>
+                    {selectedAnnouncement.pinned ? (
+                      <Badge variant="outline">{t("置顶")}</Badge>
+                    ) : null}
+                    <span>
+                      {new Intl.DateTimeFormat(language, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(selectedAnnouncement.updated_at))}
+                    </span>
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="min-h-0 overflow-y-auto px-6 py-5">
+                  <MarkdownContent content={selectedAnnouncement.body} />
+                </div>
+                <DialogFooter className="border-t px-6 py-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSelectedAnnouncement(null)}
+                  >
+                    {t("关闭")}
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      </div>
+      {confirmDialog}
+    </>
   )
 }

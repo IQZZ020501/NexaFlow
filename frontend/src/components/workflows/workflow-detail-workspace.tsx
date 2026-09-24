@@ -1422,7 +1422,7 @@ export function WorkflowDetailWorkspace({
                           <Button
                             type="submit"
                             size="icon"
-                            className="size-9 rounded-xl"
+                            className="size-9 rounded-full"
                             aria-label={t("发送问题")}
                             title={
                               runTarget?.source === "draft" && isAppDirty

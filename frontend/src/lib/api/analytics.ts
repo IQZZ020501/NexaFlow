@@ -32,6 +32,42 @@ export type WorkspaceAnalytics = {
     success_rate: AnalyticsNullableComparison
     average_duration_ms: AnalyticsNullableComparison
   }
+  inventory: {
+    applications: {
+      total: number
+      agents: number
+      workflows: number
+      published: number
+      active: number
+    }
+    knowledge: {
+      bases: number
+      documents: number
+      chunks: number
+    }
+    tools: {
+      total: number
+      mcp: number
+      python: number
+      builtin: number
+      active: number
+    }
+    models: number
+  }
+  tool_usage: {
+    calls: AnalyticsComparison
+    failed: number
+    success_rate: AnalyticsNullableComparison
+    approval_required: number
+    top_tools: Array<{
+      tool_id: string
+      name: string
+      kind: string
+      calls: number
+      failed: number
+      success_rate: number | null
+    }>
+  }
   trends: Array<{
     date: string
     runs: number

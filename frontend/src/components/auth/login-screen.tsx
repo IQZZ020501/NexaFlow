@@ -6,14 +6,6 @@ import Image from "next/image"
 import Link from "next/link"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
@@ -285,25 +277,47 @@ export function LoginScreen({
 
   return (
     <>
-      <main className="flex min-h-dvh items-start justify-center bg-muted/30 p-6 py-8 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:items-center sm:py-6">
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+      <main className="grid min-h-dvh bg-background lg:grid-cols-[minmax(0,1.1fr)_minmax(28rem,0.9fr)]">
+        <section className="relative hidden min-h-dvh overflow-hidden border-r bg-white lg:block dark:bg-black">
+          <Image
+            src="/NexaFlow-log.png"
+            alt="NexaFlow"
+            width={1536}
+            height={1024}
+            priority
+            sizes="(min-width: 1024px) 55vw, 0px"
+            className="absolute inset-0 h-full w-full object-cover dark:invert"
+          />
+        </section>
+        <section
+          aria-labelledby="login-heading"
+          className="flex min-h-dvh items-start justify-center px-6 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:items-center sm:px-10 lg:px-14 xl:px-20"
+        >
+          <div className="w-full max-w-sm">
+            <div className="mb-8 overflow-hidden lg:hidden">
               <Image
-                src="/NexaFlow-logo.png"
-                alt=""
-                width={36}
-                height={36}
+                src="/NexaFlow-log.png"
+                alt="NexaFlow"
+                width={1536}
+                height={1024}
                 priority
-                className="size-9 rounded-full dark:invert"
+                sizes="(max-width: 639px) calc(100vw - 3rem), 24rem"
+                className="mx-auto -my-10 h-auto w-[135%] max-w-none sm:-my-8 sm:w-full sm:max-w-80 dark:invert"
               />
-              <span>NexaFlow</span>
-            </CardTitle>
-            <CardDescription>{t("登录到你的工作空间")}</CardDescription>
-          </CardHeader>
-          <form onSubmit={handleSubmit}>
-            <CardContent>
-              <FieldGroup>
+            </div>
+            <div className="mb-8 space-y-2">
+              <h1
+                id="login-heading"
+                className="text-2xl font-semibold tracking-tight"
+              >
+                {t("登录")}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {t("登录到你的工作空间")}
+              </p>
+            </div>
+            <form onSubmit={handleSubmit} className="grid gap-6">
+              <FieldGroup className="gap-5">
                 <Field>
                   <FieldLabel htmlFor="username">{t("用户名")}</FieldLabel>
                   <Input
@@ -344,69 +358,71 @@ export function LoginScreen({
                   </div>
                 </Field>
               </FieldGroup>
-            </CardContent>
-            <CardFooter className="pt-6">
-              <Button className="w-full" disabled={isSubmitting}>
+              <Button className="h-11 w-full" disabled={isSubmitting}>
                 {isSubmitting ? (
                   <LoaderCircleIcon data-icon="inline-start" />
                 ) : null}
                 {t("登录")}
               </Button>
-            </CardFooter>
-          </form>
-          {enterpriseConnections.length ? (
-            <CardContent className="grid gap-3 border-t pt-6">
-              <div className="text-center text-xs text-muted-foreground">
-                {t("或使用企业账号登录")}
-              </div>
-              <div className="flex flex-wrap justify-center gap-3">
-                {enterpriseConnections.map((connection) => {
-                  const params = new URLSearchParams()
-                  if (next) params.set("next", next)
-                  const href = apiUrl(
-                    `${connection.start_url}${params.size ? `?${params}` : ""}`
-                  )
-                  const label = t("使用 {provider} 扫码登录", {
-                    provider: connection.name,
-                  })
-                  if (connection.provider === "feishu") {
+            </form>
+            {enterpriseConnections.length ? (
+              <div className="mt-8 grid gap-4 border-t pt-6">
+                <div className="text-center text-xs text-muted-foreground">
+                  {t("或使用企业账号登录")}
+                </div>
+                <div className="flex flex-wrap justify-center gap-3">
+                  {enterpriseConnections.map((connection) => {
+                    const params = new URLSearchParams()
+                    if (next) params.set("next", next)
+                    const href = apiUrl(
+                      `${connection.start_url}${params.size ? `?${params}` : ""}`
+                    )
+                    const label = t("使用 {provider} 扫码登录", {
+                      provider: connection.name,
+                    })
+                    if (connection.provider === "feishu") {
+                      return (
+                        <Button
+                          key={connection.id}
+                          type="button"
+                          variant="outline"
+                          size="icon-lg"
+                          className="size-10 rounded-full"
+                          aria-label={label}
+                          title={connection.name}
+                          onClick={() => setFeishuConnection(connection)}
+                        >
+                          <EnterpriseProviderIcon
+                            provider={connection.provider}
+                          />
+                        </Button>
+                      )
+                    }
                     return (
                       <Button
                         key={connection.id}
-                        type="button"
                         variant="outline"
                         size="icon-lg"
                         className="size-10 rounded-full"
-                        aria-label={label}
-                        title={connection.name}
-                        onClick={() => setFeishuConnection(connection)}
+                        asChild
                       >
-                        <EnterpriseProviderIcon
-                          provider={connection.provider}
-                        />
+                        <a
+                          href={href}
+                          aria-label={label}
+                          title={connection.name}
+                        >
+                          <EnterpriseProviderIcon
+                            provider={connection.provider}
+                          />
+                        </a>
                       </Button>
                     )
-                  }
-                  return (
-                    <Button
-                      key={connection.id}
-                      variant="outline"
-                      size="icon-lg"
-                      className="size-10 rounded-full"
-                      asChild
-                    >
-                      <a href={href} aria-label={label} title={connection.name}>
-                        <EnterpriseProviderIcon
-                          provider={connection.provider}
-                        />
-                      </a>
-                    </Button>
-                  )
-                })}
+                  })}
+                </div>
               </div>
-            </CardContent>
-          ) : null}
-        </Card>
+            ) : null}
+          </div>
+        </section>
       </main>
       <FeishuQrDialog
         connection={feishuConnection}

@@ -68,8 +68,7 @@ afterEach(() => {
 
 function picker(
   value: ToolRef[] = [],
-  onChange: (value: ToolRef[]) => void = () => undefined,
-  maxItems = 12
+  onChange: (value: ToolRef[]) => void = () => undefined
 ) {
   return (
     <ToolPicker
@@ -79,7 +78,6 @@ function picker(
       workspaceId="ws-1"
       value={value}
       onChange={onChange}
-      maxItems={maxItems}
     />
   )
 }
@@ -149,32 +147,6 @@ describe("ToolPicker extra", () => {
     renderPage(picker())
     expect(await screen.findByText("暂无可用工具")).toBeTruthy()
     expect(screen.queryByText("没有匹配的工具")).toBeNull()
-  })
-
-  test("enforces the maximum selection count", async () => {
-    const changes: ToolRef[][] = []
-    renderPage(
-      picker(
-        [{ tool_id: "tool-a", version_id: "version-2" }],
-        (value) => changes.push(value),
-        1
-      )
-    )
-    await screen.findByText("Lookup account")
-
-    const dialog = screen.getByRole("dialog", { name: "选择工具" })
-    const second = within(dialog).getByRole("checkbox", {
-      name: "Weekly report",
-    })
-    expect((second as HTMLInputElement).disabled).toBe(true)
-    fireEvent.click(second)
-    expect(changes).toEqual([])
-
-    fireEvent.keyDown(second, { key: "Enter" })
-    expect(changes).toEqual([])
-    expect(
-      screen.getByText("选择有使用权限且已发布的工具，最多 1 个。")
-    ).toBeTruthy()
   })
 
   test("shows a retryable load error and recovers", async () => {

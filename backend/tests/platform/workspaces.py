@@ -31,6 +31,8 @@ from app.domain.knowledge.graph.models import (
 )
 from app.domain.knowledge.models import (
     KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeDocumentChunk,
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
@@ -38,7 +40,13 @@ from app.domain.knowledge.service import knowledge_object_storage
 from app.domain.knowledge.storage import cleanup as knowledge_cleanup
 from app.domain.models.registered import RegisteredModel
 from app.domain.platform.models import ResourcePermission
-from app.domain.tools.models import McpServer, ToolSource
+from app.domain.tools.models import (
+    McpServer,
+    Tool,
+    ToolInvocation,
+    ToolSource,
+    ToolVersion,
+)
 from app.domain.workflows.models import WorkflowDefinition, WorkflowRunDetail
 from app.entities.defaults import new_id
 from app.entities.runs import AgentRun
@@ -191,6 +199,28 @@ def exercise_announcements(client, admin_token: str, workspace_id: str) -> None:
         assert archived.status_code == 200, archived.text
         assert live_publisher.publish.await_count == 4
         assert live_publisher.close.await_count == 4
+
+        cannot_delete_published = client.delete(
+            f"/api/v1/admin/announcements/{global_id}",
+            headers=headers,
+        )
+        assert cannot_delete_published.status_code == 409, cannot_delete_published.text
+
+        deleted_workspace = client.delete(
+            f"/api/v1/workspaces/{workspace_id}/announcements/{workspace_id_notice}",
+            headers=headers,
+        )
+        assert deleted_workspace.status_code == 204, deleted_workspace.text
+        remaining_workspace_announcements = client.get(
+            f"/api/v1/workspaces/{workspace_id}/announcements",
+            headers=headers,
+        )
+        assert remaining_workspace_announcements.status_code == 200, (
+            remaining_workspace_announcements.text
+        )
+        assert workspace_id_notice not in {
+            item["id"] for item in remaining_workspace_announcements.json()
+        }
 
         denied_global = client.get(
             "/api/v1/admin/announcements",
@@ -416,6 +446,40 @@ def _analytics_run(
         finished_at=created_at + timedelta(seconds=duration_seconds),
         created_at=created_at,
         updated_at=created_at + timedelta(seconds=duration_seconds),
+    )
+
+
+def _analytics_tool_call(
+    *,
+    workspace_id: str,
+    tool: Tool | None,
+    user_id: str,
+    run_id: str,
+    status: str,
+    approved: bool,
+    created_at: datetime,
+) -> ToolInvocation:
+    """Build a settled tool invocation used by the analytics tool-usage assertions."""
+    return ToolInvocation(
+        id=new_id(),
+        workspace_id=workspace_id,
+        origin="agent",
+        root_run_id=run_id,
+        run_id=run_id,
+        invocation_id=new_id(),
+        execution_user_id=user_id,
+        access_source="console",
+        tool_id=tool.id if tool is not None else None,
+        tool_version_id=tool.current_version_id if tool is not None else None,
+        arguments={},
+        arguments_hash="a" * 64,
+        policy_snapshot={},
+        idempotency_key=new_id(),
+        status=status,
+        approved_by_user_id=user_id if approved else None,
+        approved_at=created_at if approved else None,
+        result_summary="",
+        created_at=created_at,
     )
 
 
@@ -749,6 +813,223 @@ async def seed_workspace_analytics(
                 ),
             ]
         )
+        tool_source = ToolSource(
+            id="analytics-tool-source",
+            workspace_id=workspace_id,
+            kind="builtin",
+            name="Builtin",
+            status="active",
+        )
+        tool = Tool(
+            id="analytics-tool",
+            workspace_id=workspace_id,
+            source_id=tool_source.id,
+            kind="builtin",
+            stable_key="analytics_probe",
+            function_name="analytics_probe",
+            status="active",
+            availability="available",
+        )
+        tool_version = ToolVersion(
+            id="analytics-tool-version",
+            workspace_id=workspace_id,
+            tool_id=tool.id,
+            revision=1,
+            display_name="Current time",
+            description="",
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object", "additionalProperties": False},
+            execution_spec={"builtin": "current_time"},
+            definition_hash="1" * 64,
+        )
+        archived_tool_source = ToolSource(
+            id="analytics-archived-tool-source",
+            workspace_id=workspace_id,
+            kind="python",
+            name="Archived Python",
+            status="active",
+        )
+        other_tool_source = ToolSource(
+            id="analytics-other-tool-source",
+            workspace_id=other_workspace_id,
+            kind="builtin",
+            name="Builtin",
+            status="active",
+        )
+        archived_tool = Tool(
+            id="analytics-archived-tool",
+            workspace_id=workspace_id,
+            source_id=archived_tool_source.id,
+            kind="python",
+            stable_key="analytics_archived_probe",
+            function_name="analytics_archived_probe",
+            status="archived",
+            availability="unavailable",
+        )
+        other_tool = Tool(
+            id="analytics-other-tool",
+            workspace_id=other_workspace_id,
+            source_id=other_tool_source.id,
+            kind="builtin",
+            stable_key="analytics_other_probe",
+            function_name="analytics_other_probe",
+            status="active",
+            availability="available",
+        )
+        other_tool_version = ToolVersion(
+            id="analytics-other-tool-version",
+            workspace_id=other_workspace_id,
+            tool_id=other_tool.id,
+            revision=1,
+            display_name="Other current time",
+            description="",
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object", "additionalProperties": False},
+            execution_spec={"builtin": "current_time"},
+            definition_hash="2" * 64,
+        )
+        # Tools, versions, and invocations reference each other by key only, so
+        # each level is flushed before the next one is inserted.
+        db.add_all([tool_source, archived_tool_source, other_tool_source])
+        await db.flush()
+        db.add_all([tool, archived_tool, other_tool])
+        await db.flush()
+        archived_tool_version = ToolVersion(
+            id="analytics-archived-tool-version",
+            workspace_id=workspace_id,
+            tool_id=archived_tool.id,
+            revision=1,
+            display_name="Archived probe",
+            description="",
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object", "additionalProperties": False},
+            execution_spec={"builtin": "current_time"},
+            definition_hash="3" * 64,
+        )
+        db.add_all([tool_version, archived_tool_version, other_tool_version])
+        await db.flush()
+        archived_tool.current_version_id = archived_tool_version.id
+        # The current version is a foreign key, so it is linked after insert.
+        tool.current_version_id = tool_version.id
+        other_tool.current_version_id = other_tool_version.id
+        await db.flush()
+        knowledge_document = KnowledgeDocument(
+            id="analytics-document",
+            workspace_id=workspace_id,
+            knowledge_base_id=graph_knowledge.id,
+            filename="analytics.md",
+            size_bytes=128,
+            storage_path="analytics/analytics.md",
+            status="active",
+            created_by_user_id=global_admin_id,
+        )
+        db.add(knowledge_document)
+        await db.flush()
+        db.add_all(
+            [
+                KnowledgeDocumentChunk(
+                    id="analytics-chunk-1",
+                    workspace_id=workspace_id,
+                    knowledge_base_id=graph_knowledge.id,
+                    document_id=knowledge_document.id,
+                    chunk_index=0,
+                    content="Analytics chunk one",
+                    char_count=18,
+                    token_count=5,
+                    status="indexed",
+                ),
+                KnowledgeDocumentChunk(
+                    id="analytics-chunk-2",
+                    workspace_id=workspace_id,
+                    knowledge_base_id=graph_knowledge.id,
+                    document_id=knowledge_document.id,
+                    chunk_index=1,
+                    content="Analytics chunk two",
+                    char_count=18,
+                    token_count=5,
+                    status="indexed",
+                ),
+            ]
+        )
+        await db.flush()
+        db.add_all(
+            [
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="succeeded",
+                    approved=True,
+                    created_at=current_start + timedelta(days=1),
+                ),
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="succeeded",
+                    approved=False,
+                    created_at=current_start + timedelta(days=1, hours=1),
+                ),
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="failed",
+                    approved=False,
+                    created_at=current_start + timedelta(days=2),
+                ),
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="uncertain",
+                    approved=False,
+                    created_at=current_start + timedelta(days=2, hours=1),
+                ),
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="succeeded",
+                    approved=False,
+                    created_at=current_start - timedelta(days=2),
+                ),
+                _analytics_tool_call(
+                    workspace_id=other_workspace_id,
+                    tool=other_tool,
+                    user_id=global_admin_id,
+                    run_id=other.id,
+                    status="succeeded",
+                    approved=False,
+                    created_at=current_start + timedelta(days=1),
+                ),
+                # Archived tools no longer exist on the tools page.
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=archived_tool,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="succeeded",
+                    approved=False,
+                    created_at=current_start + timedelta(days=1),
+                ),
+                # Agent-internal ledger entries must not count as tool usage.
+                _analytics_tool_call(
+                    workspace_id=workspace_id,
+                    tool=None,
+                    user_id=global_admin_id,
+                    run_id=first.id,
+                    status="succeeded",
+                    approved=False,
+                    created_at=current_start + timedelta(days=1),
+                ),
+            ]
+        )
         await db.commit()
         monthly = await graph_repository.monthly_workspace_model_tokens(
             db,
@@ -919,6 +1200,53 @@ def exercise_workspace_analytics() -> None:
             "value": 12500.0,
             "previous_value": 10000.0,
             "change_percent": 25.0,
+        }
+        inventory = payload["inventory"]
+        assert inventory["applications"] == {
+            "total": 2,
+            "agents": 1,
+            "workflows": 1,
+            "published": 0,
+            "active": 2,
+        }
+        assert inventory["knowledge"] == {"bases": 1, "documents": 1, "chunks": 2}
+        assert inventory["models"] == 1
+        tools_inventory = inventory["tools"]
+        # The workspace system catalog is materialized per workspace, so only the
+        # composed shape and the isolation of the injected probe tool are asserted.
+        assert tools_inventory["mcp"] == 0
+        assert (
+            tools_inventory["total"]
+            == tools_inventory["builtin"]
+            + tools_inventory["python"]
+            + tools_inventory["mcp"]
+        )
+        # Only the injected archived probe is inactive in this workspace.
+        assert tools_inventory["active"] == tools_inventory["total"] - 1
+        assert tools_inventory["builtin"] >= 2
+        assert payload["tool_usage"] == {
+            "calls": {
+                "value": 4,
+                "previous_value": 1,
+                "change_percent": 300.0,
+            },
+            "failed": 2,
+            "success_rate": {
+                "value": 0.5,
+                "previous_value": 1.0,
+                "change_percent": -50.0,
+            },
+            "approval_required": 1,
+            "top_tools": [
+                {
+                    "tool_id": "analytics-tool",
+                    "name": "Current time",
+                    "kind": "builtin",
+                    "calls": 4,
+                    "failed": 2,
+                    "success_rate": 0.5,
+                }
+            ],
         }
         trend_by_date = {item["date"]: item for item in payload["trends"]}
         assert len(trend_by_date) == 7
@@ -1192,6 +1520,13 @@ def main() -> None:
             json={"user_id": super_admin_id, "role": "member"},
         )
         assert super_joined.status_code == 201, super_joined.text
+
+        # A platform admin keeps workspace-admin authority even with a member row.
+        super_governance = client.get(
+            f"/api/v1/workspaces/{research_workspace_id}/governance",
+            headers=auth_headers(admin_token),
+        )
+        assert super_governance.status_code == 200, super_governance.text
 
         member_knowledge_list = client.get(
             knowledge_url(research_workspace_id),

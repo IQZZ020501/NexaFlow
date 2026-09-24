@@ -67,6 +67,16 @@ import {
 import { Input } from "@/components/ui/input"
 import { IconButton } from "@/components/ui/icon-button"
 import { CardMoreMenu } from "@/components/ui/card-more-menu"
+import {
+  ResourceCard,
+  ResourceCardActions,
+  ResourceCardFooter,
+  ResourceCardMeta,
+  ResourceCardHeader,
+  ResourceCardSpecs,
+  ResourceCardTitle,
+  resourceCardGridClass,
+} from "@/components/ui/resource-card"
 import { Spec } from "@/components/ui/spec"
 import {
   createRegisteredModel,
@@ -84,10 +94,7 @@ import type {
   RegisteredModel,
 } from "@/lib/api/llm"
 import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
-import {
-  CARD_BATCH_SIZE,
-  useInfiniteScroll,
-} from "@/lib/use-infinite-scroll"
+import { CARD_BATCH_SIZE, useInfiniteScroll } from "@/lib/use-infinite-scroll"
 import { cn } from "@/lib/utils"
 
 const MODEL_TYPE_LABELS: Record<string, TranslationKey> = {
@@ -484,13 +491,7 @@ export function LlmPage() {
         .toLowerCase()
         .includes(query)
     })
-  }, [
-    models,
-    providerCatalog,
-    isInSelectedFolder,
-    search,
-    selectedProvider,
-  ])
+  }, [models, providerCatalog, isInSelectedFolder, search, selectedProvider])
   const movableModelIds = canManage
     ? visibleModels.map((model) => model.id)
     : []
@@ -816,9 +817,7 @@ export function LlmPage() {
                     { value: "name", label: t("名称") },
                   ]}
                   className="h-9 sm:w-32"
-                  onChange={(value) =>
-                    setModelSortKey(value as ModelSortKey)
-                  }
+                  onChange={(value) => setModelSortKey(value as ModelSortKey)}
                 />
                 {isCatalogLoading ? (
                   <LoaderCircleIcon className="size-4 animate-spin self-center text-muted-foreground max-sm:self-start" />
@@ -841,51 +840,28 @@ export function LlmPage() {
                 <LoaderCircleIcon className="animate-spin text-muted-foreground" />
               </div>
             ) : visibleModels.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className={resourceCardGridClass}>
                 {visibleModels.map((model) => {
                   const provider = providerCatalog.find(
                     (item) => item.provider === model.provider
                   )
+                  const selected = selectedModelIds.includes(model.id)
 
                   return (
-                    <div
+                    <ResourceCard
                       key={model.id}
-                      role={isBatchManaging && canManage ? "button" : undefined}
-                      tabIndex={isBatchManaging && canManage ? 0 : undefined}
-                      aria-pressed={
-                        isBatchManaging && canManage
-                          ? selectedModelIds.includes(model.id)
-                          : undefined
+                      interactive={isBatchManaging && canManage}
+                      selected={selected}
+                      pressed={
+                        isBatchManaging && canManage ? selected : undefined
                       }
-                      className={cn(
-                        "flex min-h-40 flex-col rounded-md border p-3",
-                        isBatchManaging &&
-                          canManage &&
-                          "cursor-pointer transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
-                        selectedModelIds.includes(model.id) &&
-                          "border-primary/50 bg-primary/[0.035]"
-                      )}
-                      onClick={() => {
-                        if (!isBatchManaging || !canManage) return
+                      onActivate={() =>
                         setSelectedModelIds((current) =>
                           toggleResourceSelection(current, model.id)
                         )
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.target !== event.currentTarget) return
-                        if (
-                          isBatchManaging &&
-                          canManage &&
-                          (event.key === "Enter" || event.key === " ")
-                        ) {
-                          event.preventDefault()
-                          setSelectedModelIds((current) =>
-                            toggleResourceSelection(current, model.id)
-                          )
-                        }
-                      }}
+                      }
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <ResourceCardHeader>
                         <div className="flex min-w-0 gap-3">
                           <ProviderIcon
                             provider={provider}
@@ -893,14 +869,14 @@ export function LlmPage() {
                               providerCatalog,
                               model.provider
                             )}
-                            frameClassName="size-9"
+                            frameClassName="size-9 rounded-lg"
                             imageClassName="max-h-6 max-w-6"
                           />
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <h2 className="truncate text-sm font-semibold">
+                              <ResourceCardTitle>
                                 {model.name}
-                              </h2>
+                              </ResourceCardTitle>
                               <StatusBadge status={model.status} />
                               <Badge variant="outline">
                                 {modelTypeLabel(model.model_type, t)}
@@ -908,10 +884,7 @@ export function LlmPage() {
                             </div>
                             <p className="mt-1 flex items-center gap-1.5 truncate text-sm text-muted-foreground">
                               <span className="shrink-0">
-                                {providerLabel(
-                                  providerCatalog,
-                                  model.provider
-                                )}
+                                {providerLabel(providerCatalog, model.provider)}
                               </span>
                               <span className="shrink-0">·</span>
                               <ModelIcon
@@ -924,17 +897,17 @@ export function LlmPage() {
                                 {model.model_name}
                               </span>
                             </p>
-                            <p className="mt-1 truncate text-xs text-muted-foreground">
+                            <ResourceCardMeta>
                               {t("更新时间")} ·{" "}
                               {formatDateTime(
                                 model.updated_at,
                                 languageLocales[language]
                               )}
-                            </p>
+                            </ResourceCardMeta>
                           </div>
                         </div>
                         {canManage ? (
-                          <div className="flex shrink-0 items-center gap-1">
+                          <ResourceCardActions>
                             {isBatchManaging ? (
                               <input
                                 type="checkbox"
@@ -942,7 +915,7 @@ export function LlmPage() {
                                 aria-label={t("选择 {value}", {
                                   value: model.name,
                                 })}
-                                checked={selectedModelIds.includes(model.id)}
+                                checked={selected}
                                 onClick={(event) => event.stopPropagation()}
                                 onChange={(event) =>
                                   setSelectedModelIds((current) =>
@@ -962,12 +935,27 @@ export function LlmPage() {
                             >
                               <PencilIcon className="size-4" />
                             </IconButton>
-                          </div>
+                            <CardMoreMenu label={t("更多")}>
+                              <DropdownMenuItem
+                                onSelect={() => setMoveModelTarget(model)}
+                              >
+                                <FolderInputIcon />
+                                {t("移动到文件夹")}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => void handleDeleteModel(model)}
+                              >
+                                <Trash2Icon />
+                                {t("删除模型")}
+                              </DropdownMenuItem>
+                            </CardMoreMenu>
+                          </ResourceCardActions>
                         ) : null}
-                      </div>
+                      </ResourceCardHeader>
 
-                      <div className="mt-auto flex items-end justify-between gap-2 pt-4">
-                        <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                      <ResourceCardFooter>
+                        <ResourceCardSpecs>
                           <Spec
                             label={t("连接地址")}
                             value={model.api_base || t("默认连接")}
@@ -983,26 +971,9 @@ export function LlmPage() {
                               )
                             }
                           />
-                        </dl>
-                        {canManage ? (
-                          <CardMoreMenu label={t("更多")}>
-                            <DropdownMenuItem
-                              onSelect={() => setMoveModelTarget(model)}
-                            >
-                              <FolderInputIcon />
-                              {t("移动到文件夹")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onSelect={() => void handleDeleteModel(model)}
-                            >
-                              <Trash2Icon />
-                              {t("删除模型")}
-                            </DropdownMenuItem>
-                          </CardMoreMenu>
-                        ) : null}
-                      </div>
-                    </div>
+                        </ResourceCardSpecs>
+                      </ResourceCardFooter>
+                    </ResourceCard>
                   )
                 })}
               </div>
@@ -1014,7 +985,9 @@ export function LlmPage() {
               <EmptyState
                 icon={BrainCircuitIcon}
                 title={t("还没有模型")}
-                description={t("接入模型后，应用可以使用它进行对话、检索增强和工具调用。")}
+                description={t(
+                  "接入模型后，应用可以使用它进行对话、检索增强和工具调用。"
+                )}
                 action={
                   canManage ? (
                     <Button type="button" onClick={openCreateModel}>
@@ -1139,7 +1112,9 @@ function ProviderPickerDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("选择供应商")}</DialogTitle>
-          <DialogDescription>{t("选择后继续填写模型和凭据。")}</DialogDescription>
+          <DialogDescription>
+            {t("选择后继续填写模型和凭据。")}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[56svh] overflow-auto pr-1">
@@ -1204,7 +1179,10 @@ function ProviderIcon({
     const Brand = brand.Color ?? brand.Render
     return (
       <span
-        className={`flex shrink-0 items-center justify-center rounded-md border bg-white ${frameClassName}`}
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-md border bg-white",
+          frameClassName
+        )}
       >
         <Brand
           size={24}
@@ -1217,7 +1195,10 @@ function ProviderIcon({
   if (provider?.icon) {
     return (
       <span
-        className={`flex shrink-0 items-center justify-center rounded-md border bg-white ${frameClassName}`}
+        className={cn(
+          "flex shrink-0 items-center justify-center rounded-md border bg-white",
+          frameClassName
+        )}
       >
         {/* Local SVGs are already lightweight; next/image would add client bundle cost. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1307,7 +1288,9 @@ function ModelDialog({
           <DialogTitle>{t(isEditing ? "编辑模型" : "接入模型")}</DialogTitle>
           <DialogDescription>
             {form.model_type === "IMAGE"
-              ? t("保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。")
+              ? t(
+                  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。"
+                )
               : t("选择供应商和基础模型，填写连接参数；保存前会测试模型调用。")}
           </DialogDescription>
         </DialogHeader>
@@ -1426,6 +1409,7 @@ function ModelDialog({
                       variant="outline"
                       size="icon-lg"
                       aria-label={t("基础模型")}
+                      title={t("基础模型")}
                       disabled={!baseModels.length}
                     >
                       <ChevronDownIcon />
@@ -1548,9 +1532,7 @@ function ModelDialog({
                     { value: "active", label: t("已启用") },
                     { value: "disabled", label: t("已停用") },
                   ]}
-                  onChange={(status) =>
-                    onFormChange({ ...form, status })
-                  }
+                  onChange={(status) => onFormChange({ ...form, status })}
                 />
               </Field>
             ) : null}

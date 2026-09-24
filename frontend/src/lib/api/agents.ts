@@ -106,7 +106,7 @@ export type AgentRunEvent = {
   summary: string
   call_id: string
   tool_label: string
-  tool_kind: "knowledge" | "mcp" | "unknown"
+  tool_kind: "knowledge" | "builtin" | "python" | "mcp" | "unknown"
   server_name: string
   input: Record<string, unknown>
   output: unknown
@@ -175,7 +175,7 @@ export type AgentToolCall = {
   call_id: string
   turn: number
   tool_name: string
-  tool_kind: "knowledge" | "mcp" | "unknown"
+  tool_kind: "knowledge" | "builtin" | "python" | "mcp" | "unknown"
   server_name: string
   arguments: Record<string, unknown>
   status:
@@ -591,7 +591,7 @@ export function createAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "ask_risky"
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
     method: "POST",
@@ -808,7 +808,7 @@ export async function streamAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "ask_risky"
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   const run = await createAgentRun(
     token,

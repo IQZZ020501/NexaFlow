@@ -1,7 +1,9 @@
+from dataclasses import replace
 from datetime import datetime
 
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentRun as AgentRunOrm
@@ -9,16 +11,30 @@ from app.domain.agents.models import AgentRunState as AgentRunStateOrm
 from app.domain.knowledge.graph.models import (
     KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
 )
+from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
+from app.domain.knowledge.models import KnowledgeDocument as KnowledgeDocumentOrm
+from app.domain.knowledge.models import (
+    KnowledgeDocumentChunk as KnowledgeDocumentChunkOrm,
+)
+from app.domain.models.registered import RegisteredModel as RegisteredModelOrm
 from app.domain.platform.models import Team as TeamOrm
 from app.domain.platform.models import TeamMembership as TeamMembershipOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
+from app.domain.tools.models import Tool as ToolOrm
+from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
+from app.domain.tools.models import ToolVersion as ToolVersionOrm
 from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailOrm
 from app.entities.analytics import (
     WorkspaceAnalyticsCounts,
     WorkspaceAnalyticsGraphBuild,
+    WorkspaceAnalyticsInventory,
+    WorkspaceAnalyticsInventoryApplications,
+    WorkspaceAnalyticsInventoryKnowledge,
+    WorkspaceAnalyticsInventoryTools,
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
+    WorkspaceAnalyticsToolCall,
 )
 
 
@@ -163,6 +179,167 @@ async def list_workspace_analytics_runs(
         )
         for row in rows.all()
     ]
+
+
+async def list_workspace_analytics_tool_calls(
+    db: AsyncSession,
+    workspace_id: str,
+    start_at: datetime,
+    end_at: datetime,
+) -> list[WorkspaceAnalyticsToolCall]:
+    # A tool is reported only while the workspace catalog still lists it, so
+    # re-registered MCP servers and archived probes keep their history out of
+    # the ranking unless an active tool with the same key exists.
+    active_tool = aliased(ToolOrm)
+    rows = await db.execute(
+        select(
+            ToolInvocationOrm.id,
+            ToolInvocationOrm.tool_id,
+            ToolInvocationOrm.status,
+            ToolInvocationOrm.approved_by_user_id,
+            ToolInvocationOrm.created_at,
+            ToolOrm.kind.label("tool_kind"),
+            ToolVersionOrm.display_name.label("tool_display_name"),
+            ToolOrm.function_name.label("tool_function_name"),
+        )
+        .select_from(ToolInvocationOrm)
+        .outerjoin(
+            ToolOrm,
+            and_(
+                ToolOrm.workspace_id == ToolInvocationOrm.workspace_id,
+                ToolOrm.id == ToolInvocationOrm.tool_id,
+            ),
+        )
+        .outerjoin(
+            ToolVersionOrm,
+            and_(
+                ToolVersionOrm.workspace_id == ToolInvocationOrm.workspace_id,
+                ToolVersionOrm.id == ToolInvocationOrm.tool_version_id,
+            ),
+        )
+        .where(
+            ToolInvocationOrm.workspace_id == workspace_id,
+            # Agent-internal ledger entries carry no catalog tool reference and
+            # would otherwise double-count agent steps as tool usage.
+            ToolInvocationOrm.tool_id.is_not(None),
+            select(active_tool.id)
+            .where(
+                active_tool.workspace_id == ToolInvocationOrm.workspace_id,
+                active_tool.stable_key == ToolOrm.stable_key,
+                active_tool.status == "active",
+            )
+            .exists(),
+            ToolInvocationOrm.created_at >= start_at,
+            ToolInvocationOrm.created_at < end_at,
+        )
+        .order_by(ToolInvocationOrm.created_at, ToolInvocationOrm.id)
+    )
+    return [
+        WorkspaceAnalyticsToolCall(
+            id=row.id,
+            tool_id=row.tool_id or "",
+            tool_name=row.tool_display_name
+            or row.tool_function_name
+            or row.tool_id
+            or "",
+            tool_kind=row.tool_kind or "unknown",
+            status=row.status or "",
+            approved=row.approved_by_user_id is not None,
+            created_at=row.created_at,
+        )
+        for row in rows.all()
+    ]
+
+
+async def get_workspace_analytics_inventory(
+    db: AsyncSession,
+    workspace_id: str,
+) -> WorkspaceAnalyticsInventory:
+    application_rows = (
+        await db.execute(
+            select(
+                AgentOrm.app_type,
+                AgentOrm.status,
+                AgentOrm.published,
+                func.count().label("total"),
+            )
+            .where(AgentOrm.workspace_id == workspace_id)
+            .group_by(AgentOrm.app_type, AgentOrm.status, AgentOrm.published)
+        )
+    ).all()
+    applications = WorkspaceAnalyticsInventoryApplications()
+    for row in application_rows:
+        total = int(row.total or 0)
+        applications = replace(
+            applications,
+            total=applications.total + total,
+            agents=applications.agents
+            + (total if row.app_type == "agent" else 0),
+            workflows=applications.workflows
+            + (total if row.app_type == "workflow" else 0),
+            published=applications.published + (total if row.published else 0),
+            active=applications.active
+            + (total if row.status == "active" else 0),
+        )
+
+    knowledge_bases = await db.scalar(
+        select(func.count())
+        .select_from(KnowledgeBaseOrm)
+        .where(KnowledgeBaseOrm.workspace_id == workspace_id)
+    )
+    knowledge_documents = await db.scalar(
+        select(func.count())
+        .select_from(KnowledgeDocumentOrm)
+        .where(
+            KnowledgeDocumentOrm.workspace_id == workspace_id,
+            KnowledgeDocumentOrm.is_active.is_(True),
+        )
+    )
+    knowledge_chunks = await db.scalar(
+        select(func.count())
+        .select_from(KnowledgeDocumentChunkOrm)
+        .where(KnowledgeDocumentChunkOrm.workspace_id == workspace_id)
+    )
+
+    tool_rows = (
+        await db.execute(
+            select(
+                ToolOrm.kind,
+                ToolOrm.status,
+                func.count().label("total"),
+            )
+            .where(ToolOrm.workspace_id == workspace_id)
+            .group_by(ToolOrm.kind, ToolOrm.status)
+        )
+    ).all()
+    tools = WorkspaceAnalyticsInventoryTools()
+    for row in tool_rows:
+        total = int(row.total or 0)
+        tools = replace(
+            tools,
+            total=tools.total + total,
+            mcp=tools.mcp + (total if row.kind == "mcp" else 0),
+            python=tools.python + (total if row.kind == "python" else 0),
+            builtin=tools.builtin + (total if row.kind == "builtin" else 0),
+            active=tools.active + (total if row.status == "active" else 0),
+        )
+
+    models = await db.scalar(
+        select(func.count())
+        .select_from(RegisteredModelOrm)
+        .where(RegisteredModelOrm.workspace_id == workspace_id)
+    )
+
+    return WorkspaceAnalyticsInventory(
+        applications=applications,
+        knowledge=WorkspaceAnalyticsInventoryKnowledge(
+            bases=int(knowledge_bases or 0),
+            documents=int(knowledge_documents or 0),
+            chunks=int(knowledge_chunks or 0),
+        ),
+        tools=tools,
+        models=int(models or 0),
+    )
 
 
 async def list_workspace_analytics_graph_builds(

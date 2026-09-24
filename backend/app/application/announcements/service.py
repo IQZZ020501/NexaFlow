@@ -305,6 +305,42 @@ async def archive_announcement(
     return _announcement_response(item)
 
 
+async def delete_announcement(
+    db: AsyncSession,
+    *,
+    scope_type: AnnouncementScope,
+    workspace_id: str | None,
+    announcement_id: str,
+    actor: User,
+) -> None:
+    item = await repository.get_by_id(
+        db,
+        announcement_id,
+        scope_type=scope_type,
+        workspace_id=workspace_id,
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Announcement not found.")
+    if item.status != "archived":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Only archived announcements can be deleted.",
+        )
+
+    record_audit_log(
+        db,
+        actor,
+        "announcement.delete",
+        "announcement",
+        item.id,
+        item.title,
+        {"status": item.status},
+        workspace_id=workspace_id,
+    )
+    await repository.delete(db, item)
+    await db.commit()
+
+
 async def list_messages(
     db: AsyncSession,
     *,

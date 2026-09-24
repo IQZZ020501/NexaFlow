@@ -323,7 +323,7 @@ async def _move_resources(
             if resource is None or resource.workspace_id != workspace_id:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found.")
         else:
-            await require_managed_tool(
+            resource = await require_managed_tool(
                 db,
                 workspace_id,
                 resource_id,
@@ -331,6 +331,11 @@ async def _move_resources(
                 workspace_role,
                 lock=True,
             )
+            if resource.kind == "builtin":
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "Built-in tools cannot be moved.",
+                )
     await repository.set_resources_folder(
         db,
         workspace_id,

@@ -1134,6 +1134,40 @@ def test_api_scenario(model_base_url: str) -> None:
         assert bob_get.status_code == 200, bob_get.text
         assert bob_get.json()["permission"] == "view"
 
+        # staged drafts stay with editors: a view grantee cannot read them by id
+        bob_staged_download = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{staged_doc_id}/download",
+            ),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_staged_download.status_code == 404, bob_staged_download.text
+        bob_staged_chunks = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{staged_doc_id}/chunks",
+            ),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_staged_chunks.status_code == 404, bob_staged_chunks.text
+        bob_staged_tasks = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{staged_doc_id}/tasks",
+            ),
+            headers=auth_headers(bob_token),
+        )
+        assert bob_staged_tasks.status_code == 404, bob_staged_tasks.text
+        alice_staged_download = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{staged_doc_id}/download",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert alice_staged_download.status_code == 200, alice_staged_download.text
+
         bob_upload_denied = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
             headers=auth_headers(bob_token),
@@ -1150,6 +1184,26 @@ def test_api_scenario(model_base_url: str) -> None:
             json={"permission": "edit"},
         )
         assert edit_grant.status_code == 200, edit_grant.text
+
+        # archive/restore stay with the creator even for an edit grantee
+        bob_archive_denied = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(bob_token),
+            json={"status": "archived"},
+        )
+        assert bob_archive_denied.status_code == 403, bob_archive_denied.text
+        alice_archive = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(alice_token),
+            json={"status": "archived"},
+        )
+        assert alice_archive.status_code == 200, alice_archive.text
+        alice_restore = client.patch(
+            knowledge_url(default_workspace_id, f"/{knowledge_base_id}"),
+            headers=auth_headers(alice_token),
+            json={"status": "active"},
+        )
+        assert alice_restore.status_code == 200, alice_restore.text
 
         # bob has edit: cross-owner attachment deletion -> 404
         other_delete = client.delete(
@@ -4795,13 +4849,64 @@ async def run_direct_shareddomain_tests(
         assert reactivated_document.is_active is True
 
         # ---- orchestration tails ----
-        # get_knowledge_document success
+        # get_knowledge_document: staged drafts need explicit editor opt-in
+        try:
+            await orchestration_service.get_knowledge_document(
+                db,
+                direct_kb,
+                created_docs[1].id,
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("staged document must stay hidden without include_staged")
         found = await orchestration_service.get_knowledge_document(
             db,
             direct_kb,
             created_docs[1].id,
+            include_staged=True,
         )
         assert found.id == created_docs[1].id
+
+        # staged-document tasks stay hidden from readers without edit rights
+        staged_entity = await knowledge_repository.get_knowledge_document_by_id(
+            db,
+            created_docs[1].id,
+        )
+        assert staged_entity is not None
+        staged_task = await knowledge_repository.create_knowledge_task(
+            db,
+            KnowledgeTask(
+                id=new_id(),
+                workspace_id=direct_kb.workspace_id,
+                knowledge_base_id=direct_kb.id,
+                document_id=staged_entity.id,
+                task_type=TASK_PARSE,
+                status=TASK_SUCCEEDED_STATUS,
+                attempts=1,
+                max_attempts=3,
+                total_items=0,
+                processed_items=0,
+                options={},
+                created_by_user_id=alice.id,
+            ),
+        )
+        await db.flush()
+        editor_tasks = await orchestration_service.list_knowledge_tasks(
+            db,
+            direct_kb,
+            staged_entity,
+        )
+        assert [task.id for task in editor_tasks] == [staged_task.id]
+        viewer_tasks = await orchestration_service.list_knowledge_tasks(
+            db,
+            direct_kb,
+            staged_entity,
+            exclude_staged_documents=True,
+        )
+        assert viewer_tasks == []
+        await knowledge_repository.delete_knowledge_task(db, staged_task)
+        await db.flush()
 
         # resolve_embedding_model sets kb model id when absent
         bare_kb = await knowledge_repository.get_knowledge_base_by_id(

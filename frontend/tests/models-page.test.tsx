@@ -194,7 +194,9 @@ describe("LlmPage", () => {
     renderPage(<LlmPage />)
 
     const alphaHeading = await screen.findByText("Alpha")
-    const alphaCard = alphaHeading.closest<HTMLElement>(".min-h-40")!
+    const alphaCard = alphaHeading.closest<HTMLElement>(
+      "[data-slot='resource-card']"
+    )!
     fireEvent.click(within(alphaCard).getByRole("button", { name: "编辑" }))
     const dialog = await screen.findByRole("dialog", { name: "编辑模型" })
     expect(

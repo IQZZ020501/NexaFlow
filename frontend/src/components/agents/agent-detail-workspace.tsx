@@ -1435,7 +1435,7 @@ export function AgentDetailWorkspace({
 
                   <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                     <form
-                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/20"
+                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
                       onSubmit={(event) => {
                         shouldFollowPreviewRef.current = true
                         onAsk(event)
@@ -1505,7 +1505,7 @@ export function AgentDetailWorkspace({
                             event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className="max-h-32 min-h-12 w-full resize-none bg-transparent px-2.5 pt-1.5 pb-1 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-14 sm:text-sm"
+                        className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-12 sm:text-sm"
                         placeholder={
                           isDirty
                             ? t("请先保存配置后再调试")
@@ -1572,12 +1572,12 @@ export function AgentDetailWorkspace({
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              className="text-muted-foreground"
+                              className="rounded-full text-muted-foreground"
                               aria-label={t("停止生成")}
                               title={t("停止生成")}
                               onClick={onCancelAsk}
                             >
-                              <SquareIcon className="fill-current" />
+                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                             </Button>
                           )}
                           <Button
@@ -1585,7 +1585,7 @@ export function AgentDetailWorkspace({
                               isAsking && !question.trim() ? "button" : "submit"
                             }
                             size="icon"
-                            className="rounded-lg"
+                            className="rounded-full"
                             aria-label={t(
                               isAsking
                                 ? question.trim()
@@ -1614,7 +1614,7 @@ export function AgentDetailWorkspace({
                             }
                           >
                             {isAsking && !question.trim() ? (
-                              <SquareIcon className="fill-current" />
+                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                             ) : (
                               <ArrowUpIcon />
                             )}

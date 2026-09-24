@@ -711,7 +711,7 @@ def test_agent_approval_modes_only_change_interactive_consent() -> None:
 
     run = AgentRun(application_snapshot={"approval_mode": "full_access"})
     assert run_agent_approval_mode(run) == "full_access"
-    assert normalize_agent_approval_mode("invalid") == "ask_risky"
+    assert normalize_agent_approval_mode("invalid") == "always_ask"
     request = AgentRunCreateRequest(goal="Run", approval_mode="always_ask")
     assert request.approval_mode == "always_ask"
     try:

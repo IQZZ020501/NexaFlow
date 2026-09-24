@@ -42,3 +42,53 @@ class WorkspaceAnalyticsGraphBuild:
     status: str = "building"
     model_usage: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class WorkspaceAnalyticsInventoryApplications:
+    total: int = 0
+    agents: int = 0
+    workflows: int = 0
+    published: int = 0
+    active: int = 0
+
+
+@dataclass(frozen=True)
+class WorkspaceAnalyticsInventoryKnowledge:
+    bases: int = 0
+    documents: int = 0
+    chunks: int = 0
+
+
+@dataclass(frozen=True)
+class WorkspaceAnalyticsInventoryTools:
+    total: int = 0
+    mcp: int = 0
+    python: int = 0
+    builtin: int = 0
+    active: int = 0
+
+
+@dataclass(frozen=True)
+class WorkspaceAnalyticsInventory:
+    applications: WorkspaceAnalyticsInventoryApplications = field(
+        default_factory=WorkspaceAnalyticsInventoryApplications
+    )
+    knowledge: WorkspaceAnalyticsInventoryKnowledge = field(
+        default_factory=WorkspaceAnalyticsInventoryKnowledge
+    )
+    tools: WorkspaceAnalyticsInventoryTools = field(
+        default_factory=WorkspaceAnalyticsInventoryTools
+    )
+    models: int = 0
+
+
+@dataclass(frozen=True)
+class WorkspaceAnalyticsToolCall:
+    id: str = ""
+    tool_id: str = ""
+    tool_name: str = ""
+    tool_kind: str = ""
+    status: str = ""
+    approved: bool = False
+    created_at: datetime | None = None

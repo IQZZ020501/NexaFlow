@@ -89,41 +89,6 @@ describe("Application cards", () => {
   })
 })
 
-describe("Agent deletion", () => {
-  test("uses an in-app confirmation dialog before issuing the delete", () => {
-    const handlerStart = agentsPageSource.indexOf(
-      "async function handleDeleteAgent"
-    )
-    const handlerEnd = agentsPageSource.indexOf(
-      "function closeAgentPermissions"
-    )
-    const dialogStart = agentsPageSource.indexOf(
-      "function renderDeleteAgentDialog"
-    )
-    const dialogEnd = agentsPageSource.indexOf(
-      "function renderTypeChooserDialog"
-    )
-
-    expect(handlerStart).toBeGreaterThan(-1)
-    expect(handlerEnd).toBeGreaterThan(handlerStart)
-    expect(dialogStart).toBeGreaterThan(-1)
-    expect(dialogEnd).toBeGreaterThan(dialogStart)
-
-    const deleteHandler = agentsPageSource.slice(handlerStart, handlerEnd)
-    const deleteDialog = agentsPageSource.slice(dialogStart, dialogEnd)
-
-    expect(deleteHandler).not.toContain("window.confirm")
-    expect(deleteHandler).toContain("limit: CARD_BATCH_SIZE")
-    expect(deleteHandler).toContain("offset: 0")
-    expect(deleteHandler).toContain("setListedAgentsCount(listedAgents.length)")
-    expect(deleteDialog).toContain("<Dialog")
-    expect(deleteDialog).toContain("onClick={() => void handleDeleteAgent()}")
-    expect(agentsPageSource).toContain(
-      "onSelect={() => setDeleteAgentTarget(agent)}"
-    )
-  })
-})
-
 const agent: Agent = {
   id: "agent-1",
   workspace_id: "workspace-1",

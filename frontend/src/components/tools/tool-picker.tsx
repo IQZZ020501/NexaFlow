@@ -43,7 +43,6 @@ type ToolPickerProps = {
   workspaceId: string
   value: ToolRef[]
   onChange: (value: ToolRef[]) => void
-  maxItems?: number
 }
 
 const toolKinds = [
@@ -80,7 +79,6 @@ function sameTool(left: ToolRef, right: ToolRef) {
  * @param workspaceId - Workspace whose tools are loaded
  * @param value - Currently selected tool references
  * @param onChange - Callback invoked with the updated tool references
- * @param maxItems - Maximum number of tools that can be selected
  */
 export function ToolPicker({
   open,
@@ -89,7 +87,6 @@ export function ToolPicker({
   workspaceId,
   value,
   onChange,
-  maxItems = 12,
 }: ToolPickerProps) {
   const { t } = useLanguage()
   const [tools, setTools] = React.useState<ToolSummary[]>([])
@@ -188,7 +185,7 @@ export function ToolPicker({
       remove(current)
       return
     }
-    if (!tool.current_version_id || value.length >= maxItems) return
+    if (!tool.current_version_id) return
     onChange([
       ...value,
       { tool_id: tool.id, version_id: tool.current_version_id },
@@ -233,9 +230,7 @@ export function ToolPicker({
             <div className="min-w-0 pt-0.5">
               <DialogTitle>{t("选择工具")}</DialogTitle>
               <DialogDescription className="mt-1.5 leading-5">
-                {t("选择有使用权限且已发布的工具，最多 {value} 个。", {
-                  value: maxItems,
-                })}
+                {t("选择有使用权限且已发布的工具。")}
               </DialogDescription>
             </div>
           </div>
@@ -346,6 +341,11 @@ export function ToolPicker({
                           ? toolDisplayName(tool, t)
                           : reference.tool_id,
                       })}
+                      title={t("移除工具 {name}", {
+                        name: tool
+                          ? toolDisplayName(tool, t)
+                          : reference.tool_id,
+                      })}
                       onClick={() => remove(reference)}
                     >
                       <XIcon />
@@ -372,7 +372,6 @@ export function ToolPicker({
                       reference &&
                       reference.version_id !== tool.current_version_id
                     )
-                    const disabled = !checked && value.length >= maxItems
                     return (
                       <div
                         key={tool.id}
@@ -380,12 +379,11 @@ export function ToolPicker({
                           checked
                             ? "border-foreground/20 bg-muted/70 shadow-xs"
                             : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
-                        } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                        } cursor-pointer`}
                         onClick={(event) => {
                           if (
-                            disabled ||
-                            (event.target instanceof Element &&
-                              event.target.closest("button, input"))
+                            event.target instanceof Element &&
+                            event.target.closest("button, input")
                           ) {
                             return
                           }
@@ -400,7 +398,6 @@ export function ToolPicker({
                           className="mt-1 size-5 shrink-0 accent-foreground"
                           aria-label={toolDisplayName(tool, t)}
                           checked={checked}
-                          disabled={disabled}
                           onChange={() => toggle(tool)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter") {

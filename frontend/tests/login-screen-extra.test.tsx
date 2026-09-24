@@ -50,6 +50,20 @@ function submitCredentials(username: string, password: string) {
 }
 
 describe("LoginScreen submission", () => {
+  test("uses the supplied NexaFlow artwork across responsive layouts", () => {
+    renderPage(
+      <LoginScreen onLogin={() => undefined} onNotify={() => undefined} />
+    )
+
+    const artwork = screen.getAllByRole("img", { name: "NexaFlow" })
+    expect(artwork).toHaveLength(2)
+    expect(
+      artwork.every(
+        (image) => image.getAttribute("src") === "/NexaFlow-log.png"
+      )
+    ).toBe(true)
+  })
+
   test("rejects unsafe post-login destinations", () => {
     expect(safeAuthDestination("/app/agents")).toBe("/app/agents")
     for (const value of [

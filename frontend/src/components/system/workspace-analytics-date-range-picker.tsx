@@ -297,6 +297,7 @@ export function WorkspaceAnalyticsDateRangePicker({
                   variant="ghost"
                   size="icon-sm"
                   aria-label={t("上个月")}
+                  title={t("上个月")}
                   onClick={() =>
                     setViewMonth(
                       new Date(
@@ -317,6 +318,7 @@ export function WorkspaceAnalyticsDateRangePicker({
                   variant="ghost"
                   size="icon-sm"
                   aria-label={t("下个月")}
+                  title={t("下个月")}
                   onClick={() =>
                     setViewMonth(
                       new Date(
@@ -371,7 +373,7 @@ export function WorkspaceAnalyticsDateRangePicker({
                           !isEnd &&
                           "ring-1 ring-border",
                         (isStart || isEnd) &&
-                          "bg-primary text-primary-foreground ring-0 hover:bg-primary/80"
+                          "bg-primary text-primary-foreground ring-0 hover:bg-primary/90"
                       )}
                     >
                       {date.getDate()}

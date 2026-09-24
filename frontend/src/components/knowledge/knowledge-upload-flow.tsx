@@ -1035,6 +1035,7 @@ export function KnowledgeUploadFlow({
               variant="ghost"
               size="icon-sm"
               aria-label={t("返回知识库")}
+              title={t("返回知识库")}
               disabled={isNavigationLocked}
               onClick={() => void handleCancel()}
             >
@@ -1689,6 +1690,7 @@ function FileList({
               size="icon-sm"
               className="max-sm:col-start-2 max-sm:row-span-2 max-sm:self-center"
               aria-label={t("移除 {value}", { value: file.name })}
+              title={t("移除 {value}", { value: file.name })}
               onClick={() => onRemove(index)}
             >
               <XIcon />

@@ -108,3 +108,15 @@ export function archiveAnnouncement(
     { method: "POST", token }
   )
 }
+
+export function deleteAnnouncement(
+  token: string,
+  scope: AnnouncementScope,
+  workspaceId: string | null,
+  announcementId: string
+) {
+  return request<void>(`${endpoint(scope, workspaceId)}/${announcementId}`, {
+    method: "DELETE",
+    token,
+  })
+}

@@ -34,7 +34,7 @@ git log --oneline --decorate -20
 `docs/local/`；不要把带运行环境、账号、资源 ID 或临时数据的验收材料提交到仓库。
 计划中的 `NOT RUN` 是报告模板初始值，不表示当前产品状态。
 
-本期明确非目标不是缺陷：不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 不开放 secret 或跨运行持久文件。Skill 通过内置/Worker 管理的 bundle、临时依赖目录和受限公网代理执行。
+本期明确非目标不是缺陷：不支持 Agent -> Agent、Agent -> Workflow、Workflow -> Workflow；Python Tool 不开放 secret 或跨运行持久文件。Skill 通过工作空间内数据库管理的固定版本包在 Run 私有 OpenSandbox 会话中执行，依赖安装仅临时开放部署允许的包注册域名。
 
 ## 1. 测试目标
 
@@ -65,7 +65,7 @@ git log --oneline --decorate -20
 
 ### 2.2 本轮非范围
 
-- Skill 的在线上传、数据库管理和跨 Worker 自动分发；本轮仅支持文件系统安装和运行时选择。
+- Skill 的跨 Worker 自动分发；本轮 Skill 使用工作空间内数据库管理的固定版本包与 Run 私有会话执行。
 - Agent -> Agent、Agent -> Workflow、Workflow -> Workflow 递归调用。
 - Skill 的跨运行持久文件、私有网络、VCS/path 依赖和源代码构建。
 - Workflow 内的 `each_call` 人工审批；本版应展示但禁止选择，并说明原因。
@@ -317,7 +317,7 @@ git log --oneline --decorate -20
 | ID | 级别 | 场景与步骤 | 预期结果 |
 | --- | --- | --- | --- |
 | UI-001 | P1 | `/app/tools` 首屏 | 直接显示统一工具列表，不再是“新建 MCP”单一页面 |
-| UI-002 | P1 | “添加工具”菜单 | Python、MCP、Skill 可选；Skill 显示内置 bundle、入口脚本、Agent 绑定和平台运行边界 |
+| UI-002 | P1 | “添加工具”菜单 | Python、MCP、Skill 可选；Skill 页签可创建/导入/编辑/发布/授权/停用工作空间 Skill 包，并显示内置渲染器与 Agent 绑定 |
 | UI-003 | P1 | 普通成员打开创建菜单 | 可以创建 Python 和公网 MCP；stdio/private 说明需 admin |
 | UI-004 | P1 | loading/error/retry/empty | 页面内状态完整；错误后可重试，不白屏 |
 | UI-005 | P1 | Tool 列表分页超过单页 | 所有页可到达，不只加载前 50/200 项 |
@@ -483,7 +483,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 
 | 需求 ID | 交付要求 | 最低证据 | 关联用例 | 结果 |
 | --- | --- | --- | --- | --- |
-| REQ-001 | 工作在独立 `feat/unified-tools` 分支，变更范围可追踪 | branch、HEAD、commit 列表、工作树状态 | PRE-001 | `NOT RUN` |
+| REQ-001 | 变更范围可追踪（记录执行时实际基线分支与 commit） | branch、HEAD、commit 列表、工作树状态 | PRE-001 | `NOT RUN` |
 | REQ-002 | Tool 默认 owner 私有；同 workspace 支持不可转授的 `view/use`；管理员治理；跨租户不可见 | API/DB/HTTP 证据与权限矩阵 | AUTH-001～015、SEC-001～003、SEC-012～015 | `NOT RUN` |
 | REQ-003 | builtin、Python、MCP 共享 Tool/Version/Policy/Binding/Invocation 身份和运行时 | schema、调用链审计、三类真实 invocation | RUN-001～020、PY、MCP | `NOT RUN` |
 | REQ-004 | Python Tool 支持 draft/test/publish/version/disable/archive，并受 sandbox 限制 | API、DB 版本、sandbox 行为与隔离证据 | PY-001～015、SEC-007～010 | `NOT RUN` |
@@ -496,7 +496,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | REQ-011 | Celery、Beat、sandbox、Compose 与开发启动方式可运行和恢复 | task 注册、Compose config、重启恢复、隔离检查 | OPS-003～011 | `NOT RUN` |
 | REQ-012 | public/API/nested Agent 不得调用 write、unknown 或待审批 Tool | HTTP、模型前 preflight、provider 未调用证据 | RUN-002～004、AGT-008～013、SEC-004、SEC-014 | `NOT RUN` |
 | REQ-013 | 重复投递、崩溃、超时、取消不会重复外部写；未知结果进入 `uncertain` | 故障注入、provider 计数、ledger 终态 | RUN-006～016、RUN-020、AGT-014～016、WF-014～020 | `NOT RUN` |
-| REQ-014 | Skill 入口可查看内置 bundle、固定入口与 Agent 选择边界，不暴露未实现的在线管理 API | UI 与路由/API 枚举 | UI-002 | `NOT RUN` |
+| REQ-014 | Skill 入口可查看内置 bundle、固定入口与 Agent 选择边界；在线管理 API（导入检查、发布、版本、授权）齐备且受工作空间权限约束 | UI 与路由/API 枚举 | UI-002 | `NOT RUN` |
 | REQ-015 | Backend 97%+、Frontend 99%+，定向/全量、类型、Lint、构建全部通过 | 原始退出码、lcov/coverage 报告、构建日志 | GATE-001～009 | `NOT RUN` |
 | REQ-016 | 测试产生的数据库、容器、volume、网络、进程、队列和文件全部清理 | 第 11 节前后对比证据 | CLEAN-001～010 | `NOT RUN` |
 
@@ -518,7 +518,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-com
 | ID | 级别 | 审计项 | 通过条件 |
 | --- | --- | --- | --- |
 | AUD-001 | P1 | API 路由依赖方向 | `api/` 只调用 application/schema/deps；无 ORM 或业务规则直连 |
-| AUD-002 | P1 | Tool domain 边界 | 业务状态与策略位于 `shareddomain/tools`；repository 只负责持久化/CAS，不复制 effect 判定 |
+| AUD-002 | P1 | Tool domain 边界 | 业务状态与策略位于 `domain/tools`；repository 只负责持久化/CAS，不复制 effect 判定 |
 | AUD-003 | P0 | 唯一 Tool Runtime | Agent、Workflow direct/LLM、Python test 均进入同一 application ToolExecution 边界；provider adapter 内才区分 builtin/Python/MCP |
 | AUD-004 | P0 | 统一 ledger | Agent、Workflow 与测试调用只写 `tool_invocations`；旧 API 通过投影兼容，不存在 `agent_tool_calls` 双账执行 |
 | AUD-005 | P1 | 不可变版本 | ToolVersion、Agent publication、WorkflowVersion 与 Run snapshot append-only；current pointer 更新不改旧版本 |

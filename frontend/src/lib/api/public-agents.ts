@@ -258,7 +258,7 @@ export function createPublicAgentRun(
   conversationId?: string | null,
   signal?: AbortSignal,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "ask_risky"
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   return request<ExternalAgentRun>(publicAgentPath(agentId, "/runs"), {
     method: "POST",
@@ -476,7 +476,7 @@ export async function streamPublicAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "ask_risky"
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   const run = await createPublicAgentRun(
     agentId,

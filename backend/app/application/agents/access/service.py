@@ -30,7 +30,7 @@ from app.application.agents.tools.builder import (
 )
 from app.application.workflows.uploads.service import resolve_public_agent_files
 from app.application.workspaces.service import WorkspaceContext, build_workspace_context
-from app.domain.agents.access.permissions import require_agent_ops
+from app.domain.agents.access.permissions import require_agent_edit, require_agent_ops
 from app.domain.agents.approval import (
     DEFAULT_AGENT_APPROVAL_MODE,
     AgentApprovalMode,
@@ -710,16 +710,27 @@ async def list_agent_api_credentials(
     workspace_role: str | None,
 ) -> AgentApiCredentialListResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_workspace_admin(workspace_role)
+    _require_agent_credential_manager(agent, actor, workspace_role)
     credentials = await agent_repository.list_agent_api_credentials(db, agent.id)
     return AgentApiCredentialListResponse(
         items=[_credential_to_response(item) for item in credentials]
     )
 
 
-def _require_workspace_admin(workspace_role: str | None) -> None:
+def _require_agent_credential_manager(
+    agent: Agent,
+    actor: User,
+    workspace_role: str | None,
+) -> None:
+    """Agent API keys belong to the agent owner; admins cannot mint them for others.
+
+    The management UI already gates this on ``workspace admin && agent.can_edit``;
+    the server must enforce the ownership half so a workspace admin cannot obtain
+    a token that runs another member's agent.
+    """
     if workspace_role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace admin required.")
+    require_agent_edit(agent, actor)
 
 
 async def _new_agent_api_credential(
@@ -749,7 +760,7 @@ async def create_agent_api_credential(
     workspace_role: str | None,
 ) -> AgentApiCredentialCreateResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_workspace_admin(workspace_role)
+    _require_agent_credential_manager(agent, actor, workspace_role)
     try:
         credential, token = await _new_agent_api_credential(db, agent, name, actor)
         record_audit_log(
@@ -783,7 +794,7 @@ async def revoke_agent_api_credential(
     workspace_role: str | None,
 ) -> None:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_workspace_admin(workspace_role)
+    _require_agent_credential_manager(agent, actor, workspace_role)
     credential = await agent_repository.get_agent_api_credential_by_id(
         db, credential_id
     )
@@ -815,7 +826,7 @@ async def rotate_agent_api_credential(
     workspace_role: str | None,
 ) -> AgentApiCredentialCreateResponse:
     agent = await get_agent(db, workspace_id, agent_id)
-    _require_workspace_admin(workspace_role)
+    _require_agent_credential_manager(agent, actor, workspace_role)
     previous = await agent_repository.get_agent_api_credential_by_id(
         db, credential_id
     )

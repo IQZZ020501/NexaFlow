@@ -331,7 +331,7 @@ function Harness(props: HarnessProps = {}) {
   const [question, setQuestion] = useState(props.question ?? "")
   const [files, setFiles] = useState<File[]>(props.files ?? [])
   const [approvalMode, setApprovalMode] =
-    useState<AgentApprovalMode>("ask_risky")
+    useState<AgentApprovalMode>("always_ask")
   const callbacks = {
     onBack: props.onBack ?? (() => undefined),
     onDelete: props.onDelete ?? (() => undefined),
@@ -650,7 +650,7 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" />)
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：按策略审批" })
+      screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     const menuLabel = await screen.findByText("应如何批准工具调用？")
     expect(
@@ -669,8 +669,31 @@ describe("AgentDetailWorkspace preview", () => {
       })
     )
 
+    // Full access only applies after the warning is accepted.
+    expect(await screen.findByText("启用完全访问？")).toBeTruthy()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "启用完全访问" })
+    )
+
     const trigger = screen.getByRole("button", { name: "执行权限：完全访问" })
     expect(trigger.dataset.variant).toBe("destructive")
+  })
+
+  test("keeps the previous mode when the full access warning is dismissed", async () => {
+    renderPage(<Harness activeView="settings" />)
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "执行权限：请求批准" })
+    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
+    fireEvent.click(await screen.findByRole("button", { name: "取消" }))
+
+    expect(
+      screen.getByRole("button", { name: "执行权限：请求批准" })
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "执行权限：完全访问" })
+    ).toBeNull()
   })
 
   test("shows the loading state", () => {

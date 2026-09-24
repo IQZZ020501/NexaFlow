@@ -244,6 +244,70 @@ async def seed_agent_run_binder_audit(
         await db.commit()
 
 
+async def assert_tool_invocation_records_survive(user_id: str) -> None:
+    """Execution history keeps the former account id after a permanent delete."""
+    from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
+
+    async with get_session_factory()() as db:
+        assert (
+            await db.scalar(
+                select(ToolInvocationOrm.execution_user_id).where(
+                    ToolInvocationOrm.execution_user_id == user_id
+                )
+            )
+            == user_id
+        )
+
+
+async def assert_publication_records_survive(user_id: str) -> None:
+    """Immutable publications keep the former publisher id."""
+    from app.domain.agents.models import (
+        AgentPublicationVersion as PublicationVersionOrm,
+    )
+
+    async with get_session_factory()() as db:
+        assert (
+            await db.scalar(
+                select(PublicationVersionOrm.published_by_user_id).where(
+                    PublicationVersionOrm.published_by_user_id == user_id
+                )
+            )
+            == user_id
+        )
+
+
+async def assert_snapshot_reference_survives(user_id: str) -> None:
+    """Immutable tool/agent snapshots keep the former binder id."""
+    from app.domain.agents.models import (
+        AgentPublicationVersion as PublicationVersionOrm,
+    )
+    from app.domain.agents.models import AgentRunSnapshot as AgentRunSnapshotOrm
+    from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
+
+    async with get_session_factory()() as db:
+        invocation_snapshots = (
+            await db.scalars(select(ToolInvocationOrm.policy_snapshot))
+        ).all()
+        run_snapshots = (
+            await db.scalars(select(AgentRunSnapshotOrm.tool_snapshots))
+        ).all()
+        publication_snapshots = (
+            await db.scalars(select(PublicationVersionOrm.resource_snapshot))
+        ).all()
+    assert any(
+        (snapshot.get("tool_snapshot") or {}).get("bound_by_user_id") == user_id
+        for snapshot in invocation_snapshots
+    ) or any(
+        isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
+        for tools in run_snapshots
+        for tool in (tools or [])
+    ) or any(
+        isinstance(tool, dict) and tool.get("bound_by_user_id") == user_id
+        for snapshot in publication_snapshots
+        for tool in (snapshot.get("tools") or [])
+    )
+
+
 async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> None:
     from app.entities.workspaces.resource_permissions import ResourcePermission
     from app.infra.db.repositories.tools import repository as tools_repository
@@ -529,8 +593,8 @@ def main() -> None:
             f"/api/v1/admin/users/{retained_user_id}",
             headers=auth_headers(admin_token),
         )
-        assert retained_delete.status_code == 409, retained_delete.text
-        assert "Tool binding or invocation" in retained_delete.json()["detail"]
+        assert retained_delete.status_code == 204, retained_delete.text
+        asyncio.run(assert_tool_invocation_records_survive(retained_user_id))
 
         publication_user = client.post(
             "/api/v1/admin/users",
@@ -554,8 +618,8 @@ def main() -> None:
             f"/api/v1/admin/users/{publication_user_id}",
             headers=auth_headers(admin_token),
         )
-        assert publication_delete.status_code == 409, publication_delete.text
-        assert "Agent publication" in publication_delete.json()["detail"]
+        assert publication_delete.status_code == 204, publication_delete.text
+        asyncio.run(assert_publication_records_survive(publication_user_id))
 
         publication_binder = client.post(
             "/api/v1/admin/users",
@@ -580,8 +644,8 @@ def main() -> None:
             f"/api/v1/admin/users/{publication_binder_id}",
             headers=auth_headers(admin_token),
         )
-        assert binder_delete.status_code == 409, binder_delete.text
-        assert "Agent publication" in binder_delete.json()["detail"]
+        assert binder_delete.status_code == 204, binder_delete.text
+        asyncio.run(assert_snapshot_reference_survives(publication_binder_id))
 
         run_binder = client.post(
             "/api/v1/admin/users",
@@ -605,8 +669,8 @@ def main() -> None:
             f"/api/v1/admin/users/{run_binder_id}",
             headers=auth_headers(admin_token),
         )
-        assert run_binder_delete.status_code == 409, run_binder_delete.text
-        assert "Agent publication" in run_binder_delete.json()["detail"]
+        assert run_binder_delete.status_code == 204, run_binder_delete.text
+        asyncio.run(assert_snapshot_reference_survives(run_binder_id))
 
         invocation_binder = client.post(
             "/api/v1/admin/users",
@@ -630,11 +694,10 @@ def main() -> None:
             f"/api/v1/admin/users/{invocation_binder_id}",
             headers=auth_headers(admin_token),
         )
-        assert invocation_binder_delete.status_code == 409, invocation_binder_delete.text
         assert (
-            "Tool binding or invocation"
-            in invocation_binder_delete.json()["detail"]
-        )
+            invocation_binder_delete.status_code == 204
+        ), invocation_binder_delete.text
+        asyncio.run(assert_snapshot_reference_survives(invocation_binder_id))
 
         grant_only_user = client.post(
             "/api/v1/admin/users",

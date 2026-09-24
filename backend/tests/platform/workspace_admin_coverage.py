@@ -12,6 +12,7 @@ database, so blocks are independent of each other.
 import asyncio
 from datetime import timedelta
 
+from sqlalchemy import select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 
@@ -26,7 +27,18 @@ from tests.support import (
 
 from app.api.v1.identity.auth import REFRESH_TOKEN_COOKIE
 from app.application.workspaces import service as workspace_service
+from app.domain.agent_skills.models import (
+    AgentSkill as AgentSkillOrm,
+)
+from app.domain.agent_skills.models import (
+    AgentSkillBinding as AgentSkillBindingOrm,
+)
+from app.domain.agents.models import Agent as AgentOrm
 from app.domain.knowledge.models import KnowledgeTask
+from app.domain.tools.models import (
+    ApplicationToolBinding as ApplicationToolBindingOrm,
+)
+from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.entities.workspaces.models import Workspace
@@ -70,6 +82,130 @@ async def seed_open_knowledge_task(
         db.add(task)
         await db.commit()
         return task.id
+
+
+async def seed_departed_user_references(
+    user_id: str,
+    workspace_id: str,
+) -> dict[str, str]:
+    """Seed records that outlive an account plus the grants it authorized."""
+    from app.domain.agent_skills.models import (
+        AgentSkillVersion as AgentSkillVersionOrm,
+    )
+    from app.domain.models.registered import RegisteredModel
+    from app.domain.tools.models import Tool as ToolOrm
+    from app.domain.tools.models import ToolSource as ToolSourceOrm
+    from app.domain.tools.models import ToolVersion as ToolVersionOrm
+
+    async with get_session_factory()() as db:
+        model = RegisteredModel(
+            workspace_id=workspace_id,
+            name="Retained model",
+            provider="retained-provider",
+            provider_type="openai_compatible",
+            api_base="",
+            model_type="LLM",
+            model_name="retained-model",
+            created_by_user_id=user_id,
+        )
+        db.add(model)
+        await db.flush()
+        agent = AgentOrm(
+            workspace_id=workspace_id,
+            name="Retained agent",
+            instructions="",
+            model_id=model.id,
+            created_by_user_id=user_id,
+        )
+        db.add(agent)
+        await db.flush()
+        source = ToolSourceOrm(
+            workspace_id=workspace_id,
+            kind="python",
+            name="Retained source",
+            created_by_user_id=user_id,
+        )
+        db.add(source)
+        await db.flush()
+        tool = ToolOrm(
+            workspace_id=workspace_id,
+            source_id=source.id,
+            kind="python",
+            stable_key="retained-tool",
+            function_name="retained_tool",
+            created_by_user_id=user_id,
+        )
+        db.add(tool)
+        await db.flush()
+        version = ToolVersionOrm(
+            workspace_id=workspace_id,
+            tool_id=tool.id,
+            revision=1,
+            display_name="Retained tool",
+            input_schema={"type": "object"},
+            execution_spec={"code": "result = {}"},
+            definition_hash="a" * 64,
+            created_by_user_id=user_id,
+        )
+        db.add(version)
+        await db.flush()
+        tool.current_version_id = version.id
+        skill = AgentSkillOrm(
+            workspace_id=workspace_id,
+            name="Retained skill",
+            created_by_user_id=user_id,
+        )
+        db.add(skill)
+        await db.flush()
+        skill_version = AgentSkillVersionOrm(
+            workspace_id=workspace_id,
+            skill_id=skill.id,
+            version_number=1,
+            schema_version=2,
+            name="Retained skill",
+            definition_snapshot={},
+            definition_hash="b" * 64,
+            published_by_user_id=user_id,
+        )
+        db.add(skill_version)
+        await db.flush()
+        db.add(
+            ApplicationToolBindingOrm(
+                workspace_id=workspace_id,
+                application_id=agent.id,
+                tool_id=tool.id,
+                tool_version_id=version.id,
+                bound_by_user_id=user_id,
+            )
+        )
+        db.add(
+            AgentSkillBindingOrm(
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                skill_id=skill.id,
+                skill_version_id=skill_version.id,
+                bound_by_user_id=user_id,
+            )
+        )
+        invocation = ToolInvocationOrm(
+            workspace_id=workspace_id,
+            origin="test",
+            invocation_id="retained-invocation",
+            execution_user_id=user_id,
+            access_source="console",
+            policy_snapshot={},
+            arguments={},
+            arguments_hash="c" * 64,
+            idempotency_key="retained-invocation",
+            status="queued",
+        )
+        db.add(invocation)
+        await db.commit()
+        return {
+            "agent_id": agent.id,
+            "skill_id": skill.id,
+            "invocation_id": invocation.id,
+        }
 
 
 async def fail_knowledge_task(task_id: str) -> None:
@@ -888,77 +1024,52 @@ async def exercise_direct_identity_edges() -> None:
             is None
         )
 
-        # delete_user_permanently: retained by Agent publication audits -> 409.
-        original_agent_refs = (
-            identity_service.agent_repository.has_agent_publication_audit_references
-        )
-
-        async def has_agent_refs(db, user_id):
-            return True
-
-        identity_service.agent_repository.has_agent_publication_audit_references = (
-            has_agent_refs
-        )
-        try:
-            agent_doomed = await make_user("direct-agent-doomed")
-            try:
-                await delete_user_permanently(db, agent_doomed, admin_user)
-            except HTTPException as exc:
-                expect(exc, 409)
-            else:
-                raise AssertionError("agent audit references did not 409")
-        finally:
-            identity_service.agent_repository.has_agent_publication_audit_references = (
-                original_agent_refs
+        # delete_user_permanently: authored content and execution history stay
+        # with the former id, while the departing user's own grants are removed.
+        retained = await make_user("direct-retained")
+        seeded = await seed_departed_user_references(retained.id, host_ws.id)
+        await delete_user_permanently(db, retained, admin_user)
+        assert await user_repo.get_user_by_id(db, retained.id) is None
+        assert (
+            await db.scalar(
+                select(AgentOrm.created_by_user_id).where(
+                    AgentOrm.id == seeded["agent_id"]
+                )
             )
-
-        # delete_user_permanently: retained by Workflow Agent binding -> 409.
-        original_workflow_refs = (
-            identity_service.workflow_repository.has_workflow_agent_binder_audit_references
+            == retained.id
         )
-
-        async def has_workflow_refs(db, user_id):
-            return True
-
-        identity_service.workflow_repository.has_workflow_agent_binder_audit_references = (
-            has_workflow_refs
-        )
-        try:
-            workflow_doomed = await make_user("direct-workflow-doomed")
-            try:
-                await delete_user_permanently(db, workflow_doomed, admin_user)
-            except HTTPException as exc:
-                expect(exc, 409)
-            else:
-                raise AssertionError("workflow audit references did not 409")
-        finally:
-            identity_service.workflow_repository.has_workflow_agent_binder_audit_references = (
-                original_workflow_refs
+        assert (
+            await db.scalar(
+                select(ToolInvocationOrm.execution_user_id).where(
+                    ToolInvocationOrm.id == seeded["invocation_id"]
+                )
             )
-
-        # delete_user_permanently: retained by Tool audit references -> 409.
-        original_tools_refs = (
-            identity_service.tools_repository.has_retained_user_audit_references
+            == retained.id
         )
-
-        async def has_tools_refs(db, user_id):
-            return True
-
-        identity_service.tools_repository.has_retained_user_audit_references = (
-            has_tools_refs
-        )
-        try:
-            tools_doomed = await make_user("direct-tools-doomed")
-            try:
-                await delete_user_permanently(db, tools_doomed, admin_user)
-            except HTTPException as exc:
-                expect(exc, 409)
-            else:
-                raise AssertionError("tool audit references did not 409")
-        finally:
-            identity_service.tools_repository.has_retained_user_audit_references = (
-                original_tools_refs
+        assert (
+            await db.scalar(
+                select(AgentSkillOrm.created_by_user_id).where(
+                    AgentSkillOrm.id == seeded["skill_id"]
+                )
             )
+            == retained.id
+        )
+        assert (
+            await db.scalar(
+                select(ApplicationToolBindingOrm.id).where(
+                    ApplicationToolBindingOrm.bound_by_user_id == retained.id
+                )
+            )
+            is None
+        )
+        assert (
+            await db.scalar(
+                select(AgentSkillBindingOrm.id).where(
+                    AgentSkillBindingOrm.bound_by_user_id == retained.id
+                )
+            )
+            is None
+        )
 
         # authenticate_user: rate-limit branches, invalid credentials, success.
         original_enforce = identity_service.enforce_login_rate_limit

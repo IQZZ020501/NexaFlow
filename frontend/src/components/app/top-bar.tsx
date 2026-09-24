@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import {
   BarChart3Icon,
   ChevronDownIcon,
@@ -9,6 +10,7 @@ import {
   LockIcon,
   LogOutIcon,
   MegaphoneIcon,
+  PaletteIcon,
   SettingsIcon,
 } from "lucide-react"
 import Image from "next/image"
@@ -18,6 +20,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { MobileTabBar } from "@/components/app/mobile-tab-bar"
+import { ThemeSettingsDialog } from "@/components/app/theme-settings-dialog"
 import { MessageCenter } from "@/components/messages/message-center"
 import {
   DropdownMenu,
@@ -79,45 +82,6 @@ function LanguageMenuItems() {
 }
 
 /**
- * Renders the theme choices as dropdown menu items.
- *
- * Shared by the dedicated theme menu and the phone-sized account menu.
- */
-function ThemeMenuItems() {
-  const { theme, setTheme } = useTheme()
-  const { t } = useLanguage()
-
-  return (
-    <>
-      <DropdownMenuLabel>{t("主题")}</DropdownMenuLabel>
-      <DropdownMenuSeparator />
-      <DropdownMenuGroup>
-        {themeOptions.map((option) => {
-          const Icon = option.icon
-          const isActive = theme === option.value
-
-          return (
-            <DropdownMenuItem
-              key={option.value}
-              className="justify-between"
-              onSelect={() => setTheme(option.value)}
-            >
-              <span className="flex items-center gap-2">
-                <Icon />
-                {t(option.labelKey)}
-              </span>
-              {isActive ? (
-                <CircleCheckIcon className="size-3.5 text-primary" />
-              ) : null}
-            </DropdownMenuItem>
-          )
-        })}
-      </DropdownMenuGroup>
-    </>
-  )
-}
-
-/**
  * Renders the authenticated user's application navigation bar.
  *
  * The bar is a single responsive header: phones get identity, workspace
@@ -129,6 +93,7 @@ function ThemeMenuItems() {
 export function TopBar() {
   const { language, t } = useLanguage()
   const { theme } = useTheme()
+  const [isThemeSettingsOpen, setIsThemeSettingsOpen] = React.useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const {
@@ -150,7 +115,6 @@ export function TopBar() {
   )
   const activeThemeOption =
     themeOptions.find((option) => option.value === theme) ?? themeOptions[0]
-  const ActiveThemeIcon = activeThemeOption.icon
   const activeLanguageOption =
     languageOptions.find((option) => option.value === language) ??
     languageOptions[0]
@@ -297,6 +261,9 @@ export function TopBar() {
                     aria-label={t("切换语言，当前为 {language}", {
                       language: activeLanguageOption.label,
                     })}
+                    title={t("切换语言，当前为 {language}", {
+                      language: activeLanguageOption.label,
+                    })}
                   >
                     <LanguagesIcon className="size-4" />
                   </Button>
@@ -308,26 +275,18 @@ export function TopBar() {
                   <LanguageMenuItems />
                 </DropdownMenuContent>
               </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-lg"
-                    className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
-                    aria-label={t("切换主题，当前为 {theme}", {
-                      theme: t(activeThemeOption.labelKey),
-                    })}
-                  >
-                    <ActiveThemeIcon className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  className="max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 overflow-y-auto overscroll-contain"
-                >
-                  <ThemeMenuItems />
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className="text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+                aria-label={t("切换主题，当前为 {theme}", {
+                  theme: t(activeThemeOption.labelKey),
+                })}
+                title={t("打开主题设置")}
+                onClick={() => setIsThemeSettingsOpen(true)}
+              >
+                <PaletteIcon className="size-4" aria-hidden="true" />
+              </Button>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -378,6 +337,12 @@ export function TopBar() {
                       </Link>
                     </DropdownMenuItem>
                   ) : null}
+                  <DropdownMenuItem
+                    onSelect={() => setIsThemeSettingsOpen(true)}
+                  >
+                    <PaletteIcon />
+                    {t("打开主题设置")}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={logout}>
                     <LogOutIcon />
                     {t("退出登录")}
@@ -387,8 +352,6 @@ export function TopBar() {
                 <div className="sm:hidden">
                   <DropdownMenuSeparator />
                   <LanguageMenuItems />
-                  <DropdownMenuSeparator />
-                  <ThemeMenuItems />
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -396,6 +359,10 @@ export function TopBar() {
         </div>
       </header>
       <MobileTabBar />
+      <ThemeSettingsDialog
+        open={isThemeSettingsOpen}
+        onOpenChange={setIsThemeSettingsOpen}
+      />
     </>
   )
 }

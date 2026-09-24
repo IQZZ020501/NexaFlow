@@ -45,5 +45,6 @@ NexaFlow 当前提供 22 个供应商目录项，但不会为每家供应商安�
 - Embedding：原生供应商走各自 SDK，其余兼容供应商走 `{api_base}/embeddings`。
 - Reranker：Bedrock 使用官方 Rerank 客户端；OpenAI 兼容供应商走 `{api_base}/rerank`。
 - 注册模型时可以覆盖目录中的默认 API URL，并可直接输入静态列表之外的有效模型 ID。AWS 可用模型受区域与账号授权影响，Azure 和火山方舟还可能要求使用自己的部署名或 Endpoint ID。
+- 表中「NexaFlow 实际调用」列对 OpenAI 兼容供应商（阿里云百炼、Kimi、智谱、SiliconFlow、腾讯云 TokenHub、腾讯混元、火山方舟、百度千帆、讯飞星火、Regolo、Docker Model Runner、vLLM、Xorbits Inference、本地模型、自定义兼容）以运行时 SDK 简写为 `openai`；代码中的 `integration.adapter` 一律为 `langchain-openai`。
 
-仓库只直接声明运行时确实导入的 SDK：`openai`、`anthropic`、`boto3` / `botocore`、`google-genai` 和 `ollama`。矩阵中其他厂商 SDK 只在需要其非兼容能力时才应引入，不能仅为“每家一个包”增加在线依赖。
+仓库只直接声明运行时确实导入的厂商 SDK：`openai`、`anthropic`、`boto3` / `botocore`、`google-genai` 和 `ollama`；此外还声明并导入矩阵中实际使用的 `langchain-*` 适配器与 `langgraph`。矩阵中其他厂商 SDK 只在需要其非兼容能力时才应引入，不能仅为“每家一个包”增加在线依赖。

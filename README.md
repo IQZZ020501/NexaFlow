@@ -19,7 +19,7 @@ NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队�
 ## 核心能力
 
 - **应用构建**：统一管理 Agent 与工作流，支持草稿、发布快照、公开访问和 API 调用。
-- **知识库与 RAG**：文档与显式 QA 导入、OCR、Parent/Child 分段、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/重排、权限过滤、显式引用、证据图谱与有界多跳路径；支持持久知识页、后台增量整理和离线评测。
+- **知识库与 RAG**：文档与显式 QA 导入、Parent/Child 分段、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/重排、权限过滤、显式引用、证据图谱与有界多跳路径（PDF 只取已有文本层，不做 OCR；图片文字由工作区视觉模型提取）；支持持久知识页、后台增量整理和离线评测。
 - **Agent 运行时**：基于 Celery 的耐久执行、运行租约、checkpoint、可重放事件、对话记忆和模型用量记录。
 - **可视化工作流**：React Flow 画布、不可变发布版本、节点审计，以及隔离的 Python Code 节点沙箱。
 - **模型管理**：支持 OpenAI-compatible、Anthropic、Amazon Bedrock、Azure OpenAI、DeepSeek、Gemini 和 Ollama。
@@ -86,7 +86,7 @@ flowchart LR
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
 | 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |
 | 检索 | PostgreSQL（权威文档、证据图谱与 revision）+ Qdrant（可重建的文档/Profile 派生向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、引用扩展、有界多跳路径、可选 reranker；不需要 Neo4j 或新数据库 |
-| 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、Worker 监管的源码 Python 沙箱 |
+| 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立 OpenSandbox / Kata 执行主机（镜像以 digest 固定） |
 
 ## 快速开始
 
@@ -115,16 +115,16 @@ cp .env.example .env
 docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
 ```
 
-`up -d` 会自动等待数据库、执行尚未应用的 Alembic 迁移，再启动 API、前端、Worker 和沙箱。迁移复用应用镜像，不需要单独构建迁移镜像。
+`up -d` 会自动等待数据库、执行尚未应用的 Alembic 迁移，再启动 API、前端与 Worker（沙箱运行在独立 OpenSandbox 执行主机，不在本 Compose 内）。迁移复用应用镜像，不需要单独构建迁移镜像。
 首次启动会自动拉取缺失镜像；升级已有部署时先执行 `pull`，再执行同一条 `up -d`。
 
 启动完成后通过唯一对外端口访问：
 
-- Web：<http://localhost:8000>
-- API 健康检查：<http://localhost:8000/health>
-- OpenAPI：<http://localhost:8000/docs>
+- Web：<http://localhost:8080>
+- API 健康检查：<http://localhost:8080/health>
+- OpenAPI：<http://localhost:8080/docs>
 
-生产 Compose 只发布宿主机 `8000` 端口，其余服务仅在内部网络访问。自定义镜像、外部数据库和 Nginx 配置见 [`deploy/README.md`](deploy/README.md)。
+生产 Compose 只发布宿主机 `NEXAFLOW_PORT`（`.env.example` 默认 `8080`）端口，其余服务仅在内部网络访问。自定义镜像、外部数据库和 Nginx 配置见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
 使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
 
@@ -143,7 +143,7 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml down
 
 数据保存在 `deploy/data` 的 bind mount 中，`down` 不会删除它。如需重置本地数据，必须先停止相关容器；不要在 Redis、PostgreSQL 或 Qdrant 运行时删除其挂载目录。
 
-详细的部署、迁移、Nginx 和安全配置见 [deploy/README.md](deploy/README.md)。
+详细的部署、迁移、Nginx 和安全配置见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 本地开发
 
@@ -171,10 +171,10 @@ NexaFlow/
 ├── deploy/     Docker Compose、Dockerfile 与 Nginx 示例
 ├── docs/       模块、产品与工程文档
 ├── scripts/    仓库辅助脚本
-└── imgs/       项目标识
+└── .github/     CI 工作流（Compose 校验与前后端套件）
 ```
 
-后端依赖方向和模块索引见 [docs/INDEX.md](docs/INDEX.md)，运行时与部署细节见 [backend/README.md](backend/README.md) 和 [deploy/README.md](deploy/README.md)。
+后端依赖方向和模块索引见 [docs/INDEX.md](docs/INDEX.md)，运行时与部署细节见 [backend/README.md](backend/README.md) 和 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 测试
 
@@ -218,6 +218,7 @@ bash sandbox/run_coverage.sh
 ```
 
 执行镜像自检及真实 OpenSandbox 检查见 [部署说明](deploy/opensandbox/README.md)。
+根目录开发监督器 `scripts/dev.py` 的单元测试单独运行：`uv run python scripts/dev_test.py`（不在 CI 覆盖率范围内）。
 完整 CI 套件以 [.github/workflows/ci.yml](.github/workflows/ci.yml) 为准。
 
 ## 安全说明
@@ -241,4 +242,4 @@ bash sandbox/run_coverage.sh
 
 ## 许可证
 
-本项目基于 [GNU General Public License v3.0](LICENSE) 发布。内置数据库镜像使用的 `pg_search` Community 扩展采用 AGPLv3，第三方组件仍保留各自许可条款；部署前请查阅 [deploy/README.md](deploy/README.md)。
+本项目基于 [GNU General Public License v3.0](LICENSE) 发布。内置数据库镜像使用的 `pg_search` Community 扩展采用 AGPLv3，第三方组件仍保留各自许可条款；部署前请查阅 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。

@@ -10,13 +10,26 @@ export type AnalyticsKeyMetrics = {
 }
 
 /**
+ * Formats a count with locale-aware grouping.
+ *
+ * @param value - Numeric value to format
+ * @param locale - Locale used for number formatting
+ */
+export function formatAnalyticsNumber(value: number, locale: string) {
+  return new Intl.NumberFormat(locale).format(value)
+}
+
+/**
  * Calculates the total count for a distribution.
  *
  * @param items - Distribution entries to aggregate.
  * @returns The sum of item counts, treating missing entries and negative counts as zero.
  */
 export function distributionTotal(items: DistributionItem[] | undefined) {
-  return (items ?? []).reduce((total, item) => total + Math.max(0, item.count), 0)
+  return (items ?? []).reduce(
+    (total, item) => total + Math.max(0, item.count),
+    0
+  )
 }
 
 /**

@@ -244,6 +244,7 @@ export function AnnouncementExpirationField({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t("上个月")}
+                title={t("上个月")}
                 onClick={() =>
                   setViewMonth(
                     new Date(
@@ -264,6 +265,7 @@ export function AnnouncementExpirationField({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t("下个月")}
+                title={t("下个月")}
                 onClick={() =>
                   setViewMonth(
                     new Date(
@@ -310,7 +312,7 @@ export function AnnouncementExpirationField({
                       isOutside && "text-muted-foreground/50",
                       dateKey === todayKey && "ring-1 ring-border",
                       isSelected &&
-                        "bg-primary text-primary-foreground ring-0 hover:bg-primary/80"
+                        "bg-primary text-primary-foreground ring-0 hover:bg-primary/90"
                     )}
                   >
                     {date.getDate()}

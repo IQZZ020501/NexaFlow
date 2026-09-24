@@ -151,9 +151,7 @@ export function AgentConfigFields({
     imageTool.status === "active" &&
     imageTool.availability === "available"
   )
-  const imageSwitchDisabled =
-    readOnly ||
-    (!isImageEnabled && (!canEnableImage || form.tools.length >= 12))
+  const imageSwitchDisabled = readOnly || (!isImageEnabled && !canEnableImage)
   const selectedSkillNames = (form.skills ?? []).map((reference) => {
     return (
       skills.find((skill) => skill.id === reference.skill_id)?.name ??
@@ -201,7 +199,6 @@ export function AgentConfigFields({
   function toggleKnowledgeBase(id: string) {
     setForm((current) => {
       const selected = current.knowledgeBaseIds.includes(id)
-      if (!selected && current.knowledgeBaseIds.length >= 4) return current
       return {
         ...current,
         knowledgeBaseIds: selected
@@ -224,11 +221,7 @@ export function AgentConfigFields({
           ),
         }
       }
-      if (
-        !canEnableImage ||
-        !imageTool.current_version_id ||
-        current.tools.length >= 12
-      ) {
+      if (!canEnableImage || !imageTool.current_version_id) {
         return current
       }
       return {
@@ -651,11 +644,9 @@ export function AgentConfigFields({
               <label
                 className={`relative inline-flex shrink-0 items-center ${imageSwitchDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
                 title={
-                  !isImageEnabled && form.tools.length >= 12
-                    ? t("最多只能关联 12 个工具")
-                    : !isImageEnabled && !canEnableImage
-                      ? t("暂无可用的图片生成工具")
-                      : undefined
+                  !isImageEnabled && !canEnableImage
+                    ? t("暂无可用的图片生成工具")
+                    : undefined
                 }
               >
                 <input
@@ -749,7 +740,7 @@ export function AgentConfigFields({
               <div className="min-w-0 pt-0.5">
                 <DialogTitle>{t("关联知识库")}</DialogTitle>
                 <DialogDescription className="mt-1.5 leading-5">
-                  {t("按需选择知识库，最多 {value} 个。", { value: 4 })}
+                  {t("按需选择要关联的知识库。")}
                 </DialogDescription>
               </div>
             </div>
@@ -788,7 +779,6 @@ export function AgentConfigFields({
                   const checked = form.knowledgeBaseIds.includes(
                     knowledgeBase.id
                   )
-                  const disabled = !checked && form.knowledgeBaseIds.length >= 4
                   return (
                     <label
                       key={knowledgeBase.id}
@@ -796,13 +786,12 @@ export function AgentConfigFields({
                         checked
                           ? "border-foreground/20 bg-muted/70 shadow-xs"
                           : "border-border/70 hover:border-foreground/20 hover:bg-muted/35"
-                      } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                      } cursor-pointer`}
                     >
                       <input
                         type="checkbox"
                         className="sr-only"
                         checked={checked}
-                        disabled={disabled}
                         onChange={() => toggleKnowledgeBase(knowledgeBase.id)}
                       />
                       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">

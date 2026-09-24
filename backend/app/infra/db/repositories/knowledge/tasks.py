@@ -87,6 +87,8 @@ async def list_knowledge_tasks(
     document_id: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    *,
+    exclude_staged_documents: bool = False,
 ) -> list[KnowledgeTask]:
     statement = select(KnowledgeTaskORM).where(
         KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
@@ -94,6 +96,18 @@ async def list_knowledge_tasks(
     )
     if document_id is not None:
         statement = statement.where(KnowledgeTaskORM.document_id == document_id)
+    if exclude_staged_documents:
+        staged_documents = select(KnowledgeDocumentORM.id).where(
+            KnowledgeDocumentORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeDocumentORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeDocumentORM.meta[DOCUMENT_STAGED_META_KEY].as_boolean().is_(True),
+        )
+        statement = statement.where(
+            or_(
+                KnowledgeTaskORM.document_id.is_(None),
+                KnowledgeTaskORM.document_id.not_in(staged_documents),
+            )
+        )
     statement = statement.order_by(
         KnowledgeTaskORM.created_at.desc(),
         KnowledgeTaskORM.id.desc(),

@@ -392,6 +392,37 @@ def main() -> None:
         )
         assert remove_team_member_again.status_code == 404, remove_team_member_again.text
 
+        # Removing a workspace member must not strand a team without admins.
+        sole_admin_id, _ = create_active_user(client, admin_token, "team-sole-admin")
+        sole_ws_member = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"user_id": sole_admin_id, "role": "member"},
+        )
+        assert sole_ws_member.status_code == 201, sole_ws_member.text
+        sole_admin_team = client.post(
+            teams_url(research_workspace_id),
+            headers=auth_headers(research_token),
+            json={"name": "Sole Admin Team", "admin_user_id": sole_admin_id},
+        )
+        assert sole_admin_team.status_code == 201, sole_admin_team.text
+        sole_admin_team_id = sole_admin_team.json()["id"]
+        remove_sole_team_admin = client.delete(
+            members_url(research_workspace_id, f"/{sole_admin_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert remove_sole_team_admin.status_code == 400, remove_sole_team_admin.text
+        removed_sole_team = client.delete(
+            teams_url(research_workspace_id, f"/{sole_admin_team_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert removed_sole_team.status_code == 204, removed_sole_team.text
+        removed_sole_member = client.delete(
+            members_url(research_workspace_id, f"/{sole_admin_id}"),
+            headers=auth_headers(research_token),
+        )
+        assert removed_sole_member.status_code == 204, removed_sole_member.text
+
         demote_last_team_admin = client.patch(
             teams_url(research_workspace_id, f"/{team_id}/members/{research_admin_id}"),
             headers=auth_headers(research_token),

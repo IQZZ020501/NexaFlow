@@ -11,6 +11,7 @@ import {
 } from "@/components/knowledge/markdown-content"
 import type { TFunction } from "@/i18n"
 import type { AgentRunSource } from "@/lib/api/agents"
+import { cn } from "@/lib/utils"
 
 type AgentSourceEvent = {
   type?: string
@@ -194,11 +195,17 @@ function AgentSourceReference({
       <PopoverPrimitive.Trigger asChild>
         <button
           type="button"
-          className={`inline-flex max-w-52 items-center gap-1 rounded-full border bg-muted/70 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${inline ? "mx-1 align-middle" : ""}`}
+          className={cn(
+            "inline-flex max-w-60 cursor-pointer items-center gap-1.5 rounded-full border border-border/70 bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground shadow-xs transition-colors",
+            "hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            inline && "mx-1 align-middle"
+          )}
           aria-label={`${t("来源")}：${label}`}
           title={label}
         >
-          <FileTextIcon className="size-3 shrink-0" />
+          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+            <FileTextIcon className="size-2.5" />
+          </span>
           <span className="truncate">{displayLabel}</span>
         </button>
       </PopoverPrimitive.Trigger>

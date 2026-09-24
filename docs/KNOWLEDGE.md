@@ -2,7 +2,7 @@
 
 ## 职责
 
-知识库业务领域：知识库/文档/分块/任务的状态机编排（解析 → 规范化全文 → 分块 → embedding → 向量入库），支持普通文档与显式 QA 表导入、平铺分段与按 Markdown 章节生成 Parent + Child 的智能分段；仅 Child 进入文本与向量检索索引。检索统一经过向量、PostgreSQL `pg_search` BM25、显式文档引用一跳扩展、可选重排和可选 Evidence Graph，多跳图谱结果始终回指证据。模块同时负责任务租约与失败重试、文档生命周期、知识库删除后的持久化外部存储清理。Celery 任务入口在 `backend/app/tasks/knowledge/jobs.py`。
+知识库业务领域：知识库/文档/分块/任务的状态机编排（解析 → 规范化全文 → 分块 → embedding → 向量入库），支持普通文档与显式 QA 表导入、平铺分段与按 Markdown 章节生成 Parent + Child 的智能分段；Child 进入向量与文本检索索引，结构化 Graph 导入的 `graph_record` 分块只进入文本（关键词）通道。检索统一经过向量、PostgreSQL `pg_search` BM25、显式文档引用一跳扩展、可选重排和可选 Evidence Graph，多跳图谱结果始终回指证据。模块同时负责任务租约与失败重试、文档生命周期、知识库删除后的持久化外部存储清理。Celery 任务入口在 `backend/app/tasks/knowledge/jobs.py`。
 
 ## 权限语义
 
@@ -16,10 +16,10 @@
 api/v1/knowledge（routes/lifecycle/retrieval/evaluation/graph 路由）
   → application/knowledge（用例编排：documents、retrieval、evaluation/runner、graph/{service,build,query,maintenance}）
     → domain/knowledge（bases、documents、evaluation、storage、tasks、graph 领域规则；service.py 门面）
-      → ports（llm/parsing/vector_store 等稳定契约入口）
-      → adapters（rag 检索与向量、parsing 管线与 QA 导入、llm 运行时与 provider）
+      → ports（llm/vector_store/execution/mcp 等稳定契约入口；解析与 QA 导入不是 port）
+      → adapters（rag/vector_store 向量存储、llm 运行时与 provider）
       → infra/db/repositories/knowledge + sql/knowledge（PostgreSQL 权威读写）
-    → tasks/knowledge/jobs.py（Celery 包装、恢复与重试；app.knowledge.* / app.uploads.*）
+    → tasks/knowledge/jobs.py（Celery 包装、恢复与重试；app.knowledge.run_task / app.storage.cleanup / app.maintenance.run）
 ```
 
 仓储层把 ORM 行经 `to_entity` 映射回 `entities/knowledge` 的 dataclass 实体后供领域层消费。
@@ -29,7 +29,7 @@ api/v1/knowledge（routes/lifecycle/retrieval/evaluation/graph 路由）
 - 附件上传 `POST /knowledge-bases/{kb_id}/attachments` 只持久化文件（对象存储 adapter 见 `backend/app/infra/storage/object_storage.py`），返回 attachment。
 - 文档创建 `POST /documents` 接收 `attachment_ids`、`staged` 和显式 `import_mode`（`document`/`qa`）；事务内消费附件并生成 staged 文档。解析/向量化一律走 Celery 任务（`POST /parse`、`POST /index`）。
 - QA 模式只接受 UTF-8 CSV 或 XLSX，表头支持 `question/问题`、`answer/答案` 和可选 `source/来源`。每行生成一个 `kind=qa` Child，答案作为返回正文，`question + answer` 作为检索文本；最多 5000 行，问题/答案分别限制为 2000/20000 字符，普通分段参数在该模式下忽略。
-- 图片资产：DOCX 解析时抽取内嵌图片落对象存储，chunk 正文保留原子占位符并用 `images[]` 结构化返回；前端经鉴权接口拉取 blob 渲染，不暴露对象路径。图片不参与向量化。
+- 图片资产：DOCX 解析时抽取内嵌图片落对象存储（`KnowledgeAsset`/`KnowledgeChunkAsset` 记录），chunk 正文保留原子占位符并用 `images[]` 结构化返回；前端经鉴权接口拉取 blob 渲染，不暴露对象路径。图片不参与向量化。
 - 附件生命周期：available → consumed（创建文档）→ deleted（删除文档/知识库时对象一并清理）。
 
 ### 四种持久表示与权威性
@@ -54,7 +54,8 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`（并在文件尾�
 
 ### Graph API、Agent/Workflow 契约
 
-- 管理页和 API 提供 `/graph/settings`、`/graph/schema`、`/graph/status`、`/graph/rebuild`、`/graph/entities`、`/graph/overview`、`/graph/path`、`/graph/neighborhood`、`/graph/import`、`/graph/reviews` 和 review resolve（路由在 `api/v1/knowledge/graph.py`）；所有路由先验证 workspace、知识库状态和 view/edit 权限。
+- 管理页和 API 提供 `/graph/settings`、`/graph/schema`、`/graph/status`、`/graph/rebuild`、`/graph/entities`、`/graph/entities/{entity_id}`、`/graph/overview`、`/graph/path`、`/graph/neighborhood`、`/graph/import`、`/graph/reviews` 和 review resolve（路由在 `api/v1/knowledge/graph.py`）；所有路由先验证 workspace、知识库状态和 view/edit 权限。
+- 结构化导入 `POST /graph/import` 会写入一个 `kind=graph_record` 的已索引文档与分块（每源记录一个 chunk，无 Parent、不向量化，只进入关键词通道），并立即合并一次 `graph_sync`（`application/knowledge/graph/service.py` 的 `import_graph_records`）。
 - 知识查询与 inspect 请求接受 `graph_mode=off|auto|path|neighborhood`、`source_entity`、`target_entity`、`max_hops` 和 `relation_filters`。Trace 返回 graph intent、revision、候选/路径/访问节点数、hop、truncated/limit_reason 及阶段耗时；Graph 关闭时这些字段为 0/null，且不访问 Graph repository 或 Qdrant profile collection。
 - Agent/Workflow 复用同一检索用例。内部工具可读取有界的 graph path、claim/evidence ID 和 revision snapshot；公开 Agent 只返回最终安全文本与既有公开 citation，不返回 profile、内部实体/claim/revision ID 或完整 evidence quote。Workflow Knowledge 节点保留 `graph_revision_id`、有界 `graph_paths` 和每个命中 Child 的 `graph_claim_ids/graph_hops`，历史运行快照不随当前 Graph 更新而改变。
 
@@ -70,14 +71,17 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`（并在文件尾�
 
 ### 领域层 `backend/app/domain/knowledge/`
 
-- `models.py` — 知识库/附件/文档/资源/分块/文档引用/任务/评测用例与结果/存储清理 ORM 模型（文件尾导入 graph 子包 ORM 完成全表注册）
+- `models.py` — 知识库/附件/文档/图片资产（`knowledge_assets`）/资源/Parent 分块/分块/分块资产（`knowledge_chunk_assets`）/文档引用/任务/评测用例、评测期望与结果/存储清理共 13 张 ORM 表（文件尾导入 graph 子包 ORM 完成全表注册）
 - `service.py` — 领域门面：重导出 bases（知识库 CRUD + 模型解析）、documents（文档/附件）、permissions 等按关切拆分的子服务
 - `entities` 对应实体在 `backend/app/entities/knowledge/models.py`（dataclass + 文档/任务/分块状态常量）与 `backend/app/entities/knowledge/graph.py`（Graph 实体 dataclass 与 schema/revision/entity/claim/evidence/review 状态常量）
 - `bases/service.py` — 知识库 CRUD、注册模型解析与默认模型、模型连通性测试、owner 转移、删除返回持久清理 id
 - `bases/permissions.py` — view/edit 资源授权、归档只读校验、授权读写与审计
 - `documents/service.py` — 文档与附件服务：上传落盘（对象存储）、附件消费建文档、清理文件名、响应组装
+- `documents/parsing.py` — 解析管线：mammoth/MarkItDown/pypdf 抽取（PDF 只读文本层，不做 OCR）、归档与内嵌图片资产约束、规范化全文工件、平铺与层级分块（`SEGMENTATION_VERSION`）
+- `documents/qa_import.py` — 有界 CSV/XLSX QA 行解析与校验（openpyxl；`MAX_QA_ROWS`/问题与答案长度上限）
 - `documents/lifecycle.py` — 文档删除/停用生命周期：tombstone、级联清理编排与 graph_sync 触发
 - `documents/references.py` — 文档引用规则：Markdown/纯文本链接标签提取、别名/锚点归一化、一跳解析、引用重建与解绑
+- `retrieval.py` — 纯检索算法：RRF 融合、Parent 上下文与 evidence 窗口裁剪、重排结果应用（由 `application/knowledge/retrieval/service.py` 调用）
 - `tasks/orchestration.py` — 解析/索引/重建/评测/图任务状态机编排：入队与冲突检测、embedding 模型解析、stop/retry/删除、图重试模式（`all`/`unfinished`）与断点续跑校验
 - `tasks/runner.py` — 知识任务执行体：租约维护与心跳、parse/index 执行、失败/取消收口、孤儿任务恢复
 - `evaluation/service.py` — 评测用例与运行的业务规则：创建/删除、入队、权限、与重建类任务互斥及 Graph 期望指标
@@ -90,7 +94,7 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`（并在文件尾�
   - `resolution.py` — 身份消歧：claim 指纹、external_key/人工别名/规范化名匹配、初始 claim 状态判定
   - `revisions.py` — revision 创建、变更 staging/应用（upsert/retire/delete 按 record kind）、原子 `publish_revision`
   - `services.py` — Graph schema 领域服务（create/activate）+ 重导出 extraction/resolution/revisions 规则
-  - `models.py` — Graph 表 ORM
+  - `models.py` — Graph 表 ORM：schema/revision/revision_changes/entity/alias/mention/claim/evidence/review 共 9 张表，实体行保存 `profile_markdown`/`profile_hash`/`profile_claim_ids`（持久知识页的落点）
   - `traversal.py` — 有界 path/neighborhood 遍历：节点/claim/evidence 视图组装与结果裁剪
 - `__init__.py` — 空包文件
 
@@ -110,26 +114,23 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`（并在文件尾�
   - `routes.py` — 知识库/文档/附件/任务 CRUD、`parse`/`index`/`rebuild`、模型测试、owner 转移、授权管理
   - `lifecycle.py` — 文档下载、文档资产 blob 读取、文档删除与启停
   - `retrieval.py` — `POST /{kb_id}/query` 与 `POST /{kb_id}/query/inspect`
-  - `evaluation.py` — `/evaluations` 用例/运行/结果路由
-  - `graph.py` — `/graph` 子路由（settings/schema/status/rebuild/entities/overview/path/neighborhood/import/reviews/resolve）
+  - `evaluation.py` — `/evaluations` 用例/运行/结果路由，含 `GET /results/latest` 最近指标汇总
+  - `graph.py` — `/graph` 子路由（settings、schema、status、rebuild、entities、entities/{entity_id}、overview、path、neighborhood、import、reviews、resolve）
 - `backend/app/schemas/knowledge/contracts.py` — 知识库/文档/分块/任务/检索/评测请求响应契约
 - `backend/app/schemas/knowledge/graph.py` — Graph 契约（settings/schema/status/entity/claim/review/查询结果与 import 记录）
 
 ### 数据访问与 SQL 资产
 
-- `backend/app/infra/db/repositories/knowledge/repository.py` — 知识库/附件/文档/分块/任务/清理记录的 PostgreSQL 读写（ORM↔entity 映射、锁与租约续期、冲突检测）及关键词 chunk id 查询
-- `backend/app/infra/db/repositories/knowledge/references.py` — `knowledge_document_references` 邻接表读写与别名解析查询
-- `backend/app/infra/db/repositories/knowledge/evaluation.py` — 评测用例/期望/结果与运行读写
-- `backend/app/infra/db/repositories/knowledge/graph.py` — Graph schema/revision/entity/alias/mention/claim/evidence/review 权威读写、工作空间模型用量统计、有界遍历行查询（加载下方 CTE 并设置 2 秒 statement timeout）
+- `backend/app/infra/db/repositories/knowledge/` — 按关切拆分的仓储包：`repository.py`（重导出门面，并加载关键词 SQL）、`bases.py`（知识库与授权行读写）、`documents.py`（文档/分块/Parent/图片资产与 `query_keyword_chunk_ids` BM25 查询）、`tasks.py`（任务、租约与恢复候选）、`storage.py`（清理记录）、`references.py`（`knowledge_document_references` 邻接表读写与别名解析）、`evaluation.py`（评测用例/期望/结果与运行）、`graph.py`（Graph 权威读写与有界遍历行查询）
 - `backend/app/infra/db/sql/knowledge/query_keyword_chunk_ids.sql` — `pg_search` BM25 关键词候选查询
 - `backend/app/infra/db/sql/knowledge/graph/shortest_path.sql`、`neighborhood.sql`、`query_entity_candidates.sql` — 有界 `WITH RECURSIVE` CTE（路径/邻域/实体候选）
 
 ### 契约与实现
 
-- `backend/app/ports/{llm,parsing,vector_store}.py` — 稳定契约入口（模型与重排、解析管线与 QA 导入、向量存储）；实现集中在 `backend/app/adapters/`
-  - `backend/app/adapters/parsing/pipeline.py` — 解析管线（分块/规范化全文）
-  - `backend/app/adapters/parsing/qa_import.py` — 有界 CSV/XLSX QA 行解析与校验
-  - `backend/app/adapters/rag/retrieval.py` — RRF 融合、Parent 上下文/evidence 窗口裁剪、重排应用
+- `backend/app/ports/{llm,vector_store}.py`（另有 `execution`/`mcp`/`errors`/`announcements`/`enterprise_identity`）— 稳定契约入口（模型与重排、向量存储）；实现集中在 `backend/app/adapters/`
+  - `backend/app/domain/knowledge/documents/parsing.py` — 解析管线（抽取/规范化全文/分块）
+  - `backend/app/domain/knowledge/documents/qa_import.py` — 有界 CSV/XLSX QA 行解析与校验
+  - `backend/app/domain/knowledge/retrieval.py` — RRF 融合、Parent 上下文/evidence 窗口裁剪、重排应用
   - `backend/app/adapters/rag/vector_store.py` — Qdrant 向量读写（含 Graph profile collection）
 - `backend/app/infra/storage/object_storage.py` — 对象存储 port 与本地实现（知识附件/规范化全文工件落盘）
 

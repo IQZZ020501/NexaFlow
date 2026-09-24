@@ -980,6 +980,7 @@ function NumberStepper({
           type="button"
           className="grid place-items-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
           aria-label={t("增加数值")}
+          title={t("增加数值")}
           disabled={readOnly || value >= max}
           onClick={() => updateValue(value + step)}
         >
@@ -989,6 +990,7 @@ function NumberStepper({
           type="button"
           className="grid place-items-center border-t border-input text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 max-sm:border-t-0 max-sm:border-l"
           aria-label={t("减少数值")}
+          title={t("减少数值")}
           disabled={readOnly || value <= min}
           onClick={() => updateValue(value - step)}
         >

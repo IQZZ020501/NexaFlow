@@ -8,7 +8,7 @@
 - 草稿调试、节点状态回显、运行与节点审计；
 - 不可变发布版本、版本列表、恢复为新草稿、指定版本运行；
 - “基础节点 / 工具 / Agent”三页签节点库：基础节点包含 Start、End、LLM、Reply、Classifier、Knowledge、Reranker、Form、Document Extract、Condition、Variable；工具页提供固定版本 Tool 与 Inline Python；Agent 页提供固定发布版本 Agent；
-- Code 节点的独立、受资源限制的 Python 生产沙箱；公网出站仅经 Worker 代理，默认阻断直连；
+- Code 节点的独立、受资源限制的 Python 生产沙箱；程序默认无外网（dns+nft 默认拒绝，仅部署批准的 stdio MCP 域名子集可出站）；
 - Celery 持久执行、租约接管、deadline、步数与模型 token 预算、NDJSON 事件重放。
 
 Form 已使用 durable `awaiting_input` checkpoint 暂停/恢复，Agent 节点已使用 durable child Run；通用 HITL、循环、迭代、子工作流、HTTP 请求和失败分支仍属于后续批次。节点失败默认立即中止整个运行；不提供隐式重试、兜底值或部分成功。
@@ -38,7 +38,7 @@ Form 已使用 durable `awaiting_input` checkpoint 暂停/恢复，Agent 节点�
 flowchart LR
     UI["Next.js 工作流画布"] -->|"草稿、发布、运行、NDJSON"| API["FastAPI workflow router"]
     API --> APP["application/workflows"]
-    APP --> DOMAIN["shareddomain/workflows"]
+    APP --> DOMAIN["domain/workflows"]
     DOMAIN --> REPO["workflow repository"]
     REPO --> PG[("PostgreSQL")]
 
@@ -57,7 +57,7 @@ flowchart LR
     ENGINE -->|"checkpoint、节点审计、事件"| PG
 ```
 
-分层遵循 `api -> application -> shareddomain/capabilities/infrastructure`。HTTP router 只负责依赖注入与 schema；仓储独占 ORM 写操作；引擎只依赖 schema 和纯类型，不导入 application 或具体 LLM/MCP 实现。
+分层遵循 `api -> application -> domain/adapters/ports -> infra`。HTTP router 只负责依赖注入与 schema；仓储独占 ORM 写操作；引擎只依赖 schema 和纯类型，不导入 application 或具体 LLM/MCP 实现。
 
 ## 4. 确定性调度语义
 
@@ -127,11 +127,15 @@ erDiagram
       string default_model_id FK
       json graph
       string graph_hash
+      json resource_snapshot
+      string resource_hash
       string published_by_user_id
     }
     WORKFLOW_RUN_DETAILS {
       string run_id FK_UK
       string source
+      string definition_id
+      string version_id
       int definition_revision
       int version_number
       string graph_hash
@@ -139,6 +143,8 @@ erDiagram
       json inputs
       json outputs
       datetime deadline_at
+      int max_steps
+      int max_model_tokens
       int step_count
       int token_usage
     }
@@ -160,6 +166,9 @@ erDiagram
       string agent_id FK
       string uploaded_by_user_id FK
       string object_key UK
+      string filename
+      string content_type
+      string category
       int size_bytes
       datetime expires_at
     }
@@ -171,6 +180,7 @@ erDiagram
       int size_bytes
       int attempts
       datetime next_attempt_at
+      string last_error
     }
 ```
 
@@ -204,15 +214,14 @@ erDiagram
 
 ## 7. Inline Python（持久化 `code`）生产沙箱
 
-Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全局变量 `result` 赋值。Worker 通过私有 Unix socket 发送单行 JSON；API 和 frontend 无法访问该 socket。
+Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全局变量 `result` 赋值。Worker 经 `app/infra/sandbox/client.py` 做语义与结果校验，再通过 execution port（`app/ports/execution.py`）由 `app/adapters/execution/opensandbox.py` 向独立 OpenSandbox 控制面提交单行 JSON 请求；API 与 frontend 不持有执行凭据。
 
 沙箱进程边界：
 
-- Linux Worker 在启动 Celery 前创建独立 mount/network/PID/IPC/UTS namespace 与最小 chroot；macOS 开发对每个子进程应用 Seatbelt；原生 Windows 不启动，使用 WSL2；
-- Compose 默认 capability 全删，只恢复 namespace/chroot、降权和清理所需能力；关闭会拦截 mount 的 Docker 默认 AppArmor profile；Broker 就绪后 supervisor 在启动 Celery 前再次全部丢弃；保留默认 seccomp 与 `no-new-privileges`；
+- 隔离由部署在独立执行平面的 OpenSandbox 提供（生产 Linux/Kata + dns+nft）；业务 Worker 容器 `cap_drop: ALL`，保留默认 seccomp/AppArmor 与 `no-new-privileges`，没有 namespace/chroot 提权，也没有本地执行回退；
 - 用户程序以 UID/GID 65532、隔离 Python 模式、最小环境运行；服务一次只执行一个同 UID 任务；
-- 5 秒墙钟/CPU、256 MiB 地址空间、16 进程、64 文件描述符、5 MiB 单文件、stdout/stderr 各 64 KiB；
-- 整个进程组在超时或输出超限时强制终止；请求只能降低、不能提高硬限制；
+- 5 秒墙钟/CPU、512 MiB 地址空间（pptx/Node/MCP 由 cgroup 约束）、32 进程、64 文件描述符、5 MiB 单文件、stdout+stderr 合计 128 KiB；
+- 整个进程组在超时或输出超限时强制终止；请求声明的超时只能落在 0.1–120 秒窗口内；
 - 沙箱不可用、超时、超限、无 `result`、结果不是 JSON 时节点失败并中止工作流。
 
 执行环境不提供跨运行文件/解释器状态持久化。每个代码/渲染任务通过 execution port 创建独立 OpenSandbox，程序默认无外网，无业务挂载/环境继承。依赖预装于锁定镜像，不接受 requirements 动态安装。四个固定文件 Skill 保留只读 renderer 和输入契约，调用方只传 Markdown/结构化数据，不能替换入口。stdio MCP 可请求部署批准的公网域名子集，dns+nft 拒绝私网/metadata；Worker 无 namespace 特权或本地回退。
@@ -230,18 +239,27 @@ Code 节点只接受 JSON `inputs`，用户代码必须给 JSON 可序列化全�
 | GET | `/versions` | 按版本号倒序列出版本 |
 | POST | `/versions/{version_number}/restore` | 把版本复制为新的草稿 revision |
 | POST | `/runs` | 创建 `draft` 或指定 `published` 版本运行 |
+| POST | `/uploads` | 上传运行输入附件（24 小时有效） |
 | GET | `/runs` | 查询当前用户的控制台运行 |
 | GET | `/runs/{run_id}` | 查询运行快照与终态 |
 | GET | `/runs/{run_id}/nodes` | 查询逐节点输入输出、耗时、usage、错误 |
+| POST | `/runs/{run_id}/cancel` | 取消运行 |
+| POST | `/runs/{run_id}/regenerate` | 基于原输入重新运行 |
+| POST | `/runs/{run_id}/feedback` | 写入/清除运行反馈 |
+| POST | `/runs/{run_id}/form` | 提交表单节点等待的输入 |
 | GET | `/runs/{run_id}/stream?after={sequence}` | NDJSON 快照、事件重放和终态 |
 
 现有 `/agents/{id}/runs`、公开 Agent 与 Agent API 运行路由显式拒绝 workflow，避免类型串线。工作流可复用应用发布、API Key、速率限制、会话归属、日志与 NDJSON 基础设施，但使用独立协议和执行入口：
 
 - `GET /public/workflows/{workflow_id}/profile`：返回已发布工作流的名称、描述与交互配置；
+- `GET /public/workflows/{workflow_id}/documentation`：登录态可见该工作流的调用文档；
 - `GET /public/workflows/{workflow_id}/conversations`：当前登录用户的工作流会话；
+- `POST /public/workflows/{workflow_id}/uploads`、`GET …/uploads`：运行输入附件；
 - `POST /public/workflows/{workflow_id}/runs`：以 `question`（作为 Start 节点输出）运行最新发布版本，可携带 `file_ids` 与 `conversation_id`；
+- `GET /public/workflows/{workflow_id}/runs`、`GET …/runs/{run_id}`：会话内运行列表与单次运行；
+- `POST /public/workflows/{workflow_id}/runs/{run_id}/regenerate|feedback|form`：重跑、反馈与表单输入；
 - `GET /public/workflows/{workflow_id}/runs/{run_id}/stream`：仅返回脱敏的节点状态、类型、耗时与终态输出；
-- `/workflow-api/{workflow_id}/documentation|runs|runs/{run_id}|runs/{run_id}/stream`：API Key 访问的同构接口。
+- `/workflow-api/{workflow_id}/documentation|runs/{run_id}|runs/{run_id}/form|runs/{run_id}/stream`：API Key 访问的同构接口。
 
 外部 workflow run 创建时固定写入 `workflow_run_details`，统一 worker 根据该记录分派到确定性的工作流执行器；同一 workflow ID 访问 `/public/agents` 或 `/agent-api` 返回 404，不会进入 Agent 的提示词/工具循环。执行身份固定为发布者快照所属用户，访问者仅作为 `consumer_id` 参与隔离和审计。外部响应不暴露节点输入、节点输出、图快照或内部错误，只暴露节点进度与 End 节点最终输出。
 
@@ -274,7 +292,7 @@ sequenceDiagram
       else "Agent 节点"
         W->>DB: "创建/观察 durable child Run"
       else "Code 节点"
-        W->>S: "Unix socket JSON request"
+        W->>S: "HTTP JSON request to OpenSandbox"
         S-->>W: "bounded JSON result"
       end
       W->>DB: "node audit + checkpoint + workflow_node event (one tx)"

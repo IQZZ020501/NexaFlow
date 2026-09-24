@@ -16,6 +16,8 @@ import {
   mergePublicRunEvent,
   splitPublicRunProgress,
   publicToolName,
+  unrenderedPublicToolCalls,
+  visiblePublicToolProgress,
 } from "@/components/agents/public-agent-chat"
 import { AgentAnswer } from "@/components/agents/agent-source-references"
 import { PublicWorkflowChat } from "@/components/workflows/public-workflow-chat"
@@ -33,6 +35,7 @@ import {
 import { getErrorMessage } from "@/lib/errors"
 import type { TFunction } from "@/i18n"
 import type { MeResponse } from "@/lib/api/auth"
+import type { AgentToolCall } from "@/lib/api/agents"
 import type { RegisteredModel } from "@/lib/api/llm"
 import {
   getPublicAgentRun,
@@ -439,7 +442,7 @@ const TOOL_CALL = {
   approved_at: null,
   started_at: null,
   finished_at: null,
-}
+} satisfies AgentToolCall
 
 function sendMessage(text: string) {
   const textarea = screen.getByLabelText("请输入问题")
@@ -1167,6 +1170,34 @@ describe("public-agent-chat helpers", () => {
     expect(merged[1]?.status).toBe("awaiting_approval")
   })
 
+  test("keeps an approval visible beside its streamed preparing row", () => {
+    const preparing = toolEvent("preparing-call-1", "running", {
+      stage: "preparing",
+      tool_name: "web_search",
+      tool_kind: "mcp",
+      server_name: "Tavily",
+    })
+
+    expect(unrenderedPublicToolCalls([preparing], [TOOL_CALL])).toEqual([
+      TOOL_CALL,
+    ])
+    expect(visiblePublicToolProgress([preparing], [TOOL_CALL])).toEqual([])
+    expect(
+      unrenderedPublicToolCalls(
+        [preparing],
+        [{ ...TOOL_CALL, status: "running" }]
+      )
+    ).toEqual([])
+    const executing = {
+      ...preparing,
+      id: "running-call-1",
+      stage: "running" as const,
+    }
+    expect(
+      visiblePublicToolProgress([preparing, executing], [TOOL_CALL])
+    ).toEqual([executing])
+  })
+
   test("leaves unrelated runs untouched for terminal events", () => {
     const merged = mergePublicRunEvent(
       [run({ id: "run-1", status: "running" })],
@@ -1583,10 +1614,6 @@ describe("PublicAgentChat", () => {
     expect(composer?.closest("main")?.className).toContain("overflow-hidden")
     expect(composer?.closest("main")?.className).toContain(
       "lg:grid-cols-[240px_minmax(0,1fr)]"
-    )
-    expect(screen.getByLabelText("请输入问题").className).toContain("min-h-12")
-    expect(screen.getByLabelText("请输入问题").className).toContain(
-      "sm:min-h-14"
     )
     expect(
       screen.getByLabelText("发送问题").parentElement?.parentElement?.className
@@ -2296,7 +2323,7 @@ describe("PublicAgentChat", () => {
     expect(createBodies[0]).toEqual({
       goal: "什么是 NexaFlow？",
       conversation_id: "conv-1",
-      approval_mode: "ask_risky",
+      approval_mode: "always_ask",
     })
     expect(
       requests.some(
@@ -2377,9 +2404,12 @@ describe("PublicAgentChat", () => {
     await screen.findByText("开始新对话")
 
     fireEvent.pointerDown(
-      screen.getByRole("button", { name: "执行权限：按策略审批" })
+      screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "启用完全访问" })
+    )
     sendMessage("开始吧")
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()
@@ -2600,6 +2630,15 @@ describe("PublicAgentChat", () => {
                 run: run({ status: "running", result: "" }),
               },
               {
+                type: "progress",
+                event: toolEvent("preparing-call-1", "running", {
+                  stage: "preparing",
+                  tool_name: "web_search",
+                  tool_kind: "mcp",
+                  server_name: "Tavily",
+                }),
+              },
+              {
                 type: "approval_required",
                 call_id: "call-1",
                 reason: "需要确认",
@@ -2649,8 +2688,14 @@ describe("PublicAgentChat", () => {
 
     sendMessage("需要审批的任务")
 
-    expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
-    expect(screen.getByText(/web_search/)).toBeTruthy()
+    const approvalCard = (await screen.findByText("工具调用需要确认")).closest(
+      "section"
+    )
+    expect(approvalCard).toBeTruthy()
+    expect(
+      within(approvalCard as HTMLElement).getByText(/web_search/)
+    ).toBeTruthy()
+    expect(screen.getAllByText(/web_search/)).toHaveLength(1)
 
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
 
@@ -2757,7 +2802,7 @@ describe("PublicAgentChat", () => {
       tool_name: "generate_image",
       tool_kind: "builtin",
       server_name: "",
-    }
+    } satisfies AgentToolCall
     const encoder = new TextEncoder()
     let controller!: ReadableStreamDefaultController<Uint8Array>
     const emit = (event: unknown) =>

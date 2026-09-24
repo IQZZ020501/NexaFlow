@@ -7,7 +7,7 @@ Skill 也不能把整个 Run 的执行预算收紧。
 
 ## 工作空间版本化包
 
-工具页 `/app/tools/skills` 可创建、导入、编辑、保存草稿、发布和停用包。
+工具页 `/app/tools` 的「Skills」页签（`kind=builtin`）可创建、导入、编辑、保存草稿、发布和停用包；导入检查与授权查询接口为 `POST /api/v1/workspaces/{workspace_id}/agent-skills/imports/inspect` 与 `GET …/{skill_id}/permissions`。
 支持 UTF-8 `SKILL.md` 或包含单个包的 ZIP；包内可有 `scripts/`、
 `references/`、`assets/` 和二进制文件。ZIP 可以带根目录，但不能包含
 包根以外的文件、路径穿越、重复路径、链接、特殊文件或加密项。
@@ -99,7 +99,7 @@ Path(os.environ["NEXAFLOW_OUTPUT_PATH"]).write_text(data)
 `install_skill_dependencies` 请求精确版本依赖；审批通过后，依赖安装到该
 Agent Run 的私有 OpenSandbox 会话，并由后续脚本复用。Worker 恢复时会根据
 已成功的 Tool 账本重建环境并核对哈希。Python 仅接受二进制 wheel，npm
-禁用 lifecycle scripts；依赖数量、文件数、单文件和总存储均有上限。
+禁用 lifecycle scripts；依赖数量（单次最多 16 个）、文件数、单文件和总存储均有上限。
 
 安装期间只临时开放部署允许的官方包注册域名，结束后立即恢复默认拒绝；
 脚本本身始终无外网。固定 renderer 依赖仍须预装到 digest 固定的执行镜像。

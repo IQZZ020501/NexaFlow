@@ -130,7 +130,7 @@ export function AuditPanel({
                 ),
               ]}
             />
-            <Button variant="outline" size="icon" onClick={onRefresh} disabled={isAuditLoading} aria-label={t("刷新")}>
+            <Button variant="outline" size="icon" onClick={onRefresh} disabled={isAuditLoading} aria-label={t("刷新")} title={t("刷新")}>
               <RefreshCwIcon className={cn("size-4", isAuditLoading && "animate-spin")} />
             </Button>
             <Button variant="outline" size="sm" onClick={() => void exportLogs()} disabled={!auditLogs.length}>

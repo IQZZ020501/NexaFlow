@@ -66,7 +66,10 @@ not trigger unrelated cleanup.
     `infra/`, `schemas/`, and other domain modules, but never
     `application/` or concrete adapter implementations.
   - `adapters/` may import `infra/` and its own modules, but never
-    `domain/`, `schemas/`, or `application/`.
+    `domain/`, `schemas/`, or `application/` (type-only
+    `if TYPE_CHECKING:` imports of `app.domain.models.registered` in
+    `adapters/llm/` and `adapters/rag/` exist and are ignored by the
+    architecture guard; runtime imports remain the rule).
   Business rules and status constants live in `domain/` (repositories
   import them from the domain models). Consume infrastructure through an
   interface where implementation swapping matters (for example
@@ -90,6 +93,15 @@ not trigger unrelated cleanup.
   expose create/save/refresh/delete wrappers on the repository. ORM model
   modules and explicit model-registration imports are the narrow exceptions;
   they are not a pattern for business logic.
+- Permanent user deletion keeps authored content, execution history, and
+  immutable snapshots: those columns store the former account id as an opaque
+  `String(36)` without a `users` foreign key (`audit_logs.actor_user_id` is the
+  original example), so a departing account never blocks the delete. Rows that
+  belong to the account itself keep their foreign key and are removed by
+  `application/identity/service.py::delete_user_permanently` (refresh sessions,
+  workspace/team memberships, uploads, MCP servers created by the user, and
+  Agent Skill / Application Tool bindings the user authorized). New user
+  references must pick one of those two shapes deliberately.
 - Agent Run persistence separates identity/caller/lineage in `agent_runs`,
   mutable lease/checkpoint/result data in `agent_run_states`, immutable
   execution configuration in `agent_run_snapshots`, and append-only history
@@ -219,6 +231,24 @@ not trigger unrelated cleanup.
   under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
   intentionally promoted to pages.
+- Appearance uses two orthogonal client-side axes: the light/dark/system mode and
+  the color palette. Both persist in local storage, apply to `<html>`, and are
+  bootstrapped before paint by the root layout script. A palette is a
+  `[data-palette]` token block in `frontend/src/app/globals.css` plus a matching
+  entry in `frontend/src/lib/theme-options.ts`; it overrides the neutral tokens
+  once per color scheme, and the dark selector also matches nested elements so a
+  menu can preview a palette that is not active. Theme settings render each
+  palette swatch by nesting `data-palette` and reading that palette's own
+  tokens instead of hand-drawn colors, so adding a palette needs no swatch
+  styling. Do not express a palette with `light-dark()`: a custom property
+  carrying it does not resolve when a utility substitutes the value. The
+  browser chrome color is written by that bootstrap script and kept in sync by
+  the theme provider; do not declare
+  `viewport.themeColor`, because a metadata color cannot see the palette and
+  React re-applies it after hydration, overwriting the palette-aware value.
+  The density, layout, radius, font, sidebar, and content-width axes each
+  override `[data-*]` variables in `frontend/src/app/globals.css`; keep a new
+  axis on its own variables so two settings cannot silently replace each other.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
   service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
   rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds
@@ -445,18 +475,19 @@ examples.
   platform.teams, platform.system_governance, platform.resource_folders,
   models.llm, models.unit, infra.infra_unit_coverage, infra.unit, infra.logger,
   infra.mcp_transports, infra.architecture, execution.unit, agent_skills.unit,
-  agent_skills.api, agents.harness, smoke.test_main). For migration changes,
+  agent_skills.api, smoke.test_main). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
-- `deploy/` Compose changes: render the affected base, development, and
-  pull-only server configurations and verify the image list. Build an image
-  only when its build inputs or wiring changed. When the unified application
-  image or sandbox wiring changes, also run the `sandbox-runtime` direct
-  container checks and `tests.execution.opensandbox_smoke` against an explicit
-  isolated OpenSandbox test server. Verify effective dns+nft filtering, timeout,
-  package isolation and cleanup; production VM isolation must also be validated
-  on Linux/Kata, not inferred from a local ordinary-Docker smoke.
+- `deploy/` Compose changes: render the affected base (`deploy/docker-compose.yml`),
+  development override (`deploy/docker-compose.dev.yml`), and pull-only server
+  (`deploy/docker-compose.server.yml`) configurations and verify the image list.
+  Build an image only when its build inputs or wiring changed. When the unified
+  application image or sandbox wiring changes, also run the `sandbox-runtime`
+  direct container checks and `tests.execution.opensandbox_smoke` against an
+  explicit isolated OpenSandbox test server. Verify effective dns+nft filtering,
+  timeout, package isolation and cleanup; production VM isolation must also be
+  validated on Linux/Kata, not inferred from a local ordinary-Docker smoke.
 - Run full coverage only for coverage work, release/CI validation, or changes
   broad enough to put a repository gate at risk. Do not claim a percentage
   unless it was measured in the current task. The configured gates and commands
@@ -465,7 +496,9 @@ examples.
     cross-platform `backend/scripts/coverage.py` runner to execute all suites
     in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), trace TestClient
     threads and SQLAlchemy greenlets, and merge with coverage.py; the gate is
-    97%.
+    97%. The `agents.evaluation` gate runs through `backend/scripts/agent_eval.py`
+    and the layer guard through `backend/scripts/dependency_matrix.py`
+    (exercised by `tests.infra.architecture`).
   - Execution image: `uv run --project sandbox python -m sandbox.tests` and
     `sandbox/run_coverage.sh` measure the job protocol (excluding test code).
     Renderer quality, child-process resource limits, cgroups and VM/network

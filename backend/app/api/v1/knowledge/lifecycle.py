@@ -48,13 +48,18 @@ async def download_workspace_knowledge_base_document(
         context.workspace.id,
         knowledge_base_id,
     )
-    await require_knowledge_base_permission(
+    permission = await require_knowledge_base_permission(
         db,
         knowledge_base,
         context.user,
         {"view", "edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db,
+        knowledge_base,
+        document_id,
+        include_staged=permission == "edit",
+    )
     document_path = knowledge_document_path(settings, document.storage_path)
     if not document_path.is_file():
         raise HTTPException(
@@ -85,13 +90,18 @@ async def read_workspace_knowledge_document_asset(
         context.workspace.id,
         knowledge_base_id,
     )
-    await require_knowledge_base_permission(
+    permission = await require_knowledge_base_permission(
         db,
         knowledge_base,
         context.user,
         {"view", "edit"},
     )
-    await get_knowledge_document(db, knowledge_base, document_id)
+    await get_knowledge_document(
+        db,
+        knowledge_base,
+        document_id,
+        include_staged=permission == "edit",
+    )
     asset, asset_path = await get_knowledge_asset_file(
         db,
         knowledge_base,
@@ -129,7 +139,9 @@ async def delete_workspace_knowledge_base_document(
         context.user,
         {"edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db, knowledge_base, document_id, include_staged=True
+    )
     await delete_knowledge_document(
         db,
         knowledge_base,
@@ -163,7 +175,9 @@ async def update_workspace_knowledge_base_document_status(
         context.user,
         {"edit"},
     )
-    document = await get_knowledge_document(db, knowledge_base, document_id)
+    document = await get_knowledge_document(
+        db, knowledge_base, document_id, include_staged=True
+    )
     document = await set_knowledge_document_active(
         db,
         knowledge_base,

@@ -30,6 +30,7 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 - `backend/app/domain/audit/services.py` — `record_audit_log`（全模块共用写审计）与审计日志列表/工作区过滤/计数查询
 - `backend/app/domain/resource_folders/models.py` — ResourceFolder ORM（工作区级资源文件夹）
 - `backend/app/domain/email/models.py` — EmailDelivery、PasswordResetToken ORM（密码重置令牌与投递记录落库）
+- `backend/app/domain/email/services.py` — 邮件模板渲染与 payload 校验（`render_email`、`EMAIL_KINDS`）；应用层入队/重试与 SMTP 用例在 `backend/app/application/email/{delivery,smtp}.py`
 
 #### Tool 目录域（app/domain/tools/）
 
@@ -40,7 +41,15 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 - `backend/app/domain/tools/access/permissions.py` — owner/admin/`view`/`use` 授权计算（`ToolAuthorization`、`evaluate_tool_authorization`）与 view/use/manage 断言、权限值校验
 - `backend/app/domain/tools/access/bindings.py` — Agent/Workflow 固定 Tool/Version 绑定快照构建（binder 身份保持）
 - `backend/app/domain/tools/runtime.py` — ToolSnapshot 序列化与载荷还原、参数 schema 校验/归一化、参数 hash、effect/approval 与运行终态约束
-- 纯领域对象（FrozenJson 容器、ToolRef、ToolSnapshot、ToolAccess、Tool 授权枚举等）在 `backend/app/entities/tools/models.py`，供 runtime/bindings/permissions 共用；上层用例编排在 `app/application/tools/{runtime,management}/service.py`，其 API 入口在 `app/api/v1/tools/{routes,sources,mcp}.py`（详见 API 文档），仓储在 `app/infra/db/repositories/tools/{repository,mcp}.py`
+- 纯领域对象（FrozenJson 容器、ToolRef、ToolSnapshot、ToolAccess、Tool 授权枚举等）在 `backend/app/entities/tools/models.py`，供 runtime/bindings/permissions 共用；上层用例编排在 `app/application/tools/{runtime,management}/service.py`，其 API 入口在 `app/api/v1/tools/{routes,sources,mcp}.py`（详见 API 文档），仓储在 `app/infra/db/repositories/tools/{repository,mcp,catalog,bindings,invocations,drafts}.py`
+
+#### 其余工作区级资源域（同文档范围的补充）
+
+- `backend/app/domain/agent_skills/`（`models.py` 的 AgentSkill/AgentSkillVersion/AgentSkillBinding、`access.py` 的 `agent_skill` 授权、`contracts.py`/`packages.py`/`service.py`）— 对应 `application/agent_skills/{service,packages,scripts,dependencies,execution}.py`、`api/v1/agent_skills/routes.py`（`/workspaces/{workspace_id}/agent-skills`）、`infra/db/repositories/agent_skills/repository.py`、`entities/agent_skills/models.py`、`schemas/agent_skills/contracts.py`
+- `backend/app/domain/announcements/models.py`（Announcement、AnnouncementRead）— 对应 `application/announcements/{service,live}.py`、`api/v1/announcements/routes.py`（`/messages`、`/admin/announcements`、`/workspaces/{id}/announcements`）、`infra/db/repositories/announcements/repository.py`、`entities/announcements/models.py`、`schemas/announcements/contracts.py`
+- `backend/app/domain/artifacts/`（`models.py` 的 GeneratedArtifact、`services.py`）— 对应 `application/artifacts/service.py`、`api/v1/artifacts/routes.py`、`infra/db/repositories/artifacts/repository.py`、`entities/artifacts/models.py`、`schemas/artifacts/contracts.py`
+- `backend/app/domain/models/registered.py`（RegisteredModel，`model` 表）— 对应 `application/models/{registry,service}.py`、`api/v1/models/routes.py`（`/model-providers` 与模型 CRUD、`folder_id`）、`infra/db/repositories/models/registry.py`、`schemas/models/contracts.py`
+- `backend/app/domain/analytics/services.py`（`get_workspace_analytics`、`resolve_analytics_period`）— 对应 `application/analytics/__init__.py`、`GET /workspaces/{workspace_id}/analytics`、`infra/db/repositories/analytics/repository.py`、`entities/analytics/models.py`、`schemas/analytics/contracts.py`
 
 ### app/application/（应用服务层）
 
@@ -58,14 +67,14 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 
 ### app/api/v1/（路由层）
 
-- `backend/app/api/v1/identity/auth.py` — `prefix="/auth"`：登录/刷新/登出、会话列表与吊销、改密、me、邀请接受
+- `backend/app/api/v1/identity/auth.py` — `prefix="/auth"`：登录/刷新/登出、会话列表与吊销、改密、me、邀请接受、密码重置申请与确认（`/password-reset/request|confirm`，实现在 `application/identity/password_reset.py`）
 - `backend/app/api/v1/identity/enterprise.py` — 双路由：`public_router`（`/auth/enterprise`：公开连接、start/QR 登录、`/callback/{provider}`）与 `admin_router`（`/enterprise-identity`：连接与身份管理）
-- `backend/app/api/v1/workspaces/routes.py` — `prefix="/workspaces"`：工作区与成员管理
+- `backend/app/api/v1/workspaces/routes.py` — `prefix="/workspaces"`：工作区与成员管理、邀请（列表/创建/撤销/永久删除）、空间治理设置（`/{id}/governance`）、资源清点（`/{id}/inventory`）、工作区审计日志、运营分析（`/{id}/analytics`）
 - `backend/app/api/v1/teams/routes.py` — `prefix="/workspaces/{workspace_id}/teams"`
 - `backend/app/api/v1/resource_folders/routes.py` — `prefix="/workspaces/{workspace_id}/resource-folders"`
 - `backend/app/api/v1/admin/users/routes.py` — `prefix="/users"`（平台级用户管理）
 - `backend/app/api/v1/admin/audit/routes.py` — `prefix="/audit-logs"`
-- `backend/app/api/v1/admin/governance/routes.py` — `prefix="/governance"`（治理/健康/清单）
+- `backend/app/api/v1/admin/governance/routes.py` — `prefix="/governance"`：仅 `GET /governance/health` 管理员健康探测；空间治理设置与清点在 `api/v1/workspaces/routes.py` 的 `/{workspace_id}/governance`、`/{workspace_id}/inventory`
 - `backend/app/api/v1/admin/smtp/routes.py` — `prefix="/smtp"`（SMTP 设置与测试）
 - `backend/app/api/v1/admin/system_logs/routes.py` — `prefix="/system-logs"`（SystemLog 的 ORM 表定义在 `app/infra/observability/system_log.py`，写入由日志采集侧完成）
 
@@ -100,15 +109,16 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 ## 关键约定
 
 - 系统管理员（`is_global_admin`）是平台级治理者：可创建、管理和审计所有工作空间，并治理跨工作空间的成员、团队、运行与安全策略；工作空间管理员负责本空间成员、全部团队及空间级策略。资源级授权仍按工作空间隔离并记录审计。
-- 角色只有 `admin`/`member` 两级，且**不参与资源可见性**：知识库、Agent、Tool 都按「创建者 + `ResourcePermission` 显式授权」判定（知识库 `view/edit`，Agent `view`，Tool 不可转授的 `view/use`），工作空间管理员与系统管理员都不能看到或管理别人的资源。授权管理（`require_can_manage_permissions`）与归档恢复也只限创建者；唯一例外是工作区公共的 builtin 工具，管理员仍可治理其策略与测试。运行遥测（`/logs`、`/conversation-users`、`/monitoring`）保留管理员只读入口，用于工作区运营。
-- 资源文件夹是「谁的目录谁管」的私有结构：任何成员都可创建目录（根目录，或自己可见的目录下），可见范围只有创建者本人，以及通过 `ResourcePermission` 授权或自己拥有的知识库/应用/工具所揭示的目录链（含祖先）；系统管理员与工作空间管理员都不再看到别人的目录。改名、移动、删除仅限创建者（系统管理员保留平台级兜底）。资源本身仍按 `view/edit` 授权判定；前端把「归入不可见目录」的资源显示在根目录，避免列表丢项。
-- 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需工作区管理员），不参与资源授权；团队成员必须是工作区成员。
+- 角色只有 `admin`/`member` 两级，且**不参与资源可见性**：知识库、Agent、Tool 与 Agent Skill 都按「创建者 + `ResourcePermission` 显式授权」判定（知识库 `view/edit`，Agent `view`，Tool 不可转授的 `view/use`，Agent Skill `view/use`），工作空间管理员与系统管理员都不能看到或管理别人的资源。授权管理（`require_can_manage_permissions`）与归档恢复也只限创建者；例外是工作区公共的 builtin 工具（管理员仍可治理其策略与测试）与 Agent Skill（工作空间/系统管理员可管理他人 Skill）。运行遥测（`/logs`、`/conversation-users`、`/monitoring`）保留管理员只读入口，用于工作区运营。
+- 资源文件夹是「谁的目录谁管」的私有结构：任何成员都可创建目录（根目录，或自己可见的目录下），可见范围只有创建者本人，以及通过 `ResourcePermission` 授权或自己拥有的知识库/应用/工具/模型（`ResourceFolderType = knowledge|application|model|tool`）所揭示的目录链（含祖先）；系统管理员与工作空间管理员都不再看到别人的目录。改名、移动、删除仅限创建者（系统管理员保留平台级兜底）。资源本身仍按 `view/edit` 授权判定；前端把「归入不可见目录」的资源显示在根目录，避免列表丢项。
+- 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需团队管理员或工作空间管理员；团队本身的创建/改名/删除需工作空间管理员），不参与资源授权；团队成员必须是工作区成员。
 - 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；资源权限只有创建者本人可管理（工作空间管理员不再代管别人的知识库）。
 - 删除工作区会在同一事务内级联删除知识库、Agent/运行记录、MCP、模型、团队/成员及资源授权；存在 queued/running 知识任务时返回 409。向量集合和对象存储文件由持久清理记录交给 Celery 异步删除，失败后自动重试。
+- 永久删除用户不再被审计/历史引用阻止：Agent 运行与工具调用历史、发布与运行快照、知识内容与各类创作归属把用户 id 作为**不带外键的字符串**保留（见迁移 `202609230001_detach_user_references`，与 `audit_logs.actor_user_id` 一致）。例外：`tools`/`tool_sources`/`tool_versions.created_by_user_id`、`tool_policies.reviewed_by_user_id`、`tool_invocations.approved_by_user_id` 仍是 `FK users.id ON DELETE SET NULL`，因此用户创建的 Python 工具在 owner 注销后会变成无 owner 的工作区级系统工具（`is_system_tool` 成立，所有成员可 `use`）。账号自身的数据（刷新会话、工作区/团队成员、上传文件、该用户创建的 MCP、该用户授权的 Agent Skill 与应用工具绑定）在同一事务内清理，Agent 随之失去这些授权，需由其他成员重新绑定。删除后，发布者是已注销账号的公开 Agent 会在公开入口按「未找到」失败关闭，需由其他成员重新发布。
 - 敏感写操作（创建/修改/删除）一律 `record_audit_log`。
-- Tool 默认 owner 私有：只有创建者或被授权者能查看、使用和管理；builtin 工具属工作区公共资源（所有成员可用、管理员可治理），MCP 服务器与工具策略治理仍限工作空间管理员。`view` 只能查看脱敏详情，`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
+- Tool 默认 owner 私有：只有创建者或被授权者能查看、使用和管理；builtin 工具属工作区公共资源（所有成员可用、管理员可治理），MCP 服务器与工具策略治理仍限工作空间管理员。`view` 提供目录/详情读取（凭据类字段无条件脱敏，不因权限等级多返回），`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
 - 普通成员可创建 Python Tool 与公网 HTTP/SSE MCP Source；stdio 和私网地址只允许工作空间管理员。Bearer token、stdio 参数/工作目录/环境值及 egress 域名加密保存且不返回明文；stdio discovery/call 只在独立 OpenSandbox 执行，不具备业务后端进程或宿主目录访问能力。域名请求必须属于部署 allowlist，stdio 配置不能放行私网/metadata。
-- Agent、Workflow 与 Python 测试都固定 Tool/Version 快照并写 `tool_invocations`；builtin/Python/MCP 只在 application adapter 内分流。
+- Agent、Workflow 与 Python 测试都固定 Tool/Version 快照并写 `tool_invocations`；builtin/Python/MCP/image_generation 只在 `app/application/tools/runtime/adapters/` 内分流（工厂 `build_tool_adapter`）。
 
 ## 相关测试
 
@@ -126,3 +136,4 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 - `tests.tools.tools` — 统一 Tool 目录/持久化/迁移回归：目录契约、租户隔离关系、授权与网络策略迁移、版本不可变
 - `tests.tools.unit` — 工具域单元测试片段
 - `tests.infra.mcp_transports` — Streamable HTTP/SSE/stdio 传输、凭据隐藏、网络边界与 discovery 行为
+- `tests.infra.infra_unit_coverage` — 基础设施覆盖聚合：本模块的平台/团队/工具/MCP/身份仓储与领域行为（`tests.infra.unit`、`tests.infra.architecture`、`tests.infra.logger` 为同包的其他片段）

@@ -181,6 +181,7 @@ export function WorkflowApiDocumentation({
                     size="icon-sm"
                     className="absolute top-1/2 right-1 -translate-y-1/2"
                     aria-label={t(visible ? "隐藏 API Key" : "显示 API Key")}
+                    title={t(visible ? "隐藏 API Key" : "显示 API Key")}
                     onClick={() => setVisible((value) => !value)}
                   >
                     {visible ? <EyeOffIcon /> : <EyeIcon />}

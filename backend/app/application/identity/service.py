@@ -17,12 +17,11 @@ from app.entities.identity.user import RefreshSession, User
 from app.entities.teams.models import Team, TeamMembership
 from app.entities.workspaces.models import Workspace, WorkspaceMembership
 from app.infra.config.settings import Settings
-from app.infra.db.repositories.agents import repository as agent_repository
+from app.infra.db.repositories.agent_skills import repository as agent_skill_repository
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.teams import repository as team_repository
-from app.infra.db.repositories.tools import repository as tools_repository
-from app.infra.db.repositories.workflows import repository as workflow_repository
+from app.infra.db.repositories.tools import bindings as tool_bindings_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.observability.logger import get_logger, log_event
 from app.infra.observability.system_log import record_system_log
@@ -430,24 +429,20 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     user = await user_repository.lock_user(db, user.id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
-    if await agent_repository.has_agent_publication_audit_references(db, user.id):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "User is retained by Agent publication audit records.",
+    # Bindings are the departed user's own grants, so they go with the account;
+    # authored content and history keep the former id as an opaque string.
+    tool_bindings_removed = (
+        await tool_bindings_repository.delete_application_tool_bindings_bound_by_user(
+            db,
+            user.id,
         )
-    if await workflow_repository.has_workflow_agent_binder_audit_references(
-        db,
-        user.id,
-    ):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "User is retained by Workflow Agent binding audit records.",
+    )
+    skill_bindings_removed = (
+        await agent_skill_repository.delete_agent_skill_bindings_bound_by_user(
+            db,
+            user.id,
         )
-    if await tools_repository.has_retained_user_audit_references(db, user.id):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "User is retained by Tool binding or invocation audit records, or a draft.",
-        )
+    )
     record_audit_log(
         db,
         actor,
@@ -455,7 +450,12 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
         "user",
         user.id,
         user.name,
-        {"username": user.username, "email": user.email},
+        {
+            "username": user.username,
+            "email": user.email,
+            "tool_bindings_removed": tool_bindings_removed,
+            "agent_skill_bindings_removed": skill_bindings_removed,
+        },
     )
     await queue_upload_cleanups(db, uploaded_by_user_id=user.id)
     await delete_owned_mcp_servers_for_user(db, user.id, actor)

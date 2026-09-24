@@ -2,19 +2,65 @@
 
 import * as React from "react"
 
-type Theme = "dark" | "light" | "system"
+import {
+  DEFAULT_PALETTE,
+  isThemePalette,
+  isThemeContentWidth,
+  isThemeDensity,
+  isThemeFont,
+  isThemeLayout,
+  isThemeRadius,
+  isThemeSidebar,
+  type ThemePalette,
+  type ThemeContentWidth,
+  type ThemeDensity,
+  type ThemeFont,
+  type ThemeLayout,
+  type ThemeRadius,
+  type ThemeSidebar,
+} from "@/lib/theme-options"
+
+export type Theme = "dark" | "light" | "system"
 type ResolvedTheme = "dark" | "light"
 
 type ThemeProviderProps = {
   children: React.ReactNode
   defaultTheme?: Theme
+  defaultPalette?: ThemePalette
+  defaultFont?: ThemeFont
+  defaultRadius?: ThemeRadius
+  defaultDensity?: ThemeDensity
+  defaultSidebar?: ThemeSidebar
+  defaultLayout?: ThemeLayout
+  defaultContentWidth?: ThemeContentWidth
   storageKey?: string
+  paletteStorageKey?: string
+  fontStorageKey?: string
+  radiusStorageKey?: string
+  densityStorageKey?: string
+  sidebarStorageKey?: string
+  layoutStorageKey?: string
+  contentWidthStorageKey?: string
   disableTransitionOnChange?: boolean
 }
 
 type ThemeProviderState = {
   theme: Theme
   setTheme: (theme: Theme) => void
+  palette: ThemePalette
+  setPalette: (palette: ThemePalette) => void
+  font: ThemeFont
+  setFont: (font: ThemeFont) => void
+  radius: ThemeRadius
+  setRadius: (radius: ThemeRadius) => void
+  density: ThemeDensity
+  setDensity: (density: ThemeDensity) => void
+  sidebar: ThemeSidebar
+  setSidebar: (sidebar: ThemeSidebar) => void
+  layout: ThemeLayout
+  setLayout: (layout: ThemeLayout) => void
+  contentWidth: ThemeContentWidth
+  setContentWidth: (contentWidth: ThemeContentWidth) => void
 }
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
@@ -39,22 +85,37 @@ function isTheme(value: string | null): value is Theme {
 }
 
 /**
- * Reads the configured theme from local storage, falling back to the default theme when unavailable or invalid.
+ * Reads a stored preference, falling back to the default when storage is
+ * unavailable or holds an unsupported value.
  *
- * @param defaultTheme - The theme to use when no valid stored theme is available
- * @param storageKey - The local storage key containing the theme
- * @returns The stored theme when valid; otherwise, `defaultTheme`
+ * @param fallback - The value to use when no valid stored preference is available
+ * @param storageKey - The local storage key containing the preference
+ * @param isSupported - Validator that narrows a stored string to a supported preference
+ * @returns The stored preference when valid; otherwise, `fallback`
  */
-function getInitialTheme(defaultTheme: Theme, storageKey: string) {
+function readStoredPreference<T extends string>(
+  fallback: T,
+  storageKey: string,
+  isSupported: (value: string | null) => value is T
+) {
   if (typeof window === "undefined") {
-    return defaultTheme
+    return fallback
   }
 
   try {
-    const storedTheme = window.localStorage.getItem(storageKey)
-    return isTheme(storedTheme) ? storedTheme : defaultTheme
+    const storedValue = window.localStorage.getItem(storageKey)
+    return isSupported(storedValue) ? storedValue : fallback
   } catch {
-    return defaultTheme
+    return fallback
+  }
+}
+
+/** Persists a preference without breaking the UI when storage is unavailable. */
+function writeStoredPreference(storageKey: string, value: string) {
+  try {
+    localStorage.setItem(storageKey, value)
+  } catch {
+    // Private browsing and restricted embedded contexts can reject writes.
   }
 }
 
@@ -96,6 +157,24 @@ function disableTransitionsTemporarily() {
 }
 
 /**
+ * Repaints the browser chrome color from the background the active palette
+ * resolves to, because the `theme-color` metadata is rendered per color scheme
+ * and cannot see the palette.
+ */
+function syncThemeColorMeta() {
+  const background = window.getComputedStyle(
+    document.documentElement
+  ).backgroundColor
+  const metaTags = document.head.querySelectorAll<HTMLMetaElement>(
+    'meta[name="theme-color"]'
+  )
+
+  for (const metaTag of metaTags) {
+    metaTag.content = background
+  }
+}
+
+/**
  * Determines whether an event target is an editable element or contained within one.
  *
  * @param target - The event target to inspect
@@ -121,35 +200,148 @@ function isEditableTarget(target: EventTarget | null) {
 }
 
 /**
- * Provides theme state and controls to descendant components.
+ * Provides theme and palette state and controls to descendant components.
  *
  * @param children - The components that receive the theme context
  * @param defaultTheme - The theme used when no valid stored preference exists
+ * @param defaultPalette - The palette used when no valid stored preference exists
+ * @param defaultFont - The font used when no valid stored preference exists
+ * @param defaultRadius - The radius used when no valid stored preference exists
+ * @param defaultDensity - The density used when no valid stored preference exists
+ * @param defaultSidebar - The sidebar style used when no valid stored preference exists
+ * @param defaultLayout - The layout used when no valid stored preference exists
+ * @param defaultContentWidth - The content width used when no valid stored preference exists
  * @param storageKey - The key used to persist and synchronize the theme preference
+ * @param paletteStorageKey - The key used to persist and synchronize the palette preference
  * @param disableTransitionOnChange - Whether to temporarily disable transitions when applying a theme
  * @returns A provider element containing the theme context
  */
 export function ThemeProvider({
   children,
   defaultTheme = "system",
+  defaultPalette = DEFAULT_PALETTE,
+  defaultFont = "auto",
+  defaultRadius = "auto",
+  defaultDensity = "default",
+  defaultSidebar = "inset",
+  defaultLayout = "default",
+  defaultContentWidth = "wide",
   storageKey = "theme",
+  paletteStorageKey = "palette",
+  fontStorageKey = "font",
+  radiusStorageKey = "radius",
+  densityStorageKey = "density",
+  sidebarStorageKey = "sidebar",
+  layoutStorageKey = "layout",
+  contentWidthStorageKey = "content-width",
   disableTransitionOnChange = true,
   ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() =>
-    getInitialTheme(defaultTheme, storageKey)
+    readStoredPreference(defaultTheme, storageKey, isTheme)
   )
+  const [palette, setPaletteState] = React.useState<ThemePalette>(() =>
+    readStoredPreference(defaultPalette, paletteStorageKey, isThemePalette)
+  )
+  const [font, setFontState] = React.useState<ThemeFont>(() =>
+    readStoredPreference(defaultFont, fontStorageKey, isThemeFont)
+  )
+  const [radius, setRadiusState] = React.useState<ThemeRadius>(() =>
+    readStoredPreference(defaultRadius, radiusStorageKey, isThemeRadius)
+  )
+  const [density, setDensityState] = React.useState<ThemeDensity>(() =>
+    readStoredPreference(defaultDensity, densityStorageKey, isThemeDensity)
+  )
+  const [sidebar, setSidebarState] = React.useState<ThemeSidebar>(() =>
+    readStoredPreference(defaultSidebar, sidebarStorageKey, isThemeSidebar)
+  )
+  const [layout, setLayoutState] = React.useState<ThemeLayout>(() =>
+    readStoredPreference(defaultLayout, layoutStorageKey, isThemeLayout)
+  )
+  const [contentWidth, setContentWidthState] =
+    React.useState<ThemeContentWidth>(() =>
+      readStoredPreference(
+        defaultContentWidth,
+        contentWidthStorageKey,
+        isThemeContentWidth
+      )
+    )
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme)
+      writeStoredPreference(storageKey, nextTheme)
       setThemeState(nextTheme)
     },
     [storageKey]
   )
 
-  const applyTheme = React.useCallback(
-    (nextTheme: Theme) => {
+  const setPalette = React.useCallback(
+    (nextPalette: ThemePalette) => {
+      writeStoredPreference(paletteStorageKey, nextPalette)
+      setPaletteState(nextPalette)
+    },
+    [paletteStorageKey]
+  )
+
+  const setFont = React.useCallback(
+    (nextFont: ThemeFont) => {
+      writeStoredPreference(fontStorageKey, nextFont)
+      setFontState(nextFont)
+    },
+    [fontStorageKey]
+  )
+
+  const setRadius = React.useCallback(
+    (nextRadius: ThemeRadius) => {
+      writeStoredPreference(radiusStorageKey, nextRadius)
+      setRadiusState(nextRadius)
+    },
+    [radiusStorageKey]
+  )
+
+  const setDensity = React.useCallback(
+    (nextDensity: ThemeDensity) => {
+      writeStoredPreference(densityStorageKey, nextDensity)
+      setDensityState(nextDensity)
+    },
+    [densityStorageKey]
+  )
+
+  const setSidebar = React.useCallback(
+    (nextSidebar: ThemeSidebar) => {
+      writeStoredPreference(sidebarStorageKey, nextSidebar)
+      setSidebarState(nextSidebar)
+    },
+    [sidebarStorageKey]
+  )
+
+  const setLayout = React.useCallback(
+    (nextLayout: ThemeLayout) => {
+      writeStoredPreference(layoutStorageKey, nextLayout)
+      setLayoutState(nextLayout)
+    },
+    [layoutStorageKey]
+  )
+
+  const setContentWidth = React.useCallback(
+    (nextContentWidth: ThemeContentWidth) => {
+      writeStoredPreference(contentWidthStorageKey, nextContentWidth)
+      setContentWidthState(nextContentWidth)
+    },
+    [contentWidthStorageKey]
+  )
+
+  const applyPreferences = React.useCallback(
+    (
+      nextTheme: Theme,
+      nextPalette: ThemePalette,
+      nextFont: ThemeFont,
+      nextRadius: ThemeRadius,
+      nextDensity: ThemeDensity,
+      nextSidebar: ThemeSidebar,
+      nextLayout: ThemeLayout,
+      nextContentWidth: ThemeContentWidth
+    ) => {
       const root = document.documentElement
       const resolvedTheme =
         nextTheme === "system" ? getSystemTheme() : nextTheme
@@ -159,8 +351,16 @@ export function ThemeProvider({
 
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
+      root.dataset.palette = nextPalette
+      root.dataset.font = nextFont
+      root.dataset.radius = nextRadius
+      root.dataset.density = nextDensity
+      root.dataset.sidebar = nextSidebar
+      root.dataset.layout = nextLayout
+      root.dataset.contentWidth = nextContentWidth
       root.style.colorScheme = resolvedTheme
       root.style.backgroundColor = "var(--background)"
+      syncThemeColorMeta()
 
       if (restoreTransitions) {
         restoreTransitions()
@@ -170,7 +370,16 @@ export function ThemeProvider({
   )
 
   React.useEffect(() => {
-    applyTheme(theme)
+    applyPreferences(
+      theme,
+      palette,
+      font,
+      radius,
+      density,
+      sidebar,
+      layout,
+      contentWidth
+    )
 
     if (theme !== "system") {
       return undefined
@@ -178,7 +387,16 @@ export function ThemeProvider({
 
     const mediaQuery = window.matchMedia(COLOR_SCHEME_QUERY)
     const handleChange = () => {
-      applyTheme("system")
+      applyPreferences(
+        "system",
+        palette,
+        font,
+        radius,
+        density,
+        sidebar,
+        layout,
+        contentWidth
+      )
     }
 
     mediaQuery.addEventListener("change", handleChange)
@@ -186,7 +404,17 @@ export function ThemeProvider({
     return () => {
       mediaQuery.removeEventListener("change", handleChange)
     }
-  }, [theme, applyTheme])
+  }, [
+    theme,
+    palette,
+    font,
+    radius,
+    density,
+    sidebar,
+    layout,
+    contentWidth,
+    applyPreferences,
+  ])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -216,7 +444,7 @@ export function ThemeProvider({
                 ? "light"
                 : "dark"
 
-        localStorage.setItem(storageKey, nextTheme)
+        writeStoredPreference(storageKey, nextTheme)
         return nextTheme
       })
     }
@@ -234,16 +462,58 @@ export function ThemeProvider({
         return
       }
 
-      if (event.key !== storageKey) {
+      if (event.key === storageKey) {
+        setThemeState(isTheme(event.newValue) ? event.newValue : defaultTheme)
         return
       }
 
-      if (isTheme(event.newValue)) {
-        setThemeState(event.newValue)
+      if (event.key === paletteStorageKey) {
+        setPaletteState(
+          isThemePalette(event.newValue) ? event.newValue : defaultPalette
+        )
         return
       }
 
-      setThemeState(defaultTheme)
+      if (event.key === fontStorageKey) {
+        setFontState(isThemeFont(event.newValue) ? event.newValue : defaultFont)
+        return
+      }
+
+      if (event.key === radiusStorageKey) {
+        setRadiusState(
+          isThemeRadius(event.newValue) ? event.newValue : defaultRadius
+        )
+        return
+      }
+
+      if (event.key === densityStorageKey) {
+        setDensityState(
+          isThemeDensity(event.newValue) ? event.newValue : defaultDensity
+        )
+        return
+      }
+
+      if (event.key === sidebarStorageKey) {
+        setSidebarState(
+          isThemeSidebar(event.newValue) ? event.newValue : defaultSidebar
+        )
+        return
+      }
+
+      if (event.key === layoutStorageKey) {
+        setLayoutState(
+          isThemeLayout(event.newValue) ? event.newValue : defaultLayout
+        )
+        return
+      }
+
+      if (event.key === contentWidthStorageKey) {
+        setContentWidthState(
+          isThemeContentWidth(event.newValue)
+            ? event.newValue
+            : defaultContentWidth
+        )
+      }
     }
 
     window.addEventListener("storage", handleStorageChange)
@@ -251,14 +521,62 @@ export function ThemeProvider({
     return () => {
       window.removeEventListener("storage", handleStorageChange)
     }
-  }, [defaultTheme, storageKey])
+  }, [
+    defaultTheme,
+    defaultPalette,
+    defaultFont,
+    defaultRadius,
+    defaultDensity,
+    defaultSidebar,
+    defaultLayout,
+    defaultContentWidth,
+    storageKey,
+    paletteStorageKey,
+    fontStorageKey,
+    radiusStorageKey,
+    densityStorageKey,
+    sidebarStorageKey,
+    layoutStorageKey,
+    contentWidthStorageKey,
+  ])
 
   const value = React.useMemo(
     () => ({
       theme,
       setTheme,
+      palette,
+      setPalette,
+      font,
+      setFont,
+      radius,
+      setRadius,
+      density,
+      setDensity,
+      sidebar,
+      setSidebar,
+      layout,
+      setLayout,
+      contentWidth,
+      setContentWidth,
     }),
-    [theme, setTheme]
+    [
+      theme,
+      setTheme,
+      palette,
+      setPalette,
+      font,
+      setFont,
+      radius,
+      setRadius,
+      density,
+      setDensity,
+      sidebar,
+      setSidebar,
+      layout,
+      setLayout,
+      contentWidth,
+      setContentWidth,
+    ]
   )
 
   return (

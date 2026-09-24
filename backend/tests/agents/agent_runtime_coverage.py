@@ -4148,6 +4148,9 @@ async def assert_durable_execution_paths(
     )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     run.knowledge_base_ids = []
+    # The tool policy set above is what approves this call; the run default
+    # would otherwise stop for interactive consent on every non-pure tool.
+    run.application_snapshot["approval_mode"] = "ask_risky"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
         await db.commit()
@@ -5437,6 +5440,9 @@ async def assert_agent_tool_runtime_paths(
         "Tool runtime paths",
     )
     run.depth = 1
+    # These assertions cover policy-driven consent, so the run must let the
+    # frozen Tool policy decide instead of the run default asking every time.
+    run.application_snapshot["approval_mode"] = "ask_risky"
     assert run.tool_snapshots
     snapshot = tool_snapshot_from_payload(run.tool_snapshots[0])
     runtime = atr.UnifiedAgentToolRuntime(

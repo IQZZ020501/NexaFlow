@@ -5,15 +5,47 @@ import { act } from "@testing-library/react"
 import { ThemeProvider, useTheme } from "@/contexts/theme-provider"
 import { cleanup, fireEvent, render, screen } from "./helpers/dom"
 
-/** Consumer child exposing the theme state and setTheme controls. */
+/** Consumer child exposing the theme and appearance state with their controls. */
 function Probe() {
-  const { theme, setTheme } = useTheme()
+  const {
+    theme,
+    setTheme,
+    palette,
+    setPalette,
+    font,
+    setFont,
+    radius,
+    setRadius,
+    density,
+    setDensity,
+    sidebar,
+    setSidebar,
+    layout,
+    setLayout,
+    contentWidth,
+    setContentWidth,
+  } = useTheme()
   return (
     <div>
       <output data-testid="theme-value">{theme}</output>
+      <output data-testid="palette-value">{palette}</output>
+      <output data-testid="font-value">{font}</output>
+      <output data-testid="radius-value">{radius}</output>
+      <output data-testid="density-value">{density}</output>
+      <output data-testid="sidebar-value">{sidebar}</output>
+      <output data-testid="layout-value">{layout}</output>
+      <output data-testid="content-width-value">{contentWidth}</output>
       <button onClick={() => setTheme("light")}>set-light</button>
       <button onClick={() => setTheme("dark")}>set-dark</button>
       <button onClick={() => setTheme("system")}>set-system</button>
+      <button onClick={() => setPalette("ocean")}>set-ocean</button>
+      <button onClick={() => setPalette("amber")}>set-amber</button>
+      <button onClick={() => setFont("serif")}>set-serif</button>
+      <button onClick={() => setRadius("0.3")}>set-radius</button>
+      <button onClick={() => setDensity("large")}>set-large</button>
+      <button onClick={() => setSidebar("floating")}>set-floating</button>
+      <button onClick={() => setLayout("full")}>set-full</button>
+      <button onClick={() => setContentWidth("centered")}>set-centered</button>
     </div>
   )
 }
@@ -120,6 +152,13 @@ afterEach(() => {
   localStorage.clear()
   const root = document.documentElement
   root.classList.remove("light", "dark")
+  root.removeAttribute("data-palette")
+  root.removeAttribute("data-font")
+  root.removeAttribute("data-radius")
+  root.removeAttribute("data-density")
+  root.removeAttribute("data-sidebar")
+  root.removeAttribute("data-layout")
+  root.removeAttribute("data-content-width")
   root.removeAttribute("style")
   for (const style of [...document.head.querySelectorAll("style")]) {
     if (style.textContent?.includes("transition:none")) {
@@ -606,5 +645,159 @@ describe("ThemeProvider", () => {
     expect(() => render(<Probe />)).toThrow(
       "useTheme must be used within a ThemeProvider"
     )
+  })
+})
+
+describe("ThemeProvider palettes", () => {
+  test("applies the default palette to the document root", () => {
+    render(
+      <ThemeProvider defaultTheme="light">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    expect(screen.getByTestId("palette-value").textContent).toBe("neutral")
+    expect(document.documentElement.dataset.palette).toBe("neutral")
+  })
+
+  test("reads a stored palette from local storage", () => {
+    localStorage.setItem("palette", "violet")
+
+    render(
+      <ThemeProvider defaultTheme="light">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    expect(screen.getByTestId("palette-value").textContent).toBe("violet")
+    expect(document.documentElement.dataset.palette).toBe("violet")
+  })
+
+  test("falls back to the default palette when the stored value is unsupported", () => {
+    localStorage.setItem("palette", "neon")
+
+    render(
+      <ThemeProvider defaultTheme="light" defaultPalette="forest">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    expect(screen.getByTestId("palette-value").textContent).toBe("forest")
+    expect(document.documentElement.dataset.palette).toBe("forest")
+  })
+
+  test("setPalette persists the choice without changing the color scheme", () => {
+    render(
+      <ThemeProvider defaultTheme="dark">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "set-ocean" }))
+    expect(localStorage.getItem("palette")).toBe("ocean")
+    expect(document.documentElement.dataset.palette).toBe("ocean")
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "set-light" }))
+    expect(document.documentElement.dataset.palette).toBe("ocean")
+    expect(document.documentElement.classList.contains("light")).toBe(true)
+  })
+
+  test("keeps the palette and the theme in separate storage keys", () => {
+    render(
+      <ThemeProvider defaultTheme="light" paletteStorageKey="skin">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "set-amber" }))
+    expect(localStorage.getItem("skin")).toBe("amber")
+    expect(localStorage.getItem("palette")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "set-dark" }))
+    expect(localStorage.getItem("theme")).toBe("dark")
+    expect(localStorage.getItem("skin")).toBe("amber")
+  })
+
+  test("syncs a palette from its storage event and ignores other keys", () => {
+    render(
+      <ThemeProvider defaultTheme="light">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    dispatchStorage("palette", "amber", localStorage)
+    expect(screen.getByTestId("palette-value").textContent).toBe("amber")
+    expect(document.documentElement.dataset.palette).toBe("amber")
+
+    dispatchStorage("theme", "dark", localStorage)
+    expect(document.documentElement.dataset.palette).toBe("amber")
+
+    dispatchStorage("palette", "neon", localStorage)
+    expect(document.documentElement.dataset.palette).toBe("neutral")
+  })
+})
+
+describe("ThemeProvider appearance axes", () => {
+  test("applies and persists font, radius, density, sidebar, layout, and width", () => {
+    render(
+      <ThemeProvider defaultTheme="light">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "set-serif" }))
+    fireEvent.click(screen.getByRole("button", { name: "set-radius" }))
+    fireEvent.click(screen.getByRole("button", { name: "set-large" }))
+    fireEvent.click(screen.getByRole("button", { name: "set-floating" }))
+    fireEvent.click(screen.getByRole("button", { name: "set-full" }))
+    fireEvent.click(screen.getByRole("button", { name: "set-centered" }))
+
+    const root = document.documentElement
+    expect(screen.getByTestId("font-value").textContent).toBe("serif")
+    expect(screen.getByTestId("radius-value").textContent).toBe("0.3")
+    expect(screen.getByTestId("density-value").textContent).toBe("large")
+    expect(screen.getByTestId("sidebar-value").textContent).toBe("floating")
+    expect(screen.getByTestId("layout-value").textContent).toBe("full")
+    expect(screen.getByTestId("content-width-value").textContent).toBe("centered")
+    expect(root.dataset.font).toBe("serif")
+    expect(root.dataset.radius).toBe("0.3")
+    expect(root.dataset.density).toBe("large")
+    expect(root.dataset.sidebar).toBe("floating")
+    expect(root.dataset.layout).toBe("full")
+    expect(root.dataset.contentWidth).toBe("centered")
+    expect(localStorage.getItem("font")).toBe("serif")
+    expect(localStorage.getItem("radius")).toBe("0.3")
+    expect(localStorage.getItem("density")).toBe("large")
+    expect(localStorage.getItem("sidebar")).toBe("floating")
+    expect(localStorage.getItem("layout")).toBe("full")
+    expect(localStorage.getItem("content-width")).toBe("centered")
+  })
+
+  test("reads stored appearance axes and rejects unsupported values", () => {
+    localStorage.setItem("font", "serif")
+    localStorage.setItem("radius", "0.5")
+    localStorage.setItem("density", "compact")
+    localStorage.setItem("sidebar", "sidebar")
+    localStorage.setItem("layout", "compact")
+    localStorage.setItem("content-width", "centered")
+
+    render(
+      <ThemeProvider defaultTheme="light">
+        <Probe />
+      </ThemeProvider>
+    )
+
+    expect(screen.getByTestId("font-value").textContent).toBe("serif")
+    expect(screen.getByTestId("radius-value").textContent).toBe("0.5")
+    expect(screen.getByTestId("density-value").textContent).toBe("compact")
+    expect(screen.getByTestId("sidebar-value").textContent).toBe("sidebar")
+    expect(screen.getByTestId("layout-value").textContent).toBe("compact")
+    expect(screen.getByTestId("content-width-value").textContent).toBe("centered")
+
+    localStorage.setItem("font", "comic")
+    dispatchStorage("font", "comic", localStorage)
+    expect(screen.getByTestId("font-value").textContent).toBe("auto")
+    expect(document.documentElement.dataset.font).toBe("auto")
   })
 })

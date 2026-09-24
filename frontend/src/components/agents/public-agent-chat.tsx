@@ -400,21 +400,51 @@ export function unrenderedPublicToolCalls(
   progress: ExternalAgentProgressEvent[],
   calls: AgentToolCall[]
 ) {
-  return calls.filter(
-    (call) =>
-      [
+  return calls.filter((call) => {
+    if (
+      ![
         "pending",
         "awaiting_approval",
         "approved",
         "running",
         "uncertain",
-      ].includes(call.status) &&
-      !progress.some(
-        (event) =>
-          event.type === "tool" &&
-          event.turn === call.turn &&
-          event.tool_name === call.tool_name &&
-          event.server_name === call.server_name
+      ].includes(call.status)
+    ) {
+      return false
+    }
+    if (["awaiting_approval", "uncertain"].includes(call.status)) return true
+    return !progress.some(
+      (event) =>
+        event.type === "tool" &&
+        event.turn === call.turn &&
+        event.tool_name === call.tool_name &&
+        event.server_name === call.server_name
+    )
+  })
+}
+
+export function visiblePublicToolProgress(
+  progress: ExternalAgentProgressEvent[],
+  calls: AgentToolCall[]
+) {
+  return progress.filter(
+    (event) =>
+      !(
+        event.type === "tool" &&
+        event.stage === "preparing" &&
+        calls.some(
+          (call) =>
+            [
+              "pending",
+              "awaiting_approval",
+              "approved",
+              "running",
+              "uncertain",
+            ].includes(call.status) &&
+            event.turn === call.turn &&
+            event.tool_name === call.tool_name &&
+            event.server_name === call.server_name
+        )
       )
   )
 }
@@ -434,7 +464,10 @@ function PublicPendingToolCall({
     turn: call.turn,
     count: null,
     tool_name: call.tool_name,
-    tool_kind: call.tool_kind,
+    tool_kind:
+      call.tool_kind === "knowledge" || call.tool_kind === "mcp"
+        ? call.tool_kind
+        : "unknown",
     server_name: call.server_name,
     input: call.arguments,
     output: null,
@@ -1148,7 +1181,7 @@ export function PublicAgentChat({
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
   const [question, setQuestion] = React.useState("")
   const [approvalMode, setApprovalMode] =
-    React.useState<AgentApprovalMode>("ask_risky")
+    React.useState<AgentApprovalMode>("always_ask")
   const [files, setFiles] = React.useState<File[]>([])
   const [isInitializing, setIsInitializing] = React.useState(true)
   const [isRunsLoading, setIsRunsLoading] = React.useState(false)
@@ -1970,6 +2003,11 @@ export function PublicAgentChat({
                 {visibleRuns.map((run, index) => {
                   const progressSegments = splitPublicRunProgress(run)
                   const currentProgress = progressSegments.at(-1) ?? []
+                  const runToolCalls = toolCallsByRun[run.id] ?? []
+                  const visibleCurrentProgress = visiblePublicToolProgress(
+                    currentProgress,
+                    runToolCalls
+                  )
                   const completedProgress = progressSegments.slice(0, -1)
                   const hasAnswerHandoffs = completedProgress.length > 0
                   const sourcesForProgress = (
@@ -2156,11 +2194,11 @@ export function PublicAgentChat({
                           <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
                             <PublicExecutionProcess
                               run={run}
-                              progress={currentProgress}
+                              progress={visibleCurrentProgress}
                             >
                               {unrenderedPublicToolCalls(
                                 run.progress,
-                                toolCallsByRun[run.id] ?? []
+                                runToolCalls
                               ).map((call) =>
                                 ["awaiting_approval", "uncertain"].includes(
                                   call.status
@@ -2274,7 +2312,7 @@ export function PublicAgentChat({
             </p>
           ) : null}
           <form
-            className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-background focus-within:ring-3 focus-within:ring-ring/20"
+            className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
             onSubmit={handleAsk}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes("Files")) {
@@ -2326,7 +2364,7 @@ export function PublicAgentChat({
                   event.currentTarget.form?.requestSubmit()
                 }
               }}
-              className="max-h-32 min-h-12 w-full resize-none bg-transparent px-2.5 pt-1.5 pb-1 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-14 sm:text-sm"
+              className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
               placeholder={t("请输入问题")}
               aria-label={t("请输入问题")}
               enterKeyHint="send"
@@ -2374,18 +2412,18 @@ export function PublicAgentChat({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    className="text-muted-foreground"
+                    className="rounded-full text-muted-foreground"
                     aria-label={t("停止生成")}
                     title={t("停止生成")}
                     onClick={handleCancelAsk}
                   >
-                    <SquareIcon className="fill-current" />
+                    <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                   </Button>
                 ) : null}
                 <Button
                   type={isSending && !question.trim() ? "button" : "submit"}
                   size="icon"
-                  className="rounded-lg"
+                  className="rounded-full"
                   aria-label={t(
                     isSending
                       ? question.trim()
@@ -2406,7 +2444,7 @@ export function PublicAgentChat({
                   disabled={!isSending && !question.trim()}
                 >
                   {isSending && !question.trim() ? (
-                    <SquareIcon className="fill-current" />
+                    <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                   ) : (
                     <ArrowUpIcon />
                   )}

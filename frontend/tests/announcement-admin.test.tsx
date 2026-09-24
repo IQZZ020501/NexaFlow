@@ -48,8 +48,10 @@ const listAnnouncementCalls: Array<{
   offset?: number
 }> = []
 let listAnnouncementTotal = 1
+let listAnnouncementItems: Announcement[] = [announcement]
 const createAnnouncementCalls: AnnouncementPayload[] = []
 const updateAnnouncementCalls: AnnouncementUpdatePayload[] = []
+const deleteAnnouncementCalls: string[] = []
 
 mockNextNavigation()
 mockUseSession()
@@ -61,7 +63,7 @@ mock.module("@/lib/api/announcements", () => ({
     options: { limit?: number; offset?: number } = {}
   ) => {
     listAnnouncementCalls.push(options)
-    return { items: [announcement], total: listAnnouncementTotal }
+    return { items: listAnnouncementItems, total: listAnnouncementTotal }
   },
   archiveAnnouncement: async () => announcement,
   createAnnouncement: async (
@@ -72,6 +74,15 @@ mock.module("@/lib/api/announcements", () => ({
   ) => {
     createAnnouncementCalls.push(payload)
     return announcement
+  },
+  deleteAnnouncement: async (
+    _token: string,
+    _scope: string,
+    _workspaceId: string | null,
+    announcementId: string
+  ) => {
+    deleteAnnouncementCalls.push(announcementId)
+    listAnnouncementItems = []
   },
   publishAnnouncement: async () => announcement,
   updateAnnouncement: async (
@@ -91,11 +102,44 @@ afterEach(() => {
   setSystemTime()
   listAnnouncementCalls.length = 0
   listAnnouncementTotal = 1
+  listAnnouncementItems = [announcement]
   createAnnouncementCalls.length = 0
   updateAnnouncementCalls.length = 0
+  deleteAnnouncementCalls.length = 0
 })
 
 describe("AnnouncementAdminPage", () => {
+  test("keeps rows title-only and deletes archived announcements after confirmation", async () => {
+    listAnnouncementItems = [{ ...announcement, status: "archived" }]
+    renderPage(<AnnouncementAdminPage />)
+
+    const title = await screen.findByText("Maintenance")
+    const list = title.closest("section")
+    expect(list).toBeTruthy()
+    expect(within(list!).queryByText("已归档")).toBeNull()
+    expect(within(list!).queryByText("警告")).toBeNull()
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "删除公告：Maintenance" })
+      )
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    const confirmation = await screen.findByRole("dialog")
+    expect(within(confirmation).getByText(/Maintenance/)).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(
+        within(confirmation).getByRole("button", { name: "删除" })
+      )
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    await waitFor(() =>
+      expect(deleteAnnouncementCalls).toEqual(["announcement-1"])
+    )
+    await waitFor(() => expect(screen.queryByText("Maintenance")).toBeNull())
+  })
+
   test("keeps announcement rows compact and opens the full body in a dialog", async () => {
     renderPage(<AnnouncementAdminPage />)
 
@@ -103,6 +147,9 @@ describe("AnnouncementAdminPage", () => {
     const list = title.closest("section")
     expect(list).toBeTruthy()
     expect(within(list!).queryByText("Scheduled")).toBeNull()
+    expect(
+      within(list!).getByRole("img", { name: "警告" }).className
+    ).toContain("bg-amber-400")
 
     fireEvent.click(title.closest("button") ?? title)
 
@@ -113,6 +160,33 @@ describe("AnnouncementAdminPage", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  test("maps announcement severity to green, yellow, and red dots", async () => {
+    listAnnouncementItems = [
+      { ...announcement, id: "info", title: "Info", severity: "info" },
+      { ...announcement, id: "warning", title: "Warning", severity: "warning" },
+      {
+        ...announcement,
+        id: "critical",
+        title: "Critical",
+        severity: "critical",
+      },
+    ]
+    listAnnouncementTotal = listAnnouncementItems.length
+    renderPage(<AnnouncementAdminPage />)
+
+    const list = (await screen.findByText("Info")).closest("section")
+    expect(list).toBeTruthy()
+    expect(
+      within(list!).getByRole("img", { name: "信息" }).className
+    ).toContain("bg-emerald-500")
+    expect(
+      within(list!).getByRole("img", { name: "警告" }).className
+    ).toContain("bg-amber-400")
+    expect(
+      within(list!).getByRole("img", { name: "严重" }).className
+    ).toContain("bg-red-500")
   })
 
   test("pages through every announcement reported by the API", async () => {

@@ -55,7 +55,12 @@ mockNextNavigation({
 mockNextImage()
 mockNextLink()
 mock.module("@/contexts/theme-provider", () => ({
-  useTheme: () => ({ theme: "system", setTheme: () => undefined }),
+  useTheme: () => ({
+    theme: "system",
+    setTheme: () => undefined,
+    palette: "neutral",
+    setPalette: () => undefined,
+  }),
   ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
 }))
 
@@ -90,6 +95,42 @@ const analytics: WorkspaceAnalytics = {
       previous_value: 10000,
       change_percent: 25,
     },
+  },
+  inventory: {
+    applications: {
+      total: 3,
+      agents: 2,
+      workflows: 1,
+      published: 1,
+      active: 3,
+    },
+    knowledge: { bases: 2, documents: 12, chunks: 340 },
+    tools: { total: 9, mcp: 3, python: 2, builtin: 4, active: 8 },
+    models: 5,
+  },
+  tool_usage: {
+    calls: { value: 42, previous_value: 30, change_percent: 40 },
+    failed: 4,
+    success_rate: { value: 0.9, previous_value: 0.8, change_percent: 12.5 },
+    approval_required: 6,
+    top_tools: [
+      {
+        tool_id: "tool-1",
+        name: "tavily_search",
+        kind: "mcp",
+        calls: 20,
+        failed: 2,
+        success_rate: 0.9,
+      },
+      {
+        tool_id: "tool-2",
+        name: "current_time",
+        kind: "builtin",
+        calls: 12,
+        failed: 0,
+        success_rate: 1,
+      },
+    ],
   },
   trends: [
     {
@@ -239,11 +280,31 @@ describe("workspace analytics", () => {
       .getByText("Token 消耗")
       .closest<HTMLElement>("[data-slot='card']")!
     expect(within(tokenCard).getByText("320")).toBeTruthy()
+    expect(within(tokenCard).getByText("输入 140 · 输出 75")).toBeTruthy()
+    expect(within(tokenCard).getByText("较上期 +433.3%")).toBeTruthy()
+
+    // Resource scale and tool usage are part of the dashboard.
+    const inventoryCard = screen
+      .getByText("资产概览")
+      .closest<HTMLElement>("[data-slot='card']")!
     expect(
-      within(tokenCard).queryByText(
-        /输入|应用运行|知识整理|上期|用量未完整上报/
-      )
-    ).toBeNull()
+      within(inventoryCard).getByText("Agent 2 · 工作流 1 · 已发布 1")
+    ).toBeTruthy()
+    expect(within(inventoryCard).getByText("文档 12 · 片段 340")).toBeTruthy()
+    expect(
+      within(inventoryCard).getByText("MCP 3 · Python 2 · 内置 4")
+    ).toBeTruthy()
+
+    const toolUsageCard = screen
+      .getByText("工具调用")
+      .closest<HTMLElement>("[data-slot='card']")!
+    expect(within(toolUsageCard).getByText("42")).toBeTruthy()
+    expect(within(toolUsageCard).getByText("上期 30 次")).toBeTruthy()
+    expect(within(toolUsageCard).getByText("90.0%")).toBeTruthy()
+    expect(within(toolUsageCard).getByText("失败 4 次")).toBeTruthy()
+    expect(within(toolUsageCard).getByText("tavily_search")).toBeTruthy()
+    expect(within(toolUsageCard).getByText("20")).toBeTruthy()
+    expect(within(toolUsageCard).getByText("90%")).toBeTruthy()
     // Average run duration renders in seconds instead of milliseconds.
     expect(screen.getByText("12.5 秒")).toBeTruthy()
     expect(screen.queryByText(/毫秒/)).toBeNull()
@@ -383,6 +444,11 @@ describe("workspace analytics", () => {
     await waitFor(() =>
       expect(screen.getByText("所选范围内暂无运行数据")).toBeTruthy()
     )
+    // Workspace scale stays visible without activity; run-based panels do not.
+    expect(screen.getByText("资产概览")).toBeTruthy()
+    expect(screen.getByText("工具调用")).toBeTruthy()
+    expect(screen.queryByText("运行分布")).toBeNull()
+    expect(screen.queryByText("时段活跃曲线")).toBeNull()
   })
 
   test("renders token consumption with K/M/B units", async () => {
@@ -401,7 +467,10 @@ describe("workspace analytics", () => {
         rankings: {
           ...analytics.rankings,
           applications: [
-            { ...analytics.rankings.applications[0], total_tokens: 2_500_000_000 },
+            {
+              ...analytics.rankings.applications[0],
+              total_tokens: 2_500_000_000,
+            },
           ],
           users: [{ ...analytics.rankings.users[0], total_tokens: 12_340 }],
           anonymous: { run_count: 2, total_tokens: 250_000 },

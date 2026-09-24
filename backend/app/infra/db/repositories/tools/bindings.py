@@ -211,3 +211,15 @@ async def sync_application_tool_bindings(
     await db.execute(statement)
     for binding in bindings:
         await save_application_tool_binding(db, binding)
+
+
+async def delete_application_tool_bindings_bound_by_user(
+    db: AsyncSession,
+    user_id: str,
+) -> int:
+    result = await db.execute(
+        delete(ApplicationToolBindingOrm).where(
+            ApplicationToolBindingOrm.bound_by_user_id == user_id,
+        )
+    )
+    return result.rowcount or 0

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   archiveAnnouncement,
   createAnnouncement,
+  deleteAnnouncement,
   listAnnouncements,
   publishAnnouncement,
   updateAnnouncement,
@@ -115,6 +116,13 @@ describe("announcement administration API", () => {
     expect(lastCall()).toMatchObject({
       url: `/api/v1/admin/announcements/${announcement.id}/archive`,
       method: "POST",
+    })
+
+    install(null)
+    await deleteAnnouncement(TOKEN, "global", null, announcement.id)
+    expect(lastCall()).toMatchObject({
+      url: `/api/v1/admin/announcements/${announcement.id}`,
+      method: "DELETE",
     })
   })
 

@@ -39,24 +39,6 @@ from app.entities.workflows import (
 from app.infra.db.mapping import refresh_entity, save, to_entity, to_orm
 
 
-async def has_workflow_agent_binder_audit_references(
-    db: AsyncSession,
-    user_id: str,
-) -> bool:
-    # ponytail: user deletion is rare; use a portable scan until snapshot volume warrants JSON indexing.
-    for model in (WorkflowVersion, WorkflowRunDetail):
-        snapshots = await db.scalars(select(model.resource_snapshot))
-        for snapshot in snapshots.all():
-            agents = snapshot.get("agents", []) if isinstance(snapshot, dict) else []
-            if isinstance(agents, list) and any(
-                isinstance(agent, dict)
-                and agent.get("bound_by_user_id") == user_id
-                for agent in agents
-            ):
-                return True
-    return False
-
-
 async def create_upload(
     db: AsyncSession,
     entity: WorkflowUploadEntity,
