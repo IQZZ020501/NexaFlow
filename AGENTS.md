@@ -236,7 +236,13 @@ not trigger unrelated cleanup.
   once per color scheme, and the dark selector also matches nested elements so a
   menu can preview a palette that is not active. Do not express a palette with
   `light-dark()`: a custom property carrying it does not resolve when a utility
-  substitutes the value.
+  substitutes the value. The browser chrome color is written by that bootstrap
+  script and kept in sync by the theme provider; do not declare
+  `viewport.themeColor`, because a metadata color cannot see the palette and
+  React re-applies it after hydration, overwriting the palette-aware value.
+  The density, layout, radius, font, sidebar, and content-width axes each
+  override `[data-*]` variables in `frontend/src/app/globals.css`; keep a new
+  axis on its own variables so two settings cannot silently replace each other.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
   service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
   rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds

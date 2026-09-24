@@ -17,10 +17,9 @@ export const viewport: Viewport = {
   initialScale: 1,
   // `cover` is required for env(safe-area-inset-*) to report real device insets.
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#252525" },
-  ],
+  // The browser chrome color is written by `themeScript` and kept in sync by the
+  // theme provider: a metadata `themeColor` cannot see the active palette, and
+  // React re-applies it after hydration, overwriting the palette-aware value.
 }
 
 const themeScript = `
@@ -53,6 +52,14 @@ const themeScript = `
     root.dataset.contentWidth = ["wide", "centered"].indexOf(storedContentWidth) >= 0 ? storedContentWidth : "wide";
     root.style.colorScheme = resolvedTheme;
     root.style.backgroundColor = "var(--background)";
+    var themeColor = getComputedStyle(root).backgroundColor;
+    var themeColorMeta = document.querySelector('meta[name="theme-color"]');
+    if (!themeColorMeta) {
+      themeColorMeta = document.createElement("meta");
+      themeColorMeta.setAttribute("name", "theme-color");
+      document.head.appendChild(themeColorMeta);
+    }
+    themeColorMeta.setAttribute("content", themeColor);
   } catch {}
 })();
 `
