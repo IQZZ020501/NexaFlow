@@ -337,12 +337,6 @@ export function TopBar() {
                       </Link>
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem
-                    onSelect={() => setIsThemeSettingsOpen(true)}
-                  >
-                    <PaletteIcon />
-                    {t("打开主题设置")}
-                  </DropdownMenuItem>
                   <DropdownMenuItem onSelect={logout}>
                     <LogOutIcon />
                     {t("退出登录")}
