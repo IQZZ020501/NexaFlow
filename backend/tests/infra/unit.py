@@ -80,10 +80,17 @@ def test_worker_command_consumes_all_application_queues() -> None:
     worker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
 
-    command = worker.worker_command(["--autoscale=10,0"])
+    pidfile = worker.worker_pidfile("redis://user:secret@localhost:6379/0")
+    command = worker.worker_command(["--autoscale=10,0"], pidfile=pidfile)
     assert "--beat" in command
     assert "--queues=celery,agents-legacy,agents-v2" in command
+    assert command[command.index("--pidfile") + 1] == str(pidfile)
     assert command[-1] == "--autoscale=10,0"
+    assert "secret" not in str(pidfile)
+    assert pidfile == worker.worker_pidfile(
+        "redis://different:credentials@localhost:6379/0"
+    )
+    assert pidfile != worker.worker_pidfile("redis://localhost:6379/1")
 
 
 def test_celery_registers_one_task_per_job_type() -> None:
