@@ -138,8 +138,8 @@ function RadiusPreview({ value }: { value: ThemeRadius }) {
           : value === "0.75"
             ? "0.46875rem"
             : value === "1.0"
-              ? "0.625rem"
-              : "0.75rem"
+              ? "0.75rem"
+              : "0.625rem"
 
   return (
     <div className="flex min-h-[2.75rem] items-center justify-center rounded-md border border-border bg-muted/30">

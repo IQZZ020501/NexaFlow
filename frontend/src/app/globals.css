@@ -569,11 +569,19 @@ html.dark[data-palette="lake"],
     --chart-5: color-mix(in oklch, var(--primary) 36%, black);
 }
 
-/* Settings axes are independent from the color palette. */
+/*
+ * Settings axes are independent from the color palette. Density owns the
+ * spacing scale and the layout axis tightens it, so the two settings compose
+ * instead of the later rule silently replacing the other one's page spacing.
+ */
 :root {
     --font-body: ui-sans-serif, system-ui, sans-serif;
-    --theme-page-gap: 1rem;
-    --theme-page-padding: 1.5rem;
+    --theme-density-gap: 1rem;
+    --theme-density-padding: 1.5rem;
+    --theme-layout-gap-scale: 1;
+    --theme-layout-padding-scale: 1;
+    --theme-page-gap: calc(var(--theme-density-gap) * var(--theme-layout-gap-scale));
+    --theme-page-padding: calc(var(--theme-density-padding) * var(--theme-layout-padding-scale));
     --theme-content-max-width: none;
     --theme-settings-accent: oklch(0.72 0.15 42);
     --theme-control-scale: 1;
@@ -612,35 +620,36 @@ html[data-radius="0.75"] {
 }
 
 html[data-radius="1.0"] {
-    --radius: 0.625rem;
+    --radius: 0.75rem;
 }
 
 html[data-density="compact"] {
-    --theme-page-gap: 0.75rem;
-    --theme-page-padding: 1rem;
+    --theme-density-gap: 0.75rem;
+    --theme-density-padding: 1rem;
     --theme-control-scale: 0.875;
 }
 
 html[data-density="relaxed"] {
-    --theme-page-gap: 1.25rem;
-    --theme-page-padding: 1.875rem;
+    --theme-density-gap: 1.25rem;
+    --theme-density-padding: 1.875rem;
     --theme-control-scale: 1.125;
 }
 
 html[data-density="large"] {
-    --theme-page-gap: 1.5rem;
-    --theme-page-padding: 2.25rem;
+    --theme-density-gap: 1.5rem;
+    --theme-density-padding: 2.25rem;
     --theme-control-scale: 1.25;
 }
 
+/* Layout tightens whatever spacing the density axis selected. */
 html[data-layout="compact"] {
-    --theme-page-gap: 0.75rem;
-    --theme-page-padding: 1rem;
+    --theme-layout-gap-scale: 0.75;
+    --theme-layout-padding-scale: calc(2 / 3);
 }
 
 html[data-layout="full"] {
-    --theme-page-gap: 0.75rem;
-    --theme-page-padding: 0.75rem;
+    --theme-layout-gap-scale: 0.75;
+    --theme-layout-padding-scale: 0.5;
 }
 
 html[data-content-width="centered"] {
@@ -931,7 +940,6 @@ html[data-content-width="wide"] {
   @media (width >= 64rem) {
     html[data-sidebar="floating"] [data-theme-sidebar-panel="true"],
     html[data-sidebar="sidebar"] [data-theme-sidebar-panel="true"] {
-      display: block;
       border-radius: calc(var(--radius) * 1.1);
       border: 1px solid var(--border);
       background: var(--background);

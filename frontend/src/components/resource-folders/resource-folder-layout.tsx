@@ -93,7 +93,7 @@ export function ResourceFolderLayout({
         className={cn(
           "min-w-0",
           !isFolderPanelOpen && "hidden",
-          isPanelCollapsed ? "lg:hidden" : "lg:contents"
+          isPanelCollapsed ? "lg:hidden" : "lg:block"
         )}
       >
         <ResourceFolderPanelContext.Provider value={panelValue}>
