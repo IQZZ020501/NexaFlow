@@ -1572,12 +1572,12 @@ export function AgentDetailWorkspace({
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              className="text-muted-foreground"
+                              className="rounded-full text-muted-foreground"
                               aria-label={t("停止生成")}
                               title={t("停止生成")}
                               onClick={onCancelAsk}
                             >
-                              <SquareIcon className="fill-current" />
+                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                             </Button>
                           )}
                           <Button
@@ -1585,7 +1585,7 @@ export function AgentDetailWorkspace({
                               isAsking && !question.trim() ? "button" : "submit"
                             }
                             size="icon"
-                            className="rounded-lg"
+                            className="rounded-full"
                             aria-label={t(
                               isAsking
                                 ? question.trim()
@@ -1614,7 +1614,7 @@ export function AgentDetailWorkspace({
                             }
                           >
                             {isAsking && !question.trim() ? (
-                              <SquareIcon className="fill-current" />
+                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                             ) : (
                               <ArrowUpIcon />
                             )}

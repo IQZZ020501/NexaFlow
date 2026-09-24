@@ -2956,6 +2956,59 @@ describe("AgentsPage run flows", () => {
     await waitFor(() => expect(screen.getByText("运行已取消")).toBeTruthy())
   })
 
+  test("reports a run cancellation the backend refused", async () => {
+    const agent = makeAgent()
+    const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
+    await renderDetail({
+      agent,
+      initialView: "settings",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse(queuedRun, 201),
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/stream`,
+          exact: false,
+          respond: () => new Promise<Response>(() => undefined),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-1/cancel`,
+          exact: true,
+          respond: () => jsonResponse({ detail: "取消失败" }, 500),
+        },
+      ],
+    })
+    await waitFor(() =>
+      expect(screen.getByText("开始和 Agent 对话")).toBeTruthy()
+    )
+    fireEvent.change(
+      screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement,
+      { target: { value: "Stop me please" } }
+    )
+    fireEvent.click(screen.getByLabelText("发送问题"))
+    await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
+    fireEvent.click(screen.getByLabelText("停止生成"))
+
+    await waitFor(() =>
+      expect(
+        notifyCalls.some(
+          (call) => call.kind === "error" && call.message === "取消失败"
+        )
+      ).toBe(true)
+    )
+  })
+
   test("uploads attachments and streams reasoning deltas", async () => {
     const agent = makeAgent()
     const attachments = [

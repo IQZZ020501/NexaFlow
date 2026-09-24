@@ -1873,8 +1873,8 @@ export function AgentsPage({
         runId
       )
       setRuns((current) => mergeAgentRunSnapshot(current, cancelled))
-    } catch {
-      // The stream abort already stopped the UI; cancellation is best-effort.
+    } catch (error) {
+      reportError(error)
     }
   }
 

@@ -2412,18 +2412,18 @@ export function PublicAgentChat({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    className="text-muted-foreground"
+                    className="rounded-full text-muted-foreground"
                     aria-label={t("停止生成")}
                     title={t("停止生成")}
                     onClick={handleCancelAsk}
                   >
-                    <SquareIcon className="fill-current" />
+                    <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                   </Button>
                 ) : null}
                 <Button
                   type={isSending && !question.trim() ? "button" : "submit"}
                   size="icon"
-                  className="rounded-lg"
+                  className="rounded-full"
                   aria-label={t(
                     isSending
                       ? question.trim()
@@ -2444,7 +2444,7 @@ export function PublicAgentChat({
                   disabled={!isSending && !question.trim()}
                 >
                   {isSending && !question.trim() ? (
-                    <SquareIcon className="fill-current" />
+                    <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
                   ) : (
                     <ArrowUpIcon />
                   )}
