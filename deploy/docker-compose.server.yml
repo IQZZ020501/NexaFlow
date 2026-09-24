@@ -1,7 +1,7 @@
 name: nexaflow
 
 x-app-image: &app-image
-  image: registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow:latest
+  image: ${NEXAFLOW_APP_IMAGE:-registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow:latest}
 
 x-backend-environment: &backend-environment
   ENVIRONMENT: production
@@ -17,7 +17,7 @@ x-backend-environment: &backend-environment
 
 services:
   db:
-    image: registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-postgres:0.25.2
+    image: ${NEXAFLOW_POSTGRES_IMAGE:-registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-postgres:0.25.2}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}

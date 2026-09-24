@@ -33,6 +33,34 @@
 - `.gitignore` — 忽略规则（Python/Node 产物、虚拟环境、日志、.env、`deploy/data/`、`docs/local/`、`.agents/`、`coverage/`、docs/MVP_TASK_PLAN.md、.codegraph、.playwright-cli/ 等）
 - `.playwright-cli/` — Playwright 浏览器自动化运行产物目录（已被 gitignore 忽略）
 
+## 配置归属
+
+`.env` 只承担进程启动前必须知道的部署边界：PostgreSQL 与向量数据库连接、
+应用密钥、OpenSandbox 连接/镜像/出网白名单，以及首次引导账号。稳定的本地服务
+地址、公开 Origin、超时、Agent 单次运行预算、租约/轮询、外部 Run 限流和令牌有效期以
+`Settings` 的代码默认值为准。SMTP、企业身份连接、工作空间配额与保留策略、
+模型、工具等可由管理员修改的产品配置保存在 PostgreSQL。
+
+`.env.example` 只列常用且必须关注的部署边界。以下变量仍可按部署需要覆盖，
+但无需复制到每个 `.env`：
+
+- 拓扑与运维：`NEXAFLOW_APP_IMAGE`、`NEXAFLOW_POSTGRES_IMAGE`、
+  `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_HOST`、`POSTGRES_PORT`、
+  `DATABASE_URL`、`ENVIRONMENT`、`LOG_LEVEL`、`KNOWLEDGE_STORAGE_DIR`、
+  `CELERY_BROKER_URL`、`PUBLIC_APP_URL`、
+  `MCP_ALLOW_PRIVATE_NETWORKS`、`NEXAFLOW_PORT`、`CORS_ORIGINS`。
+- 兼容既有部署的高级运行策略：`MCP_REQUEST_TIMEOUT_SECONDS`、
+  `MODEL_REQUEST_TIMEOUT_SECONDS`、`AGENT_TOOL_TIMEOUT_SECONDS`、
+  `AGENT_RUN_TIMEOUT_SECONDS`、`AGENT_MAX_TURNS`、`AGENT_MAX_TOOL_CALLS`、
+  `AGENT_MAX_KNOWLEDGE_CALLS`、`AGENT_MAX_KNOWLEDGE_ROUNDS`、
+  `AGENT_MAX_MODEL_TOKENS`、`AGENT_EXECUTOR_LEASE_SECONDS`、
+  `AGENT_EXECUTOR_HEARTBEAT_SECONDS`、`AGENT_EVENT_POLL_SECONDS`、
+  `WORKFLOW_SANDBOX_TIMEOUT_SECONDS`、
+  `AGENT_EXTERNAL_AGENT_RUNS_PER_MINUTE`、
+  `AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE`、`JWT_EXPIRES_MINUTES`、
+  `REFRESH_TOKEN_EXPIRES_DAYS`。这些值的权威默认值在
+  `backend/app/infra/config/settings.py`；保留环境覆盖是为了已有部署兼容和受控调优。
+
 ## 关键约定
 
 - 仓库根 `.env` 是宿主机后端与 Compose 的唯一配置源；Compose 命令显式传 `--env-file .env`，并通过 `NEXAFLOW_APP_IMAGE` / `NEXAFLOW_POSTGRES_IMAGE` 选择本地或镜像仓库标签。
@@ -41,7 +69,7 @@
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL/Redis；该组合 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - 根 `.env` 设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。单次 stdio MCP 可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
 - 旧 Unix Broker、Seatbelt/namespace supervisor、`SANDBOX_NETWORK`、宿主 Skills 目录和运行时依赖安装已移除。schema-v1 测试 Skills 需重新导入。
-- `AGENT_EXECUTOR_HEARTBEAT_SECONDS` 必须小于 `AGENT_EXECUTOR_LEASE_SECONDS` 的一半。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。
+- Agent 执行器的代码默认心跳必须小于租约的一半；使用兼容环境覆盖时仍执行同一强校验。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。
 - 公开链接与 Agent API 的 Run 提交通过同一 Redis 做双桶限流；Redis 不可用时这些成本型入口返回 503，避免恢复后集中执行未受限请求。
 - FastAPI `/docs` 和 `/openapi.json` 保留完整接口文档；Agent 概览中的专属文档页单独使用 Agent API Key 解锁，不替代或裁剪全局 Swagger。
-- 未配置 `QDRANT_URL` 时应用在任何环境都会启动失败（`Settings.validate` 有意强校验）。
+- 宿主进程未覆盖 `QDRANT_URL` 时使用代码中的本地默认地址，Compose 则显式覆盖为服务地址；显式配置为空仍会在 `Settings.validate` 中失败。

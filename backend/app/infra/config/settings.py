@@ -68,6 +68,15 @@ def load_env_file(path: Path = ENV_FILE) -> None:
 
 @dataclass(frozen=True)
 class Settings:
+    """Process configuration plus stable product/runtime policy defaults.
+
+    Deployment boundaries and secrets are loaded from the environment. Stable
+    local service and policy values stay here so a normal installation does
+    not need to copy a large tuning surface into ``.env``. Existing
+    environment overrides remain supported for controlled deployments and
+    backward compatibility.
+    """
+
     database_url: str
     bootstrap_admin_username: str
     bootstrap_admin_email: str
@@ -76,10 +85,10 @@ class Settings:
     managed_user_initial_password: str
     jwt_secret_key: str = ""
     model_secret_key: str = ""
-    knowledge_storage_dir: Path | None = None
-    qdrant_url: str = ""
+    knowledge_storage_dir: Path | None = Path("./storage/knowledge")
+    qdrant_url: str = "http://127.0.0.1:6333"
     qdrant_api_key: str = ""
-    celery_broker_url: str = ""
+    celery_broker_url: str = "redis://localhost:6379/0"
     celery_task_always_eager: bool = False
     mcp_allow_private_networks: bool = False
     mcp_request_timeout_seconds: float = 30.0
@@ -111,6 +120,12 @@ class Settings:
     @classmethod
     def from_env(cls, require_bootstrap: bool = True) -> "Settings":
         load_env_file()
+        configured_storage_dir = os.getenv("KNOWLEDGE_STORAGE_DIR")
+        knowledge_storage_dir = cls.knowledge_storage_dir
+        if configured_storage_dir is not None:
+            knowledge_storage_dir = (
+                Path(configured_storage_dir) if configured_storage_dir else None
+            )
         origins = tuple(
             origin.strip()
             for origin in os.getenv("CORS_ORIGINS", "").split(",")
@@ -128,14 +143,10 @@ class Settings:
                 "",
             ),
             model_secret_key=os.getenv("MODEL_SECRET_KEY", ""),
-            knowledge_storage_dir=(
-                Path(os.getenv("KNOWLEDGE_STORAGE_DIR"))
-                if os.getenv("KNOWLEDGE_STORAGE_DIR")
-                else None
-            ),
-            qdrant_url=os.getenv("QDRANT_URL", ""),
+            knowledge_storage_dir=knowledge_storage_dir,
+            qdrant_url=os.getenv("QDRANT_URL", cls.qdrant_url),
             qdrant_api_key=os.getenv("QDRANT_API_KEY", ""),
-            celery_broker_url=os.getenv("CELERY_BROKER_URL", ""),
+            celery_broker_url=os.getenv("CELERY_BROKER_URL", cls.celery_broker_url),
             celery_task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower()
             in {"1", "true", "yes"},
             mcp_allow_private_networks=os.getenv("MCP_ALLOW_PRIVATE_NETWORKS", "").lower()
@@ -195,7 +206,7 @@ class Settings:
             ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "1440")),
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
-            public_app_url=os.getenv("PUBLIC_APP_URL", "http://localhost:8080").rstrip("/"),
+            public_app_url=os.getenv("PUBLIC_APP_URL", cls.public_app_url).rstrip("/"),
             cors_origins=origins,
             environment=os.getenv("ENVIRONMENT", "development"),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
