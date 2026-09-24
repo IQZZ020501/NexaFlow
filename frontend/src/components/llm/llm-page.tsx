@@ -1409,6 +1409,7 @@ function ModelDialog({
                       variant="outline"
                       size="icon-lg"
                       aria-label={t("基础模型")}
+                      title={t("基础模型")}
                       disabled={!baseModels.length}
                     >
                       <ChevronDownIcon />

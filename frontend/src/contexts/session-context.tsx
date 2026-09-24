@@ -699,6 +699,12 @@ export const useSession = () => {
 }
 
 /**
+ * Reads the session context when a provider is present, so components that can
+ * render on their own (for example the theme settings panel) still mount.
+ */
+export const useOptionalSession = () => React.useContext(SessionContext)
+
+/**
  * Provides the localized name of the selected workspace.
  *
  * @returns The localized workspace name, or a localized message when no workspace is selected

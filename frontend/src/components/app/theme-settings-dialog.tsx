@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
+import { useOptionalSession } from "@/contexts/session-context"
 import { useTheme } from "@/contexts/theme-provider"
 import {
   contentWidthOptions,
@@ -260,6 +261,7 @@ export function ThemeSettingsDialog({
   onOpenChange,
 }: ThemeSettingsDialogProps) {
   const { t } = useLanguage()
+  const notify = useOptionalSession()?.notify
   const {
     theme,
     setTheme,
@@ -279,7 +281,10 @@ export function ThemeSettingsDialog({
     setContentWidth,
   } = useTheme()
 
-  const resetPalette = () => setPalette(DEFAULT_PALETTE)
+  const resetPalette = () => {
+    setPalette(DEFAULT_PALETTE)
+    notify?.("success", t("已恢复默认配色"))
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -304,6 +309,7 @@ export function ThemeSettingsDialog({
                 size="icon"
                 className="-mt-1 -mr-1 shrink-0"
                 aria-label={t("关闭")}
+                title={t("关闭")}
                 onClick={() => onOpenChange(false)}
               >
                 <XIcon aria-hidden="true" />

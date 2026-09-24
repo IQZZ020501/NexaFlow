@@ -244,6 +244,7 @@ export function AnnouncementExpirationField({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t("上个月")}
+                title={t("上个月")}
                 onClick={() =>
                   setViewMonth(
                     new Date(
@@ -264,6 +265,7 @@ export function AnnouncementExpirationField({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t("下个月")}
+                title={t("下个月")}
                 onClick={() =>
                   setViewMonth(
                     new Date(

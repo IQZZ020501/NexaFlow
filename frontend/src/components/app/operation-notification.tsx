@@ -54,6 +54,7 @@ export function OperationNotification({
           size="icon-sm"
           onClick={onDismiss}
           aria-label={t("关闭提示")}
+          title={t("关闭提示")}
         >
           <XIcon />
         </Button>

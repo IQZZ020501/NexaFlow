@@ -69,6 +69,7 @@ export const en = {
   宽: "Wide",
   居中: "Centered",
   恢复默认: "Restore defaults",
+  已恢复默认配色: "Default color palette restored",
   "切换主题，当前为 {theme}": "Change theme, currently {theme}",
   列表分隔符: ", ",
   详情分隔符: "; ",

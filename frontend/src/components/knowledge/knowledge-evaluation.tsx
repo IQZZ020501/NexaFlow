@@ -544,6 +544,7 @@ export function KnowledgeEvaluation({
                       size="icon-sm"
                       variant="ghost"
                       aria-label={t("删除用例：{value}", { value: item.question })}
+                      title={t("删除评测用例")}
                       onClick={() => setDeleteTarget({ type: "case", item })}
                     >
                       <Trash2Icon />

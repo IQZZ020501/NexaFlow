@@ -341,6 +341,11 @@ export function ToolPicker({
                           ? toolDisplayName(tool, t)
                           : reference.tool_id,
                       })}
+                      title={t("移除工具 {name}", {
+                        name: tool
+                          ? toolDisplayName(tool, t)
+                          : reference.tool_id,
+                      })}
                       onClick={() => remove(reference)}
                     >
                       <XIcon />

@@ -261,6 +261,9 @@ export function TopBar() {
                     aria-label={t("切换语言，当前为 {language}", {
                       language: activeLanguageOption.label,
                     })}
+                    title={t("切换语言，当前为 {language}", {
+                      language: activeLanguageOption.label,
+                    })}
                   >
                     <LanguagesIcon className="size-4" />
                   </Button>

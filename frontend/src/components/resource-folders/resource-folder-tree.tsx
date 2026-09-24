@@ -140,6 +140,7 @@ export function ResourceFolderTree({
               type="button"
               className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background max-sm:h-11 max-sm:w-11"
               aria-label={t(collapsed ? "展开" : "收起")}
+              title={t(collapsed ? "展开" : "收起")}
               onClick={() =>
                 setCollapsedFolderIds((current) => {
                   const next = new Set(current)
@@ -173,6 +174,7 @@ export function ResourceFolderTree({
                 variant="ghost"
                 size="icon-xs"
                 aria-label={t("管理文件夹 {name}", { name: folder.name })}
+                title={t("管理文件夹 {name}", { name: folder.name })}
               >
                 <MoreHorizontalIcon />
               </Button>
@@ -234,6 +236,7 @@ export function ResourceFolderTree({
               variant="ghost"
               size="icon-xs"
               aria-label={t("新建子文件夹")}
+              title={t("新建子文件夹")}
               onClick={() =>
                 setDialog({
                   mode: "create",

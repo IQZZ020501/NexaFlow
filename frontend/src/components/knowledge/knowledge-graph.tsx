@@ -1203,6 +1203,7 @@ export function KnowledgeGraph({
                             size="icon"
                             className="absolute top-2 right-2"
                             aria-label={t("关闭")}
+                            title={t("关闭")}
                             onClick={clearGraphSelection}
                           >
                             <XIcon />

@@ -217,6 +217,7 @@ export function MessageCenter() {
             size="icon-lg"
             className="relative text-muted-foreground hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
             aria-label={t("打开消息中心")}
+            title={t("打开消息中心")}
           >
             <BellIcon className="size-4" />
             {unreadCount > 0 ? (

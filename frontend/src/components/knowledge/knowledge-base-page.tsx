@@ -1781,6 +1781,7 @@ function KnowledgeBasePageContent({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t("返回")}
+                title={t("返回")}
                 onClick={closeKnowledgeBase}
               >
                 <ArrowLeftIcon />

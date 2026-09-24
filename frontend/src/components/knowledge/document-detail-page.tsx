@@ -214,6 +214,7 @@ function DocumentDetailPageContent({
               size="icon-sm"
               className="shrink-0"
               aria-label={t("返回知识库")}
+              title={t("返回知识库")}
               onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
             >
               <ArrowLeftIcon />

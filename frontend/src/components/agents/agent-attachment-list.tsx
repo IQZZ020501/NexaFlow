@@ -121,6 +121,7 @@ export function AgentAttachmentList({
             type="button"
             className="rounded-sm p-0.5 hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t("移除 {value}", { value: file.name })}
+            title={t("移除 {value}", { value: file.name })}
             onClick={() => onRemove(index)}
           >
             <XIcon className="size-3" />
