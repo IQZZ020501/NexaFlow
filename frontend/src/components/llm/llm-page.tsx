@@ -163,7 +163,8 @@ const PROVIDER_BRAND_ICONS: Record<string, ProviderBrandIcon> = {
   model_gemini_provider: { Render: Gemini, Color: Gemini.Color },
   model_kimi_provider: { Render: Moonshot, className: "text-[#007aff]" },
   model_ollama_provider: { Render: Ollama, className: "text-[#7c3aed]" },
-  model_openai_provider: { Render: OpenAI, className: "text-[#10a37f]" },
+  // OpenAI's official mark is monochrome; the frame keeps a white surface.
+  model_openai_provider: { Render: OpenAI, className: "text-black" },
   model_tencent_cloud_provider: {
     Render: TencentCloud,
     Color: TencentCloud.Color,
