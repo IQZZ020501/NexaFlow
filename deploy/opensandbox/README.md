@@ -14,22 +14,25 @@ when the Run reaches a terminal state and still has a native expiry as fallback.
 - Backend SDK: `opensandbox==0.1.16` (locked in `backend/uv.lock`).
 - Bootstrap: `opensandbox/execd:v1.0.22`.
 - Egress sidecar: `opensandbox/egress:v1.1.7`, **`dns+nft`** mode, IPv6 disabled.
-- Build the execution image separately:
+- Build the execution image separately from the business image:
 
 ```bash
-docker build -f deploy/dockerfiles/app.Dockerfile --target sandbox-runtime \
+docker build -f deploy/dockerfiles/sandbox.Dockerfile \
   -t nexaflow/execution:local .
 ```
 
 The image includes Python, Node.js/npm/npx, the four fixed renderers and their
-locked dependencies. Production must publish this image through the normal
-authorized release process and use an immutable image digest. Skill uploads
-cannot select an image, mount a host directory, provide setup commands or execute
-`requirements.txt`/`package.json` installation. An Agent may request exact-version
-PyPI or npm packages through the built-in dependency installer. Every request is
-recorded in the unified Tool ledger and requires user approval; Python source
-builds and npm lifecycle scripts are disabled. Bake fixed renderer dependencies
-and reviewed MCP programs into a versioned execution image.
+locked dependencies. It is a standalone image: build, publish, pull, and pin it
+independently of the NexaFlow business image. OpenSandbox creates short-lived
+execution containers from this image; the API and Worker never run its code
+locally and never mount business data into it. Production must publish this image
+through the normal authorized release process and use an immutable image digest.
+Skill uploads cannot select an image, mount a host directory, provide setup
+commands or execute `requirements.txt`/`package.json` installation. An Agent may
+request exact-version PyPI or npm packages through the built-in dependency
+installer. Every request is recorded in the unified Tool ledger and requires user
+approval; Python source builds and npm lifecycle scripts are disabled. Bake fixed
+renderer dependencies and reviewed MCP programs into a versioned execution image.
 
 ## Dedicated Linux host
 

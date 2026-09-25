@@ -114,7 +114,7 @@ jobs:
       - name: Run OpenSandbox execution image checks
         working-directory: .
         run: |
-          docker build --file deploy/dockerfiles/app.Dockerfile --target sandbox-runtime --tag nexaflow/execution:ci .
+          docker build --file deploy/dockerfiles/sandbox.Dockerfile --tag nexaflow/execution:ci .
           docker run --rm --network none --read-only --user 65532:65532 \
             --cap-drop ALL --security-opt no-new-privileges:true \
             --memory 512m --pids-limit 96 \
