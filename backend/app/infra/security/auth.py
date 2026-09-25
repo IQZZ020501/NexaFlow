@@ -8,6 +8,7 @@ import jwt
 from pwdlib import PasswordHash
 
 from app.infra.config.settings import Settings
+from app.infra.security.keyring import jwt_signing_key
 
 ALGORITHM = "HS256"
 ARTIFACT_TOKEN_SCOPE = "artifact:download"
@@ -32,7 +33,7 @@ def create_access_token(
         "sid": session_token_hash,
         "exp": expires_at,
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=ALGORITHM)
+    return jwt.encode(payload, jwt_signing_key(settings), algorithm=ALGORITHM)
 
 
 def create_refresh_token() -> str:
@@ -45,7 +46,7 @@ def hash_refresh_token(token: str) -> str:
 
 def decode_access_token(token: str, settings: Settings) -> str | None:
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, jwt_signing_key(settings), algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None
     subject = payload.get("sub")
@@ -54,7 +55,7 @@ def decode_access_token(token: str, settings: Settings) -> str | None:
 
 def decode_access_session(token: str, settings: Settings) -> tuple[str, str] | None:
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, jwt_signing_key(settings), algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None
     subject = payload.get("sub")
@@ -66,7 +67,7 @@ def decode_access_session(token: str, settings: Settings) -> tuple[str, str] | N
 
 def _artifact_signing_key(settings: Settings) -> bytes:
     return hmac.digest(
-        settings.jwt_secret_key.encode(),
+        jwt_signing_key(settings).encode(),
         b"nexaflow-generated-artifact-v1",
         sha256,
     )

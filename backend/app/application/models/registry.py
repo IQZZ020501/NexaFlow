@@ -14,6 +14,7 @@ from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.domain.models.registered import RegisteredModel
 from app.entities.defaults import utc_now
 from app.infra.config.settings import Settings
+from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import secret_hint
 from app.ports.llm import (
     SUPPORTED_PROVIDER_TYPES,
@@ -251,7 +252,7 @@ def stored_model_credentials(
         config = legacy_credential_config(model.provider_type, model.api_base)
     secrets = decrypt_credential_secrets(
         model.api_key_ciphertext,
-        settings.model_secret_key,
+        application_secret_key(settings),
     )
     hints = {
         key: value
@@ -373,7 +374,7 @@ def apply_model_credentials(
     if rewrite_secrets:
         model.api_key_ciphertext = encrypt_credential_secrets(
             secrets,
-            settings.model_secret_key,
+            application_secret_key(settings),
         )
         model.api_key_updated_at = utc_now()
 

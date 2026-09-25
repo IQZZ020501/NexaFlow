@@ -27,6 +27,7 @@ from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.observability.system_log import record_system_log
 from app.infra.security.auth import hash_password
+from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.ports.enterprise_identity import (
     EnterpriseProviderError,
@@ -198,7 +199,7 @@ async def upsert_connection(
     connection.updated_at = utc_now()
     if payload.client_secret is not None:
         connection.client_secret_ciphertext = encrypt_secret(
-            payload.client_secret, settings.model_secret_key
+            payload.client_secret, application_secret_key(settings)
         )
         connection.client_secret_hint = secret_hint(payload.client_secret)
     connection = await identity_repository.save_connection(db, connection)
@@ -375,7 +376,7 @@ async def begin_login(
             connection_id=connection.id,
             state_hash=_digest(raw_state),
             browser_nonce_hash=_digest(browser_nonce),
-            code_verifier_ciphertext=encrypt_secret(code_verifier, settings.model_secret_key),
+            code_verifier_ciphertext=encrypt_secret(code_verifier, application_secret_key(settings)),
             next_path=safe_next_path(next_path),
             expires_at=now + timedelta(seconds=LOGIN_STATE_TTL_SECONDS),
         ),
@@ -426,10 +427,10 @@ async def complete_login(
     try:
         principal = await resolve_external_principal(
             connection,
-            decrypt_secret(connection.client_secret_ciphertext, settings.model_secret_key),
+            decrypt_secret(connection.client_secret_ciphertext, application_secret_key(settings)),
             code,
             callback_url(settings, provider),
-            decrypt_secret(login_state.code_verifier_ciphertext, settings.model_secret_key),
+            decrypt_secret(login_state.code_verifier_ciphertext, application_secret_key(settings)),
             feishu_qr=raw_state.startswith(FEISHU_QR_STATE_PREFIX),
         )
     except EnterpriseProviderError as exc:

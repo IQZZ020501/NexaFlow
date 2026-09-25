@@ -14,6 +14,7 @@ from app.infra.observability.logger import get_logger, setup_logging
 from app.infra.observability.system_log import record_system_log
 from app.infra.runtime.event_loop import configure_windows_event_loop_policy
 from app.infra.runtime.request_body_limit import RequestBodyLimitMiddleware
+from app.infra.security.keyring import initialize_secret_keys
 
 logger = get_logger(__name__)
 
@@ -29,6 +30,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.validate()
         async with get_session_factory()() as db:
             await seed_bootstrap_admin(db, settings)
+        # Create or adopt the signing/encryption keys before serving traffic.
+        await initialize_secret_keys(settings)
         yield
 
     app = FastAPI(title="NexaFlow API", lifespan=lifespan)

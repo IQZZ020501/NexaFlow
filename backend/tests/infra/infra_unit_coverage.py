@@ -2194,8 +2194,6 @@ def test_settings_defaults_and_validation() -> None:
             replace(base, managed_user_initial_password=""),
             "MANAGED_USER_INITIAL_PASSWORD",
         ),
-        (replace(base, jwt_secret_key=""), "JWT_SECRET_KEY"),
-        (replace(base, model_secret_key=""), "MODEL_SECRET_KEY"),
         (replace(base, knowledge_storage_dir=None), "KNOWLEDGE_STORAGE_DIR"),
         (replace(base, qdrant_url=""), "QDRANT_URL"),
         (replace(base, celery_broker_url=""), "CELERY_BROKER_URL"),
@@ -2265,6 +2263,103 @@ def test_settings_defaults_and_validation() -> None:
             assert message in str(exc), (message, str(exc))
         else:
             raise AssertionError(f"expected RuntimeError containing {message!r}")
+
+
+def test_settings_accept_database_managed_secret_keys() -> None:
+    """JWT/MODEL keys live in platform_secrets, so .env may leave them empty."""
+    from app.infra.security import keyring
+
+    keyring.reset_secret_keys()
+    without_keys = replace(_valid_settings(), jwt_secret_key="", model_secret_key="")
+    without_keys.validate()
+    assert keyring.jwt_signing_key(_valid_settings()) == "jwt-key"
+    assert keyring.application_secret_key(_valid_settings()) == "model-key"
+
+    for environment_value in (
+        "",
+        " ",
+        "replace-with-a-random-32-byte-jwt-secret",
+        "replace-with-a-random-32-byte-model-secret",
+    ):
+        empty = replace(
+            without_keys,
+            jwt_secret_key=environment_value,
+            model_secret_key=environment_value,
+        )
+        for accessor, variable in (
+            (keyring.jwt_signing_key, "JWT_SECRET_KEY"),
+            (keyring.application_secret_key, "MODEL_SECRET_KEY"),
+        ):
+            try:
+                accessor(empty)
+            except RuntimeError as exc:
+                assert variable in str(exc)
+            else:
+                raise AssertionError(f"A missing {variable} must fail closed")
+
+
+def test_deployment_secret_keys_are_created_once_and_immutable() -> None:
+    from app.domain.platform.models import PlatformSecret as PlatformSecretOrm
+    from app.infra.security import keyring
+
+    keyring.reset_secret_keys()
+    with test_client():
+        expected = {
+            keyring.JWT_SIGNING_KEY_NAME: settings().jwt_secret_key,
+            keyring.APPLICATION_KEY_NAME: settings().model_secret_key,
+        }
+        # An empty store adopts the deployment value as the initial key.
+        assert asyncio.run(keyring.initialize_secret_keys(settings())) == expected
+
+        async def stored_keys() -> dict[str, str]:
+            async with get_session_factory()() as db:
+                rows = await db.execute(
+                    select(PlatformSecretOrm.name, PlatformSecretOrm.value)
+                )
+                return dict(rows.all())
+
+        assert asyncio.run(stored_keys()) == expected
+
+        # A restarted process with a regenerated .env keeps the stored key.
+        keyring.reset_secret_keys()
+        reinitialized = asyncio.run(
+            keyring.initialize_secret_keys(
+                replace(
+                    settings(),
+                    jwt_secret_key="regenerated-in-a-new-env",
+                    model_secret_key="regenerated-in-a-new-env",
+                )
+            )
+        )
+        assert reinitialized == expected
+        assert keyring.jwt_signing_key(settings()) == expected[keyring.JWT_SIGNING_KEY_NAME]
+        assert (
+            keyring.application_secret_key(settings())
+            == expected[keyring.APPLICATION_KEY_NAME]
+        )
+
+        # A brand-new installation has no environment value: the key is
+        # generated, stored, and reused on the next start.
+        from sqlalchemy import delete as sql_delete
+
+        async def clear_stored_keys() -> None:
+            async with get_session_factory()() as db:
+                await db.execute(sql_delete(PlatformSecretOrm))
+                await db.commit()
+
+        asyncio.run(clear_stored_keys())
+        keyring.reset_secret_keys()
+        generated = asyncio.run(
+            keyring.initialize_secret_keys(
+                replace(settings(), jwt_secret_key="", model_secret_key="")
+            )
+        )
+        assert generated != expected
+        assert all(len(value) >= 32 for value in generated.values())
+        assert asyncio.run(stored_keys()) == generated
+        keyring.reset_secret_keys()
+        assert asyncio.run(keyring.initialize_secret_keys(settings())) == generated
+    keyring.reset_secret_keys()
 
 
 def test_settings_from_env() -> None:
@@ -4752,6 +4847,8 @@ def main() -> None:
     test_load_env_file()
     test_database_url_from_env()
     test_settings_defaults_and_validation()
+    test_settings_accept_database_managed_secret_keys()
+    test_deployment_secret_keys_are_created_once_and_immutable()
     test_settings_from_env()
 
     test_security_tokens()

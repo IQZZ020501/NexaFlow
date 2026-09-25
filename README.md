@@ -103,11 +103,15 @@ cp .env.example .env
 编辑根目录 `.env`，至少替换以下值：
 
 - `POSTGRES_PASSWORD`
-- `JWT_SECRET_KEY`
-- `MODEL_SECRET_KEY`
 - `BOOTSTRAP_ADMIN_PASSWORD`
 - `MANAGED_USER_INITIAL_PASSWORD`
 - 生产 OpenSandbox 的 `OPENSANDBOX_URL`、`OPENSANDBOX_API_KEY` 和 digest 镜像
+
+`JWT_SECRET_KEY` 与 `MODEL_SECRET_KEY` 不在 `.env.example` 中，也不需要写进 `.env`：
+首次启动时会自动生成并保存到 PostgreSQL（`platform_secrets`），之后始终以数据库中
+的值为准。只有需要由外部密钥管理提供初始密钥时才手动加入这两个变量，且只对空库
+生效；已有的存储值不会被环境变量覆盖，因此改错或重写 `.env` 不会再让已保存的凭据
+和会话失效。
 
 生产环境不要继续使用示例文件中的凭据。本地服务地址、执行预算和令牌有效期
 使用代码默认值；SMTP、企业身份、工作空间治理、模型和工具等可管理配置保存在
@@ -220,6 +224,12 @@ bun run build
 ```bash
 uv run --project sandbox python -m sandbox.tests
 bash sandbox/run_coverage.sh
+make sandbox-image
+docker run --rm --network none --read-only --user 65532:65532 \
+  --cap-drop ALL --security-opt no-new-privileges:true --memory 512m --pids-limit 96 \
+  --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+  --entrypoint /opt/nexaflow/.venv/bin/python \
+  ${OPENSANDBOX_IMAGE:-nexaflow/execution:local} -I /opt/nexaflow/self_check.py
 ```
 
 执行镜像自检及真实 OpenSandbox 检查见 [部署说明](deploy/opensandbox/README.md)。

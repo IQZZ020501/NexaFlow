@@ -147,6 +147,14 @@ not trigger unrelated cleanup.
   them from the template; keep operator-managed product settings in PostgreSQL.
   Backward-compatible advanced environment overrides may remain supported
   without being copied into every installation.
+- `JWT_SECRET_KEY` and `MODEL_SECRET_KEY` are the deployment keys created once
+  and stored in `platform_secrets`. API and Worker startup resolve them through
+  `infra/security/keyring.py`: a missing row is created from the environment
+  value or a generated value, and an existing row always wins and is never
+  rewritten. `.env.example` deliberately omits both variables, so environment
+  values only seed an empty store and a regenerated or edited `.env` cannot
+  invalidate sessions or orphan stored ciphertext. Never re-derive these keys
+  from anything else, and never log them.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - The build-capable and pull-only Compose topologies both run Alembic through a
@@ -181,11 +189,12 @@ not trigger unrelated cleanup.
   and progress writes must remain in one lease-checked transaction.
 - Root `make dev` is the complete local development entrypoint. Its standard-library
   Python supervisor creates missing private local configuration, syncs dependencies,
-  builds the local PostgreSQL and OpenSandbox images when their inputs change, starts
-  PostgreSQL/Redis/Qdrant and the development OpenSandbox, applies Alembic migrations,
-  then supervises Uvicorn, Celery and Next.js with one shutdown boundary. Use root
-  `make dev-rebuild` to force both local image builds. `cd backend && make dev` remains
-  the API-only entrypoint.
+  builds the local PostgreSQL image and the standalone OpenSandbox execution image
+  when their inputs change, starts PostgreSQL/Redis/Qdrant and the development
+  OpenSandbox control plane, applies Alembic migrations, then supervises Uvicorn,
+  Celery and Next.js with one shutdown boundary. Use root `make dev-rebuild` to
+  force both local image builds. `make sandbox-image` only builds the standalone
+  execution image. `cd backend && make dev` remains the API-only entrypoint.
 - `cd backend && make worker` starts Celery without a local execution broker,
   root requirement, or sandbox dependencies. It requires `OPENSANDBOX_API_KEY`;
   code execution fails closed if the external execution plane is unavailable.
@@ -283,14 +292,8 @@ not trigger unrelated cleanup.
   renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
-- `deploy/` holds the Docker Compose topology, the unified application
-  Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
-  Dockerfile, and Nginx examples. The business Worker drops all capabilities
-  and retains default AppArmor/seccomp plus `no-new-privileges`; there is no
-  Docker socket, execution runtime or sandbox volume in business containers.
-  `deploy/opensandbox/` documents the separate pinned execution plane and
-  generates a private Kata + dns+nft production configuration; ordinary Docker
-  requires an explicit development profile, never an automatic downgrade.
+- `deploy/` holds the Docker Compose topology, the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. The business Worker drops all capabilities and retains default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
+- `deploy/opensandbox/` documents the separate pinned execution plane and generates a private Kata + dns+nft production configuration; ordinary Docker requires an explicit development profile, never an automatic downgrade. `deploy/dockerfiles/sandbox.Dockerfile` builds the execution image independently from the business image.
   Production execution images use immutable digests. Agent runs freeze the
   non-secret image/network fingerprint so retries cannot silently switch it.
   `scripts/setup-hooks.sh` enables the repository Git hooks.

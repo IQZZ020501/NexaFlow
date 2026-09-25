@@ -13,7 +13,8 @@
 - `deploy/docker-compose.dev.yml` — 开发覆盖：向宿主发布 5432/6379/6333 并固定容器名，供宿主机后端（`make dev`）使用
 - `deploy/opensandbox/README.md` / `configure.py` — 独立执行主机部署、固定版本与私有配置生成；生产默认 Kata + dns+nft，开发需显式选择普通 Docker
 - `deploy/nginx/default.conf` — 可选反向代理：`/api/` 与 `/health` 到 API，前端静态资源带缓存头转发 Next.js
-- `deploy/dockerfiles/app.Dockerfile` — `runtime` 构建业务应用（含 API 与 Celery 入口 `backend/scripts/worker.py`），`sandbox-runtime` 单独构建 Python/Node 执行镜像（`job.py`、`renderer_checks`、`skills`）；业务镜像不含沙箱源码
+- `deploy/dockerfiles/app.Dockerfile` — `runtime` 构建业务应用（含 API 与 Celery 入口 `backend/scripts/worker.py`）；业务镜像不含沙箱源码
+- `deploy/dockerfiles/sandbox.Dockerfile` — 独立构建 Python/Node 执行镜像（`job.py`、`renderer_checks`、`skills`），由 OpenSandbox 控制面按需创建隔离执行容器
 - `deploy/dockerfiles/postgres.Dockerfile` — PostgreSQL 17 + `pg_search` 0.25.2 + `pgvector` 定制镜像
 
 ### scripts/
@@ -36,10 +37,16 @@
 ## 配置归属
 
 `.env` 只承担进程启动前必须知道的部署边界：PostgreSQL 与向量数据库连接、
-应用密钥、OpenSandbox 连接/镜像/出网白名单，以及首次引导账号。稳定的本地服务
+OpenSandbox 连接/镜像/出网白名单，以及首次引导账号。稳定的本地服务
 地址、公开 Origin、超时、Agent 单次运行预算、租约/轮询、外部 Run 限流和令牌有效期以
 `Settings` 的代码默认值为准。SMTP、企业身份连接、工作空间配额与保留策略、
 模型、工具等可由管理员修改的产品配置保存在 PostgreSQL。
+
+`JWT_SECRET_KEY` 与 `MODEL_SECRET_KEY` 是唯一由应用创建并持久化的密钥：API 与
+Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中的值作为初始值，
+否则随机生成），已存在时永远使用库中的值；`.env.example` 因此不再列出这两个变量。
+密钥不可变，环境变量只对空库生效，所以重写或改错 `.env` 不会让会话失效或让已保存
+的密文无法解密。
 
 `.env.example` 只列常用且必须关注的部署边界。以下变量仍可按部署需要覆盖，
 但无需复制到每个 `.env`：
@@ -64,7 +71,7 @@
 ## 关键约定
 
 - 仓库根 `.env` 是宿主机后端与 Compose 的唯一配置源；Compose 命令显式传 `--env-file .env`，并通过 `NEXAFLOW_APP_IMAGE` / `NEXAFLOW_POSTGRES_IMAGE` 选择本地或镜像仓库标签。
-- API、Worker 与 Frontend 共享业务镜像并保持三个独立容器；独立 OpenSandbox 不进入业务 Compose、不挂载业务数据。Worker 丢弃全部 capability，保留默认 AppArmor/seccomp 和 `no-new-privileges`，不需要 Docker socket 或 root 隔离启动流程。
+- API、Worker 与 Frontend 共享业务镜像并保持三个独立容器；OpenSandbox 控制面和执行镜像是独立部署单元，执行镜像不进入业务 Compose、不挂载业务数据。Worker 丢弃全部 capability，保留默认 AppArmor/seccomp 和 `no-new-privileges`，不需要 Docker socket 或 root 隔离启动流程。
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL/Redis；该组合 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - 根 `.env` 设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。单次 stdio MCP 可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。

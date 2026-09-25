@@ -70,11 +70,14 @@ def load_env_file(path: Path = ENV_FILE) -> None:
 class Settings:
     """Process configuration plus stable product/runtime policy defaults.
 
-    Deployment boundaries and secrets are loaded from the environment. Stable
-    local service and policy values stay here so a normal installation does
-    not need to copy a large tuning surface into ``.env``. Existing
-    environment overrides remain supported for controlled deployments and
-    backward compatibility.
+    Deployment boundaries are loaded from the environment. Stable local service
+    and policy values stay here so a normal installation does not need to copy a
+    large tuning surface into ``.env``. Existing environment overrides remain
+    supported for controlled deployments and backward compatibility.
+
+    ``JWT_SECRET_KEY`` and ``MODEL_SECRET_KEY`` are the only deployment secrets
+    that are created once and then kept in PostgreSQL (``platform_secrets``);
+    the environment values here only seed an empty store on first start.
     """
 
     database_url: str
@@ -228,10 +231,9 @@ class Settings:
             raise RuntimeError(
                 "MANAGED_USER_INITIAL_PASSWORD must be set via environment or the .env file."
             )
-        if not self.jwt_secret_key:
-            raise RuntimeError("JWT_SECRET_KEY must be set via environment or the .env file.")
-        if not self.model_secret_key:
-            raise RuntimeError("MODEL_SECRET_KEY must be set via environment or the .env file.")
+        # JWT_SECRET_KEY and MODEL_SECRET_KEY are not required here: the
+        # application resolves them from platform_secrets at startup, using the
+        # environment value only to seed a missing key.
         if not self.knowledge_storage_dir:
             raise RuntimeError("KNOWLEDGE_STORAGE_DIR must be set via environment or the .env file.")
         if not self.qdrant_url:
