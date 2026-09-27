@@ -363,16 +363,16 @@ def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
     ):
         result = asyncio.run(
             image_generation.generate_image_artifact(
-                SimpleNamespace(), {"prompt": "  A mountain  "}, context
+                SimpleNamespace(), {"prompt": "  A mountain at dawn。第二句  "}, context
             )
         )
         get_model.assert_awaited_once_with(db, "image-model-1")
         provider.assert_awaited_once_with(
-            SimpleNamespace(), model, "A mountain", "square"
+            SimpleNamespace(), model, "A mountain at dawn。第二句", "square"
         )
         assert store.await_args.kwargs["workspace_id"] == "workspace-1"
         assert store.await_args.kwargs["idempotency_key"] == "image-key"
-        assert store.await_args.kwargs["filename"] == "generated-image.png"
+        assert store.await_args.kwargs["filename"] == "A mountain at dawn.png"
         assert result.data["preview_url"] == "/api/v1/artifacts/signed/preview"
         assert result.ok is True
 
@@ -480,6 +480,124 @@ def test_image_tool_honours_the_selected_model() -> None:
                 assert fragment in str(exc)
             else:
                 raise AssertionError("An unusable image model selection was accepted.")
+
+
+def test_artifact_filename_follows_the_request() -> None:
+    from app.domain.artifacts.services import artifact_filename_from_label
+
+    assert (
+        artifact_filename_from_label("夏日海边   白衣少女", "png")
+        == "夏日海边 白衣少女.png"
+    )
+    # Reserved characters and control characters become single spaces.
+    assert artifact_filename_from_label('报 表<>"|* 名', "png") == "报 表 名.png"
+    assert artifact_filename_from_label("a\x01b\tc", "png") == "a b c.png"
+    assert artifact_filename_from_label("a\nb", "png") == "a.png"
+    # Path separators cannot escape into a directory or a fake extension.
+    assert artifact_filename_from_label("../../etc/passwd", "png") == "generated-image.png"
+    assert artifact_filename_from_label("etc/passwd", "png") == "etc passwd.png"
+    assert artifact_filename_from_label("name.pdf", "png") == "name.png"
+    assert artifact_filename_from_label("time: 08:30", "png") == "08 30.png"
+    # A caption stops at its first clause, so an instruction prefix does not
+    # become part of the filename.
+    assert (
+        artifact_filename_from_label("画一张：一位年轻女孩站在夏日海边，身穿白色连衣裙", "png")
+        == "一位年轻女孩站在夏日海边.png"
+    )
+    assert (
+        artifact_filename_from_label("A livestream studio, wide shot", "png")
+        == "A livestream studio.png"
+    )
+    # The label is truncated, and an unusable label falls back to the default.
+    assert artifact_filename_from_label("x" * 100, "png", max_chars=10) == "xxxxxxxxxx.png"
+    assert (
+        artifact_filename_from_label("A modern studio at dawn", "png", max_chars=12)
+        == "A modern.png"
+    )
+    assert artifact_filename_from_label("...", "png") == "generated-image.png"
+    assert artifact_filename_from_label("", "png") == "generated-image.png"
+
+
+def test_image_tool_names_the_image_from_the_model_or_the_prompt() -> None:
+    from app.application.agents.runs.snapshots import build_model_runtime_snapshot
+    from app.application.tools.runtime.adapters import image_generation
+    from app.application.tools.runtime.contracts import ToolInvocationContext
+
+    model = SimpleNamespace(
+        id="image-model-1",
+        workspace_id="workspace-1",
+        provider="model_openai_provider",
+        provider_type="openai_compatible",
+        model_type="IMAGE",
+        model_name="gpt-image-1",
+        api_base="https://api.openai.com/v1",
+        credential_config={"api_base": "https://api.openai.com/v1"},
+        api_key_updated_at=None,
+        status="active",
+        meta={},
+    )
+    context = ToolInvocationContext(
+        workspace_id="workspace-1",
+        origin="agent",
+        root_run_id="run-1",
+        run_id="run-1",
+        invocation_id="call-1",
+        execution_user_id="user-1",
+        access_source="console",
+        deadline_at=datetime.now(UTC),
+        idempotency_key="image-key",
+        resource_snapshot={"image_model": build_model_runtime_snapshot(model)},
+    )
+    db = SimpleNamespace(commit=AsyncMock())
+
+    class Session:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *_args):
+            return None
+
+    link = SimpleNamespace(
+        artifact_id="83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+        format="png",
+        filename="",
+        media_type="image/png",
+        download_url="/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+        expires_at=datetime.now(UTC),
+        size_bytes=12,
+    )
+    store = AsyncMock(return_value=link)
+    with (
+        patch.object(image_generation, "get_session_factory", return_value=Session),
+        patch.object(
+            image_generation.model_repository,
+            "get_registered_model_by_id",
+            new=AsyncMock(return_value=model),
+        ),
+        patch.object(
+            image_generation, "generate_image", new=AsyncMock(return_value=b"valid png")
+        ),
+        patch.object(image_generation, "create_generated_artifact", new=store),
+    ):
+        # The model names the file from the user's own wording when it can.
+        for arguments, expected in (
+            (
+                {"prompt": "细节极长的扩写提示词，包含大量描述与补充说明", "filename": "夏日海边白衣少女"},
+                "夏日海边白衣少女.png",
+            ),
+            # An unusable name falls back to the request wording instead of failing.
+            ({"prompt": "A mountain at dawn。第二句", "filename": "///"}, "A mountain at dawn.png"),
+            # Older pinned Tool versions send no name at all.
+            ({"prompt": "A mountain at dawn。第二句"}, "A mountain at dawn.png"),
+        ):
+            store.reset_mock()
+            asyncio.run(
+                image_generation.generate_image_artifact(
+                    SimpleNamespace(), arguments, context
+                )
+            )
+            assert store.await_args.kwargs["filename"] == expected
+            assert store.await_args.kwargs["artifact_format"] == "png"
 
 
 def test_tool_ref_schema_requires_canonical_ids() -> None:
@@ -1014,6 +1132,8 @@ def main() -> None:
     test_image_provider_decodes_only_embedded_png()
     test_image_tool_scopes_model_and_stores_one_artifact()
     test_image_tool_honours_the_selected_model()
+    test_artifact_filename_follows_the_request()
+    test_image_tool_names_the_image_from_the_model_or_the_prompt()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_grant_rules()

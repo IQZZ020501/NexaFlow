@@ -11,7 +11,10 @@ from app.application.tools.runtime.contracts import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.domain.artifacts.services import MAX_ARTIFACT_BYTES
+from app.domain.artifacts.services import (
+    MAX_ARTIFACT_BYTES,
+    artifact_filename_from_label,
+)
 from app.domain.models.registered import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
@@ -90,7 +93,24 @@ async def generate_image_artifact(
     content = await generate_image(settings, model, prompt, size)
     if not content or len(content) > MAX_ARTIFACT_BYTES:
         raise ModelProviderError("Generated image exceeds the 5 MiB file limit.")
+    # Name the artifact after the user's request instead of a fixed placeholder,
+    # so the download, the preview and the answer all describe the picture. The
+    # model may name it explicitly from the user's own wording; an unusable name
+    # falls back to the prompt, and the builder sanitizes and truncates both.
+    requested_name = arguments.get("filename")
+    candidates = (
+        (requested_name.strip(), prompt)
+        if isinstance(requested_name, str) and requested_name.strip()
+        else (prompt,)
+    )
     filename = "generated-image.png"
+    for candidate in candidates:
+        derived = artifact_filename_from_label(
+            candidate, "png", max_chars=32, fallback=""
+        )
+        if derived:
+            filename = derived
+            break
     async with get_session_factory()() as db:
         link = await create_generated_artifact(
             db,

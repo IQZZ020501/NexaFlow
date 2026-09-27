@@ -859,7 +859,7 @@ describe("AgentDetailWorkspace preview", () => {
   test("shows an image preview without a separate preview link and downloads by UUID", () => {
     const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
     const run = makeRun({
-      result: `画好了。\n- 文件名：\`generated-image-a1b2.png\`\n- 预览链接：[点击预览](${downloadUrl}/preview)`,
+      result: `画好了。\n- 文件名：\`夏日海边白衣少女.png\`\n- 预览链接：[点击预览](${downloadUrl}/preview)`,
       events: [
         {
           type: "tool",
@@ -874,7 +874,7 @@ describe("AgentDetailWorkspace preview", () => {
           input: {},
           output: {
             artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
-            filename: "generated-image-a1b2.png",
+            filename: "夏日海边白衣少女.png",
             download_url: downloadUrl,
             preview_url: `${downloadUrl}/preview`,
           },
@@ -886,14 +886,14 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" runs={[run]} />)
 
     expect(screen.queryByText("预览链接")).toBeNull()
-    expect(screen.queryByText("generated-image-a1b2.png")).toBeNull()
+    expect(screen.queryByText("generated-image.png")).toBeNull()
     expect(
       screen
-        .getByRole("link", { name: "generated-image.png" })
+        .getByRole("link", { name: "夏日海边白衣少女.png" })
         .getAttribute("href")
     ).toBe(downloadUrl)
     fireEvent.click(
-      screen.getByRole("button", { name: "预览：generated-image.png" })
+      screen.getByRole("button", { name: "预览：夏日海边白衣少女.png" })
     )
     expect(screen.getByRole("dialog")).toBeTruthy()
   })

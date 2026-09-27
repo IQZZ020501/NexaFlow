@@ -205,8 +205,14 @@ not trigger unrelated cleanup.
   are capped at 5 MiB, stored in PostgreSQL for at most 24 hours, and downloaded
   through scoped signed bearer URLs. Generated PNGs use random UUIDv4 bearer
   URLs instead, limited to image content and the same 24-hour lifetime; older
-  signed PNG URLs remain valid until expiration. Every download response is an
-  attachment with `nosniff`; HTML additionally receives a restrictive CSP.
+  signed PNG URLs remain valid until expiration. A generated image is named
+  after the request instead of a fixed placeholder: the image Tool accepts an
+  optional `filename`, the model names it from the user's own wording, and
+  `domain/artifacts/services.py::artifact_filename_from_label` sanitizes and
+  truncates it — falling back to the prompt wording and then to a fixed default.
+  That name is what the download and the chat surface both show. Every download
+  response is an attachment with `nosniff`; HTML additionally receives a
+  restrictive CSP.
 - Identity email uses the global administrator SMTP settings and trusted site
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset

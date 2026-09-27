@@ -1911,16 +1911,27 @@ def build_image_generation_tool(
     timestamp = created_at or utc_now()
     tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:generate_image")
     description = (
-        "Generate one PNG image from a text prompt using the workspace's single "
-        "active OpenAI-compatible IMAGE model. Use this for requested artwork or illustrations, "
-        "not for drawing charts or editing uploaded images. A user must approve each "
-        "paid generation. The resulting image can be previewed and downloaded for "
-        "24 hours; include its filename and download link in the response."
+        "Generate one PNG image from a text prompt using the image model selected for "
+        "this Agent, or the workspace's single active OpenAI-compatible IMAGE model when "
+        "the Agent selects none. Use this for requested artwork or illustrations, not "
+        "for drawing charts or editing uploaded images. A user must approve each paid "
+        "generation. The resulting image can be previewed and downloaded for 24 hours; "
+        "include its filename and download link in the response."
     )
     input_schema = {
         "type": "object",
         "properties": {
             "prompt": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "filename": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": (
+                    "Short file name for this image, without extension: name it after the "
+                    "user's own wording in their language, at most 20 characters, and never "
+                    "copy the expanded prompt. Defaults to the request wording."
+                ),
+            },
             "size": {
                 "type": "string",
                 "enum": ["square", "landscape", "portrait"],

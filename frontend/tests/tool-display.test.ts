@@ -269,9 +269,8 @@ describe("tool display helpers", () => {
         },
       ]
     )
-    expect(value).toContain(`![generated-image.png](${url}/preview)`)
-    expect(value).toContain(`[generated-image.png](${url})`)
-    expect(value).not.toContain("generated-image-a1b2.png")
+    expect(value).toContain(`![generated-image-a1b2.png](${url}/preview)`)
+    expect(value).toContain(`[generated-image-a1b2.png](${url})`)
     expect(value).not.toContain("预览链接")
     expect(value).not.toContain("点击预览")
     expect(value).not.toContain(signedUrl)
@@ -297,7 +296,7 @@ describe("tool display helpers", () => {
 
     expect(value).not.toContain("预览链接")
     expect(value).toContain(`![生成图片](${url}/preview)`)
-    expect(value).toContain(`[generated-image.png](${url})`)
+    expect(value).toContain(`[generated.png](${url})`)
     expect(value.match(/\/preview/g)).toHaveLength(1)
   })
 
