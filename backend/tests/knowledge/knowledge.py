@@ -302,6 +302,32 @@ async def assert_reference_parent_requires_document(
             raise AssertionError("Parent references must include their target document.")
 
 
+async def assert_wikilink_references(
+    source_document_id: str,
+    target_document_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        references = list(
+            await db.scalars(
+                select(KnowledgeDocumentReference)
+                .where(
+                    KnowledgeDocumentReference.source_document_id
+                    == source_document_id
+                )
+                .order_by(KnowledgeDocumentReference.source_ordinal)
+            )
+        )
+        assert len(references) == 2
+        resolved, unresolved = references
+        assert resolved.target_label == "rollback.md"
+        assert resolved.target_section == "Rollback Procedure"
+        assert resolved.target_document_id == target_document_id
+        assert resolved.occurrence_count == 2
+        assert unresolved.target_label == "missing.md"
+        assert unresolved.target_document_id is None
+        assert unresolved.occurrence_count == 1
+
+
 async def clear_knowledge_base_embedding_model(knowledge_base_id: str) -> None:
     async with get_session_factory()() as db:
         knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -2632,6 +2658,63 @@ def main() -> None:
                 reference_source_id,
                 reference_target_id,
             )
+        )
+
+        wikilink_source = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "wiki.md",
+            (
+                b"See [[rollback.md#Rollback Procedure|rollback]] twice: "
+                b"[[rollback.md#Rollback Procedure]]. Missing [[missing.md]]."
+            ),
+            "text/markdown",
+        )
+        wikilink_source_id = wikilink_source["id"]
+        wikilink_parse = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{wikilink_source_id}/parse",
+            ),
+            headers=auth_headers(alice_token),
+            json={"auto_index": False},
+        )
+        assert wikilink_parse.status_code == 202, wikilink_parse.text
+        asyncio.run(
+            assert_wikilink_references(
+                wikilink_source_id,
+                reference_target_id,
+            )
+        )
+        link_graph = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/graph/links",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert link_graph.status_code == 200, link_graph.text
+        link_graph_payload = link_graph.json()
+        assert link_graph_payload["document_count"] >= 3
+        assert link_graph_payload["unresolved_count"] >= 1
+        missing_node = next(
+            node
+            for node in link_graph_payload["nodes"]
+            if node["kind"] == "unresolved" and node["filename"] == "missing.md"
+        )
+        assert any(
+            edge["source"] == wikilink_source_id
+            and edge["target"] == reference_target_id
+            and edge["count"] == 2
+            for edge in link_graph_payload["edges"]
+        )
+        assert any(
+            edge["source"] == wikilink_source_id
+            and edge["target"] == missing_node["id"]
+            and edge["resolved"] is False
+            for edge in link_graph_payload["edges"]
         )
 
         duplicate_reference_target = upload_document(

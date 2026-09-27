@@ -2721,6 +2721,7 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
     labels = extract_reference_labels(
         "详见《发布手册.md》第三章，或参考 "
         "[回滚章节](docs/%E5%8F%91%E5%B8%83%E6%89%8B%E5%86%8C.md#%E5%9B%9E%E6%BB%9A)。"
+        "也可查看 [[docs/操作手册.md#部署|部署说明]] 与 ![[架构图.png]]。"
         "![架构图](architecture.png)"
         "[外链](https://example.com/发布手册.md)"
     )
@@ -2730,6 +2731,7 @@ def test_explicit_reference_extraction_is_bounded_and_internal() -> None:
     ] == [
         ("发布手册.md", "第三章", "text"),
         ("发布手册.md", "回滚", "markdown"),
+        ("操作手册.md", "部署", "markdown"),
     ]
 
     many = " ".join(f"[文档 {index}](doc-{index}.md)" for index in range(101))
@@ -2860,6 +2862,91 @@ def test_reference_rebuild_reuses_resolution_context() -> None:
         parent.id,
     )
     assert incoming.target_document_id == source.id
+
+
+def test_document_link_graph_uses_documents_and_unresolved_markdown_links() -> None:
+    from app.application.knowledge.graph.link_view import build_document_link_graph
+    from app.entities.knowledge import KnowledgeDocument, KnowledgeDocumentReference
+
+    documents = [
+        KnowledgeDocument(
+            id="source",
+            filename="source.md",
+            content_type="text/markdown",
+            status="indexed",
+        ),
+        KnowledgeDocument(
+            id="target",
+            filename="target.md",
+            content_type="text/markdown",
+            status="indexed",
+        ),
+        KnowledgeDocument(
+            id="orphan",
+            filename="orphan.md",
+            content_type="text/markdown",
+            status="indexed",
+        ),
+        KnowledgeDocument(
+            id="inactive",
+            filename="inactive.md",
+            is_active=False,
+        ),
+    ]
+    references = [
+        KnowledgeDocumentReference(
+            id="resolved-1",
+            source_document_id="source",
+            target_document_id="target",
+            target_label="target.md",
+            target_section="Intro",
+            reference_type="markdown",
+        ),
+        KnowledgeDocumentReference(
+            id="resolved-2",
+            source_document_id="source",
+            target_document_id="target",
+            target_label="target.md",
+            target_section="Details",
+            reference_type="markdown",
+        ),
+        KnowledgeDocumentReference(
+            id="missing",
+            source_document_id="target",
+            target_label="missing.md",
+            reference_type="markdown",
+        ),
+        KnowledgeDocumentReference(
+            id="inactive-source",
+            source_document_id="inactive",
+            target_document_id="target",
+            target_label="target.md",
+            reference_type="markdown",
+        ),
+    ]
+
+    graph = build_document_link_graph(documents, references)
+
+    assert graph.document_count == 3
+    assert len(graph.revision) == 64
+    assert graph.unresolved_count == 1
+    assert graph.edge_count == 2
+    assert graph.truncated is False
+    assert {node.filename for node in graph.nodes} == {
+        "source.md",
+        "target.md",
+        "orphan.md",
+        "missing.md",
+    }
+    source = next(node for node in graph.nodes if node.id == "source")
+    target = next(node for node in graph.nodes if node.id == "target")
+    missing = next(node for node in graph.nodes if node.kind == "unresolved")
+    assert (source.incoming, source.outgoing, source.degree) == (0, 2, 2)
+    assert (target.incoming, target.outgoing, target.degree) == (2, 1, 3)
+    assert (missing.incoming, missing.outgoing, missing.degree) == (1, 0, 1)
+    resolved_edge = next(edge for edge in graph.edges if edge.resolved)
+    assert resolved_edge.count == 2
+    assert resolved_edge.target_sections == ["Details", "Intro"]
 
 def test_parent_context_windows_around_child_offsets() -> None:
     long_content = "x" * (MAX_PARENT_CONTEXT_CHARS + 500)

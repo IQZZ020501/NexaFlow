@@ -240,3 +240,36 @@ class KnowledgeGraphQueryResultResponse(BaseModel):
     visited_nodes: int
     truncated: bool
     limit_reason: str | None = None
+
+
+class KnowledgeLinkGraphNodeResponse(BaseModel):
+    id: str
+    kind: Literal["document", "unresolved"]
+    document_id: str | None = None
+    label: str
+    filename: str
+    content_type: str | None = None
+    status: str | None = None
+    incoming: int = Field(ge=0)
+    outgoing: int = Field(ge=0)
+    degree: int = Field(ge=0)
+
+
+class KnowledgeLinkGraphEdgeResponse(BaseModel):
+    id: str
+    source: str
+    target: str
+    target_label: str
+    target_sections: list[str] = Field(default_factory=list)
+    resolved: bool
+    count: int = Field(ge=1)
+
+
+class KnowledgeLinkGraphResponse(BaseModel):
+    revision: str
+    nodes: list[KnowledgeLinkGraphNodeResponse]
+    edges: list[KnowledgeLinkGraphEdgeResponse]
+    document_count: int = Field(ge=0)
+    unresolved_count: int = Field(ge=0)
+    edge_count: int = Field(ge=0)
+    truncated: bool = False

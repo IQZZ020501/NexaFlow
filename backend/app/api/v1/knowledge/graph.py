@@ -12,6 +12,7 @@ from app.api.deps import (
 from app.api.deps import (
     get_settings as get_app_settings,
 )
+from app.application.knowledge.graph import link_view as link_graph_application
 from app.application.knowledge.graph import service as graph_application
 from app.schemas.knowledge import KnowledgeTaskResponse
 from app.schemas.knowledge.graph import (
@@ -27,6 +28,7 @@ from app.schemas.knowledge.graph import (
     KnowledgeGraphSettingsResponse,
     KnowledgeGraphSettingsUpdateRequest,
     KnowledgeGraphStatusResponse,
+    KnowledgeLinkGraphResponse,
 )
 
 router = APIRouter(
@@ -204,6 +206,21 @@ async def overview(
         {"view", "edit"},
     )
     return await graph_application.get_graph_overview(db, knowledge_base)
+
+
+@router.get("/links", response_model=KnowledgeLinkGraphResponse)
+async def document_links(
+    knowledge_base_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeLinkGraphResponse:
+    knowledge_base = await _knowledge_base(
+        db,
+        context,
+        knowledge_base_id,
+        {"view", "edit"},
+    )
+    return await link_graph_application.get_document_link_graph(db, knowledge_base)
 
 
 @router.get(

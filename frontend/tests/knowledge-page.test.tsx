@@ -1138,6 +1138,17 @@ function renderDetailPage(
     if (url.includes("/models")) return jsonResponse(options.models ?? models)
     if (url.includes("/knowledge-bases?")) return jsonResponse(knowledgeBases)
     if (url.includes("/documents")) return jsonResponse(documents)
+    if (url.endsWith("/graph/links")) {
+      return jsonResponse({
+        revision: "empty-graph",
+        nodes: [],
+        edges: [],
+        document_count: 0,
+        unresolved_count: 0,
+        edge_count: 0,
+        truncated: false,
+      })
+    }
     if (url.endsWith("/graph/settings")) {
       return jsonResponse({
         enabled: false,
@@ -1200,10 +1211,10 @@ describe("KnowledgeBasePage documents tab", () => {
     )
 
     renderDetailPage()
-    fireEvent.click(await screen.findByText("知识关联"))
+    fireEvent.click(await screen.findByRole("button", { name: "关系图谱" }))
     expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/graph`)
     await waitFor(() =>
-      expect(screen.getByText("知识关联尚未启用")).toBeTruthy()
+      expect(screen.getByRole("heading", { name: "关系图谱" })).toBeTruthy()
     )
 
     fireEvent.click(await screen.findByText("任务"))

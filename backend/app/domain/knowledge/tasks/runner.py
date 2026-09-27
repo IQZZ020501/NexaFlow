@@ -16,6 +16,9 @@ from app.domain.knowledge.documents.parsing import (
     SEGMENTATION_VERSION,
     KnowledgePipelineError,
 )
+from app.domain.knowledge.documents.references import (
+    rebuild_knowledge_base_references,
+)
 from app.domain.knowledge.service import (
     RESOURCE_TYPE,
     get_default_knowledge_model,
@@ -300,6 +303,14 @@ async def run_index_task(
         if chunk.search_text != search_text:
             chunk.search_text = search_text
             await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
+
+    if task.task_type == TASK_REBUILD_INDEX:
+        await rebuild_knowledge_base_references(
+            db,
+            knowledge_base,
+            list(documents.values()),
+            chunks,
+        )
 
     if task.task_type != TASK_REBUILD_INDEX:
         for chunk_document in documents.values():

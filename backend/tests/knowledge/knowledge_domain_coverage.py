@@ -2384,7 +2384,15 @@ async def run_task_runner_direct_tests(
             task_runner_service,
             "resolve_embedding_model",
             new=AsyncMock(return_value=SimpleNamespace(id=embedding_model_id)),
-        ), patch.object(task_runner_service, "upsert_vectors", new=Mock()):
+        ), patch.object(
+            task_runner_service,
+            "rebuild_knowledge_base_references",
+            new=AsyncMock(),
+        ) as rebuild_references, patch.object(
+            task_runner_service,
+            "upsert_vectors",
+            new=Mock(),
+        ):
             await task_runner_service.run_index_task(
                 db,
                 task_entity,
@@ -2394,6 +2402,7 @@ async def run_task_runner_direct_tests(
                 settings,
                 asyncio.Event(),
             )
+        rebuild_references.assert_not_awaited()
         await db.commit()
         db_kb = await knowledge_repository.get_knowledge_base_by_id(db, indexed_kb_id)
         assert db_kb is not None and db_kb.embedding_model_id == embedding_model_id
@@ -2433,7 +2442,15 @@ async def run_task_runner_direct_tests(
             task_runner_service,
             "resolve_embedding_model",
             new=AsyncMock(return_value=SimpleNamespace(id=embedding_model_id)),
-        ), patch.object(task_runner_service, "upsert_vectors", new=Mock()):
+        ), patch.object(
+            task_runner_service,
+            "rebuild_knowledge_base_references",
+            new=AsyncMock(),
+        ) as rebuild_references, patch.object(
+            task_runner_service,
+            "upsert_vectors",
+            new=Mock(),
+        ):
             await task_runner_service.run_index_task(
                 db,
                 task_entity,
@@ -2443,6 +2460,7 @@ async def run_task_runner_direct_tests(
                 settings,
                 asyncio.Event(),
             )
+        rebuild_references.assert_awaited_once()
         await db.commit()
         assert task_entity.total_items >= 1
         assert task_entity.processed_items == task_entity.total_items

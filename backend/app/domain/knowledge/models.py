@@ -404,6 +404,7 @@ class KnowledgeDocumentReference(Base):
             "source_chunk_id",
             "target_label",
             "target_section",
+            "reference_type",
             name="uq_knowledge_document_references_source_label",
         ),
         CheckConstraint(
@@ -413,6 +414,10 @@ class KnowledgeDocumentReference(Base):
         CheckConstraint(
             "source_ordinal >= 0",
             name="ck_knowledge_document_references_source_ordinal",
+        ),
+        CheckConstraint(
+            "occurrence_count >= 1",
+            name="ck_knowledge_document_references_occurrence_count",
         ),
         CheckConstraint(
             "target_parent_id IS NULL OR target_document_id IS NOT NULL",
@@ -452,6 +457,9 @@ class KnowledgeDocumentReference(Base):
     target_section: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     reference_type: Mapped[str] = mapped_column(String(20), nullable=False)
     source_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
     )

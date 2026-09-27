@@ -343,6 +343,39 @@ export type KnowledgeGraphReviewList = {
   offset: number
 }
 
+export type KnowledgeLinkGraphNode = {
+  id: string
+  kind: "document" | "unresolved"
+  document_id: string | null
+  label: string
+  filename: string
+  content_type: string | null
+  status: string | null
+  incoming: number
+  outgoing: number
+  degree: number
+}
+
+export type KnowledgeLinkGraphEdge = {
+  id: string
+  source: string
+  target: string
+  target_label: string
+  target_sections: string[]
+  resolved: boolean
+  count: number
+}
+
+export type KnowledgeLinkGraph = {
+  revision: string
+  nodes: KnowledgeLinkGraphNode[]
+  edges: KnowledgeLinkGraphEdge[]
+  document_count: number
+  unresolved_count: number
+  edge_count: number
+  truncated: boolean
+}
+
 export type KnowledgeEvaluationCase = {
   id: string
   workspace_id: string
@@ -1061,6 +1094,18 @@ export function getKnowledgeGraphOverview(
 ) {
   return request<KnowledgeGraphQueryResult>(
     knowledgeGraphPath(workspaceId, knowledgeBaseId, "/overview"),
+    { token, signal }
+  )
+}
+
+export function getKnowledgeLinkGraph(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeLinkGraph>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/links"),
     { token, signal }
   )
 }

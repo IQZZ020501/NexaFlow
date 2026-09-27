@@ -40,7 +40,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/knowledge/lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
 - `backend/app/api/v1/knowledge/retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
 - `backend/app/api/v1/knowledge/evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
-- `backend/app/api/v1/knowledge/graph.py` — 同前缀 `/{kb_id}/graph`：图谱 settings/schema/status/rebuild/entities/overview/path/neighborhood/import/reviews 与 review resolve（对应 Evidence Graph RAG；查询请求的 `graph_mode` 等字段见 `schemas/knowledge`）
+- `backend/app/api/v1/knowledge/graph.py` — 同前缀 `/{kb_id}/graph`：`links` 返回确定性 Markdown 文档链接图（包含未解析目标与重复次数）；settings/schema/status/rebuild/entities/overview/path/neighborhood/import/reviews 与 review resolve 继续对应 Evidence Graph RAG（查询请求的 `graph_mode` 等字段见 `schemas/knowledge`）
 - `backend/app/api/v1/models/routes.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
 - `backend/app/api/v1/tools/sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
 - `backend/app/api/v1/tools/routes.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权

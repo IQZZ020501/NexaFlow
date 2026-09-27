@@ -174,6 +174,7 @@ class KnowledgeDocumentReference:
     target_section: str = ""
     reference_type: str = "text"
     source_ordinal: int = 0
+    occurrence_count: int = 1
     created_at: datetime = field(default_factory=utc_now)
 
 

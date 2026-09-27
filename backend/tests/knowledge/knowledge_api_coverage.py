@@ -2646,11 +2646,35 @@ def test_graph_api_permissions_and_scoping() -> None:
         )
         assert settings_response.status_code == 200, settings_response.text
         assert settings_response.json()["enabled"] is False
+        link_graph = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/links"),
+            headers=auth_headers(alice_token),
+        )
+        assert link_graph.status_code == 200, link_graph.text
+        link_graph_payload = link_graph.json()
+        assert link_graph_payload["document_count"] == len(
+            [node for node in link_graph_payload["nodes"] if node["kind"] == "document"]
+        )
+        assert link_graph_payload["unresolved_count"] == len(
+            [
+                node
+                for node in link_graph_payload["nodes"]
+                if node["kind"] == "unresolved"
+            ]
+        )
+        assert link_graph_payload["edge_count"] == len(link_graph_payload["edges"])
+        assert link_graph_payload["truncated"] is False
+        assert len(link_graph_payload["revision"]) == 64
         denied_settings = client.get(
             settings_url,
             headers=auth_headers(bob_token),
         )
         assert denied_settings.status_code == 403, denied_settings.text
+        denied_link_graph = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/links"),
+            headers=auth_headers(bob_token),
+        )
+        assert denied_link_graph.status_code == 403, denied_link_graph.text
 
         disabled_path = client.post(
             graph_url(workspace_id, knowledge_base_id, "/path"),

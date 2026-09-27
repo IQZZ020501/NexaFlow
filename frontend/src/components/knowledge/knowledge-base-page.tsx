@@ -122,7 +122,7 @@ import { knowledgeBaseDetailPath } from "@/lib/knowledge-views"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
-import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
+import { KnowledgeLinkGraph } from "@/components/knowledge/knowledge-link-graph"
 import {
   ResourceBulkMoveBar,
   toggleResourceSelection,
@@ -1641,7 +1641,7 @@ function KnowledgeBasePageContent({
     icon: React.ElementType
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
-    { key: "graph", label: t("知识关联"), icon: NetworkIcon },
+    { key: "graph", label: t("关系图谱"), icon: NetworkIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
     { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
@@ -3061,13 +3061,11 @@ function KnowledgeBasePageContent({
             ) : null}
 
             {activeDetailTab === "graph" ? (
-              <KnowledgeGraph
+              <KnowledgeLinkGraph
                 key={selectedKnowledgeBase.id}
                 token={token}
                 workspaceId={selectedKnowledgeBase.workspace_id}
                 knowledgeBaseId={selectedKnowledgeBase.id}
-                canEdit={canEditDocuments}
-                notify={notify}
                 reportError={reportError}
               />
             ) : null}
