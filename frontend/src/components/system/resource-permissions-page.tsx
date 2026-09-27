@@ -153,13 +153,18 @@ function rowsForKnowledge(items: KnowledgeBaseListItem[]): ResourceRow[] {
 }
 
 function rowsForTools(items: ToolSummary[], t: TFunction): ResourceRow[] {
-  return items.map((item) => ({
-    id: item.id,
-    name: toolDisplayName(item, t),
-    description: toolDisplayDescription(item, t),
-    status: item.status,
-    ownerId: item.created_by_user_id,
-  }))
+  // The API rejects grant reads and writes for tools the actor cannot manage
+  // (system Python tools and user-created tools owned by someone else), so a
+  // grant table must not list them.
+  return items
+    .filter((item) => item.can_manage)
+    .map((item) => ({
+      id: item.id,
+      name: toolDisplayName(item, t),
+      description: toolDisplayDescription(item, t),
+      status: item.status,
+      ownerId: item.created_by_user_id,
+    }))
 }
 
 function permissionLabel(value: PermissionValue, t: TFunction) {
@@ -175,6 +180,11 @@ export function ResourcePermissionsPage({
 }) {
   const { t } = useLanguage()
   const session = useSession()
+  // The provider rebuilds its context value on every render, so effects and
+  // callbacks must depend on the stable fields they use; depending on the
+  // object itself makes each provider render (including a notification)
+  // refetch every table.
+  const { notify, token } = session
   const router = useRouter()
   const config = PAGE_CONFIG[type]
   const ResourceIcon = config.icon
@@ -249,21 +259,21 @@ export function ResourcePermissionsPage({
     setMembers([])
     setSelectedMemberId(null)
     setPermissionByResource({})
-    if (!session.token || !selectedWorkspace || !canManage) return
+    if (!token || !selectedWorkspace || !canManage) return
     setIsLoading(true)
     setError(null)
     try {
       const [nextResources, nextMembers] = await Promise.all([
         type === "apps"
-          ? listAllAgents(session.token, selectedWorkspace.id).then(rowsForApps)
+          ? listAllAgents(token, selectedWorkspace.id).then(rowsForApps)
           : type === "knowledge"
-            ? listKnowledgeBases(session.token, selectedWorkspace.id, {
+            ? listKnowledgeBases(token, selectedWorkspace.id, {
                 limit: 200,
               }).then(rowsForKnowledge)
-            : listAllTools(session.token, selectedWorkspace.id).then((items) =>
+            : listAllTools(token, selectedWorkspace.id).then((items) =>
                 rowsForTools(items, t)
               ),
-        listAllWorkspaceMembers(session.token, selectedWorkspace.id),
+        listAllWorkspaceMembers(token, selectedWorkspace.id),
       ])
       const activeMembers = nextMembers.filter(
         (member) => member.user.is_active
@@ -286,7 +296,7 @@ export function ResourcePermissionsPage({
     } finally {
       if (requestId === resourcesRequestRef.current) setIsLoading(false)
     }
-  }, [canManage, selectedWorkspace, session.token, t, type])
+  }, [canManage, selectedWorkspace, token, t, type])
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -301,7 +311,7 @@ export function ResourcePermissionsPage({
 
   const loadPermissions = React.useCallback(async () => {
     const requestId = ++permissionsRequestRef.current
-    if (!session.token || !selectedWorkspace || !selectedMember) {
+    if (!token || !selectedWorkspace || !selectedMember) {
       setPermissionByResource({})
       return
     }
@@ -324,18 +334,18 @@ export function ResourcePermissionsPage({
             const permissions =
               type === "apps"
                 ? await listAgentPermissions(
-                    session.token!,
+                    token!,
                     selectedWorkspace.id,
                     resource.id
                   )
                 : type === "knowledge"
                   ? await listKnowledgeBasePermissions(
-                      session.token!,
+                      token!,
                       selectedWorkspace.id,
                       resource.id
                     )
                   : await listAllToolPermissions(
-                      session.token!,
+                      token!,
                       selectedWorkspace.id,
                       resource.id
                     )
@@ -369,21 +379,30 @@ export function ResourcePermissionsPage({
           setResources((current) =>
             current.filter((resource) => !stale.has(resource.id))
           )
-          session.notify("info", t("部分资源已不存在，已从列表移除"))
+          notify("info", t("部分资源已不存在，已从列表移除"))
         }
         setPermissionByResource(Object.fromEntries(entries))
       }
     } catch (cause) {
       if (requestId === permissionsRequestRef.current) {
         setPermissionByResource({})
-        session.notify("error", getErrorMessage(cause, t))
+        notify("error", getErrorMessage(cause, t))
       }
     } finally {
       if (requestId === permissionsRequestRef.current) {
         setIsPermissionsLoading(false)
       }
     }
-  }, [resources, resourcesType, selectedMember, selectedWorkspace, session, t, type])
+  }, [
+    notify,
+    resources,
+    resourcesType,
+    selectedMember,
+    selectedWorkspace,
+    t,
+    token,
+    type,
+  ])
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -403,12 +422,7 @@ export function ResourcePermissionsPage({
     resource: ResourceRow,
     value: PermissionValue
   ) {
-    if (
-      !session.token ||
-      !selectedWorkspace ||
-      !selectedMember ||
-      busyResourceId
-    )
+    if (!token || !selectedWorkspace || !selectedMember || busyResourceId)
       return
     if (
       selectedMember.role === "admin" ||
@@ -421,35 +435,35 @@ export function ResourcePermissionsPage({
       if (value === "none") {
         if (type === "apps")
           await revokeAgentPermission(
-            session.token,
+            token,
             selectedWorkspace.id,
             resource.id,
             selectedMember.user.id
           )
         else if (type === "knowledge")
           await revokeKnowledgeBasePermission(
-            session.token,
+            token,
             selectedWorkspace.id,
             resource.id,
             selectedMember.user.id
           )
         else
           await revokeToolPermission(
-            session.token,
+            token,
             selectedWorkspace.id,
             resource.id,
             selectedMember.user.id
           )
       } else if (type === "apps") {
         await grantAgentPermission(
-          session.token,
+          token,
           selectedWorkspace.id,
           resource.id,
           selectedMember.user.id
         )
       } else if (type === "knowledge") {
         await upsertKnowledgeBasePermission(
-          session.token,
+          token,
           selectedWorkspace.id,
           resource.id,
           selectedMember.user.id,
@@ -457,7 +471,7 @@ export function ResourcePermissionsPage({
         )
       } else {
         await setToolPermission(
-          session.token,
+          token,
           selectedWorkspace.id,
           resource.id,
           selectedMember.user.id,
@@ -468,7 +482,7 @@ export function ResourcePermissionsPage({
         ...current,
         [resource.id]: value,
       }))
-      session.notify("success", t("资源授权已更新"))
+      notify("success", t("资源授权已更新"))
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 404) {
         // The resource was deleted after the list loaded; drop it instead
@@ -476,17 +490,16 @@ export function ResourcePermissionsPage({
         setResources((current) =>
           current.filter((item) => item.id !== resource.id)
         )
-        session.notify("info", t("资源已不存在，已从列表移除"))
+        notify("info", t("资源已不存在，已从列表移除"))
       } else {
-        session.notify("error", getErrorMessage(cause, t))
+        notify("error", getErrorMessage(cause, t))
       }
     } finally {
       setBusyResourceId(null)
     }
   }
 
-  if (!session.me || !session.token || !canManage || !selectedWorkspace)
-    return null
+  if (!session.me || !token || !canManage || !selectedWorkspace) return null
 
   return (
     <div className="w-full min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">

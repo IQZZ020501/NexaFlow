@@ -80,9 +80,10 @@ import {
 } from "@/components/system/pagination-footer"
 import { ResourcePermissionNavGroup } from "@/components/system/resource-permissions-page"
 import { EnterpriseIdentityPage } from "@/components/system/enterprise-identity-page"
-import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
+import { SystemLogList } from "@/components/system/system-log-list"
 
-export type SystemGovernanceSection = "operations" | "governance" | "security" | "email" | "identity"
+export type SystemGovernanceSection =
+  "operations" | "governance" | "security" | "email" | "identity"
 
 type Props = {
   section: SystemGovernanceSection
@@ -270,12 +271,14 @@ function useGovernanceContext() {
     (session.selectedWorkspaceId && manageableWorkspaces.some((item) => item.id === session.selectedWorkspaceId)
       ? session.selectedWorkspaceId
       : manageableWorkspaces[0]?.id) ?? ""
-  const selectedWorkspace = manageableWorkspaces.find((item) => item.id === selectedWorkspaceId) ?? null
+  const selectedWorkspace =
+    manageableWorkspaces.find((item) => item.id === selectedWorkspaceId) ?? null
+  const notify = session.notify
   const reportError = React.useCallback(
     (error: unknown) => {
-      session.notify("error", getErrorMessage(error, t))
+      notify("error", getErrorMessage(error, t))
     },
-    [session, t]
+    [notify, t]
   )
   return {
     session,
@@ -303,7 +306,6 @@ const healthComponents = [
 function OperationsPanel() {
   const { t, language } = useLanguage()
   const { session, reportError } = useGovernanceContext()
-  const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
   const [health, setHealth] = React.useState<AdminHealth | null>(null)
   const [logs, setLogs] = React.useState<SystemLog[]>([])
   const [level, setLevel] = React.useState("")
@@ -506,26 +508,7 @@ function OperationsPanel() {
         <CardContent>
           {loading ? <LoaderCircleIcon className="mx-auto my-10 animate-spin" /> : logs.length ? (
             <div className="grid gap-2">
-              {isPhoneListLayout ? (
-                <ul className="flex flex-col gap-2">
-                {logs.map((log) => <li key={log.id} className="rounded-xl border bg-background p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Badge variant={log.level === "error" || log.level === "critical" ? "destructive" : "outline"}>{systemLogLevelLabel(log.level, t)}</Badge>
-                    <span className="text-xs text-muted-foreground">{formatDateTime(log.created_at, languageLocales[language])}</span>
-                  </div>
-                  <p className="mt-2 min-w-0 break-words font-medium">{systemLogEventLabel(log.event, t)}</p>
-                  <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">{log.message || systemLogEventLabel(log.event, t)}</p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{t("状态码")}</span>
-                    <span className="text-xs font-medium tabular-nums">{log.status_code ?? "—"}</span>
-                  </div>
-                </li>)}
-                </ul>
-              ) : null}
-              <div className="hidden overflow-auto rounded-lg border md:block"><div className="min-w-[900px] text-sm">
-                <div className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] gap-x-6 border-b bg-muted/40 px-3 py-2 font-medium"><span>{t("时间")}</span><span>{t("级别")}</span><span>{t("事件")}</span><span>{t("消息")}</span><span>{t("状态")}</span></div>
-                {logs.map((log) => <div key={log.id} className="grid grid-cols-[170px_90px_220px_minmax(0,1fr)_80px] items-center gap-x-6 border-b px-3 py-3 last:border-b-0"><span className="text-muted-foreground">{formatDateTime(log.created_at, languageLocales[language])}</span><span><Badge variant={log.level === "error" || log.level === "critical" ? "destructive" : "outline"}>{systemLogLevelLabel(log.level, t)}</Badge></span><span className="truncate" title={systemLogEventLabel(log.event, t)}>{systemLogEventLabel(log.event, t)}</span><span className="min-w-0 truncate text-muted-foreground" title={log.message || systemLogEventLabel(log.event, t)}>{log.message || systemLogEventLabel(log.event, t)}</span><span>{log.status_code ?? "—"}</span></div>)}
-              </div></div>
+              <SystemLogList logs={logs} />
             </div>
           ) : <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{t("暂无运行日志")}</div>}
           <SystemPagination

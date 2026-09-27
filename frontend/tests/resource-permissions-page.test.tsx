@@ -381,7 +381,9 @@ test("apps tab grants and revokes agent permissions", async () => {
   })
 
   renderPage(<ResourcePermissionsPage type="apps" />)
-  const row = (await screen.findByText("Agent One")).closest("div.grid")! as HTMLElement
+  const row = (await screen.findByText("Agent One")).closest(
+    "div.grid"
+  )! as HTMLElement
   const radios = within(row).getAllByRole("radio")
   expect(radios).toHaveLength(3)
   // Apps never expose a manage level.
@@ -394,9 +396,9 @@ test("apps tab grants and revokes agent permissions", async () => {
     )
   )
   await waitFor(() =>
-    expect((within(row).getAllByRole("radio")[1] as HTMLInputElement).checked).toBe(
-      true
-    )
+    expect(
+      (within(row).getAllByRole("radio")[1] as HTMLInputElement).checked
+    ).toBe(true)
   )
 
   fireEvent.click(within(row).getAllByRole("radio")[0])
@@ -422,6 +424,7 @@ test("tools tab maps tool rows and updates use-level permissions", async () => {
           description: "A tool",
           status: "active",
           created_by_user_id: "owner-1",
+          can_manage: true,
         },
       ])
     }
@@ -441,13 +444,57 @@ test("tools tab maps tool rows and updates use-level permissions", async () => {
   })
 
   renderPage(<ResourcePermissionsPage type="tools" />)
-  const row = (await screen.findByText("Tool One")).closest("div.grid")! as HTMLElement
+  const row = (await screen.findByText("Tool One")).closest(
+    "div.grid"
+  )! as HTMLElement
   fireEvent.click(within(row).getAllByRole("radio")[2])
   await waitFor(() =>
     expect(calls).toContain(
       "PUT /api/v1/workspaces/ws-1/tools/tool-1/permissions/u-1"
     )
   )
+})
+
+test("tools tab hides tools whose grants the actor cannot manage", async () => {
+  session.selectedWorkspaceId = "ws-1"
+  const requested: string[] = []
+  const member = { user: session.me.user, role: "member" }
+
+  withFetch((url) => {
+    const parsed = new URL(url, "http://localhost")
+    requested.push(parsed.pathname)
+    if (parsed.pathname === "/api/v1/workspaces/ws-1/tools") {
+      return jsonResponse([
+        {
+          id: "tool-1",
+          display_name: "Tool One",
+          description: "A tool",
+          status: "active",
+          created_by_user_id: "owner-1",
+          can_manage: true,
+        },
+        {
+          id: "tool-system",
+          display_name: "Current time",
+          description: "System tool",
+          status: "active",
+          created_by_user_id: null,
+          can_manage: false,
+        },
+      ])
+    }
+    if (parsed.pathname.endsWith("/members")) return jsonResponse([member])
+    if (parsed.pathname.endsWith("/permissions")) return jsonResponse([])
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  renderPage(<ResourcePermissionsPage type="tools" />)
+
+  expect(await screen.findByText("Tool One")).toBeTruthy()
+  expect(screen.queryByText("Current time")).toBeNull()
+  expect(
+    requested.some((path) => path.includes("/tools/tool-system/permissions"))
+  ).toBe(false)
 })
 
 test("knowledge tab sends edit for the manage level and drops 404 rows on update", async () => {
@@ -495,7 +542,9 @@ test("knowledge tab sends edit for the manage level and drops 404 rows on update
   })
 
   renderPage(<ResourcePermissionsPage type="knowledge" />)
-  const row = (await screen.findByText("Knowledge One")).closest("div.grid")! as HTMLElement
+  const row = (await screen.findByText("Knowledge One")).closest(
+    "div.grid"
+  )! as HTMLElement
   fireEvent.click(within(row).getAllByRole("radio")[2])
   await waitFor(() =>
     expect(requests).toContain(
@@ -552,7 +601,9 @@ test("update failures and list failures surface error notifications", async () =
   })
 
   renderPage(<ResourcePermissionsPage type="knowledge" />)
-  const row = (await screen.findByText("Knowledge One")).closest("div.grid")! as HTMLElement
+  const row = (await screen.findByText("Knowledge One")).closest(
+    "div.grid"
+  )! as HTMLElement
   fireEvent.click(within(row).getAllByRole("radio")[2])
   await waitFor(() =>
     expect(notifications.some((item) => item.kind === "error")).toBe(true)
@@ -590,7 +641,9 @@ test("owner rows are locked and empty member lists render a hint", async () => {
   })
 
   renderPage(<ResourcePermissionsPage type="knowledge" />)
-  const row = (await screen.findByText("Owned Knowledge")).closest("div.grid")! as HTMLElement
+  const row = (await screen.findByText("Owned Knowledge")).closest(
+    "div.grid"
+  )! as HTMLElement
   const radios = within(row).getAllByRole("radio")
   for (const radio of radios) {
     expect((radio as HTMLInputElement).disabled).toBe(true)
