@@ -1294,6 +1294,70 @@ describe("KnowledgeBasePage documents tab", () => {
     ).toBeTruthy()
   })
 
+  test("shows rebuild progress from zero and keeps polling on the documents tab", async () => {
+    const documents = Array.from({ length: 7 }, (_, index) =>
+      makeDocument({ id: `doc-${index + 1}`, filename: `doc-${index + 1}.md` })
+    )
+    let rebuildQueued = false
+    let taskFetches = 0
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "POST" && url.includes("/rebuild-index")) {
+        rebuildQueued = true
+        return jsonResponse(
+          makeTask({
+            id: "task-rebuild",
+            document_id: null,
+            task_type: "rebuild_index",
+            status: "queued",
+            total_items: 28,
+            processed_items: 0,
+          })
+        )
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse(documents)
+      if (url.includes("/tasks")) {
+        if (!rebuildQueued) return jsonResponse([])
+        taskFetches += 1
+        return jsonResponse([
+          makeTask({
+            id: "task-rebuild",
+            document_id: null,
+            task_type: "rebuild_index",
+            status: "running",
+            total_items: 28,
+            processed_items: taskFetches === 1 ? 0 : 7,
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    const progress = await screen.findByRole("progressbar", { name: "进度" })
+    expect(progress.getAttribute("aria-valuenow")).toBe("100")
+    fireEvent.click(screen.getByText("重建索引"))
+
+    await waitFor(() => expect(taskFetches).toBe(1))
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "0"
+    )
+    expect(screen.getByText("0 / 28")).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "已向量化" })).getByText("0")
+    ).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "向量化中" })).getByText("7")
+    ).toBeTruthy()
+    await waitFor(() => expect(screen.getByText("7 / 28")).toBeTruthy(), {
+      timeout: 4000,
+    })
+  })
+
   test("shows empty state when there are no documents", async () => {
     renderDetailPage({ documents: [] })
     await waitFor(() => {

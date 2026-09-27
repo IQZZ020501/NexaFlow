@@ -551,6 +551,12 @@ function KnowledgeBasePageContent({
   const selectedKnowledgeBase =
     knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId) ?? null
   const canEditDocuments = selectedKnowledgeBase?.permission === "edit"
+  const activeRebuildIndexTask = knowledgeTasks.find(
+    (task) =>
+      task.knowledge_base_id === selectedKnowledgeBaseId &&
+      task.task_type === "rebuild_index" &&
+      PROCESSING_TASK_STATUSES[task.status]
+  )
   const selectedEmbeddingModel =
     registeredModels.find(
       (model) => model.id === selectedKnowledgeBase?.embedding_model_id
@@ -633,7 +639,9 @@ function KnowledgeBasePageContent({
     const summary = { indexed: 0, indexing: 0, pending: 0, failed: 0 }
 
     for (const document of documents) {
-      if (document.status === "indexed") {
+      if (document.status === "indexed" && activeRebuildIndexTask) {
+        summary.indexing += 1
+      } else if (document.status === "indexed") {
         summary.indexed += 1
       } else if (
         document.status === "index_queued" ||
@@ -648,10 +656,21 @@ function KnowledgeBasePageContent({
     }
 
     return summary
-  }, [documents])
-  const documentIndexProgress = documents.length
-    ? Math.round((documentIndexSummary.indexed / documents.length) * 100)
+  }, [activeRebuildIndexTask, documents])
+  const documentIndexProgressCompleted = activeRebuildIndexTask
+    ? activeRebuildIndexTask.processed_items
+    : documentIndexSummary.indexed
+  const documentIndexProgressTotal = activeRebuildIndexTask
+    ? activeRebuildIndexTask.total_items
+    : documents.length
+  const documentIndexProgress = documentIndexProgressTotal
+    ? Math.round(
+        (documentIndexProgressCompleted / documentIndexProgressTotal) * 100
+      )
     : 0
+  const documentIndexProgressLabel = activeRebuildIndexTask
+    ? t("重建索引")
+    : t("进度")
   const visibleDocuments = paginateDocuments(
     filteredDocuments,
     documentPage,
@@ -901,7 +920,9 @@ function KnowledgeBasePageContent({
   const hasProcessingTasks = knowledgeTasks.some(
     (task) => PROCESSING_TASK_STATUSES[task.status]
   )
-  const shouldPollTasks = activeDetailTab === "tasks" && hasProcessingTasks
+  const shouldPollTasks =
+    (activeDetailTab === "tasks" && hasProcessingTasks) ||
+    activeRebuildIndexTask !== undefined
 
   React.useEffect(() => {
     if (!hasProcessingDocuments && !shouldPollTasks) {
@@ -1349,11 +1370,15 @@ function KnowledgeBasePageContent({
 
     setIsSubmittingDocumentTask(true)
     try {
-      await rebuildKnowledgeIndex(
+      const task = await rebuildKnowledgeIndex(
         token,
         selectedWorkspaceId,
         selectedKnowledgeBase.id
       )
+      setKnowledgeTasks((current) => [
+        task,
+        ...current.filter((item) => item.id !== task.id),
+      ])
       await loadKnowledgeTasks()
       notify("success", t("已提交重建索引任务"))
     } catch (error) {
@@ -1828,9 +1853,10 @@ function KnowledgeBasePageContent({
                     <div>
                       <div className="flex items-baseline justify-between gap-4">
                         <p className="text-sm font-medium">
-                          {t("进度")}
+                          {documentIndexProgressLabel}
                           <span className="ml-2 font-normal text-muted-foreground tabular-nums">
-                            {documentIndexSummary.indexed} / {documents.length}
+                            {documentIndexProgressCompleted} /{" "}
+                            {documentIndexProgressTotal}
                           </span>
                         </p>
                         <span className="text-sm font-semibold text-emerald-700 tabular-nums dark:text-emerald-400">
@@ -1839,7 +1865,7 @@ function KnowledgeBasePageContent({
                       </div>
                       <div
                         role="progressbar"
-                        aria-label={t("进度")}
+                        aria-label={documentIndexProgressLabel}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={documentIndexProgress}
