@@ -136,6 +136,36 @@ const logs: SystemLog[] = [
     stack_trace: null,
     created_at: "2026-08-20T11:00:00Z",
   },
+  {
+    id: "log-3",
+    level: "info",
+    event: "request.completed",
+    message: "after local midnight",
+    path: null,
+    method: null,
+    status_code: 200,
+    user_id: null,
+    username: null,
+    ip_address: null,
+    details: {},
+    stack_trace: null,
+    created_at: "2026-08-19T16:30:00Z",
+  },
+  {
+    id: "log-4",
+    level: "info",
+    event: "request.completed",
+    message: "before local midnight",
+    path: null,
+    method: null,
+    status_code: 200,
+    user_id: null,
+    username: null,
+    ip_address: null,
+    details: {},
+    stack_trace: null,
+    created_at: "2026-08-19T15:59:59Z",
+  },
 ]
 
 const sessions = [
@@ -497,11 +527,15 @@ describe("workspace governance settings", () => {
     withFetch((url, init) => {
       if (url.endsWith("/inventory")) return jsonResponse(inventory)
       if (url.endsWith("/governance")) return jsonResponse(governance)
-      if (url.endsWith("/invitations/inv-2/permanent") && init?.method === "DELETE") {
+      if (
+        url.endsWith("/invitations/inv-2/permanent") &&
+        init?.method === "DELETE"
+      ) {
         deleted += 1
         return new Response(null, { status: 204 })
       }
-      if (url.endsWith("/invitations")) return jsonResponse([completedInvitation])
+      if (url.endsWith("/invitations"))
+        return jsonResponse([completedInvitation])
       throw new Error(`Unexpected request: ${url}`)
     })
 
@@ -625,7 +659,9 @@ describe("system operation logs", () => {
       throw new Error(`Unexpected request: ${url}`)
     })
 
-    renderPage(<SystemGovernancePage section="operations" />)
+    const { container } = renderPage(
+      <SystemGovernancePage section="operations" />
+    )
 
     await waitFor(() =>
       expect(screen.getByText("lookup timed out")).toBeTruthy()
@@ -636,6 +672,13 @@ describe("system operation logs", () => {
     expect(screen.getByText("500")).toBeTruthy()
     expect(screen.getByText("—")).toBeTruthy()
     expect(screen.queryByText("暂无运行日志")).toBeNull()
+    expect(
+      Array.from(container.querySelectorAll("[data-system-log-date]")).map(
+        (element) => element.getAttribute("datetime")
+      )
+    ).toEqual(["2026-08-20", "2026-08-19"])
+    expect(screen.getByText("00:30:00")).toBeTruthy()
+    expect(screen.getByText("23:59:59")).toBeTruthy()
 
     const eventSelect = screen.getByRole("button", { name: "筛选事件" })
     fireEvent.pointerDown(eventSelect)
@@ -775,9 +818,7 @@ describe("session security panel", () => {
     const userSelect = screen.getByRole("button", { name: "选择用户" })
     fireEvent.pointerDown(userSelect)
     fireEvent.click(userSelect)
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "other" })
-    )
+    fireEvent.click(await screen.findByRole("menuitem", { name: "other" }))
 
     await waitFor(() => expect(screen.getByText("Safari/17")).toBeTruthy())
 
@@ -807,7 +848,10 @@ describe("session security panel", () => {
       ).toBe(true)
     )
     await waitFor(() =>
-      expect(notifications).toContainEqual(["success", "该用户的全部会话已撤销"])
+      expect(notifications).toContainEqual([
+        "success",
+        "该用户的全部会话已撤销",
+      ])
     )
 
     const refreshButton = screen.getByRole("button", { name: "刷新" })

@@ -3,7 +3,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { act, renderHook } from "@testing-library/react"
 
 import { AuditPanel } from "@/components/system/panels/audit-panel"
-import type { AuditLog } from "@/lib/api/system"
+import { SystemLogList } from "@/components/system/system-log-list"
+import type { AuditLog, SystemLog } from "@/lib/api/system"
 import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 import { renderPage, screen } from "./helpers/dom"
 
@@ -64,6 +65,24 @@ const auditLog: AuditLog = {
   created_at: "2026-08-19T00:00:00Z",
 }
 
+function systemLog(id: string, createdAt: string): SystemLog {
+  return {
+    id,
+    level: "info",
+    event: "request.completed",
+    message: id,
+    path: null,
+    method: null,
+    status_code: 200,
+    user_id: null,
+    username: null,
+    ip_address: null,
+    details: {},
+    stack_trace: null,
+    created_at: createdAt,
+  }
+}
+
 describe("useMediaQuery", () => {
   let stub: ReturnType<typeof stubMatchMedia> | null = null
 
@@ -104,7 +123,11 @@ describe("phone list layout", () => {
     stub = stubMatchMedia((query) => query === PHONE_LIST_QUERY)
 
     renderPage(
-      <AuditPanel auditLogs={[auditLog]} isAuditLoading={false} locale="en-US" />
+      <AuditPanel
+        auditLogs={[auditLog]}
+        isAuditLoading={false}
+        locale="en-US"
+      />
     )
 
     const cards = screen.getAllByRole("listitem")
@@ -116,10 +139,36 @@ describe("phone list layout", () => {
     stub = stubMatchMedia(() => false)
 
     renderPage(
-      <AuditPanel auditLogs={[auditLog]} isAuditLoading={false} locale="en-US" />
+      <AuditPanel
+        auditLogs={[auditLog]}
+        isAuditLoading={false}
+        locale="en-US"
+      />
     )
 
     expect(screen.queryAllByRole("listitem")).toHaveLength(0)
     expect(screen.getByRole("table", { name: "审计日志" })).toBeTruthy()
+  })
+
+  test("groups system logs by the application-local date on phones", () => {
+    stub = stubMatchMedia((query) => query === PHONE_LIST_QUERY)
+
+    const { container } = renderPage(
+      <SystemLogList
+        logs={[
+          systemLog("after-midnight", "2026-08-19T16:30:00Z"),
+          systemLog("before-midnight", "2026-08-19T15:59:59Z"),
+        ]}
+      />
+    )
+
+    expect(
+      Array.from(container.querySelectorAll("[data-system-log-date]")).map(
+        (element) => element.getAttribute("datetime")
+      )
+    ).toEqual(["2026-08-20", "2026-08-19"])
+    expect(screen.getAllByRole("listitem")).toHaveLength(2)
+    expect(screen.getByText("00:30:00")).toBeTruthy()
+    expect(screen.getByText("23:59:59")).toBeTruthy()
   })
 })

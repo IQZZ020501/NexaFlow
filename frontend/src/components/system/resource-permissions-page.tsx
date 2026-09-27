@@ -47,10 +47,7 @@ import {
   setToolPermission,
   type ToolSummary,
 } from "@/lib/api/tools"
-import {
-  listAllWorkspaceMembers,
-  type WorkspaceMember,
-} from "@/lib/api/system"
+import { listAllWorkspaceMembers, type WorkspaceMember } from "@/lib/api/system"
 import { displayWorkspaceName, getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { ApiError } from "@/lib/api-client"
@@ -363,7 +360,7 @@ export function ResourcePermissionsPage({
                     : "view"
             entries.push([resource.id, value] as const)
           } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 404) {
+            if (cause instanceof ApiError && cause.status === 404) {
               // The resource was deleted after the list loaded; drop it
               // instead of failing the whole permission table.
               staleIds.push(resource.id)
@@ -612,7 +609,7 @@ export function ResourcePermissionsPage({
                   return (
                     <div
                       key={resource.id}
-                      className="grid items-center gap-4 px-5 py-4 max-md:mx-3 max-md:mt-3 max-md:rounded-xl max-md:border max-md:bg-background max-md:p-3 max-md:last:mb-3 md:border-b md:last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(250px,0.8fr)]"
+                      className="grid items-center gap-4 px-5 py-4 max-md:mx-3 max-md:mt-3 max-md:rounded-xl max-md:border max-md:bg-background max-md:p-3 max-md:last:mb-3 md:grid-cols-[minmax(0,1fr)_minmax(250px,0.8fr)] md:border-b md:last:border-b-0"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">
