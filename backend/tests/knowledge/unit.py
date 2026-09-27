@@ -18,7 +18,6 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
-import json
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -1279,19 +1278,6 @@ def test_evidence_windows_mark_truncation_and_preserve_article_boundary() -> Non
     assert ids == ["chunk-1"]
     assert joined.endswith("[… evidence truncated …]")
 
-
-    from app.application.agents.tools.builder import bounded_knowledge_context
-
-    context = bounded_knowledge_context(
-        {
-            "query": "q",
-            "hits": [{"chunk_id": "chunk-1", "content": "x" * 500}],
-            "evidence_status": "found",
-        },
-        max_chars=180,
-    )
-    assert len(context) <= 180
-    assert json.loads(context)["context_truncated"] is True
 
 def test_docx_images_without_alt_text_do_not_add_placeholder_content() -> None:
     from io import BytesIO

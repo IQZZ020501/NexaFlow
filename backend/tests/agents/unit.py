@@ -2211,11 +2211,10 @@ def test_agent_usage_normalizes_provider_metadata() -> None:
     assert compacted["compaction"]["total_tokens"] == 13
 
 
-def test_knowledge_context_is_compact_for_repeated_model_turns() -> None:
+def test_knowledge_tool_message_keeps_every_selected_hit() -> None:
     from app.application.agents.tools.builder import (
-        MAX_KNOWLEDGE_CONTEXT_CHARS,
         MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS,
-        bounded_knowledge_context,
+        knowledge_tool_message,
     )
 
     payload = {
@@ -2235,16 +2234,22 @@ def test_knowledge_context_is_compact_for_repeated_model_turns() -> None:
                 "trace_id": "trace-id",
                 "graph_claim_ids": [f"claim-{index}" for index in range(400)],
                 "sources": ["keywords", "vector"],
-            }
+            },
+            {
+                "knowledge_base": "Pricing",
+                "document": "pricing.md",
+                "chunk_id": "chunk-2",
+                "content": "| 个人专业版 | 年付199元/人 |",
+            },
         ],
     }
 
-    context = bounded_knowledge_context(payload)
-    assert len(context) <= MAX_KNOWLEDGE_CONTEXT_CHARS
-    compact = json.loads(context)
+    compact = json.loads(knowledge_tool_message(payload))
+    assert [hit["chunk_id"] for hit in compact["hits"]] == ["chunk-1", "chunk-2"]
     hit = compact["hits"][0]
     assert len(hit["content"]) <= MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS
     assert hit["content_truncated"] is True
+    assert compact["hits"][1]["content"] == "| 个人专业版 | 年付199元/人 |"
     assert "distance" not in hit
     assert "similarity" not in hit
     assert "trace_id" not in hit
@@ -2883,7 +2888,7 @@ def main() -> None:
     test_edit_regeneration_rejects_a_non_latest_run()
     test_repeated_run_feedback_write_is_idempotent()
     test_agent_usage_normalizes_provider_metadata()
-    test_knowledge_context_is_compact_for_repeated_model_turns()
+    test_knowledge_tool_message_keeps_every_selected_hit()
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()

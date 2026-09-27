@@ -2235,6 +2235,53 @@ async def assert_knowledge_tool_paths(
         selected = await select_tool.ainvoke({"query": "release", "limit": 2})
         assert len(selected.output["hits"]) == 2
         assert selected.output["evidence_status"] == "found"
+
+        # Several bound sources: hits are drawn in turn, so a source that does
+        # not hold the answer cannot evict the one that does.
+        multi_tool = build_knowledge_search_tool(
+            [base, rerank_base],
+            workspace_id,
+            actor,
+            "admin",
+            settings,
+        )
+        multi = await multi_tool.ainvoke({"query": "release", "limit": 3})
+        assert [hit["chunk_id"] for hit in multi.output["hits"]] == [
+            f"chunk-{knowledge_base_id}-0",
+            f"chunk-{rerank_kb_id}-0",
+            f"chunk-{knowledge_base_id}-1",
+        ]
+        assert [hit["knowledge_base"] for hit in multi.output["hits"]] == [
+            "Runtime Docs",
+            "Reranked Docs",
+            "Runtime Docs",
+        ]
+
+        # `knowledge_base` narrows one call to a single configured source,
+        # by name or by id; unknown names list the available sources.
+        scoped = await multi_tool.ainvoke(
+            {"query": "release", "limit": 2, "knowledge_base": "Reranked Docs"}
+        )
+        assert [
+            entry["knowledge_base_name"] for entry in scoped.output["retrieval_stats"]
+        ] == ["Reranked Docs"]
+        assert [hit["chunk_id"] for hit in scoped.output["hits"]] == [
+            f"chunk-{rerank_kb_id}-0",
+            f"chunk-{rerank_kb_id}-1",
+        ]
+        by_id = await multi_tool.ainvoke(
+            {"query": "release", "limit": 1, "knowledge_base": knowledge_base_id}
+        )
+        assert [
+            entry["knowledge_base_name"] for entry in by_id.output["retrieval_stats"]
+        ] == ["Runtime Docs"]
+        unknown_source = await multi_tool.ainvoke(
+            {"query": "release", "limit": 1, "knowledge_base": "Absent Docs"}
+        )
+        assert unknown_source.is_error
+        assert unknown_source.summary == "Unknown knowledge source."
+        assert "Runtime Docs" in unknown_source.content
+        assert "Reranked Docs" in unknown_source.content
     finally:
         agent_tools.retrieve_knowledge_base = original_retrieve
         agent_tools.KnowledgeSearchInput = original_input

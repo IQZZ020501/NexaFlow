@@ -1328,36 +1328,35 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         ]
         * 4,
     }
-    bounded = agent_tools.bounded_knowledge_output(
+    bounded = agent_tools.knowledge_tool_output(
         {"graph": oversized_graph, "hits": result.output["hits"]},
-        max_chars=100_000,
     )
     assert len(bounded["graph"]["paths"]) == 3
     assert len(bounded["graph"]["paths"][0]["steps"]) == 8
     assert len(bounded["graph"]["paths"][0]["nodes"]) == 9
     atomic_hit = {"chunk_id": "atomic", "content": "complete evidence"}
-    expected = {
-        "graph": {
-            "revision_id": "revision-applied",
-            "operation": "path",
-            "paths": [],
-            "truncated": True,
-        },
-        "hits": [atomic_hit],
-        "context_truncated": True,
-    }
-    bounded = agent_tools.bounded_knowledge_output(
+    graph_path = {"nodes": [{"profile": "x" * 2_000}], "steps": []}
+    normalized = agent_tools.knowledge_tool_output(
         {
             "graph": {
-                **expected["graph"],
+                "revision_id": "revision-applied",
+                "operation": "path",
+                "paths": [graph_path],
                 "truncated": False,
-                "paths": [{"nodes": [{"profile": "x" * 2_000}], "steps": []}],
             },
             "hits": [atomic_hit],
         },
-        max_chars=len(json.dumps(expected, ensure_ascii=False)),
     )
-    assert bounded == expected
+    assert normalized == {
+        "graph": {
+            "revision_id": "revision-applied",
+            "operation": "path",
+            "paths": [graph_path],
+            "truncated": False,
+        },
+        "hits": [atomic_hit],
+        "context_truncated": False,
+    }
 
 
 def assert_tool_routing_context_is_explicit() -> None:
