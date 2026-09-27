@@ -59,6 +59,28 @@ test("keeps the workspace card aligned with the resource card", async () => {
   expect(card?.className).not.toContain("lg:top-20")
 })
 
+test("owns desktop scrolling inside the system content pane", async () => {
+  session.selectedWorkspaceId = "ws-1"
+  const member = { user: session.me.user, role: "admin" }
+
+  withFetch((url) => {
+    const parsed = new URL(url, "http://localhost")
+    if (parsed.pathname === "/api/v1/workspaces/ws-1/tools") {
+      return jsonResponse([])
+    }
+    if (parsed.pathname.endsWith("/members")) return jsonResponse([member])
+    throw new Error(`Unexpected request: ${url}`)
+  })
+
+  renderPage(<ResourcePermissionsPage type="tools" />)
+
+  const scrollRegion = (await screen.findByText("工具")).closest("div.w-full")
+  expect(scrollRegion).toBeTruthy()
+  expect(scrollRegion?.className).toContain("lg:h-full")
+  expect(scrollRegion?.className).toContain("lg:min-h-0")
+  expect(scrollRegion?.className).toContain("lg:overflow-y-auto")
+})
+
 test("keeps the permission cards mounted while data loads", async () => {
   session.selectedWorkspaceId = "ws-1"
   let resolveResources: ((response: Response) => void) | null = null

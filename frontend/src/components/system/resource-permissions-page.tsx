@@ -489,7 +489,7 @@ export function ResourcePermissionsPage({
     return null
 
   return (
-    <div className="w-full min-w-0">
+    <div className="w-full min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
       {error ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-destructive">
