@@ -936,10 +936,14 @@ export const en = {
   生图模型已添加: "Image generation model added",
   图片生成: "Generate image",
   暂无可用的图片生成工具: "Image generation is unavailable",
-  "使用工作空间的生图模型生成图片；每次调用需要确认。":
-    "Generate an image with the workspace image model; each call requires approval.",
-  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。":
-    "Saving an image model does not make a paid test call. The connection is checked on the first Agent call. Keep exactly one image model active in this workspace.",
+  "使用 Agent 选定的生图模型生成图片；每次调用需要确认。":
+    "Generate an image with the image model selected for this Agent; each call requires approval.",
+  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。Agent 未指定生图模型时，工作空间需要保持恰好一个启用的生图模型。":
+    "Saving an image model does not make a paid test call. The connection is checked on the first Agent call. While an Agent selects no image model, keep exactly one image model active in this workspace.",
+  选择生图模型: "Select an image model",
+  "图片生成工具使用的生图模型。": "Image model used by the image tool.",
+  "工作空间暂无启用的生图模型，请先在模型页添加。":
+    "No active image model in this workspace. Add one on the Models page first.",
   失败: "Failed",
   "已上传 {value} 个文件": "Uploaded {value} files",
   "已上传 {value} 个文件，{value} 个上传失败":

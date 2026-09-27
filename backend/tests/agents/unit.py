@@ -2257,6 +2257,72 @@ def test_knowledge_tool_message_keeps_every_selected_hit() -> None:
     assert compact["context_truncated"] is True
 
 
+def test_agent_image_model_selection_is_frozen_and_validated() -> None:
+    from app.application.agents.tools.runtime import frozen_agent_image_model_id
+    from app.domain.agents.access.publications import build_agent_configuration_snapshot
+    from app.domain.agents.service import get_agent_image_model
+
+    agent = Agent(id="agent-1", workspace_id="workspace-1", model_id="model-1")
+    assert "image_model_id" not in build_agent_configuration_snapshot(agent)
+    agent.image_model_id = "image-model-1"
+    assert (
+        build_agent_configuration_snapshot(agent)["image_model_id"] == "image-model-1"
+    )
+
+    frozen_run = SimpleNamespace(
+        application_snapshot={"configuration": {"image_model_id": "image-model-1"}}
+    )
+    assert frozen_agent_image_model_id(frozen_run) == "image-model-1"
+    for snapshot in (
+        {},
+        {"configuration": {}},
+        {"configuration": {"image_model_id": ""}},
+        {"configuration": "invalid"},
+    ):
+        assert (
+            frozen_agent_image_model_id(SimpleNamespace(application_snapshot=snapshot))
+            is None
+        )
+
+    valid = SimpleNamespace(
+        id="image-model-1",
+        workspace_id="workspace-1",
+        model_type="IMAGE",
+        status="active",
+    )
+    for model, fragment in (
+        (None, "not found"),
+        (SimpleNamespace(**{**vars(valid), "workspace_id": "workspace-2"}), "not found"),
+        (SimpleNamespace(**{**vars(valid), "model_type": "LLM"}), "must be an image model"),
+        (SimpleNamespace(**{**vars(valid), "status": "disabled"}), "is disabled"),
+    ):
+        with patch(
+            "app.domain.agents.service.model_repository.get_registered_model_by_id",
+            new=AsyncMock(return_value=model),
+        ):
+            try:
+                asyncio.run(
+                    get_agent_image_model(
+                        SimpleNamespace(),
+                        "workspace-1",
+                        "image-model-1",
+                    )
+                )
+            except HTTPException as exc:
+                assert fragment in exc.detail
+            else:
+                raise AssertionError("Invalid Agent image model was accepted.")
+
+    with patch(
+        "app.domain.agents.service.model_repository.get_registered_model_by_id",
+        new=AsyncMock(return_value=valid),
+    ):
+        resolved = asyncio.run(
+            get_agent_image_model(SimpleNamespace(), "workspace-1", "image-model-1")
+        )
+    assert resolved.id == "image-model-1"
+
+
 def test_agent_memory_compacts_old_turns() -> None:
     from langchain_core.messages import AIMessage
 
@@ -2889,6 +2955,7 @@ def main() -> None:
     test_repeated_run_feedback_write_is_idempotent()
     test_agent_usage_normalizes_provider_metadata()
     test_knowledge_tool_message_keeps_every_selected_hit()
+    test_agent_image_model_selection_is_frozen_and_validated()
     test_agent_memory_compacts_old_turns()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()

@@ -260,7 +260,7 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
     return t("创建 Excel 工作簿。")
   }
   if (tool.function_name === "generate_image") {
-    return t("使用工作空间的生图模型生成图片；每次调用需要确认。")
+    return t("使用 Agent 选定的生图模型生成图片；每次调用需要确认。")
   }
   return tool.description
 }

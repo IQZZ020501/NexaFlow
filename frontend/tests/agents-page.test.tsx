@@ -47,7 +47,8 @@ function model(
   id: string,
   name: string,
   modelName: string,
-  status = "active"
+  status = "active",
+  modelType = "LLM"
 ): RegisteredModel {
   return {
     id,
@@ -55,7 +56,7 @@ function model(
     name,
     provider: "deepseek",
     provider_type: "openai",
-    model_type: "LLM",
+    model_type: modelType,
     model_name: modelName,
     status,
     credential: {},
@@ -453,7 +454,10 @@ function resetNav() {
 
 function baseRoutes(
   agents: Agent[] = [makeAgent()],
-  tools: ToolSummary[] = []
+  tools: ToolSummary[] = [],
+  models: RegisteredModel[] = [
+    model("model-1", "DeepSeek Chat", "deepseek-chat"),
+  ]
 ) {
   return [
     {
@@ -466,8 +470,7 @@ function baseRoutes(
       method: "GET",
       pathname: `/api/v1/workspaces/${WS}/models`,
       exact: true,
-      respond: () =>
-        jsonResponse([model("model-1", "DeepSeek Chat", "deepseek-chat")]),
+      respond: () => jsonResponse(models),
     },
     {
       method: "GET",
@@ -519,6 +522,7 @@ async function renderDetail(
     hasLegacyView?: boolean
     agents?: Agent[]
     tools?: ToolSummary[]
+    models?: RegisteredModel[]
     extraRoutes?: FetchCase[]
     initialConversationId?: string | null
   } = {}
@@ -526,7 +530,7 @@ async function renderDetail(
   const agent = opts.agent ?? makeAgent()
   navState.params.id = agent.id
   routes = [
-    ...baseRoutes(opts.agents ?? [agent], opts.tools),
+    ...baseRoutes(opts.agents ?? [agent], opts.tools, opts.models),
     ...(opts.extraRoutes ?? []),
     {
       method: "GET",
@@ -1584,6 +1588,61 @@ describe("AgentsPage detail view", () => {
     const payload = JSON.parse(patchBody)
     expect(payload.name).toBe("Renamed Assistant")
     expect(payload.app_type).toBe("agent")
+  })
+
+  test("pins the first active image model when the Agent selects none", async () => {
+    const agent = makeAgent()
+    let patchBody = ""
+    await renderDetail({
+      agent,
+      models: [
+        model("model-1", "DeepSeek Chat", "deepseek-chat"),
+        model("model-image-1", "Seedream", "seedream-3", "active", "IMAGE"),
+        model("model-image-2", "Flux", "flux-pro", "active", "IMAGE"),
+      ],
+      extraRoutes: [
+        {
+          method: "PATCH",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1`,
+          exact: true,
+          respond: (init) => {
+            patchBody = String(init?.body ?? "")
+            return jsonResponse({
+              ...agent,
+              name: "Renamed Assistant",
+              image_model_id: "model-image-1",
+            })
+          },
+        },
+      ],
+    })
+    const settingsNavButton = screen
+      .getAllByRole("button", { name: "设置" })
+      .find((button) => Boolean(button.closest("nav")))
+    fireEvent.click(settingsNavButton!)
+    await waitFor(() =>
+      expect(screen.getByLabelText("向 Agent 提问")).toBeTruthy()
+    )
+
+    const imageTrigger = screen.getByLabelText(
+      "选择生图模型"
+    ) as HTMLButtonElement
+    expect(imageTrigger.textContent).toContain("Seedream")
+
+    const nameInput = screen.getByLabelText("Agent 名称") as HTMLInputElement
+    fireEvent.change(nameInput, { target: { value: "Renamed Assistant" } })
+    await waitFor(() => expect(screen.getByText("未保存")).toBeTruthy())
+    fireEvent.click(
+      document.querySelector(
+        'button[form="agent-settings-form"]'
+      ) as HTMLButtonElement
+    )
+    await waitFor(() =>
+      expect(notifyCalls.some((call) => call.message === "Agent 已更新")).toBe(
+        true
+      )
+    )
+    expect(JSON.parse(patchBody).image_model_id).toBe("model-image-1")
   })
 
   test("saves the separate image-generation switch as an Agent Tool binding", async () => {
@@ -4248,6 +4307,7 @@ function formFromAgentFixture(agent: Agent): AgentFormState {
     description: agent.description,
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
+    imageModelId: agent.image_model_id ?? "",
     instructions: agent.instructions,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),

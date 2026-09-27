@@ -409,6 +409,79 @@ def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
         provider.assert_awaited_once()
 
 
+def test_image_tool_honours_the_selected_model() -> None:
+    from app.application.agents.runs.snapshots import build_model_runtime_snapshot
+    from app.application.tools.runtime.adapters import image_generation
+
+    def image_model(**overrides) -> SimpleNamespace:
+        return SimpleNamespace(
+            **{
+                "id": "image-model-2",
+                "workspace_id": "workspace-1",
+                "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
+                "model_type": "IMAGE",
+                "model_name": "seedream-3",
+                "api_base": "https://api.openai.com/v1",
+                "credential_config": {"api_base": "https://api.openai.com/v1"},
+                "api_key_updated_at": None,
+                "status": "active",
+                "meta": {},
+                **overrides,
+            }
+        )
+
+    db = SimpleNamespace()
+    selected = image_model()
+    listing = AsyncMock(return_value=[selected])
+    lookup = AsyncMock(return_value=selected)
+    with (
+        patch.object(
+            image_generation.model_repository,
+            "list_active_image_models",
+            new=listing,
+        ),
+        patch.object(
+            image_generation.model_repository,
+            "get_registered_model_by_id",
+            new=lookup,
+        ),
+    ):
+        snapshot = asyncio.run(
+            image_generation.build_image_model_resource_snapshot(
+                db,
+                "workspace-1",
+                selected.id,
+            )
+        )
+        assert snapshot == {"image_model": build_model_runtime_snapshot(selected)}
+        lookup.assert_awaited_once_with(db, "image-model-2")
+        # A selected model is never resolved through the workspace fallback.
+        listing.assert_not_awaited()
+
+        # Selections that can no longer be used fail closed.
+        for model, fragment in (
+            (None, "no longer available"),
+            (image_model(workspace_id="workspace-2"), "no longer active"),
+            (image_model(status="disabled"), "no longer active"),
+            (image_model(model_type="LLM"), "no longer active"),
+        ):
+            lookup.reset_mock(return_value=True)
+            lookup.return_value = model
+            try:
+                asyncio.run(
+                    image_generation.build_image_model_resource_snapshot(
+                        db,
+                        "workspace-1",
+                        "image-model-2",
+                    )
+                )
+            except ValueError as exc:
+                assert fragment in str(exc)
+            else:
+                raise AssertionError("An unusable image model selection was accepted.")
+
+
 def test_tool_ref_schema_requires_canonical_ids() -> None:
     from pydantic import ValidationError
 
@@ -940,6 +1013,7 @@ def main() -> None:
     test_image_tool_queue_freezes_its_model_configuration()
     test_image_provider_decodes_only_embedded_png()
     test_image_tool_scopes_model_and_stores_one_artifact()
+    test_image_tool_honours_the_selected_model()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_grant_rules()

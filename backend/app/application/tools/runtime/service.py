@@ -84,6 +84,7 @@ async def queue_tool_invocation(
         resource_snapshot = await build_image_model_resource_snapshot(
             db,
             context.workspace_id,
+            context.image_model_id,
         )
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),

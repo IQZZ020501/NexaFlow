@@ -28,14 +28,19 @@ import {
 
 const WS = "ws-1"
 
-function model(id: string, name: string, status = "active"): RegisteredModel {
+function model(
+  id: string,
+  name: string,
+  status = "active",
+  modelType = "LLM"
+): RegisteredModel {
   return {
     id,
     workspace_id: WS,
     name,
     provider: "deepseek",
     provider_type: "openai",
-    model_type: "LLM",
+    model_type: modelType,
     model_name: "deepseek-chat",
     status,
     credential: {},
@@ -137,6 +142,9 @@ mockNextImage()
 const models = [
   model("model-1", "DeepSeek Chat"),
   model("model-2", "Legacy Model", "disabled"),
+  model("model-image-1", "Seedream", "active", "IMAGE"),
+  model("model-image-3", "Flux", "active", "IMAGE"),
+  model("model-image-2", "Retired Image", "disabled", "IMAGE"),
 ]
 const knowledgeBases = [
   knowledgeBase("knowledge-1", "产品文档"),
@@ -168,6 +176,7 @@ function initialForm(overrides: Partial<AgentFormState> = {}): AgentFormState {
       user_input_title: "",
     },
     modelId: "model-1",
+    imageModelId: "",
     instructions: "Be concise.",
     knowledgeBaseIds: ["knowledge-1"],
     tools: [{ tool_id: "tool-search", version_id: "version-1" }],
@@ -238,6 +247,22 @@ describe("AgentConfigFields", () => {
       await screen.findByRole("menuitem", { name: /DeepSeek Chat/ })
     )
     expect(screen.getByText("DeepSeek Chat")).toBeTruthy()
+  })
+
+  test("shows the first active image model and switches between image models", async () => {
+    renderPage(<FieldsHarness form={initialForm()} />)
+
+    const trigger = screen.getByLabelText(
+      "选择生图模型"
+    ) as HTMLButtonElement
+    expect(trigger.textContent).toContain("Seedream")
+
+    fireEvent.pointerDown(trigger)
+    fireEvent.click(trigger)
+    expect(screen.queryByText("使用工作空间唯一启用的生图模型")).toBeNull()
+    expect(screen.queryByText("Retired Image")).toBeNull()
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Flux/ }))
+    await waitFor(() => expect(trigger.textContent).toContain("Flux"))
   })
 
   test("edits instructions and expands knowledge and tool sections", () => {

@@ -26,6 +26,7 @@ export type Agent = {
   interaction_config: AgentInteractionConfig
   instructions: string
   model_id: string
+  image_model_id?: string | null
   knowledge_base_ids: string[]
   tools?: ToolRef[]
   skills?: AgentSkillRef[]
@@ -59,6 +60,7 @@ export type AgentPayload = {
   name: string
   app_type?: AppType
   model_id: string
+  image_model_id?: string | null
   knowledge_base_ids: string[]
   tools: ToolRef[]
   skills?: AgentSkillRef[]

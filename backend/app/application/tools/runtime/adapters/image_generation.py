@@ -40,15 +40,21 @@ def _validate_image_model(model: RegisteredModel, workspace_id: str) -> None:
 async def build_image_model_resource_snapshot(
     db: AsyncSession,
     workspace_id: str,
+    image_model_id: str | None = None,
 ) -> dict[str, object]:
-    models = await model_repository.list_active_image_models(db, workspace_id)
-    if not models:
-        raise ValueError(
-            "Configure an active OpenAI-compatible image model in this workspace first."
-        )
-    if len(models) != 1:
-        raise ValueError("Keep exactly one image model active in this workspace.")
-    model = models[0]
+    if image_model_id:
+        model = await model_repository.get_registered_model_by_id(db, image_model_id)
+        if model is None:
+            raise ValueError("The selected image model is no longer available.")
+    else:
+        models = await model_repository.list_active_image_models(db, workspace_id)
+        if not models:
+            raise ValueError(
+                "Configure an active OpenAI-compatible image model in this workspace first."
+            )
+        if len(models) != 1:
+            raise ValueError("Keep exactly one image model active in this workspace.")
+        model = models[0]
     _validate_image_model(model, workspace_id)
     return {"image_model": build_model_runtime_snapshot(model)}
 

@@ -175,6 +175,11 @@ class Agent(Base):
     )
     instructions: Mapped[str] = mapped_column(Text, nullable=False)
     model_id: Mapped[str] = mapped_column(ForeignKey("model.id"), nullable=False, index=True)
+    image_model_id: Mapped[str | None] = mapped_column(
+        ForeignKey("model.id"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     published_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

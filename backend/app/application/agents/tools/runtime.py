@@ -64,6 +64,21 @@ def tool_runtime_result_to_agent_result(result: ToolRuntimeResult) -> AgentToolR
     )
 
 
+def frozen_agent_image_model_id(run: AgentRun) -> str | None:
+    """Return the image model frozen for this run, if the Agent selected one.
+
+    The selection lives in the frozen application configuration, so a retry or
+    lease takeover can never switch the image model that was authorized when the
+    run was created. ``None`` keeps the workspace fallback: the single active
+    image model of the workspace.
+    """
+    configuration = run.application_snapshot.get("configuration")
+    if not isinstance(configuration, dict):
+        return None
+    image_model_id = configuration.get("image_model_id")
+    return image_model_id if isinstance(image_model_id, str) and image_model_id else None
+
+
 class UnifiedAgentToolRuntime:
     """Executes frozen Agent Tool snapshots through ``ToolInvocation`` only."""
 
@@ -82,6 +97,7 @@ class UnifiedAgentToolRuntime:
         self.worker_task_id = worker_task_id
         self.settings = settings
         self.lease_lost = lease_lost
+        self.image_model_id = frozen_agent_image_model_id(run)
 
     async def before(
         self,
@@ -112,6 +128,7 @@ class UnifiedAgentToolRuntime:
             access_source=self.run.access_source,
             deadline_at=self._tool_deadline(snapshot),
             idempotency_key=idempotency_key,
+            image_model_id=self.image_model_id,
             approval_required=agent_tool_requires_approval(
                 run_agent_approval_mode(self.run),
                 snapshot,

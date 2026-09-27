@@ -1290,7 +1290,7 @@ function ModelDialog({
           <DialogDescription>
             {form.model_type === "IMAGE"
               ? t(
-                  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。"
+                  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。Agent 未指定生图模型时，工作空间需要保持恰好一个启用的生图模型。"
                 )
               : t("选择供应商和基础模型，填写连接参数；保存前会测试模型调用。")}
           </DialogDescription>

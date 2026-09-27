@@ -141,6 +141,7 @@ function formFrom(agent: Agent): AgentFormState {
     description: agent.description,
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
+    imageModelId: agent.image_model_id ?? "",
     instructions: agent.instructions,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),

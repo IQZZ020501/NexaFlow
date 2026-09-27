@@ -49,13 +49,19 @@ def normalized_interaction_config(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_agent_configuration_snapshot(agent: Agent) -> dict[str, Any]:
-    return {
+    snapshot = {
         "name": agent.name,
         "description": agent.description,
         "instructions": agent.instructions,
         "model_id": agent.model_id,
         "interaction_config": normalized_interaction_config(agent.interaction_config),
     }
+    if agent.image_model_id:
+        # Optional selection: it is frozen only once an Agent picks an image
+        # model, so Agents that rely on the workspace image model keep their
+        # published configuration hash.
+        snapshot["image_model_id"] = agent.image_model_id
+    return snapshot
 
 
 def build_agent_resource_snapshot(
