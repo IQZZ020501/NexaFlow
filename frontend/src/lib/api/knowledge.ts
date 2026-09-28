@@ -1,5 +1,4 @@
 import {
-  ApiError,
   listQuery,
   request,
   requestBlob,
@@ -767,17 +766,10 @@ export async function downloadKnowledgeDocument(
   documentId: string,
   filename: string
 ) {
-  const response = await fetch(
+  const blob = await requestBlob(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    }
+    { token }
   )
-  if (!response.ok) {
-    throw new ApiError(response.status, response.statusText)
-  }
-
-  const blob = await response.blob()
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement("a")
   anchor.href = url
