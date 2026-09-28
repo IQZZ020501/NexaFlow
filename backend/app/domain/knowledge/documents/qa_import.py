@@ -27,6 +27,24 @@ class QaRow:
     row_number: int
 
 
+def qa_rows_to_markdown(filename: str, rows: Sequence[QaRow]) -> str:
+    """Render validated QA rows as one canonical Markdown document."""
+    title = Path(filename).stem.replace("\r", " ").replace("\n", " ").strip()
+    sections = [f"# {title or 'QA'}"]
+    for index, row in enumerate(rows, start=1):
+        sections.extend(
+            [
+                f"## Question {index}",
+                row.question,
+                "**Answer**",
+                row.answer,
+            ]
+        )
+        if row.source:
+            sections.extend(["**Source**", row.source])
+    return "\n\n".join(sections)
+
+
 def _cell(value: object) -> str:
     return "" if value is None else str(value).strip()
 

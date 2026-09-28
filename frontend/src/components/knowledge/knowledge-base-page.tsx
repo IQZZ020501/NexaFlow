@@ -113,6 +113,7 @@ import { cn } from "@/lib/utils"
 import { formatDateTime, formatUserIdentity, modelLabel } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import {
+  DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
   knowledgeUploadPath,
   knowledgeUploadSegmentPath,
   type KnowledgeUploadRouteState,
@@ -336,10 +337,12 @@ function PaginationFooter({
   )
 }
 
-const SMART_CHUNK_SIZE = 1200
-const SMART_CHUNK_OVERLAP = 150
-const SMART_CLEANING_RULES = ["trim_lines", "remove_empty_lines"]
-const SMART_SPLIT_SEPARATOR = "\n\n"
+const {
+  chunkSize: SMART_CHUNK_SIZE,
+  chunkOverlap: SMART_CHUNK_OVERLAP,
+  cleaningRules: SMART_CLEANING_RULES,
+  splitSeparator: SMART_SPLIT_SEPARATOR,
+} = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS
 
 const CLEANING_RULE_OPTIONS: Array<{
   value: string
@@ -1704,69 +1707,88 @@ function KnowledgeBasePageContent({
     )
   }
 
-  function renderKnowledgeTaskActions(task: KnowledgeTask) {
+  function renderKnowledgeTaskActionMenu(task: KnowledgeTask) {
     const isTaskActionDisabled =
       !canEditDocuments || isKnowledgeTaskMutationBusy
+    const canStopTask = ["queued", "running"].includes(task.status)
+    const canRetryTask = ["failed", "cancelled"].includes(task.status)
+    const canRetryUnfinishedGraphTask =
+      canRetryTask &&
+      task.processed_items > 0 &&
+      task.processed_items < task.total_items
+    const canDeleteTask = !["queued", "running", "cancelling"].includes(
+      task.status
+    )
+    const hasAvailableAction = canStopTask || canRetryTask || canDeleteTask
+    const isGraphTask = ["graph_sync", "graph_rebuild"].includes(task.task_type)
 
     return (
-      <>
-        <IconButton
-          label={t("停止")}
-          disabled={
-            isTaskActionDisabled || !["queued", "running"].includes(task.status)
-          }
-          onClick={() => void handleStopKnowledgeTask(task)}
-        >
-          <SquareIcon className="size-4 fill-current" />
-        </IconButton>
-        {["graph_sync", "graph_rebuild"].includes(task.task_type) ? (
-          <>
-            <IconButton
-              label={t("重试未完成分片")}
-              disabled={
-                isTaskActionDisabled ||
-                !["failed", "cancelled"].includes(task.status) ||
-                task.processed_items <= 0 ||
-                task.processed_items >= task.total_items
-              }
-              onClick={() => void handleRetryKnowledgeTask(task, "unfinished")}
-            >
-              <PlayIcon className="size-4" />
-            </IconButton>
-            <IconButton
-              label={t("重试全部分片")}
-              disabled={
-                isTaskActionDisabled ||
-                !["failed", "cancelled"].includes(task.status)
-              }
-              onClick={() => void handleRetryKnowledgeTask(task, "all")}
-            >
-              <RotateCcwIcon className="size-4" />
-            </IconButton>
-          </>
-        ) : (
-          <IconButton
-            label={t("重试")}
-            disabled={
-              isTaskActionDisabled ||
-              !["failed", "cancelled"].includes(task.status)
-            }
-            onClick={() => void handleRetryKnowledgeTask(task)}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-foreground"
+            disabled={isTaskActionDisabled || !hasAvailableAction}
+            aria-label={t("操作 {value}", { value: task.id })}
+            title={t("更多")}
           >
-            <RotateCcwIcon className="size-4" />
-          </IconButton>
-        )}
-        <IconButton
-          label={t("删除任务")}
-          disabled={
-            isTaskActionDisabled ||
-            ["queued", "running", "cancelling"].includes(task.status)
-          }
-          onClick={() => void handleDeleteKnowledgeTask(task)}
-        >
-          <Trash2Icon className="size-4" />
-        </IconButton>
-      </>
+            <MoreHorizontalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="end" className="min-w-40">
+          {canStopTask ? (
+            <DropdownMenuItem
+              onSelect={() => void handleStopKnowledgeTask(task)}
+            >
+              <SquareIcon className="fill-current" />
+              {t("停止")}
+            </DropdownMenuItem>
+          ) : null}
+          {isGraphTask ? (
+            <>
+              {canRetryUnfinishedGraphTask ? (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void handleRetryKnowledgeTask(task, "unfinished")
+                  }
+                >
+                  <PlayIcon />
+                  {t("重试未完成分片")}
+                </DropdownMenuItem>
+              ) : null}
+              {canRetryTask ? (
+                <DropdownMenuItem
+                  onSelect={() => void handleRetryKnowledgeTask(task, "all")}
+                >
+                  <RotateCcwIcon />
+                  {t("重试全部分片")}
+                </DropdownMenuItem>
+              ) : null}
+            </>
+          ) : canRetryTask ? (
+            <DropdownMenuItem
+              onSelect={() => void handleRetryKnowledgeTask(task)}
+            >
+              <RotateCcwIcon />
+              {t("重试")}
+            </DropdownMenuItem>
+          ) : null}
+          {canDeleteTask && (canStopTask || canRetryTask) ? (
+            <DropdownMenuSeparator />
+          ) : null}
+          {canDeleteTask ? (
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => void handleDeleteKnowledgeTask(task)}
+            >
+              <Trash2Icon />
+              {t("删除")}
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
     )
   }
 
@@ -2923,7 +2945,7 @@ function KnowledgeBasePageContent({
                                 </div>
                               </div>
                               <div className="mt-3 flex flex-wrap items-center justify-end gap-1 border-t pt-3">
-                                {renderKnowledgeTaskActions(task)}
+                                {renderKnowledgeTaskActionMenu(task)}
                               </div>
                             </li>
                           )
@@ -2936,7 +2958,7 @@ function KnowledgeBasePageContent({
                     </ul>
                   ) : null}
                   <div className="min-w-[920px] max-md:hidden">
-                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
                       <label className="flex items-center justify-center">
                         <input
                           ref={selectAllKnowledgeTasksRef}
@@ -2959,7 +2981,7 @@ function KnowledgeBasePageContent({
                       <span>{t("进度")}</span>
                       <span>{t("尝试次数")}</span>
                       <span>{t("更新时间 / 错误")}</span>
-                      <span>{t("操作")}</span>
+                      <span className="text-center">{t("操作")}</span>
                     </div>
                     {isKnowledgeTaskLoading ? (
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
@@ -2969,7 +2991,7 @@ function KnowledgeBasePageContent({
                       visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
-                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm last:border-b-0"
+                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
                           <label className="flex items-center justify-center">
                             <input
@@ -3024,8 +3046,8 @@ function KnowledgeBasePageContent({
                               </span>
                             ) : null}
                           </span>
-                          <span className="flex items-center gap-1">
-                            {renderKnowledgeTaskActions(task)}
+                          <span className="flex items-center justify-center">
+                            {renderKnowledgeTaskActionMenu(task)}
                           </span>
                         </div>
                       ))
@@ -3066,6 +3088,8 @@ function KnowledgeBasePageContent({
                 token={token}
                 workspaceId={selectedKnowledgeBase.workspace_id}
                 knowledgeBaseId={selectedKnowledgeBase.id}
+                canEdit={canEditDocuments}
+                notify={notify}
                 reportError={reportError}
               />
             ) : null}

@@ -217,13 +217,14 @@ not trigger unrelated cleanup.
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset
   links store only a token hash and expire after 30 minutes.
-- Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, and XLS; PDF parsing
-  uses pypdf to extract existing text layers without OCR. The upload UI and
-  parser accept DOCX, PDF, Markdown, text, common UTF-8 source/configuration
-  files, PPTX, XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG,
-  JPEG, and WEBP. Images use the workspace's active `VISION` model; image
-  uploads fail clearly when none is configured. The unified application image
-  does not include Tesseract or OCR language data.
+- Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, XLS, HTML, CSV, and
+  ZIP; PDF parsing uses pypdf to extract existing text layers without OCR. The
+  knowledge upload UI and API accept exactly DOCX, MD, MARKDOWN, PDF, TXT,
+  PPTX, XLSX, XLS, HTML, CSV, JSON, XML, and ZIP. Every parsed document,
+  including QA-table imports, persists a canonical UTF-8 Markdown artifact;
+  the document detail page reads that artifact and renders it as Markdown.
+  The unified application image does not include Tesseract or OCR language
+  data.
 - QA-table import is opt-in (`import_mode=qa`) and uses read-only openpyxl for
   XLSX plus the Python CSV module for UTF-8 CSV. It requires question/answer
   headers, ignores document segmentation settings, and indexes question plus

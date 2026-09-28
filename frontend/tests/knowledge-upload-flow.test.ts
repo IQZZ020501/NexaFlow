@@ -22,13 +22,7 @@ describe("knowledge upload preview selection", () => {
       ".csv",
       ".json",
       ".xml",
-      ".ipynb",
-      ".epub",
       ".zip",
-      ".png",
-      ".jpg",
-      ".jpeg",
-      ".webp",
     ])
   })
 

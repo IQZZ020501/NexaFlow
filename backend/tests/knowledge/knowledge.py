@@ -563,7 +563,7 @@ async def assert_parse_task_failed(task_id: str, document_id: str) -> None:
         assert task.task_type == "parse"
         assert task.attempts == 1
         assert task.processed_items == 0
-        assert task.last_error == "Document format is not supported."
+        assert task.last_error == "Document has no extractable text."
         assert document is not None
         assert document.status == "parse_failed"
         assert document.last_error == task.last_error
@@ -1672,7 +1672,7 @@ def main() -> None:
         parsed_document = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{document_id}/parse"),
             headers=auth_headers(alice_token),
-            json={"auto_index": True},
+            json={"strategy": "flat", "auto_index": True},
         )
         assert parsed_document.status_code == 202, parsed_document.text
 
@@ -1736,6 +1736,7 @@ def main() -> None:
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{configured_document_id}/parse"),
             headers=auth_headers(alice_token),
             json={
+                "strategy": "flat",
                 "chunk_size": 100,
                 "chunk_overlap": 0,
                 "cleaning_rules": ["collapse_spaces"],
@@ -1908,6 +1909,23 @@ def main() -> None:
             }
         ]
         assert qa_chunks.json()[0]["char_count"] == len("99.9%")
+        qa_markdown = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{qa_document['id']}/content",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert qa_markdown.status_code == 200, qa_markdown.text
+        assert qa_markdown.text == (
+            "# faq\n\n"
+            "## Question 1\n\n"
+            "What is SLA?\n\n"
+            "**Answer**\n\n"
+            "99.9%\n\n"
+            "**Source**\n\n"
+            "runbook"
+        )
 
         for imported_document in (csv_document, qa_document):
             deleted_import = client.delete(
@@ -2159,12 +2177,31 @@ def main() -> None:
         )
         asyncio.run(recover_knowledge_tasks(test_settings()))
 
+        unsupported_upload = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/attachments",
+            ),
+            headers=auth_headers(alice_token),
+            files={
+                "file": (
+                    "unsupported.bin",
+                    b"\x00\x01\x02",
+                    "application/octet-stream",
+                )
+            },
+        )
+        assert unsupported_upload.status_code == 422, unsupported_upload.text
+        assert unsupported_upload.json()["detail"] == (
+            "Document format is not supported."
+        )
+
         failed_parse_document = upload_document(
             client,
             alice_token,
             default_workspace_id,
             knowledge_base_id,
-            "unsupported.bin",
+            "unsupported.zip",
             b"\x00\x01\x02",
             "application/octet-stream",
         )
@@ -2400,6 +2437,7 @@ def main() -> None:
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/parse"),
             headers=auth_headers(alice_token),
             json={
+                "strategy": "flat",
                 "chunk_size": 100,
                 "chunk_overlap": 0,
                 "split_separator": "\n",

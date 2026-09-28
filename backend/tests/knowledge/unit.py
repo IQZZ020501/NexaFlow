@@ -1130,6 +1130,14 @@ def test_clean_upload_filename_sanitizes_path_and_classification() -> None:
     assert clean_upload_filename("photo.png") == "photo.png"
 
 def test_parse_task_options_validates_boundaries() -> None:
+    assert parse_task_options() == {
+        "strategy": "hierarchical",
+        "chunk_size": 1200,
+        "chunk_overlap": 150,
+        "split_separator": "\n\n",
+        "cleaning_rules": ["trim_lines", "remove_empty_lines"],
+        "auto_index": True,
+    }
     # overlap must be smaller than size
     expect_http_error(
         lambda: parse_task_options(
@@ -1417,36 +1425,11 @@ def test_supported_document_formats_are_accepted() -> None:
     from app.domain.knowledge.documents import parsing as pipeline
 
     expected_extensions = {
-        ".c",
-        ".cc",
-        ".cpp",
-        ".cs",
-        ".css",
         ".docx",
-        ".go",
-        ".h",
-        ".hpp",
-        ".java",
-        ".js",
-        ".jsx",
-        ".kt",
-        ".kts",
         ".md",
         ".markdown",
         ".pdf",
-        ".php",
-        ".properties",
-        ".py",
-        ".rb",
-        ".rs",
-        ".sh",
-        ".sql",
-        ".swift",
-        ".toml",
-        ".ts",
-        ".tsx",
         ".txt",
-        ".vue",
         ".pptx",
         ".xlsx",
         ".xls",
@@ -1454,15 +1437,7 @@ def test_supported_document_formats_are_accepted() -> None:
         ".csv",
         ".json",
         ".xml",
-        ".ipynb",
-        ".epub",
         ".zip",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-        ".yaml",
-        ".yml",
     }
     assert expected_extensions == pipeline.SUPPORTED_DOCUMENT_EXTENSIONS
 
@@ -1473,11 +1448,11 @@ def test_supported_document_formats_are_accepted() -> None:
         for extension in expected_extensions - {
             ".docx",
             ".pdf",
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".webp",
-            *pipeline.PLAIN_TEXT_DOCUMENT_EXTENSIONS,
+            ".md",
+            ".markdown",
+            ".txt",
+            ".json",
+            ".xml",
         }:
             path = Path(directory) / f"document{extension}"
             path.write_bytes(b"content")
@@ -1494,16 +1469,43 @@ def test_supported_document_formats_are_accepted() -> None:
             assert text == "converted"
             assert assets == []
 
-        for extension in pipeline.PLAIN_TEXT_DOCUMENT_EXTENSIONS:
-            path = Path(directory) / f"source{extension}"
-            path.write_text("print('source')", encoding="utf-8")
+        source_samples = {
+            ".md": ("# Existing\n\nBody", "# Existing\n\nBody"),
+            ".markdown": ("**Body**", "**Body**"),
+            ".txt": ("plain body", "plain body"),
+            ".json": (
+                '{"value": "```"}',
+                '# document\n\n````json\n{"value": "```"}\n````',
+            ),
+            ".xml": (
+                "<root><value>1</value></root>",
+                "# document\n\n```xml\n<root><value>1</value></root>\n```",
+            ),
+        }
+        for extension, (source, expected) in source_samples.items():
+            path = Path(directory) / f"document{extension}"
+            path.write_text(source, encoding="utf-8")
             text, assets = pipeline.extract_document(
                 path.name,
                 "application/octet-stream",
                 path,
             )
-            assert text == "print('source')"
+            assert text == expected
             assert assets == []
+
+        for extension in {".py", ".ipynb", ".epub", ".png"}:
+            path = Path(directory) / f"unsupported{extension}"
+            path.write_bytes(b"content")
+            try:
+                pipeline.extract_document(
+                    path.name,
+                    "application/octet-stream",
+                    path,
+                )
+            except pipeline.KnowledgePipelineError as exc:
+                assert str(exc) == "Document format is not supported."
+            else:
+                raise AssertionError(f"Unsupported format accepted: {extension}")
 
 def test_pdf_documents_extract_only_the_text_layer() -> None:
     from pathlib import Path
@@ -1564,6 +1566,7 @@ def test_image_documents_use_the_configured_vision_extractor() -> None:
             "image/png",
             path,
             image_text_extractor=extract_image,
+            supported_extensions=pipeline.EXTRACTABLE_DOCUMENT_EXTENSIONS,
         )
 
         assert text == "# 通知\n\n识别文本"
@@ -1571,7 +1574,12 @@ def test_image_documents_use_the_configured_vision_extractor() -> None:
         assert calls == [("image/png", b"png")]
 
         try:
-            pipeline.extract_document(path.name, "image/png", path)
+            pipeline.extract_document(
+                path.name,
+                "image/png",
+                path,
+                supported_extensions=pipeline.EXTRACTABLE_DOCUMENT_EXTENSIONS,
+            )
         except pipeline.KnowledgePipelineError as exc:
             assert str(exc) == "Vision model is not configured for this workspace."
         else:
@@ -2595,6 +2603,7 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
     from app.domain.knowledge.documents.qa_import import (
         QaRow,
         extract_qa_rows,
+        qa_rows_to_markdown,
         validate_qa_rows,
     )
 
@@ -2621,6 +2630,15 @@ def test_qa_import_is_explicit_validated_and_bounded() -> None:
                 row_number=2,
             )
         ]
+        assert qa_rows_to_markdown(csv_path.name, expected) == (
+            "# qa\n\n"
+            "## Question 1\n\n"
+            "如何回滚？\n\n"
+            "**Answer**\n\n"
+            "需要管理员批准。\n\n"
+            "**Source**\n\n"
+            "运维手册 3.2"
+        )
         assert extract_qa_rows(csv_path.name, csv_path) == expected
 
         xlsx_path = root / "qa.xlsx"
@@ -2947,6 +2965,200 @@ def test_document_link_graph_uses_documents_and_unresolved_markdown_links() -> N
     resolved_edge = next(edge for edge in graph.edges if edge.resolved)
     assert resolved_edge.count == 2
     assert resolved_edge.target_sections == ["Details", "Intro"]
+
+
+def test_evidence_link_graph_projects_published_entities_and_claims() -> None:
+    from app.application.knowledge.graph.link_view import build_evidence_link_graph
+    from app.entities.knowledge import KnowledgeDocument
+    from app.entities.knowledge.graph import (
+        KnowledgeGraphClaim,
+        KnowledgeGraphClaimEvidence,
+        KnowledgeGraphEntity,
+    )
+
+    documents = [
+        KnowledgeDocument(id="source-doc", filename="source.pdf", status="indexed"),
+        KnowledgeDocument(id="target-doc", filename="target.md", status="indexed"),
+    ]
+    entities = [
+        KnowledgeGraphEntity(
+            id="source-entity",
+            entity_type="Document",
+            canonical_name="source.pdf",
+            properties_json={"document_id": "source-doc"},
+        ),
+        KnowledgeGraphEntity(
+            id="target-entity",
+            entity_type="Document",
+            canonical_name="target.md",
+            properties_json={"document_id": "target-doc"},
+        ),
+        KnowledgeGraphEntity(
+            id="topic-entity",
+            entity_type="Topic",
+            canonical_name="Retention",
+        ),
+    ]
+    claims = [
+        KnowledgeGraphClaim(
+            id="reference-claim",
+            subject_entity_id="source-entity",
+            predicate="references",
+            object_entity_id="target-entity",
+            properties_json={
+                "occurrence_count": 3,
+                "target_sections": ["Scope"],
+            },
+            status="active",
+            source_kind="document_reference",
+            quality_score=1.0,
+            support_count=1,
+        ),
+        KnowledgeGraphClaim(
+            id="semantic-claim",
+            subject_entity_id="target-entity",
+            predicate="related_to",
+            object_entity_id="topic-entity",
+            status="active",
+            source_kind="explicit_text",
+            quality_score=0.85,
+            support_count=2,
+        ),
+    ]
+    evidence = [
+        KnowledgeGraphClaimEvidence(id="evidence-1", claim_id="reference-claim"),
+        KnowledgeGraphClaimEvidence(id="evidence-2", claim_id="semantic-claim"),
+    ]
+
+    graph = build_evidence_link_graph(
+        documents,
+        entities,
+        claims,
+        evidence,
+        "revision-1",
+    )
+
+    assert graph.source == "evidence_graph"
+    assert graph.graph_revision_id == "revision-1"
+    assert graph.document_count == 2
+    assert graph.entity_count == 3
+    assert graph.unresolved_count == 0
+    assert graph.edge_count == 2
+    topic = next(node for node in graph.nodes if node.id == "topic-entity")
+    assert topic.kind == "entity"
+    assert topic.entity_type == "Topic"
+    reference = next(edge for edge in graph.edges if edge.id == "reference-claim")
+    assert reference.count == 3
+    assert reference.predicate == "references"
+    assert reference.target_sections == ["Scope"]
+    assert reference.evidence_ids == ["evidence-1"]
+
+
+def test_reference_candidates_use_published_graph_with_legacy_fallback() -> None:
+    from app.application.knowledge.retrieval import service as retrieval_service
+    from app.entities.knowledge import (
+        KnowledgeBase,
+        KnowledgeDocumentReference,
+    )
+
+    graph_reference = KnowledgeDocumentReference(id="graph-reference")
+    legacy_reference = KnowledgeDocumentReference(id="legacy-reference")
+
+    async def run() -> None:
+        db = SimpleNamespace()
+        graph_base = KnowledgeBase(active_graph_revision_id="revision-1")
+        legacy_base = KnowledgeBase()
+        with (
+            patch.object(
+                retrieval_service.knowledge_graph_repository,
+                "list_active_document_references_for_chunks",
+                AsyncMock(return_value=[graph_reference]),
+            ) as graph_list,
+            patch.object(
+                retrieval_service.knowledge_reference_repository,
+                "list_resolved_references_for_chunks",
+                AsyncMock(return_value=[legacy_reference]),
+            ) as legacy_list,
+        ):
+            assert await retrieval_service._list_reference_candidates(
+                db,
+                graph_base,
+                ["chunk-1"],
+            ) == [graph_reference]
+            graph_list.assert_awaited_once_with(
+                db,
+                graph_base,
+                ["chunk-1"],
+                retrieval_service.MAX_REFERENCES,
+            )
+            legacy_list.assert_not_awaited()
+
+            assert await retrieval_service._list_reference_candidates(
+                db,
+                legacy_base,
+                ["chunk-2"],
+            ) == [legacy_reference]
+            legacy_list.assert_awaited_once_with(
+                db,
+                legacy_base,
+                ["chunk-2"],
+                retrieval_service.MAX_REFERENCES,
+            )
+
+    asyncio.run(run())
+
+
+def test_graph_reference_repository_reconstructs_section_targets() -> None:
+    from app.entities.knowledge import KnowledgeBase
+    from app.infra.db.repositories.knowledge import graph as graph_repository
+
+    claim = SimpleNamespace(
+        properties_json={
+            "reference_type": "markdown",
+            "target_labels": ["policy.md"],
+            "target_sections": ["Scope"],
+            "target_parent_ids": ["parent-2", "parent-1"],
+            "occurrence_count": 3,
+            "evidence_anchors": {
+                "evidence-1": {
+                    "target_labels": ["policy.md"],
+                    "target_sections": ["Definitions"],
+                    "target_parent_ids": ["parent-1"],
+                    "occurrence_count": 2,
+                }
+            },
+        },
+        support_count=1,
+    )
+    evidence = SimpleNamespace(
+        id="evidence-1",
+        document_id="source-document",
+        chunk_id="source-chunk",
+        quote="policy.md",
+        start_offset=12,
+        created_at=None,
+    )
+    target = SimpleNamespace(properties_json={"document_id": "target-document"})
+    db = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=SimpleNamespace(all=lambda: [(claim, evidence, target)])
+        )
+    )
+    knowledge_base = KnowledgeBase(id="kb-1", workspace_id="workspace-1")
+
+    references = asyncio.run(
+        graph_repository.list_active_document_references_for_chunks(
+            db,
+            knowledge_base,
+            ["source-chunk"],
+        )
+    )
+
+    assert [item.target_parent_id for item in references] == ["parent-1"]
+    assert all(item.target_document_id == "target-document" for item in references)
+    assert all(item.target_section == "Definitions" for item in references)
+    assert all(item.occurrence_count == 2 for item in references)
+
 
 def test_parent_context_windows_around_child_offsets() -> None:
     long_content = "x" * (MAX_PARENT_CONTEXT_CHARS + 500)

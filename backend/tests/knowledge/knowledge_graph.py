@@ -3690,11 +3690,20 @@ async def test_structured_graph_build_publishes_evidence_and_profiles() -> None:
                 KnowledgeGraphClaimEvidence.claim_id == claim.id
             )
         )
+        document_entity = await db.scalar(
+            select(KnowledgeGraphEntity).where(
+                KnowledgeGraphEntity.knowledge_base_id == "graph-kb",
+                KnowledgeGraphEntity.entity_type == "Document",
+                KnowledgeGraphEntity.external_key == f"document:{document.id}",
+                KnowledgeGraphEntity.state == "active",
+            )
+        )
         assert evidence is not None
         assert evidence.quote == "制度 A 定义术语 A"
-        assert {item.entity_id for item in captured_profiles} == {
-            item.id for item in entities
-        }
+        assert document_entity is not None
+        assert {item.id for item in [*entities, document_entity]}.issubset(
+            {item.entity_id for item in captured_profiles}
+        )
         knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
             db,
             "graph-kb",

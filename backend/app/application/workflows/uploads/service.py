@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 from app.domain.knowledge.documents.parsing import (
+    EXTRACTABLE_DOCUMENT_EXTENSIONS,
     PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     ImageTextExtractor,
     KnowledgePipelineError,
@@ -453,6 +454,7 @@ async def _resolve_workflow_files(
                     item.content_type,
                     storage.path(item.object_key),
                     image_text_extractor=image_text_extractor,
+                    supported_extensions=EXTRACTABLE_DOCUMENT_EXTENSIONS,
                 )
                 contents[item.id] = extracted[: min(AGENT_FILE_TEXT_LIMIT, remaining)]
                 remaining -= len(contents[item.id])
@@ -562,6 +564,7 @@ async def _resolve_agent_file_text(
                 item.content_type,
                 storage.path(item.object_key),
                 image_text_extractor=image_text_extractor,
+                supported_extensions=EXTRACTABLE_DOCUMENT_EXTENSIONS,
             )
             text = extracted[: min(AGENT_FILE_TEXT_LIMIT, remaining)]
             sections.append(f"--- {item.filename} ---\n{text}")

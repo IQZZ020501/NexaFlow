@@ -3,7 +3,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, timedelta
-from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +11,6 @@ from app.domain.audit.services import record_audit_log
 # ponytail: fixed lease window; make it configurable if task recovery needs a different budget.
 from app.domain.knowledge.documents.parsing import (
     EMBED_BATCH_SIZE,
-    IMAGE_DOCUMENT_EXTENSIONS,
     SEGMENTATION_VERSION,
     KnowledgePipelineError,
 )
@@ -21,7 +19,6 @@ from app.domain.knowledge.documents.references import (
 )
 from app.domain.knowledge.service import (
     RESOURCE_TYPE,
-    get_default_knowledge_model,
     knowledge_object_storage,
 )
 from app.domain.knowledge.tasks.orchestration import (
@@ -70,7 +67,6 @@ from app.infra.db.repositories.knowledge import repository as knowledge_base_rep
 from app.infra.db.session import get_session_factory
 from app.infra.observability.errors import classify_error, log_error
 from app.infra.observability.logger import get_logger, log_event
-from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 from app.ports.vector_store import (
     VectorChunk,
     delete_vectors,
@@ -172,20 +168,10 @@ async def run_parse_task(
     await knowledge_base_repository.save_knowledge_document(db, document)
 
     options = parse_task_options_from_task(task)
-    vision_model = None
-    if Path(document.filename).suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS:
-        vision_model = await get_default_knowledge_model(
-            db,
-            knowledge_base.workspace_id,
-            "VISION",
-        )
-        if vision_model is None:
-            raise KnowledgePipelineError(VISION_MODEL_REQUIRED_MESSAGE)
     chunks = await extract_document_chunk_contents(
         document,
         settings,
         options,
-        vision_model,
     )
     ensure_knowledge_task_lease(lease_lost)
     vector_ids, stale_object_keys, written_object_keys = await replace_document_chunks(

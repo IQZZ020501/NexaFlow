@@ -2232,7 +2232,9 @@ export const en = {
   "邮件服务尚未配置，邀请邮件未发送；你仍可复制邀请链接":
     "Email service is not configured, so the invitation email was not sent. You can still copy the invitation link.",
   知识关联: "Knowledge graph",
-  关系图谱: "Link graph",
+  关系图谱: "Relationship graph",
+  关系图谱与检索共享同一份已发布证据图谱:
+    "The relationship graph and retrieval share the same published evidence graph",
   "基于 Markdown 显式链接生成，不使用 AI 或语义向量":
     "Generated from explicit Markdown links, without AI or semantic vectors.",
   正在加载关系图谱: "Loading link graph",

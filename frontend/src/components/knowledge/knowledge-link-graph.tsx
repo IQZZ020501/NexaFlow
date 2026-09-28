@@ -17,12 +17,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import {
+  getKnowledgeGraphSettings,
+  getKnowledgeGraphStatus,
   getKnowledgeLinkGraph,
+  rebuildKnowledgeGraph,
   type KnowledgeLinkGraph,
   type KnowledgeLinkGraphEdge,
   type KnowledgeLinkGraphNode,
+  type KnowledgeGraphSettings,
+  type KnowledgeGraphStatus,
+  updateKnowledgeGraphSettings,
 } from "@/lib/api/knowledge"
 import { getErrorMessage } from "@/lib/errors"
+import type { AppNotification } from "@/lib/notifications"
 import { cn } from "@/lib/utils"
 
 export type LinkGraphDirection = "both" | "incoming" | "outgoing"
@@ -36,6 +43,12 @@ export type LinkGraphFilters = {
   direction: LinkGraphDirection
 }
 
+function graphBuildActive(status: KnowledgeGraphStatus | null) {
+  return ["queued", "running", "cancelling"].includes(
+    status?.build_task_status ?? ""
+  )
+}
+
 export function filterKnowledgeLinkGraph(
   graph: KnowledgeLinkGraph,
   filters: LinkGraphFilters
@@ -43,7 +56,7 @@ export function filterKnowledgeLinkGraph(
   const query = filters.query.trim().toLocaleLowerCase()
   const candidates = new Set(
     graph.nodes
-      .filter((node) => filters.includeUnresolved || node.kind === "document")
+      .filter((node) => filters.includeUnresolved || node.kind !== "unresolved")
       .filter(
         (node) =>
           filters.includeOrphans ||
@@ -126,11 +139,15 @@ export function KnowledgeLinkGraph({
   token,
   workspaceId,
   knowledgeBaseId,
+  canEdit = false,
+  notify,
   reportError,
 }: {
   token: string
   workspaceId: string
   knowledgeBaseId: string
+  canEdit?: boolean
+  notify?: (kind: AppNotification["kind"], message: string) => void
   reportError: (error: unknown) => void
 }) {
   const { t } = useLanguage()
@@ -139,6 +156,13 @@ export function KnowledgeLinkGraph({
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRefreshing, setIsRefreshing] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string | null>(null)
+  const [graphSettings, setGraphSettings] =
+    React.useState<KnowledgeGraphSettings | null>(null)
+  const [graphStatus, setGraphStatus] =
+    React.useState<KnowledgeGraphStatus | null>(null)
+  const [buildAction, setBuildAction] = React.useState<
+    "enable" | "rebuild" | null
+  >(null)
   const [query, setQuery] = React.useState("")
   const [mode, setMode] = React.useState<"global" | "local">("global")
   const [direction, setDirection] = React.useState<LinkGraphDirection>("both")
@@ -187,21 +211,56 @@ export function KnowledgeLinkGraph({
     [knowledgeBaseId, reportError, t, token, workspaceId]
   )
 
+  const loadBuildState = React.useCallback(
+    async (signal?: AbortSignal, quiet = false) => {
+      try {
+        const [nextSettings, nextStatus] = await Promise.all([
+          getKnowledgeGraphSettings(
+            token,
+            workspaceId,
+            knowledgeBaseId,
+            signal
+          ),
+          getKnowledgeGraphStatus(token, workspaceId, knowledgeBaseId, signal),
+        ])
+        if (signal?.aborted) return
+        setGraphSettings(nextSettings)
+        setGraphStatus(nextStatus)
+      } catch (error) {
+        if (signal?.aborted) return
+        if (!quiet) reportError(error)
+      }
+    },
+    [knowledgeBaseId, reportError, token, workspaceId]
+  )
+
+  const isGraphBuilding = graphBuildActive(graphStatus)
+
   React.useEffect(() => {
     const controller = new AbortController()
     const frame = window.requestAnimationFrame(() => {
-      void loadGraph(controller.signal)
+      void Promise.all([
+        loadGraph(controller.signal),
+        loadBuildState(controller.signal),
+      ])
     })
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible")
-        void loadGraph(undefined, true)
-    }, 15_000)
+    const interval = window.setInterval(
+      () => {
+        if (document.visibilityState === "visible") {
+          void Promise.all([
+            loadGraph(undefined, true),
+            loadBuildState(undefined, true),
+          ])
+        }
+      },
+      isGraphBuilding ? 3_000 : 15_000
+    )
     return () => {
       controller.abort()
       window.cancelAnimationFrame(frame)
       window.clearInterval(interval)
     }
-  }, [loadGraph])
+  }, [isGraphBuilding, loadBuildState, loadGraph])
 
   const root = mode === "local" ? rootId : null
   const filtered = React.useMemo(
@@ -242,6 +301,38 @@ export function KnowledgeLinkGraph({
     }
   }
 
+  async function enableGraphBuild() {
+    setBuildAction("enable")
+    try {
+      const next = await updateKnowledgeGraphSettings(
+        token,
+        workspaceId,
+        knowledgeBaseId,
+        { enabled: true }
+      )
+      setGraphSettings(next)
+      notify?.("success", t("知识关联已启用，正在自动抽取已有文件"))
+      await loadBuildState(undefined, true)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setBuildAction(null)
+    }
+  }
+
+  async function rebuildGraph() {
+    setBuildAction("rebuild")
+    try {
+      await rebuildKnowledgeGraph(token, workspaceId, knowledgeBaseId)
+      notify?.("success", t("知识关联重建已提交"))
+      await loadBuildState(undefined, true)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setBuildAction(null)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="flex min-h-72 items-center justify-center" role="status">
@@ -271,26 +362,73 @@ export function KnowledgeLinkGraph({
               {t("关系图谱")}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t("基于 Markdown 显式链接生成，不使用 AI 或语义向量")}
+              {t(
+                graph.source === "evidence_graph"
+                  ? "关系图谱与检索共享同一份已发布证据图谱"
+                  : graphSettings?.enabled
+                    ? "正在自动抽取已有文件；完成后将在这里显示实体关系图"
+                    : "基于 Markdown 显式链接生成，不使用 AI 或语义向量"
+              )}
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={isRefreshing}
-            onClick={() => void loadGraph()}
-          >
-            <RefreshCwIcon className={cn(isRefreshing && "animate-spin")} />
-            {t("刷新")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {canEdit && graphSettings ? (
+              graphSettings.enabled ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={buildAction !== null || isGraphBuilding}
+                  onClick={() => void rebuildGraph()}
+                >
+                  {buildAction === "rebuild" || isGraphBuilding ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <NetworkIcon />
+                  )}
+                  {t("重新抽取全部文件")}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={buildAction !== null}
+                  onClick={() => void enableGraphBuild()}
+                >
+                  {buildAction === "enable" ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <NetworkIcon />
+                  )}
+                  {t("启用知识关联")}
+                </Button>
+              )
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isRefreshing}
+              onClick={() => void Promise.all([loadGraph(), loadBuildState()])}
+            >
+              <RefreshCwIcon className={cn(isRefreshing && "animate-spin")} />
+              {t("刷新")}
+            </Button>
+          </div>
         </div>
         <dl className="mt-4 grid gap-px overflow-hidden border bg-border text-sm sm:grid-cols-3">
-          {[
-            [t("文档数"), graph.document_count],
-            [t("链接数"), graph.edge_count],
-            [t("未解析链接"), graph.unresolved_count],
-          ].map(([label, value]) => (
+          {(graph.source === "evidence_graph"
+            ? [
+                [t("文档数"), graph.document_count],
+                [t("实体数"), graph.entity_count],
+                [t("关系数"), graph.edge_count],
+              ]
+            : [
+                [t("文档数"), graph.document_count],
+                [t("链接数"), graph.edge_count],
+                [t("未解析链接"), graph.unresolved_count],
+              ]
+          ).map(([label, value]) => (
             <div key={String(label)} className="bg-background p-3">
               <dt className="text-xs text-muted-foreground">{label}</dt>
               <dd className="mt-1 font-medium">{value}</dd>
@@ -304,6 +442,11 @@ export function KnowledgeLinkGraph({
         ) : null}
         {loadError ? (
           <p className="mt-2 text-xs text-destructive">{loadError}</p>
+        ) : null}
+        {graphStatus?.last_error ? (
+          <p className="mt-2 text-xs text-destructive">
+            {t("构建失败：{value}", { value: graphStatus.last_error })}
+          </p>
         ) : null}
       </section>
 
@@ -398,6 +541,8 @@ export function KnowledgeLinkGraph({
               <div className="flex min-w-0 items-start gap-3">
                 {selectedNode.kind === "document" ? (
                   <FileTextIcon className="mt-0.5 size-5 shrink-0 text-primary" />
+                ) : selectedNode.kind === "entity" ? (
+                  <NetworkIcon className="mt-0.5 size-5 shrink-0 text-primary" />
                 ) : (
                   <FileQuestionIcon className="mt-0.5 size-5 shrink-0 text-destructive" />
                 )}
@@ -406,11 +551,13 @@ export function KnowledgeLinkGraph({
                     {selectedNode.filename}
                   </h2>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {t(
-                      selectedNode.kind === "document"
-                        ? "已解析文档节点"
-                        : "尚未创建的链接目标"
-                    )}
+                    {selectedNode.kind === "entity"
+                      ? selectedNode.entity_type
+                      : t(
+                          selectedNode.kind === "document"
+                            ? "已解析文档节点"
+                            : "尚未创建的链接目标"
+                        )}
                   </p>
                 </div>
               </div>

@@ -66,6 +66,7 @@ from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
+    KnowledgeDocumentReference,
     KnowledgeTask,
 )
 from app.entities.knowledge.graph import (
@@ -891,6 +892,55 @@ async def _stage_document_entity(
     return entity_id
 
 
+async def stage_document_entities(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    revision: KnowledgeGraphRevision,
+    documents: list[KnowledgeDocument],
+    changed_document_ids: set[str] | None,
+) -> set[str]:
+    """Keep indexed documents as first-class nodes in the Evidence Graph."""
+    active_entities = await graph_repository.list_active_entities(
+        db,
+        knowledge_base,
+    )
+    document_entities = {
+        str(document_id): entity
+        for entity in active_entities
+        if entity.entity_type == "Document"
+        and (document_id := (entity.properties_json or {}).get("document_id"))
+    }
+    source_document_ids = {document.id for document in documents}
+    full_rebuild = changed_document_ids is None
+    affected: set[str] = set()
+
+    for document_id, entity in document_entities.items():
+        if document_id in source_document_ids:
+            continue
+        if not full_rebuild and document_id not in changed_document_ids:
+            continue
+        await stage_revision_change(
+            db,
+            revision,
+            record_kind="entity",
+            record_key=entity.id,
+            operation="retire",
+            before_json=_entity_before(entity),
+            after_json=None,
+        )
+        affected.add(entity.id)
+
+    for document in documents:
+        if (
+            not full_rebuild
+            and document.id not in changed_document_ids
+            and document.id in document_entities
+        ):
+            continue
+        affected.add(await _stage_document_entity(db, revision, document))
+    return affected
+
+
 async def stage_document_reference_claims(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -928,6 +978,17 @@ async def stage_document_reference_claims(
         )
     }
     affected: set[str] = set()
+    claim_groups: dict[str, dict[str, Any]] = {}
+    evidence_rows: list[
+        tuple[
+            KnowledgeDocumentReference,
+            KnowledgeDocumentChunk,
+            str,
+            str,
+            int,
+            str,
+        ]
+    ] = []
     for reference in references:
         source = documents.get(reference.source_document_id)
         target = documents.get(reference.target_document_id or "")
@@ -948,33 +1009,33 @@ async def stage_document_reference_claims(
             None,
             None,
         )
-        existing = await graph_repository.get_claim(db, revision, fingerprint)
-        claim_id = existing.id if existing is not None else _stable_id(
-            "kg-claim", knowledge_base.id, fingerprint
-        )
-        await stage_revision_change(
-            db,
-            revision,
-            record_kind="claim",
-            record_key=fingerprint,
-            operation="upsert",
-            before_json=_entity_before(existing),
-            after_json={
-                "id": claim_id,
-                "subject_entity_id": subject_id,
-                "predicate": "references",
-                "object_entity_id": object_id,
-                "object_value_json": None,
-                "properties_json": {
-                    "reference_type": reference.reference_type,
-                    "target_section": reference.target_section,
-                },
-                "status": GRAPH_CLAIM_ACTIVE,
-                "source_kind": "document_reference",
-                "quality_score": 1.0,
-                "fingerprint": fingerprint,
-            },
-        )
+        aggregate = claim_groups.get(fingerprint)
+        if aggregate is None:
+            existing = await graph_repository.get_claim(db, revision, fingerprint)
+            claim_id = existing.id if existing is not None else _stable_id(
+                "kg-claim", knowledge_base.id, fingerprint
+            )
+            aggregate = {
+                "claim_id": claim_id,
+                "existing": existing,
+                "subject_id": subject_id,
+                "object_id": object_id,
+                "target_document_id": target.id,
+                "reference_types": set(),
+                "target_labels": set(),
+                "target_sections": set(),
+                "target_parent_ids": set(),
+                "occurrence_count": 0,
+                "evidence_anchors": {},
+            }
+            claim_groups[fingerprint] = aggregate
+        aggregate["reference_types"].add(reference.reference_type)
+        aggregate["target_labels"].add(reference.target_label)
+        if reference.target_section:
+            aggregate["target_sections"].add(reference.target_section)
+        if reference.target_parent_id:
+            aggregate["target_parent_ids"].add(reference.target_parent_id)
+        aggregate["occurrence_count"] += reference.occurrence_count
         end_offset = start_offset + len(reference.target_label)
         evidence_id = _stable_id(
             "kg-evidence",
@@ -983,6 +1044,91 @@ async def stage_document_reference_claims(
             str(start_offset),
             str(end_offset),
         )
+        evidence_anchor = aggregate["evidence_anchors"].setdefault(
+            evidence_id,
+            {
+                "target_labels": set(),
+                "target_sections": set(),
+                "target_parent_ids": set(),
+                "occurrence_count": 0,
+            },
+        )
+        evidence_anchor["target_labels"].add(reference.target_label)
+        if reference.target_section:
+            evidence_anchor["target_sections"].add(reference.target_section)
+        if reference.target_parent_id:
+            evidence_anchor["target_parent_ids"].add(reference.target_parent_id)
+        evidence_anchor["occurrence_count"] += reference.occurrence_count
+        evidence_rows.append(
+            (
+                reference,
+                chunk,
+                fingerprint,
+                str(aggregate["claim_id"]),
+                start_offset,
+                evidence_id,
+            )
+        )
+
+    for fingerprint, aggregate in claim_groups.items():
+        reference_types = sorted(aggregate["reference_types"])
+        target_labels = sorted(aggregate["target_labels"])
+        target_sections = sorted(aggregate["target_sections"])
+        target_parent_ids = sorted(aggregate["target_parent_ids"])
+        evidence_anchors = {
+            evidence_id: {
+                "target_labels": sorted(anchor["target_labels"]),
+                "target_sections": sorted(anchor["target_sections"]),
+                "target_parent_ids": sorted(anchor["target_parent_ids"]),
+                "occurrence_count": anchor["occurrence_count"],
+            }
+            for evidence_id, anchor in aggregate["evidence_anchors"].items()
+        }
+        await stage_revision_change(
+            db,
+            revision,
+            record_kind="claim",
+            record_key=fingerprint,
+            operation="upsert",
+            before_json=_entity_before(aggregate["existing"]),
+            after_json={
+                "id": aggregate["claim_id"],
+                "subject_entity_id": aggregate["subject_id"],
+                "predicate": "references",
+                "object_entity_id": aggregate["object_id"],
+                "object_value_json": None,
+                "properties_json": {
+                    "reference_type": reference_types[0],
+                    "reference_types": reference_types,
+                    "target_document_id": aggregate["target_document_id"],
+                    "target_label": target_labels[0],
+                    "target_labels": target_labels,
+                    "target_section": target_sections[0] if target_sections else "",
+                    "target_sections": target_sections,
+                    "target_parent_id": (
+                        target_parent_ids[0] if target_parent_ids else None
+                    ),
+                    "target_parent_ids": target_parent_ids,
+                    "occurrence_count": aggregate["occurrence_count"],
+                    "evidence_anchors": evidence_anchors,
+                },
+                "status": GRAPH_CLAIM_ACTIVE,
+                "source_kind": "document_reference",
+                "quality_score": 1.0,
+                "fingerprint": fingerprint,
+            },
+        )
+
+    schema_hash = graph_schema_hash(schema)
+    for (
+        reference,
+        chunk,
+        fingerprint,
+        claim_id,
+        start_offset,
+        evidence_id,
+    ) in evidence_rows:
+        end_offset = start_offset + len(reference.target_label)
         await stage_revision_change(
             db,
             revision,
@@ -1001,7 +1147,7 @@ async def stage_document_reference_claims(
                 "extractor_type": "reference",
                 "model_name": "",
                 "prompt_hash": "document-reference",
-                "schema_hash": graph_schema_hash(schema),
+                "schema_hash": schema_hash,
             },
         )
     return affected
@@ -1048,6 +1194,20 @@ async def stage_connected_components(
     affected: set[str] = set()
     for entity_id, entity in entities.items():
         if entity_id not in referenced:
+            if entity.entity_type == "Document":
+                if entity.component_id == entity_id and entity.degree == 0:
+                    continue
+                await stage_revision_change(
+                    db,
+                    revision,
+                    record_kind="entity",
+                    record_key=entity_id,
+                    operation="upsert",
+                    before_json=_entity_before(entity),
+                    after_json={"component_id": entity_id, "degree": 0},
+                )
+                affected.add(entity_id)
+                continue
             await stage_revision_change(
                 db,
                 revision,
@@ -1446,6 +1606,19 @@ async def run_graph_build_task(
                         db,
                         knowledge_base,
                         revision,
+                        (
+                            changed_document_ids
+                            if task.task_type == TASK_GRAPH_SYNC
+                            else None
+                        ),
+                    )
+                )
+                affected_entities.update(
+                    await stage_document_entities(
+                        db,
+                        knowledge_base,
+                        revision,
+                        source_documents,
                         (
                             changed_document_ids
                             if task.task_type == TASK_GRAPH_SYNC

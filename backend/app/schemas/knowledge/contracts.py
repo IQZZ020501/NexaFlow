@@ -119,11 +119,14 @@ class KnowledgeDocumentStatusUpdateRequest(BaseModel):
 
 
 class KnowledgeDocumentParseRequest(BaseModel):
-    strategy: Literal["flat", "hierarchical"] = "flat"
+    strategy: Literal["flat", "hierarchical"] = "hierarchical"
     chunk_size: int = Field(default=1200, ge=100, le=8000)
     chunk_overlap: int = Field(default=150, ge=0, le=2000)
     split_separator: str = Field(default="\n\n", min_length=1, max_length=16)
-    cleaning_rules: list[str] = Field(default_factory=list, max_length=3)
+    cleaning_rules: list[str] = Field(
+        default_factory=lambda: ["trim_lines", "remove_empty_lines"],
+        max_length=3,
+    )
     auto_index: bool = True
 
 

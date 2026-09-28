@@ -109,13 +109,7 @@ export const SUPPORTED_FILE_TYPES = [
   ".csv",
   ".json",
   ".xml",
-  ".ipynb",
-  ".epub",
   ".zip",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
 ]
 export const QA_FILE_TYPES = [".csv", ".xlsx"]
 const SMART_CHUNK_SIZE = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS.chunkSize

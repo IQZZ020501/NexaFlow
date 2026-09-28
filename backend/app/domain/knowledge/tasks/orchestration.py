@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, timedelta
-from functools import partial
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -11,8 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.audit.services import record_audit_log
 from app.domain.knowledge.bases.permissions import require_knowledge_base_active
 from app.domain.knowledge.documents.parsing import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
     NORMALIZED_TEXT_VERSION,
     SPLIT_SEPARATORS,
     ChildChunkDraft,
@@ -23,10 +20,12 @@ from app.domain.knowledge.documents.parsing import (
     chunk_token_count,
     clean_text,
     extract_document,
+    remove_asset_markers,
     split_text,
 )
 from app.domain.knowledge.documents.qa_import import (
     extract_qa_rows,
+    qa_rows_to_markdown,
 )
 from app.domain.knowledge.documents.references import (
     prepare_document_reference_rebuild,
@@ -80,7 +79,6 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.observability.logger import get_logger
-from app.ports.llm import extract_image_text
 from app.schemas.knowledge import (
     KnowledgeAssetResponse,
     KnowledgeDocumentChunkResponse,
@@ -92,14 +90,7 @@ logger = get_logger(__name__)
 
 MAX_TASK_ATTEMPTS = 3
 ALLOWED_CLEANING_RULES = {"trim_lines", "collapse_spaces", "remove_empty_lines"}
-DEFAULT_PARSE_OPTIONS: dict[str, Any] = {
-    "strategy": "flat",
-    "chunk_size": CHUNK_SIZE,
-    "chunk_overlap": CHUNK_OVERLAP,
-    "split_separator": "\n\n",
-    "cleaning_rules": [],
-    "auto_index": True,
-}
+DEFAULT_PARSE_OPTIONS: dict[str, Any] = KnowledgeDocumentParseRequest().model_dump()
 
 
 @dataclass(frozen=True)
@@ -343,7 +334,6 @@ async def extract_document_chunk_contents(
     document: KnowledgeDocument,
     settings: Settings,
     options: dict[str, Any],
-    vision_model: RegisteredModel | None = None,
 ) -> DocumentChunkDrafts:
     if (document.meta or {}).get("import_mode") == "qa":
         rows = await asyncio.to_thread(
@@ -365,6 +355,7 @@ async def extract_document_chunk_contents(
                 )
                 for row in rows
             ],
+            normalized_text=qa_rows_to_markdown(document.filename, rows),
         )
 
     text, assets = await asyncio.to_thread(
@@ -372,11 +363,6 @@ async def extract_document_chunk_contents(
         document.filename,
         document.content_type,
         knowledge_document_path(settings, document.storage_path),
-        image_text_extractor=(
-            partial(extract_image_text, settings, vision_model)
-            if vision_model is not None
-            else None
-        ),
     )
     text = clean_text(
         text,
@@ -406,7 +392,7 @@ async def extract_document_chunk_contents(
         parents=chunks.parents,
         children=chunks.children,
         assets=assets,
-        normalized_text=text,
+        normalized_text=remove_asset_markers(text),
     )
 
 
@@ -465,6 +451,7 @@ async def replace_document_chunks(
                 **(document.meta or {}),
                 "normalized_artifact_key": artifact.object_key,
                 "normalized_content_hash": artifact.content_hash,
+                "normalized_content_type": "text/markdown",
                 "normalized_text_version": NORMALIZED_TEXT_VERSION,
                 "document_version": int(
                     (document.meta or {}).get("document_version") or 0

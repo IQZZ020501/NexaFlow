@@ -1217,6 +1217,29 @@ describe("lib/api/knowledge", () => {
     ])
   })
 
+  test("loads the canonical document Markdown", async () => {
+    const calls: Array<{ url: string; auth: string | null }> = []
+    stubFetch((url, init) => {
+      calls.push({
+        url,
+        auth: new Headers(init?.headers).get("Authorization"),
+      })
+      return new Response("# Guide", { status: 200 })
+    })
+
+    const content = await knowledgeApi.loadKnowledgeDocumentMarkdown(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "doc-1"
+    )
+    expect(calls[0].url).toBe(
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/content"
+    )
+    expect(calls[0].auth).toBe("Bearer tok")
+    expect(content).toBe("# Guide")
+  })
+
   test("loads knowledge assets as blobs", async () => {
     let calledUrl = ""
     stubFetch((url) => {

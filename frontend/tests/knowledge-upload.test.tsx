@@ -551,11 +551,13 @@ describe("knowledge upload flow: files step", () => {
     const files = [
       new File(["ok"], "guide.md", { type: "text/markdown" }),
       new File(["bad"], "setup.exe", { type: "application/x-msdownload" }),
+      new File(["image"], "diagram.png", { type: "image/png" }),
       new File(["ok2"], "readme.txt", { type: "text/plain" }),
     ]
     fireEvent.change(fileInput, { target: { files } })
 
     expect(screen.queryByText("setup.exe")).toBeNull()
+    expect(screen.queryByText("diagram.png")).toBeNull()
     expect(screen.getByText("guide.md")).toBeTruthy()
     expect(screen.getByText("readme.txt")).toBeTruthy()
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
@@ -1841,6 +1843,25 @@ describe("knowledge upload flow: import and document management", () => {
 })
 
 describe("chunk preview list", () => {
+  test("renders document chunk content as Markdown", () => {
+    renderPage(
+      <ChunkPreviewList
+        chunks={[
+          makeChunk({
+            content: "# Guide\n\nRead the **important** note.",
+          }),
+        ]}
+        fileName="guide.md"
+        token={TOKEN}
+        workspaceId={WS_ID}
+        knowledgeBaseId={KB_ID}
+      />,
+    )
+
+    expect(screen.getByRole("heading", { name: "Guide" })).toBeTruthy()
+    expect(screen.getByText("important").tagName).toBe("STRONG")
+  })
+
   test("renders parent and child chunk titles with counts", () => {
     const chunks = [
       makeChunk({

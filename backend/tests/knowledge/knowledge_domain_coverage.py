@@ -354,9 +354,18 @@ async def save_asset(db, asset: KnowledgeAsset) -> KnowledgeAsset:
 def test_parse_task_options() -> None:
     from fastapi import HTTPException
 
+    expected_defaults = {
+        "strategy": "hierarchical",
+        "chunk_size": 1200,
+        "chunk_overlap": 150,
+        "split_separator": "\n\n",
+        "cleaning_rules": ["trim_lines", "remove_empty_lines"],
+        "auto_index": True,
+    }
+    assert KnowledgeDocumentParseRequest().model_dump() == expected_defaults
+
     options = orchestration_service.parse_task_options(None)
-    assert options["strategy"] == "flat"
-    assert options["cleaning_rules"] == []
+    assert options == expected_defaults
 
     deduped = orchestration_service.parse_task_options(
         KnowledgeDocumentParseRequest(cleaning_rules=["trim_lines", "trim_lines"])
@@ -405,7 +414,8 @@ def test_parse_task_options() -> None:
     )
     from_task = orchestration_service.parse_task_options_from_task(task)
     assert from_task["chunk_size"] == 300
-    assert from_task["strategy"] == "flat"
+    assert from_task["strategy"] == "hierarchical"
+    assert from_task["cleaning_rules"] == ["trim_lines", "remove_empty_lines"]
 
 
 def test_clean_upload_filename() -> None:
@@ -1545,7 +1555,7 @@ async def run_direct_domain_tests(
         research_token,
         cleanup_workspace_id,
         no_model_kb_id,
-        "unsupported.bin",
+        "unsupported.zip",
         b"\x00\x01\x02",
         "application/octet-stream",
     )
@@ -2856,7 +2866,8 @@ async def run_parse_task_direct_tests(
         initial_normalized_path = settings.knowledge_storage_dir / initial_normalized_key
         initial_document_version = int(doc.meta["document_version"])
         assert len(str(doc.meta["normalized_content_hash"])) == 64
-        assert doc.meta["normalized_text_version"] == "normalized-markdown-v1"
+        assert doc.meta["normalized_content_type"] == "text/markdown"
+        assert doc.meta["normalized_text_version"] == "normalized-markdown-v2"
         assert initial_normalized_path.exists()
 
     with_assets = DocumentChunkDrafts(

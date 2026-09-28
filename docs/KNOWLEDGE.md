@@ -26,8 +26,9 @@ api/v1/knowledge（routes/lifecycle/retrieval/evaluation/graph 路由）
 
 ## 文档导入流程
 
-- 附件上传 `POST /knowledge-bases/{kb_id}/attachments` 只持久化文件（对象存储 adapter 见 `backend/app/infra/storage/object_storage.py`），返回 attachment。
+- 附件上传 `POST /knowledge-bases/{kb_id}/attachments` 只接受 DOCX、MD、MARKDOWN、PDF、TXT、PPTX、XLSX、XLS、HTML、CSV、JSON、XML、ZIP，并先在服务端按扩展名拒绝其他格式，再将原文件持久化到对象存储（adapter 见 `backend/app/infra/storage/object_storage.py`）并返回 attachment。
 - 文档创建 `POST /documents` 接收 `attachment_ids`、`staged` 和显式 `import_mode`（`document`/`qa`）；事务内消费附件并生成 staged 文档。解析/向量化一律走 Celery 任务（`POST /parse`、`POST /index`）。
+- 普通文档解析在前后端统一默认使用智能分段：`hierarchical`、1200 字符、150 字符重叠、按空行分隔，并依次执行 `trim_lines` 与 `remove_empty_lines`；高级模式仍可显式提交 `flat` 和自定义参数。省略解析请求体与提交空对象的语义一致。
 - QA 模式只接受 UTF-8 CSV 或 XLSX，表头支持 `question/问题`、`answer/答案` 和可选 `source/来源`。每行生成一个 `kind=qa` Child，答案作为返回正文，`question + answer` 作为检索文本；最多 5000 行，问题/答案分别限制为 2000/20000 字符，普通分段参数在该模式下忽略。
 - 图片资产：DOCX 解析时抽取内嵌图片落对象存储（`KnowledgeAsset`/`KnowledgeChunkAsset` 记录），chunk 正文保留原子占位符并用 `images[]` 结构化返回；前端经鉴权接口拉取 blob 渲染，不暴露对象路径。图片不参与向量化。
 - 附件生命周期：available → consumed（创建文档）→ deleted（删除文档/知识库时对象一并清理）。
@@ -35,7 +36,7 @@ api/v1/knowledge（routes/lifecycle/retrieval/evaluation/graph 路由）
 ### 四种持久表示与权威性
 
 - 原始文件是用户上传的事实来源，保存在共享对象存储；数据库只保存文档元数据、状态和清理意图。
-- 规范化全文工件是解析器生成的 UTF-8 Markdown/text 快照，按内容 hash 写入对象存储，并由 `document.meta.normalized_artifact_key` 和 `normalized_content_hash` 指向。它是分块、引用解析和 Graph 增量版本判断的输入，不替代原始文件。
+- 规范化全文工件是解析器为每种受支持格式（包括 QA CSV/XLSX）生成的 UTF-8 Markdown 快照，按内容 hash 以 `.md` 写入对象存储，并由 `document.meta.normalized_artifact_key`、`normalized_content_hash`、`normalized_content_type=text/markdown` 和 `normalized_text_version` 指向。它是分块、引用解析、Graph 增量版本判断和文档详情 Markdown 展示的输入，不替代原始文件；详情通过受知识库权限保护的 `GET /documents/{document_id}/content` 读取。
 - Parent/Child 是可重建的结构化分段：Parent 保存章节上下文，Child 保存可检索正文、半开区间 offset 和索引状态。只有 Child 进入 Qdrant/`pg_search`；数据库中的文档、Parent、Child 状态和权限仍是检索事实来源。
 - Evidence Graph 保存实体、别名、提及、claim、evidence、review、schema 和 revision。PostgreSQL 是关系、状态、版本和证据引用的唯一权威；Profile Markdown 是由当前发布 revision 投影出的持久知识页，Qdrant profile collection 只是可删除、可重建的派生向量索引。
 
