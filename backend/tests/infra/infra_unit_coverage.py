@@ -851,6 +851,10 @@ def test_registry_basics() -> None:
         {"max_tokens": 1024},
         "VISION",
     ) == {"max_tokens": 1024}
+    assert llm_registry.normalize_model_request_params(
+        {"quality": "high", "extra_body": {"image_size": "4K"}},
+        "IMAGE",
+    ) == {"quality": "high", "extra_body": {"image_size": "4K"}}
     expect_http_error(
         lambda: llm_registry.normalize_model_request_params(
             {"max_tokens": 0},

@@ -1937,6 +1937,14 @@ def build_image_generation_tool(
                 "enum": ["square", "landscape", "portrait"],
                 "description": "Image orientation; defaults to square.",
             },
+            "resolution": {
+                "type": "string",
+                "enum": ["1K", "2K", "4K"],
+                "description": (
+                    "Output resolution tier. Use 2K or 4K only when the configured "
+                    "image provider supports it; defaults to 1K."
+                ),
+            },
         },
         "required": ["prompt"],
         "additionalProperties": False,

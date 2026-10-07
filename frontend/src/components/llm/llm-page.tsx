@@ -1494,7 +1494,9 @@ function ModelDialog({
               })
             )}
 
-            {form.model_type === "LLM" || form.model_type === "VISION" ? (
+            {form.model_type === "LLM" ||
+            form.model_type === "VISION" ||
+            form.model_type === "IMAGE" ? (
               <Field>
                 <FieldLabel htmlFor="model-request-params">
                   {t("额外请求参数")}

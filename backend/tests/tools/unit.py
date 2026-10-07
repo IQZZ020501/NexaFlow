@@ -127,6 +127,10 @@ def test_image_generation_is_a_bounded_approval_backed_builtin() -> None:
     validate_tool_arguments(
         snapshot, {"prompt": "A watercolor mountain", "size": "square"}
     )
+    validate_tool_arguments(
+        snapshot,
+        {"prompt": "A watercolor mountain", "size": "landscape", "resolution": "4K"},
+    )
     for arguments in ({"prompt": ""}, {"prompt": "hello", "size": "gigantic"}):
         try:
             validate_tool_arguments(snapshot, arguments)
@@ -265,7 +269,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
         assert (
             asyncio.run(
                 image_adapter.generate_registered_image(
-                    model, settings, "A mountain", "landscape"
+                    model, settings, "A mountain", "landscape", "2K"
                 )
             )
             == png
@@ -273,7 +277,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
         images.generate.assert_awaited_once_with(
             model="gpt-image-1",
             prompt="A mountain",
-            size="1536x1024",
+            size="3072x2048",
             output_format="png",
             n=1,
         )
@@ -368,7 +372,7 @@ def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
         )
         get_model.assert_awaited_once_with(db, "image-model-1")
         provider.assert_awaited_once_with(
-            SimpleNamespace(), model, "A mountain at dawn。第二句", "square"
+            SimpleNamespace(), model, "A mountain at dawn。第二句", "square", "1K"
         )
         assert store.await_args.kwargs["workspace_id"] == "workspace-1"
         assert store.await_args.kwargs["idempotency_key"] == "image-key"
@@ -407,6 +411,67 @@ def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
         else:
             raise AssertionError("Ambiguous image models were accepted.")
         provider.assert_awaited_once()
+
+
+def test_image_provider_updates_configured_resolution_extension() -> None:
+    from app.adapters.llm import image as image_adapter
+
+    png = image_adapter.PNG_SIGNATURE + b"test-image"
+    model = SimpleNamespace(
+        provider="model_custom_provider",
+        model_name="custom-image",
+        meta={
+            "request_params": {
+                "quality": "high",
+                "extra_body": {"image_size": "1K", "aspect_ratio": "16:9"},
+            }
+        },
+    )
+    settings = SimpleNamespace(model_request_timeout_seconds=60)
+    generated = SimpleNamespace(
+        data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
+    )
+    images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+
+    class FakeClient:
+        def __init__(self, **_options):
+            self.images = images
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    with (
+        patch.object(
+            image_adapter,
+            "_registered_model_credentials",
+            return_value={
+                "api_key": "test-key",
+                "api_base": "https://images.example.test/v1",
+            },
+        ),
+        patch.object(image_adapter, "AsyncOpenAI", FakeClient),
+    ):
+        assert (
+            asyncio.run(
+                image_adapter.generate_registered_image(
+                    model, settings, "A mountain", "square", "4K"
+                )
+            )
+            == png
+        )
+
+    images.generate.assert_awaited_once_with(
+        model="custom-image",
+        prompt="A mountain",
+        size="4096x4096",
+        quality="high",
+        extra_body={"image_size": "4K", "aspect_ratio": "16:9"},
+        response_format="b64_json",
+        n=1,
+    )
 
 
 def test_image_tool_honours_the_selected_model() -> None:

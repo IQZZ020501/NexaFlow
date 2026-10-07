@@ -124,10 +124,10 @@ def normalize_model_request_params(
     params = dict(value or {})
     if not params:
         return {}
-    if model_type not in {"LLM", "VISION"}:
+    if model_type not in {"LLM", "VISION", "IMAGE"}:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Extra request parameters are only supported for chat models.",
+            "Extra request parameters are only supported for chat and image models.",
         )
     if len(params) > MAX_MODEL_REQUEST_PARAM_KEYS:
         raise HTTPException(

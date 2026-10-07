@@ -90,7 +90,10 @@ async def generate_image_artifact(
     size = arguments.get("size", "square")
     if size not in {"square", "landscape", "portrait"}:
         raise ValueError("Image size is invalid.")
-    content = await generate_image(settings, model, prompt, size)
+    resolution = arguments.get("resolution", "1K")
+    if resolution not in {"1K", "2K", "4K"}:
+        raise ValueError("Image resolution is invalid.")
+    content = await generate_image(settings, model, prompt, size, resolution)
     if not content or len(content) > MAX_ARTIFACT_BYTES:
         raise ModelProviderError("Generated image exceeds the 5 MiB file limit.")
     # Name the artifact after the user's request instead of a fixed placeholder,
