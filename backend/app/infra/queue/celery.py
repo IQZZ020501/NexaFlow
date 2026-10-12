@@ -2,6 +2,7 @@ import asyncio
 import gc
 import logging
 import sys
+import threading
 
 from celery import Celery, Task
 from celery.signals import after_setup_logger, task_failure, task_postrun
@@ -117,6 +118,10 @@ def log_celery_task_failure(
 
 @task_postrun.connect
 def collect_task_garbage(*, sender=None, **kwargs) -> None:
+    # Threads-pool tasks share one process and event loop, where a full
+    # collection would pause every concurrent run.
+    if threading.current_thread() is not threading.main_thread():
+        return
     if getattr(sender, "name", None) in _GC_AFTER_TASKS:
         gc.collect()
 

@@ -4590,7 +4590,7 @@ async def assert_durable_execution_paths(
         current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None and current.status == "failed"
 
-    # live run owned by another worker -> RUN_BUSY (984)
+    # live run owned by another worker -> redundant delivery ends without retry
     run, _ = await prepare_console_run(workspace_id, agent_id, "Busy claim")
     run.knowledge_base_ids = []
     async with get_session_factory()() as db:
@@ -4609,7 +4609,7 @@ async def assert_durable_execution_paths(
         settings,
         worker_task_id="worker-interloper",
     )
-    assert outcome == agent_executor.RUN_BUSY
+    assert outcome == agent_executor.RUN_LEASED
 
     # missing run -> AgentRunnerError (888)
     try:
@@ -4975,6 +4975,9 @@ async def assert_durable_execution_paths(
         await db.commit()
     recoverable = await agent_executor.list_recoverable_unified_agent_run_ids(settings)
     assert run.id in recoverable
+    # The expired lease got its delivery; the next sweep must not publish again.
+    recoverable = await agent_executor.list_recoverable_unified_agent_run_ids(settings)
+    assert run.id not in recoverable
 
 
 async def assert_ledger_db_paths(

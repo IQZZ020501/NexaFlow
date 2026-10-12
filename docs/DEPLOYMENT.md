@@ -8,7 +8,7 @@
 
 ### deploy/
 
-- `deploy/docker-compose.yml` — 全栈编排：PostgreSQL 17/Redis 7/Qdrant/一次性 `migrate`/API/内嵌 Beat 的 Celery worker/Next.js 前端；三个应用服务共用一个可从镜像仓库拉取的应用镜像，API 与 Worker 依赖 `migrate` 成功完成
+- `deploy/docker-compose.yml` — 全栈编排：PostgreSQL 17/Redis 7/Qdrant/一次性 `migrate`/API/内嵌 Beat 的后台 Celery worker/Agent worker/Next.js 前端；应用服务共用一个可从镜像仓库拉取的应用镜像，API 与两个 Worker 依赖 `migrate` 成功完成
 - `deploy/docker-compose.server.yml` — 阿里云镜像仓库拉取版：同样内置一次性 `migrate` 服务，再按健康状态启动全部服务
 - `deploy/docker-compose.dev.yml` — 开发覆盖：向宿主发布 5432/6379/6333 并固定容器名，供宿主机后端（`make dev`）使用
 - `deploy/opensandbox/README.md` / `configure.py` — 独立执行主机部署、固定版本与私有配置生成；生产默认 Kata + dns+nft，开发需显式选择普通 Docker
@@ -71,9 +71,10 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
 ## 关键约定
 
 - 仓库根 `.env` 是宿主机后端与 Compose 的唯一配置源；Compose 命令显式传 `--env-file .env`，并通过 `NEXAFLOW_APP_IMAGE` / `NEXAFLOW_POSTGRES_IMAGE` 选择本地或镜像仓库标签。
-- API、Worker 与 Frontend 共享业务镜像并保持三个独立容器；OpenSandbox 控制面和执行镜像是独立部署单元，执行镜像不进入业务 Compose、不挂载业务数据。Worker 丢弃全部 capability，保留默认 AppArmor/seccomp 和 `no-new-privileges`，不需要 Docker socket 或 root 隔离启动流程。
+- API、Worker 与 Frontend 共享业务镜像并保持独立容器；OpenSandbox 控制面和执行镜像是独立部署单元，执行镜像不进入业务 Compose、不挂载业务数据。两个 Worker 都丢弃全部 capability，保留默认 AppArmor/seccomp 和 `no-new-privileges`，不需要 Docker socket 或 root 隔离启动流程。
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
-- API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL/Redis；该组合 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
+- `backend/scripts/worker.py --role` 决定一个 Worker 的职责：`all`（默认，本地开发）消费全部队列并内嵌 Beat；`background` 只消费 `celery` 队列（知识库、工具测试、邮件、清理）并内嵌 Beat，用 prefork 自动伸缩；`agents` 只消费 `agents-legacy`/`agents-v2`，不带 Beat，用线程池让同一进程的所有对话共享一个事件循环，默认并发 32（可追加 `--concurrency=N`）。Worker 使用 NullPool，每个执行中的 Run 会短暂占用 PostgreSQL 连接，调大并发或 `--scale agent-worker=N` 前要确认 `max_connections` 足够。
+- API 与内嵌 Beat 的后台 Worker 必须连接同一 PostgreSQL/Redis；后台 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Agent Run 只在消息超过租约时长仍未被消费、或租约刚过期时才重新派发，并记录在 `agent_run_states.redispatched_at`，积压时不会每轮重复投递；发现 Run 已被其他 Worker 持有有效租约的重复消息直接结束，不再定时重试。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - 根 `.env` 设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。单次 stdio MCP 可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
 - 旧 Unix Broker、Seatbelt/namespace supervisor、`SANDBOX_NETWORK`、宿主 Skills 目录和运行时依赖安装已移除。schema-v1 测试 Skills 需重新导入。
 - Agent 执行器的代码默认心跳必须小于租约的一半；使用兼容环境覆盖时仍执行同一强校验。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。

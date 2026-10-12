@@ -198,6 +198,19 @@ not trigger unrelated cleanup.
 - `cd backend && make worker` starts Celery without a local execution broker,
   root requirement, or sandbox dependencies. It requires `OPENSANDBOX_API_KEY`;
   code execution fails closed if the external execution plane is unavailable.
+- `scripts/worker.py --role` selects a worker's queues: `all` (default, local
+  development) serves every queue with the embedded Beat; `background` serves
+  the `celery` queue with the embedded Beat and must stay a single instance;
+  `agents` serves `agents-legacy`/`agents-v2` on a threads pool without Beat,
+  so concurrent runs share one process event loop. Compose runs one `worker`
+  (background) and a horizontally scalable `agent-worker`. Code reached from
+  Agent or Workflow runs must not block that event loop; offload blocking
+  calls with `asyncio.to_thread`.
+- Beat re-publishes a claimable Agent Run only when its last delivery is
+  overdue (`agent_run_states.redispatched_at` plus the lease length), and a
+  delivery that finds another worker holding a live lease ends as
+  `RUN_LEASED` instead of retrying; keep recovery bounded rather than
+  re-publishing every queued run on each sweep.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
@@ -299,7 +312,7 @@ not trigger unrelated cleanup.
   renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
-- `deploy/` holds the Docker Compose topology, the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. The business Worker drops all capabilities and retains default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
+- `deploy/` holds the Docker Compose topology, the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. Both business Workers (`worker` and `agent-worker`) drop all capabilities and retain default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
 - `deploy/opensandbox/` documents the separate pinned execution plane and generates a private Kata + dns+nft production configuration; ordinary Docker requires an explicit development profile, never an automatic downgrade. `deploy/dockerfiles/sandbox.Dockerfile` builds the execution image independently from the business image.
   Production execution images use immutable digests. Agent runs freeze the
   non-secret image/network fingerprint so retries cannot silently switch it.

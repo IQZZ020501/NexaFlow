@@ -70,7 +70,7 @@ def test_celery_worker_pool_is_fork_safe_without_prefork() -> None:
     assert worker_pool_for_platform("linux") == "prefork"
 
 
-def test_worker_command_consumes_all_application_queues() -> None:
+def _load_worker_script():
     import importlib.util
     from pathlib import Path
 
@@ -79,11 +79,22 @@ def test_worker_command_consumes_all_application_queues() -> None:
     assert spec is not None and spec.loader is not None
     worker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
+    return worker
+
+
+def test_worker_command_consumes_all_application_queues() -> None:
+    worker = _load_worker_script()
 
     pidfile = worker.worker_pidfile("redis://user:secret@localhost:6379/0")
-    command = worker.worker_command(["--autoscale=10,0"], pidfile=pidfile)
+    command = worker.worker_command(
+        ["--autoscale=10,0"],
+        pidfile=pidfile,
+        role=worker.worker_role("all", "linux"),
+    )
     assert "--beat" in command
     assert "--queues=celery,agents-legacy,agents-v2" in command
+    assert command[command.index("--pool") + 1] == "prefork"
+    assert not any(part.startswith("--concurrency") for part in command)
     assert command[command.index("--pidfile") + 1] == str(pidfile)
     assert command[-1] == "--autoscale=10,0"
     assert "secret" not in str(pidfile)
@@ -91,6 +102,72 @@ def test_worker_command_consumes_all_application_queues() -> None:
         "redis://different:credentials@localhost:6379/0"
     )
     assert pidfile != worker.worker_pidfile("redis://localhost:6379/1")
+
+
+def test_worker_roles_split_agent_runs_from_background_jobs() -> None:
+    worker = _load_worker_script()
+    broker = "redis://localhost:6379/0"
+
+    background = worker.worker_command(
+        ["--autoscale=10,0"],
+        pidfile=worker.worker_pidfile(broker, "background"),
+        role=worker.worker_role("background", "linux"),
+    )
+    assert "--beat" in background
+    assert "--queues=celery" in background
+    assert background[background.index("--pool") + 1] == "prefork"
+
+    agents = worker.worker_command(
+        [],
+        pidfile=worker.worker_pidfile(broker, "agents"),
+        role=worker.worker_role("agents", "linux"),
+    )
+    assert "--beat" not in agents
+    assert "--queues=agents-legacy,agents-v2" in agents
+    assert agents[agents.index("--pool") + 1] == "threads"
+    assert f"--concurrency={worker.AGENT_WORKER_CONCURRENCY}" in agents
+    assert worker.worker_pidfile(broker, "agents") != worker.worker_pidfile(
+        broker, "background"
+    )
+
+    role, concurrency, celery_arguments = worker.parse_worker_arguments(
+        ["--role=agents", "-c", "8", "--loglevel=warning"]
+    )
+    assert (role, concurrency, celery_arguments) == ("agents", 8, ["--loglevel=warning"])
+    tuned = worker.worker_command(
+        celery_arguments,
+        pidfile=worker.worker_pidfile(broker, role),
+        role=worker.worker_role(role, "linux"),
+        concurrency=concurrency,
+    )
+    assert "--concurrency=8" in tuned
+    assert f"--concurrency={worker.AGENT_WORKER_CONCURRENCY}" not in tuned
+    assert worker.parse_worker_arguments(["--autoscale=10,0"]) == (
+        "all",
+        None,
+        ["--autoscale=10,0"],
+    )
+    try:
+        worker.worker_role("unknown")
+    except ValueError as exc:
+        assert "unknown" in str(exc)
+    else:
+        raise AssertionError("expected an unsupported worker role to be rejected")
+
+
+def test_task_event_loop_offloads_blocking_calls_to_a_wide_executor() -> None:
+    import threading
+
+    from app.tasks import runtime
+
+    async def offloaded_thread_name() -> str:
+        loop = asyncio.get_running_loop()
+        assert loop._default_executor._max_workers == runtime.TASK_LOOP_EXECUTOR_THREADS
+        return await asyncio.to_thread(lambda: threading.current_thread().name)
+
+    assert runtime.run_task_async(offloaded_thread_name()).startswith(
+        "nexaflow-task-io"
+    )
 
 
 def test_celery_registers_one_task_per_job_type() -> None:
@@ -183,6 +260,8 @@ def main() -> None:
     test_coverage_runner_times_out_suites()
     test_celery_worker_pool_is_fork_safe_without_prefork()
     test_worker_command_consumes_all_application_queues()
+    test_worker_roles_split_agent_runs_from_background_jobs()
+    test_task_event_loop_offloads_blocking_calls_to_a_wide_executor()
     test_celery_registers_one_task_per_job_type()
     test_celery_nonfork_pool_runs_tasks_concurrently()
     test_worker_database_rejects_in_memory_sqlite()

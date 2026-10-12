@@ -37,7 +37,7 @@
 
 ### app/infra/queue/
 
-- `backend/app/infra/queue/celery.py` — Celery 应用工厂：broker、序列化、ack 策略、任务失败全局错误钩子（走 `app.infra.observability.errors.log_error`）、重任务后 GC。任务模块以 `include` 注册：`app.tasks.<feature>.jobs`（knowledge/agents/tools/email/storage/maintenance），任务实现在 `app/tasks/<feature>/jobs.py`，worker 辅助逻辑在 `app/tasks/runtime.py`；另有 `beat_schedule`（30s/60s 维护恢复，均指向 `app.maintenance.run`）、按平台选择 pool 的 `worker_pool_for_platform`、`NexaFlowTask` 任务基类与 `publish_task` 按名投递辅助。Worker 启动命令由 `backend/scripts/worker.py` 生成：`python -m celery -A app.infra.queue.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=info --pool <threads|solo|prefork> --pidfile <tmp>`；未设置 `OPENSANDBOX_API_KEY` 时直接报错退出，pidfile 路径由仓库路径与 broker 端点指纹生成。
+- `backend/app/infra/queue/celery.py` — Celery 应用工厂：broker、序列化、ack 策略、任务失败全局错误钩子（走 `app.infra.observability.errors.log_error`）、重任务后 GC（线程池中跳过，避免暂停共享事件循环上的其他 Run）。任务模块以 `include` 注册：`app.tasks.<feature>.jobs`（knowledge/agents/tools/email/storage/maintenance），任务实现在 `app/tasks/<feature>/jobs.py`，worker 辅助逻辑在 `app/tasks/runtime.py`（每进程一个共享任务事件循环，默认线程池上限 64）；另有 `beat_schedule`（30s/60s 维护恢复，均指向 `app.maintenance.run`）、按平台选择 pool 的 `worker_pool_for_platform`、`NexaFlowTask` 任务基类与 `publish_task` 按名投递辅助。Worker 启动命令由 `backend/scripts/worker.py` 按 `--role` 生成：`all`（默认）为 `python -m celery -A app.infra.queue.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=info --pool <threads|solo|prefork> --pidfile <tmp>`，`background` 只消费 `celery` 并内嵌 Beat，`agents` 只消费 `agents-legacy,agents-v2`、不带 Beat、使用 `--pool threads --concurrency=32`（`-c`/`--concurrency` 可覆盖）；未设置 `OPENSANDBOX_API_KEY` 时直接报错退出，pidfile 路径由仓库路径、broker 端点与角色指纹生成。
 
 ### app/infra/security/
 

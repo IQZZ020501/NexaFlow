@@ -68,13 +68,16 @@ flowchart LR
     API --> Redis[(Redis)]
     API --> Qdrant[("Qdrant derived vectors")]
     API --> Storage[("Shared upload storage")]
-    Redis <--> Worker["Celery worker + embedded Beat"]
+    Redis <--> Worker["Celery background worker + embedded Beat"]
+    Redis <--> AgentWorker["Celery Agent worker (thread pool)"]
     Worker --> DB
     Worker --> Qdrant
     Worker --> Storage[(Shared upload storage)]
     Worker --> Sandbox[External OpenSandbox / Kata]
-    Worker --> Models[LLM providers]
-    Worker --> ToolRuntime[Unified Tool Runtime]
+    AgentWorker --> DB
+    AgentWorker --> Qdrant
+    AgentWorker --> Models[LLM providers]
+    AgentWorker --> ToolRuntime[Unified Tool Runtime]
     ToolRuntime --> Sandbox
     ToolRuntime --> MCP[MCP servers]
 ```
@@ -141,7 +144,13 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.server.yml ps
-docker compose --env-file .env -f deploy/docker-compose.server.yml logs -f api worker frontend
+docker compose --env-file .env -f deploy/docker-compose.server.yml logs -f api worker agent-worker frontend
+```
+
+`worker` 处理知识库、工具测试、邮件和清理任务，并内嵌唯一的 Beat，只能运行一个实例；`agent-worker` 专门执行 Agent 与工作流对话，单进程用线程池并发处理（默认 32 个），对话量大时可以横向扩容：
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.server.yml up -d --scale agent-worker=2
 ```
 
 停止服务：

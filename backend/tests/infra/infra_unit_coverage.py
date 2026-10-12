@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -2589,6 +2590,15 @@ def test_celery() -> None:
         )
         celery_mod.collect_task_garbage(sender=None)
         collect.assert_called_once_with()
+
+    with patch.object(celery_mod.gc, "collect") as collect:
+        pool_thread = threading.Thread(
+            target=celery_mod.collect_task_garbage,
+            kwargs={"sender": SimpleNamespace(name="app.agents.run")},
+        )
+        pool_thread.start()
+        pool_thread.join()
+        collect.assert_not_called()
 
     app = celery_mod.create_celery_app()
     assert app.task_cls is celery_mod.NexaFlowTask

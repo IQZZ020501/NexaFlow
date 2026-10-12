@@ -14,6 +14,7 @@ from app.application.agents.runs.children import (
 from app.application.agents.runs.executor import (
     RUN_BUSY,
     RUN_FINISHED,
+    RUN_LEASED,
     maintain_agent_run_lease,
 )
 from app.application.workflows.nodes.executor import (
@@ -750,7 +751,7 @@ async def run_durable_workflow_run(
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run_id)
         return (
-            RUN_BUSY
+            RUN_LEASED
             if current is not None
             and current.status
             == (

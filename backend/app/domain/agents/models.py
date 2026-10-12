@@ -566,6 +566,9 @@ class AgentRunState(Base):
     execution_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    redispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     checkpoint: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )

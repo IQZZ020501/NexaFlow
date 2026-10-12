@@ -88,6 +88,9 @@ logger = get_logger(__name__)
 
 RUN_FINISHED = "finished"
 RUN_BUSY = "busy"
+# Another worker holds a live lease. The holder finishes the run, and recovery
+# re-publishes it once that lease expires, so this delivery is redundant.
+RUN_LEASED = "leased"
 RUN_AWAITING_APPROVAL = "awaiting_approval"
 AGENT_EVENT_REPLAY_PAGE_SIZE = 500
 
@@ -1299,7 +1302,7 @@ async def _run_durable_agent_run(
             if generation == "unified"
             else AGENT_RUN_RUNNING_STATUS
         )
-        return RUN_BUSY if current.status == expected_running else RUN_FINISHED
+        return RUN_LEASED if current.status == expected_running else RUN_FINISHED
 
     lease_lost = asyncio.Event()
     heartbeat = asyncio.create_task(
@@ -1335,7 +1338,6 @@ async def _list_recoverable_agent_run_ids(
     *,
     generation: str,
 ) -> list[str]:
-    del settings
     async with get_session_factory()() as db:
         now = utc_now()
         await fail_exhausted_agent_runs(db, now, generation=generation)
@@ -1343,7 +1345,11 @@ async def _list_recoverable_agent_run_ids(
             db,
             now,
             generation=generation,
+            redispatch_after=timedelta(
+                seconds=settings.agent_executor_lease_seconds
+            ),
         )
+        await agent_repository.mark_agent_runs_redispatched(db, run_ids, now)
         await db.commit()
     return run_ids
 
