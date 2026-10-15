@@ -2287,10 +2287,7 @@ describe("KnowledgeBasePage documents tab", () => {
     const documents = [makeDocument({ id: "doc-1", filename: "a.md" })]
     fetchHandler = (url) => {
       if (url.includes("/download")) {
-        return new Response("nope", {
-          status: 500,
-          statusText: "download server error",
-        })
+        return new Response("download failed", { status: 500 })
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?"))
@@ -2309,7 +2306,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "download server error"
+      "download failed"
     )
   })
 
