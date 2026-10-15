@@ -32,6 +32,8 @@ const ARTIFACT_TOOL_FUNCTIONS = new Set([
   "pptx_skill",
   "spreadsheets_skill",
   "generate_image",
+  "bash",
+  "run_skill_script",
 ])
 
 function artifactLink(filename: string, downloadUrl: string) {
@@ -75,13 +77,14 @@ export function withArtifactDownloadLinksInContent(content: string) {
 }
 
 export function builtinToolDisplayName(functionName: string, t: TFunction) {
+  if (functionName === "bash") return t("命令行")
   if (functionName === "inline_python") return t("Python 代码")
   if (functionName === "current_time") return t("当前时间")
   if (functionName === "create_artifact") return t("创建文件")
-  if (functionName === "documents_skill") return t("DOCX")
-  if (functionName === "pdf_skill") return t("PDF")
-  if (functionName === "pptx_skill") return t("PPTX")
-  if (functionName === "spreadsheets_skill") return t("Excel")
+  if (functionName === "documents_skill") return t("生成 Word")
+  if (functionName === "pdf_skill") return t("生成 PDF")
+  if (functionName === "pptx_skill") return t("生成 PPT")
+  if (functionName === "spreadsheets_skill") return t("生成 Excel")
   if (functionName === "generate_image") return t("图片生成")
   return null
 }
@@ -90,6 +93,22 @@ export function withArtifactDownloadLinks(
   content: string,
   events: readonly ToolOutputEvent[]
 ) {
+  events = events.flatMap((event) => {
+    const output = event.output
+    if (
+      (event.tool_name === "bash" || event.tool_name === "run_skill_script") &&
+      output &&
+      typeof output === "object" &&
+      "artifacts" in output &&
+      Array.isArray(output.artifacts)
+    ) {
+      return output.artifacts.map((artifact: unknown) => ({
+        ...event,
+        output: artifact,
+      }))
+    }
+    return [event]
+  })
   let value = content
   const artifacts: Array<{
     sourceFilename: string
@@ -228,6 +247,9 @@ export function toolDisplayName(tool: DisplayableTool, t: TFunction) {
  * @returns The localized description for a built-in tool or the tool's configured description
  */
 export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
+  if (tool.function_name === "bash") {
+    return t("在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。")
+  }
   if (tool.function_name === "inline_python") {
     return t("在工作流沙箱中运行 Python 代码。")
   }

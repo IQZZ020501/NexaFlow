@@ -1,5 +1,10 @@
 // Simplified Chinese dictionary; keys are the default (Chinese) copy.
 export const zhHans = {
+  命令行: "命令行",
+  "在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。":
+    "在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。",
+  退出码: "退出码",
+
   "应如何批准工具调用？": "应如何批准工具调用？",
   请求批准: "请求批准",
   按策略审批: "按策略审批",
@@ -1480,6 +1485,10 @@ export const zhHans = {
   PDF: "PDF",
   PPTX: "PPTX",
   Excel: "Excel",
+  "生成 Word": "生成 Word",
+  "生成 PDF": "生成 PDF",
+  "生成 PPT": "生成 PPT",
+  "生成 Excel": "生成 Excel",
   "创建 DOCX 文件。": "创建 DOCX 文件。",
   "创建 PDF 文件。": "创建 PDF 文件。",
   "创建 PPTX 演示文稿。": "创建 PPTX 演示文稿。",

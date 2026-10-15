@@ -15,6 +15,43 @@ const translated = (language: Language) =>
   ((key, values) => translate(language, key, values)) as TFunction
 
 describe("tool display helpers", () => {
+  test("localizes bash and expands command artifact lists", () => {
+    for (const [language, label] of [
+      ["zh-Hans", "命令行"],
+      ["zh-Hant", "命令列"],
+      ["en", "Command line"],
+    ] as const) {
+      expect(
+        toolDisplayName(
+          {
+            function_name: "bash",
+            display_name: "Command line",
+            description: "Shell",
+          },
+          translated(language)
+        )
+      ).toBe(label)
+    }
+    const content = withArtifactDownloadLinks(
+      "result.txt: /api/v1/artifacts/shell-token",
+      [
+        {
+          tool_name: "bash",
+          status: "succeeded",
+          output: {
+            exit_code: 7,
+            artifacts: [
+              {
+                filename: "result.txt",
+                download_url: "/api/v1/artifacts/shell-token",
+              },
+            ],
+          },
+        },
+      ]
+    )
+    expect(content).toContain("[result.txt](/api/v1/artifacts/shell-token)")
+  })
   test("localizes built-in tool display names", () => {
     expect(
       toolDisplayName(
@@ -55,7 +92,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("DOCX")
+    ).toBe("生成 Word")
     expect(
       toolDisplayName(
         {
@@ -65,7 +102,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("PPTX")
+    ).toBe("生成 PPT")
     expect(
       toolDisplayName(
         {
@@ -75,7 +112,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("PDF")
+    ).toBe("生成 PDF")
     expect(
       toolDisplayName(
         {
@@ -85,7 +122,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("Excel")
+    ).toBe("生成 Excel")
     expect(
       toolDisplayName(
         {
@@ -184,6 +221,21 @@ describe("tool display helpers", () => {
     )
   })
 
+  test("translates renderer names in all supported languages", () => {
+    const renderers = [
+      ["documents_skill", "生成 Word", "產生 Word", "Generate Word"],
+      ["pdf_skill", "生成 PDF", "產生 PDF", "Generate PDF"],
+      ["pptx_skill", "生成 PPT", "產生 PPT", "Generate PowerPoint"],
+      ["spreadsheets_skill", "生成 Excel", "產生 Excel", "Generate Excel"],
+    ] as const
+    for (const [function_name, hans, hant, en] of renderers) {
+      const tool = { function_name, display_name: "Renderer", description: "" }
+      expect(toolDisplayName(tool, translated("zh-Hans"))).toBe(hans)
+      expect(toolDisplayName(tool, translated("zh-Hant"))).toBe(hant)
+      expect(toolDisplayName(tool, translated("en"))).toBe(en)
+    }
+  })
+
   test("falls back to the configured description for custom tools", () => {
     expect(
       toolDisplayDescription(
@@ -198,15 +250,15 @@ describe("tool display helpers", () => {
   })
 
   test("localizes built-in tool sources", () => {
-    expect(
-      toolSourceDisplayName({ kind: "builtin", name: "Builtin" }, t)
-    ).toBe("内置")
+    expect(toolSourceDisplayName({ kind: "builtin", name: "Builtin" }, t)).toBe(
+      "内置"
+    )
   })
 
   test("falls back to the source name for external sources", () => {
-    expect(
-      toolSourceDisplayName({ kind: "mcp", name: "Search MCP" }, t)
-    ).toBe("Search MCP")
+    expect(toolSourceDisplayName({ kind: "mcp", name: "Search MCP" }, t)).toBe(
+      "Search MCP"
+    )
   })
 
   test("normalizes absolute artifact URLs and keeps the latest file version", () => {

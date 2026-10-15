@@ -275,6 +275,14 @@ function ToolEventDetails({
       </button>
       {isOpen ? (
         <div className="grid gap-2.5 border-t bg-muted/20 p-2.5 text-xs">
+          {event.tool_name === "bash" &&
+          event.output &&
+          typeof event.output === "object" &&
+          "exit_code" in event.output ? (
+            <p className="font-mono text-muted-foreground">
+              {t("退出码")}: {String(event.output.exit_code)}
+            </p>
+          ) : null}
           {Object.keys(event.input).length > 0 ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -1577,7 +1585,10 @@ export function AgentDetailWorkspace({
                               title={t("停止生成")}
                               onClick={onCancelAsk}
                             >
-                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
+                              <SquareIcon
+                                className="size-4.5 fill-current"
+                                strokeWidth={0}
+                              />
                             </Button>
                           )}
                           <Button
@@ -1614,7 +1625,10 @@ export function AgentDetailWorkspace({
                             }
                           >
                             {isAsking && !question.trim() ? (
-                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
+                              <SquareIcon
+                                className="size-4.5 fill-current"
+                                strokeWidth={0}
+                              />
                             ) : (
                               <ArrowUpIcon />
                             )}

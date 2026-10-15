@@ -1,6 +1,11 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const zhHant = {
+  命令行: "命令列",
+  "在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。":
+    "在 Run 的私有沙箱中執行命令，保留檔案並產生可下載的結果。",
+  退出码: "結束代碼",
+
   "应如何批准工具调用？": "應如何批准工具呼叫？",
   请求批准: "請求批准",
   按策略审批: "依策略審批",
@@ -1482,6 +1487,10 @@ export const zhHant = {
   PDF: "PDF",
   PPTX: "PPTX",
   Excel: "Excel",
+  "生成 Word": "產生 Word",
+  "生成 PDF": "產生 PDF",
+  "生成 PPT": "產生 PPT",
+  "生成 Excel": "產生 Excel",
   "创建 DOCX 文件。": "建立 DOCX 檔案。",
   "创建 PDF 文件。": "建立 PDF 檔案。",
   "创建 PPTX 演示文稿。": "建立 PPTX 簡報。",

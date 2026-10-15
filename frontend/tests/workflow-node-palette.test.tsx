@@ -154,7 +154,7 @@ describe("WorkflowNodePalette", () => {
       button: 0,
       ctrlKey: false,
     })
-    fireEvent.click(screen.getByRole("button", { name: "DOCX" }))
+    fireEvent.click(screen.getByRole("button", { name: "生成 Word" }))
     expect(added.at(-1)).toEqual({
       type: "tool",
       config: {

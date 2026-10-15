@@ -1,6 +1,11 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  命令行: "Command line",
+  "在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。":
+    "Run commands in the Run’s private sandbox, preserving files and creating downloadable results.",
+  退出码: "Exit code",
+
   "应如何批准工具调用？": "How should tool calls be approved?",
   请求批准: "Request approval",
   按策略审批: "Policy approval",
@@ -1547,6 +1552,10 @@ export const en = {
   PDF: "PDF",
   PPTX: "PPTX",
   Excel: "Excel",
+  "生成 Word": "Generate Word",
+  "生成 PDF": "Generate PDF",
+  "生成 PPT": "Generate PowerPoint",
+  "生成 Excel": "Generate Excel",
   "创建 DOCX 文件。": "Create DOCX files.",
   "创建 PDF 文件。": "Create PDF files.",
   "创建 PPTX 演示文稿。": "Create PPTX presentations.",

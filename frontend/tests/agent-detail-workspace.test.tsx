@@ -672,9 +672,7 @@ describe("AgentDetailWorkspace preview", () => {
 
     // Full access only applies after the warning is accepted.
     expect(await screen.findByText("启用完全访问？")).toBeTruthy()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "启用完全访问" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "启用完全访问" }))
 
     const trigger = screen.getByRole("button", { name: "执行权限：完全访问" })
     expect(trigger.dataset.variant).toBe("destructive")
@@ -1349,6 +1347,35 @@ describe("AgentDetailWorkspace preview", () => {
     expect(within(completedToolCard).getByText("调用输入")).toBeTruthy()
     expect(within(completedToolCard).getByText(/query/)).toBeTruthy()
     expect(within(completedToolCard).getByText("调用结果")).toBeTruthy()
+  })
+
+  test("shows bash commands and nonzero exit codes in the console timeline", () => {
+    const run = makeRun({
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "bash",
+          tool_label: "Command line",
+          tool_kind: "builtin",
+          server_name: "",
+          status: "succeeded",
+          summary: "Command exited with status 7.",
+          call_id: "bash-call",
+          input: { command: "printf hello; exit 7", timeout_seconds: 60 },
+          output: { stdout: "hello", stderr: "", exit_code: 7, artifacts: [] },
+          duration_ms: 50,
+        },
+      ],
+    })
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+    const button = screen.getByText("命令行").closest("button")!
+    expect(button.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(button)
+    const card = button.parentElement!
+    expect(within(card).getByText("退出码: 7")).toBeTruthy()
+    expect(within(card).getByText(/printf hello; exit 7/)).toBeTruthy()
+    expect(within(card).getByText("调用结果")).toBeTruthy()
   })
 
   test("renders knowledge hits inside tool details", () => {
