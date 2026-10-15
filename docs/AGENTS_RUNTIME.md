@@ -74,7 +74,7 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
 
 - `backend/app/application/tools/runtime/service.py` — durable、provider-neutral 的 Tool 执行：`queue_tool_invocation`/`execute_tool_invocation`、幂等冲突检测、审批等待、busy/conflict 语义、执行前 preflight 与过期调用恢复。
 - `backend/app/application/tools/runtime/contracts.py` — provider-neutral Tool 契约：`ToolAdapter` 协议、`ToolInvocationContext`（含 resource_snapshot/approval_required/deadline_at）、`ToolRuntimeResult` 与 `ToolAdapterBusy`。
-- `backend/app/application/tools/runtime/adapters/` — `ToolAdapter` 实现与工厂：`BuiltinToolAdapter`/`PythonToolAdapter`/`McpToolAdapter`（`builtin.py`/`python_tool.py`/`mcp.py`，含 sandbox/artifact 执行路径），`build_tool_adapter` 在 `adapters/__init__.py`；`image_generation.py` 提供 `generate_image_artifact`（由 builtin 适配器内部分派）。
+- `backend/app/application/tools/runtime/adapters/` — `ToolAdapter` 实现与工厂：`BuiltinToolAdapter`/`PythonToolAdapter`/`McpToolAdapter`（`builtin.py`/`python_tool.py`/`mcp.py`，含 sandbox/artifact 执行路径），`build_tool_adapter` 在 `adapters/__init__.py`；`image_generation.py` 提供 `generate_image_artifact`，`shell.py` 执行 bash、实时核验 Skill 授权、恢复已批准的依赖并流式登记生成物（均由 builtin 适配器内部分派）。
 - `backend/app/application/tools/management/service.py` — Tool 目录、Python 工具生命周期/测试与 `view/use` 授权用例。
 - `backend/app/application/runs/lifecycle.py` — `cancel_run_tree`：取消 Run 树并结算被取消的 Tool invocation（Agent/Workflow 共用）。
 - `backend/app/application/runs/feedback.py` — `update_run_feedback`：终态 Run 的反馈写入与清除。
@@ -82,6 +82,8 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
 - `backend/app/infra/agents/live_stream.py` — 按 Run 隔离的 Redis Stream 实时增量（`AgentLiveStreamPublisher`/`AgentLiveStreamReader`，maxlen 4096、TTL 900s、key `nexaflow:agent-live:{run_id}`）。
 - `backend/app/infra/tools/dispatch.py` — `enqueue_tool_invocation`：经 Celery `app.tools.run` 投递 durable ToolInvocation。
 - `backend/app/infra/tools/mcp_stdio.py` — MCP stdio 配置契约与上限校验（command/args/cwd/env/egress_domains 属于执行镜像路径）。
+- `backend/app/infra/execution/sessions.py` / `infra/db/repositories/execution/sessions.py` — 持久化沙箱所有权与 Run 租约核验；`adapters/execution/opensandbox.py` 按 ID 接回、短租约监督、原生 TTL 和清理，`pool.py` 使用 SDK 的共享 Redis 预热池，`resources.py` 保存待 Kata 校准的三档规格。
+- `sandbox/command.py` / `mcp_bridge.py` — 独立执行镜像中的 bash 监督与 stdio HTTP 桥接；业务进程不执行子程序。
 - `backend/app/tasks/agents/jobs.py` — Celery 任务入口：`run_agent_job`（agent legacy/unified 运行任务）。
 - `backend/app/tasks/maintenance/jobs.py` — 周期恢复编排：agent legacy/unified 恢复、Workflow Agent 子运行 reconcile 与 Tool invocation 恢复。
 - `backend/app/infra/db/repositories/agents/repository.py` — Agent 持久化仓储：Agent/发布版本/API 凭据/绑定查询与写入、Agent 维度的 Run 列表与会话记忆读取/摘要保存，以及统一 `ToolInvocation` 的审批/幂等状态落库与 canonical 工具调用视图。
@@ -104,7 +106,10 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 
 - Agent 内核不预设 RAG 路径。知识库检索、MCP、内置/自定义工具和可执行 Skills 都以 StructuredTool 接入同一模型/工具循环，由模型根据任务选择是否调用；知识工具暴露 `search_mode`（embedding/keywords/blend，默认 blend）、`graph_mode`（off/auto/path/neighborhood，默认 auto）与 `source_entity` 等自适应参数，`similarity` 缺省使用 `DEFAULT_KNOWLEDGE_SIMILARITY = 0.5`（归一化余弦下限），单次最多 8 条命中（`MAX_KNOWLEDGE_HITS_PER_CALL`）；选中的命中不会为迁就消息长度被丢弃，超出 `MAX_KNOWLEDGE_CONTEXT_CONTENT_CHARS` 的单条内容就地截断并标记 `content_truncated`，命中条数只由 `KnowledgeSearchInput.limit` 决定；一次调用会检索全部已配置来源并在来源之间轮流取命中，`knowledge_base` 可把该次调用收窄到单个来源（按名称或 id 精确匹配，仅限该 Run 已授权来源，未知名称报错并列出可用来源）；知识工具的来源说明和引用格式随工具描述提供，不注入通用 Agent 系统协议。没有前置强制检索、证据充分性/来源多样性门控、重复检索拦截、grounding manifest、后置核验或失败替换答案。来源卡片从成功的知识工具事件直接生成，并不代表所有检索片段都被答案引用。
 - 每个 Run 都属于一个 `conversation_id`，并以 `access_source + consumer_id` 区分控制台/工作区成员、已发布应用的公开访问（消费方为登录用户 id）和 API 凭据；同一工作区、Agent、来源主体、会话最多只有一个活动 Run。未传会话 ID 的旧登录客户端复用最近会话，前端把当前会话写入 URL，并可显式开始新会话。
-- AgentSession 把输入消费、CapabilityRegistry、轮次间 ContextManager 和受信任扩展生命周期组合成 harness。最多 8 个工具的小目录按配置顺序装入 16 KiB 的初始 Schema 预算；超出剩余预算的单个工具延迟加载，但不清空其他已配置工具。更大的目录通过 search_tools/activate_tools 渐进选择。Skills 初始仅目录，通过 load_skill/read_skill_file 读取固定版本正文和 UTF-8 文件。管理工具只改变内存/下一 checkpoint；run_skill_script 是普通 ledger-backed Tool，真实动作经过审批/幂等/租约策略与外部 OpenSandbox。
+- AgentSession 把输入消费、CapabilityRegistry、轮次间 ContextManager 和受信任扩展生命周期组合成 harness。默认 bash 优先装入初始 Schema 预算，并在大目录、activate_tools 和 checkpoint 恢复后持续可用；最多 8 个工具的小目录再按配置顺序使用 16 KiB 总预算的剩余额度，放不下的单个工具延迟加载。更大的目录通过 search_tools/activate_tools 渐进选择可选工具。Skills 初始仅目录，通过 load_skill/read_skill_file 读取固定版本正文和 UTF-8 文件。load_skill 通过实时授权检查后，如果包里含 `.py` / `.js` 且 Run 目录已授权 run_skill_script，就自动激活该工具并随 checkpoint 保存，下一轮可直接执行；Run 包含 bash 时同时返回经过规范化、带版本哈希的 `/skills/` 路径。管理工具只改变内存/下一 checkpoint；run_skill_script 是普通 ledger-backed Tool，真实动作经过审批/幂等/租约策略与外部 OpenSandbox。
+- `execution_sessions` 按工作区、Run、purpose、owner_key 对未关闭记录建立唯一索引。执行前核验 Run 身份、截止时间和镜像/网络指纹，SDK 按 ID 接回；启动租约 60 秒，运行时每 2 秒续期至 15 秒并核验 worker_task_id，失去所有权立即中止。旧 holder 过期后，接管者先清理旧进程；关闭中记录阻止新建，确认销毁后才释放 Redis 容量。Python Tool、Workflow 代码、生成物、渲染器和 Skill/bash 共用 Run 沙箱，终态/取消主动关闭，Beat 回收过期、孤儿与遗留标签。依赖锁在普通重连时直接复用，重建时才重放已批准的安装并返回 workspace_reset。
+- bash 是 Agent 默认内置能力，新建 Run 自动注入并冻结版本，计入统一工具调用预算，无需手动绑定；工具目录、选择器和 Agent 绑定列表隐藏它，历史手动绑定保存时自动清除。新建 Run 默认冻结 24 轮/64 次调用/900 秒，历史 Run 保留原预算；单命令 1–300 秒，工具截止时间为命令超时加 60 秒并受 Run 截止时间约束。非零退出和超时 124 作为正常结果；输出最多 30 KiB，结束后清理该 UID 的所有进程，outputs 每条最多 8 个、单个 5 MiB 的文件按流登记生成物。控制台时间线显示命令和退出码，外部投影继续隐藏工具参数。
+- Run 内 stdio 注册各用独立宿主沙箱，桥接进程只启动一次服务并通过控制面代理暴露 Streamable HTTP。应用认证使用专用 X-NexaFlow-MCP-Token 头，控制面密钥被代理剥离；连接池按 Run 复用，关闭/60 秒空闲会销毁宿主。发现与非 Run 调用继续使用一次性沙箱。公开/API 消费方最多同时占两台，主 Run 和 stdio 宿主都计数；SDK 预热池默认关闭，启用时扣减按需容量。
 - 运行中的后续任务通过各来源 `POST runs/{run_id}/inputs` 追加到既有事件表，并只在当前任务产生普通答案后继续执行；`input_id` 幂等、最大 32 条/每条 4000 字符，消费 ID 随 checkpoint 保存。输入与成功终态共用 RunState 行锁，已接受但未消费的任务阻止成功收尾；失败/取消仍保留可读任务。它们不会重置整次执行预算或解除工具审批。Console 与公开聊天在运行中按回车发送后续任务，API Key 使用同一输入接口。
 - 执行中的消息也在每轮前检查窗口；旧消息可摘要，系统协议和最近工具消息组保持完整。若当前交互或工具 schema 已无法容纳，则显式报错，原始 durable 记录不删除；这与历史轮次准备阶段的最佳努力摘要是两个不同边界。不是无限上下文，也没有引入 pi 的树形分支或用户扩展安装。
 - 历史成功 Run 以真实 `user`/`assistant` 角色恢复。上下文在保守 token 预算内直接复用；超预算时用当前注册模型压缩较旧轮次，摘要持久化在最后被覆盖的成功 Run 上，同时保留最近 6 轮。摘要调用失败时回退到截断历史，不阻断当前问题，原始 Run 记录始终保留。

@@ -56,6 +56,7 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
   `DATABASE_URL`、`ENVIRONMENT`、`LOG_LEVEL`、`KNOWLEDGE_STORAGE_DIR`、
   `CELERY_BROKER_URL`、`PUBLIC_APP_URL`、
   `MCP_ALLOW_PRIVATE_NETWORKS`、`NEXAFLOW_PORT`、`CORS_ORIGINS`。
+- 执行容量：`OPENSANDBOX_MAX_SANDBOXES` 限制所有 Worker 同时存活的沙箱总数，默认 `0` 表示不限制。按执行主机的承载能力设置；槽位记录在 Redis（`CELERY_BROKER_URL`）中，按沙箱的原生过期时间自动失效。满载时最多等待 5 秒，仍无空位的工具调用回到队列，由 Run 稍后重试，不会被判为失败；Redis 不可用时不创建沙箱。
 - 兼容既有部署的高级运行策略：`MCP_REQUEST_TIMEOUT_SECONDS`、
   `MODEL_REQUEST_TIMEOUT_SECONDS`、`AGENT_TOOL_TIMEOUT_SECONDS`、
   `AGENT_RUN_TIMEOUT_SECONDS`、`AGENT_MAX_TURNS`、`AGENT_MAX_TOOL_CALLS`、
@@ -75,8 +76,11 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
 - `backend/scripts/worker.py --role` 决定一个 Worker 的职责：`all`（默认，本地开发）消费全部队列并内嵌 Beat；`background` 只消费 `celery` 队列（知识库、工具测试、邮件、清理）并内嵌 Beat，用 prefork 自动伸缩；`agents` 只消费 `agents-legacy`/`agents-v2`，不带 Beat，用线程池让同一进程的所有对话共享一个事件循环，默认并发 32（可追加 `--concurrency=N`）。Worker 使用 NullPool，每个执行中的 Run 会短暂占用 PostgreSQL 连接，调大并发或 `--scale agent-worker=N` 前要确认 `max_connections` 足够。
 - API 与内嵌 Beat 的后台 Worker 必须连接同一 PostgreSQL/Redis；后台 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Agent Run 只在消息超过租约时长仍未被消费、或租约刚过期时才重新派发，并记录在 `agent_run_states.redispatched_at`，积压时不会每轮重复投递；发现 Run 已被其他 Worker 持有有效租约的重复消息直接结束，不再定时重试。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
-- 根 `.env` 设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。单次 stdio MCP 可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
-- 旧 Unix Broker、Seatbelt/namespace supervisor、`SANDBOX_NETWORK`、宿主 Skills 目录和运行时依赖安装已移除。schema-v1 测试 Skills 需重新导入。
+- 根 `.env` 设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。stdio MCP 和已批准的 Skill 依赖安装可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent/Workflow Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
+- `execution_sessions` 持久化 Run 的沙箱 ID、短租约和依赖锁；任意 Worker 按 ID 接回，Python、生成文件、渲染器、Workflow 代码节点和 bash 共用 Run 沙箱。结束/取消主动销毁，Beat 按分钟回收过期、孤儿和待关闭会话。Run 内 stdio 服务通过另一台宿主沙箱的 HTTP 桥接进程复用，工具发现仍然一次性。
+- 新建 Agent Run 默认自带 bash 能力，无需绑定，工具目录与选择器隐藏它；默认预算为 24 轮、64 次工具调用、900 秒，历史 Run 保留原冻结预算。单条命令最多 300 秒，输出最多 30 KiB。新生成的执行主机配置 TTL 上限为 1860 秒；已有 `server.toml` 需由操作者提高上限，覆盖 Run 最长截止时间加 60 秒，配置生成器不会自动覆盖。
+- `OPENSANDBOX_WARM_POOL_SIZE` 默认为 0，开启后从 `OPENSANDBOX_MAX_SANDBOXES` 扣除池大小；公开/API 每位访客最多同时占两台（含 stdio 宿主）。small/standard/heavy 暂用 1 CPU/512 MiB、1 CPU/1 GiB、2 CPU/2 GiB；这些规格尚未做 Kata 生产校准。
+- 旧 Unix Broker、Seatbelt/namespace supervisor、`SANDBOX_NETWORK`、宿主 Skills 目录和宿主依赖安装已移除。schema-v1 测试 Skills 需重新导入。
 - Agent 执行器的代码默认心跳必须小于租约的一半；使用兼容环境覆盖时仍执行同一强校验。部署更新应先执行 Alembic，再滚动更新 API/Worker；回滚则先回滚进程，再降级 migration。
 - 公开链接与 Agent API 的 Run 提交通过同一 Redis 做双桶限流；Redis 不可用时这些成本型入口返回 503，避免恢复后集中执行未受限请求。
 - FastAPI `/docs` 和 `/openapi.json` 保留完整接口文档；Agent 概览中的专属文档页单独使用 Agent API Key 解锁，不替代或裁剪全局 Swagger。

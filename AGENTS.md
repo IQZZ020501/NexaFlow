@@ -123,6 +123,9 @@ not trigger unrelated cleanup.
   Session inputs are append-only `agent_run_events` records, with consumed IDs
   in checkpoint; enqueue and successful finalization share the RunState lock.
   Do not bypass the tool ledger or reset frozen budgets when adding input.
+  Loading an authorized Skill with `.py` or `.js` files automatically activates
+  `run_skill_script` only when that Tool is already in the Run's capability
+  catalog; the active loadout persists in the checkpoint.
 - Pure unit suites (no DB, no HTTP, no network) for business rules and
   services with mocked ports/repositories live per feature under
   `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run
@@ -251,9 +254,17 @@ not trigger unrelated cleanup.
   addresses require `MCP_ALLOW_PRIVATE_NETWORKS=true`. Workspace admins submit
   stdio commands, arguments, working directories, environment values and egress
   domains. These are execution-image paths, never business-host paths. stdio
-  discovery/calls run in ephemeral OpenSandbox executions with only that
+  discovery runs in ephemeral OpenSandbox executions. Calls within a Run reuse
+  a separate `purpose=mcp` host with a stdio-to-Streamable-HTTP bridge, only that
   integration's environment and approved egress; no backend process fallback.
+  The control-plane proxy strips Authorization, so bridges authenticate with
+  `X-NexaFlow-MCP-Token`; bridge credentials stay in worker memory.
   MCP responses preserve content blocks, structured content and metadata.
+  Within a Run, remote/bridged Streamable HTTP sessions are reused per worker process and
+  closed when the Run ends or idles for 60 seconds. Only a call that may have
+  reached the server marks a side-effecting Tool uncertain; connection or
+  start-up failures are confirmed failures, and oversized results are cut to a
+  text prefix rather than failed.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `src/app/` route groups `(auth)`,
   `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for
@@ -284,16 +295,34 @@ not trigger unrelated cleanup.
   axis on its own variables so two settings cannot silently replace each other.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
   service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
-  rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds
+  rendering, pinned Python/JavaScript Skill scripts, bash commands and stdio MCP; it adds
   program/file/output/time limits inside the platform's container/VM boundary.
   The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
   python-pptx, Pillow, the adapted offline open-kimi-ppt PPTD/WASM exporter,
   and the standard library. Business secrets and mounts are
   never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
   authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
-  native TTL cleanup. Effective `dns+nft` default-deny policy is required before
+  native TTL cleanup. `execution_sessions` persists Run guests, staged packages
+  and dependency locks. Python, renderers, Workflow code and Skills share that
+  guest; short holders check Run ownership, fence old workers and stop stale
+  processes before takeover. TTL follows the Run deadline plus 60 seconds;
+  terminal/cancelled Runs close guests and Beat reconciles cleanup and orphans.
+  Bash's trusted guest supervisor remains root solely for UID process cleanup
+  and immutable exports; model commands run as UID 65532. Authorized Skills
+  mount read-only under `/skills/`, logs are bounded to 30 KiB, and generated
+  files stream through the execution port into the shared artifact store.
+  Effective `dns+nft` default-deny policy is required before
   staging code or secrets; private/metadata ranges stay denied. Only stdio MCP
-  may request a subset of deployment-approved public egress domains.
+  and the approved Skill dependency installer may request a subset of
+  deployment-approved public egress domains.
+  `OPENSANDBOX_MAX_SANDBOXES` bounds live sandboxes across workers through
+  Redis slots that expire with each sandbox's native TTL; exhausted capacity
+  raises `ExecutionBusy`, which callers map to `ToolAdapterBusy` so the
+  invocation is requeued rather than failed. `ExecutionNotStarted` means no
+  program ran, so callers may treat it as a confirmed failure.
+  The SDK Redis warm pool defaults off; its total idle size is deducted from
+  host capacity. Public/API consumers can hold at most two guests, including
+  stdio hosts. Resource profiles use provisional sizes pending Kata calibration.
   Fixed `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live under
   `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
   format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
@@ -308,7 +337,14 @@ not trigger unrelated cleanup.
   built-in installer. Installation runs in the Run-private OpenSandbox session,
   with temporary deployment-allowlisted registry egress, Python binary wheels,
   npm lifecycle scripts disabled, bounded storage and a recorded environment
-  lock; Skill uploads cannot supply setup commands or dependency files. Fixed
+  lock; Skill uploads cannot supply setup commands or dependency files.
+  Recorded dependency locks skip installation on ordinary reconnects and are
+  replayed only when the guest is rebuilt. `load_skill` activates an already
+  authorized script runner for Python/JavaScript Skills and returns a safe
+  `/skills/` path when the Run includes bash. Bash is an implicit Agent core
+  capability injected into new Run snapshots, hidden from Tool catalogs,
+  pickers and manual Agent bindings, and always active when authorized in the
+  frozen catalog; console command execution records remain visible. Fixed
   renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
@@ -496,13 +532,13 @@ examples.
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
   knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
   knowledge.knowledge_graph_edge_coverage, knowledge.knowledge_domain_coverage,
-  knowledge.knowledge_api_coverage, tools.tools, tools.unit, identity.identity,
+  knowledge.knowledge_api_coverage, tools.tools, tools.unit, tools.shell_unit, identity.identity,
   identity.enterprise_identity, identity.email, identity.smtp,
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,
   platform.teams, platform.system_governance, platform.resource_folders,
   models.llm, models.unit, infra.infra_unit_coverage, infra.unit, infra.logger,
-  infra.mcp_transports, infra.architecture, execution.unit, agent_skills.unit,
-  agent_skills.api, smoke.test_main). For migration changes,
+  infra.mcp_transports, infra.architecture, execution.unit, execution.sessions, execution.probe_unit,
+  agent_skills.unit, agent_skills.api, smoke.test_main). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
@@ -515,6 +551,16 @@ examples.
   explicit isolated OpenSandbox test server. Verify effective dns+nft filtering,
   timeout, package isolation and cleanup; production VM isolation must also be
   validated on Linux/Kata, not inferred from a local ordinary-Docker smoke.
+- For the remaining Tools redesign, run
+  `uv run python -m tests.execution.opensandbox_probe --url "$OPENSANDBOX_URL" --image "$OPENSANDBOX_IMAGE"`
+  from `backend/` on an isolated execution host with the control-plane key and
+  `OPENSANDBOX_PROBE_REDIS_URL` in its private environment. The probe verifies
+  actual Docker runtime, reconnect/renew, proxy streaming, SDK shared pool,
+  metadata filtering, filesystem behavior and cleanup. Its explicit
+  `--allow-development` mode does not establish Kata/VM isolation. The user
+  deferred the Kata test environment on 2026-10-14; it no longer gates A–F
+  implementation, but production VM and resource calibration remain pending.
+  See `docs/TOOLS_REDESIGN.md` for verified results and remaining measurements.
 - Run full coverage only for coverage work, release/CI validation, or changes
   broad enough to put a repository gate at risk. Do not claim a percentage
   unless it was measured in the current task. The configured gates and commands
