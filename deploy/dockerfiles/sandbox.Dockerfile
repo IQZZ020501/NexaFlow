@@ -31,8 +31,11 @@ COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
-COPY sandbox/job.py sandbox/self_check.py ./
+COPY sandbox/job.py sandbox/command.py sandbox/mcp_bridge.py sandbox/self_check.py ./
 COPY sandbox/renderer_checks ./renderer_checks
 COPY sandbox/skills ./skills
 RUN chmod -R a+rX,a-w /opt/nexaflow
+RUN mkdir -p /skills /tmp/nexaflow-skill /tmp/nexaflow-protocol /tmp/nexaflow-exports \
+    && chmod 755 /skills /tmp/nexaflow-skill \
+    && chmod 700 /tmp/nexaflow-protocol /tmp/nexaflow-exports
 ENTRYPOINT ["tail", "-f", "/dev/null"]

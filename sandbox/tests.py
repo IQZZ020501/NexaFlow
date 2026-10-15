@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from . import job
+from .command_tests import CommandTests  # noqa: F401
 from .self_check import check_execution
 
 

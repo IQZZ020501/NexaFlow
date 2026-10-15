@@ -1189,6 +1189,73 @@ def test_normalize_mcp_url() -> None:
         raise AssertionError(f"Invalid MCP URL accepted: {invalid}")
 
 
+def test_mcp_adapter_marks_only_sent_writes_uncertain() -> None:
+    from tests.support import settings
+
+    from app.application.tools.runtime.adapters import mcp as mcp_adapter
+    from app.application.tools.runtime.contracts import ToolAdapterBusy
+    from app.ports.mcp import McpClientError, McpServerBusy
+
+    adapter = mcp_adapter.McpToolAdapter(settings(), SimpleNamespace())
+
+    async def invoke(failure, effect):
+        snapshot = SimpleNamespace(effect=effect, execution_spec={"tool_name": "write"})
+        with (
+            patch.object(mcp_adapter, "mcp_server_connection"),
+            patch.object(mcp_adapter, "call_mcp_tool", AsyncMock(side_effect=failure)),
+        ):
+            return await adapter.invoke(
+                snapshot, {}, SimpleNamespace(idempotency_key="idem")
+            )
+
+    sent = asyncio.run(
+        invoke(McpClientError("MCP server request failed."), "external_write")
+    )
+    assert sent.outcome == "uncertain"
+    assert sent.error_message == "MCP server request failed."
+    unsent = asyncio.run(
+        invoke(
+            McpClientError(
+                "Private MCP server addresses are not allowed.", request_sent=False
+            ),
+            "external_write",
+        )
+    )
+    assert unsent.outcome == "confirmed" and "Private" in unsent.error_message
+    assert asyncio.run(
+        invoke(McpClientError("MCP server request failed."), "external_read")
+    ).outcome == "confirmed"
+    try:
+        asyncio.run(invoke(McpServerBusy("busy"), "external_write"))
+    except ToolAdapterBusy:
+        pass
+    else:
+        raise AssertionError("A busy MCP host was reported as a Tool failure")
+
+
+def test_skill_runtime_capacity_requeues_instead_of_failing() -> None:
+    from tests.support import settings
+
+    from app.application.agent_skills import dependencies, scripts
+    from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
+    from app.application.tools.runtime.contracts import ToolAdapterBusy
+    from app.ports.execution import ExecutionBusy
+
+    adapter = BuiltinToolAdapter(settings())
+    for module, function, builtin in (
+        (scripts, "execute_skill_script", "skill_script"),
+        (dependencies, "execute_skill_dependency_install", "skill_dependency_install"),
+    ):
+        snapshot = SimpleNamespace(execution_spec={"builtin": builtin})
+        with patch.object(module, function, AsyncMock(side_effect=ExecutionBusy("full"))):
+            try:
+                asyncio.run(adapter.invoke(snapshot, {}, SimpleNamespace()))
+            except ToolAdapterBusy:
+                pass
+            else:
+                raise AssertionError("Exhausted Skill capacity failed the Tool call")
+
+
 def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_summary_projects_effective_public_access_and_mcp_policy()
@@ -1211,6 +1278,8 @@ def main() -> None:
     test_documents_skill_formal_legal_contract_is_versioned()
     test_pptx_skill_exposes_pptd_design_animation_and_media_contract()
     test_normalize_mcp_url()
+    test_mcp_adapter_marks_only_sent_writes_uncertain()
+    test_skill_runtime_capacity_requeues_instead_of_failing()
     print("TOOLS_UNIT_OK")
 
 

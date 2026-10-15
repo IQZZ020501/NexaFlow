@@ -126,7 +126,7 @@ class UnifiedAgentToolRuntime:
             invocation_id=invocation_id,
             execution_user_id=self.run.execution_user_id,
             access_source=self.run.access_source,
-            deadline_at=self._tool_deadline(snapshot),
+            deadline_at=self._tool_deadline(snapshot, arguments),
             idempotency_key=idempotency_key,
             image_model_id=self.image_model_id,
             approval_required=agent_tool_requires_approval(
@@ -166,6 +166,7 @@ class UnifiedAgentToolRuntime:
                 invocation.id,
                 self.settings,
                 f"{self.worker_task_id}:{invocation_id}",
+                run_worker_task_id=self.worker_task_id,
             )
         except ToolInvocationBusy as exc:
             raise AgentToolBusy(call["id"], str(exc)) from exc
@@ -188,7 +189,7 @@ class UnifiedAgentToolRuntime:
             )
         return mapped
 
-    def _tool_deadline(self, snapshot: ToolSnapshot | None = None) -> datetime:
+    def _tool_deadline(self, snapshot: ToolSnapshot | None = None, arguments: dict | None = None) -> datetime:
         # Approval and image generation share a deadline; allow time for a
         # person to approve before the image provider's slower response.
         timeout_seconds = (
@@ -197,6 +198,10 @@ class UnifiedAgentToolRuntime:
             and snapshot.execution_spec.get("builtin") == "image_generation"
             else self.settings.agent_tool_timeout_seconds
         )
+        if snapshot is not None and snapshot.execution_spec.get("builtin") == "shell":
+            command_timeout = (arguments or {}).get("timeout_seconds", 60)
+            if type(command_timeout) is int and 1 <= command_timeout <= 300:
+                timeout_seconds = command_timeout + 60
         deadline = utc_now() + timedelta(
             seconds=timeout_seconds
         )

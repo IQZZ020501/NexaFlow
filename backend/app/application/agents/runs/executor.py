@@ -1171,7 +1171,9 @@ async def _execute_claimed_agent_run(
         if terminal:
             try:
                 from app.ports.execution import close_execution_session
+                from app.ports.mcp import close_mcp_run_sessions
 
+                await close_mcp_run_sessions(run.id)
                 await close_execution_session(settings, run.workspace_id, run.id)
             except Exception as exc:
                 log_error(

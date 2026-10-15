@@ -100,6 +100,9 @@ class Settings:
     agent_run_timeout_seconds: float = 300.0
     agent_max_turns: int = 8
     agent_max_tool_calls: int = 12
+    agent_shell_max_turns: int = 24
+    agent_shell_max_tool_calls: int = 64
+    agent_shell_run_timeout_seconds: float = 900.0
     agent_max_knowledge_calls: int = 6
     agent_max_knowledge_rounds: int = 3
     agent_max_model_tokens: int = 100_000
@@ -112,6 +115,10 @@ class Settings:
     opensandbox_api_key: str = ""
     opensandbox_image: str = "nexaflow/execution:local"
     opensandbox_egress_domains: tuple[str, ...] = ()
+    # Live sandboxes allowed across all workers; 0 leaves creation unbounded.
+    opensandbox_max_sandboxes: int = 0
+    opensandbox_warm_pool_size: int = 0
+    opensandbox_max_sandboxes_per_consumer: int = 2
     workflow_sandbox_timeout_seconds: float = 5.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
@@ -168,6 +175,9 @@ class Settings:
             ),
             agent_max_turns=int(os.getenv("AGENT_MAX_TURNS", "8")),
             agent_max_tool_calls=int(os.getenv("AGENT_MAX_TOOL_CALLS", "12")),
+            agent_shell_max_turns=int(os.getenv("AGENT_SHELL_MAX_TURNS", "24")),
+            agent_shell_max_tool_calls=int(os.getenv("AGENT_SHELL_MAX_TOOL_CALLS", "64")),
+            agent_shell_run_timeout_seconds=float(os.getenv("AGENT_SHELL_RUN_TIMEOUT_SECONDS", "900")),
             agent_max_knowledge_calls=int(
                 os.getenv("AGENT_MAX_KNOWLEDGE_CALLS", "6")
             ),
@@ -204,6 +214,11 @@ class Settings:
                 for value in os.getenv("OPENSANDBOX_EGRESS_DOMAINS", "").split(",")
                 if value.strip()
             ),
+            opensandbox_max_sandboxes=int(
+                os.getenv("OPENSANDBOX_MAX_SANDBOXES", "0")
+            ),
+            opensandbox_warm_pool_size=int(os.getenv("OPENSANDBOX_WARM_POOL_SIZE", "0")),
+            opensandbox_max_sandboxes_per_consumer=int(os.getenv("OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER", "2")),
             workflow_sandbox_timeout_seconds=float(
                 os.getenv("WORKFLOW_SANDBOX_TIMEOUT_SECONDS", "5")
             ),
@@ -267,6 +282,12 @@ class Settings:
             raise RuntimeError("AGENT_RUN_TIMEOUT_SECONDS must not exceed 1800.")
         if not 1 <= self.agent_max_turns <= 64:
             raise RuntimeError("AGENT_MAX_TURNS must be between 1 and 64.")
+        if not 1 <= self.agent_shell_max_turns <= 64:
+            raise RuntimeError("AGENT_SHELL_MAX_TURNS must be between 1 and 64.")
+        if not 1 <= self.agent_shell_max_tool_calls <= 128:
+            raise RuntimeError("AGENT_SHELL_MAX_TOOL_CALLS must be between 1 and 128.")
+        if not 0 < self.agent_shell_run_timeout_seconds <= 1800:
+            raise RuntimeError("AGENT_SHELL_RUN_TIMEOUT_SECONDS must be between 0 and 1800.")
         if not 1 <= self.agent_max_tool_calls <= 128:
             raise RuntimeError("AGENT_MAX_TOOL_CALLS must be between 1 and 128.")
         if not 1 <= self.agent_max_knowledge_calls <= self.agent_max_tool_calls:
@@ -334,6 +355,12 @@ class Settings:
             raise RuntimeError(
                 "OPENSANDBOX_EGRESS_DOMAINS must contain domain names, not URLs or IP ranges."
             ) from exc
+        if self.opensandbox_max_sandboxes < 0:
+            raise RuntimeError("OPENSANDBOX_MAX_SANDBOXES must not be negative.")
+        if self.opensandbox_warm_pool_size < 0 or (self.opensandbox_max_sandboxes and self.opensandbox_warm_pool_size >= self.opensandbox_max_sandboxes):
+            raise RuntimeError("OPENSANDBOX_WARM_POOL_SIZE must be nonnegative and leave capacity for active sandboxes.")
+        if not 1 <= self.opensandbox_max_sandboxes_per_consumer <= 2:
+            raise RuntimeError("OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER must be between 1 and 2.")
         if not 0.1 <= self.workflow_sandbox_timeout_seconds <= 30:
             raise RuntimeError(
                 "WORKFLOW_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 30."

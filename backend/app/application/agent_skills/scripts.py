@@ -20,7 +20,9 @@ from app.infra.sandbox.client import (
 from app.ports.execution import build_execution_platform
 
 
-async def _installed_dependency_plans(db, workspace_id: str, run_id: str, version_id: str):
+async def _installed_dependency_plans(
+    db, workspace_id: str, run_id: str, version_id: str
+):
     from app.domain.tools.catalog.service import build_skill_dependency_installer_tool
 
     tool, _, _ = build_skill_dependency_installer_tool(workspace_id)
@@ -41,9 +43,10 @@ async def _installed_dependency_plans(db, workspace_id: str, run_id: str, versio
         if not isinstance(result, dict):
             raise WorkflowSandboxError("Stored dependency lock is invalid.")
         expected_hash = result.get("environment_hash")
-        if not isinstance(expected_hash, str) or re.fullmatch(
-            r"[a-f0-9]{64}", expected_hash
-        ) is None:
+        if (
+            not isinstance(expected_hash, str)
+            or re.fullmatch(r"[a-f0-9]{64}", expected_hash) is None
+        ):
             raise WorkflowSandboxError("Stored dependency lock is invalid.")
         plan = dependency_install_plan(
             invocation.arguments.get("manager"),
@@ -51,6 +54,32 @@ async def _installed_dependency_plans(db, workspace_id: str, run_id: str, versio
         )
         installed.append((plan, expected_hash))
     return installed
+
+
+async def restore_skill_dependencies(snapshot, installed, context, platform):
+    """The adapter returns recorded locks cheaply, replaying only in a new guest."""
+    expected_hashes = {}
+    replay_hashes = {}
+    reset = False
+    for plan, expected_hash in installed:
+        expected_hashes[plan.manager] = expected_hash
+        replay = await platform.execute(
+            {
+                **dependency_shell_request(snapshot, plan),
+                "expected_environment_hash": expected_hash,
+            },
+            timeout_seconds=snapshot.definition.get("execution_timeout_seconds", 30),
+            max_output_bytes=256 * 1024,
+        )
+        _execution_fields(replay)
+        replay_hashes[plan.manager] = replay.get("environment_hash")
+        reset = reset or bool(replay.get("workspace_reset"))
+    if replay_hashes != expected_hashes:
+        await platform.close_session(context.workspace_id, context.run_id)
+        raise WorkflowSandboxError(
+            "Pinned Skill dependency environment could not be reproduced."
+        )
+    return reset
 
 
 async def execute_skill_script(settings, arguments, context):
@@ -90,22 +119,7 @@ async def execute_skill_script(settings, arguments, context):
             "format": artifact_format_from_filename(filename),
         }
     platform = build_execution_platform(settings)
-    expected_hashes = {}
-    replay_hashes = {}
-    for plan, expected_hash in installed:
-        expected_hashes[plan.manager] = expected_hash
-        replay = await platform.execute(
-            dependency_shell_request(snapshot, plan),
-            timeout_seconds=snapshot.definition.get("execution_timeout_seconds", 30),
-            max_output_bytes=256 * 1024,
-        )
-        _execution_fields(replay)
-        replay_hashes[plan.manager] = replay.get("environment_hash")
-    if replay_hashes != expected_hashes:
-        await platform.close_session(context.workspace_id, context.run_id)
-        raise WorkflowSandboxError(
-            "Pinned Skill dependency environment could not be reproduced."
-        )
+    reset = await restore_skill_dependencies(snapshot, installed, context, platform)
     response = await platform.execute(
         request,
         timeout_seconds=snapshot.definition.get("execution_timeout_seconds", 30),
@@ -113,6 +127,8 @@ async def execute_skill_script(settings, arguments, context):
     )
     stdout, _, exit_code = _execution_fields(response)
     data = {"stdout": stdout, "exit_code": exit_code}
+    if reset or response.get("workspace_reset"):
+        data["workspace_reset"] = True
     if filename:
         from app.application.artifacts.service import create_generated_artifact
 

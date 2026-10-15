@@ -59,6 +59,7 @@ from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshots,
     resolve_tool_refs_for_actor,
 )
+from app.domain.tools.catalog.service import build_shell_tool
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_EACH_CALL,
     tool_snapshot_from_payload,
@@ -113,7 +114,10 @@ def _require_agent_run_application(agent: Agent) -> None:
 
 
 from app.application.runs.feedback import update_run_feedback
-from app.application.runs.lifecycle import cancel_run_tree
+from app.application.runs.lifecycle import (
+    cancel_run_tree,
+    close_cancelled_execution_sessions,
+)
 
 
 async def enqueue_prepared_agent_run(
@@ -272,6 +276,7 @@ async def cancel_agent_run(
     if not await cancel_run_tree(db, run.id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent run is already finished.")
     await db.commit()
+    await close_cancelled_execution_sessions(db)
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None
     return run_to_response(current, trace_id=current.trace_id)
@@ -440,7 +445,7 @@ def build_regenerated_agent_run(
     Returns:
     	AgentRun: A new queued run linked to the source run.
     """
-    runtime_policy = AgentRuntimePolicy.from_settings(settings)
+    runtime_policy = AgentRuntimePolicy.from_settings(settings, shell=any(item.get("execution_spec", {}).get("builtin") == "shell" for item in source.tool_snapshots))
     return AgentRun(
         workspace_id=source.workspace_id,
         agent_id=source.agent_id,
@@ -1075,7 +1080,10 @@ async def prepare_agent_run(
         )
     tool_snapshots = configurable_agent_tools(workspace_id, tool_snapshots)
     skill_knowledge_base_ids: list[str] = []
-    skill_tool_refs: dict[str, ToolRef] = {}
+    shell_tool, shell_version, _ = build_shell_tool(workspace_id)
+    implicit_tool_refs: dict[str, ToolRef] = {
+        shell_tool.id: ToolRef(shell_tool.id, shell_version.id)
+    }
     for skill_snapshot in skill_snapshots:
         try:
             skill_definition = AgentSkillDefinition.model_validate(
@@ -1092,13 +1100,13 @@ async def prepare_agent_run(
                 tool_id=skill_tool.tool_id,
                 version_id=skill_tool.version_id,
             )
-            existing = skill_tool_refs.get(reference.tool_id)
+            existing = implicit_tool_refs.get(reference.tool_id)
             if existing is not None and existing.version_id != reference.version_id:
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     "Agent Skills bind conflicting Tool versions.",
                 )
-            skill_tool_refs[reference.tool_id] = reference
+            implicit_tool_refs[reference.tool_id] = reference
     knowledge_base_ids = list(
         dict.fromkeys([*knowledge_base_ids, *skill_knowledge_base_ids])
     )
@@ -1112,31 +1120,30 @@ async def prepare_agent_run(
         )
 
         script_tool, script_version, _ = build_skill_script_tool(workspace_id)
-        skill_tool_refs[script_tool.id] = ToolRef(script_tool.id, script_version.id)
+        implicit_tool_refs[script_tool.id] = ToolRef(script_tool.id, script_version.id)
         if not authorized_by_parent and access_source in {"console", "public"}:
             installer, installer_version, _ = build_skill_dependency_installer_tool(
                 workspace_id
             )
-            skill_tool_refs[installer.id] = ToolRef(installer.id, installer_version.id)
-    if skill_tool_refs:
-        skill_tools = await resolve_tool_refs_for_actor(
-            db,
-            workspace_id,
-            list(skill_tool_refs.values()),
-            actor,
-            workspace_role,
-        )
-        tools_by_id = {item.tool_id: item for item in tool_snapshots}
-        for skill_tool in skill_tools:
-            existing = tools_by_id.get(skill_tool.tool_id)
-            if existing is not None and existing.version_id != skill_tool.version_id:
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT,
-                    "Agent and Agent Skill bind conflicting Tool versions.",
-                )
-            if existing is None:
-                tools_by_id[skill_tool.tool_id] = skill_tool
-        tool_snapshots = list(tools_by_id.values())
+            implicit_tool_refs[installer.id] = ToolRef(installer.id, installer_version.id)
+    implicit_tools = await resolve_tool_refs_for_actor(
+        db,
+        workspace_id,
+        list(implicit_tool_refs.values()),
+        actor,
+        workspace_role,
+    )
+    tools_by_id = {item.tool_id: item for item in tool_snapshots}
+    for implicit_tool in implicit_tools:
+        existing = tools_by_id.get(implicit_tool.tool_id)
+        if existing is not None and existing.version_id != implicit_tool.version_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Agent and Agent Skill bind conflicting Tool versions.",
+            )
+        if existing is None:
+            tools_by_id[implicit_tool.tool_id] = implicit_tool
+    tool_snapshots = list(tools_by_id.values())
     knowledge_bases = await accessible_agent_knowledge_bases(
         db,
         workspace_id,
@@ -1215,7 +1222,7 @@ async def prepare_agent_run(
             status.HTTP_409_CONFLICT,
             "This conversation already has an active run.",
         )
-    runtime_policy = AgentRuntimePolicy.from_settings(settings)
+    runtime_policy = AgentRuntimePolicy.from_settings(settings, shell=any(item.execution_spec.get("builtin") == "shell" for item in tool_snapshots))
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,

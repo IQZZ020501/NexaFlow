@@ -25,7 +25,7 @@ def server_config(state_dir: Path, api_key: str, *, development: bool) -> str:
 host = "127.0.0.1"
 port = 8088
 api_key = {quoted(api_key)}
-max_sandbox_timeout_seconds = 360
+max_sandbox_timeout_seconds = 1860
 
 [runtime]
 type = "docker"

@@ -29,6 +29,7 @@ from app.infra.sandbox.client import (
     execute_skill_artifact,
     execute_workflow_code,
 )
+from app.ports.execution import ExecutionBusy, ExecutionError
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
 
 
@@ -45,6 +46,14 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "shell":
+            from app.application.tools.runtime.adapters.shell import execute_shell
+            try:
+                return await execute_shell(self.settings, arguments, context)
+            except ExecutionBusy as exc:
+                raise ToolAdapterBusy("Command runtime is busy.") from exc
+            except (ValueError, ExecutionError, OSError, TimeoutError) as exc:
+                return _failure("shell_failed", str(exc)[:1000])
         if builtin == "image_generation":
             from app.application.tools.runtime.adapters.image_generation import (
                 generate_image_artifact,
@@ -71,6 +80,8 @@ class BuiltinToolAdapter:
 
             try:
                 return await execute_skill_script(self.settings, arguments, context)
+            except ExecutionBusy as exc:
+                raise ToolAdapterBusy("Skill runtime is busy.") from exc
             except (ValueError, WorkflowSandboxError) as exc:
                 return _failure("skill_script_failed", str(exc)[:1000])
         if builtin == "skill_dependency_install":
@@ -84,6 +95,8 @@ class BuiltinToolAdapter:
                     arguments,
                     context,
                 )
+            except ExecutionBusy as exc:
+                raise ToolAdapterBusy("Skill runtime is busy.") from exc
             except (ValueError, WorkflowSandboxError) as exc:
                 return _failure("skill_dependency_install_failed", str(exc)[:1000])
         if builtin in {"artifact", "python_artifact", "skill"}:

@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.infra.config.settings import Settings
-from app.ports.execution import ExecutionError, build_execution_platform
+from app.ports.execution import (
+    ExecutionBusy,
+    ExecutionError,
+    build_execution_platform,
+    execution_scope,
+)
 
 RESULT_MARKER = "__NEXAFLOW_RESULT__="
 MAX_RESPONSE_BYTES = 128 * 1024
@@ -96,6 +101,9 @@ async def _exchange(
     timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     try:
+        scope = execution_scope.get()
+        if scope and scope.run_id:
+            request = {**request, "execution_session": "agent_run"}
         return await build_execution_platform(settings).execute(
             request,
             max_output_bytes=max_response_bytes,
@@ -105,6 +113,8 @@ async def _exchange(
                 else settings.workflow_sandbox_timeout_seconds + 1
             ),
         )
+    except ExecutionBusy as exc:
+        raise WorkflowSandboxBusyError("Code sandbox capacity is exhausted.") from exc
     except (ExecutionError, OSError, TimeoutError) as exc:
         raise WorkflowSandboxError("Code sandbox is unavailable.") from exc
     except ValueError as exc:
@@ -118,8 +128,6 @@ def _execution_fields(response: dict[str, Any]) -> tuple[str, str, int]:
     if response.get("ok") is not True or not isinstance(exit_code, int):
         error = response.get("error")
         reason = _error_line(str(error or stderr or "Code execution failed."))
-        if error == "sandbox_busy":
-            raise WorkflowSandboxBusyError(reason)
         raise WorkflowSandboxError(reason[:1000])
     return stdout, stderr, exit_code
 

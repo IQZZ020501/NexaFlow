@@ -878,12 +878,14 @@ def build_mcp_agent_tool(
                     )
                 else:
                     result = await call_mcp_tool(*call_args)
-            except McpClientError:
+            except McpClientError as exc:
                 return AgentToolResult(
                     content="MCP tool request failed.",
                     summary=f"{tool.server.name}: {definition.name} request failed.",
                     is_error=True,
-                    outcome_uncertain=effective_policy_mode != "read_only",
+                    outcome_uncertain=(
+                        exc.request_sent and effective_policy_mode != "read_only"
+                    ),
                 )
         safe_output = result.payload()
         content = json.dumps(safe_output, ensure_ascii=False)

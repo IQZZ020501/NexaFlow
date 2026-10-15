@@ -73,8 +73,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 
 
 def is_agent_implicit_tool(workspace_id: str, tool_id: str) -> bool:
-    return tool_id == stable_catalog_id(
-        f"tool:{workspace_id}:builtin:install_skill_dependencies"
+    return any(
+        tool_id == stable_catalog_id(f"tool:{workspace_id}:builtin:{name}")
+        for name in ("bash", "install_skill_dependencies")
     )
 
 

@@ -71,7 +71,7 @@ from app.adapters.llm.runtime import (
     test_model_connection,
 )
 from app.adapters.mcp.client import (
-    MAX_MCP_RESULT_CHARS,
+    MAX_MCP_RESULT_BYTES,
     MAX_MCP_TOOLS,
     McpClientError,
     McpConnection,
@@ -1429,6 +1429,7 @@ def test_mcp_client_error_paths() -> None:
                 pass
         except McpClientError as exc:
             assert "URL is required" in str(exc)
+            assert not exc.request_sent
         else:
             raise AssertionError("expected McpClientError")
 
@@ -1511,6 +1512,25 @@ def test_mcp_client_error_paths() -> None:
                     pass
             except McpClientError as exc:
                 assert "MCP server request failed" in str(exc)
+                assert not exc.request_sent
+            else:
+                raise AssertionError("expected McpClientError")
+
+        # a failure after the session opened may have reached the server
+        with patch.object(
+            mcp_capabilities.client, "Client", return_value=_FakeMcpClient()
+        ), patch.object(
+            mcp_capabilities.client, "streamable_http_client", return_value=_FakeTransport()
+        ):
+            try:
+                async with mcp_client(
+                    McpConnection(transport="streamable_http", url="https://example.com/mcp"),
+                    _mcp_settings(),
+                    timeout_seconds=5,
+                ):
+                    raise RuntimeError("lost response")
+            except McpClientError as exc:
+                assert exc.request_sent
             else:
                 raise AssertionError("expected McpClientError")
 
@@ -1750,7 +1770,27 @@ def test_call_mcp_tool() -> None:
         assert fake_client.call_tool.call_args.kwargs.get("meta") is None
 
         fake_client.call_tool.return_value = SimpleNamespace(
-            structured_content={"data": "x" * (MAX_MCP_RESULT_CHARS + 100)},
+            structured_content={"data": "x" * (MAX_MCP_RESULT_BYTES + 100)},
+            content=[],
+            is_error=False,
+        )
+        with patch.object(mcp_capabilities.client, "mcp_client") as context:
+            context.return_value.__aenter__.return_value = fake_client
+            result = await call_mcp_tool(
+                McpConnection(
+                    transport="streamable_http", url="https://example.com/mcp"
+                ),
+                _mcp_settings(),
+                "echo",
+                {},
+            )
+        # The call already ran, so an oversized result is cut rather than failed.
+        assert not result.is_error and result.structured_content is None
+        assert result.meta == {"nexaflow/truncated": True}
+        assert len(json.dumps(result.payload()).encode()) <= MAX_MCP_RESULT_BYTES
+
+        fake_client.call_tool.return_value = SimpleNamespace(
+            structured_content={"value": float("nan")},
             content=[],
             is_error=False,
         )
@@ -1765,10 +1805,10 @@ def test_call_mcp_tool() -> None:
                     "echo",
                     {},
                 )
-            except McpClientError:
-                pass
+            except McpClientError as exc:
+                assert exc.request_sent
             else:
-                raise AssertionError("Oversized MCP output accepted")
+                raise AssertionError("Non-JSON MCP output accepted")
 
     run(scenario())
 

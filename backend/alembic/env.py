@@ -23,6 +23,7 @@ from app.domain.announcements.models import Announcement, AnnouncementRead  # no
 from app.domain.artifacts.models import GeneratedArtifact  # noqa: F401
 from app.domain.audit.models import AuditLog  # noqa: F401
 from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
+from app.domain.execution.models import ExecutionSession  # noqa: F401
 from app.domain.identity.enterprise.models import (  # noqa: F401
     EnterpriseIdentity,
     EnterpriseIdentityConnection,

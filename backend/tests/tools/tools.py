@@ -1879,6 +1879,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         ]
         tools = await repository.list_tools(db, workspace_id)
         assert {tool.stable_key for tool in tools} == {
+            "bash",
             "current_time",
             "image_generation",
             "install_skill_dependencies",

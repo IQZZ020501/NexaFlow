@@ -45,13 +45,13 @@ class AgentRuntimePolicy:
     max_model_tokens: int
 
     @classmethod
-    def from_settings(cls, settings: Settings | None) -> AgentRuntimePolicy:
+    def from_settings(cls, settings: Settings | None, *, shell: bool = False) -> AgentRuntimePolicy:
         if settings is None:
-            return cls(300.0, 8, 12, 6, 3, 100_000)
+            return cls(900.0, 24, 64, 6, 3, 100_000) if shell else cls(300.0, 8, 12, 6, 3, 100_000)
         return cls(
-            float(settings.agent_run_timeout_seconds),
-            settings.agent_max_turns,
-            settings.agent_max_tool_calls,
+            float(settings.agent_shell_run_timeout_seconds if shell else settings.agent_run_timeout_seconds),
+            settings.agent_shell_max_turns if shell else settings.agent_max_turns,
+            settings.agent_shell_max_tool_calls if shell else settings.agent_max_tool_calls,
             settings.agent_max_knowledge_calls,
             settings.agent_max_knowledge_rounds,
             settings.agent_max_model_tokens,
