@@ -62,6 +62,9 @@ jobs:
           uv run python -m tests.agents.harness
           uv run python -m tests.agent_skills.unit
           uv run python -m tests.execution.unit
+          uv run python -m tests.execution.probe_unit
+          uv run python -m tests.execution.sessions
+          uv run python -m tests.tools.shell_unit
           uv run python -m tests.knowledge.unit
           uv run python -m tests.tools.unit
           uv run python -m tests.workflows.unit
