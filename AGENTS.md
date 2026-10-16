@@ -271,6 +271,15 @@ not trigger unrelated cleanup.
   published agents and Agent API docs); shared components in `src/components/`,
   providers in `src/contexts/`, trilingual dictionaries in `src/i18n/`, and
   feature API modules in `src/lib/api/`.
+- Agent file cards preview HTML, PDF, DOCX, XLSX, and PPTX in a right-side
+  panel. Keep generated markup and Office renderers in opaque sandboxed iframes;
+  never grant `allow-same-origin`, mount document HTML in the host, or send
+  signed download tokens to the viewer. PDF/Office dependencies load from the
+  public `/file-preview/` asset directory only, with scoped anonymous CORS.
+  `frontend/scripts/build-file-preview.ts` generates that gitignored directory
+  before `bun run dev` and `bun run build`; after viewer-only edits during
+  development, run `bun run build:file-preview`. The application image's
+  existing `public/` copy includes these assets.
 - Every new user-navigable frontend page must have a stable App Router entry
   under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
