@@ -12,51 +12,34 @@
   </p>
 </div>
 
+[核心能力](#核心能力) · [快速开始](#快速开始) · [创建第一个应用](#创建第一个应用) · [本地开发](#本地开发) · [文档导航](#文档导航) · [界面截图](#界面截图)
+
 ## 项目简介
 
-NexaFlow 提供多工作空间隔离的 AI 应用构建与运行能力。团队可以管理模型和知识库，创建可发布的 Agent，使用可视化画布编排工作流，并在服务端权限、审批、预算和运行恢复机制约束下调用内置、Python 与 MCP 工具。
+NexaFlow 是面向团队的 AI 应用构建与运行平台，适合知识问答、资料整理、文档生成和业务流程编排。模型、知识库、Agent、工作流、MCP 与 Skills 在同一工作空间中管理，资源访问受工作空间和团队权限约束。
+
+Agent 通过通用模型与工具循环完成任务，按需使用知识检索、MCP 和 Skills；工作流通过可视化画布定义执行顺序。两者共用持久运行、权限审批、工具调用记录与隔离执行能力，支持从控制台调试到发布访问页面和 API 接入。
 
 ## 核心能力
 
-- **应用构建**：统一管理 Agent 与工作流，支持草稿、发布快照、公开访问和 API 调用。
-- **知识库与 RAG**：文档与显式 QA 导入、Parent/Child 分段、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/重排、权限过滤、显式引用、证据图谱与有界多跳路径（PDF 只取已有文本层，不做 OCR；图片文字由工作区视觉模型提取）；支持持久知识页、后台增量整理和离线评测。
-- **Agent 运行时**：基于 Celery 的耐久执行、运行租约、checkpoint、可重放事件、对话记忆和模型用量记录。
-- **可视化工作流**：React Flow 画布、不可变发布版本、节点审计，以及隔离的 Python Code 节点沙箱。
-- **模型管理**：支持 OpenAI-compatible、Anthropic、Amazon Bedrock、Azure OpenAI、DeepSeek、Gemini 和 Ollama。
-- **统一工具系统**：内置、Python 与 MCP 工具共享目录、不可变版本、`view/use` 授权、应用绑定和调用账本；MCP 支持 Streamable HTTP、SSE、stdio、加密凭据与定义变更失效策略。
-- **团队治理**：工作空间与团队分级管理、资源级权限、审计日志和简体中文、繁体中文、英文界面。
+| 能力 | 说明 |
+| --- | --- |
+| 应用构建与发布 | 统一管理 Agent 和工作流，保留草稿与不可变发布版本，提供访问页面、独立 API Key 和接口文档。 |
+| Agent 运行时 | 支持流式回答、对话记忆、上下文压缩、运行中追加输入、工具审批和模型用量记录；通过 Celery、租约、checkpoint 与事件恢复执行。新建 Run 默认具备在隔离环境中执行 bash 的能力。 |
+| 知识库与 RAG | 支持文档与 QA 导入、智能层级分段、规范化 Markdown 预览、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/可选重排、引用、证据图谱和检索评测。 |
+| 可视化工作流 | React Flow 画布支持模型、知识检索、分类、条件、表单、变量、工具、Python 代码与已发布 Agent 等节点，提供草稿调试、版本管理和节点执行记录。 |
+| MCP 与统一工具 | 内置、Python、MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
+| Skills | 导入 `SKILL.md` 或 ZIP 技能包，按需加载指令、参考文件和 Python/JavaScript 脚本；固定版本绑定到 Agent，脚本依赖安装需逐次审批。 |
+| 文件与图片生成 | 内置 Word、PDF、Excel、PPTX 文件渲染工具，可按需接入生图模型；HTML、PDF、DOCX、XLSX、PPTX 在聊天右侧预览，查看文件时可以继续对话。 |
+| 模型接入 | 当前提供 22 个供应商目录项，包括 OpenAI、Anthropic、Bedrock、Azure OpenAI、Gemini、DeepSeek、阿里云百炼、Kimi、Ollama、vLLM 和自定义 OpenAI 兼容服务；支持对话、视觉、向量、重排和生图模型，具体类型取决于供应商。 |
+| 团队与管理 | 多工作空间、团队和资源级授权，审计日志、公告与消息中心、SMTP 邮件、企业登录及会话管理；界面支持简体中文、繁体中文、英文和多种外观设置。 |
 
-## 产品界面
+### 使用边界
 
-### Agent 构建与调试
-
-在同一工作区配置模型、知识库、统一工具和系统提示词，并在右侧调试区直接验证 Agent。工具绑定固定版本，发布后可继续维护草稿，再通过重新发布更新公开版本。
-
-![NexaFlow Agent 构建与调试界面](docs/assets/agent-builder.png)
-
-### 应用发布与 API
-
-Agent 和工作流都可以发布为访问页面，登录后的所属工作空间成员可直接使用；也可以通过独立 API Key、API 地址和接口文档接入其他系统。
-
-![NexaFlow 应用发布与 API 界面](docs/assets/application-publishing.png)
-
-### 知识库文档
-
-知识库集中管理文档/QA 上传、解析、向量化、启停、重建索引和命中测试，并提供检索 Trace 与异步评测。
-
-![NexaFlow 知识库文档界面](docs/assets/knowledge-base-documents.png)
-
-### 模型供应商
-
-模型注册按供应商引导填写连接信息和凭据，可接入云端模型、OpenAI-compatible 服务和本地模型。
-
-![NexaFlow 模型供应商选择界面](docs/assets/model-provider-selection.png)
-
-### 工作空间管理
-
-系统管理员可以创建和维护工作空间，并在工作空间内继续管理团队、用户和审计日志，实现组织与资源隔离。
-
-![NexaFlow 工作空间管理界面](docs/assets/workspace-management.png)
+- **知识库上传**：接受 DOCX、MD、MARKDOWN、PDF、TXT、PPTX、XLSX、XLS、HTML、CSV、JSON、XML、ZIP。PDF 提取已有文本层，不做 OCR；扫描件需要先转成可提取文本的文档。QA 模式需主动选择，支持带问题/答案表头的 XLSX 和 UTF-8 CSV。
+- **文件预览**：支持 HTML/HTM、PDF、DOCX、XLSX、PPTX；旧版 DOC、XLS、PPT 仅提供下载。生成文件单个不超过 5 MiB，保存和下载链接有效期最长 24 小时。复杂 Office 排版、图表和动画以下载后在原生应用中的效果为准。
+- **应用访问**：已发布应用的访问页面仍要求登录并属于相应工作空间；其他系统通过应用专属 API Key 接入。
+- **代码执行**：bash、Python 工具、Skill 脚本和文件渲染依赖独立 OpenSandbox 执行环境；服务不可用时执行失败，不回退到业务宿主机。
 
 ## 技术架构
 
@@ -72,10 +55,11 @@ flowchart LR
     Redis <--> AgentWorker["Celery Agent worker (thread pool)"]
     Worker --> DB
     Worker --> Qdrant
-    Worker --> Storage[(Shared upload storage)]
+    Worker --> Storage
     Worker --> Sandbox[External OpenSandbox / Kata]
     AgentWorker --> DB
     AgentWorker --> Qdrant
+    AgentWorker --> Storage
     AgentWorker --> Models[LLM providers]
     AgentWorker --> ToolRuntime[Unified Tool Runtime]
     ToolRuntime --> Sandbox
@@ -87,15 +71,19 @@ flowchart LR
 | 前端 | Next.js 16、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
-| 工具 | builtin / Python / MCP 统一目录、不可变版本、授权、策略、绑定与 ToolInvocation |
+| 工具与 Skills | builtin / Python / MCP 统一目录、不可变版本、授权、策略、调用账本与按需加载的技能包 |
 | 检索 | PostgreSQL（权威文档、证据图谱与 revision）+ Qdrant（可重建的文档/Profile 派生向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、引用扩展、有界多跳路径、可选 reranker；不需要 Neo4j 或新数据库 |
 | 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立 OpenSandbox / Kata 执行主机（镜像以 digest 固定） |
 
 ## 快速开始
 
+以下步骤适用于拉取镜像部署。需要在本机修改代码或体验完整开发环境时，可直接使用[本地开发](#本地开发)中的 `make dev`。
+
 ### 前置要求
 
 - Docker 与 Docker Compose v2
+- 已按[执行主机部署说明](deploy/opensandbox/README.md)配置、且 API/Worker 可访问的 OpenSandbox 服务；生产环境使用独立 Linux/Kata 执行主机和固定 digest 的执行镜像
+- 已获取本仓库，并在仓库根目录执行后续命令
 
 ### 1. 准备配置
 
@@ -108,7 +96,9 @@ cp .env.example .env
 - `POSTGRES_PASSWORD`
 - `BOOTSTRAP_ADMIN_PASSWORD`
 - `MANAGED_USER_INITIAL_PASSWORD`
-- 生产 OpenSandbox 的 `OPENSANDBOX_URL`、`OPENSANDBOX_API_KEY` 和 digest 镜像
+- `OPENSANDBOX_URL`、`OPENSANDBOX_API_KEY` 和 `OPENSANDBOX_IMAGE`（生产环境使用镜像 digest）
+
+Compose 容器中的 `127.0.0.1` 指向容器自身，`OPENSANDBOX_URL` 必须填写容器可达的执行主机地址。执行镜像通过独立流程构建和部署，不包含在业务应用镜像内。
 
 `JWT_SECRET_KEY` 与 `MODEL_SECRET_KEY` 不在 `.env.example` 中，也不需要写进 `.env`：
 首次启动时会自动生成并保存到 PostgreSQL（`platform_secrets`），之后始终以数据库中
@@ -163,6 +153,14 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml down
 
 详细的部署、迁移、Nginx 和安全配置见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
+## 创建第一个应用
+
+1. **登录并进入工作空间**：使用根目录 `.env` 中的引导账号登录，首次登录修改密码，再选择或创建工作空间。
+2. **接入模型**：在「模型」页添加对话模型并检查连接；需要知识检索时再接入向量模型，需要图片生成时再接入生图模型。
+3. **准备知识与工具**：按任务需要创建知识库、上传文档并等待向量化完成；在「工具」页配置 MCP、Python 或导入 Skills，并为使用者授予相应权限。
+4. **创建并调试**：在「应用」页创建 Agent，选择模型、填写系统提示词并按需关联知识库、工具与 Skills，在右侧调试区验证。需要固定执行流程时，创建工作流并在画布中连接节点。
+5. **发布与交付**：发布后从「概览」获取访问链接或 API 文档。生成的文件可以直接下载；支持的格式可点击文件卡片，在右侧预览并继续对话。
+
 ## 本地开发
 
 本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。macOS 与 Linux 直接在仓库根目录运行：
@@ -176,6 +174,8 @@ make dev
 启动完成后访问 <http://localhost:3000>；API 健康检查和文档分别位于 <http://localhost:8000/health> 与 <http://localhost:8000/docs>。按 `Ctrl+C` 会停止本次托管的 OpenSandbox、API、Worker 和前端，但保留基础容器及数据，便于下次快速启动。若 OpenSandbox 已在运行且密钥匹配，启动器会直接复用。
 
 默认端口被其他开发进程占用时，可用一次性的 `NEXAFLOW_DEV_API_PORT=8001 NEXAFLOW_DEV_FRONTEND_PORT=3001 make dev` 启动；前端代理会自动指向对应 API 端口。
+
+`bun run dev` 和 `bun run build` 会自动构建 PDF/Office 预览所需的本地静态资源。开发期间只修改文件预览器时，在 `frontend/` 运行 `bun run build:file-preview` 刷新资源。
 
 本地 `--development` OpenSandbox 使用普通 Docker，只用于功能开发，不代表生产级隔离；生产仍须使用独立 Linux/Kata 执行主机。原生 Windows 不支持，请在 WSL2 中运行。需要单独调试 API 或 Worker 时，仍可分别使用 `cd backend && make dev` 和 `cd backend && make worker`。
 
@@ -193,6 +193,21 @@ NexaFlow/
 ```
 
 后端依赖方向和模块索引见 [docs/INDEX.md](docs/INDEX.md)，运行时与部署细节见 [backend/README.md](backend/README.md) 和 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+
+## 文档导航
+
+| 需要了解 | 文档 |
+| --- | --- |
+| 模块职责与代码入口 | [文档索引](docs/INDEX.md) |
+| 业务服务部署、配置与数据存储 | [部署说明](docs/DEPLOYMENT.md) |
+| 独立执行主机、镜像与网络策略 | [OpenSandbox 部署](deploy/opensandbox/README.md) |
+| Agent 运行、持久化与恢复 | [Agent 运行时](docs/AGENTS_RUNTIME.md) |
+| 知识导入、检索、证据图谱与评测 | [知识库](docs/KNOWLEDGE.md) |
+| 工作流节点与执行语义 | [工作流设计](docs/WORKFLOW_DESIGN.md) |
+| 技能包格式、授权与脚本执行 | [Skills](docs/SKILLS.md) |
+| 模型供应商与适配方式 | [模型接入矩阵](docs/model-providers.md) |
+| 飞书、钉钉、企业微信登录 | [企业身份接入](docs/ENTERPRISE_IDENTITY.md) |
+| 前端路由、交互与文件预览 | [前端模块](docs/FRONTEND.md) |
 
 ## 测试
 
@@ -251,6 +266,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 在独立 OpenSandbox 内运行；command/cwd 是执行镜像路径，不能读取业务宿主目录。仅注入该集成的环境值，出站域名须由部署 allowlist 批准。
 - Python Tool、Python Code、文件渲染与 Skill 脚本通过统一 execution port 执行；业务 Worker 无 Docker socket、namespace 特权或本地运行器回退。
+- HTML 与 Office/PDF 预览在不透明源的 sandbox iframe 中运行；渲染器使用本地静态资源，不向第三方预览服务发送文件或下载凭据。
 - 生产执行平面使用 Kata + `dns+nft`、持久化元数据与不可变镜像 digest；网络策略不满足要求时失败关闭。开发 Docker 测试不能替代生产 VM 隔离验收。
 - 不要提交根目录 `.env`、模型凭据或其他真实密钥。
 
@@ -267,3 +283,49 @@ docker run --rm --network none --read-only --user 65532:65532 \
 ## 许可证
 
 本项目基于 [GNU General Public License v3.0](LICENSE) 发布。内置数据库镜像使用的 `pg_search` Community 扩展采用 AGPLv3，第三方组件仍保留各自许可条款；部署前请查阅 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+
+## 界面截图
+
+以下截图于 **2026-10-16** 从当前前端代码运行的桌面界面截取，使用本地演示数据。示例会话与文件内容用于展示交互，未调用真实模型；不包含真实业务数据或 API Key。
+
+### Agent 构建与调试
+
+配置模型、提示词、知识库、工具和 Skills，并在同一页面查看对话与工具执行过程。
+
+![Agent 构建与调试：左侧配置，右侧展示示例对话和文件卡片](docs/assets/agent-builder.png)
+
+### 对话中的文件预览
+
+点击文件卡片后，右侧显示预览，左侧仍可继续输入。下图展示 HTML 简报；PDF、Word、Excel 和 PPTX 共用文件预览面板。
+
+![文件侧栏预览：左侧继续聊天，右侧查看产品发布简报](docs/assets/agent-file-preview.png)
+
+### 知识库文档管理
+
+集中查看文档、分段数量和向量化状态，并进入关系图谱、后台任务、检索评测与设置。
+
+![知识库文档管理：文档列表、向量化进度和文档操作](docs/assets/knowledge-base-documents.png)
+
+### Skills 与工具
+
+工具页统一提供 Skills、MCP 和 Python 入口；内置 Skills 可生成 Word、PDF、Excel 和 PPTX，也可新建或导入工作区技能包。
+
+![工具目录：四个内置文件生成 Skills 与工作区 Skills 入口](docs/assets/tools-skills.png)
+
+### 模型供应商
+
+按供应商选择模型接入方式，再填写模型标识、连接地址与凭据；完整支持范围见[模型接入矩阵](docs/model-providers.md)。
+
+![模型接入：供应商选择窗口](docs/assets/model-provider-selection.png)
+
+### 应用发布与 API
+
+在应用概览中获取访问链接、打开接口文档并管理独立 API Key。截图中的地址仅为本地演示地址。
+
+![应用发布：公开访问链接、API 地址和密钥管理入口](docs/assets/application-publishing.png)
+
+### 工作空间管理
+
+按团队或业务场景划分工作空间，管理成员、资源授权和审计，并从系统管理入口配置企业登录、邮件与会话安全。
+
+![系统管理：工作空间列表及管理导航](docs/assets/workspace-management.png)
