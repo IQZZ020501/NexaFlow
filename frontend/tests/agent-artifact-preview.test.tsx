@@ -569,7 +569,8 @@ test("shares a single non-modal preview across answers and leaves the composer u
   fireEvent.keyDown(screen.getByRole("heading", { name: "other.html" }), {
     key: "Escape",
   })
-  await waitFor(() => expect(document.activeElement).toBe(second))
+  // Avoid serializing happy-dom trees while waiting for the focus animation frame.
+  await waitFor(() => expect(document.activeElement === second).toBe(true))
   expect(screen.queryByRole("complementary")).toBeNull()
   expect((input as HTMLTextAreaElement).value).toBe("Make the heading bigger")
 })
@@ -604,7 +605,7 @@ test("keeps a loaded preview when a follow-up moves its card into a previous ans
   const newCard = screen.getByRole("button", { name: "预览文件：page.html" })
   expect(newCard.getAttribute("aria-expanded")).toBe("true")
   fireEvent.click(screen.getByRole("button", { name: "关闭" }))
-  await waitFor(() => expect(document.activeElement).toBe(newCard))
+  await waitFor(() => expect(document.activeElement === newCard).toBe(true))
 })
 
 test("discards previews and cancels loading on a conversation change without restoring stale state", async () => {
