@@ -1,6 +1,17 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "预览文件：{filename}": "Preview file: {filename}",
+  "文件预览：{filename}": "File preview: {filename}",
+  正在加载文件预览: "Loading file preview",
+  "文件预览失败，可重试或下载原文件查看。":
+    "Unable to preview this file. Retry or download the original.",
+  "文件已过期或不可用，请重新生成。":
+    "This file has expired or is unavailable. Please generate it again.",
+  选择工作表: "Select worksheet",
+  工作表为空: "This worksheet is empty",
+  "预览仅显示前 500 行、50 列，完整内容请下载文件。":
+    "Preview shows the first 500 rows and 50 columns. Download the file for all content.",
   命令行: "Command line",
   "在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。":
     "Run commands in the Run’s private sandbox, preserving files and creating downloadable results.",

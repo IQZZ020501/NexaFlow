@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['.next', 'out', 'next-env.d.ts']),
+  globalIgnores(['.next', 'out', 'next-env.d.ts', 'public/file-preview']),
   {
     plugins: {
       '@next/next': nextPlugin,
