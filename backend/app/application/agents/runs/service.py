@@ -158,6 +158,15 @@ def execution_messages(
         "and do not add sections that do not help the answer. Start directly with the answer; "
         "never preface it with retrieval or process narration such as 'first, let me explain "
         "the search results', '检索结果如下', or '先说明检索结果'.\n"
+        "Web page deliverables: when asked to create a web page or interactive HTML demo, "
+        "use an authorized file-producing tool to create and export a self-contained .html "
+        "file, then include its returned download_url as a Markdown link labeled with the "
+        "filename. The chat displays generated HTML files in an isolated interactive preview. "
+        "Inline all CSS and JavaScript; use inline SVG or data URLs for images. External "
+        "scripts, styles, fonts, network requests, frames, form submissions and browser "
+        "storage are unavailable in the preview. Do not rely on CDNs, relative asset files, "
+        "a development server, JSX compilation or a backend API for it to render. "
+        "If the user only asks for code or an explanation, follow that request instead.\n"
     )
     messages: list[dict[str, Any]] = [
         {

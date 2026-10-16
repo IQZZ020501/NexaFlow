@@ -2843,7 +2843,29 @@ def test_mcp_server_create_request_transport_matrix() -> None:
         raise AssertionError(f"Invalid MCP server payload accepted: {payload}")
 
 
+def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
+    from app.application.agents.runs.service import execution_messages
+
+    messages = execution_messages(
+        SimpleNamespace(
+            instructions="Build useful pages.",
+            goal="Create an interactive page.",
+            attachment_context="",
+        )
+    )
+    protocol = messages[0]["content"]
+    assert "self-contained .html" in protocol
+    assert "create and export" in protocol
+    assert "download_url as a Markdown link labeled with the filename" in protocol
+    assert "Inline all CSS and JavaScript" in protocol
+    assert "storage are unavailable in the preview" in protocol
+    assert "If the user only asks for code or an explanation" in protocol
+    assert "authorized file-producing tool" in protocol
+    assert messages[-1]["content"] == "Create an interactive page."
+
+
 def main() -> None:
+    test_web_page_delivery_instructions_match_preview_capabilities()
     test_effective_agent_permission_matrix()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
