@@ -16,6 +16,7 @@ class Agent:
     interaction_config: dict[str, Any] = field(default_factory=dict)
     instructions: str = ""
     model_id: str = ""
+    image_model_id: str | None = None
     status: str = "active"
     published: bool = False
     published_snapshot: dict[str, Any] | None = None

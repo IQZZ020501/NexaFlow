@@ -1,6 +1,22 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "预览文件：{filename}": "Preview file: {filename}",
+  "文件预览：{filename}": "File preview: {filename}",
+  正在加载文件预览: "Loading file preview",
+  "文件预览失败，可重试或下载原文件查看。":
+    "Unable to preview this file. Retry or download the original.",
+  "文件已过期或不可用，请重新生成。":
+    "This file has expired or is unavailable. Please generate it again.",
+  选择工作表: "Select worksheet",
+  工作表为空: "This worksheet is empty",
+  "预览仅显示前 500 行、50 列，完整内容请下载文件。":
+    "Preview shows the first 500 rows and 50 columns. Download the file for all content.",
+  命令行: "Command line",
+  "在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。":
+    "Run commands in the Run’s private sandbox, preserving files and creating downloadable results.",
+  退出码: "Exit code",
+
   "应如何批准工具调用？": "How should tool calls be approved?",
   请求批准: "Request approval",
   按策略审批: "Policy approval",
@@ -14,11 +30,12 @@ export const en = {
   "自动运行已授权工具，仍受安全限制": "Auto-run authorized tools; limits apply",
   "执行权限：{mode}": "Execution permission: {mode}",
   "编辑 Skill": "Edit Skill",
-  "技能指令": "Skill instructions",
-  "包文件": "Package files",
-  "保存并发布": "Save and publish",
+  技能指令: "Skill instructions",
+  包文件: "Package files",
+  保存并发布: "Save and publish",
   "Skill 包不能超过 2 MiB": "Skill packages cannot exceed 2 MiB",
-  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。": "Skills are instruction and file packages loaded on demand. They do not automatically create or authorize external tools.",
+  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。":
+    "Skills are instruction and file packages loaded on demand. They do not automatically create or authorize external tools.",
   追加后续任务: "Queue follow-up",
   后续任务已排队: "Follow-up queued",
   后续任务: "Follow-up task",
@@ -27,7 +44,8 @@ export const en = {
   主题: "Theme",
   主题色: "Palette",
   主题设置: "Theme settings",
-  "调整外观和布局以适应您的偏好。": "Adjust the appearance and layout to fit your preferences.",
+  "调整外观和布局以适应您的偏好。":
+    "Adjust the appearance and layout to fit your preferences.",
   打开主题设置: "Open theme settings",
   颜色预设: "Color presets",
   字体: "Font",
@@ -319,7 +337,7 @@ export const en = {
   "失败 {failed} 次": "{failed} failed calls",
   需审批调用: "Requiring approval",
   调用最多的工具: "Busiest tools",
-  "所选范围内暂无工具调用": "No tool calls in the selected range",
+  所选范围内暂无工具调用: "No tool calls in the selected range",
   "启用成员 {active} / {total}": "Active members {active} / {total}",
   "公开与 API 运行 {runs} 次": "{runs} public and API runs",
   "输入 {input} · 输出 {output}": "Input {input} · Output {output}",
@@ -936,10 +954,14 @@ export const en = {
   生图模型已添加: "Image generation model added",
   图片生成: "Generate image",
   暂无可用的图片生成工具: "Image generation is unavailable",
-  "使用工作空间的生图模型生成图片；每次调用需要确认。":
-    "Generate an image with the workspace image model; each call requires approval.",
-  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。":
-    "Saving an image model does not make a paid test call. The connection is checked on the first Agent call. Keep exactly one image model active in this workspace.",
+  "使用 Agent 选定的生图模型生成图片；每次调用需要确认。":
+    "Generate an image with the image model selected for this Agent; each call requires approval.",
+  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。Agent 未指定生图模型时，工作空间需要保持恰好一个启用的生图模型。":
+    "Saving an image model does not make a paid test call. The connection is checked on the first Agent call. While an Agent selects no image model, keep exactly one image model active in this workspace.",
+  选择生图模型: "Select an image model",
+  "图片生成工具使用的生图模型。": "Image model used by the image tool.",
+  "工作空间暂无启用的生图模型，请先在模型页添加。":
+    "No active image model in this workspace. Add one on the Models page first.",
   失败: "Failed",
   "已上传 {value} 个文件": "Uploaded {value} files",
   "已上传 {value} 个文件，{value} 个上传失败":
@@ -1541,6 +1563,10 @@ export const en = {
   PDF: "PDF",
   PPTX: "PPTX",
   Excel: "Excel",
+  "生成 Word": "Generate Word",
+  "生成 PDF": "Generate PDF",
+  "生成 PPT": "Generate PowerPoint",
+  "生成 Excel": "Generate Excel",
   "创建 DOCX 文件。": "Create DOCX files.",
   "创建 PDF 文件。": "Create PDF files.",
   "创建 PPTX 演示文稿。": "Create PPTX presentations.",
@@ -2096,7 +2122,8 @@ export const en = {
   邀请已删除: "Invitation deleted",
   邀请链接: "Invitation link",
   邀请链接无效或已过期: "The invitation link is invalid or expired",
-  "输入内容过短，请检查后重试": "The value is too short. Check it and try again",
+  "输入内容过短，请检查后重试":
+    "The value is too short. Check it and try again",
   撤销该用户全部会话: "Revoke all sessions for this user",
   确认撤销该用户全部会话: "Revoke all sessions for this user?",
   该用户的全部会话已撤销: "All sessions for this user were revoked",
@@ -2225,6 +2252,49 @@ export const en = {
   "邮件服务尚未配置，邀请邮件未发送；你仍可复制邀请链接":
     "Email service is not configured, so the invitation email was not sent. You can still copy the invitation link.",
   知识关联: "Knowledge graph",
+  关系图谱: "Relationship graph",
+  关系图谱与检索共享同一份已发布证据图谱:
+    "The relationship graph and retrieval share the same published evidence graph",
+  "基于 Markdown 显式链接生成，不使用 AI 或语义向量":
+    "Generated from explicit Markdown links, without AI or semantic vectors.",
+  正在加载关系图谱: "Loading link graph",
+  关系图谱加载失败: "Failed to load the link graph",
+  链接数: "Links",
+  未解析链接: "Unresolved links",
+  "图谱过大，当前仅显示部分节点和链接":
+    "The graph is large, so only part of its nodes and links are shown.",
+  搜索图谱文档: "Search graph documents",
+  搜索文件名: "Search file names",
+  图谱范围: "Graph scope",
+  全局图谱: "Global graph",
+  局部图谱: "Local graph",
+  链接方向: "Link direction",
+  双向: "Both directions",
+  仅入链: "Incoming only",
+  仅出链: "Outgoing only",
+  遍历深度: "Traversal depth",
+  "深度 {value}": "Depth {value}",
+  显示未解析链接: "Show unresolved links",
+  显示孤立文档: "Show orphan documents",
+  没有符合当前筛选条件的节点: "No nodes match the current filters.",
+  已解析文档节点: "Resolved document node",
+  尚未创建的链接目标: "Link target that has not been created",
+  入链: "Incoming",
+  出链: "Outgoing",
+  总连接: "Total degree",
+  设为局部图中心: "Use as local graph center",
+  打开文档: "Open document",
+  相邻链接: "Adjacent links",
+  暂无相邻链接: "No adjacent links",
+  选择节点查看链接详情: "Select a node to inspect its links.",
+  "拖动节点重新布局 · 拖动画布平移 · 滚轮缩放":
+    "Drag nodes to rearrange · Drag to pan · Scroll to zoom",
+  缩小: "Zoom out",
+  放大: "Zoom in",
+  适合画布: "Fit graph",
+  重新计算布局: "Recompute layout",
+  图谱画布初始化失败: "The graph canvas failed to initialize.",
+  "选择节点 {name}": "Select node {name}",
   "探索可追溯实体关系，并管理构建与审核":
     "Explore traceable entity relationships and manage builds and reviews.",
   知识关联工作区: "Knowledge graph workspace",

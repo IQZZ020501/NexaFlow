@@ -25,7 +25,6 @@ const IMAGE_PREVIEW_URL_LINE =
   /^[ \t]*(?:[-*+•]|\d+[.)])?[ \t]*(?:[*_]{1,2})?(?:图片)?预览[ \t]*[：:][ \t]*(?:[*_]{1,2})?[^\r\n]*(?:\r?\n|$)/gim
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-const GENERATED_IMAGE_FILENAME = "generated-image.png"
 const ARTIFACT_TOOL_FUNCTIONS = new Set([
   "create_artifact",
   "documents_skill",
@@ -33,6 +32,8 @@ const ARTIFACT_TOOL_FUNCTIONS = new Set([
   "pptx_skill",
   "spreadsheets_skill",
   "generate_image",
+  "bash",
+  "run_skill_script",
 ])
 
 function artifactLink(filename: string, downloadUrl: string) {
@@ -76,13 +77,14 @@ export function withArtifactDownloadLinksInContent(content: string) {
 }
 
 export function builtinToolDisplayName(functionName: string, t: TFunction) {
+  if (functionName === "bash") return t("命令行")
   if (functionName === "inline_python") return t("Python 代码")
   if (functionName === "current_time") return t("当前时间")
   if (functionName === "create_artifact") return t("创建文件")
-  if (functionName === "documents_skill") return t("DOCX")
-  if (functionName === "pdf_skill") return t("PDF")
-  if (functionName === "pptx_skill") return t("PPTX")
-  if (functionName === "spreadsheets_skill") return t("Excel")
+  if (functionName === "documents_skill") return t("生成 Word")
+  if (functionName === "pdf_skill") return t("生成 PDF")
+  if (functionName === "pptx_skill") return t("生成 PPT")
+  if (functionName === "spreadsheets_skill") return t("生成 Excel")
   if (functionName === "generate_image") return t("图片生成")
   return null
 }
@@ -91,9 +93,24 @@ export function withArtifactDownloadLinks(
   content: string,
   events: readonly ToolOutputEvent[]
 ) {
+  events = events.flatMap((event) => {
+    const output = event.output
+    if (
+      (event.tool_name === "bash" || event.tool_name === "run_skill_script") &&
+      output &&
+      typeof output === "object" &&
+      "artifacts" in output &&
+      Array.isArray(output.artifacts)
+    ) {
+      return output.artifacts.map((artifact: unknown) => ({
+        ...event,
+        output: artifact,
+      }))
+    }
+    return [event]
+  })
   let value = content
   const artifacts: Array<{
-    filename: string
     sourceFilename: string
     downloadUrl: string
     sourceDownloadUrl: string
@@ -118,13 +135,10 @@ export function withArtifactDownloadLinks(
     const sourceDownloadUrl =
       typeof output.download_url === "string" ? output.download_url.trim() : ""
     const isGeneratedImage = event.tool_name === "generate_image"
-    const filename = isGeneratedImage
-      ? GENERATED_IMAGE_FILENAME
-      : sourceFilename
     if (
       !sourceFilename ||
       !sourceDownloadUrl.startsWith("/api/v1/artifacts/") ||
-      (!isGeneratedImage && filenames.has(filename)) ||
+      (!isGeneratedImage && filenames.has(sourceFilename)) ||
       linkedUrls.has(sourceDownloadUrl)
     )
       continue
@@ -134,7 +148,7 @@ export function withArtifactDownloadLinks(
       isGeneratedImage && UUID_V4_PATTERN.test(artifactId)
         ? `/api/v1/artifacts/${artifactId}`
         : sourceDownloadUrl
-    filenames.add(filename)
+    filenames.add(sourceFilename)
     linkedUrls.add(sourceDownloadUrl)
     const sourcePreviewUrl =
       isGeneratedImage && output.preview_url === `${sourceDownloadUrl}/preview`
@@ -142,7 +156,6 @@ export function withArtifactDownloadLinks(
         : undefined
     const previewUrl = sourcePreviewUrl ? `${downloadUrl}/preview` : undefined
     artifacts.push({
-      filename,
       sourceFilename,
       downloadUrl,
       sourceDownloadUrl,
@@ -152,16 +165,12 @@ export function withArtifactDownloadLinks(
   }
 
   for (const {
-    filename,
     sourceFilename,
     downloadUrl,
     sourceDownloadUrl,
     previewUrl,
     sourcePreviewUrl,
   } of artifacts.reverse()) {
-    if (sourceFilename !== filename) {
-      value = value.replaceAll(sourceFilename, filename)
-    }
     if (previewUrl) {
       value = value.replace(IMAGE_PREVIEW_LINK_LINE, "")
       value = value.replace(IMAGE_PREVIEW_URL_LINE, (line) =>
@@ -174,8 +183,8 @@ export function withArtifactDownloadLinks(
         value = value.replaceAll(sourcePreviewUrl, previewUrl)
       }
     }
-    const link = artifactLink(filename, downloadUrl)
-    let wasMentioned = value.includes(filename)
+    const link = artifactLink(sourceFilename, downloadUrl)
+    let wasMentioned = value.includes(sourceFilename)
     for (const referencedUrl of new Set([sourceDownloadUrl, downloadUrl])) {
       const escapedUrl = referencedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       const artifactUrl = `(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?${escapedUrl}(?!/preview)`
@@ -194,7 +203,7 @@ export function withArtifactDownloadLinks(
   }
 
   if (artifacts.length === 1) {
-    const { filename, downloadUrl } = artifacts[0]!
+    const { sourceFilename, downloadUrl } = artifacts[0]!
     const artifactUrl =
       "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+(?![A-Za-z0-9._~-]|/preview)"
     value = value.replace(
@@ -202,10 +211,10 @@ export function withArtifactDownloadLinks(
         `\\[[^\\]\\n]*\\]\\s*\\(\\s*${artifactUrl}\\s*\\)|<${artifactUrl}>|\\x60${artifactUrl}\\x60|${artifactUrl}`,
         "g"
       ),
-      artifactLink(filename, downloadUrl)
+      artifactLink(sourceFilename, downloadUrl)
     )
   }
-  for (const { filename, previewUrl } of artifacts) {
+  for (const { sourceFilename, previewUrl } of artifacts) {
     if (!previewUrl) continue
     const hasEmbeddedPreview = [
       ...value.matchAll(
@@ -213,7 +222,7 @@ export function withArtifactDownloadLinks(
       ),
     ].some((match) => match[1] === previewUrl)
     if (!hasEmbeddedPreview) {
-      value = `${value.trimEnd()}\n\n![${filename.replace(/[\x5B\x5D]/g, "\\$&")}](${previewUrl})`
+      value = `${value.trimEnd()}\n\n![${sourceFilename.replace(/[\x5B\x5D]/g, "\\$&")}](${previewUrl})`
     }
   }
   return value
@@ -238,6 +247,9 @@ export function toolDisplayName(tool: DisplayableTool, t: TFunction) {
  * @returns The localized description for a built-in tool or the tool's configured description
  */
 export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
+  if (tool.function_name === "bash") {
+    return t("在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。")
+  }
   if (tool.function_name === "inline_python") {
     return t("在工作流沙箱中运行 Python 代码。")
   }
@@ -260,7 +272,7 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
     return t("创建 Excel 工作簿。")
   }
   if (tool.function_name === "generate_image") {
-    return t("使用工作空间的生图模型生成图片；每次调用需要确认。")
+    return t("使用 Agent 选定的生图模型生成图片；每次调用需要确认。")
   }
   return tool.description
 }

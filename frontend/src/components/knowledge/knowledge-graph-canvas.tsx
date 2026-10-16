@@ -1,292 +1,609 @@
 "use client"
 
 import * as React from "react"
-import {
-  Controls,
-  Handle,
-  Position,
-  ReactFlow,
-  type Edge,
-  type Node,
-  type NodeProps,
-  type ReactFlowInstance,
-  useNodesState,
-} from "@xyflow/react"
+import { LocateFixedIcon, MinusIcon, NetworkIcon, PlusIcon } from "lucide-react"
+import type {
+  Application,
+  Container,
+  Graphics,
+  Text as PixiText,
+} from "pixi.js"
 
+import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
 import type {
-  KnowledgeGraphClaim,
-  KnowledgeGraphEntity,
+  KnowledgeLinkGraphEdge,
+  KnowledgeLinkGraphNode,
 } from "@/lib/api/knowledge"
 
-const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
-const FIT_VIEW_OPTIONS = { padding: 0.08, maxZoom: 1.2 }
-
-type EntityNodeData = {
-  label: string
-  entityType: string
-  size: number
+type NodeDisplay = {
+  container: Container
+  circle: Graphics
+  label: PixiText
+  node: KnowledgeLinkGraphNode
+  radius: number
 }
 
-type EntityNode = Node<EntityNodeData, "entity">
-
-function KnowledgeEntityNode({ data, selected }: NodeProps<EntityNode>) {
-  return (
-    <div className="relative flex h-14 w-44 flex-col items-center text-center">
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!pointer-events-none !size-1 !border-0 !bg-transparent !opacity-0"
-        style={{ left: "50%", top: data.size / 2 }}
-      />
-      <Handle
-        type="source"
-        position={Position.Top}
-        className="!pointer-events-none !size-1 !border-0 !bg-transparent !opacity-0"
-        style={{ left: "50%", top: data.size / 2 }}
-      />
-      <span
-        className="block shrink-0 rounded-full shadow-sm"
-        style={{
-          width: data.size,
-          height: data.size,
-          backgroundColor: selected
-            ? "var(--primary)"
-            : "var(--muted-foreground)",
-          boxShadow: selected
-            ? "0 0 0 4px color-mix(in srgb, var(--primary) 25%, transparent)"
-            : undefined,
-        }}
-      />
-      <span
-        className="mt-1 max-w-44 truncate text-xs font-medium text-foreground"
-        title={`${data.label} · ${data.entityType}`}
-      >
-        {data.label}
-      </span>
-    </div>
-  )
+type CanvasRuntime = {
+  app: Application
+  root: Container
+  fit: () => void
+  zoom: (factor: number) => void
+  reheat: () => void
+  redrawNodes: () => void
 }
 
-const nodeTypes = { entity: KnowledgeEntityNode }
-
-function fitMeasuredNodes(instance: ReactFlowInstance<EntityNode, Edge>) {
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => void instance.fitView(FIT_VIEW_OPTIONS))
-  )
+function nodeRadius(node: KnowledgeLinkGraphNode) {
+  return Math.min(24, 7 + Math.sqrt(Math.max(0, node.degree)) * 2.2)
 }
 
-function forceDirectedPositions(
-  entities: KnowledgeGraphEntity[],
-  claims: KnowledgeGraphClaim[]
+function readThemeColor(
+  host: HTMLElement,
+  className: string,
+  property: "color" | "backgroundColor",
+  fallbackCss: string,
+  fallbackColor: number,
+  context: CanvasRenderingContext2D | null
 ) {
-  const indexById = new Map(entities.map((entity, index) => [entity.id, index]))
-  const points = entities.map((_, index) => {
-    const radius = index === 0 ? 0 : 72 * Math.sqrt(index)
-    const angle = index * GOLDEN_ANGLE
-    return {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-      vx: 0,
-      vy: 0,
-    }
-  })
-  const links = claims.flatMap((claim) => {
-    const source = indexById.get(claim.subject_entity_id)
-    const target = claim.object_entity_id
-      ? indexById.get(claim.object_entity_id)
-      : undefined
-    return source === undefined || target === undefined
-      ? []
-      : [[source, target]]
-  })
-  // ponytail: O(n²) repulsion is bounded by the 500-node API cap; use Barnes-Hut if that cap grows.
-  const iterations = Math.max(
-    24,
-    Math.min(72, Math.floor(9_000 / Math.max(entities.length, 1)))
-  )
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const alpha = 1 - iteration / iterations
-    const forces = points.map(() => ({ x: 0, y: 0 }))
-    for (let left = 0; left < points.length; left += 1) {
-      for (let right = left + 1; right < points.length; right += 1) {
-        let dx = points[right].x - points[left].x
-        let dy = points[right].y - points[left].y
-        if (dx === 0 && dy === 0) dx = 0.01 * (right - left)
-        const distanceSquared = Math.max(64, dx * dx + dy * dy)
-        const distance = Math.sqrt(distanceSquared)
-        const force = (2_400 * alpha) / distanceSquared
-        dx = (dx / distance) * force
-        dy = (dy / distance) * force
-        forces[left].x -= dx
-        forces[left].y -= dy
-        forces[right].x += dx
-        forces[right].y += dy
-      }
-    }
-    for (const [source, target] of links) {
-      const dx = points[target].x - points[source].x
-      const dy = points[target].y - points[source].y
-      const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy))
-      const force = (distance - 180) * 0.012 * alpha
-      const x = (dx / distance) * force
-      const y = (dy / distance) * force
-      forces[source].x += x
-      forces[source].y += y
-      forces[target].x -= x
-      forces[target].y -= y
-    }
-    for (let index = 0; index < points.length; index += 1) {
-      const point = points[index]
-      point.vx = (point.vx + forces[index].x - point.x * 0.002 * alpha) * 0.72
-      point.vy = (point.vy + forces[index].y - point.y * 0.002 * alpha) * 0.72
-      point.x += point.vx
-      point.y += point.vy
-    }
-  }
-  return new Map(
-    entities.map((entity, index) => [
-      entity.id,
-      { x: points[index].x * 1.35, y: points[index].y },
-    ])
-  )
+  const probe = document.createElement("span")
+  probe.className = className
+  probe.style.position = "absolute"
+  probe.style.pointerEvents = "none"
+  probe.style.opacity = "0"
+  host.appendChild(probe)
+  const value = getComputedStyle(probe)[property] || fallbackCss
+  probe.remove()
+  return cssColorToPixiColor(value, fallbackColor, context)
 }
 
-export function graphCanvasElements(
-  entities: KnowledgeGraphEntity[],
-  claims: KnowledgeGraphClaim[],
-  orderedEntityIds: string[] = []
-): { nodes: EntityNode[]; edges: Edge[] } {
-  const order = new Map(orderedEntityIds.map((id, index) => [id, index]))
-  const sorted = [...entities].sort((left, right) => {
-    const leftOrder = order.get(left.id)
-    const rightOrder = order.get(right.id)
-    if (leftOrder !== undefined || rightOrder !== undefined) {
-      return (
-        (leftOrder ?? Number.MAX_SAFE_INTEGER) -
-        (rightOrder ?? Number.MAX_SAFE_INTEGER)
-      )
-    }
-    return (
-      right.degree - left.degree ||
-      left.canonical_name.localeCompare(right.canonical_name)
-    )
-  })
-  const entityIds = new Set(sorted.map((entity) => entity.id))
-  const pathLayout = orderedEntityIds.length > 0
-  const positions = pathLayout
-    ? new Map(
-        sorted.map((entity, index) => [entity.id, { x: index * 220, y: 0 }])
-      )
-    : forceDirectedPositions(sorted, claims)
+export function cssColorToPixiColor(
+  value: string,
+  fallback: number,
+  context: CanvasRenderingContext2D | null
+) {
+  if (!context) return fallback
+  if (typeof CSS !== "undefined" && !CSS.supports("color", value)) {
+    return fallback
+  }
+  try {
+    context.clearRect(0, 0, 1, 1)
+    context.fillStyle = value
+    context.fillRect(0, 0, 1, 1)
+    const [red = 0, green = 0, blue = 0] = context.getImageData(0, 0, 1, 1).data
+    return (red << 16) | (green << 8) | blue
+  } catch {
+    return fallback
+  }
+}
 
+function createCssColorContext() {
+  try {
+    const canvas = document.createElement("canvas")
+    canvas.width = 1
+    canvas.height = 1
+    return canvas.getContext("2d", { willReadFrequently: true })
+  } catch {
+    return null
+  }
+}
+
+function readGraphColors(host: HTMLElement) {
+  const context = createCssColorContext()
   return {
-    nodes: sorted.map((entity) => {
-      return {
-        id: entity.id,
-        type: "entity",
-        position: positions.get(entity.id) ?? { x: 0, y: 0 },
-        data: {
-          label: entity.canonical_name,
-          entityType: entity.entity_type,
-          size: Math.min(18, 9 + Math.sqrt(Math.max(0, entity.degree)) * 2),
-        },
-        ariaLabel: `${entity.canonical_name}, ${entity.entity_type}`,
-      }
-    }),
-    edges: claims
-      .filter(
-        (claim) =>
-          claim.object_entity_id &&
-          entityIds.has(claim.subject_entity_id) &&
-          entityIds.has(claim.object_entity_id)
-      )
-      .map((claim) => ({
-        id: claim.id,
-        source: claim.subject_entity_id,
-        target: claim.object_entity_id as string,
-        data: { claimId: claim.id, predicate: claim.predicate },
-        ariaLabel: claim.predicate,
-        style: {
-          stroke: "var(--muted-foreground)",
-          strokeOpacity: 0.38,
-          strokeWidth: 1,
-        },
-      })),
+    background: readThemeColor(
+      host,
+      "bg-background",
+      "backgroundColor",
+      "rgb(255, 255, 255)",
+      0xffffff,
+      context
+    ),
+    foreground: readThemeColor(
+      host,
+      "text-foreground",
+      "color",
+      "rgb(24, 24, 27)",
+      0x18181b,
+      context
+    ),
+    muted: readThemeColor(
+      host,
+      "text-muted-foreground",
+      "color",
+      "rgb(113, 113, 122)",
+      0x71717a,
+      context
+    ),
+    primary: readThemeColor(
+      host,
+      "text-primary",
+      "color",
+      "rgb(37, 99, 235)",
+      0x2563eb,
+      context
+    ),
+    destructive: readThemeColor(
+      host,
+      "text-destructive",
+      "color",
+      "rgb(220, 38, 38)",
+      0xdc2626,
+      context
+    ),
   }
 }
 
 export function KnowledgeGraphCanvas({
-  entities,
-  claims,
-  orderedEntityIds = [],
-  onEntitySelect,
-  onClaimSelect,
+  nodes,
+  edges,
+  selectedNodeId,
+  highlightedNodeIds,
+  onNodeSelect,
+  onNodeOpen,
 }: {
-  entities: KnowledgeGraphEntity[]
-  claims: KnowledgeGraphClaim[]
-  orderedEntityIds?: string[]
-  onEntitySelect: (entityId: string) => void
-  onClaimSelect: (claimId: string) => void
+  nodes: KnowledgeLinkGraphNode[]
+  edges: KnowledgeLinkGraphEdge[]
+  selectedNodeId: string | null
+  highlightedNodeIds: ReadonlySet<string>
+  onNodeSelect: (nodeId: string) => void
+  onNodeOpen: (nodeId: string) => void
 }) {
   const { t } = useLanguage()
-  const elements = React.useMemo(
-    () => graphCanvasElements(entities, claims, orderedEntityIds),
-    [claims, entities, orderedEntityIds]
-  )
-  const [nodes, setNodes, onNodesChange] = useNodesState<EntityNode>(
-    elements.nodes
-  )
+  const hostRef = React.useRef<HTMLDivElement>(null)
+  const runtimeRef = React.useRef<CanvasRuntime | null>(null)
+  const selectedNodeIdRef = React.useRef(selectedNodeId)
+  const highlightedNodeIdsRef = React.useRef(highlightedNodeIds)
+  const onNodeSelectRef = React.useRef(onNodeSelect)
+  const onNodeOpenRef = React.useRef(onNodeOpen)
+  const [rendererFailed, setRendererFailed] = React.useState(false)
 
-  React.useEffect(() => setNodes(elements.nodes), [elements.nodes, setNodes])
+  React.useEffect(() => {
+    selectedNodeIdRef.current = selectedNodeId
+    highlightedNodeIdsRef.current = highlightedNodeIds
+    runtimeRef.current?.redrawNodes()
+  }, [highlightedNodeIds, selectedNodeId])
+
+  React.useEffect(() => {
+    onNodeSelectRef.current = onNodeSelect
+    onNodeOpenRef.current = onNodeOpen
+  }, [onNodeOpen, onNodeSelect])
+
+  React.useEffect(() => {
+    const host = hostRef.current
+    if (!host || typeof Worker === "undefined" || !nodes.length) return
+    let disposed = false
+    let worker: Worker | null = null
+    let runtime: CanvasRuntime | null = null
+    let app: Application | null = null
+    let themeObserver: MutationObserver | null = null
+
+    void import("pixi.js")
+      .then(
+        ({
+          Application: PixiApplication,
+          Circle,
+          Container: PixiContainer,
+          Graphics: PixiGraphics,
+          Point,
+          Text: PixiTextClass,
+        }) => {
+          if (disposed) return
+          setRendererFailed(false)
+          let colors = readGraphColors(host)
+          const pixiApp = new PixiApplication({
+            resizeTo: host,
+            antialias: true,
+            autoDensity: true,
+            resolution: Math.min(window.devicePixelRatio || 1, 2),
+            backgroundAlpha: 0,
+          })
+          app = pixiApp
+          const canvas = pixiApp.view as HTMLCanvasElement
+          canvas.className = "block size-full touch-none"
+          canvas.setAttribute("aria-hidden", "true")
+          host.replaceChildren(canvas)
+
+          const root = new PixiContainer()
+          const edgeGraphics = new PixiGraphics()
+          root.addChild(edgeGraphics)
+          pixiApp.stage.addChild(root)
+          pixiApp.stage.eventMode = "static"
+          pixiApp.stage.hitArea = pixiApp.screen
+
+          const displays = new Map<string, NodeDisplay>()
+          const positions = new Map<string, { x: number; y: number }>()
+          const nodeById = new Map(nodes.map((node) => [node.id, node]))
+          let fitted = false
+          let draggedNodeId: string | null = null
+          let panStart: {
+            x: number
+            y: number
+            rootX: number
+            rootY: number
+          } | null = null
+
+          function redrawNode(display: NodeDisplay) {
+            const selected = selectedNodeIdRef.current === display.node.id
+            const highlighted = highlightedNodeIdsRef.current.has(
+              display.node.id
+            )
+            const dimmed =
+              highlightedNodeIdsRef.current.size > 0 && !highlighted
+            display.container.alpha = dimmed ? 0.22 : 1
+            display.circle.clear()
+            if (display.node.kind === "unresolved") {
+              display.circle.lineStyle(
+                selected ? 3 : 1.5,
+                selected ? colors.primary : colors.destructive,
+                selected ? 1 : 0.72
+              )
+              display.circle.beginFill(colors.background, 0.9)
+            } else {
+              display.circle.lineStyle(
+                selected ? 3 : 1,
+                selected ? colors.primary : colors.background,
+                selected ? 1 : 0.65
+              )
+              display.circle.beginFill(
+                selected ? colors.primary : colors.muted,
+                selected ? 1 : 0.86
+              )
+            }
+            display.circle.drawCircle(0, 0, display.radius)
+            display.circle.endFill()
+            display.label.style.fill = selected
+              ? colors.primary
+              : colors.foreground
+            display.label.style.fontWeight = selected ? "600" : "500"
+          }
+
+          function redrawNodes() {
+            for (const display of displays.values()) redrawNode(display)
+          }
+
+          function drawEdges() {
+            edgeGraphics.clear()
+            for (const edge of edges) {
+              const source = positions.get(edge.source)
+              const target = positions.get(edge.target)
+              const targetNode = nodeById.get(edge.target)
+              if (!source || !target || !targetNode) continue
+              const dx = target.x - source.x
+              const dy = target.y - source.y
+              const distance = Math.max(1, Math.hypot(dx, dy))
+              const ux = dx / distance
+              const uy = dy / distance
+              const targetRadius = nodeRadius(targetNode)
+              const endX = target.x - ux * (targetRadius + 4)
+              const endY = target.y - uy * (targetRadius + 4)
+              const width = Math.min(
+                3.2,
+                0.7 + Math.log2(edge.count + 1) * 0.55
+              )
+              edgeGraphics.lineStyle(
+                width,
+                colors.muted,
+                edge.resolved ? 0.34 : 0.22
+              )
+              edgeGraphics.moveTo(source.x, source.y)
+              edgeGraphics.lineTo(endX, endY)
+              const arrow = 5 + width
+              const leftX = endX - ux * arrow - uy * arrow * 0.65
+              const leftY = endY - uy * arrow + ux * arrow * 0.65
+              const rightX = endX - ux * arrow + uy * arrow * 0.65
+              const rightY = endY - uy * arrow - ux * arrow * 0.65
+              edgeGraphics.beginFill(colors.muted, edge.resolved ? 0.45 : 0.3)
+              edgeGraphics.drawPolygon([
+                endX,
+                endY,
+                leftX,
+                leftY,
+                rightX,
+                rightY,
+              ])
+              edgeGraphics.endFill()
+            }
+          }
+
+          themeObserver = new MutationObserver(() => {
+            colors = readGraphColors(host)
+            redrawNodes()
+            drawEdges()
+          })
+          themeObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ["class", "data-palette"],
+          })
+
+          function fit() {
+            if (!positions.size) return
+            const values = [...positions.values()]
+            const minX = Math.min(...values.map((position) => position.x))
+            const maxX = Math.max(...values.map((position) => position.x))
+            const minY = Math.min(...values.map((position) => position.y))
+            const maxY = Math.max(...values.map((position) => position.y))
+            const width = Math.max(120, maxX - minX + 180)
+            const height = Math.max(120, maxY - minY + 180)
+            const scale = Math.max(
+              0.08,
+              Math.min(
+                1.35,
+                pixiApp.screen.width / width,
+                pixiApp.screen.height / height
+              )
+            )
+            root.scale.set(scale)
+            root.position.set(
+              pixiApp.screen.width / 2 - ((minX + maxX) / 2) * scale,
+              pixiApp.screen.height / 2 - ((minY + maxY) / 2) * scale
+            )
+          }
+
+          function zoom(factor: number) {
+            const previous = root.scale.x || 1
+            const next = Math.max(0.08, Math.min(3, previous * factor))
+            const center = new Point(
+              pixiApp.screen.width / 2,
+              pixiApp.screen.height / 2
+            )
+            const local = root.toLocal(center)
+            root.scale.set(next)
+            root.position.set(
+              center.x - local.x * next,
+              center.y - local.y * next
+            )
+          }
+
+          for (const node of nodes) {
+            const radius = nodeRadius(node)
+            const container = new PixiContainer()
+            const circle = new PixiGraphics()
+            const label = new PixiTextClass(node.label, {
+              fill: colors.foreground,
+              fontFamily:
+                "Geist Variable, ui-sans-serif, system-ui, sans-serif",
+              fontSize: 12,
+              fontWeight: "500",
+              align: "center",
+            })
+            label.anchor.set(0.5, 0)
+            label.y = radius + 5
+            label.resolution = Math.min(window.devicePixelRatio || 1, 2)
+            container.addChild(circle, label)
+            container.eventMode = "static"
+            container.cursor = "pointer"
+            container.hitArea = new Circle(0, 0, radius + 10)
+            container.on("pointertap", () => onNodeSelectRef.current(node.id))
+            container.on("rightclick", () => onNodeOpenRef.current(node.id))
+            container.on("pointerdown", (event) => {
+              event.stopPropagation()
+              draggedNodeId = node.id
+              onNodeSelectRef.current(node.id)
+              const point = root.toLocal(event.global)
+              worker?.postMessage({
+                type: "pin",
+                id: node.id,
+                x: point.x,
+                y: point.y,
+              })
+            })
+            const display = { container, circle, label, node, radius }
+            displays.set(node.id, display)
+            root.addChild(container)
+            redrawNode(display)
+          }
+
+          pixiApp.stage.on("pointerdown", (event) => {
+            if (draggedNodeId) return
+            panStart = {
+              x: event.global.x,
+              y: event.global.y,
+              rootX: root.position.x,
+              rootY: root.position.y,
+            }
+          })
+          pixiApp.stage.on("pointermove", (event) => {
+            if (draggedNodeId) {
+              const point = root.toLocal(event.global)
+              worker?.postMessage({
+                type: "pin",
+                id: draggedNodeId,
+                x: point.x,
+                y: point.y,
+              })
+              return
+            }
+            if (!panStart) return
+            root.position.set(
+              panStart.rootX + event.global.x - panStart.x,
+              panStart.rootY + event.global.y - panStart.y
+            )
+          })
+          const endPointer = () => {
+            if (draggedNodeId) {
+              worker?.postMessage({ type: "release", id: draggedNodeId })
+            }
+            draggedNodeId = null
+            panStart = null
+          }
+          pixiApp.stage.on("pointerup", endPointer)
+          pixiApp.stage.on("pointerupoutside", endPointer)
+
+          const handleWheel = (event: WheelEvent) => {
+            event.preventDefault()
+            const rect = canvas.getBoundingClientRect()
+            const cursor = new Point(
+              event.clientX - rect.left,
+              event.clientY - rect.top
+            )
+            const local = root.toLocal(cursor)
+            const next = Math.max(
+              0.08,
+              Math.min(3, root.scale.x * Math.exp(-event.deltaY * 0.0015))
+            )
+            root.scale.set(next)
+            root.position.set(
+              cursor.x - local.x * next,
+              cursor.y - local.y * next
+            )
+          }
+          canvas.addEventListener("wheel", handleWheel, { passive: false })
+
+          worker = new Worker(
+            new URL("./knowledge-graph.worker.ts", import.meta.url),
+            { type: "module" }
+          )
+          worker.onmessage = (
+            event: MessageEvent<{
+              type: "positions"
+              positions: ArrayBuffer
+            }>
+          ) => {
+            if (event.data.type !== "positions") return
+            const values = new Float32Array(event.data.positions)
+            nodes.forEach((node, index) => {
+              const position = {
+                x: values[index * 2] ?? 0,
+                y: values[index * 2 + 1] ?? 0,
+              }
+              positions.set(node.id, position)
+              displays
+                .get(node.id)
+                ?.container.position.set(position.x, position.y)
+            })
+            drawEdges()
+            if (!fitted && positions.size === nodes.length) {
+              fitted = true
+              fit()
+            }
+          }
+          worker.postMessage({
+            type: "initialize",
+            nodes: nodes.map((node) => ({
+              id: node.id,
+              radius: nodeRadius(node),
+            })),
+            edges: edges.map((edge) => ({
+              source: edge.source,
+              target: edge.target,
+              weight: edge.count,
+            })),
+          })
+
+          runtime = {
+            app: pixiApp,
+            root,
+            fit,
+            zoom,
+            reheat: () => worker?.postMessage({ type: "reheat" }),
+            redrawNodes,
+          }
+          runtimeRef.current = runtime
+        }
+      )
+      .catch((error: unknown) => {
+        themeObserver?.disconnect()
+        app?.destroy(true, {
+          children: true,
+          texture: true,
+          baseTexture: true,
+        })
+        app = null
+        host.replaceChildren()
+        if (!disposed) {
+          if (process.env.NODE_ENV !== "test") {
+            console.error(
+              "[knowledge-graph-canvas] Failed to initialize graph canvas",
+              error
+            )
+          }
+          setRendererFailed(true)
+        }
+      })
+
+    return () => {
+      disposed = true
+      worker?.postMessage({ type: "stop" })
+      worker?.terminate()
+      themeObserver?.disconnect()
+      runtimeRef.current = null
+      app?.destroy(true, {
+        children: true,
+        texture: true,
+        baseTexture: true,
+      })
+      app = null
+      host.replaceChildren()
+    }
+  }, [edges, nodes])
 
   return (
     <div
-      className="relative h-[calc(100vh-18rem)] min-h-[38rem] w-full bg-muted/20 max-sm:h-[62svh] max-sm:min-h-[20rem]"
+      className="relative h-[calc(100vh-15rem)] min-h-[36rem] w-full overflow-hidden bg-muted/15 max-sm:h-[62svh] max-sm:min-h-[22rem]"
       data-testid="knowledge-graph-canvas"
     >
-      <div className="pointer-events-none absolute top-3 left-3 z-10 flex gap-3 rounded-md border bg-background/85 px-3 py-2 text-xs text-muted-foreground backdrop-blur max-sm:inset-x-2 max-sm:flex-col max-sm:items-center max-sm:gap-1">
-        <span className="flex gap-3">
-          <span>
-            {t("实体数")} {entities.length}
-          </span>
-          <span>
-            {t("关系数")} {claims.length}
-          </span>
-        </span>
-        <span className="sm:hidden">{t("拖动平移 · 双指缩放")}</span>
+      <div ref={hostRef} className="absolute inset-0" />
+      <div className="pointer-events-none absolute top-3 left-3 z-10 rounded-md border bg-background/85 px-3 py-2 text-xs text-muted-foreground shadow-xs backdrop-blur">
+        {t("拖动节点重新布局 · 拖动画布平移 · 滚轮缩放")}
       </div>
-      <ReactFlow
-        nodes={nodes}
-        edges={elements.edges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={FIT_VIEW_OPTIONS}
-        minZoom={0.08}
-        maxZoom={2}
-        nodesDraggable
-        nodesConnectable={false}
-        panOnDrag
-        panOnScroll={false}
-        zoomOnPinch
-        zoomOnDoubleClick
-        preventScrolling
-        onlyRenderVisibleElements
-        proOptions={{ hideAttribution: true }}
-        aria-label={t("知识关联画布")}
-        onInit={fitMeasuredNodes}
-        onNodesChange={onNodesChange}
-        onNodeClick={(_, node) => onEntitySelect(node.id)}
-        onEdgeClick={(_, edge) =>
-          onClaimSelect(String(edge.data?.claimId ?? edge.id))
-        }
+      <div
+        className="absolute right-3 bottom-3 z-10 flex items-center gap-1 rounded-md border bg-background/90 p-1 shadow-sm backdrop-blur"
+        aria-label={t("知识关联画布控制")}
       >
-        <Controls
-          showInteractive={false}
-          className="!border-border !bg-background max-sm:[&>button]:!w-10 [&>button]:!border-border [&>button]:!bg-background [&>button]:!fill-foreground [&>button:hover]:!bg-muted"
-          aria-label={t("知识关联画布控制")}
-        />
-      </ReactFlow>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("缩小")}
+          onClick={() => runtimeRef.current?.zoom(0.8)}
+        >
+          <MinusIcon />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("放大")}
+          onClick={() => runtimeRef.current?.zoom(1.25)}
+        >
+          <PlusIcon />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("适合画布")}
+          onClick={() => runtimeRef.current?.fit()}
+        >
+          <LocateFixedIcon />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("重新计算布局")}
+          onClick={() => runtimeRef.current?.reheat()}
+        >
+          <NetworkIcon />
+        </Button>
+      </div>
+      {rendererFailed ? (
+        <p className="absolute inset-x-4 top-16 text-center text-sm text-destructive">
+          {t("图谱画布初始化失败")}
+        </p>
+      ) : null}
+      <div className="sr-only" aria-label={t("知识关联画布")}>
+        {nodes.map((node) => (
+          <button
+            key={node.id}
+            type="button"
+            aria-label={t("选择节点 {name}", { name: node.filename })}
+            onClick={() => onNodeSelect(node.id)}
+          >
+            {node.filename}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

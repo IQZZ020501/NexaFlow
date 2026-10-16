@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { fireEvent, screen, waitFor } from "@testing-library/react"
 
 import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
-import { graphCanvasElements } from "@/components/knowledge/knowledge-graph-canvas"
+import { graphCanvasElements } from "@/components/knowledge/knowledge-evidence-graph-canvas"
 import { LanguageProvider } from "@/contexts/language-provider"
 import type {
   KnowledgeGraphEntity,

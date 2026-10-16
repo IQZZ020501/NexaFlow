@@ -113,6 +113,7 @@ import { cn } from "@/lib/utils"
 import { formatDateTime, formatUserIdentity, modelLabel } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import {
+  DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS,
   knowledgeUploadPath,
   knowledgeUploadSegmentPath,
   type KnowledgeUploadRouteState,
@@ -122,7 +123,7 @@ import { knowledgeBaseDetailPath } from "@/lib/knowledge-views"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
-import { KnowledgeGraph } from "@/components/knowledge/knowledge-graph"
+import { KnowledgeLinkGraph } from "@/components/knowledge/knowledge-link-graph"
 import {
   ResourceBulkMoveBar,
   toggleResourceSelection,
@@ -336,10 +337,12 @@ function PaginationFooter({
   )
 }
 
-const SMART_CHUNK_SIZE = 1200
-const SMART_CHUNK_OVERLAP = 150
-const SMART_CLEANING_RULES = ["trim_lines", "remove_empty_lines"]
-const SMART_SPLIT_SEPARATOR = "\n\n"
+const {
+  chunkSize: SMART_CHUNK_SIZE,
+  chunkOverlap: SMART_CHUNK_OVERLAP,
+  cleaningRules: SMART_CLEANING_RULES,
+  splitSeparator: SMART_SPLIT_SEPARATOR,
+} = DEFAULT_KNOWLEDGE_UPLOAD_PARSE_SETTINGS
 
 const CLEANING_RULE_OPTIONS: Array<{
   value: string
@@ -551,6 +554,12 @@ function KnowledgeBasePageContent({
   const selectedKnowledgeBase =
     knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId) ?? null
   const canEditDocuments = selectedKnowledgeBase?.permission === "edit"
+  const activeRebuildIndexTask = knowledgeTasks.find(
+    (task) =>
+      task.knowledge_base_id === selectedKnowledgeBaseId &&
+      task.task_type === "rebuild_index" &&
+      PROCESSING_TASK_STATUSES[task.status]
+  )
   const selectedEmbeddingModel =
     registeredModels.find(
       (model) => model.id === selectedKnowledgeBase?.embedding_model_id
@@ -633,7 +642,9 @@ function KnowledgeBasePageContent({
     const summary = { indexed: 0, indexing: 0, pending: 0, failed: 0 }
 
     for (const document of documents) {
-      if (document.status === "indexed") {
+      if (document.status === "indexed" && activeRebuildIndexTask) {
+        summary.indexing += 1
+      } else if (document.status === "indexed") {
         summary.indexed += 1
       } else if (
         document.status === "index_queued" ||
@@ -648,10 +659,21 @@ function KnowledgeBasePageContent({
     }
 
     return summary
-  }, [documents])
-  const documentIndexProgress = documents.length
-    ? Math.round((documentIndexSummary.indexed / documents.length) * 100)
+  }, [activeRebuildIndexTask, documents])
+  const documentIndexProgressCompleted = activeRebuildIndexTask
+    ? activeRebuildIndexTask.processed_items
+    : documentIndexSummary.indexed
+  const documentIndexProgressTotal = activeRebuildIndexTask
+    ? activeRebuildIndexTask.total_items
+    : documents.length
+  const documentIndexProgress = documentIndexProgressTotal
+    ? Math.round(
+        (documentIndexProgressCompleted / documentIndexProgressTotal) * 100
+      )
     : 0
+  const documentIndexProgressLabel = activeRebuildIndexTask
+    ? t("重建索引")
+    : t("进度")
   const visibleDocuments = paginateDocuments(
     filteredDocuments,
     documentPage,
@@ -901,7 +923,9 @@ function KnowledgeBasePageContent({
   const hasProcessingTasks = knowledgeTasks.some(
     (task) => PROCESSING_TASK_STATUSES[task.status]
   )
-  const shouldPollTasks = activeDetailTab === "tasks" && hasProcessingTasks
+  const shouldPollTasks =
+    (activeDetailTab === "tasks" && hasProcessingTasks) ||
+    activeRebuildIndexTask !== undefined
 
   React.useEffect(() => {
     if (!hasProcessingDocuments && !shouldPollTasks) {
@@ -1349,11 +1373,15 @@ function KnowledgeBasePageContent({
 
     setIsSubmittingDocumentTask(true)
     try {
-      await rebuildKnowledgeIndex(
+      const task = await rebuildKnowledgeIndex(
         token,
         selectedWorkspaceId,
         selectedKnowledgeBase.id
       )
+      setKnowledgeTasks((current) => [
+        task,
+        ...current.filter((item) => item.id !== task.id),
+      ])
       await loadKnowledgeTasks()
       notify("success", t("已提交重建索引任务"))
     } catch (error) {
@@ -1616,7 +1644,7 @@ function KnowledgeBasePageContent({
     icon: React.ElementType
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
-    { key: "graph", label: t("知识关联"), icon: NetworkIcon },
+    { key: "graph", label: t("关系图谱"), icon: NetworkIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
     { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
@@ -1679,69 +1707,88 @@ function KnowledgeBasePageContent({
     )
   }
 
-  function renderKnowledgeTaskActions(task: KnowledgeTask) {
+  function renderKnowledgeTaskActionMenu(task: KnowledgeTask) {
     const isTaskActionDisabled =
       !canEditDocuments || isKnowledgeTaskMutationBusy
+    const canStopTask = ["queued", "running"].includes(task.status)
+    const canRetryTask = ["failed", "cancelled"].includes(task.status)
+    const canRetryUnfinishedGraphTask =
+      canRetryTask &&
+      task.processed_items > 0 &&
+      task.processed_items < task.total_items
+    const canDeleteTask = !["queued", "running", "cancelling"].includes(
+      task.status
+    )
+    const hasAvailableAction = canStopTask || canRetryTask || canDeleteTask
+    const isGraphTask = ["graph_sync", "graph_rebuild"].includes(task.task_type)
 
     return (
-      <>
-        <IconButton
-          label={t("停止")}
-          disabled={
-            isTaskActionDisabled || !["queued", "running"].includes(task.status)
-          }
-          onClick={() => void handleStopKnowledgeTask(task)}
-        >
-          <SquareIcon className="size-4 fill-current" />
-        </IconButton>
-        {["graph_sync", "graph_rebuild"].includes(task.task_type) ? (
-          <>
-            <IconButton
-              label={t("重试未完成分片")}
-              disabled={
-                isTaskActionDisabled ||
-                !["failed", "cancelled"].includes(task.status) ||
-                task.processed_items <= 0 ||
-                task.processed_items >= task.total_items
-              }
-              onClick={() => void handleRetryKnowledgeTask(task, "unfinished")}
-            >
-              <PlayIcon className="size-4" />
-            </IconButton>
-            <IconButton
-              label={t("重试全部分片")}
-              disabled={
-                isTaskActionDisabled ||
-                !["failed", "cancelled"].includes(task.status)
-              }
-              onClick={() => void handleRetryKnowledgeTask(task, "all")}
-            >
-              <RotateCcwIcon className="size-4" />
-            </IconButton>
-          </>
-        ) : (
-          <IconButton
-            label={t("重试")}
-            disabled={
-              isTaskActionDisabled ||
-              !["failed", "cancelled"].includes(task.status)
-            }
-            onClick={() => void handleRetryKnowledgeTask(task)}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-foreground"
+            disabled={isTaskActionDisabled || !hasAvailableAction}
+            aria-label={t("操作 {value}", { value: task.id })}
+            title={t("更多")}
           >
-            <RotateCcwIcon className="size-4" />
-          </IconButton>
-        )}
-        <IconButton
-          label={t("删除任务")}
-          disabled={
-            isTaskActionDisabled ||
-            ["queued", "running", "cancelling"].includes(task.status)
-          }
-          onClick={() => void handleDeleteKnowledgeTask(task)}
-        >
-          <Trash2Icon className="size-4" />
-        </IconButton>
-      </>
+            <MoreHorizontalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="end" className="min-w-40">
+          {canStopTask ? (
+            <DropdownMenuItem
+              onSelect={() => void handleStopKnowledgeTask(task)}
+            >
+              <SquareIcon className="fill-current" />
+              {t("停止")}
+            </DropdownMenuItem>
+          ) : null}
+          {isGraphTask ? (
+            <>
+              {canRetryUnfinishedGraphTask ? (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void handleRetryKnowledgeTask(task, "unfinished")
+                  }
+                >
+                  <PlayIcon />
+                  {t("重试未完成分片")}
+                </DropdownMenuItem>
+              ) : null}
+              {canRetryTask ? (
+                <DropdownMenuItem
+                  onSelect={() => void handleRetryKnowledgeTask(task, "all")}
+                >
+                  <RotateCcwIcon />
+                  {t("重试全部分片")}
+                </DropdownMenuItem>
+              ) : null}
+            </>
+          ) : canRetryTask ? (
+            <DropdownMenuItem
+              onSelect={() => void handleRetryKnowledgeTask(task)}
+            >
+              <RotateCcwIcon />
+              {t("重试")}
+            </DropdownMenuItem>
+          ) : null}
+          {canDeleteTask && (canStopTask || canRetryTask) ? (
+            <DropdownMenuSeparator />
+          ) : null}
+          {canDeleteTask ? (
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => void handleDeleteKnowledgeTask(task)}
+            >
+              <Trash2Icon />
+              {t("删除")}
+            </DropdownMenuItem>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
     )
   }
 
@@ -1828,9 +1875,10 @@ function KnowledgeBasePageContent({
                     <div>
                       <div className="flex items-baseline justify-between gap-4">
                         <p className="text-sm font-medium">
-                          {t("进度")}
+                          {documentIndexProgressLabel}
                           <span className="ml-2 font-normal text-muted-foreground tabular-nums">
-                            {documentIndexSummary.indexed} / {documents.length}
+                            {documentIndexProgressCompleted} /{" "}
+                            {documentIndexProgressTotal}
                           </span>
                         </p>
                         <span className="text-sm font-semibold text-emerald-700 tabular-nums dark:text-emerald-400">
@@ -1839,7 +1887,7 @@ function KnowledgeBasePageContent({
                       </div>
                       <div
                         role="progressbar"
-                        aria-label={t("进度")}
+                        aria-label={documentIndexProgressLabel}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={documentIndexProgress}
@@ -2897,7 +2945,7 @@ function KnowledgeBasePageContent({
                                 </div>
                               </div>
                               <div className="mt-3 flex flex-wrap items-center justify-end gap-1 border-t pt-3">
-                                {renderKnowledgeTaskActions(task)}
+                                {renderKnowledgeTaskActionMenu(task)}
                               </div>
                             </li>
                           )
@@ -2910,7 +2958,7 @@ function KnowledgeBasePageContent({
                     </ul>
                   ) : null}
                   <div className="min-w-[920px] max-md:hidden">
-                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
                       <label className="flex items-center justify-center">
                         <input
                           ref={selectAllKnowledgeTasksRef}
@@ -2933,7 +2981,7 @@ function KnowledgeBasePageContent({
                       <span>{t("进度")}</span>
                       <span>{t("尝试次数")}</span>
                       <span>{t("更新时间 / 错误")}</span>
-                      <span>{t("操作")}</span>
+                      <span className="text-center">{t("操作")}</span>
                     </div>
                     {isKnowledgeTaskLoading ? (
                       <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
@@ -2943,7 +2991,7 @@ function KnowledgeBasePageContent({
                       visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
-                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_176px] items-center border-b px-4 py-3 text-sm last:border-b-0"
+                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
                           <label className="flex items-center justify-center">
                             <input
@@ -2998,8 +3046,8 @@ function KnowledgeBasePageContent({
                               </span>
                             ) : null}
                           </span>
-                          <span className="flex items-center gap-1">
-                            {renderKnowledgeTaskActions(task)}
+                          <span className="flex items-center justify-center">
+                            {renderKnowledgeTaskActionMenu(task)}
                           </span>
                         </div>
                       ))
@@ -3035,7 +3083,7 @@ function KnowledgeBasePageContent({
             ) : null}
 
             {activeDetailTab === "graph" ? (
-              <KnowledgeGraph
+              <KnowledgeLinkGraph
                 key={selectedKnowledgeBase.id}
                 token={token}
                 workspaceId={selectedKnowledgeBase.workspace_id}

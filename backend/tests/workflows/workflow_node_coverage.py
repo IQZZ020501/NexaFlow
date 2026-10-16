@@ -3315,7 +3315,7 @@ def test_executor_manual_run_scenarios() -> None:
             outcome = await run_durable_workflow_run(
                 held_id, tests.support.settings(), worker_task_id="worker-x"
             )
-            assert outcome == "busy", outcome
+            assert outcome == "leased", outcome
             async with get_session_factory()() as db:
                 held.status = "failed"
                 await agent_repository.save_agent_run(db, held)

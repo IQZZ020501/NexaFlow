@@ -1138,6 +1138,17 @@ function renderDetailPage(
     if (url.includes("/models")) return jsonResponse(options.models ?? models)
     if (url.includes("/knowledge-bases?")) return jsonResponse(knowledgeBases)
     if (url.includes("/documents")) return jsonResponse(documents)
+    if (url.endsWith("/graph/links")) {
+      return jsonResponse({
+        revision: "empty-graph",
+        nodes: [],
+        edges: [],
+        document_count: 0,
+        unresolved_count: 0,
+        edge_count: 0,
+        truncated: false,
+      })
+    }
     if (url.endsWith("/graph/settings")) {
       return jsonResponse({
         enabled: false,
@@ -1200,10 +1211,10 @@ describe("KnowledgeBasePage documents tab", () => {
     )
 
     renderDetailPage()
-    fireEvent.click(await screen.findByText("知识关联"))
+    fireEvent.click(await screen.findByRole("button", { name: "关系图谱" }))
     expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/graph`)
     await waitFor(() =>
-      expect(screen.getByText("知识关联尚未启用")).toBeTruthy()
+      expect(screen.getByRole("heading", { name: "关系图谱" })).toBeTruthy()
     )
 
     fireEvent.click(await screen.findByText("任务"))
@@ -1292,6 +1303,70 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(
       within(screen.getByRole("group", { name: "失败" })).getByText("1")
     ).toBeTruthy()
+  })
+
+  test("shows rebuild progress from zero and keeps polling on the documents tab", async () => {
+    const documents = Array.from({ length: 7 }, (_, index) =>
+      makeDocument({ id: `doc-${index + 1}`, filename: `doc-${index + 1}.md` })
+    )
+    let rebuildQueued = false
+    let taskFetches = 0
+    fetchHandler = (url, init) => {
+      const method = init?.method ?? "GET"
+      if (method === "POST" && url.includes("/rebuild-index")) {
+        rebuildQueued = true
+        return jsonResponse(
+          makeTask({
+            id: "task-rebuild",
+            document_id: null,
+            task_type: "rebuild_index",
+            status: "queued",
+            total_items: 28,
+            processed_items: 0,
+          })
+        )
+      }
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse(documents)
+      if (url.includes("/tasks")) {
+        if (!rebuildQueued) return jsonResponse([])
+        taskFetches += 1
+        return jsonResponse([
+          makeTask({
+            id: "task-rebuild",
+            document_id: null,
+            task_type: "rebuild_index",
+            status: "running",
+            total_items: 28,
+            processed_items: taskFetches === 1 ? 0 : 7,
+          }),
+        ])
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+
+    const progress = await screen.findByRole("progressbar", { name: "进度" })
+    expect(progress.getAttribute("aria-valuenow")).toBe("100")
+    fireEvent.click(screen.getByText("重建索引"))
+
+    await waitFor(() => expect(taskFetches).toBe(1))
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "0"
+    )
+    expect(screen.getByText("0 / 28")).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "已向量化" })).getByText("0")
+    ).toBeTruthy()
+    expect(
+      within(screen.getByRole("group", { name: "向量化中" })).getByText("7")
+    ).toBeTruthy()
+    await waitFor(() => expect(screen.getByText("7 / 28")).toBeTruthy(), {
+      timeout: 4000,
+    })
   })
 
   test("shows empty state when there are no documents", async () => {
@@ -2212,10 +2287,7 @@ describe("KnowledgeBasePage documents tab", () => {
     const documents = [makeDocument({ id: "doc-1", filename: "a.md" })]
     fetchHandler = (url) => {
       if (url.includes("/download")) {
-        return new Response("nope", {
-          status: 500,
-          statusText: "download server error",
-        })
+        return new Response("download failed", { status: 500 })
       }
       if (url.includes("/models")) return jsonResponse(models)
       if (url.includes("/knowledge-bases?"))
@@ -2234,7 +2306,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "download server error"
+      "download failed"
     )
   })
 
@@ -2351,6 +2423,12 @@ describe("KnowledgeBasePage tasks tab", () => {
         total_items: 1,
         processed_items: 0,
       }),
+      makeTask({
+        id: "task-3",
+        document_id: null,
+        task_type: "vectorize",
+        status: "succeeded",
+      }),
     ]
     const retryCalls: string[] = []
     const stopCalls: string[] = []
@@ -2389,13 +2467,9 @@ describe("KnowledgeBasePage tasks tab", () => {
     expect(screen.getByText("2/3")).toBeTruthy()
     expect(screen.getByText("vector store unreachable")).toBeTruthy()
 
-    const retryButtons = screen.getAllByRole("button", { name: "重试" })
-    expect(retryButtons).toHaveLength(2) // failed + queued tasks both render it
-    const enabledRetry = retryButtons.find(
-      (button) => !(button as HTMLButtonElement).disabled
-    )
-    expect(enabledRetry).toBeTruthy()
-    fireEvent.click(enabledRetry!)
+    expect(screen.queryByRole("menuitem", { name: "删除" })).toBeNull()
+    openMenu(screen.getByRole("button", { name: "操作 task-1" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "重试" }))
 
     await waitFor(() => {
       expect(retryCalls).toHaveLength(1)
@@ -2403,23 +2477,20 @@ describe("KnowledgeBasePage tasks tab", () => {
     expect(retryCalls[0]).toContain("/tasks/task-1/retry")
     expect(notifications.some(([, msg]) => msg === "已重新提交任务")).toBe(true)
 
-    const enabledStop = screen
-      .getAllByRole("button", { name: "停止" })
-      .find((button) => !(button as HTMLButtonElement).disabled)
-    expect(enabledStop).toBeTruthy()
-    fireEvent.click(enabledStop!)
+    openMenu(screen.getByRole("button", { name: "操作 task-2" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "停止" }))
     await waitFor(() => expect(stopCalls).toHaveLength(1))
     expect(stopCalls[0]).toContain("/tasks/task-2/stop")
     expect(notifications.some(([, msg]) => msg === "已停止任务")).toBe(true)
 
-    const enabledDelete = screen
-      .getAllByRole("button", { name: "删除任务" })
-      .find((button) => !(button as HTMLButtonElement).disabled)
-    expect(enabledDelete).toBeTruthy()
-    fireEvent.click(enabledDelete!)
+    openMenu(screen.getByRole("button", { name: "操作 task-3" }))
+    expect(await screen.findByRole("menuitem", { name: "删除" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "停止" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "重试" })).toBeNull()
+    fireEvent.click(await screen.findByRole("menuitem", { name: "删除" }))
     await respondToConfirm("删除")
     await waitFor(() => expect(deleteCalls).toHaveLength(1))
-    expect(deleteCalls[0]).toContain("/tasks/task-1")
+    expect(deleteCalls[0]).toContain("/tasks/task-3")
     expect(notifications.some(([, msg]) => msg === "已删除任务")).toBe(true)
   })
 
@@ -2511,12 +2582,15 @@ describe("KnowledgeBasePage tasks tab", () => {
     renderPage(<KnowledgeBasePage />)
 
     fireEvent.click(await screen.findByText("任务"))
-    const unfinished = await screen.findByRole("button", {
+    const moreActions = await screen.findByRole("button", {
+      name: "操作 graph-retry-task",
+    })
+    openMenu(moreActions)
+    const unfinished = await screen.findByRole("menuitem", {
       name: "重试未完成分片",
     })
-    const all = screen.getByRole("button", { name: "重试全部分片" })
-    expect((unfinished as HTMLButtonElement).disabled).toBe(false)
-    expect((all as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByRole("menuitem", { name: "重试全部分片" })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: "删除" })).toBeTruthy()
     fireEvent.click(unfinished)
     await waitFor(() => expect(retryModes).toEqual(["unfinished"]))
   })
@@ -2664,7 +2738,8 @@ describe("KnowledgeBasePage tasks tab", () => {
     renderPage(<KnowledgeBasePage />)
 
     fireEvent.click(await screen.findByText("任务"))
-    fireEvent.click(await screen.findByRole("button", { name: "重试" }))
+    openMenu(await screen.findByRole("button", { name: "操作 task-1" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "重试" }))
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })

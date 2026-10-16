@@ -17,6 +17,7 @@ from app.infra.email.smtp import (
     send_smtp_message,
 )
 from app.infra.runtime.validation import normalize_email
+from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.schemas.email.smtp import (
     SmtpSettingsResponse,
@@ -101,7 +102,7 @@ def _password(entity: SmtpSettings, settings: Settings) -> str | None:
     if entity.password_ciphertext is None:
         return None
     try:
-        return decrypt_secret(entity.password_ciphertext, settings.model_secret_key)
+        return decrypt_secret(entity.password_ciphertext, application_secret_key(settings))
     except (InvalidToken, UnicodeDecodeError) as exc:
         raise SmtpConfigurationError("Stored SMTP password is invalid.") from exc
 
@@ -179,7 +180,7 @@ async def update_smtp_settings(
     elif payload.password:
         entity.password_ciphertext = encrypt_secret(
             payload.password,
-            settings.model_secret_key,
+            application_secret_key(settings),
         )
         entity.password_hint = secret_hint(payload.password)
         password_updated = True

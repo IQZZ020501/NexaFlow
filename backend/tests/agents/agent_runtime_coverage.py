@@ -2235,6 +2235,53 @@ async def assert_knowledge_tool_paths(
         selected = await select_tool.ainvoke({"query": "release", "limit": 2})
         assert len(selected.output["hits"]) == 2
         assert selected.output["evidence_status"] == "found"
+
+        # Several bound sources: hits are drawn in turn, so a source that does
+        # not hold the answer cannot evict the one that does.
+        multi_tool = build_knowledge_search_tool(
+            [base, rerank_base],
+            workspace_id,
+            actor,
+            "admin",
+            settings,
+        )
+        multi = await multi_tool.ainvoke({"query": "release", "limit": 3})
+        assert [hit["chunk_id"] for hit in multi.output["hits"]] == [
+            f"chunk-{knowledge_base_id}-0",
+            f"chunk-{rerank_kb_id}-0",
+            f"chunk-{knowledge_base_id}-1",
+        ]
+        assert [hit["knowledge_base"] for hit in multi.output["hits"]] == [
+            "Runtime Docs",
+            "Reranked Docs",
+            "Runtime Docs",
+        ]
+
+        # `knowledge_base` narrows one call to a single configured source,
+        # by name or by id; unknown names list the available sources.
+        scoped = await multi_tool.ainvoke(
+            {"query": "release", "limit": 2, "knowledge_base": "Reranked Docs"}
+        )
+        assert [
+            entry["knowledge_base_name"] for entry in scoped.output["retrieval_stats"]
+        ] == ["Reranked Docs"]
+        assert [hit["chunk_id"] for hit in scoped.output["hits"]] == [
+            f"chunk-{rerank_kb_id}-0",
+            f"chunk-{rerank_kb_id}-1",
+        ]
+        by_id = await multi_tool.ainvoke(
+            {"query": "release", "limit": 1, "knowledge_base": knowledge_base_id}
+        )
+        assert [
+            entry["knowledge_base_name"] for entry in by_id.output["retrieval_stats"]
+        ] == ["Runtime Docs"]
+        unknown_source = await multi_tool.ainvoke(
+            {"query": "release", "limit": 1, "knowledge_base": "Absent Docs"}
+        )
+        assert unknown_source.is_error
+        assert unknown_source.summary == "Unknown knowledge source."
+        assert "Runtime Docs" in unknown_source.content
+        assert "Reranked Docs" in unknown_source.content
     finally:
         agent_tools.retrieve_knowledge_base = original_retrieve
         agent_tools.KnowledgeSearchInput = original_input
@@ -4543,7 +4590,7 @@ async def assert_durable_execution_paths(
         current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None and current.status == "failed"
 
-    # live run owned by another worker -> RUN_BUSY (984)
+    # live run owned by another worker -> redundant delivery ends without retry
     run, _ = await prepare_console_run(workspace_id, agent_id, "Busy claim")
     run.knowledge_base_ids = []
     async with get_session_factory()() as db:
@@ -4562,7 +4609,7 @@ async def assert_durable_execution_paths(
         settings,
         worker_task_id="worker-interloper",
     )
-    assert outcome == agent_executor.RUN_BUSY
+    assert outcome == agent_executor.RUN_LEASED
 
     # missing run -> AgentRunnerError (888)
     try:
@@ -4928,6 +4975,9 @@ async def assert_durable_execution_paths(
         await db.commit()
     recoverable = await agent_executor.list_recoverable_unified_agent_run_ids(settings)
     assert run.id in recoverable
+    # The expired lease got its delivery; the next sweep must not publish again.
+    recoverable = await agent_executor.list_recoverable_unified_agent_run_ids(settings)
+    assert run.id not in recoverable
 
 
 async def assert_ledger_db_paths(

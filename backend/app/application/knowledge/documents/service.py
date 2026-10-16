@@ -28,9 +28,6 @@ from app.domain.knowledge.documents.lifecycle import (
 from app.domain.knowledge.documents.lifecycle import (
     set_knowledge_document_active as set_knowledge_document_active_record,
 )
-from app.domain.knowledge.documents.parsing import (
-    IMAGE_DOCUMENT_EXTENSIONS,
-)
 from app.domain.knowledge.evaluation import (
     create_evaluation_case,
     delete_evaluation_case,
@@ -45,7 +42,6 @@ from app.domain.knowledge.service import (
     create_knowledge_documents_from_attachments,
     delete_knowledge_attachment,
     document_to_response,
-    get_default_knowledge_model,
     get_knowledge_base,
     knowledge_document_path,
     knowledge_object_storage,
@@ -90,7 +86,6 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
-from app.ports.llm import VISION_MODEL_REQUIRED_MESSAGE
 from app.schemas.knowledge import KnowledgeAttachmentResponse, KnowledgeDocumentResponse
 
 logger = get_logger(__name__)
@@ -115,21 +110,6 @@ async def upload_knowledge_attachment(
     actor: User,
     settings: Settings,
 ) -> KnowledgeAttachmentResponse:
-    if (
-        Path(upload.filename or "").suffix.lower() in IMAGE_DOCUMENT_EXTENSIONS
-        and (
-            await get_default_knowledge_model(
-                db,
-                knowledge_base.workspace_id,
-                "VISION",
-            )
-            is None
-        )
-    ):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            VISION_MODEL_REQUIRED_MESSAGE,
-        )
     return await upload_knowledge_attachment_record(
         db,
         knowledge_base,
@@ -293,6 +273,26 @@ async def get_knowledge_asset_file(
     return asset, asset_path
 
 
+def get_knowledge_document_markdown_file(
+    document: KnowledgeDocument,
+    settings: Settings,
+) -> Path:
+    """Resolve the canonical Markdown artifact for an authorized document."""
+    object_key = (document.meta or {}).get("normalized_artifact_key")
+    if not isinstance(object_key, str) or not object_key:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Document Markdown is not available.",
+        )
+    markdown_path = knowledge_object_storage(settings).path(object_key)
+    if not markdown_path.is_file():
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Document Markdown file is missing.",
+        )
+    return markdown_path
+
+
 __all__ = [
     "create_evaluation_case",
     "create_knowledge_base",
@@ -316,6 +316,7 @@ __all__ = [
     "get_knowledge_asset_file",
     "get_knowledge_base",
     "get_knowledge_document",
+    "get_knowledge_document_markdown_file",
     "get_latest_evaluation_summary",
     "import_graph_records",
     "knowledge_document_path",

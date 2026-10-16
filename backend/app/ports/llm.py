@@ -126,10 +126,17 @@ async def generate_image(
     model: RegisteredModel,
     prompt: str,
     size: str,
+    resolution: str = "1K",
 ) -> bytes:
     from app.adapters.llm.image import generate_registered_image
 
-    return await generate_registered_image(model, settings, prompt, size)
+    return await generate_registered_image(
+        model,
+        settings,
+        prompt,
+        size,
+        resolution,
+    )
 
 
 def test_model_connection(

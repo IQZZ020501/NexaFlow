@@ -2,7 +2,7 @@
 import hashlib
 import json
 from dataclasses import fields
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, case, delete, exists, func, or_, select, update
@@ -414,11 +414,24 @@ async def list_recoverable_agent_run_ids(
     limit: int = 200,
     *,
     generation: str = "legacy",
+    redispatch_after: timedelta,
 ) -> list[str]:
+    """Return claimable runs whose last delivery is overdue.
+
+    A queued run already had a message published when it entered the queue, so
+    it is only re-published once that message has had ``redispatch_after`` to be
+    consumed. A run whose lease expired gets one delivery right away; further
+    deliveries again wait ``redispatch_after``.
+    """
     claimable_statuses = (
         AGENT_RUN_UNIFIED_CLAIMABLE_STATUSES
         if generation == "unified"
         else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
+    )
+    delivery_overdue_at = now - redispatch_after
+    not_recently_redispatched = or_(
+        AgentRunState.redispatched_at.is_(None),
+        AgentRunState.redispatched_at <= delivery_overdue_at,
     )
     rows = await db.scalars(
         select(AgentRunState.run_id)
@@ -427,12 +440,21 @@ async def list_recoverable_agent_run_ids(
             AgentRunState.worker_generation == generation,
             AgentRunState.attempts < AgentRunState.max_attempts,
             or_(
-                AgentRunState.status == claimable_statuses[0],
+                and_(
+                    AgentRunState.status == claimable_statuses[0],
+                    AgentRunState.updated_at <= delivery_overdue_at,
+                    not_recently_redispatched,
+                ),
                 and_(
                     AgentRunState.status == claimable_statuses[1],
                     or_(
                         AgentRunState.lease_expires_at.is_(None),
                         AgentRunState.lease_expires_at <= now,
+                    ),
+                    or_(
+                        not_recently_redispatched,
+                        AgentRunState.redispatched_at
+                        < AgentRunState.lease_expires_at,
                     ),
                 ),
             ),
@@ -441,6 +463,25 @@ async def list_recoverable_agent_run_ids(
         .limit(limit)
     )
     return list(rows.all())
+
+
+async def mark_agent_runs_redispatched(
+    db: AsyncSession,
+    run_ids: list[str],
+    redispatched_at: datetime,
+) -> None:
+    if not run_ids:
+        return
+    await db.execute(
+        update(AgentRunState)
+        .where(AgentRunState.run_id.in_(run_ids))
+        .values(
+            redispatched_at=redispatched_at,
+            # Recovery and resume read updated_at as the time a run entered its
+            # current status; a re-published message is not a status change.
+            updated_at=AgentRunState.updated_at,
+        )
+    )
 
 async def fail_exhausted_agent_run_ids(
     db: AsyncSession,

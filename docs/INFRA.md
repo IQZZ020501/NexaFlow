@@ -2,7 +2,7 @@
 
 ## 职责
 
-技术基础设施：配置加载、异步数据库会话与仓库层（ORM↔实体映射 + 按特性划分的 repositories 数据访问层）、原始 SQL 脚本、Alembic 数据库迁移链、安全（密码/JWT、密钥加解密、Redis 限流）、日志体系（`log_error`/`log_event` 与内外部错误分类）、Celery 应用与任务分发、对象存储、Python 沙箱客户端、运行时工具、Agent 实时流、MCP stdio 处理、SMTP 发送与引导数据播种。
+技术基础设施：配置加载、异步数据库会话与仓库层（ORM↔实体映射 + 按特性划分的 repositories 数据访问层）、原始 SQL 脚本、Alembic 数据库迁移链、安全（密码/JWT、密钥加解密与部署密钥持久化、Redis 限流）、日志体系（`log_error`/`log_event` 与内外部错误分类）、Celery 应用与任务分发、对象存储、Python 沙箱客户端、运行时工具、Agent 实时流、MCP stdio 处理、SMTP 发送与引导数据播种。
 
 分层约定：业务领域代码通过 `app/ports/` 中稳定契约访问能力；本模块（`app/infra`）提供其基础设施实现与跨层工具，不反向依赖业务模块。
 
@@ -25,6 +25,7 @@
   - `tools/repository.py`、`tools/catalog.py`、`tools/bindings.py`、`tools/invocations.py`、`tools/drafts.py`、`tools/mcp.py` — Tool Source/Tool/Version/Policy、应用绑定、durable ToolInvocation 生命周期、草稿，以及 MCP Server 与本地审核工具策略数据访问
   - `agent_skills/repository.py`、`announcements/repository.py` — 技能包与公告数据访问
   - `identity/users.py`、`identity/enterprise.py`、`identity/invitations.py` — 用户/刷新会话、企业身份连接、邀请数据访问
+  - `platform/secrets.py` — `platform_secrets` 部署密钥（JWT 签发密钥与存储密文加密密钥）数据访问；应用只在缺失时插入，读取永不改写
   - `platform` 相关特性仓库拆分于 `teams/repository.py`、`workspaces/repository.py`（含资源权限 `workspaces/resource_permissions.py`）、`governance/inventory.py`、`governance/settings.py`、`resource_folders/repository.py`、`analytics/repository.py`
   - `audit/repository.py`、`audit/system_logs.py` — 审计日志与系统日志列表查询
   - `models/registry.py` — 模型注册表数据访问
@@ -36,11 +37,12 @@
 
 ### app/infra/queue/
 
-- `backend/app/infra/queue/celery.py` — Celery 应用工厂：broker、序列化、ack 策略、任务失败全局错误钩子（走 `app.infra.observability.errors.log_error`）、重任务后 GC。任务模块以 `include` 注册：`app.tasks.<feature>.jobs`（knowledge/agents/tools/email/storage/maintenance），任务实现在 `app/tasks/<feature>/jobs.py`，worker 辅助逻辑在 `app/tasks/runtime.py`；另有 `beat_schedule`（30s/60s 维护恢复，均指向 `app.maintenance.run`）、按平台选择 pool 的 `worker_pool_for_platform`、`NexaFlowTask` 任务基类与 `publish_task` 按名投递辅助。Worker 启动命令由 `backend/scripts/worker.py` 生成：`python -m celery -A app.infra.queue.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=info --pool <threads|solo|prefork> --pidfile <tmp>`；未设置 `OPENSANDBOX_API_KEY` 时直接报错退出，pidfile 路径由仓库路径与 broker 端点指纹生成。
+- `backend/app/infra/queue/celery.py` — Celery 应用工厂：broker、序列化、ack 策略、任务失败全局错误钩子（走 `app.infra.observability.errors.log_error`）、重任务后 GC（线程池中跳过，避免暂停共享事件循环上的其他 Run）。任务模块以 `include` 注册：`app.tasks.<feature>.jobs`（knowledge/agents/tools/email/storage/maintenance），任务实现在 `app/tasks/<feature>/jobs.py`，worker 辅助逻辑在 `app/tasks/runtime.py`（每进程一个共享任务事件循环，默认线程池上限 64）；另有 `beat_schedule`（30s/60s 维护恢复，均指向 `app.maintenance.run`）、按平台选择 pool 的 `worker_pool_for_platform`、`NexaFlowTask` 任务基类与 `publish_task` 按名投递辅助。Worker 启动命令由 `backend/scripts/worker.py` 按 `--role` 生成：`all`（默认）为 `python -m celery -A app.infra.queue.celery:celery_app worker --beat --queues=celery,agents-legacy,agents-v2 --loglevel=info --pool <threads|solo|prefork> --pidfile <tmp>`，`background` 只消费 `celery` 并内嵌 Beat，`agents` 只消费 `agents-legacy,agents-v2`、不带 Beat、使用 `--pool threads --concurrency=32`（`-c`/`--concurrency` 可覆盖）；未设置 `OPENSANDBOX_API_KEY` 时直接报错退出，pidfile 路径由仓库路径、broker 端点与角色指纹生成。
 
 ### app/infra/security/
 
-- `backend/app/infra/security/auth.py` — 密码哈希（pwdlib）、JWT access token 签发/校验、refresh token 生成与哈希、隔离密钥派生的 Artifact 下载 token。
+- `backend/app/infra/security/auth.py` — 密码哈希（pwdlib）、JWT access token 签发/校验（签名密钥取自 keyring）、refresh token 生成与哈希、隔离密钥派生的 Artifact 下载 token。
+- `backend/app/infra/security/keyring.py` — 部署密钥解析：启动时按 `KEY_SPECS` 查询 `platform_secrets`，缺失则用环境变量值或随机值创建，已存在则永远使用库中值并忽略环境值；`jwt_signing_key`/`application_secret_key` 供签发与加解密调用，API 进程内缓存，Worker 在 `os.execv` 前把解析结果导出到 Celery 进程环境。`.env.example` 不列这两个变量；旧模板遗留的占位值不会被当作真实密钥。
 - `backend/app/infra/security/secrets.py` — Fernet 对称加解密工具与密钥尾号提示 `secret_hint`。
 - `backend/app/infra/security/agent_rate_limit.py` — Redis 固定窗口限流（Lua 脚本，agent 级与 consumer 级双计数），约束 Agent 外部请求；同模块另提供 `AgentRateLimitExceeded`/`AgentRateLimitUnavailable` 与登录、密码重置限流错误（`LoginRateLimitExceeded` 等，均携带 `retry_after`）。
 - `backend/app/infra/security/enterprise_login_rate_limit.py` — Redis 固定窗口企业登录限流，超限抛 `EnterpriseLoginRateLimitExceeded`（携带 `retry_after`）。
@@ -87,7 +89,7 @@
 ## Alembic 迁移链
 
 - `backend/alembic/env.py` — Alembic 迁移环境：导入 ORM 模型注册到 `Base.metadata`，覆盖 `app.domain` 各特性模型（agent/tool/knowledge/workflow/graph/platform/identity-enterprise/email/audit/artifacts/resource_folders/agent_skills/announcements 与 `app.domain.models.registered.RegisteredModel`）及 `app.infra.observability.system_log.SystemLog`；从 Settings 读 `DATABASE_URL`，支持在线/离线迁移。
-- 迁移版本（`backend/alembic/versions/*.py`，时间戳编号，单链演进）：从 `202607040001_identity_workspace_foundation`（users / workspaces / teams 初始表）到 `202609230001_detach_user_references`，先后覆盖租户约束与系统/审计日志、知识库文档分块流水线与 BM25 检索、模型注册与凭据、Agent 发布/公开访问/四表 Run 存储/会话记忆、统一 Tool 持久化与 Workflow 基础、MCP 传输与网络策略、生成 Artifact 与资源文件夹、企业身份、治理与邀请、技能与内建工具、上海时区、视觉模型、公告、文档引用模板、Agent 运行时治理、当前时间工具、知识调用预算与查询模式移除、技能控制面与依赖安装、PPT/图片生成技能、用户引用解耦等演进。
+- 迁移版本（`backend/alembic/versions/*.py`，时间戳编号，单链演进）：从 `202607040001_identity_workspace_foundation`（users / workspaces / teams 初始表）到 `202609250001_platform_secrets`，先后覆盖租户约束与系统/审计日志、知识库文档分块流水线与 BM25 检索、模型注册与凭据、Agent 发布/公开访问/四表 Run 存储/会话记忆、统一 Tool 持久化与 Workflow 基础、MCP 传输与网络策略、生成 Artifact 与资源文件夹、企业身份、治理与邀请、技能与内建工具、上海时区、视觉模型、公告、文档引用模板、Agent 运行时治理、当前时间工具、知识调用预算与查询模式移除、技能控制面与依赖安装、PPT/图片生成技能、用户引用解耦、部署密钥持久化等演进。`202609250001` 建 `platform_secrets`（`app.domain.platform.models.PlatformSecret`）；downgrade 在仍有密钥行时拒绝执行。
 - 根配置：`backend/alembic.ini`（`script_location = alembic`、`prepend_sys_path = .`）与 `backend/Makefile` 目标 `dev`/`migrate`/`worker`/`coverage`。
 
 ## 相关测试

@@ -25,8 +25,12 @@ from app.entities.defaults import new_id
 from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocumentChunk,
+    KnowledgeDocumentReference,
 )
 from app.infra.config.settings import Settings
+from app.infra.db.repositories.knowledge import (
+    graph as knowledge_graph_repository,
+)
 from app.infra.db.repositories.knowledge import (
     references as knowledge_reference_repository,
 )
@@ -49,6 +53,26 @@ MAX_REFERENCES = 100
 
 def _elapsed_ms(started_at: float) -> float:
     return round(max(0.0, (time.perf_counter() - started_at) * 1000), 3)
+
+
+async def _list_reference_candidates(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    source_chunk_ids: list[str],
+) -> list[KnowledgeDocumentReference]:
+    if knowledge_base.active_graph_revision_id:
+        return await knowledge_graph_repository.list_active_document_references_for_chunks(
+            db,
+            knowledge_base,
+            source_chunk_ids,
+            MAX_REFERENCES,
+        )
+    return await knowledge_reference_repository.list_resolved_references_for_chunks(
+        db,
+        knowledge_base,
+        source_chunk_ids,
+        MAX_REFERENCES,
+    )
 
 
 def normalized_cosine_similarity(distance: float | None) -> float | None:
@@ -226,13 +250,11 @@ async def retrieve_knowledge_base(
     reference_chunk_ids: list[str] = []
     if payload.include_references and seed_hits:
         reference_started_at = time.perf_counter()
-        references = (
-            await knowledge_reference_repository.list_resolved_references_for_chunks(
-                db,
-                knowledge_base,
-                [chunk.id for chunk, _ in seed_hits[: payload.limit]],
-                MAX_REFERENCES,
-            )
+        source_chunk_ids = [chunk.id for chunk, _ in seed_hits[: payload.limit]]
+        references = await _list_reference_candidates(
+            db,
+            knowledge_base,
+            source_chunk_ids,
         )
         retrievable_document_ids = (
             await knowledge_base_repository.list_retrievable_document_ids(

@@ -146,14 +146,14 @@ describe("ToolPicker", () => {
       ])
     const changes: ToolRef[][] = []
     renderPage(picker([], (value) => changes.push(value)))
-    await screen.findByText("PDF")
-    fireEvent.click(screen.getByRole("checkbox", { name: "PDF" }))
+    await screen.findByText("生成 PDF")
+    fireEvent.click(screen.getByRole("checkbox", { name: "生成 PDF" }))
     expect(changes.at(-1)).toEqual([
       { tool_id: "skill-pdf", version_id: "skill-pdf-v1" },
     ])
   })
 
-  test("groups regular tools and excludes image generation and the implicit installer", async () => {
+  test("groups regular tools and excludes image generation, bash and the implicit installer", async () => {
     const imageTool: ToolSummary = {
       ...tools[2]!,
       id: "image-tool",
@@ -183,6 +183,12 @@ describe("ToolPicker", () => {
           function_name: "install_skill_dependencies",
           display_name: "Install Skill dependencies",
         },
+        {
+          ...imageTool,
+          id: "builtin-bash",
+          function_name: "bash",
+          display_name: "Command line",
+        },
       ])
 
     function Harness() {
@@ -191,12 +197,13 @@ describe("ToolPicker", () => {
     }
 
     renderPage(<Harness />)
-    await screen.findByText("PDF")
+    await screen.findByText("生成 PDF")
     const categories = within(screen.getByRole("group", { name: "工具分类" }))
     expect(screen.getByRole("region", { name: "内置工具" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "MCP 工具" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "Python" })).toBeTruthy()
     expect(screen.queryByText("Install Skill dependencies")).toBeNull()
+    expect(screen.queryByText("命令行") === null).toBe(true)
     expect(screen.queryByText("图片生成")).toBeNull()
     expect(
       categories.getByRole("button", { name: "全部工具" }).textContent
@@ -209,7 +216,7 @@ describe("ToolPicker", () => {
     expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
 
     fireEvent.click(categories.getByRole("button", { name: "内置工具" }))
-    expect(screen.getByText("PDF")).toBeTruthy()
+    expect(screen.getByText("生成 PDF")).toBeTruthy()
     expect(screen.queryByText("图片生成")).toBeNull()
     expect(screen.queryByText("Private report")).toBeNull()
     expect(screen.getByText("已选择 1 个工具")).toBeTruthy()

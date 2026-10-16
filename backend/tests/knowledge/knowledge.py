@@ -302,6 +302,32 @@ async def assert_reference_parent_requires_document(
             raise AssertionError("Parent references must include their target document.")
 
 
+async def assert_wikilink_references(
+    source_document_id: str,
+    target_document_id: str,
+) -> None:
+    async with get_session_factory()() as db:
+        references = list(
+            await db.scalars(
+                select(KnowledgeDocumentReference)
+                .where(
+                    KnowledgeDocumentReference.source_document_id
+                    == source_document_id
+                )
+                .order_by(KnowledgeDocumentReference.source_ordinal)
+            )
+        )
+        assert len(references) == 2
+        resolved, unresolved = references
+        assert resolved.target_label == "rollback.md"
+        assert resolved.target_section == "Rollback Procedure"
+        assert resolved.target_document_id == target_document_id
+        assert resolved.occurrence_count == 2
+        assert unresolved.target_label == "missing.md"
+        assert unresolved.target_document_id is None
+        assert unresolved.occurrence_count == 1
+
+
 async def clear_knowledge_base_embedding_model(knowledge_base_id: str) -> None:
     async with get_session_factory()() as db:
         knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
@@ -537,7 +563,7 @@ async def assert_parse_task_failed(task_id: str, document_id: str) -> None:
         assert task.task_type == "parse"
         assert task.attempts == 1
         assert task.processed_items == 0
-        assert task.last_error == "Document format is not supported."
+        assert task.last_error == "Document has no extractable text."
         assert document is not None
         assert document.status == "parse_failed"
         assert document.last_error == task.last_error
@@ -1646,7 +1672,7 @@ def main() -> None:
         parsed_document = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{document_id}/parse"),
             headers=auth_headers(alice_token),
-            json={"auto_index": True},
+            json={"strategy": "flat", "auto_index": True},
         )
         assert parsed_document.status_code == 202, parsed_document.text
 
@@ -1710,6 +1736,7 @@ def main() -> None:
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{configured_document_id}/parse"),
             headers=auth_headers(alice_token),
             json={
+                "strategy": "flat",
                 "chunk_size": 100,
                 "chunk_overlap": 0,
                 "cleaning_rules": ["collapse_spaces"],
@@ -1882,6 +1909,23 @@ def main() -> None:
             }
         ]
         assert qa_chunks.json()[0]["char_count"] == len("99.9%")
+        qa_markdown = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{qa_document['id']}/content",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert qa_markdown.status_code == 200, qa_markdown.text
+        assert qa_markdown.text == (
+            "# faq\n\n"
+            "## Question 1\n\n"
+            "What is SLA?\n\n"
+            "**Answer**\n\n"
+            "99.9%\n\n"
+            "**Source**\n\n"
+            "runbook"
+        )
 
         for imported_document in (csv_document, qa_document):
             deleted_import = client.delete(
@@ -2133,12 +2177,31 @@ def main() -> None:
         )
         asyncio.run(recover_knowledge_tasks(test_settings()))
 
+        unsupported_upload = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/attachments",
+            ),
+            headers=auth_headers(alice_token),
+            files={
+                "file": (
+                    "unsupported.bin",
+                    b"\x00\x01\x02",
+                    "application/octet-stream",
+                )
+            },
+        )
+        assert unsupported_upload.status_code == 422, unsupported_upload.text
+        assert unsupported_upload.json()["detail"] == (
+            "Document format is not supported."
+        )
+
         failed_parse_document = upload_document(
             client,
             alice_token,
             default_workspace_id,
             knowledge_base_id,
-            "unsupported.bin",
+            "unsupported.zip",
             b"\x00\x01\x02",
             "application/octet-stream",
         )
@@ -2374,6 +2437,7 @@ def main() -> None:
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/documents/{preview_document_id}/parse"),
             headers=auth_headers(alice_token),
             json={
+                "strategy": "flat",
                 "chunk_size": 100,
                 "chunk_overlap": 0,
                 "split_separator": "\n",
@@ -2632,6 +2696,63 @@ def main() -> None:
                 reference_source_id,
                 reference_target_id,
             )
+        )
+
+        wikilink_source = upload_document(
+            client,
+            alice_token,
+            default_workspace_id,
+            knowledge_base_id,
+            "wiki.md",
+            (
+                b"See [[rollback.md#Rollback Procedure|rollback]] twice: "
+                b"[[rollback.md#Rollback Procedure]]. Missing [[missing.md]]."
+            ),
+            "text/markdown",
+        )
+        wikilink_source_id = wikilink_source["id"]
+        wikilink_parse = client.post(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{wikilink_source_id}/parse",
+            ),
+            headers=auth_headers(alice_token),
+            json={"auto_index": False},
+        )
+        assert wikilink_parse.status_code == 202, wikilink_parse.text
+        asyncio.run(
+            assert_wikilink_references(
+                wikilink_source_id,
+                reference_target_id,
+            )
+        )
+        link_graph = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/graph/links",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert link_graph.status_code == 200, link_graph.text
+        link_graph_payload = link_graph.json()
+        assert link_graph_payload["document_count"] >= 3
+        assert link_graph_payload["unresolved_count"] >= 1
+        missing_node = next(
+            node
+            for node in link_graph_payload["nodes"]
+            if node["kind"] == "unresolved" and node["filename"] == "missing.md"
+        )
+        assert any(
+            edge["source"] == wikilink_source_id
+            and edge["target"] == reference_target_id
+            and edge["count"] == 2
+            for edge in link_graph_payload["edges"]
+        )
+        assert any(
+            edge["source"] == wikilink_source_id
+            and edge["target"] == missing_node["id"]
+            and edge["resolved"] is False
+            for edge in link_graph_payload["edges"]
         )
 
         duplicate_reference_target = upload_document(

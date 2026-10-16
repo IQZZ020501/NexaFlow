@@ -141,6 +141,7 @@ function formFrom(agent: Agent): AgentFormState {
     description: agent.description,
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
+    imageModelId: agent.image_model_id ?? "",
     instructions: agent.instructions,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
@@ -671,9 +672,7 @@ describe("AgentDetailWorkspace preview", () => {
 
     // Full access only applies after the warning is accepted.
     expect(await screen.findByText("启用完全访问？")).toBeTruthy()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "启用完全访问" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "启用完全访问" }))
 
     const trigger = screen.getByRole("button", { name: "执行权限：完全访问" })
     expect(trigger.dataset.variant).toBe("destructive")
@@ -858,7 +857,7 @@ describe("AgentDetailWorkspace preview", () => {
   test("shows an image preview without a separate preview link and downloads by UUID", () => {
     const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
     const run = makeRun({
-      result: `画好了。\n- 文件名：\`generated-image-a1b2.png\`\n- 预览链接：[点击预览](${downloadUrl}/preview)`,
+      result: `画好了。\n- 文件名：\`夏日海边白衣少女.png\`\n- 预览链接：[点击预览](${downloadUrl}/preview)`,
       events: [
         {
           type: "tool",
@@ -873,7 +872,7 @@ describe("AgentDetailWorkspace preview", () => {
           input: {},
           output: {
             artifact_id: "83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
-            filename: "generated-image-a1b2.png",
+            filename: "夏日海边白衣少女.png",
             download_url: downloadUrl,
             preview_url: `${downloadUrl}/preview`,
           },
@@ -885,14 +884,14 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" runs={[run]} />)
 
     expect(screen.queryByText("预览链接")).toBeNull()
-    expect(screen.queryByText("generated-image-a1b2.png")).toBeNull()
+    expect(screen.queryByText("generated-image.png")).toBeNull()
     expect(
       screen
-        .getByRole("link", { name: "generated-image.png" })
+        .getByRole("link", { name: "夏日海边白衣少女.png" })
         .getAttribute("href")
     ).toBe(downloadUrl)
     fireEvent.click(
-      screen.getByRole("button", { name: "预览：generated-image.png" })
+      screen.getByRole("button", { name: "预览：夏日海边白衣少女.png" })
     )
     expect(screen.getByRole("dialog")).toBeTruthy()
   })
@@ -937,6 +936,104 @@ describe("AgentDetailWorkspace preview", () => {
       screen.getByRole("button", { name: "预览：generated-image.png" })
     ).toBeTruthy()
     expect(screen.queryByText(`${downloadUrl}/preview`)).toBeNull()
+  })
+
+  test("previews HTML exports in the console and keeps them on the original answer", async () => {
+    routes = [
+      {
+        method: "POST",
+        pathname: "/api/v1/artifacts/download",
+        respond: () =>
+          new Response("<h1>Console page</h1>", {
+            headers: { "Content-Type": "text/html" },
+          }),
+      },
+    ]
+    const run = makeRun({
+      result: "Later answer",
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "bash",
+          status: "succeeded",
+          summary: "Exported page",
+          call_id: "html-call",
+          tool_label: "bash",
+          tool_kind: "builtin",
+          server_name: "",
+          input: {},
+          output: {
+            artifacts: [
+              {
+                filename: "console.html",
+                download_url: "/api/v1/artifacts/console-token",
+              },
+            ],
+          },
+          duration_ms: 1,
+        },
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+        },
+      ],
+      session_inputs: [
+        {
+          sequence: 1,
+          run_id: "run-1",
+          input_id: "follow-up",
+          mode: "follow_up",
+          content: "Another question",
+          status: "applied",
+          previous_answer: "Page generated",
+          previous_answer_turn: 2,
+        },
+      ],
+    })
+    const onAsk = mock((event: unknown) => (event as Event).preventDefault())
+    renderPage(<Harness activeView="settings" runs={[run]} onAsk={onAsk} />)
+    const card = screen.getByRole("button", { name: "预览文件：console.html" })
+    expect(
+      screen.getByText("Page generated").closest(".rounded-2xl")?.contains(card)
+    ).toBe(true)
+    expect(
+      screen.getByText("Later answer").closest(".rounded-2xl")?.contains(card)
+    ).toBe(false)
+    expect(document.querySelector("iframe")).toBeNull()
+    fireEvent.click(card)
+    const frame = await screen.findByTitle("文件预览：console.html")
+    expect(frame.getAttribute("srcdoc")).toContain("Console page")
+    expect(
+      screen
+        .getByRole("button", { name: "调试预览" })
+        .getAttribute("data-variant")
+    ).toBe("secondary")
+    expect(
+      screen
+        .getByRole("complementary", { name: "文件预览：console.html" })
+        .contains(frame)
+    ).toBe(true)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    const input = screen.getByRole("textbox", { name: "向 Agent 提问" })
+    input.focus()
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: "Change the title" } })
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }))
+    expect(onAsk).toHaveBeenCalledTimes(1)
+    expect(screen.getByTitle("文件预览：console.html")).toBe(frame)
+    fireEvent.click(screen.getByRole("button", { name: "新建对话" }))
+    expect(screen.queryByTitle("文件预览：console.html")).toBeNull()
   })
 
   test("keeps artifacts and sources with the answer turn that produced them", () => {
@@ -1348,6 +1445,35 @@ describe("AgentDetailWorkspace preview", () => {
     expect(within(completedToolCard).getByText("调用输入")).toBeTruthy()
     expect(within(completedToolCard).getByText(/query/)).toBeTruthy()
     expect(within(completedToolCard).getByText("调用结果")).toBeTruthy()
+  })
+
+  test("shows bash commands and nonzero exit codes in the console timeline", () => {
+    const run = makeRun({
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "bash",
+          tool_label: "Command line",
+          tool_kind: "builtin",
+          server_name: "",
+          status: "succeeded",
+          summary: "Command exited with status 7.",
+          call_id: "bash-call",
+          input: { command: "printf hello; exit 7", timeout_seconds: 60 },
+          output: { stdout: "hello", stderr: "", exit_code: 7, artifacts: [] },
+          duration_ms: 50,
+        },
+      ],
+    })
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+    const button = screen.getByText("命令行").closest("button")!
+    expect(button.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(button)
+    const card = button.parentElement!
+    expect(within(card).getByText("退出码: 7")).toBeTruthy()
+    expect(within(card).getByText(/printf hello; exit 7/)).toBeTruthy()
+    expect(within(card).getByText("调用结果")).toBeTruthy()
   })
 
   test("renders knowledge hits inside tool details", () => {

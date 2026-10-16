@@ -50,6 +50,7 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.session import get_session_factory
+from app.infra.execution.profile import execution_profile
 from app.schemas.workflows.contracts import (
     FormNodeConfig,
     WorkflowFormSubmitRequest,
@@ -546,6 +547,7 @@ async def create_workflow_run(
             "source": payload.source,
             "graph_hash": graph_hash(parsed),
             "resources": resource_snapshot,
+            "execution_profile": execution_profile(settings),
         },
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
         # WorkflowRunDetail carries the draft/published source. The shared Run
@@ -656,6 +658,8 @@ async def cancel_workflow_run(
             "Workflow run is already finished.",
         )
     await db.commit()
+    from app.application.runs.lifecycle import close_cancelled_execution_sessions
+    await close_cancelled_execution_sessions(db)
     run = await agent_repository.get_agent_run_by_id(db, run_id)
     detail = await workflow_repository.get_run_detail(db, run_id)
     assert run is not None and detail is not None

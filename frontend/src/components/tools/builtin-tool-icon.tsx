@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- tiny local Skill icons do not need image optimization */
 import type { ComponentType } from "react"
-import { ImageIcon, WrenchIcon } from "lucide-react"
+import { ImageIcon, TerminalIcon, WrenchIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -27,7 +27,12 @@ export function BuiltinToolIcon({
 }: BuiltinToolIconProps) {
   const src = functionName ? BUILTIN_TOOL_ICON_PATHS[functionName] : undefined
   if (!src) {
-    const Icon = functionName === "generate_image" ? ImageIcon : Fallback
+    const Icon =
+      functionName === "generate_image"
+        ? ImageIcon
+        : functionName === "bash"
+          ? TerminalIcon
+          : Fallback
     return <Icon className={className} />
   }
 

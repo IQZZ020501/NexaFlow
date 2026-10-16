@@ -43,6 +43,11 @@ SENSITIVE_BACKEND_ENV_KEYS = {
     "OPENSANDBOX_API_KEY",
     "POSTGRES_PASSWORD",
 }
+# Values shipped by older .env.example templates; they are never valid keys.
+SECRET_KEY_PLACEHOLDERS = (
+    ("JWT_SECRET_KEY", "replace-with-a-random-32-byte-jwt-secret"),
+    ("MODEL_SECRET_KEY", "replace-with-a-random-32-byte-model-secret"),
+)
 
 _PRINT_LOCK = threading.Lock()
 
@@ -122,16 +127,21 @@ def ensure_env_file() -> dict[str, str]:
         log("[setup] Created .env from .env.example")
 
     values = read_env(ENV_FILE)
-    generated = False
-    for key, placeholder in (
-        ("JWT_SECRET_KEY", "replace-with-a-random-32-byte-jwt-secret"),
-        ("MODEL_SECRET_KEY", "replace-with-a-random-32-byte-model-secret"),
-    ):
-        if not values.get(key) or values[key] == placeholder:
-            set_env_value(ENV_FILE, key, secrets.token_urlsafe(48))
-            generated = True
-    if generated:
-        log("[setup] Generated private local application secrets in .env")
+    # JWT_SECRET_KEY and MODEL_SECRET_KEY are created once and kept in
+    # PostgreSQL, so this supervisor must never invent new values: replacing
+    # them would invalidate sessions and orphan stored ciphertext. The current
+    # template omits both keys; leftover placeholders from an older template are
+    # cleared so they cannot be adopted as real keys.
+    cleared = False
+    for key, placeholder in SECRET_KEY_PLACEHOLDERS:
+        if values.get(key) == placeholder:
+            set_env_value(ENV_FILE, key, "")
+            cleared = True
+    if cleared:
+        log(
+            "[setup] Cleared template secret keys; the application creates and "
+            "keeps them in PostgreSQL"
+        )
     return read_env(ENV_FILE)
 
 
@@ -372,11 +382,10 @@ def prepare(
             LocalImageBuild(
                 name="OpenSandbox runtime",
                 image=image,
-                dockerfile=ROOT / "deploy" / "dockerfiles" / "app.Dockerfile",
-                target="sandbox-runtime",
+                dockerfile=ROOT / "deploy" / "dockerfiles" / "sandbox.Dockerfile",
                 inputs=(
                     ROOT / ".dockerignore",
-                    ROOT / "deploy" / "dockerfiles" / "app.Dockerfile",
+                    ROOT / "deploy" / "dockerfiles" / "sandbox.Dockerfile",
                     ROOT / "sandbox" / "pyproject.toml",
                     ROOT / "sandbox" / "uv.lock",
                     ROOT / "sandbox" / "job.py",

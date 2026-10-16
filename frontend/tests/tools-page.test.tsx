@@ -563,7 +563,7 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage initialKind="builtin" />)
-    await screen.findByText("PDF")
+    await screen.findByText("生成 PDF")
     expect(screen.getByRole("heading", { name: "内置 Skills" })).toBeTruthy()
     expect(screen.getByRole("heading", { name: "工作区 Skills" })).toBeTruthy()
     expect(screen.getByText("还没有工作区 Skill")).toBeTruthy()
@@ -582,7 +582,7 @@ describe("ToolsPage", () => {
     expandSource("Remote tools")
     await screen.findByText("Remote lookup")
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
-    expect(screen.queryByText("PDF")).toBeNull()
+    expect(screen.queryByText("生成 PDF")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Python" }))
     await screen.findByText("Owned formatter")
@@ -596,7 +596,7 @@ describe("ToolsPage", () => {
     ).toBe("true")
   })
 
-  test("hides image generation and the Skill installer from the Tool catalog", async () => {
+  test("hides image generation, bash and the Skill installer from the Tool catalog", async () => {
     const imageTool = tool({
       id: "tool-image",
       folder_id: null,
@@ -625,17 +625,24 @@ describe("ToolsPage", () => {
       function_name: "install_skill_dependencies",
       display_name: "Install Skill dependencies",
     })
+    const bashTool = tool({
+      ...imageTool,
+      id: "builtin-bash",
+      function_name: "bash",
+      display_name: "Command line",
+    })
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes("/tools?"))
-        return jsonResponse([imageTool, installerTool, pdfTool])
+        return jsonResponse([imageTool, installerTool, bashTool, pdfTool])
       return jsonResponse([])
     }) as typeof fetch
 
     renderPage(<ToolsPage initialKind="builtin" />)
-    await screen.findByText("PDF")
+    await screen.findByText("生成 PDF")
     expect(screen.queryByText("图片生成")).toBeNull()
     expect(screen.queryByText("Install Skill dependencies")).toBeNull()
+    expect(screen.queryByText("命令行") === null).toBe(true)
     expect(screen.queryByRole("heading", { name: "内置工具" })).toBeNull()
   })
 
@@ -1035,12 +1042,12 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findByText("当前时间")
-    expect(screen.getByText("PDF")).toBeTruthy()
+    expect(screen.getByText("生成 PDF")).toBeTruthy()
     expect(screen.queryByText("内置工具")).toBeNull()
     const timeCard = screen.getByText("当前时间").closest("article")!
     expect(within(timeCard).getAllByText("Python").length).toBeGreaterThan(0)
     expect(within(timeCard).getByText("可用")).toBeTruthy()
-    const skillCard = screen.getByText("PDF").closest("article")!
+    const skillCard = screen.getByText("生成 PDF").closest("article")!
     expect(within(skillCard).getAllByText("内置").length).toBeGreaterThan(0)
   })
 
@@ -1071,9 +1078,9 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
-    fireEvent.click((await screen.findByText("PDF")).closest("article")!)
+    fireEvent.click((await screen.findByText("生成 PDF")).closest("article")!)
     expect(
-      await screen.findByRole("heading", { name: "PDF Skill" })
+      await screen.findByRole("heading", { name: "生成 PDF Skill" })
     ).toBeTruthy()
     expect(await screen.findByText("Runtime contract")).toBeTruthy()
     expect(screen.queryByText("输入 Schema")).toBeNull()

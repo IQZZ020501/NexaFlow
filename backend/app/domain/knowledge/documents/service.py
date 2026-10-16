@@ -6,6 +6,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.audit.services import record_audit_log
+from app.domain.knowledge.documents.parsing import SUPPORTED_DOCUMENT_EXTENSIONS
 from app.entities.defaults import new_id
 from app.entities.identity.user import User
 from app.entities.knowledge import (
@@ -129,6 +130,11 @@ async def upload_knowledge_attachment(
 ) -> KnowledgeAttachmentResponse:
     attachment_id = new_id()
     filename = clean_upload_filename(upload.filename)
+    if Path(filename).suffix.lower() not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Document format is not supported.",
+        )
     object_key = (
         f"{knowledge_base.workspace_id}/{knowledge_base.id}/attachments/"
         f"{attachment_id}/{filename}"

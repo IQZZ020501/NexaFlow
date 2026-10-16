@@ -14,6 +14,7 @@ from app.adapters.llm.providers import PROVIDER_CATALOG
 from app.domain.models.registered import RegisteredModel
 from app.entities.defaults import utc_now
 from app.infra.config.settings import Settings
+from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import secret_hint
 from app.ports.llm import (
     SUPPORTED_PROVIDER_TYPES,
@@ -123,10 +124,10 @@ def normalize_model_request_params(
     params = dict(value or {})
     if not params:
         return {}
-    if model_type not in {"LLM", "VISION"}:
+    if model_type not in {"LLM", "VISION", "IMAGE"}:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Extra request parameters are only supported for chat models.",
+            "Extra request parameters are only supported for chat and image models.",
         )
     if len(params) > MAX_MODEL_REQUEST_PARAM_KEYS:
         raise HTTPException(
@@ -251,7 +252,7 @@ def stored_model_credentials(
         config = legacy_credential_config(model.provider_type, model.api_base)
     secrets = decrypt_credential_secrets(
         model.api_key_ciphertext,
-        settings.model_secret_key,
+        application_secret_key(settings),
     )
     hints = {
         key: value
@@ -373,7 +374,7 @@ def apply_model_credentials(
     if rewrite_secrets:
         model.api_key_ciphertext = encrypt_credential_secrets(
             secrets,
-            settings.model_secret_key,
+            application_secret_key(settings),
         )
         model.api_key_updated_at = utc_now()
 

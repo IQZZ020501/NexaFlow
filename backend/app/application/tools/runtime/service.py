@@ -84,6 +84,7 @@ async def queue_tool_invocation(
         resource_snapshot = await build_image_model_resource_snapshot(
             db,
             context.workspace_id,
+            context.image_model_id,
         )
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),
@@ -139,6 +140,7 @@ async def execute_tool_invocation(
     worker_task_id: str,
     *,
     adapter: ToolAdapter | None = None,
+    run_worker_task_id: str | None = None,
 ) -> ToolRuntimeResult:
     async with get_session_factory()() as db:
         invocation = await tool_repository.get_tool_invocation_by_id(db, invocation_id)
@@ -233,7 +235,7 @@ async def execute_tool_invocation(
 
                 scope_token = execution_scope.set(
                     ExecutionScope(
-                        context.workspace_id, context.invocation_id, context.run_id
+                        context.workspace_id, context.invocation_id, context.run_id, run_worker_task_id
                     )
                 )
                 try:

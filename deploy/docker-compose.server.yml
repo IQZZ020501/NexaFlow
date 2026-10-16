@@ -92,11 +92,36 @@ services:
     command:
       - python
       - scripts/worker.py
+      - --role=background
       - --autoscale=10,0
     env_file: ../.env
     environment:
       <<: *backend-environment
       AUTOSCALE_KEEPALIVE: "5"
+    volumes:
+      - ./data/uploads:/data/knowledge
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  agent-worker:
+    <<: *app-image
+    init: true
+    restart: unless-stopped
+    command:
+      - python
+      - scripts/worker.py
+      - --role=agents
+    env_file: ../.env
+    environment: *backend-environment
     volumes:
       - ./data/uploads:/data/knowledge
     cap_drop:

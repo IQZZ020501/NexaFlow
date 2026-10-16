@@ -1,5 +1,6 @@
 """Private execution capability; callers never select images or sandbox IDs."""
 
+from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -12,11 +13,26 @@ class ExecutionError(RuntimeError):
     pass
 
 
+class ExecutionNotStarted(ExecutionError):
+    """Nothing ran: the request failed before the sandbox command started."""
+
+
+class ExecutionBusy(ExecutionNotStarted):
+    """Sandbox capacity is exhausted; the same request may be retried later."""
+
+
 @dataclass(frozen=True)
 class ExecutionScope:
     workspace_id: str
     invocation_id: str
     run_id: str | None = None
+    worker_task_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionBridge:
+    url: str
+    headers: dict[str, str]
 
 
 execution_scope: ContextVar[ExecutionScope | None] = ContextVar(
@@ -30,6 +46,12 @@ class ExecutionPlatform(Protocol):
     ) -> dict[str, Any]: ...
 
     async def close_session(self, workspace_id: str, run_id: str) -> None: ...
+
+    async def reclaim_sessions(self) -> None: ...
+
+    def mcp_host(self, config: dict, domains: list[str], owner_key: str) -> AbstractAsyncContextManager[ExecutionBridge]: ...
+
+    async def read_session_file(self, workspace_id: str, run_id: str, path: str, max_bytes: int) -> bytes: ...
 
 
 def build_execution_platform(settings: "Settings") -> ExecutionPlatform:

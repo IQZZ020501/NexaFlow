@@ -93,10 +93,40 @@ services:
   worker:
     <<: *app-image
     init: true
-    command: python scripts/worker.py --autoscale=10,0
+    command: python scripts/worker.py --role=background --autoscale=10,0
     env_file: ../.env
     environment:
       AUTOSCALE_KEEPALIVE: "5"
+      ENVIRONMENT: production
+      DATABASE_URL: ""
+      POSTGRES_DB: ${POSTGRES_DB:-nexaflow}
+      POSTGRES_USER: ${POSTGRES_USER:-nexaflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexaflow}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      KNOWLEDGE_STORAGE_DIR: /data/knowledge
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./data/uploads:/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  agent-worker:
+    <<: *app-image
+    init: true
+    command: python scripts/worker.py --role=agents
+    env_file: ../.env
+    environment:
       ENVIRONMENT: production
       DATABASE_URL: ""
       POSTGRES_DB: ${POSTGRES_DB:-nexaflow}

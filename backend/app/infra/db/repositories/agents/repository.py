@@ -87,6 +87,7 @@ from app.infra.db.repositories.runs.leases import (
     fail_exhausted_agent_run_ids,
     fail_exhausted_agent_runs,
     list_recoverable_agent_run_ids,
+    mark_agent_runs_redispatched,
     queue_agent_run,
     queue_agent_run_from_child,
     queue_agent_run_from_input,

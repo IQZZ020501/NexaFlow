@@ -137,6 +137,7 @@ class WorkflowToolRuntime:
                     invocation.id,
                     self.settings,
                     f"{self.worker_task_id}:{invocation_id}",
+                    run_worker_task_id=self.worker_task_id,
                 )
                 break
             except ToolInvocationBusy as exc:

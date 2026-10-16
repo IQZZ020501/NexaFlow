@@ -76,6 +76,25 @@ class DevelopmentPreparationTests(unittest.TestCase):
         )
         self.assertNotIn("--build", compose_command)
 
+    @patch("scripts.dev.ensure_local_image")
+    @patch("scripts.dev.run")
+    def test_open_sandbox_uses_standalone_dockerfile(
+        self,
+        run_mock,
+        ensure_image_mock,
+    ) -> None:
+        prepare({"OPENSANDBOX_IMAGE": "nexaflow/execution:test"}, local_opensandbox=True)
+
+        builds = [call.args[0] for call in ensure_image_mock.call_args_list]
+        self.assertEqual(len(builds), 2)
+        sandbox_build = ensure_image_mock.call_args_list[1].args[0]
+        self.assertEqual(
+            sandbox_build.dockerfile.name,
+            "sandbox.Dockerfile",
+        )
+        self.assertIsNone(sandbox_build.target)
+        self.assertEqual(sandbox_build.image, "nexaflow/execution:test")
+
 
 class LocalImageBuildTests(unittest.TestCase):
     def build(self) -> LocalImageBuild:

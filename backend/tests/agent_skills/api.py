@@ -18,7 +18,10 @@ from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
 )
-from app.domain.tools.catalog.service import build_skill_dependency_installer_tool
+from app.domain.tools.catalog.service import (
+    build_shell_tool,
+    build_skill_dependency_installer_tool,
+)
 from app.domain.tools.runtime import tool_snapshot_from_payload
 from app.entities.defaults import utc_now
 from app.entities.tools import ApplicationToolBinding
@@ -370,8 +373,10 @@ def test_agent_skill_lifecycle() -> None:
         installer, installer_version, _ = build_skill_dependency_installer_tool(
             workspace_id
         )
+        bash, bash_version, _ = build_shell_tool(workspace_id)
+        implicit_tools = [(installer, installer_version), (bash, bash_version)]
 
-        async def bind_legacy_installer(agent_id: str):
+        async def bind_legacy_implicit_tools(agent_id: str):
             async with get_session_factory()() as db:
                 await tool_repository.sync_application_tool_bindings(
                     db,
@@ -381,15 +386,16 @@ def test_agent_skill_lifecycle() -> None:
                         ApplicationToolBinding(
                             workspace_id=workspace_id,
                             application_id=agent_id,
-                            tool_id=installer.id,
-                            tool_version_id=installer_version.id,
+                            tool_id=tool.id,
+                            tool_version_id=version.id,
                             bound_by_user_id=me["id"],
                         )
+                        for tool, version in implicit_tools
                     ],
                 )
                 await db.commit()
 
-        asyncio.run(bind_legacy_installer(agent.json()["id"]))
+        asyncio.run(bind_legacy_implicit_tools(agent.json()["id"]))
         listed_agent = client.get(
             f"/api/v1/workspaces/{workspace_id}/agents/{agent.json()['id']}",
             headers=auth_headers(token),
@@ -435,7 +441,10 @@ def test_agent_skill_lifecycle() -> None:
             f"/api/v1/workspaces/{workspace_id}/agents/{agent.json()['id']}",
             headers=auth_headers(token),
             json={
-                "tools": [{"tool_id": installer.id, "version_id": installer_version.id}]
+                "tools": [
+                    {"tool_id": tool.id, "version_id": version.id}
+                    for tool, version in implicit_tools
+                ]
             },
         )
         assert saved.status_code == 200, saved.text
@@ -448,7 +457,7 @@ def test_agent_skill_lifecycle() -> None:
             json={"name": "No Skill Agent", "model_id": model.json()["id"]},
         )
         assert plain_agent.status_code == 201, plain_agent.text
-        asyncio.run(bind_legacy_installer(plain_agent.json()["id"]))
+        asyncio.run(bind_legacy_implicit_tools(plain_agent.json()["id"]))
         with patch(
             "app.application.agents.runs.service.enqueue_prepared_agent_run",
             new=AsyncMock(),
@@ -464,6 +473,7 @@ def test_agent_skill_lifecycle() -> None:
             async with get_session_factory()() as db:
                 run = await runs.get_agent_run_by_id(db, plain_run.json()["id"])
                 assert run is not None
+                assert [item["function_name"] for item in run.tool_snapshots] == ["bash"]
                 assert all(
                     item["function_name"] != "install_skill_dependencies"
                     for item in run.tool_snapshots

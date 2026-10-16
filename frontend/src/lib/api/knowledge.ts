@@ -1,4 +1,9 @@
-import { ApiError, listQuery, request, requestBlob } from "@/lib/api-client"
+import {
+  listQuery,
+  request,
+  requestBlob,
+  requestText,
+} from "@/lib/api-client"
 import type { User } from "@/lib/api/auth"
 
 export type { User } from "@/lib/api/auth"
@@ -341,6 +346,49 @@ export type KnowledgeGraphReviewList = {
   total: number
   limit: number
   offset: number
+}
+
+export type KnowledgeLinkGraphNode = {
+  id: string
+  kind: "document" | "entity" | "unresolved"
+  document_id: string | null
+  label: string
+  filename: string
+  content_type: string | null
+  status: string | null
+  entity_type: string | null
+  properties: Record<string, unknown>
+  incoming: number
+  outgoing: number
+  degree: number
+}
+
+export type KnowledgeLinkGraphEdge = {
+  id: string
+  source: string
+  target: string
+  target_label: string
+  target_sections: string[]
+  resolved: boolean
+  count: number
+  predicate: string | null
+  source_kind: string | null
+  quality_score: number | null
+  support_count: number
+  evidence_ids: string[]
+}
+
+export type KnowledgeLinkGraph = {
+  revision: string
+  nodes: KnowledgeLinkGraphNode[]
+  edges: KnowledgeLinkGraphEdge[]
+  document_count: number
+  entity_count: number
+  unresolved_count: number
+  edge_count: number
+  graph_revision_id: string | null
+  source: "evidence_graph" | "legacy_references"
+  truncated: boolean
 }
 
 export type KnowledgeEvaluationCase = {
@@ -718,17 +766,10 @@ export async function downloadKnowledgeDocument(
   documentId: string,
   filename: string
 ) {
-  const response = await fetch(
+  const blob = await requestBlob(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/download`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    }
+    { token }
   )
-  if (!response.ok) {
-    throw new ApiError(response.status, response.statusText)
-  }
-
-  const blob = await response.blob()
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement("a")
   anchor.href = url
@@ -763,6 +804,21 @@ export async function listKnowledgeDocumentChunks(
       return chunks
     }
   }
+}
+
+/**
+ * Loads the canonical Markdown representation of a parsed knowledge document.
+ */
+export function loadKnowledgeDocumentMarkdown(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string
+) {
+  return requestText(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/content`,
+    { token }
+  )
 }
 
 /**
@@ -1061,6 +1117,18 @@ export function getKnowledgeGraphOverview(
 ) {
   return request<KnowledgeGraphQueryResult>(
     knowledgeGraphPath(workspaceId, knowledgeBaseId, "/overview"),
+    { token, signal }
+  )
+}
+
+export function getKnowledgeLinkGraph(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  signal?: AbortSignal
+) {
+  return request<KnowledgeLinkGraph>(
+    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/links"),
     { token, signal }
   )
 }

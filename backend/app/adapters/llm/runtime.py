@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
+from app.infra.security.keyring import application_secret_key
 from app.ports.llm import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
@@ -618,7 +619,7 @@ def _registered_model_credentials(
     try:
         secrets = decrypt_credential_secrets(
             model.api_key_ciphertext,
-            settings.model_secret_key,
+            application_secret_key(settings),
         )
     except (ValueError, json.JSONDecodeError) as exc:
         raise ModelProviderError("Stored model credentials are invalid.") from exc

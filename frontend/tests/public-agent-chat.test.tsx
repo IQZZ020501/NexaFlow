@@ -2407,9 +2407,7 @@ describe("PublicAgentChat", () => {
       screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
-    fireEvent.click(
-      await screen.findByRole("button", { name: "启用完全访问" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "启用完全访问" }))
     sendMessage("开始吧")
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()
@@ -2992,6 +2990,115 @@ describe("PublicAgentChat", () => {
     expect(within(processes[1]).getByText("追问思维")).toBeTruthy()
     expect(within(processes[1]).queryByText("首问思维")).toBeNull()
     expect(within(article).getByText("第二问")).toBeTruthy()
+  })
+
+  test("previews current and historical public HTML exports in their own answers", async () => {
+    const historyFetch = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "Generate a page")] },
+      history: {
+        items: [
+          run({
+            result: "New page generated",
+            session_inputs: [
+              {
+                input_id: "input-1",
+                mode: "follow_up",
+                content: "Another page",
+                sequence: 1,
+                run_id: "run-1",
+                status: "applied",
+                previous_answer: "First page generated",
+                previous_answer_turn: 2,
+              },
+            ],
+            progress: [
+              toolEvent("page-1", "succeeded", {
+                turn: 1,
+                tool_name: "create_artifact",
+                output: {
+                  filename: "first.html",
+                  download_url: "/api/v1/artifacts/first-token",
+                },
+              }),
+              {
+                id: "answer-1",
+                type: "answer",
+                status: "succeeded",
+                stage: "succeeded",
+                turn: 2,
+                count: null,
+                hits: [],
+              },
+              toolEvent("page-2", "succeeded", {
+                turn: 3,
+                tool_name: "run_skill_script",
+                output: {
+                  artifacts: [
+                    {
+                      filename: "second.html",
+                      download_url: "/api/v1/artifacts/second-token",
+                    },
+                  ],
+                },
+              }),
+              {
+                id: "answer-2",
+                type: "answer",
+                status: "succeeded",
+                stage: "succeeded",
+                turn: 4,
+                count: null,
+                hits: [],
+              },
+            ],
+          }),
+        ],
+      },
+    })
+    fetchHandler = (url, init) =>
+      url.includes("/api/v1/artifacts/download")
+        ? new Response("<h1>Public page</h1>", {
+            headers: { "Content-Type": "text/html" },
+          })
+        : historyFetch(url, init)
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+    const first = await screen.findByRole("button", {
+      name: "预览文件：first.html",
+    })
+    const second = await screen.findByRole("button", {
+      name: "预览文件：second.html",
+    })
+    const previousAnswer = screen
+      .getByText("First page generated")
+      .closest(".rounded-2xl")!
+    const currentAnswer = screen
+      .getByText("New page generated")
+      .closest(".rounded-2xl")!
+    expect(previousAnswer.contains(first)).toBe(true)
+    expect(previousAnswer.contains(second)).toBe(false)
+    expect(currentAnswer.contains(second)).toBe(true)
+    expect(currentAnswer.contains(first)).toBe(false)
+    fireEvent.click(first)
+    expect(await screen.findByTitle("文件预览：first.html")).toBeTruthy()
+    expect(screen.queryByRole("dialog")).toBeNull()
+    const composer = screen.getByRole("textbox", { name: "请输入问题" })
+    composer.focus()
+    expect(document.activeElement).toBe(composer)
+    fireEvent.change(composer, { target: { value: "Adjust the page" } })
+    fireEvent.click(second)
+    expect(await screen.findByTitle("文件预览：second.html")).toBeTruthy()
+    expect(screen.queryByTitle("文件预览：first.html")).toBeNull()
+    expect(document.querySelectorAll("iframe")).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }))
+    expect((composer as HTMLTextAreaElement).value).toBe("Adjust the page")
+    fireEvent.click(first)
+    expect(await screen.findByTitle("文件预览：first.html")).toBeTruthy()
+    fireEvent.click(screen.getByLabelText("新建对话"))
+    await waitFor(() =>
+      expect(screen.queryByTitle("文件预览：first.html")).toBeNull()
+    )
   })
 
   test("keeps public artifacts and sources with their answer turns", async () => {

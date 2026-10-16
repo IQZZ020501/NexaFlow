@@ -202,3 +202,25 @@ async def list_resolved_references(
         )
     )
     return [to_entity(KnowledgeDocumentReference, row) for row in rows.all()]
+
+
+async def list_markdown_references(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+) -> list[KnowledgeDocumentReference]:
+    rows = await db.scalars(
+        select(KnowledgeDocumentReferenceORM)
+        .where(
+            KnowledgeDocumentReferenceORM.workspace_id
+            == knowledge_base.workspace_id,
+            KnowledgeDocumentReferenceORM.knowledge_base_id
+            == knowledge_base.id,
+            KnowledgeDocumentReferenceORM.reference_type == "markdown",
+        )
+        .order_by(
+            KnowledgeDocumentReferenceORM.source_document_id,
+            KnowledgeDocumentReferenceORM.source_ordinal,
+            KnowledgeDocumentReferenceORM.id,
+        )
+    )
+    return [to_entity(KnowledgeDocumentReference, row) for row in rows.all()]

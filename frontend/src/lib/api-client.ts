@@ -186,3 +186,39 @@ export async function requestBlob(
   }
   return response.blob()
 }
+
+/**
+ * Requests a plain-text resource.
+ *
+ * @param path - The API path to request
+ * @param options - Request configuration, including an optional bearer token
+ * @returns The successful response body as text
+ */
+export async function requestText(
+  path: string,
+  options: RequestOptions = {},
+) {
+  const headers = new Headers(options.headers)
+  if (options.token) {
+    headers.set("Authorization", `Bearer ${options.token}`)
+  }
+  const response = await fetch(apiUrl(path), {
+    ...options,
+    credentials: options.credentials ?? "include",
+    headers,
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    let payload: unknown = text
+    try {
+      payload = text ? JSON.parse(text) : null
+    } catch {
+      // Keep the plain response body as the fallback message.
+    }
+    throw new ApiError(
+      response.status,
+      errorMessage(payload, response.statusText),
+    )
+  }
+  return response.text()
+}

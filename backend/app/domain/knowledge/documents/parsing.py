@@ -14,7 +14,7 @@ CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 150
 PARENT_CHUNK_SIZE = CHUNK_SIZE * 4
 SEGMENTATION_VERSION = "hierarchical-v2"
-NORMALIZED_TEXT_VERSION = "normalized-markdown-v1"
+NORMALIZED_TEXT_VERSION = "normalized-markdown-v2"
 EMBED_BATCH_SIZE = 64
 SPLIT_SEPARATORS = frozenset({"\n\n", "\n", "。", "."})
 IMAGE_DOCUMENT_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
@@ -70,9 +70,16 @@ SUPPORTED_DOCUMENT_EXTENSIONS = frozenset(
         ".csv",
         ".json",
         ".xml",
+        ".zip",
+    }
+)
+# Agent and Workflow attachments keep their existing broader readable formats;
+# the knowledge-upload boundary below remains the stricter source of truth.
+EXTRACTABLE_DOCUMENT_EXTENSIONS = frozenset(
+    {
+        *SUPPORTED_DOCUMENT_EXTENSIONS,
         ".ipynb",
         ".epub",
-        ".zip",
         *IMAGE_DOCUMENT_EXTENSIONS,
         *PLAIN_TEXT_DOCUMENT_EXTENSIONS,
     }
@@ -268,6 +275,29 @@ def normalize_extracted_text(filename: str, text: str) -> str:
     return text
 
 
+def _markdown_code_fence(text: str) -> str:
+    longest_run = max(
+        (len(match.group(0)) for match in re.finditer(r"`+", text)),
+        default=0,
+    )
+    return "`" * max(3, longest_run + 1)
+
+
+def normalize_document_markdown(filename: str, extension: str, text: str) -> str:
+    """Return the canonical UTF-8 Markdown representation of a document."""
+    normalized = normalize_text(text)
+    if extension in {".md", ".markdown", ".txt"}:
+        return normalized
+    if extension in {".json", ".xml"}:
+        fence = _markdown_code_fence(normalized)
+        language = extension.removeprefix(".")
+        return (
+            f"# {Path(filename).stem}\n\n"
+            f"{fence}{language}\n{normalized}\n{fence}"
+        )
+    return normalized
+
+
 def extract_pdf_text(filename: str, path: Path) -> str:
     from pypdf import PdfReader
 
@@ -288,12 +318,13 @@ def extract_document(
     path: Path,
     *,
     image_text_extractor: ImageTextExtractor | None = None,
+    supported_extensions: frozenset[str] = SUPPORTED_DOCUMENT_EXTENSIONS,
 ) -> tuple[str, list[DocumentAssetDraft]]:
     if not path.exists():
         raise KnowledgePipelineError("Document file is missing.")
 
     extension = Path(filename).suffix.lower()
-    if extension not in SUPPORTED_DOCUMENT_EXTENSIONS:
+    if extension not in supported_extensions:
         raise KnowledgePipelineError("Document format is not supported.")
     if extension in IMAGE_DOCUMENT_EXTENSIONS and image_text_extractor is None:
         raise KnowledgePipelineError(
@@ -304,7 +335,9 @@ def extract_document(
     validate_archive(path)
     assets: list[DocumentAssetDraft] = []
     try:
-        if extension in PLAIN_TEXT_DOCUMENT_EXTENSIONS:
+        if extension in {".md", ".markdown", ".txt", ".json", ".xml"}:
+            extracted_text = path.read_text(encoding="utf-8-sig")
+        elif extension in PLAIN_TEXT_DOCUMENT_EXTENSIONS:
             extracted_text = path.read_text(encoding="utf-8-sig")
         elif extension == ".docx":
             from markitdown.converters._docx_converter import pre_process_docx
@@ -368,12 +401,23 @@ def extract_document(
                 ),
             )
             extracted_text = result.text_content
+            if extension == ".zip":
+                extracted_text = extracted_text.replace(
+                    f"`{path}`",
+                    f"`{filename}`",
+                    1,
+                )
     except Exception as exc:
         raise KnowledgePipelineError("Document text extraction failed.") from exc
 
-    text = normalize_text(extracted_text)
-    if not text or not has_printable_text(strip_asset_markers(text)):
+    extracted_text = normalize_text(extracted_text)
+    if not extracted_text or not has_printable_text(strip_asset_markers(extracted_text)):
         raise KnowledgePipelineError("Document has no extractable text.")
+    text = (
+        normalize_document_markdown(filename, extension, extracted_text)
+        if extension in SUPPORTED_DOCUMENT_EXTENSIONS
+        else extracted_text
+    )
     return text, assets
 
 

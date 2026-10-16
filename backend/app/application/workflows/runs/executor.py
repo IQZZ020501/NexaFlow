@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import traceback
 from contextlib import suppress
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from app.application.agents.runs.children import (
 from app.application.agents.runs.executor import (
     RUN_BUSY,
     RUN_FINISHED,
+    RUN_LEASED,
     maintain_agent_run_lease,
 )
 from app.application.workflows.nodes.executor import (
@@ -67,10 +69,12 @@ from app.infra.db.repositories.workflows import repository as workflow_repositor
 from app.infra.db.session import get_session_factory
 from app.infra.observability.errors import classify_error
 from app.infra.observability.system_log import record_system_log
+from app.ports.execution import ExecutionScope, close_execution_session, execution_scope
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderTimeoutError,
 )
+from app.ports.mcp import close_mcp_run_sessions
 from app.schemas.workflows.contracts import (
     LlmNodeConfig,
     RerankerNodeConfig,
@@ -78,6 +82,7 @@ from app.schemas.workflows.contracts import (
 )
 
 MAX_WORKFLOW_OUTPUT_BYTES = 256 * 1024
+logger = logging.getLogger(__name__)
 WORKFLOW_HISTORY_LIMIT = 20
 
 
@@ -750,7 +755,7 @@ async def run_durable_workflow_run(
         async with get_session_factory()() as db:
             current = await agent_repository.get_agent_run_by_id(db, run_id)
         return (
-            RUN_BUSY
+            RUN_LEASED
             if current is not None
             and current.status
             == (
@@ -765,6 +770,9 @@ async def run_durable_workflow_run(
     heartbeat = asyncio.create_task(
         maintain_agent_run_lease(run_id, worker_task_id, settings, lease_lost)
     )
+    async with get_session_factory()() as db:
+        current = await agent_repository.get_agent_run_by_id(db, run_id)
+    token = execution_scope.set(ExecutionScope(current.workspace_id, worker_task_id, run_id, worker_task_id))
     try:
         try:
             return await _execute_claimed_workflow_run(
@@ -773,6 +781,15 @@ async def run_durable_workflow_run(
         except Exception as exc:
             return await _fail_claimed_workflow_run(run_id, worker_task_id, exc)
     finally:
+        execution_scope.reset(token)
         heartbeat.cancel()
         with suppress(asyncio.CancelledError):
             await heartbeat
+        async with get_session_factory()() as db:
+            current = await agent_repository.get_agent_run_by_id(db, run_id)
+        if current and current.status in {"succeeded", "failed", "cancelled"}:
+            try:
+                await close_mcp_run_sessions(run_id)
+                await close_execution_session(settings, current.workspace_id, run_id)
+            except Exception:
+                logger.warning("Workflow sandbox cleanup will be retried", exc_info=True)

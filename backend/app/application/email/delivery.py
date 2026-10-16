@@ -23,6 +23,7 @@ from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
 from app.infra.observability.system_log import record_system_log
 from app.infra.runtime.validation import normalize_email
+from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import decrypt_secret, encrypt_secret
 
 logger = get_logger(__name__)
@@ -70,7 +71,7 @@ async def queue_identity_email(
         content["url"] = f"{smtp.site_url.rstrip('/')}{path}"
     ciphertext = encrypt_secret(
         json.dumps(content, ensure_ascii=False, separators=(",", ":")),
-        settings.model_secret_key,
+        application_secret_key(settings),
     )
     delivery = await email_repository.create_delivery(
         db,
@@ -238,7 +239,7 @@ async def run_email_delivery(delivery_id: str, settings: Settings) -> None:
     try:
         raw_payload = decrypt_secret(
             delivery.payload_ciphertext,
-            settings.model_secret_key,
+            application_secret_key(settings),
         )
         payload = json.loads(raw_payload)
         if not isinstance(payload, dict):

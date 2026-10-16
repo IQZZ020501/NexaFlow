@@ -26,8 +26,9 @@ api/v1/knowledge（routes/lifecycle/retrieval/evaluation/graph 路由）
 
 ## 文档导入流程
 
-- 附件上传 `POST /knowledge-bases/{kb_id}/attachments` 只持久化文件（对象存储 adapter 见 `backend/app/infra/storage/object_storage.py`），返回 attachment。
+- 附件上传 `POST /knowledge-bases/{kb_id}/attachments` 只接受 DOCX、MD、MARKDOWN、PDF、TXT、PPTX、XLSX、XLS、HTML、CSV、JSON、XML、ZIP，并先在服务端按扩展名拒绝其他格式，再将原文件持久化到对象存储（adapter 见 `backend/app/infra/storage/object_storage.py`）并返回 attachment。
 - 文档创建 `POST /documents` 接收 `attachment_ids`、`staged` 和显式 `import_mode`（`document`/`qa`）；事务内消费附件并生成 staged 文档。解析/向量化一律走 Celery 任务（`POST /parse`、`POST /index`）。
+- 普通文档解析在前后端统一默认使用智能分段：`hierarchical`、1200 字符、150 字符重叠、按空行分隔，并依次执行 `trim_lines` 与 `remove_empty_lines`；高级模式仍可显式提交 `flat` 和自定义参数。省略解析请求体与提交空对象的语义一致。
 - QA 模式只接受 UTF-8 CSV 或 XLSX，表头支持 `question/问题`、`answer/答案` 和可选 `source/来源`。每行生成一个 `kind=qa` Child，答案作为返回正文，`question + answer` 作为检索文本；最多 5000 行，问题/答案分别限制为 2000/20000 字符，普通分段参数在该模式下忽略。
 - 图片资产：DOCX 解析时抽取内嵌图片落对象存储（`KnowledgeAsset`/`KnowledgeChunkAsset` 记录），chunk 正文保留原子占位符并用 `images[]` 结构化返回；前端经鉴权接口拉取 blob 渲染，不暴露对象路径。图片不参与向量化。
 - 附件生命周期：available → consumed（创建文档）→ deleted（删除文档/知识库时对象一并清理）。
@@ -35,7 +36,7 @@ api/v1/knowledge（routes/lifecycle/retrieval/evaluation/graph 路由）
 ### 四种持久表示与权威性
 
 - 原始文件是用户上传的事实来源，保存在共享对象存储；数据库只保存文档元数据、状态和清理意图。
-- 规范化全文工件是解析器生成的 UTF-8 Markdown/text 快照，按内容 hash 写入对象存储，并由 `document.meta.normalized_artifact_key` 和 `normalized_content_hash` 指向。它是分块、引用解析和 Graph 增量版本判断的输入，不替代原始文件。
+- 规范化全文工件是解析器为每种受支持格式（包括 QA CSV/XLSX）生成的 UTF-8 Markdown 快照，按内容 hash 以 `.md` 写入对象存储，并由 `document.meta.normalized_artifact_key`、`normalized_content_hash`、`normalized_content_type=text/markdown` 和 `normalized_text_version` 指向。它是分块、引用解析、Graph 增量版本判断和文档详情 Markdown 展示的输入，不替代原始文件；详情通过受知识库权限保护的 `GET /documents/{document_id}/content` 读取。
 - Parent/Child 是可重建的结构化分段：Parent 保存章节上下文，Child 保存可检索正文、半开区间 offset 和索引状态。只有 Child 进入 Qdrant/`pg_search`；数据库中的文档、Parent、Child 状态和权限仍是检索事实来源。
 - Evidence Graph 保存实体、别名、提及、claim、evidence、review、schema 和 revision。PostgreSQL 是关系、状态、版本和证据引用的唯一权威；Profile Markdown 是由当前发布 revision 投影出的持久知识页，Qdrant profile collection 只是可删除、可重建的派生向量索引。
 
@@ -45,7 +46,7 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`（并在文件尾�
 
 - 所有 API、Agent 和 Workflow 调用同一应用层检索器（`application/knowledge/retrieval/service.py`）；`query/inspect` 额外返回候选数量、重排状态和各阶段耗时，不记录原始查询文本。
 - 关键词通道使用 `pg_search` 的 ParadeDB 索引和 `pdb.score()` BM25 排序，`search_text` 以 Jieba 分词；查询采用词项析取以提高自然语言问题召回，再与向量和引用候选通过 RRF 融合。（如需回滚到引入 `pg_search` 之前的旧关键词实现，须同时恢复上一版应用和 Alembic 版本，使原生 `ts_rank_cd` 查询与 GIN 索引匹配。）
-- 文档引用图使用 PostgreSQL `knowledge_document_references` 邻接表，不使用图数据库。Markdown/纯文本中的相对链接在解析时确定性解析（规则在 `domain/knowledge/documents/references.py`）；仅扩展同工作区、同知识库、已启用且已索引的目标文档，固定一跳，单文档最多 100 条边、单次最多 8 个目标文档。
+- 文档引用图使用 PostgreSQL `knowledge_document_references` 邻接表，不使用图数据库。Markdown 相对链接、Obsidian 风格 `[[WikiLink]]` / `[[target#section|alias]]` 与纯文本引用在解析时确定性解析（规则在 `domain/knowledge/documents/references.py`），重复显式链接保留出现次数；“重建索引”也会基于已持久化分段刷新引用表，因此既有文档无需重新上传或重新解析即可获得新版链接规则。检索仅扩展同工作区、同知识库、已启用且已索引的目标文档，固定一跳，单文档最多 100 条边、单次最多 8 个目标文档。关系图谱页面直接读取这张邻接表，Local Graph 在前端按深度和入链/出链方向遍历，不依赖 Evidence Graph 或向量相似度。
 - Evidence Graph 领域规则与纯遍历逻辑在 `domain/knowledge/graph/`（schema/extraction/resolution/revisions/traversal 等子模块）；用例层在 `application/knowledge/graph/`：`build.py` 负责抽取、身份消歧、引用 claim、组件/Profile 与 revision 发布，`query.py` 负责实体链接、路径/邻域计划和结果裁剪，`maintenance.py` 负责源变更对账、孤儿 revision 恢复与 Profile 修复，`service.py` 提供 Graph 管理/查询用例门面。复杂路径查询使用 `infra/db/sql/knowledge/graph/*.sql` 的有界 PostgreSQL `WITH RECURSIVE` CTE，并在同一 workspace/knowledge base 范围内设置 2 秒 statement timeout。
 - Graph schema 是知识库级版本化抽取约束；revision 依次经历 `building`、`published`、`failed`、`retired`，发布时以数据库事务原子切换活动版本。Entity 为 `active/merged/retired`，claim 为 `candidate/active/rejected/superseded`，evidence 为 `active/deleted/inaccessible`，review 为 `open/approved/rejected/resolved`。候选、人工 merge/split 和拒绝结果都进入下一 revision，不直接改写历史快照。
 - Graph 默认使用内置 schema，不要求用户先编辑 JSON。知识库从关闭切换为启用时会持久化一次全量 `graph_rebuild`；之后每个文档索引成功都会自动合并 `graph_sync`，因此上传流程不需要手工触发抽取。自定义 schema 和手动全量重建只用于高级约束、模型切换或故障恢复。

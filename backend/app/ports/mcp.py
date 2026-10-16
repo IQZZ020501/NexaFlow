@@ -21,7 +21,22 @@ MAX_MCP_TOOL_PAGES = 32
 
 
 class McpClientError(ExternalServiceError):
-    pass
+    """An MCP request failed.
+
+    ``request_sent`` is False only when the server cannot have received the
+    tool call, so a side-effecting call is known not to have run.
+    """
+
+    def __init__(self, message: str = "", *, request_sent: bool = True) -> None:
+        super().__init__(message)
+        self.request_sent = request_sent
+
+
+class McpServerBusy(McpClientError):
+    """The MCP server host has no capacity; nothing was sent."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message, request_sent=False)
 
 
 McpTransport = Literal["streamable_http", "sse", "stdio"]
@@ -124,6 +139,13 @@ async def call_mcp_tool(
     )
 
 
+async def close_mcp_run_sessions(run_id: str) -> None:
+    """Close the MCP connections a Run kept open in this process."""
+    from app.adapters.mcp.sessions import close_run_sessions
+
+    await close_run_sessions(run_id)
+
+
 __all__ = [
     "MAX_MCP_TOOL_PAGES",
     "McpClient",
@@ -131,9 +153,11 @@ __all__ = [
     "McpCallResult",
     "McpConnection",
     "McpDiscovery",
+    "McpServerBusy",
     "McpTransport",
     "build_mcp_client",
     "call_mcp_tool",
+    "close_mcp_run_sessions",
     "discover_mcp_tools",
     "normalize_mcp_url",
 ]

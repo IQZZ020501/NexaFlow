@@ -23,6 +23,9 @@ class ToolInvocationContext:
     deadline_at: datetime
     idempotency_key: str
     resource_snapshot: dict[str, Any] = field(default_factory=dict)
+    # Image model frozen by the caller's configuration. Absent means the caller
+    # relies on the workspace fallback (its single active image model).
+    image_model_id: str | None = None
     approval_required: bool | None = None
 
     def __post_init__(self) -> None:

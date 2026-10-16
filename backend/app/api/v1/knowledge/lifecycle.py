@@ -15,6 +15,7 @@ from app.application.knowledge.documents.service import (
     get_knowledge_asset_file,
     get_knowledge_base,
     get_knowledge_document,
+    get_knowledge_document_markdown_file,
     knowledge_document_path,
     require_knowledge_base_permission,
     set_knowledge_document_active,
@@ -70,6 +71,42 @@ async def download_workspace_knowledge_base_document(
         document_path,
         media_type="application/octet-stream",
         filename=document.filename,
+    )
+
+
+@router.get(
+    "/{knowledge_base_id}/documents/{document_id}/content",
+    response_class=FileResponse,
+)
+async def read_workspace_knowledge_document_markdown(
+    knowledge_base_id: str,
+    document_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> FileResponse:
+    knowledge_base = await get_knowledge_base(
+        db,
+        context.workspace.id,
+        knowledge_base_id,
+    )
+    permission = await require_knowledge_base_permission(
+        db,
+        knowledge_base,
+        context.user,
+        {"view", "edit"},
+    )
+    document = await get_knowledge_document(
+        db,
+        knowledge_base,
+        document_id,
+        include_staged=permission == "edit",
+    )
+    markdown_path = get_knowledge_document_markdown_file(document, settings)
+    return FileResponse(
+        markdown_path,
+        media_type="text/markdown; charset=utf-8",
+        content_disposition_type="inline",
     )
 
 

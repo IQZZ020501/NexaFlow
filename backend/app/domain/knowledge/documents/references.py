@@ -20,6 +20,9 @@ MAX_REFERENCES_PER_DOCUMENT = 100
 MARKDOWN_REFERENCE_PATTERN = re.compile(
     r"(?<!!)\[[^\]\n]+\]\((?P<target>[^)\n]+)\)"
 )
+WIKILINK_REFERENCE_PATTERN = re.compile(
+    r"!?\[\[(?P<target>[^\]\n]{1,1000})\]\]"
+)
 TEXT_REFERENCE_PATTERN = re.compile(
     r"(?:详见|参考|参见)\s*(?:"
     r"[《\"“](?P<quoted_label>[^》\"”\n，。；;]{1,120})[》\"”]"
@@ -34,6 +37,7 @@ class ReferenceLabel:
     target_label: str
     target_section: str = ""
     reference_type: Literal["markdown", "text"] = "text"
+    occurrence_count: int = 1
 
 
 _ResolutionContext = tuple[
@@ -58,6 +62,24 @@ def _section_anchor(value: str) -> str:
 
 def extract_reference_labels(content: str) -> list[ReferenceLabel]:
     candidates: list[tuple[int, ReferenceLabel]] = []
+    for match in WIKILINK_REFERENCE_PATTERN.finditer(content):
+        if match.group(0).startswith("!"):
+            continue
+        target = match.group("target").split("|", 1)[0].strip()
+        target_path, _, target_section = target.partition("#")
+        label = normalize_reference_label(target_path)
+        if label:
+            candidates.append(
+                (
+                    match.start(),
+                    ReferenceLabel(
+                        target_label=label,
+                        target_section=_normalize_section(target_section),
+                        reference_type="markdown",
+                    ),
+                )
+            )
+
     for match in MARKDOWN_REFERENCE_PATTERN.finditer(content):
         target = match.group("target").strip()
         parsed = urlsplit(target)
@@ -100,12 +122,24 @@ def extract_reference_labels(content: str) -> list[ReferenceLabel]:
             )
 
     labels: list[ReferenceLabel] = []
-    seen: set[tuple[str, str]] = set()
+    index_by_key: dict[tuple[str, str, str], int] = {}
     for _, label in sorted(candidates, key=lambda item: item[0]):
-        key = (label.target_label.casefold(), label.target_section.casefold())
-        if key in seen:
+        key = (
+            label.target_label.casefold(),
+            label.target_section.casefold(),
+            label.reference_type,
+        )
+        existing_index = index_by_key.get(key)
+        if existing_index is not None:
+            existing = labels[existing_index]
+            labels[existing_index] = ReferenceLabel(
+                target_label=existing.target_label,
+                target_section=existing.target_section,
+                reference_type=existing.reference_type,
+                occurrence_count=existing.occurrence_count + 1,
+            )
             continue
-        seen.add(key)
+        index_by_key[key] = len(labels)
         labels.append(label)
         if len(labels) == MAX_REFERENCES_PER_DOCUMENT:
             break
@@ -217,22 +251,27 @@ async def rebuild_document_references(
     knowledge_base: KnowledgeBase,
     document: KnowledgeDocument,
     chunks: list[KnowledgeDocumentChunk],
+    resolution_context: _ResolutionContext | None = None,
 ) -> None:
     await reference_repository.delete_source_references(
         db,
         knowledge_base,
         document.id,
     )
-    documents = await reference_repository.list_active_documents(db, knowledge_base)
-    parents = await reference_repository.list_parent_chunks_for_documents(
-        db,
-        knowledge_base,
-        {item.id for item in documents},
-    )
-    resolution_context = _resolution_context(
-        documents,
-        parents,
-    )
+    if resolution_context is None:
+        active_documents = await reference_repository.list_active_documents(
+            db,
+            knowledge_base,
+        )
+        parents = await reference_repository.list_parent_chunks_for_documents(
+            db,
+            knowledge_base,
+            {item.id for item in active_documents},
+        )
+        resolution_context = _resolution_context(
+            active_documents,
+            parents,
+        )
     documents_by_alias, parents_by_document = resolution_context
     references: list[KnowledgeDocumentReference] = []
     for chunk in sorted(chunks, key=lambda item: item.chunk_index):
@@ -256,6 +295,7 @@ async def rebuild_document_references(
                     target_section=label.target_section,
                     reference_type=label.reference_type,
                     source_ordinal=len(references),
+                    occurrence_count=label.occurrence_count,
                 )
             )
             if len(references) == MAX_REFERENCES_PER_DOCUMENT:
@@ -269,6 +309,37 @@ async def rebuild_document_references(
         document,
         resolution_context,
     )
+
+
+async def rebuild_knowledge_base_references(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    documents: list[KnowledgeDocument],
+    chunks: list[KnowledgeDocumentChunk],
+) -> None:
+    chunks_by_document: dict[str, list[KnowledgeDocumentChunk]] = {}
+    for chunk in chunks:
+        chunks_by_document.setdefault(chunk.document_id, []).append(chunk)
+
+    active_documents = await reference_repository.list_active_documents(
+        db,
+        knowledge_base,
+    )
+    parents = await reference_repository.list_parent_chunks_for_documents(
+        db,
+        knowledge_base,
+        {item.id for item in active_documents},
+    )
+    resolution_context = _resolution_context(active_documents, parents)
+
+    for document in documents:
+        await rebuild_document_references(
+            db,
+            knowledge_base,
+            document,
+            chunks_by_document.get(document.id, []),
+            resolution_context,
+        )
 
 
 async def detach_document_references(

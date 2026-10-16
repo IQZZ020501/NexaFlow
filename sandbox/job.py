@@ -207,6 +207,12 @@ def child(request):
 
 
 def execute(request):
+    if "command" in request:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("nexaflow_command", Path(__file__).with_name("command.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.execute(request["command"], python_binary=sys.executable)
     max_log = 2 * 1024 * 1024 if "mcp" in request else MAX_LOG
     seconds = request.get("limits", {}).get("timeout_ms", 5000) / 1000
     if not 0.1 <= seconds <= (300 if "mcp" in request else 120):
@@ -524,7 +530,7 @@ def main():
             "exit_code": 1,
             "error": f"{type(exc).__name__}: {exc}"[:1000],
         }
-    Path("/tmp/nexaflow-response.json").write_text(
+    Path(sys.argv[2] if len(sys.argv) > 2 else "/tmp/nexaflow-response.json").write_text(
         json.dumps(response, ensure_ascii=False)
     )
 

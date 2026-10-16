@@ -64,6 +64,7 @@ from app.entities.knowledge import (
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeDocumentChunk,
+    KnowledgeDocumentReference,
 )
 from app.entities.knowledge.graph import (
     GRAPH_REVISION_BUILDING,
@@ -1174,6 +1175,155 @@ async def list_current_evidence_for_claim_ids(
         )
     )
     return [to_entity(KnowledgeGraphClaimEvidence, row) for row in rows.all()]
+
+
+async def list_active_document_references_for_chunks(
+    db: AsyncSession,
+    knowledge_base: KnowledgeBase,
+    source_chunk_ids: list[str],
+    limit: int = 100,
+) -> list[KnowledgeDocumentReference]:
+    """Read explicit document links from the published Evidence Graph."""
+    if not source_chunk_ids or limit <= 0:
+        return []
+    rows = await db.execute(
+        select(
+            KnowledgeGraphClaimORM,
+            KnowledgeGraphClaimEvidenceORM,
+            KnowledgeGraphEntityORM,
+        )
+        .join(
+            KnowledgeGraphClaimEvidenceORM,
+            and_(
+                KnowledgeGraphClaimEvidenceORM.workspace_id
+                == KnowledgeGraphClaimORM.workspace_id,
+                KnowledgeGraphClaimEvidenceORM.knowledge_base_id
+                == KnowledgeGraphClaimORM.knowledge_base_id,
+                KnowledgeGraphClaimEvidenceORM.claim_id
+                == KnowledgeGraphClaimORM.id,
+            ),
+        )
+        .join(
+            KnowledgeGraphEntityORM,
+            and_(
+                KnowledgeGraphEntityORM.workspace_id
+                == KnowledgeGraphClaimORM.workspace_id,
+                KnowledgeGraphEntityORM.knowledge_base_id
+                == KnowledgeGraphClaimORM.knowledge_base_id,
+                KnowledgeGraphEntityORM.id
+                == KnowledgeGraphClaimORM.object_entity_id,
+            ),
+        )
+        .where(
+            KnowledgeGraphClaimORM.workspace_id == knowledge_base.workspace_id,
+            KnowledgeGraphClaimORM.knowledge_base_id == knowledge_base.id,
+            KnowledgeGraphClaimORM.status == "active",
+            KnowledgeGraphClaimORM.retired_revision_id.is_(None),
+            KnowledgeGraphClaimORM.source_kind == "document_reference",
+            KnowledgeGraphClaimORM.predicate == "references",
+            KnowledgeGraphClaimEvidenceORM.chunk_id.in_(source_chunk_ids),
+            KnowledgeGraphClaimEvidenceORM.evidence_state == "active",
+            KnowledgeGraphClaimEvidenceORM.retired_revision_id.is_(None),
+            KnowledgeGraphEntityORM.entity_type == "Document",
+            KnowledgeGraphEntityORM.state == "active",
+            KnowledgeGraphEntityORM.retired_revision_id.is_(None),
+        )
+    )
+    positions = {chunk_id: index for index, chunk_id in enumerate(source_chunk_ids)}
+    references: list[KnowledgeDocumentReference] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    for claim_row, evidence_row, target_row in rows.all():
+        properties = claim_row.properties_json or {}
+        anchors = properties.get("evidence_anchors")
+        anchor = (
+            anchors.get(evidence_row.id)
+            if isinstance(anchors, dict)
+            and isinstance(anchors.get(evidence_row.id), dict)
+            else {}
+        )
+        target_document_id = str(
+            (target_row.properties_json or {}).get("document_id")
+            or properties.get("target_document_id")
+            or ""
+        )
+        if not target_document_id:
+            continue
+        parent_values = anchor.get(
+            "target_parent_ids",
+            properties.get("target_parent_ids"),
+        )
+        if isinstance(parent_values, list):
+            target_parent_ids = [
+                str(item) for item in parent_values if isinstance(item, str) and item
+            ]
+        else:
+            target_parent_id = anchor.get(
+                "target_parent_id",
+                properties.get("target_parent_id"),
+            )
+            target_parent_ids = (
+                [target_parent_id]
+                if isinstance(target_parent_id, str) and target_parent_id
+                else []
+            )
+        if not target_parent_ids:
+            target_parent_ids = [None]
+        section_values = anchor.get(
+            "target_sections",
+            properties.get("target_sections"),
+        )
+        target_section = (
+            str(section_values[0])
+            if isinstance(section_values, list) and section_values
+            else str(properties.get("target_section") or "")
+        )
+        label_values = anchor.get(
+            "target_labels",
+            properties.get("target_labels"),
+        )
+        target_label = (
+            str(label_values[0])
+            if isinstance(label_values, list) and label_values
+            else str(properties.get("target_label") or evidence_row.quote)
+        )
+        occurrence_count = anchor.get(
+            "occurrence_count",
+            properties.get("occurrence_count"),
+        )
+        if not isinstance(occurrence_count, int) or isinstance(
+            occurrence_count, bool
+        ):
+            occurrence_count = max(1, claim_row.support_count)
+        for target_parent_id in target_parent_ids:
+            key = (evidence_row.chunk_id, target_document_id, target_parent_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            references.append(
+                KnowledgeDocumentReference(
+                    id=f"{evidence_row.id}:{target_parent_id or ''}",
+                    workspace_id=knowledge_base.workspace_id,
+                    knowledge_base_id=knowledge_base.id,
+                    source_document_id=evidence_row.document_id,
+                    source_chunk_id=evidence_row.chunk_id,
+                    target_document_id=target_document_id,
+                    target_parent_id=target_parent_id,
+                    target_label=target_label,
+                    target_section=target_section,
+                    reference_type=str(properties.get("reference_type") or "text"),
+                    source_ordinal=evidence_row.start_offset,
+                    occurrence_count=max(1, occurrence_count),
+                    created_at=evidence_row.created_at,
+                )
+            )
+    return sorted(
+        references,
+        key=lambda item: (
+            positions.get(item.source_chunk_id, len(positions)),
+            item.source_ordinal,
+            item.id,
+        ),
+    )[:limit]
 
 
 async def list_graph_source_chunks(

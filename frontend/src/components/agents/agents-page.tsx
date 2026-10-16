@@ -148,6 +148,7 @@ export type AgentFormState = {
   description: string
   interactionConfig: AgentInteractionConfig
   modelId: string
+  imageModelId: string
   instructions: string
   knowledgeBaseIds: string[]
   tools: ToolRef[]
@@ -162,6 +163,7 @@ const EMPTY_FORM: AgentFormState = {
   description: "",
   interactionConfig: defaultInteractionConfig(),
   modelId: "",
+  imageModelId: "",
   instructions: "",
   knowledgeBaseIds: [],
   tools: [],
@@ -207,6 +209,7 @@ function formFromAgent(agent: Agent): AgentFormState {
     description: agent.description,
     interactionConfig: structuredClone(agent.interaction_config),
     modelId: agent.model_id,
+    imageModelId: agent.image_model_id ?? "",
     instructions: agent.instructions,
     knowledgeBaseIds: [...agent.knowledge_base_ids],
     tools: (agent.tools ?? []).map((tool) => ({ ...tool })),
@@ -621,6 +624,7 @@ export function isAgentFormDirty(form: AgentFormState, agent: Agent) {
     JSON.stringify(form.interactionConfig) !==
       JSON.stringify(agent.interaction_config) ||
     form.modelId !== agent.model_id ||
+    form.imageModelId !== (agent.image_model_id ?? "") ||
     form.instructions.trim() !== agent.instructions ||
     form.status !== agent.status ||
     (form.appType === "agent" &&
@@ -1392,6 +1396,13 @@ export function AgentsPage({
         description: form.description.trim(),
         interaction_config: interactionConfig,
         model_id: form.modelId,
+        image_model_id:
+          form.imageModelId ||
+          models.find(
+            (model) =>
+              model.model_type === "IMAGE" && model.status === "active"
+          )?.id ||
+          null,
         instructions: form.instructions,
         knowledge_base_ids:
           form.appType === "workflow" ? [] : form.knowledgeBaseIds,

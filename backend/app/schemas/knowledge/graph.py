@@ -240,3 +240,46 @@ class KnowledgeGraphQueryResultResponse(BaseModel):
     visited_nodes: int
     truncated: bool
     limit_reason: str | None = None
+
+
+class KnowledgeLinkGraphNodeResponse(BaseModel):
+    id: str
+    kind: Literal["document", "entity", "unresolved"]
+    document_id: str | None = None
+    label: str
+    filename: str
+    content_type: str | None = None
+    status: str | None = None
+    entity_type: str | None = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+    incoming: int = Field(ge=0)
+    outgoing: int = Field(ge=0)
+    degree: int = Field(ge=0)
+
+
+class KnowledgeLinkGraphEdgeResponse(BaseModel):
+    id: str
+    source: str
+    target: str
+    target_label: str
+    target_sections: list[str] = Field(default_factory=list)
+    resolved: bool
+    count: int = Field(ge=1)
+    predicate: str | None = None
+    source_kind: str | None = None
+    quality_score: float | None = Field(default=None, ge=0, le=1)
+    support_count: int = Field(default=0, ge=0)
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class KnowledgeLinkGraphResponse(BaseModel):
+    revision: str
+    nodes: list[KnowledgeLinkGraphNodeResponse]
+    edges: list[KnowledgeLinkGraphEdgeResponse]
+    document_count: int = Field(ge=0)
+    entity_count: int = Field(default=0, ge=0)
+    unresolved_count: int = Field(ge=0)
+    edge_count: int = Field(ge=0)
+    graph_revision_id: str | None = None
+    source: Literal["evidence_graph", "legacy_references"] = "legacy_references"
+    truncated: bool = False

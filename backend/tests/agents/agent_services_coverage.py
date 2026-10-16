@@ -1469,12 +1469,49 @@ async def exercise_repository_runs(
             ),
         )
         await db.commit()
+        grace = timedelta(seconds=90)
+        # A fresh queued run still has its original message in flight.
+        fresh = await agent_repository.list_recoverable_agent_run_ids(
+            db, now, limit=10, redispatch_after=grace
+        )
+        assert queued_recoverable.id not in fresh
+        assert running_recoverable.id in fresh
+        sweep_at = now + timedelta(minutes=2)
         recoverable = await agent_repository.list_recoverable_agent_run_ids(
-            db, now, limit=10
+            db, sweep_at, limit=10, redispatch_after=grace
         )
         assert queued_recoverable.id in recoverable
         assert running_recoverable.id in recoverable
         assert exhausted.id not in recoverable
+        await db.commit()
+
+        async with get_session_factory()() as fresh_db:
+            queued_before = await agent_repository.get_agent_run_by_id(
+                fresh_db, queued_recoverable.id
+            )
+        await agent_repository.mark_agent_runs_redispatched(
+            db, [queued_recoverable.id, running_recoverable.id], sweep_at
+        )
+        await agent_repository.mark_agent_runs_redispatched(db, [], sweep_at)
+        await db.commit()
+        async with get_session_factory()() as fresh_db:
+            queued_after = await agent_repository.get_agent_run_by_id(
+                fresh_db, queued_recoverable.id
+            )
+        assert queued_before is not None and queued_after is not None
+        assert queued_after.updated_at == queued_before.updated_at
+        assert queued_after.status == queued_before.status
+        # Both runs just got a delivery: no duplicate until the grace passes.
+        repeated = await agent_repository.list_recoverable_agent_run_ids(
+            db, sweep_at + timedelta(seconds=30), limit=10, redispatch_after=grace
+        )
+        assert queued_recoverable.id not in repeated
+        assert running_recoverable.id not in repeated
+        overdue = await agent_repository.list_recoverable_agent_run_ids(
+            db, sweep_at + timedelta(minutes=2), limit=10, redispatch_after=grace
+        )
+        assert queued_recoverable.id in overdue
+        assert running_recoverable.id in overdue
 
         failed_count = await agent_repository.fail_exhausted_agent_runs(db, now)
         assert failed_count == 1

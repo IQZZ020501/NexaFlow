@@ -123,6 +123,9 @@ not trigger unrelated cleanup.
   Session inputs are append-only `agent_run_events` records, with consumed IDs
   in checkpoint; enqueue and successful finalization share the RunState lock.
   Do not bypass the tool ledger or reset frozen budgets when adding input.
+  Loading an authorized Skill with `.py` or `.js` files automatically activates
+  `run_skill_script` only when that Tool is already in the Run's capability
+  catalog; the active loadout persists in the checkpoint.
 - Pure unit suites (no DB, no HTTP, no network) for business rules and
   services with mocked ports/repositories live per feature under
   `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run
@@ -147,6 +150,14 @@ not trigger unrelated cleanup.
   them from the template; keep operator-managed product settings in PostgreSQL.
   Backward-compatible advanced environment overrides may remain supported
   without being copied into every installation.
+- `JWT_SECRET_KEY` and `MODEL_SECRET_KEY` are the deployment keys created once
+  and stored in `platform_secrets`. API and Worker startup resolve them through
+  `infra/security/keyring.py`: a missing row is created from the environment
+  value or a generated value, and an existing row always wins and is never
+  rewritten. `.env.example` deliberately omits both variables, so environment
+  values only seed an empty store and a regenerated or edited `.env` cannot
+  invalidate sessions or orphan stored ciphertext. Never re-derive these keys
+  from anything else, and never log them.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - The build-capable and pull-only Compose topologies both run Alembic through a
@@ -181,14 +192,28 @@ not trigger unrelated cleanup.
   and progress writes must remain in one lease-checked transaction.
 - Root `make dev` is the complete local development entrypoint. Its standard-library
   Python supervisor creates missing private local configuration, syncs dependencies,
-  builds the local PostgreSQL and OpenSandbox images when their inputs change, starts
-  PostgreSQL/Redis/Qdrant and the development OpenSandbox, applies Alembic migrations,
-  then supervises Uvicorn, Celery and Next.js with one shutdown boundary. Use root
-  `make dev-rebuild` to force both local image builds. `cd backend && make dev` remains
-  the API-only entrypoint.
+  builds the local PostgreSQL image and the standalone OpenSandbox execution image
+  when their inputs change, starts PostgreSQL/Redis/Qdrant and the development
+  OpenSandbox control plane, applies Alembic migrations, then supervises Uvicorn,
+  Celery and Next.js with one shutdown boundary. Use root `make dev-rebuild` to
+  force both local image builds. `make sandbox-image` only builds the standalone
+  execution image. `cd backend && make dev` remains the API-only entrypoint.
 - `cd backend && make worker` starts Celery without a local execution broker,
   root requirement, or sandbox dependencies. It requires `OPENSANDBOX_API_KEY`;
   code execution fails closed if the external execution plane is unavailable.
+- `scripts/worker.py --role` selects a worker's queues: `all` (default, local
+  development) serves every queue with the embedded Beat; `background` serves
+  the `celery` queue with the embedded Beat and must stay a single instance;
+  `agents` serves `agents-legacy`/`agents-v2` on a threads pool without Beat,
+  so concurrent runs share one process event loop. Compose runs one `worker`
+  (background) and a horizontally scalable `agent-worker`. Code reached from
+  Agent or Workflow runs must not block that event loop; offload blocking
+  calls with `asyncio.to_thread`.
+- Beat re-publishes a claimable Agent Run only when its last delivery is
+  overdue (`agent_run_states.redispatched_at` plus the lease length), and a
+  delivery that finds another worker holding a live lease ends as
+  `RUN_LEASED` instead of retrying; keep recovery bounded rather than
+  re-publishing every queued run on each sweep.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
@@ -196,19 +221,26 @@ not trigger unrelated cleanup.
   are capped at 5 MiB, stored in PostgreSQL for at most 24 hours, and downloaded
   through scoped signed bearer URLs. Generated PNGs use random UUIDv4 bearer
   URLs instead, limited to image content and the same 24-hour lifetime; older
-  signed PNG URLs remain valid until expiration. Every download response is an
-  attachment with `nosniff`; HTML additionally receives a restrictive CSP.
+  signed PNG URLs remain valid until expiration. A generated image is named
+  after the request instead of a fixed placeholder: the image Tool accepts an
+  optional `filename`, the model names it from the user's own wording, and
+  `domain/artifacts/services.py::artifact_filename_from_label` sanitizes and
+  truncates it — falling back to the prompt wording and then to a fixed default.
+  That name is what the download and the chat surface both show. Every download
+  response is an attachment with `nosniff`; HTML additionally receives a
+  restrictive CSP.
 - Identity email uses the global administrator SMTP settings and trusted site
   URL. Invitation, welcome, and password-change messages are persisted as
   encrypted `email_deliveries` and recovered by Celery Beat; password-reset
   links store only a token hash and expire after 30 minutes.
-- Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, and XLS; PDF parsing
-  uses pypdf to extract existing text layers without OCR. The upload UI and
-  parser accept DOCX, PDF, Markdown, text, common UTF-8 source/configuration
-  files, PPTX, XLSX, XLS, HTML, CSV, JSON, XML, IPYNB, EPUB, ZIP, PNG, JPG,
-  JPEG, and WEBP. Images use the workspace's active `VISION` model; image
-  uploads fail clearly when none is configured. The unified application image
-  does not include Tesseract or OCR language data.
+- Knowledge parsing uses MarkItDown for DOCX, PPTX, XLSX, XLS, HTML, CSV, and
+  ZIP; PDF parsing uses pypdf to extract existing text layers without OCR. The
+  knowledge upload UI and API accept exactly DOCX, MD, MARKDOWN, PDF, TXT,
+  PPTX, XLSX, XLS, HTML, CSV, JSON, XML, and ZIP. Every parsed document,
+  including QA-table imports, persists a canonical UTF-8 Markdown artifact;
+  the document detail page reads that artifact and renders it as Markdown.
+  The unified application image does not include Tesseract or OCR language
+  data.
 - QA-table import is opt-in (`import_mode=qa`) and uses read-only openpyxl for
   XLSX plus the Python CSV module for UTF-8 CSV. It requires question/answer
   headers, ignores document segmentation settings, and indexes question plus
@@ -222,15 +254,32 @@ not trigger unrelated cleanup.
   addresses require `MCP_ALLOW_PRIVATE_NETWORKS=true`. Workspace admins submit
   stdio commands, arguments, working directories, environment values and egress
   domains. These are execution-image paths, never business-host paths. stdio
-  discovery/calls run in ephemeral OpenSandbox executions with only that
+  discovery runs in ephemeral OpenSandbox executions. Calls within a Run reuse
+  a separate `purpose=mcp` host with a stdio-to-Streamable-HTTP bridge, only that
   integration's environment and approved egress; no backend process fallback.
+  The control-plane proxy strips Authorization, so bridges authenticate with
+  `X-NexaFlow-MCP-Token`; bridge credentials stay in worker memory.
   MCP responses preserve content blocks, structured content and metadata.
+  Within a Run, remote/bridged Streamable HTTP sessions are reused per worker process and
+  closed when the Run ends or idles for 60 seconds. Only a call that may have
+  reached the server marks a side-effecting Tool uncertain; connection or
+  start-up failures are confirmed failures, and oversized results are cut to a
+  text prefix rather than failed.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `src/app/` route groups `(auth)`,
   `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for
   published agents and Agent API docs); shared components in `src/components/`,
   providers in `src/contexts/`, trilingual dictionaries in `src/i18n/`, and
   feature API modules in `src/lib/api/`.
+- Agent file cards preview HTML, PDF, DOCX, XLSX, and PPTX in a right-side
+  panel. Keep generated markup and Office renderers in opaque sandboxed iframes;
+  never grant `allow-same-origin`, mount document HTML in the host, or send
+  signed download tokens to the viewer. PDF/Office dependencies load from the
+  public `/file-preview/` asset directory only, with scoped anonymous CORS.
+  `frontend/scripts/build-file-preview.ts` generates that gitignored directory
+  before `bun run dev` and `bun run build`; after viewer-only edits during
+  development, run `bun run build:file-preview`. The application image's
+  existing `public/` copy includes these assets.
 - Every new user-navigable frontend page must have a stable App Router entry
   under `frontend/src/app/`; do not leave navigation-level views only in component
   state. Dialogs and responsive panels remain component states unless they are
@@ -255,16 +304,34 @@ not trigger unrelated cleanup.
   axis on its own variables so two settings cannot silently replace each other.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
   service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
-  rendering, pinned Python/JavaScript Skill scripts and stdio MCP; it adds
+  rendering, pinned Python/JavaScript Skill scripts, bash commands and stdio MCP; it adds
   program/file/output/time limits inside the platform's container/VM boundary.
   The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
   python-pptx, Pillow, the adapted offline open-kimi-ppt PPTD/WASM exporter,
   and the standard library. Business secrets and mounts are
   never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
   authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
-  native TTL cleanup. Effective `dns+nft` default-deny policy is required before
+  native TTL cleanup. `execution_sessions` persists Run guests, staged packages
+  and dependency locks. Python, renderers, Workflow code and Skills share that
+  guest; short holders check Run ownership, fence old workers and stop stale
+  processes before takeover. TTL follows the Run deadline plus 60 seconds;
+  terminal/cancelled Runs close guests and Beat reconciles cleanup and orphans.
+  Bash's trusted guest supervisor remains root solely for UID process cleanup
+  and immutable exports; model commands run as UID 65532. Authorized Skills
+  mount read-only under `/skills/`, logs are bounded to 30 KiB, and generated
+  files stream through the execution port into the shared artifact store.
+  Effective `dns+nft` default-deny policy is required before
   staging code or secrets; private/metadata ranges stay denied. Only stdio MCP
-  may request a subset of deployment-approved public egress domains.
+  and the approved Skill dependency installer may request a subset of
+  deployment-approved public egress domains.
+  `OPENSANDBOX_MAX_SANDBOXES` bounds live sandboxes across workers through
+  Redis slots that expire with each sandbox's native TTL; exhausted capacity
+  raises `ExecutionBusy`, which callers map to `ToolAdapterBusy` so the
+  invocation is requeued rather than failed. `ExecutionNotStarted` means no
+  program ran, so callers may treat it as a confirmed failure.
+  The SDK Redis warm pool defaults off; its total idle size is deducted from
+  host capacity. Public/API consumers can hold at most two guests, including
+  stdio hosts. Resource profiles use provisional sizes pending Kata calibration.
   Fixed `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live under
   `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
   format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
@@ -279,18 +346,19 @@ not trigger unrelated cleanup.
   built-in installer. Installation runs in the Run-private OpenSandbox session,
   with temporary deployment-allowlisted registry egress, Python binary wheels,
   npm lifecycle scripts disabled, bounded storage and a recorded environment
-  lock; Skill uploads cannot supply setup commands or dependency files. Fixed
+  lock; Skill uploads cannot supply setup commands or dependency files.
+  Recorded dependency locks skip installation on ordinary reconnects and are
+  replayed only when the guest is rebuilt. `load_skill` activates an already
+  authorized script runner for Python/JavaScript Skills and returns a safe
+  `/skills/` path when the Run includes bash. Bash is an implicit Agent core
+  capability injected into new Run snapshots, hidden from Tool catalogs,
+  pickers and manual Agent bindings, and always active when authorized in the
+  frozen catalog; console command execution records remain visible. Fixed
   renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
-- `deploy/` holds the Docker Compose topology, the unified application
-  Dockerfile shared by API/worker/frontend containers, the custom PostgreSQL
-  Dockerfile, and Nginx examples. The business Worker drops all capabilities
-  and retains default AppArmor/seccomp plus `no-new-privileges`; there is no
-  Docker socket, execution runtime or sandbox volume in business containers.
-  `deploy/opensandbox/` documents the separate pinned execution plane and
-  generates a private Kata + dns+nft production configuration; ordinary Docker
-  requires an explicit development profile, never an automatic downgrade.
+- `deploy/` holds the Docker Compose topology, the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. Both business Workers (`worker` and `agent-worker`) drop all capabilities and retain default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
+- `deploy/opensandbox/` documents the separate pinned execution plane and generates a private Kata + dns+nft production configuration; ordinary Docker requires an explicit development profile, never an automatic downgrade. `deploy/dockerfiles/sandbox.Dockerfile` builds the execution image independently from the business image.
   Production execution images use immutable digests. Agent runs freeze the
   non-secret image/network fingerprint so retries cannot silently switch it.
   `scripts/setup-hooks.sh` enables the repository Git hooks.
@@ -473,13 +541,13 @@ examples.
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
   knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
   knowledge.knowledge_graph_edge_coverage, knowledge.knowledge_domain_coverage,
-  knowledge.knowledge_api_coverage, tools.tools, tools.unit, identity.identity,
+  knowledge.knowledge_api_coverage, tools.tools, tools.unit, tools.shell_unit, identity.identity,
   identity.enterprise_identity, identity.email, identity.smtp,
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,
   platform.teams, platform.system_governance, platform.resource_folders,
   models.llm, models.unit, infra.infra_unit_coverage, infra.unit, infra.logger,
-  infra.mcp_transports, infra.architecture, execution.unit, agent_skills.unit,
-  agent_skills.api, smoke.test_main). For migration changes,
+  infra.mcp_transports, infra.architecture, execution.unit, execution.sessions, execution.probe_unit,
+  agent_skills.unit, agent_skills.api, smoke.test_main). For migration changes,
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
@@ -492,6 +560,16 @@ examples.
   explicit isolated OpenSandbox test server. Verify effective dns+nft filtering,
   timeout, package isolation and cleanup; production VM isolation must also be
   validated on Linux/Kata, not inferred from a local ordinary-Docker smoke.
+- For the remaining Tools redesign, run
+  `uv run python -m tests.execution.opensandbox_probe --url "$OPENSANDBOX_URL" --image "$OPENSANDBOX_IMAGE"`
+  from `backend/` on an isolated execution host with the control-plane key and
+  `OPENSANDBOX_PROBE_REDIS_URL` in its private environment. The probe verifies
+  actual Docker runtime, reconnect/renew, proxy streaming, SDK shared pool,
+  metadata filtering, filesystem behavior and cleanup. Its explicit
+  `--allow-development` mode does not establish Kata/VM isolation. The user
+  deferred the Kata test environment on 2026-10-14; it no longer gates A–F
+  implementation, but production VM and resource calibration remain pending.
+  See `docs/TOOLS_REDESIGN.md` for verified results and remaining measurements.
 - Run full coverage only for coverage work, release/CI validation, or changes
   broad enough to put a repository gate at risk. Do not claim a percentage
   unless it was measured in the current task. The configured gates and commands

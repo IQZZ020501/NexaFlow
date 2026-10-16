@@ -16,8 +16,10 @@ import {
   listKnowledgeDocumentChunks,
   listKnowledgeDocuments,
   listKnowledgeTasks,
+  loadKnowledgeDocumentMarkdown,
 } from "@/lib/api/knowledge"
 import { ChunkPreviewList } from "@/components/knowledge/chunk-preview-list"
+import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
   documentStatusDotClassName,
   documentStatusLabel,
@@ -32,6 +34,7 @@ import type {
   KnowledgeDocumentChunk,
   KnowledgeTask,
 } from "@/lib/api/knowledge"
+import { ApiError } from "@/lib/api-client"
 import { formatDateTime } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
@@ -95,6 +98,9 @@ function DocumentDetailPageContent({
   const [document, setDocument] = React.useState<KnowledgeDocument | null>(null)
   const [chunks, setChunks] = React.useState<KnowledgeDocumentChunk[]>([])
   const [tasks, setTasks] = React.useState<KnowledgeTask[]>([])
+  const [markdownContent, setMarkdownContent] = React.useState<string | null>(
+    null
+  )
   const [isLoading, setIsLoading] = React.useState(true)
 
   const load = React.useCallback(async () => {
@@ -104,23 +110,39 @@ function DocumentDetailPageContent({
 
     setIsLoading(true)
     try {
-      const [bases, documents, documentChunks, documentTasks] =
-        await Promise.all([
-          listKnowledgeBases(token, selectedWorkspaceId),
-          listKnowledgeDocuments(token, selectedWorkspaceId, knowledgeBaseId),
-          listKnowledgeDocumentChunks(
-            token,
-            selectedWorkspaceId,
-            knowledgeBaseId,
-            documentId
-          ),
-          listKnowledgeTasks(
-            token,
-            selectedWorkspaceId,
-            knowledgeBaseId,
-            documentId
-          ),
-        ])
+      const [
+        bases,
+        documents,
+        documentChunks,
+        documentTasks,
+        documentMarkdown,
+      ] = await Promise.all([
+        listKnowledgeBases(token, selectedWorkspaceId),
+        listKnowledgeDocuments(token, selectedWorkspaceId, knowledgeBaseId),
+        listKnowledgeDocumentChunks(
+          token,
+          selectedWorkspaceId,
+          knowledgeBaseId,
+          documentId
+        ),
+        listKnowledgeTasks(
+          token,
+          selectedWorkspaceId,
+          knowledgeBaseId,
+          documentId
+        ),
+        loadKnowledgeDocumentMarkdown(
+          token,
+          selectedWorkspaceId,
+          knowledgeBaseId,
+          documentId
+        ).catch((error: unknown) => {
+          if (error instanceof ApiError && error.status === 404) {
+            return null
+          }
+          throw error
+        }),
+      ])
       setKnowledgeBase(
         bases.find((base) => base.id === knowledgeBaseId) ?? null
       )
@@ -129,6 +151,7 @@ function DocumentDetailPageContent({
       )
       setChunks(documentChunks)
       setTasks(documentTasks)
+      setMarkdownContent(documentMarkdown)
     } catch (error) {
       notify("error", getErrorMessage(error, t))
     } finally {
@@ -202,6 +225,7 @@ function DocumentDetailPageContent({
     document.status.endsWith("_queued") ||
     document.status === "parsing" ||
     document.status === "indexing"
+  const hasChunkAssets = chunks.some((chunk) => chunk.images.length > 0)
 
   return (
     <main className="min-h-[calc(100svh-6.5rem)] bg-background">
@@ -288,6 +312,13 @@ function DocumentDetailPageContent({
               {document.last_error ?? t("解析失败")}
             </p>
           </div>
+        ) : markdownContent && !hasChunkAssets ? (
+          <section className="overflow-hidden rounded-lg border bg-background">
+            <MarkdownContent
+              content={markdownContent}
+              className="break-words px-5 py-5 text-[15px] leading-7 sm:px-6 sm:py-6"
+            />
+          </section>
         ) : chunks.length ? (
           <ChunkPreviewList
             chunks={chunks}

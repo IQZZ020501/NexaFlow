@@ -3,6 +3,7 @@
 import asyncio
 import base64
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import tests.support  # noqa: F401
@@ -19,7 +20,7 @@ from tests.agents.evaluation import ScriptedModel, answer_message
 from tests.support import activate_admin, auth_headers, create_active_user, test_client
 from tests.support import settings as test_settings
 
-from app.adapters.llm.runtime import ModelCompletion
+from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.application.agents.runs.executor import run_durable_agent_run
 from app.application.agents.runs.memory import _run_messages
 from app.application.agents.runs.service import skill_execution_context
@@ -256,6 +257,239 @@ async def assert_skill_file_reads_and_revocation():
         "call activate_tools with its exact name"
         in mixed_registry.management_tools[0].description
     )
+
+
+async def assert_loading_script_skill_activates_authorized_runner():
+    snapshot = replace(
+        skill(),
+        definition={
+            "instructions": "Execute the bundled script.",
+            "files": {"main.py": base64.b64encode(b"print('ready')").decode()},
+        },
+    )
+    execute = AsyncMock(
+        return_value=AgentToolResult(content="ready", summary="Script completed.")
+    )
+    tools = [
+        create_agent_tool(
+            name="run_skill_script" if number == 0 else f"optional_{number}",
+            description="Authorized capability",
+            parameters={"type": "object"},
+            execute=execute if number == 0 else AsyncMock(),
+            kind="builtin",
+        )
+        for number in range(9)
+    ]
+    extensions = ExtensionRuntime([AgentExtension("script_tools", "1", tuple(tools))])
+    authorize = AsyncMock()
+    registry = CapabilityRegistry(extensions, [snapshot], authorize)
+    assert registry.active_names == []
+    load = registry.management_tools[2]
+    await load.ainvoke({"version_id": "v1"})
+    assert registry.active_names == ["run_skill_script"]
+    authorize.assert_awaited_once_with(snapshot)
+    await load.ainvoke({"version_id": "v1"})
+    assert registry.active_names == ["run_skill_script"]
+    restored = CapabilityRegistry(extensions, [snapshot], authorize)
+    restored.restore(registry.snapshot())
+    assert "run_skill_script" in [tool.name for tool in restored.tools]
+
+    registry = CapabilityRegistry(extensions, [snapshot], authorize)
+    model = ScriptedModel(
+        [
+            call("load_skill", {"version_id": "v1"}, "load"),
+            call("run_skill_script", {}, "run"),
+            answer_message("Done"),
+        ]
+    )
+    result = await run_agent(
+        model,
+        [{"role": "user", "content": "Execute the bundled script."}],
+        registry.tools,
+        session=AgentSession(registry),
+    )
+    assert result.content == "Done"
+    assert "run_skill_script" not in model.bindings[0]
+    assert "run_skill_script" in model.bindings[1]
+    assert result.harness["active_tools"] == ["run_skill_script"]
+    execute.assert_awaited_once()
+
+    bash = create_agent_tool(name="bash", description="Commands", parameters={"type": "object"}, execute=AsyncMock(), kind="builtin")
+    registry = CapabilityRegistry(ExtensionRuntime([AgentExtension("shell", "1", (bash,))]), [snapshot], authorize)
+    loaded = await registry.management_tools[2].ainvoke({"version_id": "v1"})
+    import json
+
+    from app.domain.agent_skills.paths import skill_mount_name
+    content = json.loads(loaded.content)
+    assert content["bash_path"] == f"/skills/{skill_mount_name(snapshot.name, snapshot.version_id)}/"
+    assert "bash_guidance" in content
+
+    instructions_only = replace(snapshot, definition={"files": {"guide.md": ""}})
+    registry = CapabilityRegistry(extensions, [instructions_only])
+    await registry.management_tools[2].ainvoke({"version_id": "v1"})
+    assert registry.active_names == []
+
+    no_runner = ExtensionRuntime([AgentExtension("references", "1", tuple(tools[1:]))])
+    registry = CapabilityRegistry(no_runner, [snapshot])
+    await registry.management_tools[1].ainvoke({"names": []})
+    await registry.management_tools[2].ainvoke({"version_id": "v1"})
+    assert registry.active_names == [] and "run_skill_script" not in registry.catalog
+
+    authorize.side_effect = ValueError("revoked")
+    registry = CapabilityRegistry(extensions, [snapshot], authorize)
+    try:
+        await registry.management_tools[2].ainvoke({"version_id": "v1"})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Skill load bypassed live authorization")
+    assert registry.active_names == [] and registry.loaded_skills == []
+
+
+async def assert_shell_is_always_active():
+    execute = AsyncMock(return_value=AgentToolResult(content="ready", summary="Done"))
+    bash = create_agent_tool(
+        name="bash",
+        description="Run sandbox commands",
+        parameters={"type": "object"},
+        execute=execute,
+        kind="builtin",
+    )
+    optional = tuple(
+        replace_tool_name(bash, f"optional_{number}") for number in range(9)
+    )
+    extensions = ExtensionRuntime([AgentExtension("tools", "1", (*optional, bash))])
+    registry = CapabilityRegistry(extensions, [])
+    assert registry.active_names == ["bash"]
+    await registry.management_tools[1].ainvoke({"names": []})
+    assert registry.active_names == ["bash"]
+    registry.restore({"active_tools": []})
+    assert registry.active_names == ["bash"]
+    model = ScriptedModel([call("bash", {}, "command"), answer_message("Done")])
+    result = await run_agent(
+        model,
+        [{"role": "user", "content": "Run the command"}],
+        registry.tools,
+        session=AgentSession(registry),
+    )
+    assert result.content == "Done"
+    assert "bash" in model.bindings[0] and "optional_0" not in model.bindings[0]
+    execute.assert_awaited_once()
+
+    large_tool = create_agent_tool(
+        name="large_schema",
+        description="x" * 16350,
+        parameters={"type": "object"},
+        execute=execute,
+        kind="builtin",
+    )
+    small_catalog = CapabilityRegistry(
+        ExtensionRuntime([AgentExtension("tools", "1", (large_tool, bash))]), []
+    )
+    assert small_catalog.active_names == ["bash"]
+
+
+def assert_implicit_shell_agent_run():
+    from app.infra.db.repositories.tools import repository as tool_repository
+
+    with (
+        test_client() as client,
+        agent_model_server() as model_base_url,
+        patch(
+            "app.application.agents.runs.service.enqueue_prepared_agent_run",
+            new=AsyncMock(),
+        ),
+    ):
+        token, workspace_id = activate_admin(client)
+        headers = auth_headers(token)
+        model_response = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url),
+        )
+        assert model_response.status_code == 201, model_response.text
+        created = client.post(
+            agents_url(workspace_id),
+            headers=headers,
+            json={"name": "Built-in shell", "model_id": model_response.json()["id"]},
+        )
+        assert created.status_code == 201 and created.json()["tools"] == [], created.text
+        base = agents_url(workspace_id, f"/{created.json()['id']}")
+        prepared = client.post(
+            f"{base}/runs", headers=headers, json={"goal": "Write code"}
+        )
+        assert prepared.status_code == 201, prepared.text
+        run_id = prepared.json()["id"]
+
+        async def check_run():
+            async with get_session_factory()() as db:
+                run = await agent_repository.get_agent_run_by_id(db, run_id)
+                assert run is not None
+                assert [item["function_name"] for item in run.tool_snapshots] == ["bash"]
+                assert (
+                    run.max_runtime_seconds
+                    == test_settings().agent_shell_run_timeout_seconds
+                )
+                assert not await tool_repository.list_application_tool_bindings(
+                    db, workspace_id, run.agent_id
+                )
+
+        asyncio.run(check_run())
+        model = StreamingProvider(
+            [
+                ModelCompletion(
+                    content="",
+                    tool_calls=(
+                        ModelToolCall("command", "bash", '{"command":"printf ready"}'),
+                    ),
+                    finish_reason="tool_calls",
+                ),
+                ModelCompletion(
+                    content="Code ran successfully", tool_calls=(), finish_reason="stop"
+                ),
+            ],
+            [[], []],
+        )
+        platform = SimpleNamespace(
+            execute=AsyncMock(
+                return_value={
+                    "ok": True,
+                    "exit_code": 0,
+                    "stdout": "ready",
+                    "stderr": "",
+                    "artifacts": [],
+                }
+            )
+        )
+        with (
+            patch.object(model, "bind_tools", wraps=model.bind_tools) as bind_tools,
+            patch(
+                "app.application.agents.runs.executor.build_chat_model", return_value=model
+            ),
+            patch(
+                "app.application.tools.runtime.adapters.shell.build_execution_platform",
+                return_value=platform,
+            ),
+        ):
+            outcome = asyncio.run(
+                run_durable_agent_run(run_id, test_settings(), "shell-worker")
+            )
+        assert outcome == "finished"
+        assert "bash" in [tool.name for tool in bind_tools.call_args_list[0].args[0]]
+        platform.execute.assert_awaited_once()
+
+        async def check_ledger():
+            async with get_session_factory()() as db:
+                run = await agent_repository.get_agent_run_by_id(db, run_id)
+                assert run is not None and run.status == "succeeded"
+                assert run.result == "Code ran successfully"
+                calls = await tool_repository.list_tool_invocations(
+                    db, workspace_id, run_id
+                )
+                assert len(calls) == 1 and calls[0].status == "succeeded"
+                assert calls[0].arguments == {"command": "printf ready"}
+
+        asyncio.run(check_ledger())
 
 
 async def assert_follow_up_queue():
@@ -604,6 +838,14 @@ def assert_session_input_api_isolation():
             )
             assert created.status_code == 201, created.text
             run_id = created.json()["id"]
+
+            async def check_implicit_shell():
+                async with get_session_factory()() as db:
+                    run = await agent_repository.get_agent_run_by_id(db, run_id)
+                    assert run is not None
+                    assert [item["function_name"] for item in run.tool_snapshots] == ["bash"]
+
+            asyncio.run(check_implicit_shell())
             url = f"{base}/runs/{run_id}/inputs"
             payload = {
                 "input_id": "input1",
@@ -691,6 +933,9 @@ def assert_session_input_api_isolation():
 def main():
     asyncio.run(assert_capabilities_and_lazy_skills())
     asyncio.run(assert_skill_file_reads_and_revocation())
+    asyncio.run(assert_loading_script_skill_activates_authorized_runner())
+    asyncio.run(assert_shell_is_always_active())
+    assert_implicit_shell_agent_run()
     asyncio.run(assert_follow_up_queue())
     asyncio.run(assert_context_compaction_and_hooks())
     asyncio.run(assert_durable_input_finalization())

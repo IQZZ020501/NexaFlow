@@ -163,7 +163,8 @@ const PROVIDER_BRAND_ICONS: Record<string, ProviderBrandIcon> = {
   model_gemini_provider: { Render: Gemini, Color: Gemini.Color },
   model_kimi_provider: { Render: Moonshot, className: "text-[#007aff]" },
   model_ollama_provider: { Render: Ollama, className: "text-[#7c3aed]" },
-  model_openai_provider: { Render: OpenAI, className: "text-[#10a37f]" },
+  // OpenAI's official mark is monochrome; the frame keeps a white surface.
+  model_openai_provider: { Render: OpenAI, className: "text-black" },
   model_tencent_cloud_provider: {
     Render: TencentCloud,
     Color: TencentCloud.Color,
@@ -1289,7 +1290,7 @@ function ModelDialog({
           <DialogDescription>
             {form.model_type === "IMAGE"
               ? t(
-                  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。请保持此工作空间只有一个启用的生图模型。"
+                  "保存生图模型不会发起付费测试；Agent 首次调用时验证连接。Agent 未指定生图模型时，工作空间需要保持恰好一个启用的生图模型。"
                 )
               : t("选择供应商和基础模型，填写连接参数；保存前会测试模型调用。")}
           </DialogDescription>
@@ -1493,7 +1494,9 @@ function ModelDialog({
               })
             )}
 
-            {form.model_type === "LLM" || form.model_type === "VISION" ? (
+            {form.model_type === "LLM" ||
+            form.model_type === "VISION" ||
+            form.model_type === "IMAGE" ? (
               <Field>
                 <FieldLabel htmlFor="model-request-params">
                   {t("额外请求参数")}

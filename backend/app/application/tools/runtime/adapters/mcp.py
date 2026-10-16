@@ -12,13 +12,15 @@ from app.application.tools.runtime.adapters._common import (  # noqa: F401
     _redirect_legacy_artifact_path,
 )
 from app.application.tools.runtime.contracts import (
+    ToolAdapterBusy,
     ToolInvocationContext,
     ToolRuntimeResult,
 )
 from app.domain.tools.mcp.service import mcp_server_connection
+from app.domain.tools.runtime import TOOL_UNCERTAIN_EFFECTS
 from app.entities.tools import McpServer, ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
-from app.ports.mcp import McpClientError, call_mcp_tool
+from app.ports.mcp import McpClientError, McpServerBusy, call_mcp_tool
 
 
 class McpToolAdapter:
@@ -45,14 +47,17 @@ class McpToolAdapter:
                 arguments,
                 idempotency_key=context.idempotency_key,
             )
-        except McpClientError:
-            uncertain = snapshot.effect in {"external_write", "unknown"}
+        except McpServerBusy as exc:
+            raise ToolAdapterBusy("MCP server host is busy.") from exc
+        except McpClientError as exc:
+            uncertain = exc.request_sent and snapshot.effect in TOOL_UNCERTAIN_EFFECTS
+            message = str(exc)[:1000] or "MCP Tool request failed."
             return ToolRuntimeResult(
                 ok=False,
                 data=None,
                 summary="MCP Tool request failed.",
                 error_code="mcp_request_failed",
-                error_message="MCP Tool request failed.",
+                error_message=message,
                 outcome="uncertain" if uncertain else "confirmed",
                 usage={},
             )

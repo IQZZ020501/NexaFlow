@@ -80,7 +80,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/knowledge/chunk-preview-list.tsx` — 分段预览列表（智能模式按 Parent 分组，高级模式平铺，高亮同 Parent 相邻重叠文本）
 - `frontend/src/components/knowledge/knowledge-hit-test.tsx` — 命中测试与评测用例入口
 - `frontend/src/components/knowledge/knowledge-evaluation.tsx` — 检索评测用例/运行/指标
-- `frontend/src/components/knowledge/knowledge-graph.tsx`、`knowledge-graph-canvas.tsx` — 证据图谱视图与画布
+- `frontend/src/components/knowledge/knowledge-link-graph.tsx`、`knowledge-graph-canvas.tsx`、`knowledge-graph.worker.ts` — Markdown 文档关系图谱、Local Graph 过滤、Worker 力导向布局与 PixiJS WebGL 画布；`knowledge-graph.tsx` 与 `knowledge-evidence-graph-canvas.tsx` 保留 Evidence Graph 管理/检索界面实现，但知识库主图谱入口使用文档链接图
 - `frontend/src/components/knowledge/markdown-content.tsx` — react-markdown + GFM 渲染；`markdown-code-block.tsx` 代码高亮
 - `frontend/src/components/knowledge/document-file-icon.tsx` — 文档类型图标
 - `frontend/src/components/knowledge/status-badges.tsx` — 状态/权限徽章

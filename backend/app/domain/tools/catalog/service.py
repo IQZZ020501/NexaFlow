@@ -1,7 +1,7 @@
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4, uuid5
@@ -80,6 +80,7 @@ BUILTIN_SKILL_DEFINITIONS = (
 )
 
 INTERNAL_BUILTIN_FUNCTION_NAMES = (
+    "bash",
     "create_artifact",
     "inline_python",
     "install_skill_dependencies",
@@ -1641,6 +1642,29 @@ def build_skill_script_tool(
     )
 
 
+def build_shell_tool(workspace_id: str, created_at: datetime | None = None) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    tool, version, policy = build_skill_script_tool(workspace_id, created_at)
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:bash")
+    description = (
+        "Run a bash command in this Run's persistent private workspace. Network is denied. "
+        "Read authorized Skills under /skills/ and write deliverables to /workspace/outputs/. "
+        "Files and installed Skill packages persist between calls; background processes are stopped after each command. "
+        "Exit status and timeouts are returned as results. Output is limited to 30 KiB."
+    )
+    schema = {"type": "object", "properties": {
+        "command": {"type": "string", "minLength": 1, "maxLength": 32768},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300, "default": 60},
+    }, "required": ["command"], "additionalProperties": False}
+    spec = {"builtin": "shell"}
+    digest = canonical_definition_hash({"name": "bash", "description": description, "input_schema": schema, "output_schema": None, "execution_spec": spec})
+    version_id = stable_catalog_id(f"version:{tool_id}:{digest}")
+    return (
+        replace(tool, id=tool_id, stable_key="bash", function_name="bash", current_version_id=version_id),
+        replace(version, id=version_id, tool_id=tool_id, display_name="Command line", description=description, input_schema=schema, execution_spec=spec, definition_hash=digest),
+        replace(policy, id=stable_catalog_id(f"policy:{tool_id}"), tool_id=tool_id, tool_version_id=version_id, definition_hash=digest),
+    )
+
+
 def build_skill_dependency_installer_tool(
     workspace_id: str, created_at: datetime | None = None
 ) -> tuple[Tool, ToolVersion, ToolPolicy]:
@@ -1911,20 +1935,39 @@ def build_image_generation_tool(
     timestamp = created_at or utc_now()
     tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:generate_image")
     description = (
-        "Generate one PNG image from a text prompt using the workspace's single "
-        "active OpenAI-compatible IMAGE model. Use this for requested artwork or illustrations, "
-        "not for drawing charts or editing uploaded images. A user must approve each "
-        "paid generation. The resulting image can be previewed and downloaded for "
-        "24 hours; include its filename and download link in the response."
+        "Generate one PNG image from a text prompt using the image model selected for "
+        "this Agent, or the workspace's single active OpenAI-compatible IMAGE model when "
+        "the Agent selects none. Use this for requested artwork or illustrations, not "
+        "for drawing charts or editing uploaded images. A user must approve each paid "
+        "generation. The resulting image can be previewed and downloaded for 24 hours; "
+        "include its filename and download link in the response."
     )
     input_schema = {
         "type": "object",
         "properties": {
             "prompt": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "filename": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": (
+                    "Short file name for this image, without extension: name it after the "
+                    "user's own wording in their language, at most 20 characters, and never "
+                    "copy the expanded prompt. Defaults to the request wording."
+                ),
+            },
             "size": {
                 "type": "string",
                 "enum": ["square", "landscape", "portrait"],
                 "description": "Image orientation; defaults to square.",
+            },
+            "resolution": {
+                "type": "string",
+                "enum": ["1K", "2K", "4K"],
+                "description": (
+                    "Output resolution tier. Use 2K or 4K only when the configured "
+                    "image provider supports it; defaults to 1K."
+                ),
             },
         },
         "required": ["prompt"],
@@ -2088,6 +2131,7 @@ async def ensure_workspace_system_catalog(
     await ensure_tool(catalog.tool, catalog.version, catalog.policy)
     await ensure_tool(*build_inline_python_tool(workspace_id))
     await ensure_tool(*build_skill_script_tool(workspace_id))
+    await ensure_tool(*build_shell_tool(workspace_id))
     await ensure_tool(*build_skill_dependency_installer_tool(workspace_id))
     await ensure_tool(*build_image_generation_tool(workspace_id))
     for skill_name, *_ in BUILTIN_SKILL_DEFINITIONS:

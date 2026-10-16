@@ -1142,7 +1142,11 @@ describe("lib/api/knowledge", () => {
   })
 
   test("downloads documents with the auth header and a blob", async () => {
-    const calls: Array<{ url: string; auth: string | null }> = []
+    const calls: Array<{
+      url: string
+      auth: string | null
+      credentials: RequestCredentials | undefined
+    }> = []
     const anchorPrototype = HTMLAnchorElement.prototype
     const originalClick = anchorPrototype.click
     const clicked: string[] = []
@@ -1152,7 +1156,11 @@ describe("lib/api/knowledge", () => {
     try {
       stubFetch((url, init) => {
         const headers = new Headers(init?.headers)
-        calls.push({ url, auth: headers.get("Authorization") })
+        calls.push({
+          url,
+          auth: headers.get("Authorization"),
+          credentials: init?.credentials,
+        })
         return new Response(new Blob(["content"]), { status: 200 })
       })
 
@@ -1167,6 +1175,7 @@ describe("lib/api/knowledge", () => {
         "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/download"
       )
       expect(calls[0].auth).toBe("Bearer tok")
+      expect(calls[0].credentials).toBe("include")
       expect(clicked).toHaveLength(1)
       expect(clicked[0]).toMatch(/^blob:/)
     } finally {
@@ -1176,7 +1185,12 @@ describe("lib/api/knowledge", () => {
 
   test("rejects downloads with a non-ok response", async () => {
     stubFetch(
-      () => new Response("nope", { status: 500, statusText: "Server Error" })
+      () =>
+        new Response(JSON.stringify({ detail: "Download failed." }), {
+          status: 500,
+          statusText: "Server Error",
+          headers: { "Content-Type": "application/json" },
+        })
     )
     await expect(
       knowledgeApi.downloadKnowledgeDocument(
@@ -1186,7 +1200,7 @@ describe("lib/api/knowledge", () => {
         "doc-1",
         "a.txt"
       )
-    ).rejects.toThrow("Server Error")
+    ).rejects.toThrow("Download failed.")
   })
 
   test("loads document chunks across pages", async () => {
@@ -1215,6 +1229,29 @@ describe("lib/api/knowledge", () => {
       "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/chunks?limit=200&offset=0",
       "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/chunks?limit=200&offset=200",
     ])
+  })
+
+  test("loads the canonical document Markdown", async () => {
+    const calls: Array<{ url: string; auth: string | null }> = []
+    stubFetch((url, init) => {
+      calls.push({
+        url,
+        auth: new Headers(init?.headers).get("Authorization"),
+      })
+      return new Response("# Guide", { status: 200 })
+    })
+
+    const content = await knowledgeApi.loadKnowledgeDocumentMarkdown(
+      "tok",
+      "ws-1",
+      "kb-1",
+      "doc-1"
+    )
+    expect(calls[0].url).toBe(
+      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/documents/doc-1/content"
+    )
+    expect(calls[0].auth).toBe("Bearer tok")
+    expect(content).toBe("# Guide")
   })
 
   test("loads knowledge assets as blobs", async () => {

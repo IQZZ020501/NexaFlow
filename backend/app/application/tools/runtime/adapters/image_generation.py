@@ -11,7 +11,10 @@ from app.application.tools.runtime.contracts import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.domain.artifacts.services import MAX_ARTIFACT_BYTES
+from app.domain.artifacts.services import (
+    MAX_ARTIFACT_BYTES,
+    artifact_filename_from_label,
+)
 from app.domain.models.registered import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
@@ -40,15 +43,21 @@ def _validate_image_model(model: RegisteredModel, workspace_id: str) -> None:
 async def build_image_model_resource_snapshot(
     db: AsyncSession,
     workspace_id: str,
+    image_model_id: str | None = None,
 ) -> dict[str, object]:
-    models = await model_repository.list_active_image_models(db, workspace_id)
-    if not models:
-        raise ValueError(
-            "Configure an active OpenAI-compatible image model in this workspace first."
-        )
-    if len(models) != 1:
-        raise ValueError("Keep exactly one image model active in this workspace.")
-    model = models[0]
+    if image_model_id:
+        model = await model_repository.get_registered_model_by_id(db, image_model_id)
+        if model is None:
+            raise ValueError("The selected image model is no longer available.")
+    else:
+        models = await model_repository.list_active_image_models(db, workspace_id)
+        if not models:
+            raise ValueError(
+                "Configure an active OpenAI-compatible image model in this workspace first."
+            )
+        if len(models) != 1:
+            raise ValueError("Keep exactly one image model active in this workspace.")
+        model = models[0]
     _validate_image_model(model, workspace_id)
     return {"image_model": build_model_runtime_snapshot(model)}
 
@@ -81,10 +90,30 @@ async def generate_image_artifact(
     size = arguments.get("size", "square")
     if size not in {"square", "landscape", "portrait"}:
         raise ValueError("Image size is invalid.")
-    content = await generate_image(settings, model, prompt, size)
+    resolution = arguments.get("resolution", "1K")
+    if resolution not in {"1K", "2K", "4K"}:
+        raise ValueError("Image resolution is invalid.")
+    content = await generate_image(settings, model, prompt, size, resolution)
     if not content or len(content) > MAX_ARTIFACT_BYTES:
         raise ModelProviderError("Generated image exceeds the 5 MiB file limit.")
+    # Name the artifact after the user's request instead of a fixed placeholder,
+    # so the download, the preview and the answer all describe the picture. The
+    # model may name it explicitly from the user's own wording; an unusable name
+    # falls back to the prompt, and the builder sanitizes and truncates both.
+    requested_name = arguments.get("filename")
+    candidates = (
+        (requested_name.strip(), prompt)
+        if isinstance(requested_name, str) and requested_name.strip()
+        else (prompt,)
+    )
     filename = "generated-image.png"
+    for candidate in candidates:
+        derived = artifact_filename_from_label(
+            candidate, "png", max_chars=32, fallback=""
+        )
+        if derived:
+            filename = derived
+            break
     async with get_session_factory()() as db:
         link = await create_generated_artifact(
             db,

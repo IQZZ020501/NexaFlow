@@ -127,6 +127,10 @@ def test_image_generation_is_a_bounded_approval_backed_builtin() -> None:
     validate_tool_arguments(
         snapshot, {"prompt": "A watercolor mountain", "size": "square"}
     )
+    validate_tool_arguments(
+        snapshot,
+        {"prompt": "A watercolor mountain", "size": "landscape", "resolution": "4K"},
+    )
     for arguments in ({"prompt": ""}, {"prompt": "hello", "size": "gigantic"}):
         try:
             validate_tool_arguments(snapshot, arguments)
@@ -265,7 +269,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
         assert (
             asyncio.run(
                 image_adapter.generate_registered_image(
-                    model, settings, "A mountain", "landscape"
+                    model, settings, "A mountain", "landscape", "2K"
                 )
             )
             == png
@@ -273,7 +277,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
         images.generate.assert_awaited_once_with(
             model="gpt-image-1",
             prompt="A mountain",
-            size="1536x1024",
+            size="3072x2048",
             output_format="png",
             n=1,
         )
@@ -363,16 +367,16 @@ def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
     ):
         result = asyncio.run(
             image_generation.generate_image_artifact(
-                SimpleNamespace(), {"prompt": "  A mountain  "}, context
+                SimpleNamespace(), {"prompt": "  A mountain at dawn。第二句  "}, context
             )
         )
         get_model.assert_awaited_once_with(db, "image-model-1")
         provider.assert_awaited_once_with(
-            SimpleNamespace(), model, "A mountain", "square"
+            SimpleNamespace(), model, "A mountain at dawn。第二句", "square", "1K"
         )
         assert store.await_args.kwargs["workspace_id"] == "workspace-1"
         assert store.await_args.kwargs["idempotency_key"] == "image-key"
-        assert store.await_args.kwargs["filename"] == "generated-image.png"
+        assert store.await_args.kwargs["filename"] == "A mountain at dawn.png"
         assert result.data["preview_url"] == "/api/v1/artifacts/signed/preview"
         assert result.ok is True
 
@@ -407,6 +411,258 @@ def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
         else:
             raise AssertionError("Ambiguous image models were accepted.")
         provider.assert_awaited_once()
+
+
+def test_image_provider_updates_configured_resolution_extension() -> None:
+    from app.adapters.llm import image as image_adapter
+
+    png = image_adapter.PNG_SIGNATURE + b"test-image"
+    model = SimpleNamespace(
+        provider="model_custom_provider",
+        model_name="custom-image",
+        meta={
+            "request_params": {
+                "quality": "high",
+                "extra_body": {"image_size": "1K", "aspect_ratio": "16:9"},
+            }
+        },
+    )
+    settings = SimpleNamespace(model_request_timeout_seconds=60)
+    generated = SimpleNamespace(
+        data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
+    )
+    images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+
+    class FakeClient:
+        def __init__(self, **_options):
+            self.images = images
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    with (
+        patch.object(
+            image_adapter,
+            "_registered_model_credentials",
+            return_value={
+                "api_key": "test-key",
+                "api_base": "https://images.example.test/v1",
+            },
+        ),
+        patch.object(image_adapter, "AsyncOpenAI", FakeClient),
+    ):
+        assert (
+            asyncio.run(
+                image_adapter.generate_registered_image(
+                    model, settings, "A mountain", "square", "4K"
+                )
+            )
+            == png
+        )
+
+    images.generate.assert_awaited_once_with(
+        model="custom-image",
+        prompt="A mountain",
+        size="4096x4096",
+        quality="high",
+        extra_body={"image_size": "4K", "aspect_ratio": "16:9"},
+        response_format="b64_json",
+        n=1,
+    )
+
+
+def test_image_tool_honours_the_selected_model() -> None:
+    from app.application.agents.runs.snapshots import build_model_runtime_snapshot
+    from app.application.tools.runtime.adapters import image_generation
+
+    def image_model(**overrides) -> SimpleNamespace:
+        return SimpleNamespace(
+            **{
+                "id": "image-model-2",
+                "workspace_id": "workspace-1",
+                "provider": "model_openai_provider",
+                "provider_type": "openai_compatible",
+                "model_type": "IMAGE",
+                "model_name": "seedream-3",
+                "api_base": "https://api.openai.com/v1",
+                "credential_config": {"api_base": "https://api.openai.com/v1"},
+                "api_key_updated_at": None,
+                "status": "active",
+                "meta": {},
+                **overrides,
+            }
+        )
+
+    db = SimpleNamespace()
+    selected = image_model()
+    listing = AsyncMock(return_value=[selected])
+    lookup = AsyncMock(return_value=selected)
+    with (
+        patch.object(
+            image_generation.model_repository,
+            "list_active_image_models",
+            new=listing,
+        ),
+        patch.object(
+            image_generation.model_repository,
+            "get_registered_model_by_id",
+            new=lookup,
+        ),
+    ):
+        snapshot = asyncio.run(
+            image_generation.build_image_model_resource_snapshot(
+                db,
+                "workspace-1",
+                selected.id,
+            )
+        )
+        assert snapshot == {"image_model": build_model_runtime_snapshot(selected)}
+        lookup.assert_awaited_once_with(db, "image-model-2")
+        # A selected model is never resolved through the workspace fallback.
+        listing.assert_not_awaited()
+
+        # Selections that can no longer be used fail closed.
+        for model, fragment in (
+            (None, "no longer available"),
+            (image_model(workspace_id="workspace-2"), "no longer active"),
+            (image_model(status="disabled"), "no longer active"),
+            (image_model(model_type="LLM"), "no longer active"),
+        ):
+            lookup.reset_mock(return_value=True)
+            lookup.return_value = model
+            try:
+                asyncio.run(
+                    image_generation.build_image_model_resource_snapshot(
+                        db,
+                        "workspace-1",
+                        "image-model-2",
+                    )
+                )
+            except ValueError as exc:
+                assert fragment in str(exc)
+            else:
+                raise AssertionError("An unusable image model selection was accepted.")
+
+
+def test_artifact_filename_follows_the_request() -> None:
+    from app.domain.artifacts.services import artifact_filename_from_label
+
+    assert (
+        artifact_filename_from_label("夏日海边   白衣少女", "png")
+        == "夏日海边 白衣少女.png"
+    )
+    # Reserved characters and control characters become single spaces.
+    assert artifact_filename_from_label('报 表<>"|* 名', "png") == "报 表 名.png"
+    assert artifact_filename_from_label("a\x01b\tc", "png") == "a b c.png"
+    assert artifact_filename_from_label("a\nb", "png") == "a.png"
+    # Path separators cannot escape into a directory or a fake extension.
+    assert artifact_filename_from_label("../../etc/passwd", "png") == "generated-image.png"
+    assert artifact_filename_from_label("etc/passwd", "png") == "etc passwd.png"
+    assert artifact_filename_from_label("name.pdf", "png") == "name.png"
+    assert artifact_filename_from_label("time: 08:30", "png") == "08 30.png"
+    # A caption stops at its first clause, so an instruction prefix does not
+    # become part of the filename.
+    assert (
+        artifact_filename_from_label("画一张：一位年轻女孩站在夏日海边，身穿白色连衣裙", "png")
+        == "一位年轻女孩站在夏日海边.png"
+    )
+    assert (
+        artifact_filename_from_label("A livestream studio, wide shot", "png")
+        == "A livestream studio.png"
+    )
+    # The label is truncated, and an unusable label falls back to the default.
+    assert artifact_filename_from_label("x" * 100, "png", max_chars=10) == "xxxxxxxxxx.png"
+    assert (
+        artifact_filename_from_label("A modern studio at dawn", "png", max_chars=12)
+        == "A modern.png"
+    )
+    assert artifact_filename_from_label("...", "png") == "generated-image.png"
+    assert artifact_filename_from_label("", "png") == "generated-image.png"
+
+
+def test_image_tool_names_the_image_from_the_model_or_the_prompt() -> None:
+    from app.application.agents.runs.snapshots import build_model_runtime_snapshot
+    from app.application.tools.runtime.adapters import image_generation
+    from app.application.tools.runtime.contracts import ToolInvocationContext
+
+    model = SimpleNamespace(
+        id="image-model-1",
+        workspace_id="workspace-1",
+        provider="model_openai_provider",
+        provider_type="openai_compatible",
+        model_type="IMAGE",
+        model_name="gpt-image-1",
+        api_base="https://api.openai.com/v1",
+        credential_config={"api_base": "https://api.openai.com/v1"},
+        api_key_updated_at=None,
+        status="active",
+        meta={},
+    )
+    context = ToolInvocationContext(
+        workspace_id="workspace-1",
+        origin="agent",
+        root_run_id="run-1",
+        run_id="run-1",
+        invocation_id="call-1",
+        execution_user_id="user-1",
+        access_source="console",
+        deadline_at=datetime.now(UTC),
+        idempotency_key="image-key",
+        resource_snapshot={"image_model": build_model_runtime_snapshot(model)},
+    )
+    db = SimpleNamespace(commit=AsyncMock())
+
+    class Session:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, *_args):
+            return None
+
+    link = SimpleNamespace(
+        artifact_id="83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+        format="png",
+        filename="",
+        media_type="image/png",
+        download_url="/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e",
+        expires_at=datetime.now(UTC),
+        size_bytes=12,
+    )
+    store = AsyncMock(return_value=link)
+    with (
+        patch.object(image_generation, "get_session_factory", return_value=Session),
+        patch.object(
+            image_generation.model_repository,
+            "get_registered_model_by_id",
+            new=AsyncMock(return_value=model),
+        ),
+        patch.object(
+            image_generation, "generate_image", new=AsyncMock(return_value=b"valid png")
+        ),
+        patch.object(image_generation, "create_generated_artifact", new=store),
+    ):
+        # The model names the file from the user's own wording when it can.
+        for arguments, expected in (
+            (
+                {"prompt": "细节极长的扩写提示词，包含大量描述与补充说明", "filename": "夏日海边白衣少女"},
+                "夏日海边白衣少女.png",
+            ),
+            # An unusable name falls back to the request wording instead of failing.
+            ({"prompt": "A mountain at dawn。第二句", "filename": "///"}, "A mountain at dawn.png"),
+            # Older pinned Tool versions send no name at all.
+            ({"prompt": "A mountain at dawn。第二句"}, "A mountain at dawn.png"),
+        ):
+            store.reset_mock()
+            asyncio.run(
+                image_generation.generate_image_artifact(
+                    SimpleNamespace(), arguments, context
+                )
+            )
+            assert store.await_args.kwargs["filename"] == expected
+            assert store.await_args.kwargs["artifact_format"] == "png"
 
 
 def test_tool_ref_schema_requires_canonical_ids() -> None:
@@ -933,6 +1189,73 @@ def test_normalize_mcp_url() -> None:
         raise AssertionError(f"Invalid MCP URL accepted: {invalid}")
 
 
+def test_mcp_adapter_marks_only_sent_writes_uncertain() -> None:
+    from tests.support import settings
+
+    from app.application.tools.runtime.adapters import mcp as mcp_adapter
+    from app.application.tools.runtime.contracts import ToolAdapterBusy
+    from app.ports.mcp import McpClientError, McpServerBusy
+
+    adapter = mcp_adapter.McpToolAdapter(settings(), SimpleNamespace())
+
+    async def invoke(failure, effect):
+        snapshot = SimpleNamespace(effect=effect, execution_spec={"tool_name": "write"})
+        with (
+            patch.object(mcp_adapter, "mcp_server_connection"),
+            patch.object(mcp_adapter, "call_mcp_tool", AsyncMock(side_effect=failure)),
+        ):
+            return await adapter.invoke(
+                snapshot, {}, SimpleNamespace(idempotency_key="idem")
+            )
+
+    sent = asyncio.run(
+        invoke(McpClientError("MCP server request failed."), "external_write")
+    )
+    assert sent.outcome == "uncertain"
+    assert sent.error_message == "MCP server request failed."
+    unsent = asyncio.run(
+        invoke(
+            McpClientError(
+                "Private MCP server addresses are not allowed.", request_sent=False
+            ),
+            "external_write",
+        )
+    )
+    assert unsent.outcome == "confirmed" and "Private" in unsent.error_message
+    assert asyncio.run(
+        invoke(McpClientError("MCP server request failed."), "external_read")
+    ).outcome == "confirmed"
+    try:
+        asyncio.run(invoke(McpServerBusy("busy"), "external_write"))
+    except ToolAdapterBusy:
+        pass
+    else:
+        raise AssertionError("A busy MCP host was reported as a Tool failure")
+
+
+def test_skill_runtime_capacity_requeues_instead_of_failing() -> None:
+    from tests.support import settings
+
+    from app.application.agent_skills import dependencies, scripts
+    from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
+    from app.application.tools.runtime.contracts import ToolAdapterBusy
+    from app.ports.execution import ExecutionBusy
+
+    adapter = BuiltinToolAdapter(settings())
+    for module, function, builtin in (
+        (scripts, "execute_skill_script", "skill_script"),
+        (dependencies, "execute_skill_dependency_install", "skill_dependency_install"),
+    ):
+        snapshot = SimpleNamespace(execution_spec={"builtin": builtin})
+        with patch.object(module, function, AsyncMock(side_effect=ExecutionBusy("full"))):
+            try:
+                asyncio.run(adapter.invoke(snapshot, {}, SimpleNamespace()))
+            except ToolAdapterBusy:
+                pass
+            else:
+                raise AssertionError("Exhausted Skill capacity failed the Tool call")
+
+
 def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_summary_projects_effective_public_access_and_mcp_policy()
@@ -940,6 +1263,9 @@ def main() -> None:
     test_image_tool_queue_freezes_its_model_configuration()
     test_image_provider_decodes_only_embedded_png()
     test_image_tool_scopes_model_and_stores_one_artifact()
+    test_image_tool_honours_the_selected_model()
+    test_artifact_filename_follows_the_request()
+    test_image_tool_names_the_image_from_the_model_or_the_prompt()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_grant_rules()
@@ -952,6 +1278,8 @@ def main() -> None:
     test_documents_skill_formal_legal_contract_is_versioned()
     test_pptx_skill_exposes_pptd_design_animation_and_media_contract()
     test_normalize_mcp_url()
+    test_mcp_adapter_marks_only_sent_writes_uncertain()
+    test_skill_runtime_capacity_requeues_instead_of_failing()
     print("TOOLS_UNIT_OK")
 
 

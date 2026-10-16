@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 
 import { FilterDropdown } from "@/components/app/filter-dropdown"
-import { KnowledgeGraphCanvas } from "@/components/knowledge/knowledge-graph-canvas"
+import { KnowledgeGraphCanvas } from "@/components/knowledge/knowledge-evidence-graph-canvas"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"

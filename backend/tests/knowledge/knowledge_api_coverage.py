@@ -820,6 +820,18 @@ def exercise_direct_endpoint_calls(
                 )
                 assert downloaded.path.is_file()
 
+                markdown = (
+                    await knowledge_lifecycle_api.read_workspace_knowledge_document_markdown(
+                        knowledge_base_id,
+                        document_id,
+                        alice_ctx,
+                        settings,
+                        db,
+                    )
+                )
+                assert markdown.path.is_file()
+                assert markdown.media_type == "text/markdown; charset=utf-8"
+
                 # GET /{kb}/documents/{id}/download — missing file -> 404.
                 try:
                     await knowledge_lifecycle_api.download_workspace_knowledge_base_document(
@@ -833,6 +845,19 @@ def exercise_direct_endpoint_calls(
                     assert exc.status_code == 404
                 else:
                     raise AssertionError("Download of a missing file was allowed.")
+
+                try:
+                    await knowledge_lifecycle_api.read_workspace_knowledge_document_markdown(
+                        knowledge_base_id,
+                        missing_document_id,
+                        alice_ctx,
+                        settings,
+                        db,
+                    )
+                except HTTPException as exc:
+                    assert exc.status_code == 404
+                else:
+                    raise AssertionError("Missing document Markdown was allowed.")
 
                 # GET /{kb}/documents/{id}/assets/{asset_id}.
                 asset_response = (
@@ -1484,7 +1509,7 @@ def test_embedding_pipeline_edge_paths() -> None:
         raise AssertionError("Missing document file was accepted.")
 
     # extract_document where the converter raises.
-    missing_convert_path = Path("/tmp/knowledge-pipeline-convert-fail.txt")
+    missing_convert_path = Path("/tmp/knowledge-pipeline-convert-fail.html")
     missing_convert_path.write_bytes(b"content")
     original_converter = pipeline.markitdown_converter
     pipeline.markitdown_converter = lambda: SimpleNamespace(
@@ -1495,8 +1520,8 @@ def test_embedding_pipeline_edge_paths() -> None:
     try:
         try:
             pipeline.extract_document(
-                "convert-fail.txt",
-                "text/plain",
+                "convert-fail.html",
+                "text/html",
                 missing_convert_path,
             )
         except pipeline.KnowledgePipelineError as exc:
@@ -1508,7 +1533,7 @@ def test_embedding_pipeline_edge_paths() -> None:
         missing_convert_path.unlink(missing_ok=True)
 
     # extract_document with no extractable text (converter returns whitespace).
-    blank_path = Path("/tmp/knowledge-pipeline-blank.txt")
+    blank_path = Path("/tmp/knowledge-pipeline-blank.html")
     blank_path.write_bytes(b"content")
     original_converter = pipeline.markitdown_converter
     pipeline.markitdown_converter = lambda: SimpleNamespace(
@@ -1518,7 +1543,7 @@ def test_embedding_pipeline_edge_paths() -> None:
     )
     try:
         try:
-            pipeline.extract_document("blank.txt", "text/plain", blank_path)
+            pipeline.extract_document("blank.html", "text/html", blank_path)
         except pipeline.KnowledgePipelineError as exc:
             assert "no extractable text" in str(exc)
         else:
@@ -1651,7 +1676,7 @@ def test_knowledge_api_flow() -> None:
         assert knowledge_base.status_code == 201, knowledge_base.text
         knowledge_base_id = knowledge_base.json()["id"]
 
-        image_without_vision_model = client.post(
+        unsupported_image = client.post(
             knowledge_url(
                 default_workspace_id,
                 f"/{knowledge_base_id}/attachments",
@@ -1659,75 +1684,10 @@ def test_knowledge_api_flow() -> None:
             headers=auth_headers(alice_token),
             files={"file": ("diagram.png", b"image", "image/png")},
         )
-        assert image_without_vision_model.status_code == 422
-        assert image_without_vision_model.json()["detail"] == (
-            "Vision model is not configured for this workspace."
+        assert unsupported_image.status_code == 422, unsupported_image.text
+        assert unsupported_image.json()["detail"] == (
+            "Document format is not supported."
         )
-
-        vision_model = client.post(
-            models_url(default_workspace_id),
-            headers=auth_headers(admin_token),
-            json={
-                **model_payload(model_base_url),
-                "name": "Knowledge Vision",
-                "model_type": "VISION",
-                "model_name": "vision-test",
-            },
-        )
-        assert vision_model.status_code == 201, vision_model.text
-        image_attachment = client.post(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/attachments",
-            ),
-            headers=auth_headers(alice_token),
-            files={"file": ("diagram.png", b"image", "image/png")},
-        )
-        assert image_attachment.status_code == 201, image_attachment.text
-        image_document = client.post(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents",
-            ),
-            headers=auth_headers(alice_token),
-            json={
-                "attachment_ids": [image_attachment.json()["id"]],
-                "staged": False,
-            },
-        )
-        assert image_document.status_code == 201, image_document.text
-        image_document_id = image_document.json()[0]["id"]
-        parsed_image = client.post(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents/{image_document_id}/parse",
-            ),
-            headers=auth_headers(alice_token),
-            json={"auto_index": False},
-        )
-        assert parsed_image.status_code == 202, parsed_image.text
-        image_chunks = client.get(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents/{image_document_id}/chunks",
-            ),
-            headers=auth_headers(alice_token),
-        )
-        assert image_chunks.status_code == 200, image_chunks.text
-        assert [item["content"] for item in image_chunks.json()] == [
-            "# diagram\n\nok"
-        ]
-        assert client.delete(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents/{image_document_id}",
-            ),
-            headers=auth_headers(alice_token),
-        ).status_code == 204
-        assert client.delete(
-            models_url(default_workspace_id, f"/{vision_model.json()['id']}"),
-            headers=auth_headers(admin_token),
-        ).status_code == 204
 
         duplicate_name = client.post(
             knowledge_url(default_workspace_id),
@@ -1868,7 +1828,7 @@ def test_knowledge_api_flow() -> None:
                 f"/{knowledge_base_id}/documents/{document_id}/parse",
             ),
             headers=auth_headers(alice_token),
-            json={"auto_index": False},
+            json={"strategy": "flat", "auto_index": False},
         )
         assert parsed_document.status_code == 202, parsed_document.text
 
@@ -1900,6 +1860,28 @@ def test_knowledge_api_flow() -> None:
         assert [chunk["content"] for chunk in parsed_chunks.json()] == [
             "Hello from product docs"
         ]
+
+        denied_markdown = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{document_id}/content",
+            ),
+            headers=auth_headers(bob_token),
+        )
+        assert denied_markdown.status_code == 403, denied_markdown.text
+
+        document_markdown = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{document_id}/content",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert document_markdown.status_code == 200, document_markdown.text
+        assert document_markdown.headers["content-type"].startswith(
+            "text/markdown"
+        )
+        assert document_markdown.text == "Hello from product docs"
 
         indexed_document = client.post(
             knowledge_url(
@@ -2046,6 +2028,15 @@ def test_knowledge_api_flow() -> None:
             headers=auth_headers(alice_token),
         )
         assert missing_download.status_code == 404, missing_download.text
+
+        missing_markdown = client.get(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/documents/{missing_download_document_id}/content",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert missing_markdown.status_code == 404, missing_markdown.text
 
         missing_document_download = client.get(
             knowledge_url(
@@ -2346,7 +2337,7 @@ def test_knowledge_api_flow() -> None:
             alice_token,
             default_workspace_id,
             knowledge_base_id,
-            "unsupported.bin",
+            "unsupported.zip",
             b"\x00\x01\x02",
             "application/octet-stream",
         )
@@ -2434,9 +2425,9 @@ def test_knowledge_api_flow() -> None:
             alice_token,
             default_workspace_id,
             knowledge_base_id,
-            "direct-retry.bin",
+            "direct-retry.zip",
             b"\x00\x01\x02",
-            "application/octet-stream",
+            "application/zip",
         )
         direct_retry_document_id = direct_retry_document["id"]
         direct_retry_enqueue = client.post(
@@ -2646,11 +2637,35 @@ def test_graph_api_permissions_and_scoping() -> None:
         )
         assert settings_response.status_code == 200, settings_response.text
         assert settings_response.json()["enabled"] is False
+        link_graph = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/links"),
+            headers=auth_headers(alice_token),
+        )
+        assert link_graph.status_code == 200, link_graph.text
+        link_graph_payload = link_graph.json()
+        assert link_graph_payload["document_count"] == len(
+            [node for node in link_graph_payload["nodes"] if node["kind"] == "document"]
+        )
+        assert link_graph_payload["unresolved_count"] == len(
+            [
+                node
+                for node in link_graph_payload["nodes"]
+                if node["kind"] == "unresolved"
+            ]
+        )
+        assert link_graph_payload["edge_count"] == len(link_graph_payload["edges"])
+        assert link_graph_payload["truncated"] is False
+        assert len(link_graph_payload["revision"]) == 64
         denied_settings = client.get(
             settings_url,
             headers=auth_headers(bob_token),
         )
         assert denied_settings.status_code == 403, denied_settings.text
+        denied_link_graph = client.get(
+            graph_url(workspace_id, knowledge_base_id, "/links"),
+            headers=auth_headers(bob_token),
+        )
+        assert denied_link_graph.status_code == 403, denied_link_graph.text
 
         disabled_path = client.post(
             graph_url(workspace_id, knowledge_base_id, "/path"),

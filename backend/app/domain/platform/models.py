@@ -265,6 +265,28 @@ class SmtpSettings(Base):
     )
 
 
+class PlatformSecret(Base):
+    """Deployment-wide key material, created on first start and never rewritten.
+
+    ``platform_secrets`` holds the session signing key and the stored-secret
+    encryption key, so a regenerated or lost ``.env`` cannot invalidate sessions
+    or orphan ciphertext. The application inserts a row only when the name is
+    missing; the stored value stays authoritative for the deployment.
+    """
+
+    __tablename__ = "platform_secrets"
+    __table_args__ = (
+        CheckConstraint("length(value) > 0", name="ck_platform_secrets_value"),
+    )
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
 class WorkspaceGovernance(Base):
     __tablename__ = "workspace_governance"
 

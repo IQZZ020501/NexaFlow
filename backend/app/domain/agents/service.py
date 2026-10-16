@@ -73,8 +73,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
 
 
 def is_agent_implicit_tool(workspace_id: str, tool_id: str) -> bool:
-    return tool_id == stable_catalog_id(
-        f"tool:{workspace_id}:builtin:install_skill_dependencies"
+    return any(
+        tool_id == stable_catalog_id(f"tool:{workspace_id}:builtin:{name}")
+        for name in ("bash", "install_skill_dependencies")
     )
 
 
@@ -113,6 +114,7 @@ def agent_to_response(
         interaction_config=normalized_interaction_config(agent.interaction_config),
         instructions=agent.instructions,
         model_id=agent.model_id,
+        image_model_id=agent.image_model_id,
         knowledge_base_ids=knowledge_base_ids,
         tools=[
             {"tool_id": item.tool_id, "version_id": item.version_id}
@@ -422,6 +424,28 @@ async def get_agent_model(
     return model
 
 
+async def get_agent_image_model(
+    db: AsyncSession,
+    workspace_id: str,
+    model_id: str,
+) -> RegisteredModel:
+    model = await model_repository.get_registered_model_by_id(db, model_id)
+    if model is None or model.workspace_id != workspace_id:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Agent image model not found."
+        )
+    if model.model_type != "IMAGE":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Agent image model must be an image model.",
+        )
+    if model.status != ACTIVE_STATUS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Agent image model is disabled."
+        )
+    return model
+
+
 async def resolve_agent_knowledge_bases(
     db: AsyncSession,
     workspace_id: str,
@@ -599,6 +623,11 @@ async def create_agent(
             "Agent Skills can only be attached to Agent applications.",
         )
     model = await get_agent_model(db, workspace_id, payload.model_id)
+    image_model_id = (
+        (await get_agent_image_model(db, workspace_id, payload.image_model_id)).id
+        if payload.image_model_id
+        else None
+    )
     tool_snapshots = await resolve_requested_agent_tools(
         db,
         workspace_id,
@@ -629,6 +658,7 @@ async def create_agent(
         interaction_config=payload.interaction_config.model_dump(mode="json"),
         instructions=payload.instructions.strip() or DEFAULT_AGENT_INSTRUCTIONS,
         model_id=model.id,
+        image_model_id=image_model_id,
         status=ACTIVE_STATUS,
         created_by_user_id=actor.id,
     )
@@ -907,6 +937,22 @@ async def update_agent(
     if payload.model_id is not None and payload.model_id != agent.model_id:
         agent.model_id = (await get_agent_model(db, agent.workspace_id, payload.model_id)).id
         configuration_changed = True
+    if "image_model_id" in details:
+        # PATCH semantics: an explicit null clears the selection and falls back
+        # to the single active image model of the workspace.
+        requested_image_model_id = payload.image_model_id
+        if requested_image_model_id is None:
+            configuration_changed = configuration_changed or agent.image_model_id is not None
+            agent.image_model_id = None
+        elif requested_image_model_id != agent.image_model_id:
+            agent.image_model_id = (
+                await get_agent_image_model(
+                    db,
+                    agent.workspace_id,
+                    requested_image_model_id,
+                )
+            ).id
+            configuration_changed = True
     if payload.status is not None:
         next_status = validate_agent_status(payload.status)
         configuration_changed = configuration_changed or next_status != agent.status

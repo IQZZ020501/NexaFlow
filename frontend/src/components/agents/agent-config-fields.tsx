@@ -112,6 +112,11 @@ export function AgentConfigFields({
       model.model_type === "LLM" &&
       (model.status === "active" || model.id === form.modelId)
   )
+  const imageModels = models.filter(
+    (model) =>
+      model.model_type === "IMAGE" &&
+      (model.status === "active" || model.id === form.imageModelId)
+  )
   const activeKnowledgeBases = knowledgeBases.filter(
     (knowledgeBase) => knowledgeBase.status === "active"
   )
@@ -127,6 +132,14 @@ export function AgentConfigFields({
   const selectedModel = configurableModels.find(
     (model) => model.id === form.modelId
   )
+  const activeImageModels = imageModels.filter(
+    (model) => model.status === "active"
+  )
+  // Without an explicit choice the selector shows the first active image model
+  // of the workspace; saving then pins it for this Agent.
+  const selectedImageModel =
+    imageModels.find((model) => model.id === form.imageModelId) ??
+    activeImageModels[0]
   const selectedKnowledgeBaseNames = form.knowledgeBaseIds
     .map((id) => knowledgeBases.find((item) => item.id === id)?.name)
     .filter((name): name is string => Boolean(name))
@@ -363,6 +376,67 @@ export function AgentConfigFields({
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="agent-image-model">
+                {t("选择生图模型")}
+              </FieldLabel>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    id="agent-image-model"
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-full justify-between px-3 font-normal"
+                    disabled={readOnly || imageModels.length === 0}
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-2 truncate text-left">
+                      <span className="min-w-0 truncate">
+                        {selectedImageModel?.name ?? t("选择生图模型")}
+                      </span>
+                    </span>
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="max-h-72 w-(--radix-dropdown-menu-trigger-width) min-w-0 overflow-y-auto"
+                >
+                  <DropdownMenuGroup>
+                    {imageModels.map((model) => (
+                      <DropdownMenuItem
+                        key={model.id}
+                        className="justify-between"
+                        onSelect={() =>
+                          setForm((current) => ({
+                            ...current,
+                            imageModelId: model.id,
+                          }))
+                        }
+                      >
+                        <span className="flex min-w-0 items-center gap-2 truncate">
+                          <ModelIcon
+                            model={model.model_name}
+                            size={16}
+                            type="color"
+                            className="shrink-0"
+                          />
+                          <span className="min-w-0 truncate">{model.name}</span>
+                        </span>
+                        {model.id === selectedImageModel?.id ? (
+                          <CheckIcon className="text-primary" />
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <p className="text-xs text-muted-foreground">
+                {imageModels.length
+                  ? t("图片生成工具使用的生图模型。")
+                  : t("工作空间暂无启用的生图模型，请先在模型页添加。")}
+              </p>
             </Field>
 
             <Field className="sm:col-span-2">

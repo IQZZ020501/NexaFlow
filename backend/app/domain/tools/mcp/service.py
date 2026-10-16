@@ -48,6 +48,7 @@ from app.infra.db.repositories.workspaces import (
     resource_permissions as permission_repository,
 )
 from app.infra.runtime.validation import normalize_name
+from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.infra.tools.mcp_stdio import (
     McpStdioConfig,
@@ -164,7 +165,7 @@ def mcp_server_to_response(
 def bearer_token(server: McpServer, settings: Settings) -> str | None:
     if server.bearer_token_ciphertext is None:
         return None
-    return decrypt_secret(server.bearer_token_ciphertext, settings.model_secret_key)
+    return decrypt_secret(server.bearer_token_ciphertext, application_secret_key(settings))
 
 
 def stdio_config(server: McpServer, settings: Settings) -> McpStdioConfig | None:
@@ -174,7 +175,7 @@ def stdio_config(server: McpServer, settings: Settings) -> McpStdioConfig | None
         return parse_mcp_stdio_config(
             decrypt_secret(
                 server.stdio_config_ciphertext,
-                settings.model_secret_key,
+                application_secret_key(settings),
             )
         )
     except McpStdioConfigError as exc:
@@ -323,7 +324,7 @@ async def create_mcp_server(
             stdio_config_ciphertext=(
                 encrypt_secret(
                     serialize_mcp_stdio_config(direct_stdio_config),
-                    settings.model_secret_key,
+                    application_secret_key(settings),
                 )
                 if direct_stdio_config is not None
                 else None
@@ -334,7 +335,7 @@ async def create_mcp_server(
         )
         if token:
             server.bearer_token_ciphertext = encrypt_secret(
-                token, settings.model_secret_key
+                token, application_secret_key(settings)
             )
             server.bearer_token_hint = secret_hint(token)
         discovery = await discover_mcp_tools(

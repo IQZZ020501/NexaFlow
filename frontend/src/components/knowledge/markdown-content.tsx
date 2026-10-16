@@ -164,19 +164,21 @@ function markdownText(children: React.ReactNode) {
     .trim()
 }
 
-function ArtifactDownloadLink({
+export function ArtifactDownloadLink({
   href,
   children,
   className,
+  filename: suppliedFilename,
 }: {
   href: string
   children?: React.ReactNode
   className?: string
+  filename?: string
 }) {
   const { t } = useLanguage()
   const [isDownloading, setIsDownloading] = React.useState(false)
   const [failed, setFailed] = React.useState(false)
-  const filename = markdownText(children) || "download"
+  const filename = suppliedFilename || markdownText(children) || "download"
   const token = href.slice("/api/v1/artifacts/".length)
 
   async function handleDownload(event: React.MouseEvent<HTMLAnchorElement>) {

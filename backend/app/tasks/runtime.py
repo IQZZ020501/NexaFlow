@@ -2,10 +2,16 @@ import asyncio
 import os
 import threading
 from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypeVar
 
 from app.infra.config.settings import Settings
 from app.infra.db.session import configure_database
+
+# One task event loop serves every Celery thread of a threads-pool worker, so
+# its default executor carries all of their blocking provider calls; the stdlib
+# default of cpu_count + 4 would serialize them. Threads start on demand.
+TASK_LOOP_EXECUTOR_THREADS = 64
 
 _configured_process_id: int | None = None
 # ponytail: global init lock; split by settings only if worker setup becomes dynamic.
@@ -47,6 +53,12 @@ def _get_task_event_loop() -> asyncio.AbstractEventLoop:
         ):
             return _event_loop
         loop = asyncio.new_event_loop()
+        loop.set_default_executor(
+            ThreadPoolExecutor(
+                max_workers=TASK_LOOP_EXECUTOR_THREADS,
+                thread_name_prefix="nexaflow-task-io",
+            )
+        )
         ready = threading.Event()
 
         def run_event_loop() -> None:
