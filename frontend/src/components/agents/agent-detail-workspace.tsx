@@ -84,6 +84,11 @@ import {
 } from "./agent-management-panels"
 import type { AgentFormState } from "./agents-page"
 import { ToolInputPreview } from "./tool-input-preview"
+import {
+  AgentArtifactPreviewContext,
+  useAgentArtifactPreview,
+} from "./artifacts/agent-artifact-preview-context"
+import { AgentArtifactPreviewPanel } from "./artifacts/agent-artifact-previews"
 
 type AgentDetailWorkspaceProps = {
   agent: Agent
@@ -787,6 +792,7 @@ function RunExchange({
                     </details>
                   ) : null}
                   <AgentAnswer
+                    events={completedTimeline.map(({ event }) => event)}
                     content={withArtifactDownloadLinks(
                       input.previous_answer,
                       completedTimeline.map(({ event }) => event)
@@ -860,6 +866,7 @@ function RunExchange({
             {run.result ? (
               <AgentAnswer
                 content={answer}
+                events={currentEvents}
                 sources={currentSources}
                 t={t}
                 className="text-sm leading-6"
@@ -1011,6 +1018,10 @@ export function AgentDetailWorkspace({
     "config"
   )
   const [isConfigVisible, setIsConfigVisible] = React.useState(true)
+  const artifactPreview = useAgentArtifactPreview(
+    `${workspaceId}:${agent.id}:${activeView}:${runs[0]?.conversation_id ?? ""}`
+  )
+  const hasArtifactPreview = !!artifactPreview.selection
   const previewScrollRef = React.useRef<HTMLDivElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const shouldFollowPreviewRef = React.useRef(true)
@@ -1116,561 +1127,616 @@ export function AgentDetailWorkspace({
   }, [visibleActiveView])
 
   return (
-    <div className="-mx-4 -mt-6 flex min-h-[calc(100dvh-3.5rem-6rem)] flex-col overflow-hidden bg-background sm:-mx-6 sm:-mb-6 sm:min-h-[calc(100svh-3.5rem)] lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
-      <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={t("返回 Agent 列表")}
-          title={t("返回 Agent 列表")}
-          onClick={onBack}
-        >
-          <ArrowLeftIcon />
-        </Button>
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-sm">
-          <BotIcon className="size-5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="max-w-52 truncate text-base font-semibold sm:max-w-none">
-              {form.name || agent.name}
-            </h1>
-            <Badge
-              variant="outline"
-              className={
-                agent.status === "active"
-                  ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "text-muted-foreground"
-              }
-            >
-              <span
-                className={`mr-1.5 size-1.5 rounded-full ${agent.status === "active" ? "bg-emerald-500" : "bg-muted-foreground"}`}
-              />
-              {t(agent.status === "active" ? "已启用" : "已停用")}
-            </Badge>
-            {agent.published ? (
+    <AgentArtifactPreviewContext
+      value={{
+        ...artifactPreview,
+        open: (artifact, opener) => {
+          setActivePanel("preview")
+          artifactPreview.open(artifact, opener)
+        },
+      }}
+    >
+      <div className="-mx-4 -mt-6 flex min-h-[calc(100dvh-3.5rem-6rem)] flex-col overflow-hidden bg-background sm:-mx-6 sm:-mb-6 sm:min-h-[calc(100svh-3.5rem)] lg:-mx-8 lg:h-[calc(100svh-3.5rem)] lg:min-h-0">
+        <header className="z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("返回 Agent 列表")}
+            title={t("返回 Agent 列表")}
+            onClick={onBack}
+          >
+            <ArrowLeftIcon />
+          </Button>
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-sm">
+            <BotIcon className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="max-w-52 truncate text-base font-semibold sm:max-w-none">
+                {form.name || agent.name}
+              </h1>
               <Badge
                 variant="outline"
-                className="border-blue-600/20 bg-blue-500/10 text-blue-700 dark:text-blue-400"
-              >
-                <span className="mr-1.5 size-1.5 rounded-full bg-blue-500" />
-                {t("已发布")}
-              </Badge>
-            ) : null}
-            {isDirty ? <Badge variant="secondary">{t("未保存")}</Badge> : null}
-          </div>
-          <p className="mt-0.5 hidden items-center gap-1.5 truncate text-xs text-muted-foreground sm:flex">
-            {selectedModel ? (
-              <ModelIcon
-                model={selectedModel.model_name}
-                size={13}
-                type="color"
-                className="shrink-0"
-              />
-            ) : null}
-            <span className="truncate">
-              {selectedModel?.name ?? t("未连接")} · {currentViewLabel}
-            </span>
-          </p>
-        </div>
-
-        {visibleActiveView === "settings" ? (
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={t("新建对话")}
-              title={t("新建对话")}
-              onClick={onNewConversation}
-            >
-              <MessageSquarePlusIcon />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="hidden lg:inline-flex"
-              aria-label={t(isConfigVisible ? "预览" : "设置")}
-              title={t(isConfigVisible ? "预览" : "设置")}
-              onClick={() => setIsConfigVisible((current) => !current)}
-            >
-              {isConfigVisible ? <PanelLeftCloseIcon /> : <PanelLeftOpenIcon />}
-            </Button>
-          </>
-        ) : null}
-        {agent.can_edit ? (
-          <>
-            {canManagePublishing ? (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isSaving || isPublishing || isDirty}
-                title={isDirty ? t("请先保存更改后再发布。") : undefined}
-                onClick={onPublish}
-              >
-                {isPublishing ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : publicationAction === "unpublish" ? (
-                  <Undo2Icon />
-                ) : (
-                  <RocketIcon />
-                )}
-                <span className="hidden sm:inline">
-                  {t(
-                    publicationAction === "unpublish"
-                      ? "取消发布"
-                      : publicationAction === "republish"
-                        ? "重新发布"
-                        : "发布"
-                  )}
-                </span>
-              </Button>
-            ) : null}
-            {visibleActiveView === "settings" ? (
-              <Button
-                type="submit"
-                form="agent-settings-form"
-                disabled={
-                  isSaving || !isDirty || !form.name.trim() || !form.modelId
+                className={
+                  agent.status === "active"
+                    ? "border-emerald-600/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "text-muted-foreground"
                 }
               >
-                {isSaving ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : (
-                  <SaveIcon />
-                )}
-                <span className="hidden sm:inline">{t("保存")}</span>
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              aria-label={t("删除 Agent")}
-              title={t("删除 Agent")}
-              onClick={onDelete}
-            >
-              <Trash2Icon />
-            </Button>
-          </>
-        ) : null}
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
-          <nav className="space-y-1" aria-label={t("Agent 详情导航")}>
-            {renderNavItems("w-full justify-start")}
-          </nav>
-        </aside>
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <nav
-            ref={tabStripRef}
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden [&::-webkit-scrollbar]:hidden"
-            aria-label={t("Agent 详情导航")}
-          >
-            {renderNavItems(
-              "shrink-0 max-sm:min-h-10 max-sm:px-2.5",
-              activeTabRef
-            )}
-          </nav>
+                <span
+                  className={`mr-1.5 size-1.5 rounded-full ${agent.status === "active" ? "bg-emerald-500" : "bg-muted-foreground"}`}
+                />
+                {t(agent.status === "active" ? "已启用" : "已停用")}
+              </Badge>
+              {agent.published ? (
+                <Badge
+                  variant="outline"
+                  className="border-blue-600/20 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                >
+                  <span className="mr-1.5 size-1.5 rounded-full bg-blue-500" />
+                  {t("已发布")}
+                </Badge>
+              ) : null}
+              {isDirty ? (
+                <Badge variant="secondary">{t("未保存")}</Badge>
+              ) : null}
+            </div>
+            <p className="mt-0.5 hidden items-center gap-1.5 truncate text-xs text-muted-foreground sm:flex">
+              {selectedModel ? (
+                <ModelIcon
+                  model={selectedModel.model_name}
+                  size={13}
+                  type="color"
+                  className="shrink-0"
+                />
+              ) : null}
+              <span className="truncate">
+                {selectedModel?.name ?? t("未连接")} · {currentViewLabel}
+              </span>
+            </p>
+          </div>
 
           {visibleActiveView === "settings" ? (
             <>
-              <nav className="grid shrink-0 grid-cols-2 border-b bg-background p-1 lg:hidden">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("新建对话")}
+                title={t("新建对话")}
+                onClick={() => {
+                  artifactPreview.close()
+                  onNewConversation()
+                }}
+              >
+                <MessageSquarePlusIcon />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="hidden lg:inline-flex"
+                aria-label={t(
+                  isConfigVisible && !hasArtifactPreview ? "预览" : "设置"
+                )}
+                title={t(
+                  isConfigVisible && !hasArtifactPreview ? "预览" : "设置"
+                )}
+                onClick={() => {
+                  if (hasArtifactPreview) {
+                    artifactPreview.close()
+                    setIsConfigVisible(true)
+                  } else {
+                    setIsConfigVisible((current) => !current)
+                  }
+                }}
+              >
+                {isConfigVisible && !hasArtifactPreview ? (
+                  <PanelLeftCloseIcon />
+                ) : (
+                  <PanelLeftOpenIcon />
+                )}
+              </Button>
+            </>
+          ) : null}
+          {agent.can_edit ? (
+            <>
+              {canManagePublishing ? (
                 <Button
                   type="button"
-                  variant={activePanel === "config" ? "secondary" : "ghost"}
-                  onClick={() => setActivePanel("config")}
+                  variant="outline"
+                  disabled={isSaving || isPublishing || isDirty}
+                  title={isDirty ? t("请先保存更改后再发布。") : undefined}
+                  onClick={onPublish}
                 >
-                  <DatabaseIcon />
-                  {t("基本信息")}
+                  {isPublishing ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : publicationAction === "unpublish" ? (
+                    <Undo2Icon />
+                  ) : (
+                    <RocketIcon />
+                  )}
+                  <span className="hidden sm:inline">
+                    {t(
+                      publicationAction === "unpublish"
+                        ? "取消发布"
+                        : publicationAction === "republish"
+                          ? "重新发布"
+                          : "发布"
+                    )}
+                  </span>
                 </Button>
+              ) : null}
+              {visibleActiveView === "settings" ? (
                 <Button
-                  type="button"
-                  variant={activePanel === "preview" ? "secondary" : "ghost"}
-                  onClick={() => {
-                    shouldFollowPreviewRef.current = true
-                    setActivePanel("preview")
-                  }}
+                  type="submit"
+                  form="agent-settings-form"
+                  disabled={
+                    isSaving || !isDirty || !form.name.trim() || !form.modelId
+                  }
                 >
-                  <MessageSquareIcon />
-                  {t("调试预览")}
+                  {isSaving ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <SaveIcon />
+                  )}
+                  <span className="hidden sm:inline">{t("保存")}</span>
                 </Button>
-              </nav>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                aria-label={t("删除 Agent")}
+                title={t("删除 Agent")}
+                onClick={onDelete}
+              >
+                <Trash2Icon />
+              </Button>
+            </>
+          ) : null}
+        </header>
 
-              <main className="flex min-h-0 flex-1 bg-muted/20">
-                <section
-                  className={`${activePanel === "config" ? "flex" : "hidden"} min-h-0 w-full flex-col border-r bg-muted/30 lg:flex ${isConfigVisible ? "lg:w-[46%] lg:max-w-[680px]" : "lg:hidden"}`}
-                >
-                  <div className="flex items-center justify-between border-b bg-background/70 px-5 py-3">
-                    <div>
-                      <h2 className="text-sm font-semibold">{t("基本信息")}</h2>
-                      <p className="text-xs text-muted-foreground">
-                        {t("配置 Agent 使用的模型、知识库和工具。")}
-                      </p>
-                    </div>
-                    <div className="hidden items-center gap-3 text-xs text-muted-foreground sm:flex">
-                      <span className="flex items-center gap-1.5">
-                        <DatabaseIcon className="size-3.5" />
-                        {form.knowledgeBaseIds.length}
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <WrenchIcon className="size-3.5" />
-                        {
-                          form.tools.filter((reference) => {
-                            const tool = tools.find(
-                              (item) => item.id === reference.tool_id
-                            )
-                            return !tool || isRegularTool(tool.function_name)
-                          }).length
-                        }
-                      </span>
-                    </div>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-                    <form id="agent-settings-form" onSubmit={onSave}>
-                      <AgentConfigFields
-                        form={form}
-                        setForm={setForm}
-                        models={models}
-                        knowledgeBases={knowledgeBases}
-                        skills={skills}
-                        tools={tools}
-                        token={token}
-                        workspaceId={workspaceId}
-                        hasLegacyToolBindings={
-                          agent.tools === undefined &&
-                          Boolean(agent.mcp_tools?.length)
-                        }
-                        readOnly={!agent.can_edit}
-                        t={t}
-                      />
-                    </form>
-                  </div>
-                </section>
+        <div className="flex min-h-0 flex-1">
+          <aside className="hidden w-52 shrink-0 border-r bg-muted/20 p-3 lg:block">
+            <nav className="space-y-1" aria-label={t("Agent 详情导航")}>
+              {renderNavItems("w-full justify-start")}
+            </nav>
+          </aside>
 
-                <section
-                  className={`${activePanel === "preview" ? "flex" : "hidden"} min-h-[680px] min-w-0 flex-1 flex-col bg-background lg:flex lg:min-h-0`}
-                >
-                  <div className="flex items-center justify-between border-b px-5 py-3">
-                    <div>
-                      <h2 className="text-sm font-semibold">{t("调试预览")}</h2>
-                      <p className="text-xs text-muted-foreground">
-                        {t("保存配置后，在这里直接提问。")}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="font-normal text-muted-foreground"
-                    >
-                      <span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />
-                      {t("预览")}
-                    </Badge>
-                  </div>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <nav
+              ref={tabStripRef}
+              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b bg-background p-2 lg:hidden [&::-webkit-scrollbar]:hidden"
+              aria-label={t("Agent 详情导航")}
+            >
+              {renderNavItems(
+                "shrink-0 max-sm:min-h-10 max-sm:px-2.5",
+                activeTabRef
+              )}
+            </nav>
 
-                  <div
-                    ref={previewScrollRef}
-                    className="relative min-h-0 flex-1 overflow-y-auto bg-muted/20"
-                    onScroll={(event) => {
-                      if (
-                        previewScrollHost(event.currentTarget) ===
-                        event.currentTarget
-                      ) {
-                        shouldFollowPreviewRef.current = isNearScrollBottom(
-                          event.currentTarget
-                        )
-                      }
+            {visibleActiveView === "settings" ? (
+              <>
+                <nav className="grid shrink-0 grid-cols-2 border-b bg-background p-1 lg:hidden">
+                  <Button
+                    type="button"
+                    variant={activePanel === "config" ? "secondary" : "ghost"}
+                    onClick={() => {
+                      artifactPreview.close()
+                      setActivePanel("config")
                     }}
                   >
-                    <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-3 py-4 sm:px-8 sm:py-8">
-                      {isRunsLoading ? (
-                        <div className="flex min-h-72 flex-1 items-center justify-center text-muted-foreground">
-                          <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-                          {t("正在加载")}
-                        </div>
-                      ) : visibleRuns.length === 0 && !pendingQuestion ? (
-                        <div className="flex min-h-72 flex-1 flex-col items-center justify-center text-center">
-                          <span className="relative flex size-16 items-center justify-center rounded-2xl bg-foreground text-background shadow-lg">
-                            <BotIcon className="size-7" />
-                            <span className="absolute -right-1 -bottom-1 size-4 rounded-full border-2 border-muted bg-emerald-500" />
-                          </span>
-                          <p className="mt-5 text-base font-semibold">
-                            {t("开始和 Agent 对话")}
-                          </p>
-                          <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                            {t(
-                              "直接提问，Agent 会按需使用已配置的知识库和工具。"
-                            )}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-8">
-                          {visibleRuns.map((run, index) => (
-                            <RunExchange
-                              key={run.id}
-                              run={run}
-                              toolCalls={toolCallsByRun[run.id] ?? []}
-                              resolvingCallId={resolvingCallId}
-                              onToolCallDecision={onToolCallDecision}
-                              onRegenerateRun={onRegenerateRun}
-                              onRunFeedback={onRunFeedback}
-                              regenerateDisabled={isAsking || isRunsLoading}
-                              editable={
-                                index === visibleRuns.length - 1 &&
-                                run.status === "succeeded"
-                              }
-                              regeneratingRunId={regeneratingRunId}
-                              feedbackPendingRunId={feedbackPendingRunId}
-                              t={t}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    <DatabaseIcon />
+                    {t("基本信息")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={activePanel === "preview" ? "secondary" : "ghost"}
+                    onClick={() => {
+                      artifactPreview.close()
+                      shouldFollowPreviewRef.current = true
+                      setActivePanel("preview")
+                    }}
+                  >
+                    <MessageSquareIcon />
+                    {t("调试预览")}
+                  </Button>
+                </nav>
 
-                  <div className="shrink-0 border-t bg-background p-2 sm:p-4">
-                    <form
-                      className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
-                      onSubmit={(event) => {
-                        shouldFollowPreviewRef.current = true
-                        onAsk(event)
-                      }}
-                      onDragOver={(event) => {
-                        if (event.dataTransfer.types.includes("Files")) {
-                          event.preventDefault()
-                        }
-                      }}
-                      onDrop={(event) => {
-                        const dropped = transferredFiles(event.dataTransfer)
-                        if (!dropped.length) return
-                        event.preventDefault()
+                <main
+                  className={`flex min-h-0 min-w-0 flex-1 bg-muted/20 ${hasArtifactPreview ? "max-md:h-[70dvh] max-md:flex-none" : ""}`}
+                >
+                  <section
+                    className={`${hasArtifactPreview ? "hidden" : `${activePanel === "config" ? "flex" : "hidden"} lg:flex ${isConfigVisible ? "lg:w-[46%] lg:max-w-[680px]" : "lg:hidden"}`} min-h-0 w-full flex-col border-r bg-muted/30`}
+                  >
+                    <div className="flex items-center justify-between border-b bg-background/70 px-5 py-3">
+                      <div>
+                        <h2 className="text-sm font-semibold">
+                          {t("基本信息")}
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                          {t("配置 Agent 使用的模型、知识库和工具。")}
+                        </p>
+                      </div>
+                      <div className="hidden items-center gap-3 text-xs text-muted-foreground sm:flex">
+                        <span className="flex items-center gap-1.5">
+                          <DatabaseIcon className="size-3.5" />
+                          {form.knowledgeBaseIds.length}
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <WrenchIcon className="size-3.5" />
+                          {
+                            form.tools.filter((reference) => {
+                              const tool = tools.find(
+                                (item) => item.id === reference.tool_id
+                              )
+                              return !tool || isRegularTool(tool.function_name)
+                            }).length
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+                      <form id="agent-settings-form" onSubmit={onSave}>
+                        <AgentConfigFields
+                          form={form}
+                          setForm={setForm}
+                          models={models}
+                          knowledgeBases={knowledgeBases}
+                          skills={skills}
+                          tools={tools}
+                          token={token}
+                          workspaceId={workspaceId}
+                          hasLegacyToolBindings={
+                            agent.tools === undefined &&
+                            Boolean(agent.mcp_tools?.length)
+                          }
+                          readOnly={!agent.can_edit}
+                          t={t}
+                        />
+                      </form>
+                    </div>
+                  </section>
+
+                  <section
+                    className={`${hasArtifactPreview ? "hidden md:flex md:flex-[2]" : `${activePanel === "preview" ? "flex" : "hidden"} lg:flex`} min-h-[680px] min-w-0 flex-1 flex-col bg-background lg:min-h-0`}
+                  >
+                    <div className="flex items-center justify-between border-b px-5 py-3">
+                      <div>
+                        <h2 className="text-sm font-semibold">
+                          {t("调试预览")}
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                          {t("保存配置后，在这里直接提问。")}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className="font-normal text-muted-foreground"
+                      >
+                        <span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />
+                        {t("预览")}
+                      </Badge>
+                    </div>
+
+                    <div
+                      ref={previewScrollRef}
+                      className="relative min-h-0 flex-1 overflow-y-auto bg-muted/20"
+                      onScroll={(event) => {
                         if (
-                          isDirty ||
-                          isAsking ||
-                          isRunsLoading ||
-                          agent.status !== "active"
+                          previewScrollHost(event.currentTarget) ===
+                          event.currentTarget
                         ) {
-                          return
+                          shouldFollowPreviewRef.current = isNearScrollBottom(
+                            event.currentTarget
+                          )
                         }
-                        setFiles((current) =>
-                          appendAttachmentFiles(current, dropped)
-                        )
                       }}
                     >
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        className="sr-only"
-                        multiple
-                        accept={acceptedUploadExtensions(
-                          AGENT_FILE_UPLOAD_SETTING.file_upload_type
+                      <div
+                        className={`mx-auto flex min-h-full w-full max-w-3xl flex-col px-3 py-4 ${hasArtifactPreview ? "sm:px-4" : "sm:px-8 sm:py-8"}`}
+                      >
+                        {isRunsLoading ? (
+                          <div className="flex min-h-72 flex-1 items-center justify-center text-muted-foreground">
+                            <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+                            {t("正在加载")}
+                          </div>
+                        ) : visibleRuns.length === 0 && !pendingQuestion ? (
+                          <div className="flex min-h-72 flex-1 flex-col items-center justify-center text-center">
+                            <span className="relative flex size-16 items-center justify-center rounded-2xl bg-foreground text-background shadow-lg">
+                              <BotIcon className="size-7" />
+                              <span className="absolute -right-1 -bottom-1 size-4 rounded-full border-2 border-muted bg-emerald-500" />
+                            </span>
+                            <p className="mt-5 text-base font-semibold">
+                              {t("开始和 Agent 对话")}
+                            </p>
+                            <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                              {t(
+                                "直接提问，Agent 会按需使用已配置的知识库和工具。"
+                              )}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-8">
+                            {visibleRuns.map((run, index) => (
+                              <RunExchange
+                                key={run.id}
+                                run={run}
+                                toolCalls={toolCallsByRun[run.id] ?? []}
+                                resolvingCallId={resolvingCallId}
+                                onToolCallDecision={onToolCallDecision}
+                                onRegenerateRun={onRegenerateRun}
+                                onRunFeedback={onRunFeedback}
+                                regenerateDisabled={isAsking || isRunsLoading}
+                                editable={
+                                  index === visibleRuns.length - 1 &&
+                                  run.status === "succeeded"
+                                }
+                                regeneratingRunId={regeneratingRunId}
+                                feedbackPendingRunId={feedbackPendingRunId}
+                                t={t}
+                              />
+                            ))}
+                          </div>
                         )}
-                        disabled={
-                          isDirty ||
-                          isAsking ||
-                          isRunsLoading ||
-                          agent.status !== "active"
-                        }
-                        onChange={(event) => {
-                          const selected = Array.from(event.target.files ?? [])
-                          setFiles((current) =>
-                            appendAttachmentFiles(current, selected)
-                          )
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 border-t bg-background p-2 sm:p-4">
+                      <form
+                        className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                        onSubmit={(event) => {
+                          shouldFollowPreviewRef.current = true
+                          onAsk(event)
                         }}
-                      />
-                      <textarea
-                        value={question}
-                        onChange={(event) => setQuestion(event.target.value)}
-                        onPaste={(event) => {
-                          if (isAsking) return
-                          const pasted = transferredFiles(event.clipboardData)
-                          if (!pasted.length) return
-                          event.preventDefault()
-                          setFiles((current) =>
-                            appendAttachmentFiles(current, pasted)
-                          )
-                        }}
-                        onKeyDown={(event) => {
-                          if (
-                            event.key === "Enter" &&
-                            !event.shiftKey &&
-                            !event.nativeEvent.isComposing
-                          ) {
+                        onDragOver={(event) => {
+                          if (event.dataTransfer.types.includes("Files")) {
                             event.preventDefault()
-                            event.currentTarget.form?.requestSubmit()
                           }
                         }}
-                        className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-12 sm:text-sm"
-                        placeholder={
-                          isDirty
-                            ? t("请先保存配置后再调试")
-                            : t("向 Agent 提问...")
-                        }
-                        aria-label={t("向 Agent 提问")}
-                        enterKeyHint="send"
-                        autoComplete="off"
-                        disabled={
-                          isDirty || isRunsLoading || agent.status !== "active"
-                        }
-                        maxLength={4000}
-                        rows={1}
-                      />
-                      <AgentAttachmentList
-                        files={files}
-                        onRemove={(indexToRemove) =>
+                        onDrop={(event) => {
+                          const dropped = transferredFiles(event.dataTransfer)
+                          if (!dropped.length) return
+                          event.preventDefault()
+                          if (
+                            isDirty ||
+                            isAsking ||
+                            isRunsLoading ||
+                            agent.status !== "active"
+                          ) {
+                            return
+                          }
                           setFiles((current) =>
-                            current.filter(
-                              (_, index) => index !== indexToRemove
-                            )
+                            appendAttachmentFiles(current, dropped)
                           )
-                        }
-                        t={t}
-                      />
-                      <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
-                        <div className="flex min-w-0 items-center gap-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            className="rounded-md text-muted-foreground hover:text-foreground"
-                            aria-label={t("添加附件")}
-                            title={t("添加附件")}
-                            disabled={
-                              isDirty ||
-                              isAsking ||
-                              isRunsLoading ||
-                              agent.status !== "active"
+                        }}
+                      >
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          className="sr-only"
+                          multiple
+                          accept={acceptedUploadExtensions(
+                            AGENT_FILE_UPLOAD_SETTING.file_upload_type
+                          )}
+                          disabled={
+                            isDirty ||
+                            isAsking ||
+                            isRunsLoading ||
+                            agent.status !== "active"
+                          }
+                          onChange={(event) => {
+                            const selected = Array.from(
+                              event.target.files ?? []
+                            )
+                            setFiles((current) =>
+                              appendAttachmentFiles(current, selected)
+                            )
+                          }}
+                        />
+                        <textarea
+                          value={question}
+                          onChange={(event) => setQuestion(event.target.value)}
+                          onPaste={(event) => {
+                            if (isAsking) return
+                            const pasted = transferredFiles(event.clipboardData)
+                            if (!pasted.length) return
+                            event.preventDefault()
+                            setFiles((current) =>
+                              appendAttachmentFiles(current, pasted)
+                            )
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === "Enter" &&
+                              !event.shiftKey &&
+                              !event.nativeEvent.isComposing
+                            ) {
+                              event.preventDefault()
+                              event.currentTarget.form?.requestSubmit()
                             }
-                            onClick={() => {
-                              if (!fileInputRef.current) return
-                              fileInputRef.current.value = ""
-                              fileInputRef.current.click()
-                            }}
-                          >
-                            <PlusIcon />
-                          </Button>
-                          <AgentApprovalModeMenu
-                            value={approvalMode}
-                            onChange={onApprovalModeChange}
-                            disabled={
-                              isDirty ||
-                              isAsking ||
-                              isRunsLoading ||
-                              agent.status !== "active"
-                            }
-                            t={t}
-                          />
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          {isAsking && question.trim() && (
+                          }}
+                          className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-12 sm:text-sm"
+                          placeholder={
+                            isDirty
+                              ? t("请先保存配置后再调试")
+                              : t("向 Agent 提问...")
+                          }
+                          aria-label={t("向 Agent 提问")}
+                          enterKeyHint="send"
+                          autoComplete="off"
+                          disabled={
+                            isDirty ||
+                            isRunsLoading ||
+                            agent.status !== "active"
+                          }
+                          maxLength={4000}
+                          rows={1}
+                        />
+                        <AgentAttachmentList
+                          files={files}
+                          onRemove={(indexToRemove) =>
+                            setFiles((current) =>
+                              current.filter(
+                                (_, index) => index !== indexToRemove
+                              )
+                            )
+                          }
+                          t={t}
+                        />
+                        <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+                          <div className="flex min-w-0 items-center gap-1">
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              className="rounded-full text-muted-foreground"
-                              aria-label={t("停止生成")}
-                              title={t("停止生成")}
-                              onClick={onCancelAsk}
-                            >
-                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
-                            </Button>
-                          )}
-                          <Button
-                            type={
-                              isAsking && !question.trim() ? "button" : "submit"
-                            }
-                            size="icon"
-                            className="rounded-full"
-                            aria-label={t(
-                              isAsking
-                                ? question.trim()
-                                  ? "追加后续任务"
-                                  : "停止生成"
-                                : "发送问题"
-                            )}
-                            title={t(
-                              isAsking
-                                ? question.trim()
-                                  ? "追加后续任务"
-                                  : "停止生成"
-                                : "发送问题"
-                            )}
-                            onClick={
-                              isAsking && !question.trim()
-                                ? onCancelAsk
-                                : undefined
-                            }
-                            disabled={
-                              !isAsking &&
-                              (!question.trim() ||
+                              className="rounded-md text-muted-foreground hover:text-foreground"
+                              aria-label={t("添加附件")}
+                              title={t("添加附件")}
+                              disabled={
                                 isDirty ||
+                                isAsking ||
                                 isRunsLoading ||
-                                agent.status !== "active")
-                            }
-                          >
-                            {isAsking && !question.trim() ? (
-                              <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
-                            ) : (
-                              <ArrowUpIcon />
+                                agent.status !== "active"
+                              }
+                              onClick={() => {
+                                if (!fileInputRef.current) return
+                                fileInputRef.current.value = ""
+                                fileInputRef.current.click()
+                              }}
+                            >
+                              <PlusIcon />
+                            </Button>
+                            <AgentApprovalModeMenu
+                              value={approvalMode}
+                              onChange={onApprovalModeChange}
+                              disabled={
+                                isDirty ||
+                                isAsking ||
+                                isRunsLoading ||
+                                agent.status !== "active"
+                              }
+                              t={t}
+                            />
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {isAsking && question.trim() && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="rounded-full text-muted-foreground"
+                                aria-label={t("停止生成")}
+                                title={t("停止生成")}
+                                onClick={onCancelAsk}
+                              >
+                                <SquareIcon
+                                  className="size-4.5 fill-current"
+                                  strokeWidth={0}
+                                />
+                              </Button>
                             )}
-                          </Button>
+                            <Button
+                              type={
+                                isAsking && !question.trim()
+                                  ? "button"
+                                  : "submit"
+                              }
+                              size="icon"
+                              className="rounded-full"
+                              aria-label={t(
+                                isAsking
+                                  ? question.trim()
+                                    ? "追加后续任务"
+                                    : "停止生成"
+                                  : "发送问题"
+                              )}
+                              title={t(
+                                isAsking
+                                  ? question.trim()
+                                    ? "追加后续任务"
+                                    : "停止生成"
+                                  : "发送问题"
+                              )}
+                              onClick={
+                                isAsking && !question.trim()
+                                  ? onCancelAsk
+                                  : undefined
+                              }
+                              disabled={
+                                !isAsking &&
+                                (!question.trim() ||
+                                  isDirty ||
+                                  isRunsLoading ||
+                                  agent.status !== "active")
+                              }
+                            >
+                              {isAsking && !question.trim() ? (
+                                <SquareIcon
+                                  className="size-4.5 fill-current"
+                                  strokeWidth={0}
+                                />
+                              ) : (
+                                <ArrowUpIcon />
+                              )}
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    </form>
-                  </div>
-                </section>
+                      </form>
+                    </div>
+                  </section>
+                  <AgentArtifactPreviewPanel />
+                </main>
+              </>
+            ) : (
+              <main className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
+                {visibleActiveView === "overview" ? (
+                  <AgentOverviewPanel
+                    key={`${agent.id}:overview`}
+                    agent={agent}
+                    token={token}
+                    workspaceId={workspaceId}
+                    canViewCredentials={agent.can_edit}
+                    canManageCredentials={canManagePublishing && agent.can_edit}
+                    t={t}
+                    notify={notify}
+                  />
+                ) : visibleActiveView === "logs" ? (
+                  <AgentLogsPanel
+                    key={`${agent.id}:logs`}
+                    agent={agent}
+                    token={token}
+                    workspaceId={workspaceId}
+                    t={t}
+                    notify={notify}
+                  />
+                ) : visibleActiveView === "monitoring" ? (
+                  <AgentMonitoringPanel
+                    key={`${agent.id}:monitoring`}
+                    agent={agent}
+                    token={token}
+                    workspaceId={workspaceId}
+                    t={t}
+                    notify={notify}
+                  />
+                ) : (
+                  <AgentConversationUsersPanel
+                    key={`${agent.id}:users`}
+                    agent={agent}
+                    token={token}
+                    workspaceId={workspaceId}
+                    t={t}
+                    notify={notify}
+                  />
+                )}
               </main>
-            </>
-          ) : (
-            <main className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
-              {visibleActiveView === "overview" ? (
-                <AgentOverviewPanel
-                  key={`${agent.id}:overview`}
-                  agent={agent}
-                  token={token}
-                  workspaceId={workspaceId}
-                  canViewCredentials={agent.can_edit}
-                  canManageCredentials={canManagePublishing && agent.can_edit}
-                  t={t}
-                  notify={notify}
-                />
-              ) : visibleActiveView === "logs" ? (
-                <AgentLogsPanel
-                  key={`${agent.id}:logs`}
-                  agent={agent}
-                  token={token}
-                  workspaceId={workspaceId}
-                  t={t}
-                  notify={notify}
-                />
-              ) : visibleActiveView === "monitoring" ? (
-                <AgentMonitoringPanel
-                  key={`${agent.id}:monitoring`}
-                  agent={agent}
-                  token={token}
-                  workspaceId={workspaceId}
-                  t={t}
-                  notify={notify}
-                />
-              ) : (
-                <AgentConversationUsersPanel
-                  key={`${agent.id}:users`}
-                  agent={agent}
-                  token={token}
-                  workspaceId={workspaceId}
-                  t={t}
-                  notify={notify}
-                />
-              )}
-            </main>
-          )}
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </AgentArtifactPreviewContext>
   )
 }

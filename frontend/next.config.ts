@@ -30,6 +30,11 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Only public viewer assets are readable by the opaque preview iframe.
+        source: "/file-preview/:path*",
+        headers: [{ key: "Access-Control-Allow-Origin", value: "*" }],
+      },
+      {
         // HTML and RSC payloads reference build-specific chunks. Do not let a
         // deployment leave an old shell in a shared cache.
         source: "/((?!_next/static/|_next/image/).*)",

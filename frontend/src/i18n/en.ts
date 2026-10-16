@@ -1,6 +1,19 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  缩小: "Zoom out",
+  放大: "Zoom in",
+  "预览文件：{filename}": "Preview file: {filename}",
+  "文件预览：{filename}": "File preview: {filename}",
+  正在加载文件预览: "Loading file preview",
+  "文件预览失败，可重试或下载原文件查看。":
+    "Unable to preview this file. Retry or download the original.",
+  "文件已过期或不可用，请重新生成。":
+    "This file has expired or is unavailable. Please generate it again.",
+  选择工作表: "Select worksheet",
+  工作表为空: "This worksheet is empty",
+  "预览仅显示前 500 行、50 列，完整内容请下载文件。":
+    "Preview shows the first 500 rows and 50 columns. Download the file for all content.",
   "应如何批准工具调用？": "How should tool calls be approved?",
   请求批准: "Request approval",
   按策略审批: "Policy approval",

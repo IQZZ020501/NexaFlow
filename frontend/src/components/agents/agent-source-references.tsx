@@ -5,11 +5,13 @@ import { FileTextIcon } from "lucide-react"
 import { Popover as PopoverPrimitive } from "radix-ui"
 import type { Components } from "react-markdown"
 
+import { AgentArtifactPreviews } from "@/components/agents/artifacts/agent-artifact-previews"
 import {
   MarkdownContent,
   MarkdownLink,
 } from "@/components/knowledge/markdown-content"
 import type { TFunction } from "@/i18n"
+import type { ArtifactEvent } from "@/lib/agent-artifacts"
 import type { AgentRunSource } from "@/lib/api/agents"
 import { cn } from "@/lib/utils"
 
@@ -254,11 +256,13 @@ export function AgentSourceReferences({
 
 export function AgentAnswer({
   content,
+  events = [],
   sources,
   t,
   className,
 }: {
   content: string
+  events?: readonly ArtifactEvent[]
   sources?: AgentRunSource[]
   t: TFunction
   className?: string
@@ -341,6 +345,7 @@ export function AgentAnswer({
         className={className}
         components={components}
       />
+      <AgentArtifactPreviews events={events} />
       {hasInlineSource && !hasUnresolvedSource ? null : (
         <AgentSourceReferences
           sources={hasInlineSource ? fallbackSources : sources}

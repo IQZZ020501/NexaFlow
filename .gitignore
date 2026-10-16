@@ -17,6 +17,7 @@ venv/
 node_modules/
 dist-ssr/
 .next/
+/frontend/public/file-preview/
 out/
 *.local
 

@@ -939,6 +939,104 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.queryByText(`${downloadUrl}/preview`)).toBeNull()
   })
 
+  test("previews HTML exports in the console and keeps them on the original answer", async () => {
+    routes = [
+      {
+        method: "POST",
+        pathname: "/api/v1/artifacts/download",
+        respond: () =>
+          new Response("<h1>Console page</h1>", {
+            headers: { "Content-Type": "text/html" },
+          }),
+      },
+    ]
+    const run = makeRun({
+      result: "Later answer",
+      events: [
+        {
+          type: "tool",
+          turn: 1,
+          tool_name: "bash",
+          status: "succeeded",
+          summary: "Exported page",
+          call_id: "html-call",
+          tool_label: "bash",
+          tool_kind: "builtin",
+          server_name: "",
+          input: {},
+          output: {
+            artifacts: [
+              {
+                filename: "console.html",
+                download_url: "/api/v1/artifacts/console-token",
+              },
+            ],
+          },
+          duration_ms: 1,
+        },
+        {
+          type: "thought",
+          turn: 2,
+          tool_name: "",
+          status: "succeeded",
+          summary: "agent.answer_ready",
+          call_id: "",
+          tool_label: "",
+          tool_kind: "unknown",
+          server_name: "",
+          input: {},
+          output: null,
+          duration_ms: 0,
+        },
+      ],
+      session_inputs: [
+        {
+          sequence: 1,
+          run_id: "run-1",
+          input_id: "follow-up",
+          mode: "follow_up",
+          content: "Another question",
+          status: "applied",
+          previous_answer: "Page generated",
+          previous_answer_turn: 2,
+        },
+      ],
+    })
+    const onAsk = mock((event: unknown) => (event as Event).preventDefault())
+    renderPage(<Harness activeView="settings" runs={[run]} onAsk={onAsk} />)
+    const card = screen.getByRole("button", { name: "预览文件：console.html" })
+    expect(
+      screen.getByText("Page generated").closest(".rounded-2xl")?.contains(card)
+    ).toBe(true)
+    expect(
+      screen.getByText("Later answer").closest(".rounded-2xl")?.contains(card)
+    ).toBe(false)
+    expect(document.querySelector("iframe")).toBeNull()
+    fireEvent.click(card)
+    const frame = await screen.findByTitle("文件预览：console.html")
+    expect(frame.getAttribute("srcdoc")).toContain("Console page")
+    expect(
+      screen
+        .getByRole("button", { name: "调试预览" })
+        .getAttribute("data-variant")
+    ).toBe("secondary")
+    expect(
+      screen
+        .getByRole("complementary", { name: "文件预览：console.html" })
+        .contains(frame)
+    ).toBe(true)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    const input = screen.getByRole("textbox", { name: "向 Agent 提问" })
+    input.focus()
+    expect(document.activeElement).toBe(input)
+    fireEvent.change(input, { target: { value: "Change the title" } })
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }))
+    expect(onAsk).toHaveBeenCalledTimes(1)
+    expect(screen.getByTitle("文件预览：console.html")).toBe(frame)
+    fireEvent.click(screen.getByRole("button", { name: "新建对话" }))
+    expect(screen.queryByTitle("文件预览：console.html")).toBeNull()
+  })
+
   test("keeps artifacts and sources with the answer turn that produced them", () => {
     const downloadUrl = "/api/v1/artifacts/83ccbf9c-7c17-4d78-a46d-637bb88ef48e"
     const source = {

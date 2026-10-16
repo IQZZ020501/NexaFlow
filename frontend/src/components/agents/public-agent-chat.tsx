@@ -60,6 +60,11 @@ import {
 } from "@/components/agents/agent-source-references"
 import { ToolInputPreview } from "@/components/agents/tool-input-preview"
 import {
+  AgentArtifactPreviewContext,
+  useAgentArtifactPreview,
+} from "@/components/agents/artifacts/agent-artifact-preview-context"
+import { AgentArtifactPreviewPanel } from "@/components/agents/artifacts/agent-artifact-previews"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -1178,6 +1183,10 @@ export function PublicAgentChat({
   const [activeConversationId, setActiveConversationId] = React.useState<
     string | null
   >(initialConversationId)
+  const artifactPreview = useAgentArtifactPreview(
+    `${agentId}:${activeConversationId ?? ""}`
+  )
+  const hasArtifactPreview = !!artifactPreview.selection
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
   const [question, setQuestion] = React.useState("")
   const [approvalMode, setApprovalMode] =
@@ -1934,543 +1943,574 @@ export function PublicAgentChat({
   }
 
   return (
-    <main
-      className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 lg:h-svh lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]"
-      style={viewportStyle}
-    >
-      <aside className="hidden min-h-0 border-r lg:block">
-        <ConversationHistory {...historyProps} />
-      </aside>
+    <AgentArtifactPreviewContext value={artifactPreview}>
+      <main
+        className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 lg:h-svh lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]"
+        style={viewportStyle}
+      >
+        <aside className="hidden min-h-0 border-r lg:block">
+          <ConversationHistory {...historyProps} />
+        </aside>
 
-      <section className="flex min-h-0 min-w-0 flex-col">
-        <header className="flex min-h-16 shrink-0 items-center gap-2 border-b bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:gap-3 sm:px-6">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            aria-label={t("打开历史记录")}
-            title={t("打开历史记录")}
-            onClick={() => setIsHistoryOpen(true)}
+        <div className="flex min-h-0 min-w-0">
+          <section
+            className={`${hasArtifactPreview ? "hidden md:flex md:flex-[2]" : "flex"} min-h-0 min-w-0 flex-1 flex-col`}
           >
-            <MenuIcon />
-          </Button>
-          <span className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground sm:flex">
-            <BotIcon className="size-4" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">{profile.name}</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              {profile.description || t("公开对话")}
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={t("新建对话")}
-            title={t("新建对话")}
-            onClick={startNewConversation}
-          >
-            <MessageSquarePlusIcon />
-          </Button>
-        </header>
-
-        <div
-          ref={scrollRef}
-          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
-        >
-          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 sm:px-8 sm:py-8 2xl:max-w-6xl">
-            {isRunsLoading ? (
-              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-                {t("正在加载")}
-              </div>
-            ) : visibleRuns.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center text-center">
-                <span className="flex size-14 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-                  <BotIcon className="size-6" />
-                </span>
-                <h2 className="mt-4 text-base font-semibold">
-                  {t("开始新对话")}
-                </h2>
-                <p className="mt-2 max-w-md text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
-                  {profile.description || t("输入问题，Agent 会为你生成回答。")}
+            <header className="flex min-h-16 shrink-0 items-center gap-2 border-b bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:gap-3 sm:px-6">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                aria-label={t("打开历史记录")}
+                title={t("打开历史记录")}
+                onClick={() => setIsHistoryOpen(true)}
+              >
+                <MenuIcon />
+              </Button>
+              <span className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground sm:flex">
+                <BotIcon className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-sm font-semibold">
+                  {profile.name}
+                </h1>
+                <p className="truncate text-xs text-muted-foreground">
+                  {profile.description || t("公开对话")}
                 </p>
               </div>
-            ) : (
-              <div className="space-y-6 sm:space-y-8">
-                {visibleRuns.map((run, index) => {
-                  const progressSegments = splitPublicRunProgress(run)
-                  const currentProgress = progressSegments.at(-1) ?? []
-                  const runToolCalls = toolCallsByRun[run.id] ?? []
-                  const visibleCurrentProgress = visiblePublicToolProgress(
-                    currentProgress,
-                    runToolCalls
-                  )
-                  const completedProgress = progressSegments.slice(0, -1)
-                  const hasAnswerHandoffs = completedProgress.length > 0
-                  const sourcesForProgress = (
-                    progress: ExternalAgentProgressEvent[]
-                  ) =>
-                    hasAnswerHandoffs
-                      ? agentSourcesForEvents(run.sources, progress)
-                      : run.sources
-                  let completedProgressIndex = 0
-                  const sessionInputs = (run.session_inputs ?? []).map(
-                    (input) => {
-                      const inputProgress = input.previous_answer
-                        ? (completedProgress[completedProgressIndex++] ?? [])
-                        : []
-                      return {
-                        input,
-                        progress: inputProgress,
-                        sources: sourcesForProgress(inputProgress),
-                      }
-                    }
-                  )
-                  const currentSources = sourcesForProgress(currentProgress)
-                  const pendingFollowUpIds = new Set(
-                    sessionInputs
-                      .filter(
-                        ({ input }) =>
-                          input.status !== "applied" && !input.previous_answer
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={t("新建对话")}
+                title={t("新建对话")}
+                onClick={startNewConversation}
+              >
+                <MessageSquarePlusIcon />
+              </Button>
+            </header>
+
+            <div
+              ref={scrollRef}
+              className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+            >
+              <div
+                className={`mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 2xl:max-w-6xl ${hasArtifactPreview ? "sm:px-4" : "sm:px-8 sm:py-8"}`}
+              >
+                {isRunsLoading ? (
+                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                    <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+                    {t("正在加载")}
+                  </div>
+                ) : visibleRuns.length === 0 ? (
+                  <div className="flex flex-1 flex-col items-center justify-center text-center">
+                    <span className="flex size-14 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                      <BotIcon className="size-6" />
+                    </span>
+                    <h2 className="mt-4 text-base font-semibold">
+                      {t("开始新对话")}
+                    </h2>
+                    <p className="mt-2 max-w-md text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
+                      {profile.description ||
+                        t("输入问题，Agent 会为你生成回答。")}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6 sm:space-y-8">
+                    {visibleRuns.map((run, index) => {
+                      const progressSegments = splitPublicRunProgress(run)
+                      const currentProgress = progressSegments.at(-1) ?? []
+                      const runToolCalls = toolCallsByRun[run.id] ?? []
+                      const visibleCurrentProgress = visiblePublicToolProgress(
+                        currentProgress,
+                        runToolCalls
                       )
-                      .map(({ input }) => input.input_id)
-                  )
-                  const answerStartedAt = currentProgress.findLast(
-                    (event) => event.type === "answer"
-                  )?.created_at
-                  const canEdit =
-                    index === visibleRuns.length - 1 &&
-                    run.status === "succeeded"
-                  const isEditing = editingRunId === run.id
-                  return (
-                    <article key={run.id} className="space-y-4">
-                      <div className="flex items-start justify-end gap-2">
-                        <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
-                          <RunAttachmentCards
-                            attachments={run.attachments}
-                            t={t}
-                          />
-                          {isEditing ? (
-                            <form
-                              className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
-                              onSubmit={(event) => {
-                                event.preventDefault()
-                                const goal = editDraft.trim()
-                                if (
-                                  !goal ||
-                                  isSending ||
-                                  isRunsLoading ||
-                                  regeneratingRunId
-                                ) {
-                                  return
-                                }
-                                void handleRegenerateRun(run.id, goal)
-                              }}
-                            >
-                              <textarea
-                                autoFocus
-                                aria-label={t("编辑消息")}
-                                className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
-                                maxLength={4000}
-                                value={editDraft}
-                                onChange={(event) =>
-                                  setEditDraft(event.target.value)
-                                }
+                      const completedProgress = progressSegments.slice(0, -1)
+                      const hasAnswerHandoffs = completedProgress.length > 0
+                      const sourcesForProgress = (
+                        progress: ExternalAgentProgressEvent[]
+                      ) =>
+                        hasAnswerHandoffs
+                          ? agentSourcesForEvents(run.sources, progress)
+                          : run.sources
+                      let completedProgressIndex = 0
+                      const sessionInputs = (run.session_inputs ?? []).map(
+                        (input) => {
+                          const inputProgress = input.previous_answer
+                            ? (completedProgress[completedProgressIndex++] ??
+                              [])
+                            : []
+                          return {
+                            input,
+                            progress: inputProgress,
+                            sources: sourcesForProgress(inputProgress),
+                          }
+                        }
+                      )
+                      const currentSources = sourcesForProgress(currentProgress)
+                      const pendingFollowUpIds = new Set(
+                        sessionInputs
+                          .filter(
+                            ({ input }) =>
+                              input.status !== "applied" &&
+                              !input.previous_answer
+                          )
+                          .map(({ input }) => input.input_id)
+                      )
+                      const answerStartedAt = currentProgress.findLast(
+                        (event) => event.type === "answer"
+                      )?.created_at
+                      const canEdit =
+                        index === visibleRuns.length - 1 &&
+                        run.status === "succeeded"
+                      const isEditing = editingRunId === run.id
+                      return (
+                        <article key={run.id} className="space-y-4">
+                          <div className="flex items-start justify-end gap-2">
+                            <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
+                              <RunAttachmentCards
+                                attachments={run.attachments}
+                                t={t}
                               />
-                              <div className="flex justify-end gap-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  disabled={regeneratingRunId === run.id}
-                                  onClick={() => {
-                                    setEditingRunId(null)
-                                    setEditDraft("")
+                              {isEditing ? (
+                                <form
+                                  className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
+                                  onSubmit={(event) => {
+                                    event.preventDefault()
+                                    const goal = editDraft.trim()
+                                    if (
+                                      !goal ||
+                                      isSending ||
+                                      isRunsLoading ||
+                                      regeneratingRunId
+                                    ) {
+                                      return
+                                    }
+                                    void handleRegenerateRun(run.id, goal)
                                   }}
                                 >
-                                  {t("取消")}
-                                </Button>
-                                <Button
-                                  type="submit"
-                                  size="sm"
-                                  disabled={
-                                    !editDraft.trim() ||
-                                    isSending ||
-                                    isRunsLoading ||
-                                    Boolean(regeneratingRunId)
-                                  }
-                                >
-                                  {regeneratingRunId === run.id ? (
-                                    <LoaderCircleIcon className="animate-spin" />
-                                  ) : (
-                                    <SendIcon />
-                                  )}
-                                  {t("重新发送")}
-                                </Button>
-                              </div>
-                            </form>
-                          ) : (
-                            <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                              {run.question}
-                            </div>
-                          )}
-                          <div className="flex items-start gap-1">
-                            <CopyMessageButton value={run.question} />
-                            {canEdit && !isEditing ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="text-muted-foreground"
-                                aria-label={t("编辑消息")}
-                                title={t("编辑消息")}
-                                disabled={
-                                  isSending ||
-                                  isRunsLoading ||
-                                  Boolean(regeneratingRunId)
-                                }
-                                onClick={() => {
-                                  setEditingRunId(run.id)
-                                  setEditDraft(run.question)
-                                }}
-                              >
-                                <PencilIcon />
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                        <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
-                          <UserIcon className="size-3.5" />
-                        </span>
-                      </div>
-                      {sessionInputs
-                        .filter(
-                          ({ input }) => !pendingFollowUpIds.has(input.input_id)
-                        )
-                        .map(({ input, progress, sources }) => (
-                          <React.Fragment key={input.input_id}>
-                            {input.previous_answer ? (
-                              <div className="flex items-start gap-3">
-                                <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
-                                  <BotIcon className="size-4" />
-                                </span>
-                                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
-                                  <PublicExecutionProcess
-                                    run={run}
-                                    progress={progress}
-                                    completed
+                                  <textarea
+                                    autoFocus
+                                    aria-label={t("编辑消息")}
+                                    className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
+                                    maxLength={4000}
+                                    value={editDraft}
+                                    onChange={(event) =>
+                                      setEditDraft(event.target.value)
+                                    }
                                   />
+                                  <div className="flex justify-end gap-1">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={regeneratingRunId === run.id}
+                                      onClick={() => {
+                                        setEditingRunId(null)
+                                        setEditDraft("")
+                                      }}
+                                    >
+                                      {t("取消")}
+                                    </Button>
+                                    <Button
+                                      type="submit"
+                                      size="sm"
+                                      disabled={
+                                        !editDraft.trim() ||
+                                        isSending ||
+                                        isRunsLoading ||
+                                        Boolean(regeneratingRunId)
+                                      }
+                                    >
+                                      {regeneratingRunId === run.id ? (
+                                        <LoaderCircleIcon className="animate-spin" />
+                                      ) : (
+                                        <SendIcon />
+                                      )}
+                                      {t("重新发送")}
+                                    </Button>
+                                  </div>
+                                </form>
+                              ) : (
+                                <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+                                  {run.question}
+                                </div>
+                              )}
+                              <div className="flex items-start gap-1">
+                                <CopyMessageButton value={run.question} />
+                                {canEdit && !isEditing ? (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    className="text-muted-foreground"
+                                    aria-label={t("编辑消息")}
+                                    title={t("编辑消息")}
+                                    disabled={
+                                      isSending ||
+                                      isRunsLoading ||
+                                      Boolean(regeneratingRunId)
+                                    }
+                                    onClick={() => {
+                                      setEditingRunId(run.id)
+                                      setEditDraft(run.question)
+                                    }}
+                                  >
+                                    <PencilIcon />
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                            <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
+                              <UserIcon className="size-3.5" />
+                            </span>
+                          </div>
+                          {sessionInputs
+                            .filter(
+                              ({ input }) =>
+                                !pendingFollowUpIds.has(input.input_id)
+                            )
+                            .map(({ input, progress, sources }) => (
+                              <React.Fragment key={input.input_id}>
+                                {input.previous_answer ? (
+                                  <div className="flex items-start gap-3">
+                                    <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+                                      <BotIcon className="size-4" />
+                                    </span>
+                                    <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+                                      <PublicExecutionProcess
+                                        run={run}
+                                        progress={progress}
+                                        completed
+                                      />
+                                      <AgentAnswer
+                                        events={progress}
+                                        content={withArtifactDownloadLinks(
+                                          input.previous_answer,
+                                          progress
+                                        )}
+                                        sources={sources}
+                                        t={t}
+                                        className="text-sm leading-6"
+                                      />
+                                    </div>
+                                  </div>
+                                ) : null}
+                                <div className="flex flex-col items-end gap-1.5">
+                                  <span className="text-xs text-muted-foreground">
+                                    {t("后续任务")}
+                                  </span>
+                                  <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+                                    {input.content}
+                                  </div>
+                                  <CopyMessageButton value={input.content} />
+                                </div>
+                              </React.Fragment>
+                            ))}
+                          <div className="flex items-start gap-3">
+                            <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+                              <BotIcon className="size-4" />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+                                <PublicExecutionProcess
+                                  run={run}
+                                  progress={visibleCurrentProgress}
+                                >
+                                  {unrenderedPublicToolCalls(
+                                    run.progress,
+                                    runToolCalls
+                                  ).map((call) =>
+                                    ["awaiting_approval", "uncertain"].includes(
+                                      call.status
+                                    ) ? (
+                                      <PublicToolApproval
+                                        key={call.call_id}
+                                        runId={run.id}
+                                        call={call}
+                                        resolvingCallId={resolvingCallId}
+                                        onDecision={(callId, decision) =>
+                                          handleToolCallDecision(
+                                            run.id,
+                                            callId,
+                                            decision
+                                          )
+                                        }
+                                        t={t}
+                                      />
+                                    ) : (
+                                      <PublicPendingToolCall
+                                        key={call.call_id}
+                                        call={call}
+                                        t={t}
+                                      />
+                                    )
+                                  )}
+                                </PublicExecutionProcess>
+                                {run.result ? (
                                   <AgentAnswer
+                                    events={currentProgress}
                                     content={withArtifactDownloadLinks(
-                                      input.previous_answer,
-                                      progress
+                                      run.result,
+                                      currentProgress
                                     )}
-                                    sources={sources}
+                                    sources={currentSources}
                                     t={t}
                                     className="text-sm leading-6"
                                   />
+                                ) : run.status === "failed" ? (
+                                  <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                                    {run.error || t("回答失败，请稍后重试。")}
+                                  </p>
+                                ) : run.status === "cancelled" ? (
+                                  <p className="text-sm text-muted-foreground">
+                                    {t("运行已取消")}
+                                  </p>
+                                ) : null}
+                              </div>
+                              {answerStartedAt ||
+                              (run.status === "succeeded" && run.result) ? (
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <MessageTimestamp value={answerStartedAt} />
+                                  {run.status === "succeeded" && run.result ? (
+                                    <RunActionBar
+                                      result={stripAgentSourceLinks(run.result)}
+                                      feedback={run.feedback}
+                                      regenerateDisabled={
+                                        isSending ||
+                                        isRunsLoading ||
+                                        Boolean(regeneratingRunId)
+                                      }
+                                      regenerating={
+                                        regeneratingRunId === run.id
+                                      }
+                                      feedbackPending={
+                                        feedbackPendingRunId === run.id
+                                      }
+                                      onRegenerate={() =>
+                                        void handleRegenerateRun(run.id)
+                                      }
+                                      onFeedback={(value) =>
+                                        void handleRunFeedback(run.id, value)
+                                      }
+                                      t={t}
+                                    />
+                                  ) : null}
                                 </div>
-                              </div>
-                            ) : null}
-                            <div className="flex flex-col items-end gap-1.5">
-                              <span className="text-xs text-muted-foreground">
-                                {t("后续任务")}
-                              </span>
-                              <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
-                                {input.content}
-                              </div>
-                              <CopyMessageButton value={input.content} />
-                            </div>
-                          </React.Fragment>
-                        ))}
-                      <div className="flex items-start gap-3">
-                        <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
-                          <BotIcon className="size-4" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
-                            <PublicExecutionProcess
-                              run={run}
-                              progress={visibleCurrentProgress}
-                            >
-                              {unrenderedPublicToolCalls(
-                                run.progress,
-                                runToolCalls
-                              ).map((call) =>
-                                ["awaiting_approval", "uncertain"].includes(
-                                  call.status
-                                ) ? (
-                                  <PublicToolApproval
-                                    key={call.call_id}
-                                    runId={run.id}
-                                    call={call}
-                                    resolvingCallId={resolvingCallId}
-                                    onDecision={(callId, decision) =>
-                                      handleToolCallDecision(
-                                        run.id,
-                                        callId,
-                                        decision
-                                      )
-                                    }
-                                    t={t}
-                                  />
-                                ) : (
-                                  <PublicPendingToolCall
-                                    key={call.call_id}
-                                    call={call}
-                                    t={t}
-                                  />
-                                )
-                              )}
-                            </PublicExecutionProcess>
-                            {run.result ? (
-                              <AgentAnswer
-                                content={withArtifactDownloadLinks(
-                                  run.result,
-                                  currentProgress
-                                )}
-                                sources={currentSources}
-                                t={t}
-                                className="text-sm leading-6"
-                              />
-                            ) : run.status === "failed" ? (
-                              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                                {run.error || t("回答失败，请稍后重试。")}
-                              </p>
-                            ) : run.status === "cancelled" ? (
-                              <p className="text-sm text-muted-foreground">
-                                {t("运行已取消")}
-                              </p>
-                            ) : null}
-                          </div>
-                          {answerStartedAt ||
-                          (run.status === "succeeded" && run.result) ? (
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <MessageTimestamp value={answerStartedAt} />
-                              {run.status === "succeeded" && run.result ? (
-                                <RunActionBar
-                                  result={stripAgentSourceLinks(run.result)}
-                                  feedback={run.feedback}
-                                  regenerateDisabled={
-                                    isSending ||
-                                    isRunsLoading ||
-                                    Boolean(regeneratingRunId)
-                                  }
-                                  regenerating={regeneratingRunId === run.id}
-                                  feedbackPending={
-                                    feedbackPendingRunId === run.id
-                                  }
-                                  onRegenerate={() =>
-                                    void handleRegenerateRun(run.id)
-                                  }
-                                  onFeedback={(value) =>
-                                    void handleRunFeedback(run.id, value)
-                                  }
-                                  t={t}
-                                />
                               ) : null}
                             </div>
-                          ) : null}
-                        </div>
-                      </div>
-                      {sessionInputs
-                        .filter(({ input }) =>
-                          pendingFollowUpIds.has(input.input_id)
-                        )
-                        .map(({ input }) => (
-                          <div
-                            key={input.input_id}
-                            className="flex flex-col items-end gap-1.5"
-                          >
-                            <span className="text-xs text-muted-foreground">
-                              {t("后续任务")}
-                            </span>
-                            <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
-                              {input.content}
-                            </div>
-                            <CopyMessageButton value={input.content} />
                           </div>
-                        ))}
-                    </article>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="shrink-0 border-t bg-background p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {sendError ? (
-            <p
-              role="alert"
-              className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
-            >
-              {sendError}
-            </p>
-          ) : null}
-          <form
-            className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
-            onSubmit={handleAsk}
-            onDragOver={(event) => {
-              if (event.dataTransfer.types.includes("Files")) {
-                event.preventDefault()
-              }
-            }}
-            onDrop={(event) => {
-              const dropped = transferredFiles(event.dataTransfer)
-              if (!dropped.length) return
-              event.preventDefault()
-              if (isSending) return
-              setSendError(null)
-              setFiles((current) => appendAttachmentFiles(current, dropped))
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="sr-only"
-              multiple
-              accept={acceptedUploadExtensions(
-                AGENT_FILE_UPLOAD_SETTING.file_upload_type
-              )}
-              disabled={isSending}
-              onChange={(event) => {
-                const selected = Array.from(event.target.files ?? [])
-                setSendError(null)
-                setFiles((current) => appendAttachmentFiles(current, selected))
-              }}
-            />
-            <textarea
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onPaste={(event) => {
-                if (isSending) return
-                const pasted = transferredFiles(event.clipboardData)
-                if (!pasted.length) return
-                event.preventDefault()
-                setSendError(null)
-                setFiles((current) => appendAttachmentFiles(current, pasted))
-              }}
-              onKeyDown={(event) => {
-                if (
-                  event.key === "Enter" &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault()
-                  event.currentTarget.form?.requestSubmit()
-                }
-              }}
-              className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
-              placeholder={t("请输入问题")}
-              aria-label={t("请输入问题")}
-              enterKeyHint="send"
-              autoComplete="off"
-              maxLength={4000}
-              rows={1}
-            />
-            <AgentAttachmentList
-              files={files}
-              onRemove={(indexToRemove) =>
-                setFiles((current) =>
-                  current.filter((_, index) => index !== indexToRemove)
-                )
-              }
-              t={t}
-            />
-            <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
-              <div className="flex min-w-0 items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-md text-muted-foreground hover:text-foreground"
-                  aria-label={t("添加附件")}
-                  title={t("添加附件")}
-                  disabled={isSending}
-                  onClick={() => {
-                    if (!fileInputRef.current) return
-                    fileInputRef.current.value = ""
-                    fileInputRef.current.click()
-                  }}
-                >
-                  <PlusIcon />
-                </Button>
-                <AgentApprovalModeMenu
-                  value={approvalMode}
-                  onChange={setApprovalMode}
-                  disabled={isSending}
-                  t={t}
-                />
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {isSending && question.trim() ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="rounded-full text-muted-foreground"
-                    aria-label={t("停止生成")}
-                    title={t("停止生成")}
-                    onClick={handleCancelAsk}
-                  >
-                    <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
-                  </Button>
-                ) : null}
-                <Button
-                  type={isSending && !question.trim() ? "button" : "submit"}
-                  size="icon"
-                  className="rounded-full"
-                  aria-label={t(
-                    isSending
-                      ? question.trim()
-                        ? "追加后续任务"
-                        : "停止生成"
-                      : "发送问题"
-                  )}
-                  title={t(
-                    isSending
-                      ? question.trim()
-                        ? "追加后续任务"
-                        : "停止生成"
-                      : "发送问题"
-                  )}
-                  onClick={
-                    isSending && !question.trim() ? handleCancelAsk : undefined
-                  }
-                  disabled={!isSending && !question.trim()}
-                >
-                  {isSending && !question.trim() ? (
-                    <SquareIcon className="size-4.5 fill-current" strokeWidth={0} />
-                  ) : (
-                    <ArrowUpIcon />
-                  )}
-                </Button>
+                          {sessionInputs
+                            .filter(({ input }) =>
+                              pendingFollowUpIds.has(input.input_id)
+                            )
+                            .map(({ input }) => (
+                              <div
+                                key={input.input_id}
+                                className="flex flex-col items-end gap-1.5"
+                              >
+                                <span className="text-xs text-muted-foreground">
+                                  {t("后续任务")}
+                                </span>
+                                <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+                                  {input.content}
+                                </div>
+                                <CopyMessageButton value={input.content} />
+                              </div>
+                            ))}
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
-          </form>
-        </div>
-      </section>
 
-      <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <DialogContent
-          side="right"
-          className="flex h-full min-h-0 flex-col gap-0 overflow-hidden p-0 max-sm:max-w-none lg:hidden"
-        >
-          <DialogHeader className="sr-only">
-            <DialogTitle>{t("历史记录")}</DialogTitle>
-            <DialogDescription>{t("选择或新建对话")}</DialogDescription>
-          </DialogHeader>
-          <ConversationHistory
-            {...historyProps}
-            onClose={() => setIsHistoryOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
-      {confirmDialog}
-    </main>
+            <div className="shrink-0 border-t bg-background p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {sendError ? (
+                <p
+                  role="alert"
+                  className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
+                >
+                  {sendError}
+                </p>
+              ) : null}
+              <form
+                className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                onSubmit={handleAsk}
+                onDragOver={(event) => {
+                  if (event.dataTransfer.types.includes("Files")) {
+                    event.preventDefault()
+                  }
+                }}
+                onDrop={(event) => {
+                  const dropped = transferredFiles(event.dataTransfer)
+                  if (!dropped.length) return
+                  event.preventDefault()
+                  if (isSending) return
+                  setSendError(null)
+                  setFiles((current) => appendAttachmentFiles(current, dropped))
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="sr-only"
+                  multiple
+                  accept={acceptedUploadExtensions(
+                    AGENT_FILE_UPLOAD_SETTING.file_upload_type
+                  )}
+                  disabled={isSending}
+                  onChange={(event) => {
+                    const selected = Array.from(event.target.files ?? [])
+                    setSendError(null)
+                    setFiles((current) =>
+                      appendAttachmentFiles(current, selected)
+                    )
+                  }}
+                />
+                <textarea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onPaste={(event) => {
+                    if (isSending) return
+                    const pasted = transferredFiles(event.clipboardData)
+                    if (!pasted.length) return
+                    event.preventDefault()
+                    setSendError(null)
+                    setFiles((current) =>
+                      appendAttachmentFiles(current, pasted)
+                    )
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault()
+                      event.currentTarget.form?.requestSubmit()
+                    }
+                  }}
+                  className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
+                  placeholder={t("请输入问题")}
+                  aria-label={t("请输入问题")}
+                  enterKeyHint="send"
+                  autoComplete="off"
+                  maxLength={4000}
+                  rows={1}
+                />
+                <AgentAttachmentList
+                  files={files}
+                  onRemove={(indexToRemove) =>
+                    setFiles((current) =>
+                      current.filter((_, index) => index !== indexToRemove)
+                    )
+                  }
+                  t={t}
+                />
+                <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+                  <div className="flex min-w-0 items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="rounded-md text-muted-foreground hover:text-foreground"
+                      aria-label={t("添加附件")}
+                      title={t("添加附件")}
+                      disabled={isSending}
+                      onClick={() => {
+                        if (!fileInputRef.current) return
+                        fileInputRef.current.value = ""
+                        fileInputRef.current.click()
+                      }}
+                    >
+                      <PlusIcon />
+                    </Button>
+                    <AgentApprovalModeMenu
+                      value={approvalMode}
+                      onChange={setApprovalMode}
+                      disabled={isSending}
+                      t={t}
+                    />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {isSending && question.trim() ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="rounded-full text-muted-foreground"
+                        aria-label={t("停止生成")}
+                        title={t("停止生成")}
+                        onClick={handleCancelAsk}
+                      >
+                        <SquareIcon
+                          className="size-4.5 fill-current"
+                          strokeWidth={0}
+                        />
+                      </Button>
+                    ) : null}
+                    <Button
+                      type={isSending && !question.trim() ? "button" : "submit"}
+                      size="icon"
+                      className="rounded-full"
+                      aria-label={t(
+                        isSending
+                          ? question.trim()
+                            ? "追加后续任务"
+                            : "停止生成"
+                          : "发送问题"
+                      )}
+                      title={t(
+                        isSending
+                          ? question.trim()
+                            ? "追加后续任务"
+                            : "停止生成"
+                          : "发送问题"
+                      )}
+                      onClick={
+                        isSending && !question.trim()
+                          ? handleCancelAsk
+                          : undefined
+                      }
+                      disabled={!isSending && !question.trim()}
+                    >
+                      {isSending && !question.trim() ? (
+                        <SquareIcon
+                          className="size-4.5 fill-current"
+                          strokeWidth={0}
+                        />
+                      ) : (
+                        <ArrowUpIcon />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </section>
+          <AgentArtifactPreviewPanel />
+        </div>
+
+        <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
+          <DialogContent
+            side="right"
+            className="flex h-full min-h-0 flex-col gap-0 overflow-hidden p-0 max-sm:max-w-none lg:hidden"
+          >
+            <DialogHeader className="sr-only">
+              <DialogTitle>{t("历史记录")}</DialogTitle>
+              <DialogDescription>{t("选择或新建对话")}</DialogDescription>
+            </DialogHeader>
+            <ConversationHistory
+              {...historyProps}
+              onClose={() => setIsHistoryOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+        {confirmDialog}
+      </main>
+    </AgentArtifactPreviewContext>
   )
 }
