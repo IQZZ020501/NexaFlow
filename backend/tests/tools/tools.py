@@ -4450,6 +4450,43 @@ async def assert_tool_runtime_edge_branches(
         adapter=TimeoutAdapter(),
     )
     assert timed_out.error_code == "tool_deadline_exceeded"
+    assert timed_out.outcome == "confirmed"
+
+    # An outer Tool deadline must retain evidence that a command was dispatched.
+    dispatched_invocation = await queue_invocation(
+        make_context("edge-dispatched-timeout", deadline_at=utc_now() + timedelta(seconds=0.3))
+    )
+
+    class DispatchedAdapter:
+        kind = "python"
+        calls = 0
+
+        async def invoke(self, snapshot, arguments, context):
+            from app.ports.execution import execution_scope
+
+            self.calls += 1
+            execution_scope.get().attempt.unconfirmed = True
+            await asyncio.Event().wait()
+
+    dispatched_adapter = DispatchedAdapter()
+    timed_out = await execute_tool_invocation(
+        dispatched_invocation.id,
+        settings,
+        "edge-dispatched-worker",
+        adapter=dispatched_adapter,
+    )
+    assert timed_out.error_code == "tool_deadline_exceeded"
+    assert timed_out.outcome == "uncertain"
+    async with get_session_factory()() as db:
+        stored = await tool_repository.get_tool_invocation(db, workspace_id, dispatched_invocation.id)
+        assert stored.status == "uncertain"
+    replay = await execute_tool_invocation(
+        dispatched_invocation.id,
+        settings,
+        "edge-dispatched-replay-worker",
+        adapter=dispatched_adapter,
+    )
+    assert replay.outcome == "uncertain" and dispatched_adapter.calls == 1
 
     # Provider exception (tool_runtime.py:232-237).
     boom_invocation = await queue_invocation(make_context("edge-boom"))

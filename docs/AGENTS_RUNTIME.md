@@ -82,8 +82,8 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
 - `backend/app/infra/agents/live_stream.py` — 按 Run 隔离的 Redis Stream 实时增量（`AgentLiveStreamPublisher`/`AgentLiveStreamReader`，maxlen 4096、TTL 900s、key `nexaflow:agent-live:{run_id}`）。
 - `backend/app/infra/tools/dispatch.py` — `enqueue_tool_invocation`：经 Celery `app.tools.run` 投递 durable ToolInvocation。
 - `backend/app/infra/tools/mcp_stdio.py` — MCP stdio 配置契约与上限校验（command/args/cwd/env/egress_domains 属于执行镜像路径）。
-- `backend/app/infra/execution/sessions.py` / `infra/db/repositories/execution/sessions.py` — 持久化沙箱所有权与 Run 租约核验；`adapters/execution/opensandbox.py` 按 ID 接回、短租约监督、原生 TTL 和清理，`pool.py` 使用 SDK 的共享 Redis 预热池，`resources.py` 保存待 Kata 校准的三档规格。
-- `sandbox/command.py` / `mcp_bridge.py` — 独立执行镜像中的 bash 监督与 stdio HTTP 桥接；业务进程不执行子程序。
+- `backend/app/infra/execution/sessions.py` / `infra/db/repositories/execution/sessions.py` — 持久化沙箱所有权与 Run 租约核验；`adapters/execution/opensandbox.py` 按 ID 接回、短租约监督、原生 TTL 和清理，`pool.py` 使用 SDK 的共享 Redis 预热池，`resources.py` 保存待 Kata 校准的三档规格。`adapters/execution/capacity.py` 按主机、外部 consumer 与工作空间三个维度在 Redis 记账容量；`opensandbox.py` 的出网策略在每条命令前 reconcile（清理上一位 worker 遗留的放行规则），因此 worker 硬死不会再让该 Run 丢失工作区；创建、执行与销毁共享调用方的整体 deadline。
+- `sandbox/command.py` / `mcp_bridge.py` — 独立执行镜像中的 bash 监督与 stdio HTTP 桥接；业务进程不执行子程序。`sandbox/command.py` 对工作区施加 512 MiB / 20 000 文件的上限，持续增长时以退出码 125 停止命令，并回收旧的导出目录。
 - `backend/app/tasks/agents/jobs.py` — Celery 任务入口：`run_agent_job`（agent legacy/unified 运行任务）。
 - `backend/app/tasks/maintenance/jobs.py` — 周期恢复编排：agent legacy/unified 恢复、Workflow Agent 子运行 reconcile 与 Tool invocation 恢复。
 - `backend/app/infra/db/repositories/agents/repository.py` — Agent 持久化仓储：Agent/发布版本/API 凭据/绑定查询与写入、Agent 维度的 Run 列表与会话记忆读取/摘要保存，以及统一 `ToolInvocation` 的审批/幂等状态落库与 canonical 工具调用视图。

@@ -37,6 +37,9 @@ path = {quoted(str(state_dir / "sandboxes.db"))}
 
 [storage]
 allowed_host_paths = []
+# Guest disk is bounded inside the guest (workspace and job storage quotas).
+# The host filesystem must still carry a dedicated quota: the writable layer
+# of a guest lives on the execution host's data root.
 
 [docker]
 network_mode = "bridge"

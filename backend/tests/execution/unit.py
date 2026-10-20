@@ -36,10 +36,39 @@ from app.ports.execution import (
     ExecutionBusy,
     ExecutionError,
     ExecutionNotStarted,
+    ExecutionOutcomeUnknown,
     ExecutionScope,
     execution_scope,
 )
 from app.ports.mcp import McpConnection, McpServerBusy
+
+
+def _host_slots(fake):
+    """The deployment-wide slot count held by the fake Redis."""
+    return len(fake.slots.get(fake.host_key, {}))
+
+
+def policy_status(allowed=()):
+    """A valid dns+nft policy status with the given allow rules."""
+    return {
+        "enforcementMode": "dns+nft",
+        "policy": {
+            "defaultAction": "deny",
+            "egress": [
+                *[{"action": "deny", "target": target} for target in DENIED_NETWORKS],
+                *[{"action": "allow", "target": target} for target in allowed],
+            ],
+        },
+    }
+
+
+def policy_state(allowed=()):
+    """The tuple shape the adapter's policy reader returns."""
+    status = policy_status(allowed)
+    policy = status["policy"]
+    denies = {rule["target"] for rule in policy["egress"] if rule["action"] == "deny"}
+    allows = {rule["target"] for rule in policy["egress"] if rule["action"] == "allow"}
+    return status, policy, denies, allows
 
 
 class FakeSessionStore:
@@ -74,6 +103,13 @@ class FakeSessionStore:
 
     def row(self, record):
         return next(row for row in self.records.values() if row.id == record.id)
+
+    async def acquire_existing(self, settings, scope, timeout, **kwargs):
+        key = (scope.workspace_id, scope.run_id, "run", "")
+        row = self.records.get(key)
+        if row is None or row.state == "closed":
+            raise ExecutionNotStarted("Run sandbox no longer exists.")
+        return await self.acquire(settings, scope, timeout, **kwargs)
 
     async def publish(self, record, *, scope=None, **values):
         row = self.row(record)
@@ -113,14 +149,26 @@ class FakeSessionStore:
 
 
 class FakeRedis:
-    """Evaluates the capacity scripts against an in-memory slot table."""
+    """Evaluates the capacity scripts against in-memory slot tables.
 
-    slots: dict[str, int] = {}
+    Slots are kept per Redis key, mirroring the Lua script: the
+    deployment-wide host limit, the per-consumer limit and the per-workspace
+    limit are three separate sorted sets.
+    """
+
+    slots: dict[str, dict[str, int]] = {}
+    host_key: str = ""
     failure: Exception | None = None
 
     @classmethod
     def from_url(cls, *_args, **_kwargs):
         return cls()
+
+    @classmethod
+    def reset(cls):
+        cls.slots = {}
+        cls.host_key = ""
+        cls.failure = None
 
     async def __aenter__(self):
         return self
@@ -128,26 +176,54 @@ class FakeRedis:
     async def __aexit__(self, *_exc_info):
         return False
 
-    async def eval(self, script, _numkeys, _key, *args):
+    def _expire(self, key, now):
+        held = self.slots.setdefault(key, {})
+        for token, score in list(held.items()):
+            if score <= now:
+                del held[token]
+        return held
+
+    async def eval(self, script, _numkeys, *keys_and_args):
         if self.failure is not None:
             raise self.failure
+        keys = keys_and_args[:_numkeys]
+        args = keys_and_args[_numkeys:]
         if script is capacity._ACQUIRE:
-            now, limit, expiry, token, _lifetime = args
-            for held, score in list(self.slots.items()):
-                if score <= now:
-                    del self.slots[held]
-            if len(self.slots) >= limit:
+            (
+                now,
+                limit,
+                expiry,
+                token,
+                _lifetime,
+                consumer_limit,
+                workspace_limit,
+                track_consumer,
+                track_workspace,
+            ) = args
+            host = self._expire(keys[0], now)
+            type(self).host_key = keys[0]
+            consumer = self._expire(keys[1], now)
+            workspace = self._expire(keys[2], now)
+            if limit > 0 and len(host) >= limit:
                 return 0
-            self.slots[token] = expiry
+            if track_consumer == "1" and len(consumer) >= consumer_limit:
+                return 0
+            if track_workspace == "1" and len(workspace) >= workspace_limit:
+                return 0
+            host[token] = expiry
+            if track_consumer == "1":
+                consumer[token] = expiry
+            if track_workspace == "1":
+                workspace[token] = expiry
             return 1
         expiry, token, _lifetime = args
-        self.slots[token] = expiry
+        self.slots.setdefault(keys[0], {})[token] = expiry
         return 1
 
-    async def zrem(self, _key, token):
+    async def zrem(self, key, token):
         if self.failure is not None:
             raise self.failure
-        self.slots.pop(token, None)
+        self.slots.setdefault(key, {}).pop(token, None)
 
 
 class Files:
@@ -170,18 +246,37 @@ class Files:
 
 
 def sandbox(files=None, run=None):
-    return SimpleNamespace(
+    """A fake guest that tracks its own egress rules."""
+
+    allowed: set[str] = set()
+
+    async def patch_egress_rules(rules):
+        for rule in rules:
+            if rule.action == "allow":
+                allowed.add(rule.target)
+
+    async def delete_egress_rules(targets):
+        for target in targets:
+            allowed.discard(target)
+
+    async def get_endpoint(_port):
+        return SimpleNamespace(headers={})
+
+    instance = SimpleNamespace(
         id="sb-owned",
         files=files or Files(),
         destroy=AsyncMock(),
         close=AsyncMock(),
         renew=AsyncMock(),
-        patch_egress_rules=AsyncMock(),
-        delete_egress_rules=AsyncMock(),
+        patch_egress_rules=AsyncMock(side_effect=patch_egress_rules),
+        delete_egress_rules=AsyncMock(side_effect=delete_egress_rules),
+        get_endpoint=AsyncMock(side_effect=get_endpoint),
+        allowed_egress=allowed,
         commands=SimpleNamespace(
             run=run or AsyncMock(return_value=SimpleNamespace(error=None, exit_code=0))
         ),
     )
+    return instance
 
 
 def runtime_settings():
@@ -193,10 +288,21 @@ def runtime_settings():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_execution_lifecycle():
     instance = sandbox()
     invocation_id = "1:call_00_fqd8NnkrNewASPzvj2pb9371"
     scope = execution_scope.set(ExecutionScope("tenant-a", invocation_id, "run/a"))
+
+    async def run_command(*_args, **_kwargs):
+        assert execution_scope.get().attempt.unconfirmed
+        return SimpleNamespace(error=None, exit_code=0)
+
+    instance.commands.run.side_effect = run_command
 
     async def create_sandbox(*_args, **kwargs):
         for value in kwargs["metadata"].values():
@@ -212,6 +318,7 @@ async def assert_execution_lifecycle():
                 {"code": "print(1)"}, timeout_seconds=5, max_output_bytes=1000
             )
             assert result == {"ok": True}
+            assert not execution_scope.get().attempt.unconfirmed
             kwargs = create.call_args.kwargs
             assert kwargs["metadata"]["workspace"] == "tenant-a"
             assert kwargs["metadata"]["invocation"] != invocation_id
@@ -239,6 +346,11 @@ async def assert_execution_lifecycle():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_agent_run_session_lifecycle():
     instance = sandbox()
     config = replace(
@@ -291,6 +403,11 @@ async def assert_agent_run_session_lifecycle():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_failure_and_cancellation_cleanup():
     for files in (
         Files(b"[]"),
@@ -347,6 +464,11 @@ async def assert_failure_and_cancellation_cleanup():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_platform_failure_boundaries():
     with patch.object(adapter.Sandbox, "create", AsyncMock()) as create:
         try:
@@ -444,6 +566,11 @@ async def assert_platform_failure_boundaries():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_immutable_package_staging():
     instance = sandbox()
     with patch.object(adapter.Sandbox, "create", AsyncMock(return_value=instance)):
@@ -461,6 +588,11 @@ async def assert_immutable_package_staging():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_session_stages_packages_once():
     instance = sandbox()
     platform = adapter.OpenSandboxExecution(runtime_settings())
@@ -494,9 +626,13 @@ async def assert_session_stages_packages_once():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_capacity_bounds_live_sandboxes():
-    FakeRedis.slots = {}
-    FakeRedis.failure = None
+    FakeRedis.reset()
     platform = adapter.OpenSandboxExecution(
         replace(runtime_settings(), opensandbox_max_sandboxes=1)
     )
@@ -525,7 +661,7 @@ async def assert_capacity_bounds_live_sandboxes():
             await platform.execute(
                 session_request, timeout_seconds=5, max_output_bytes=1000
             )
-            assert len(FakeRedis.slots) == 1
+            assert _host_slots(FakeRedis) == 1
             try:
                 await platform.execute(
                     {"code": "print(2)"}, timeout_seconds=5, max_output_bytes=1000
@@ -539,13 +675,13 @@ async def assert_capacity_bounds_live_sandboxes():
             await platform.close_session("tenant-a", "run-capacity")
             held.destroy.assert_awaited_once()
             # An unreleased slot is left to expire with the sandbox's TTL.
-            assert len(FakeRedis.slots) == 1
+            assert _host_slots(FakeRedis) == 1
             FakeRedis.failure = None
-            FakeRedis.slots = {}
+            FakeRedis.reset()
             assert await platform.execute(
                 {"code": "print(2)"}, timeout_seconds=5, max_output_bytes=1000
             ) == {"ok": True}
-            assert FakeRedis.slots == {}
+            assert _host_slots(FakeRedis) == 0
             spare.destroy.assert_awaited_once()
 
             FakeRedis.failure = RedisError("offline")
@@ -564,6 +700,11 @@ async def assert_capacity_bounds_live_sandboxes():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_dependency_cache_and_missing_guest():
     digest = "a" * 64
     response = json.dumps(
@@ -650,6 +791,264 @@ async def assert_failed_cleanup_keeps_capacity():
     platform.capacity.release.assert_not_awaited()
 
 
+async def assert_export_reads_never_replace_a_missing_guest():
+    for failure in ("missing-id", "missing-guest", "cached-missing", "transient"):
+        platform = adapter.OpenSandboxExecution(runtime_settings())
+        scope = ExecutionScope(f"read-{failure}", "read", f"run-{failure}")
+        row = ExecutionSession(
+            workspace_id=scope.workspace_id,
+            run_id=scope.run_id,
+            sandbox_id=None if failure == "missing-id" else f"guest-{failure}",
+            state="creating" if failure == "missing-id" else "ready",
+            capacity_token="existing-slot",
+            expires_at=utc_now() + timedelta(seconds=300),
+        )
+        FakeSessionStore.records[(scope.workspace_id, scope.run_id, "run", "")] = row
+        error = RuntimeError("control plane unavailable")
+        error.status_code = 503 if failure == "transient" else 404
+        if failure == "cached-missing":
+            guest = sandbox()
+            guest.id = row.sandbox_id
+            guest.renew.side_effect = error
+            platform._sessions[row.id] = adapter._Session(guest, row.expires_at)
+        platform.capacity.release = AsyncMock()
+        token = execution_scope.set(scope)
+        try:
+            with (
+                patch.object(adapter.Sandbox, "connect", AsyncMock(side_effect=error)),
+                patch.object(adapter.Sandbox, "create", AsyncMock()) as create,
+            ):
+                try:
+                    await platform.read_session_file(
+                        scope.workspace_id,
+                        scope.run_id,
+                        "/tmp/nexaflow-exports/" + "a" * 32 + "/0",
+                        1000,
+                    )
+                except ExecutionError:
+                    pass
+                else:
+                    raise AssertionError("A missing export was returned")
+                create.assert_not_awaited()
+            assert row.holder is None
+            assert row.state == {
+                "missing-id": "creating",
+                "transient": "ready",
+            }.get(failure, "closed")
+            if failure in {"missing-guest", "cached-missing"}:
+                platform.capacity.release.assert_awaited_once()
+            else:
+                platform.capacity.release.assert_not_awaited()
+        finally:
+            execution_scope.reset(token)
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution, "_fetch_policy", new=AsyncMock(return_value=policy_state())
+)
+async def assert_dispatched_timeout_is_uncertain():
+    for persistent in (False, True):
+        guest = sandbox(run=AsyncMock(side_effect=TimeoutError("response lost")))
+        platform = adapter.OpenSandboxExecution(runtime_settings())
+        scope = execution_scope.set(ExecutionScope("uncertain", "call", "run-uncertain"))
+        try:
+            with patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)):
+                try:
+                    await platform.execute(
+                        {"execution_session": "agent_run"} if persistent else {},
+                        timeout_seconds=5,
+                        max_output_bytes=1000,
+                    )
+                except ExecutionOutcomeUnknown:
+                    pass
+                else:
+                    raise AssertionError("A dispatched command lost its uncertain outcome")
+            guest.commands.run.assert_awaited_once()
+            guest.destroy.assert_awaited_once()
+        finally:
+            execution_scope.reset(scope)
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution, "_fetch_policy", new=AsyncMock(return_value=policy_state())
+)
+async def assert_execution_deadline_covers_dispatch_and_cleanup():
+    async def blocked(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    for persistent in (False, True):
+        guest = sandbox(run=AsyncMock(side_effect=blocked))
+        platform = adapter.OpenSandboxExecution(runtime_settings())
+        scope = execution_scope.set(ExecutionScope("deadline", "call", "run-deadline"))
+        try:
+            with (
+                patch.object(adapter, "DEADLINE_OVERHEAD_SECONDS", 0.1),
+                patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)),
+            ):
+                try:
+                    await asyncio.wait_for(
+                        platform.execute(
+                            {"execution_session": "agent_run"} if persistent else {},
+                            timeout_seconds=0.05,
+                            max_output_bytes=1000,
+                        ),
+                        0.5,
+                    )
+                except ExecutionOutcomeUnknown:
+                    pass
+                else:
+                    raise AssertionError("A dispatched timeout was not uncertain")
+            guest.commands.run.assert_awaited_once()
+            guest.destroy.assert_awaited_once()
+        finally:
+            execution_scope.reset(scope)
+
+    guest = sandbox()
+    guest.id = "slow-cleanup"
+    guest.destroy.side_effect = blocked
+    platform = adapter.OpenSandboxExecution(runtime_settings())
+    platform.capacity.acquire = AsyncMock(return_value="cleanup-slot")
+    platform.capacity.release = AsyncMock()
+    with (
+        patch.object(adapter, "DEADLINE_OVERHEAD_SECONDS", 0.1),
+        patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)),
+    ):
+        result = await asyncio.wait_for(
+            platform.execute({}, timeout_seconds=0.05, max_output_bytes=1000), 0.5
+        )
+    assert result == {"ok": True}, "Cleanup lost a confirmed execution result"
+    platform.capacity.release.assert_not_awaited()
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution, "_fetch_policy", new=AsyncMock(return_value=policy_state())
+)
+async def assert_execution_deadline_covers_pre_dispatch_waits():
+    async def blocked(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    for phase in ("handles", "lock", "store", "create", "staging"):
+        guest = sandbox()
+        guest.id = f"pre-dispatch-{phase}"
+        platform = adapter.OpenSandboxExecution(runtime_settings())
+        platform.capacity.acquire = AsyncMock(return_value=f"slot-{phase}")
+        platform.capacity.release = AsyncMock()
+        scope = execution_scope.set(ExecutionScope(f"wait-{phase}", "call", f"run-{phase}"))
+        held = None
+        request = {"execution_session": "agent_run"}
+        if phase == "handles":
+            guest.close.side_effect = blocked
+            platform._sessions[phase] = adapter._Session(guest, utc_now() - timedelta(seconds=1))
+        elif phase == "lock":
+            held = asyncio.Lock()
+            await held.acquire()
+            platform._session_locks[platform._session_key(request, execution_scope.get())] = held
+        elif phase == "store":
+            platform.store.acquire = AsyncMock(side_effect=blocked)
+        elif phase == "staging":
+            guest.files.write_files = AsyncMock(side_effect=blocked)
+        try:
+            with (
+                patch.object(adapter, "DEADLINE_OVERHEAD_SECONDS", 0.1),
+                patch.object(
+                    adapter.Sandbox, "create",
+                    AsyncMock(side_effect=blocked) if phase == "create" else AsyncMock(return_value=guest),
+                ),
+            ):
+                try:
+                    await asyncio.wait_for(
+                        platform.execute(request, timeout_seconds=0.05, max_output_bytes=1000), 0.5
+                    )
+                except ExecutionNotStarted:
+                    pass
+                else:
+                    raise AssertionError(f"Unbounded pre-dispatch wait: {phase}")
+            guest.commands.run.assert_not_awaited()
+            assert not execution_scope.get().attempt.unconfirmed
+            if phase == "create":
+                platform.capacity.release.assert_not_awaited()
+        finally:
+            if held is not None:
+                held.release()
+            execution_scope.reset(scope)
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution, "_fetch_policy", new=AsyncMock(return_value=policy_state())
+)
+async def assert_timed_out_session_cleanup_stays_pending():
+    async def blocked():
+        await asyncio.Event().wait()
+
+    guest = sandbox(run=AsyncMock(side_effect=TimeoutError("reply lost")))
+    guest.id = "pending-cleanup"
+    guest.destroy.side_effect = blocked
+    platform = adapter.OpenSandboxExecution(runtime_settings())
+    platform.capacity.acquire = AsyncMock(return_value="pending-slot")
+    platform.capacity.release = AsyncMock()
+    scope = execution_scope.set(ExecutionScope("pending-cleanup", "call", "run-cleanup"))
+    try:
+        with (
+            patch.object(adapter, "DEADLINE_OVERHEAD_SECONDS", 0.1),
+            patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)),
+        ):
+            try:
+                await asyncio.wait_for(
+                    platform.execute(
+                        {"execution_session": "agent_run"}, timeout_seconds=0.05, max_output_bytes=1000
+                    ), 0.5,
+                )
+            except ExecutionOutcomeUnknown:
+                pass
+            else:
+                raise AssertionError("An unconfirmed command became safe to retry")
+        record = (await platform.store.for_run("pending-cleanup", "run-cleanup"))[0]
+        assert record.state == "closing"
+        assert platform._capacity_slots[guest.id] == "pending-slot"
+        platform.capacity.release.assert_not_awaited()
+    finally:
+        execution_scope.reset(scope)
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution, "_fetch_policy", new=AsyncMock(return_value=policy_state())
+)
+async def assert_egress_cleanup_timeout_preserves_result_and_fences_guest():
+    async def blocked(*_args):
+        await asyncio.Event().wait()
+
+    guest = sandbox()
+    guest.id = "pending-egress"
+    guest.delete_egress_rules.side_effect = blocked
+    guest.destroy.side_effect = blocked
+    platform = adapter.OpenSandboxExecution(replace(
+        runtime_settings(), opensandbox_egress_domains=("packages.example",)
+    ))
+    platform.capacity.acquire = AsyncMock(return_value="egress-slot")
+    platform.capacity.release = AsyncMock()
+    scope = execution_scope.set(ExecutionScope("pending-egress", "call", "run-egress"))
+    try:
+        with (
+            patch.object(adapter, "DEADLINE_OVERHEAD_SECONDS", 0.1),
+            patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)),
+        ):
+            result = await asyncio.wait_for(platform.execute(
+                {"execution_session": "agent_run", "network_domains": ["packages.example"]},
+                timeout_seconds=0.05, max_output_bytes=1000,
+            ), 0.5)
+        assert result == {"ok": True}
+        record = (await platform.store.for_run("pending-egress", "run-egress"))[0]
+        assert record.state == "closing"
+        platform.capacity.release.assert_not_awaited()
+    finally:
+        execution_scope.reset(scope)
+
+
 async def assert_orphan_cleanup_respects_live_work():
     platform = adapter.OpenSandboxExecution(runtime_settings())
     platform.store.reclaimable = AsyncMock(return_value=[])
@@ -701,6 +1100,11 @@ async def assert_orphan_cleanup_respects_live_work():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_lease_loss_during_staging_never_starts_program():
     platform = adapter.OpenSandboxExecution(runtime_settings())
 
@@ -729,6 +1133,11 @@ async def assert_lease_loss_during_staging_never_starts_program():
 
 
 @patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_lost_mcp_owner_never_stages_secrets_or_starts_bridge():
     platform = adapter.OpenSandboxExecution(runtime_settings())
     platform.store.current = AsyncMock(return_value=False)
@@ -847,6 +1256,13 @@ async def assert_workflow_port():
             pass
         else:
             raise AssertionError("Offline platform executed on the host")
+        platform.execute.side_effect = ExecutionOutcomeUnknown("reply lost")
+        try:
+            await client.execute_workflow_code(settings(), "result = 1", {})
+        except ExecutionOutcomeUnknown:
+            pass
+        else:
+            raise AssertionError("Sandbox client discarded the uncertain outcome")
 
 
 async def assert_execution_response_contracts():
@@ -996,20 +1412,25 @@ def assert_private_server_configuration():
                     raise AssertionError("Unsafe/unconfigured execution host accepted")
 
 
+def patch_policy(status):
+    """Serve a fixed policy status to the adapter's policy reader."""
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json=status)
+    )
+    return patch.object(
+        adapter.httpx,
+        "AsyncClient",
+        side_effect=lambda **kwargs: original_client(transport=transport, **kwargs),
+    )
+
+
 async def assert_network_enforcement():
     instance = sandbox()
     instance.get_endpoint = AsyncMock(
         return_value=SimpleNamespace(headers={"OPENSANDBOX-EGRESS-AUTH": "test"})
     )
-    valid = {
-        "enforcementMode": "dns+nft",
-        "policy": {
-            "defaultAction": "deny",
-            "egress": [
-                {"action": "deny", "target": target} for target in DENIED_NETWORKS
-            ],
-        },
-    }
+    valid = policy_status()
     original_client = httpx.AsyncClient
     for status in (
         valid,
@@ -1059,6 +1480,60 @@ async def assert_network_enforcement():
     assert validate_egress_domain("*.Example.COM") == "*.example.com"
 
 
+async def assert_egress_reconciliation_keeps_the_workspace():
+    """A leftover egress rule must not cost the Run its workspace.
+
+    A worker that died after granting an egress rule leaves the guest with a
+    wider allow list than the current request. The adapter reconciles the
+    policy instead of demanding an exact match, so the guest survives.
+    """
+    instance = sandbox()
+    platform = adapter.OpenSandboxExecution(runtime_settings())
+
+    def policy_of_guest(_sandbox):
+        # The control plane reports the guest's real rule set.
+        return policy_state(instance.allowed_egress)
+
+    # The guest still carries the rule of a dead worker.
+    instance.allowed_egress.add("packages.example")
+    with patch.object(
+        adapter.OpenSandboxExecution,
+        "_fetch_policy",
+        AsyncMock(side_effect=policy_of_guest),
+    ):
+        await platform._reconcile_egress(instance, [])
+    assert instance.allowed_egress == set()
+    assert instance.delete_egress_rules.await_count == 1
+    # A rule that is still required is granted, not removed.
+    with patch.object(
+        adapter.OpenSandboxExecution,
+        "_fetch_policy",
+        AsyncMock(side_effect=policy_of_guest),
+    ):
+        await platform._reconcile_egress(instance, ["packages.example"])
+    assert instance.allowed_egress == {"packages.example"}
+    assert instance.patch_egress_rules.await_count == 1
+    # A guest that cannot enforce the policy is refused before any code runs.
+    with patch.object(
+        adapter.OpenSandboxExecution,
+        "_fetch_policy",
+        AsyncMock(
+            side_effect=lambda _sandbox: (
+                {**policy_status(), "enforcementMode": "dns"},
+                policy_status()["policy"],
+                set(DENIED_NETWORKS),
+                set(),
+            )
+        ),
+    ):
+        try:
+            await platform._reconcile_egress(instance, [])
+        except ExecutionNotStarted:
+            pass
+        else:
+            raise AssertionError("A guest without dns+nft enforcement was accepted")
+
+
 def main():
     assert_private_server_configuration()
     original = runtime_settings()
@@ -1085,6 +1560,12 @@ def main():
         assert_capacity_bounds_live_sandboxes,
         assert_dependency_cache_and_missing_guest,
         assert_failed_cleanup_keeps_capacity,
+        assert_export_reads_never_replace_a_missing_guest,
+        assert_dispatched_timeout_is_uncertain,
+        assert_execution_deadline_covers_dispatch_and_cleanup,
+        assert_execution_deadline_covers_pre_dispatch_waits,
+        assert_timed_out_session_cleanup_stays_pending,
+        assert_egress_cleanup_timeout_preserves_result_and_fences_guest,
         assert_orphan_cleanup_respects_live_work,
         assert_lease_loss_during_staging_never_starts_program,
         assert_lost_mcp_owner_never_stages_secrets_or_starts_bridge,
@@ -1092,6 +1573,7 @@ def main():
         assert_workflow_port,
         assert_execution_response_contracts,
         assert_network_enforcement,
+        assert_egress_reconciliation_keeps_the_workspace,
     ):
         with patch.object(adapter, "SessionStore", FakeSessionStore):
             asyncio.run(check())

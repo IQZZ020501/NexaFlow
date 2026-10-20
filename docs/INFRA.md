@@ -59,8 +59,8 @@
 
 ### app/infra/sandbox/
 
-- `backend/app/infra/sandbox/client.py` — Workflow/Artifact 语义与结果校验：通过 `app/ports/execution.py` 委托外部 OpenSandbox，保持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact` 契约；无 Unix socket 或宿主进程回退。
-- `backend/app/infra/execution/` — 公网域名语法/私网 deny 列表、非敏感执行配置指纹；生命周期在 `adapters/execution/opensandbox.py`，运行器在独立执行镜像。
+- `backend/app/infra/sandbox/client.py` — Workflow/Artifact 语义与结果校验：通过 `app/ports/execution.py` 委托外部 OpenSandbox，保持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact` 契约；无 Unix socket 或宿主进程回退。Workflow 代码节点与文档/Skill 渲染各用一份预算（`WORKFLOW_SANDBOX_TIMEOUT_SECONDS` 与 `ARTIFACT_SANDBOX_TIMEOUT_SECONDS`），内外层使用同一个值，避免内层先超时造成的“随机失败”。
+- `backend/app/infra/execution/` — 公网域名语法/私网 deny 列表、非敏感执行配置指纹；生命周期在 `adapters/execution/opensandbox.py`，运行器在独立执行镜像。`sessions.py::SessionStore.acquire_existing` 只认领既有会话、绝不新建，用于产物读取这类只读路径。
 
 ### app/infra/runtime/
 

@@ -96,13 +96,13 @@ def _artifact_error_message(error: Exception) -> str:
             return candidate[:1000]
     return message[:1000]
 
-def _failure(code: str, message: str) -> ToolRuntimeResult:
+def _failure(code: str, message: str, *, uncertain: bool = False) -> ToolRuntimeResult:
     return ToolRuntimeResult(
         ok=False,
         data=None,
         summary=message,
         error_code=code,
         error_message=message,
-        outcome="confirmed",
+        outcome="uncertain" if uncertain else "confirmed",
         usage={},
     )

@@ -4,6 +4,7 @@ import hashlib
 import os
 import resource
 import selectors
+import shutil
 import signal
 import stat
 import subprocess
@@ -18,6 +19,16 @@ EXPORTS = Path("/tmp/nexaflow-exports")
 SESSION = Path("/tmp/nexaflow-session")
 MAX_LOG = 30 * 1024
 MAX_FILE = 5 * 1024 * 1024
+# The guest writable layer is shared with the execution host. Cap the
+# workspace instead of warning: an unbounded workspace fills the host disk and
+# breaks every other tenant, not just this Run.
+MAX_WORKSPACE_BYTES = 512 * 1024 * 1024
+MAX_WORKSPACE_FILES = 20000
+WORKSPACE_CHECK_SECONDS = 0.2
+# Export directories are read once by the backend right after the command
+# returns. Keep a small window so an in-flight read is never truncated, then
+# reclaim the rest.
+KEPT_EXPORT_DIRECTORIES = 3
 
 
 class BoundedLog:
@@ -87,6 +98,46 @@ def _snapshot(outputs):
     return files
 
 
+def _workspace_usage():
+    """Complete byte and file counts, without following symlinks.
+
+    Quota enforcement compares samples, so truncated totals cannot distinguish
+    a growing workspace from cleanup that is still above the limit.
+    """
+    total = 0
+    files = 0
+    for parent, directories, names in os.walk(WORKSPACE, followlinks=False):
+        directories[:] = [
+            name for name in directories if not (Path(parent) / name).is_symlink()
+        ]
+        for name in names:
+            try:
+                info = (Path(parent) / name).lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            total += info.st_size
+            files += 1
+    return total, files
+
+
+def _prune_exports() -> None:
+    """Drop export directories older than the retained window."""
+    EXPORTS.mkdir(mode=0o700, exist_ok=True)
+    directories = []
+    for child in EXPORTS.iterdir():
+        if child.is_symlink() or not child.is_dir():
+            continue
+        try:
+            directories.append((child.stat().st_mtime, child))
+        except OSError:
+            continue
+    directories.sort()
+    for _, child in directories[:-KEPT_EXPORT_DIRECTORIES]:
+        shutil.rmtree(child, ignore_errors=True)
+
+
 def execute(command, *, python_binary):
     text = command.get("command")
     seconds = command.get("timeout_seconds", 60)
@@ -114,20 +165,37 @@ def execute(command, *, python_binary):
     env["PYTHONPATH"] = os.pathsep.join(str(path / "python") for path in environments)
     env["NODE_PATH"] = os.pathsep.join(str(path / "node/node_modules") for path in environments)
     stdout, stderr = BoundedLog(MAX_LOG // 2), BoundedLog(MAX_LOG // 2)
+    usage = _workspace_usage()
     process = subprocess.Popen(["/bin/bash", "--noprofile", "--norc", "-c", text], cwd=WORKSPACE, env=env,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         preexec_fn=lambda: _child_limits(seconds))
     timed_out = False
+    quota_exceeded = False
     try:
         with selectors.DefaultSelector() as selector:
             for stream, log in ((process.stdout, stdout), (process.stderr, stderr)):
                 os.set_blocking(stream.fileno(), False)
                 selector.register(stream, selectors.EVENT_READ, log)
             deadline = time.monotonic() + seconds
+            quota_check = time.monotonic() + WORKSPACE_CHECK_SECONDS
             while process.poll() is None:
                 if time.monotonic() >= deadline:
                     timed_out = True
                     break
+                if time.monotonic() >= quota_check:
+                    quota_check = time.monotonic() + WORKSPACE_CHECK_SECONDS
+                    previous = usage
+                    usage = _workspace_usage()
+                    # Kill only a command that keeps growing the workspace.
+                    # A shrinking workspace means cleanup, which must stay
+                    # possible even while the quota is exceeded.
+                    if (
+                        usage[0] > MAX_WORKSPACE_BYTES and usage[0] > previous[0]
+                    ) or (
+                        usage[1] > MAX_WORKSPACE_FILES and usage[1] > previous[1]
+                    ):
+                        quota_exceeded = True
+                        break
                 for key, _ in selector.select(timeout=0.02):
                     data = os.read(key.fd, 65536)
                     if data:
@@ -156,12 +224,11 @@ def execute(command, *, python_binary):
     after = _snapshot(outputs)
     exported = []
     warnings = []
-    destination = EXPORTS / uuid4().hex
-    destination.mkdir(mode=0o700)
+    pending = []
     for relative, metadata in sorted(after.items()):
         if before.get(relative) == metadata:
             continue
-        if len(exported) >= 8 or not 0 < metadata[0] <= MAX_FILE:
+        if len(pending) >= 8 or not 0 < metadata[0] <= MAX_FILE:
             warnings.append(f"Output omitted: {relative[:255]} (limit: 8 files, 5 MiB each).")
             continue
         path = outputs / relative
@@ -173,14 +240,28 @@ def execute(command, *, python_binary):
             content = stream.read(MAX_FILE + 1)
         if not 0 < len(content) <= MAX_FILE:
             continue
-        target = destination / str(len(exported))
-        target.write_bytes(content)
-        target.chmod(0o400)
-        exported.append({"path": str(target), "relative_path": relative, "filename": Path(relative).name, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()})
-    total = sum(path.stat().st_size for path in WORKSPACE.rglob("*") if not path.is_symlink() and path.is_file())
-    if total > 512 * 1024 * 1024:
-        warnings.append("Workspace exceeds 512 MiB; remove temporary files before continuing.")
-    return {"ok": True, "exit_code": 124 if timed_out else process.returncode, "timed_out": timed_out,
+        pending.append((relative, content))
+    if pending:
+        destination = EXPORTS / uuid4().hex
+        destination.mkdir(mode=0o700)
+        for relative, content in pending:
+            target = destination / str(len(exported))
+            target.write_bytes(content)
+            target.chmod(0o400)
+            exported.append({"path": str(target), "relative_path": relative, "filename": Path(relative).name, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+    _prune_exports()
+    total, files = _workspace_usage()
+    if quota_exceeded:
+        warnings.append(
+            "Workspace exceeded its size limit while writing; the command was "
+            "stopped. Remove temporary files before continuing."
+        )
+    elif total > MAX_WORKSPACE_BYTES or files > MAX_WORKSPACE_FILES:
+        warnings.append(
+            "Workspace exceeds its size limit; remove temporary files before continuing."
+        )
+    return {"ok": True, "exit_code": 125 if quota_exceeded else 124 if timed_out else process.returncode,
+        "timed_out": timed_out, "quota_exceeded": quota_exceeded,
         "stdout": stdout.text(), "stderr": stderr.text(), "truncated": stdout.total > MAX_LOG // 2 or stderr.total > MAX_LOG // 2,
         "artifacts": exported, "warnings": warnings[:16]}
 

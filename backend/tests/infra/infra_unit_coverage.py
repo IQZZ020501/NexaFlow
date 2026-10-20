@@ -2298,6 +2298,31 @@ def test_settings_defaults_and_validation() -> None:
             replace(base, workflow_sandbox_timeout_seconds=31),
             "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
         ),
+        (
+            replace(base, artifact_sandbox_timeout_seconds=0.05),
+            "ARTIFACT_SANDBOX_TIMEOUT_SECONDS",
+        ),
+        (
+            replace(base, artifact_sandbox_timeout_seconds=301),
+            "ARTIFACT_SANDBOX_TIMEOUT_SECONDS",
+        ),
+        (replace(base, opensandbox_max_sandboxes=-1), "OPENSANDBOX_MAX_SANDBOXES"),
+        (
+            replace(base, opensandbox_warm_pool_size=2, opensandbox_max_sandboxes=2),
+            "OPENSANDBOX_WARM_POOL_SIZE",
+        ),
+        (
+            replace(base, opensandbox_warm_pool_size=1),
+            "OPENSANDBOX_WARM_POOL_SIZE",
+        ),
+        (
+            replace(base, opensandbox_max_sandboxes_per_workspace=0),
+            "OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE",
+        ),
+        (
+            replace(base, opensandbox_max_sandboxes_per_workspace=9),
+            "OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE",
+        ),
         (replace(base, jwt_expires_minutes=0), "JWT_EXPIRES_MINUTES"),
         (replace(base, refresh_token_expires_days=0), "REFRESH_TOKEN_EXPIRES_DAYS"),
     ]
@@ -2308,6 +2333,56 @@ def test_settings_defaults_and_validation() -> None:
             assert message in str(exc), (message, str(exc))
         else:
             raise AssertionError(f"expected RuntimeError containing {message!r}")
+
+
+def test_production_requires_a_bounded_secure_execution_plane() -> None:
+    """A production deployment must not run the execution plane unbounded."""
+    base = _valid_settings()
+    production = replace(
+        base,
+        environment="production",
+        opensandbox_api_key="control-plane-key",
+        opensandbox_image="nexaflow/execution@sha256:" + "a" * 64,
+        opensandbox_url="https://execution.internal.example",
+        opensandbox_max_sandboxes=4,
+        public_app_url="https://nexaflow.example",
+    )
+    production.validate()
+
+    # No host limit: a burst of Runs can exhaust the execution host.
+    try:
+        replace(production, opensandbox_max_sandboxes=0).validate()
+    except RuntimeError as exc:
+        assert "OPENSANDBOX_MAX_SANDBOXES" in str(exc)
+    else:
+        raise AssertionError("an unbounded execution host was accepted")
+
+    # Plaintext control plane: the key travels with every request.
+    try:
+        replace(production, opensandbox_url="http://execution.internal.example").validate()
+    except RuntimeError as exc:
+        assert "https" in str(exc)
+    else:
+        raise AssertionError("a plaintext control plane was accepted")
+
+    # An explicit opt-out is honoured for a loopback control plane.
+    replace(
+        production,
+        opensandbox_url="http://127.0.0.1:8088",
+        opensandbox_allow_insecure_http=True,
+    ).validate()
+
+    # A warm pool without a host limit bypasses capacity accounting.
+    try:
+        replace(
+            production,
+            opensandbox_max_sandboxes=0,
+            opensandbox_warm_pool_size=2,
+        ).validate()
+    except RuntimeError as exc:
+        assert "OPENSANDBOX_WARM_POOL_SIZE" in str(exc)
+    else:
+        raise AssertionError("a warm pool without a host limit was accepted")
 
 
 def test_settings_accept_database_managed_secret_keys() -> None:
@@ -4901,6 +4976,7 @@ def main() -> None:
     test_load_env_file()
     test_database_url_from_env()
     test_settings_defaults_and_validation()
+    test_production_requires_a_bounded_secure_execution_plane()
     test_settings_accept_database_managed_secret_keys()
     test_deployment_secret_keys_are_created_once_and_immutable()
     test_settings_from_env()

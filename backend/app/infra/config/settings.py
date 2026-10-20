@@ -119,7 +119,17 @@ class Settings:
     opensandbox_max_sandboxes: int = 0
     opensandbox_warm_pool_size: int = 0
     opensandbox_max_sandboxes_per_consumer: int = 2
+    # Console Runs share the same per-consumer bound as public/API Runs so a
+    # single workspace cannot occupy the whole deployment.
+    opensandbox_max_sandboxes_per_workspace: int = 2
+    # The control plane key grants execution-host control. Plaintext HTTP
+    # sends it in every request, so production requires TLS unless the
+    # operator explicitly opts out for a loopback-only control plane.
+    opensandbox_allow_insecure_http: bool = False
     workflow_sandbox_timeout_seconds: float = 5.0
+    # Rendering and Skill execution get their own budget; the workflow code
+    # budget is not a safe upper bound for a document renderer.
+    artifact_sandbox_timeout_seconds: float = 30.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
     public_app_url: str = "http://localhost:8080"
@@ -219,8 +229,18 @@ class Settings:
             ),
             opensandbox_warm_pool_size=int(os.getenv("OPENSANDBOX_WARM_POOL_SIZE", "0")),
             opensandbox_max_sandboxes_per_consumer=int(os.getenv("OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER", "2")),
+            opensandbox_max_sandboxes_per_workspace=int(
+                os.getenv("OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE", "2")
+            ),
+            opensandbox_allow_insecure_http=os.getenv(
+                "OPENSANDBOX_ALLOW_INSECURE_HTTP", ""
+            ).strip().lower()
+            in {"1", "true", "yes", "on"},
             workflow_sandbox_timeout_seconds=float(
                 os.getenv("WORKFLOW_SANDBOX_TIMEOUT_SECONDS", "5")
+            ),
+            artifact_sandbox_timeout_seconds=float(
+                os.getenv("ARTIFACT_SANDBOX_TIMEOUT_SECONDS", "30")
             ),
             jwt_expires_minutes=int(os.getenv("JWT_EXPIRES_MINUTES", "1440")),
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
@@ -359,11 +379,37 @@ class Settings:
             raise RuntimeError("OPENSANDBOX_MAX_SANDBOXES must not be negative.")
         if self.opensandbox_warm_pool_size < 0 or (self.opensandbox_max_sandboxes and self.opensandbox_warm_pool_size >= self.opensandbox_max_sandboxes):
             raise RuntimeError("OPENSANDBOX_WARM_POOL_SIZE must be nonnegative and leave capacity for active sandboxes.")
+        if self.opensandbox_warm_pool_size and not self.opensandbox_max_sandboxes:
+            raise RuntimeError(
+                "OPENSANDBOX_WARM_POOL_SIZE requires OPENSANDBOX_MAX_SANDBOXES: a warm pool "
+                "without a host limit bypasses capacity accounting entirely."
+            )
         if not 1 <= self.opensandbox_max_sandboxes_per_consumer <= 2:
             raise RuntimeError("OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER must be between 1 and 2.")
+        if not 1 <= self.opensandbox_max_sandboxes_per_workspace <= 8:
+            raise RuntimeError(
+                "OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE must be between 1 and 8."
+            )
+        if self.environment == "production" and self.opensandbox_api_key:
+            # An unbounded host limit lets one burst of Runs exhaust the
+            # execution host, which fails every tenant at once.
+            if self.opensandbox_max_sandboxes <= 0:
+                raise RuntimeError(
+                    "OPENSANDBOX_MAX_SANDBOXES must be a positive host limit in production."
+                )
+            if endpoint.scheme != "https" and not self.opensandbox_allow_insecure_http:
+                raise RuntimeError(
+                    "OPENSANDBOX_URL must use https in production: the control-plane key "
+                    "is sent on every request. Set OPENSANDBOX_ALLOW_INSECURE_HTTP=1 only "
+                    "for a loopback control plane."
+                )
         if not 0.1 <= self.workflow_sandbox_timeout_seconds <= 30:
             raise RuntimeError(
                 "WORKFLOW_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 30."
+            )
+        if not 0.1 <= self.artifact_sandbox_timeout_seconds <= 300:
+            raise RuntimeError(
+                "ARTIFACT_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 300."
             )
         if self.jwt_expires_minutes <= 0:
             raise RuntimeError("JWT_EXPIRES_MINUTES must be greater than zero.")

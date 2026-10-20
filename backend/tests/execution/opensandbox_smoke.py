@@ -8,11 +8,12 @@ import argparse
 import asyncio
 import base64
 import os
+import time
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import tests.support  # noqa: F401
@@ -25,7 +26,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from tests.support import settings
 
 from app.adapters.execution import pool
-from app.adapters.execution.capacity import SandboxCapacity
+from app.adapters.execution.capacity import CapacityScope, SandboxCapacity
 from app.adapters.execution.opensandbox import OpenSandboxExecution
 from app.domain.execution.models import ExecutionSession as SessionRow
 from app.entities.defaults import utc_now
@@ -37,7 +38,13 @@ from app.infra.execution.network import DENIED_NETWORKS
 from app.infra.execution.profile import execution_profile
 from app.infra.sandbox.client import execute_workflow_code
 from app.infra.tools.mcp_stdio import parse_mcp_stdio_config
-from app.ports.execution import ExecutionBusy, ExecutionScope, execution_scope
+from app.ports.execution import (
+    ExecutionBusy,
+    ExecutionNotStarted,
+    ExecutionOutcomeUnknown,
+    ExecutionScope,
+    execution_scope,
+)
 from app.ports.mcp import (
     McpConnection,
     call_mcp_tool,
@@ -269,16 +276,22 @@ async def assert_live_pool_and_capacity(runtime, redis_url):
             and not info.metadata.get("pool")
         ), info
         await platform._require_enforcement(guest, [])
+        consumer_a = CapacityScope(consumer_key="consumer-a")
+        consumer_b = CapacityScope(consumer_key="consumer-b")
         for _ in range(2):
-            slots.append((await capacity.acquire(120, "consumer-a"), "consumer-a"))
+            slots.append(
+                (await capacity.acquire(120, consumer_a), consumer_a)
+            )
         with patch("app.adapters.execution.capacity.ACQUIRE_WAIT_SECONDS", 0):
             try:
-                await capacity.acquire(120, "consumer-a")
+                await capacity.acquire(120, consumer_a)
             except ExecutionBusy:
                 pass
             else:
                 raise AssertionError("A visitor reserved a third sandbox")
-            slots.append((await capacity.acquire(120, "consumer-b"), "consumer-b"))
+            slots.append(
+                (await capacity.acquire(120, consumer_b), consumer_b)
+            )
             try:
                 await capacity.acquire(120)
             except ExecutionBusy:
@@ -287,10 +300,27 @@ async def assert_live_pool_and_capacity(runtime, redis_url):
                 raise AssertionError(
                     "Warm capacity was not deducted from the host limit"
                 )
+        # A workspace is bounded like a consumer, for console Runs as well.
+        for token, scope in slots:
+            await capacity.release(token, scope)
+        slots.clear()
+        workspace = CapacityScope(workspace_key="workspace-a")
+        for _ in range(2):
+            slots.append((await capacity.acquire(120, workspace), workspace))
+        with patch("app.adapters.execution.capacity.ACQUIRE_WAIT_SECONDS", 0):
+            try:
+                await capacity.acquire(120, workspace)
+            except ExecutionBusy:
+                pass
+            else:
+                raise AssertionError("A workspace reserved a third sandbox")
+        token, scope = slots.pop()
+        await capacity.release(token, scope)
+        slots.append((await capacity.acquire(120, workspace), workspace))
         print("OPENSANDBOX_POOL_CAPACITY_OK")
     finally:
-        for token, consumer in slots:
-            await capacity.release(token, consumer)
+        for token, scope in slots:
+            await capacity.release(token, scope)
         if guest is not None:
             await platform._destroy_sandbox(guest)
         for key, sdk_pool in list(pool._pools.items()):
@@ -298,6 +328,71 @@ async def assert_live_pool_and_capacity(runtime, redis_url):
                 await sdk_pool.shutdown()
                 await sdk_pool.release_all_idle()
                 pool._pools.pop(key, None)
+
+
+async def assert_live_workspace_quota(platform):
+    async def command(text):
+        return await platform.execute(
+            {"execution_session": "agent_run", "command": {"command": text, "timeout_seconds": 5}},
+            timeout_seconds=10, max_output_bytes=128 * 1024,
+        )
+
+    # Sparse files exercise logical size accounting without filling the host.
+    seeded = await command("for n in {0..15}; do truncate -s 64M quota$n || exit; done")
+    assert seeded["exit_code"] == 0, seeded
+    cleaned = await command("rm quota0; sleep 0.6; rm -f quota*")
+    assert cleaned["exit_code"] == 0 and not cleaned["quota_exceeded"], cleaned
+    grown = await command("for n in {0..29}; do truncate -s 64M quota$n || exit; sleep 0.05; done")
+    assert grown["exit_code"] == 125 and grown["quota_exceeded"], grown
+    cleaned = await command("rm -f quota*")
+    assert cleaned["exit_code"] == 0, cleaned
+    print("OPENSANDBOX_WORKSPACE_QUOTA_OK")
+
+
+async def assert_live_export_reads(platform):
+    response = await platform.execute(
+        {"execution_session": "agent_run", "command": {"command": "printf captured > outputs/captured.txt", "timeout_seconds": 5}},
+        timeout_seconds=10, max_output_bytes=128 * 1024,
+    )
+    assert response["exit_code"] == 0 and response["artifacts"], response
+    path = response["artifacts"][0]["path"]
+    content = await platform.read_session_file("smoke-workspace", "smoke-run", path, 1000)
+    assert content == b"captured", content
+    record = (await platform.store.for_run("smoke-workspace", "smoke-run"))[0]
+    guest = platform._sessions.pop(record.id).sandbox
+    await guest.destroy()
+    with patch.object(Sandbox, "create", AsyncMock()) as create:
+        try:
+            await platform.read_session_file("smoke-workspace", "smoke-run", path, 1000)
+        except ExecutionNotStarted:
+            pass
+        else:
+            raise AssertionError("An export survived its missing guest")
+        create.assert_not_awaited()
+    assert await platform.store.for_run("smoke-workspace", "smoke-run") == []
+    print("OPENSANDBOX_EXPORT_READ_OK")
+
+
+async def assert_live_execution_deadline(platform):
+    await platform.execute(
+        {"execution_session": "agent_run", "code": "print('ready')"},
+        timeout_seconds=10, max_output_bytes=10000,
+    )
+    started = time.monotonic()
+    with patch("app.adapters.execution.opensandbox.DEADLINE_OVERHEAD_SECONDS", 0.5):
+        try:
+            await platform.execute(
+                {"execution_session": "agent_run", "command": {"command": "sleep 5", "timeout_seconds": 5}},
+                timeout_seconds=0.5, max_output_bytes=10000,
+            )
+        except ExecutionOutcomeUnknown:
+            pass
+        else:
+            raise AssertionError("A dispatched deadline did not preserve uncertainty")
+    elapsed = time.monotonic() - started
+    assert elapsed < 2, elapsed
+    await platform.close_session("smoke-workspace", "smoke-run")
+    print(f"OPENSANDBOX_EXECUTION_DEADLINE_OK elapsed={elapsed:.3f}s")
 
 
 async def assert_live_cleanup(runtime):
@@ -458,6 +553,9 @@ async def run_checks(runtime) -> None:
         assert session_result.get("ok"), session_result
         assert session_result["stdout"].strip() == "7", session_result
         await assert_live_shell(platform)
+        await assert_live_workspace_quota(platform)
+        await assert_live_export_reads(platform)
+        await assert_live_execution_deadline(platform)
         await platform.close_session("smoke-workspace", "smoke-run")
         probe = await platform.execute(
             {

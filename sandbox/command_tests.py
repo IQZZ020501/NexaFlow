@@ -6,6 +6,7 @@ import unittest
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from . import command
 
@@ -76,3 +77,50 @@ class CommandTests(unittest.TestCase):
         for payload in ({"command": ""}, {"command": "true", "timeout_seconds": True}, {"command": "true", "timeout_seconds": 301}):
             with self.assertRaises(ValueError):
                 command.execute(payload, python_binary=sys.executable)
+
+    def test_workspace_quota_stops_a_growing_command(self):
+        """A command that keeps growing the workspace is stopped."""
+        with patch.object(command, "MAX_WORKSPACE_BYTES", 256 * 1024):
+            result = self.run_command(
+                "for n in {1..200}; do head -c 65536 /dev/zero > blob$n; sleep 0.02; done",
+                timeout=20,
+            )
+        self.assertTrue(result["quota_exceeded"])
+        self.assertEqual(result["exit_code"], 125)
+        self.assertTrue(
+            any("size limit" in warning for warning in result["warnings"]),
+            result["warnings"],
+        )
+
+    def test_workspace_quota_allows_cleanup(self):
+        """A shrinking workspace is cleanup and must stay possible."""
+        with patch.object(command, "MAX_WORKSPACE_BYTES", 64 * 1024):
+            self.run_command("head -c 200000 /dev/zero > blob", timeout=20)
+            result = self.run_command("rm -f blob; echo cleaned", timeout=20)
+        self.assertFalse(result["quota_exceeded"])
+        self.assertEqual(result["stdout"].strip(), "cleaned")
+
+    def test_workspace_quota_allows_gradual_cleanup_above_limit(self):
+        self.workspace.mkdir()
+        for index in range(4):
+            (self.workspace / f"blob{index}").write_bytes(b"x" * 65536)
+        with patch.object(command, "MAX_WORKSPACE_BYTES", 32768):
+            result = self.run_command("rm blob0; sleep 0.6; rm blob1 blob2 blob3")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertFalse(result["quota_exceeded"])
+        self.assertEqual(list(self.workspace.glob("blob*")), [])
+
+    def test_export_directories_are_pruned(self):
+        """Old export directories are reclaimed instead of accumulating."""
+        command.EXPORTS.mkdir(mode=0o700, exist_ok=True)
+        for _ in range(command.KEPT_EXPORT_DIRECTORIES + 3):
+            destination = command.EXPORTS / uuid4().hex
+            destination.mkdir(mode=0o700)
+            (destination / "0").write_bytes(b"x")
+        self.run_command("true")
+        remaining = [
+            child
+            for child in command.EXPORTS.iterdir()
+            if child.is_dir() and not child.is_symlink()
+        ]
+        self.assertLessEqual(len(remaining), command.KEPT_EXPORT_DIRECTORIES)

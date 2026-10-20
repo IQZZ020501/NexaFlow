@@ -94,6 +94,60 @@ class SessionStore:
             await db.commit()
             return session, run, reset, stale
 
+    async def acquire_existing(self, settings, scope, timeout, *, purpose="run", owner_key=""):
+        """Claim an existing live session without ever creating one.
+
+        A read must not bring a guest into existence: a missing session means
+        the workspace is gone, and creating a fresh guest would only produce
+        an empty workspace to fail in.
+        """
+        now = utc_now()
+        holder = uuid4().hex
+        async with get_session_factory()() as db:
+            info = await repository.run_for_execution(
+                db, scope.workspace_id, scope.run_id
+            )
+            if info is None or info[0].deadline_at <= now:
+                raise ExecutionNotStarted("Run execution has ended or expired.")
+            run, profile = info
+            if (
+                scope.worker_task_id is not None
+                and run.worker_task_id != scope.worker_task_id
+            ):
+                raise ExecutionBusy("Run execution lease was lost.")
+            require_execution_profile(settings, profile)
+            session = await repository.live_session(
+                db, scope.workspace_id, scope.run_id, purpose, owner_key
+            )
+            if session is None:
+                raise ExecutionNotStarted("Run sandbox no longer exists.")
+            if session.state == "closing":
+                raise ExecutionBusy("Previous Run sandbox cleanup is pending.")
+            if session.expires_at is not None and repository.aware(
+                session.expires_at
+            ) <= now:
+                raise ExecutionNotStarted("Run sandbox expired.")
+            if (
+                session.profile_fingerprint
+                != execution_profile(settings)["fingerprint"]
+            ):
+                raise ExecutionNotStarted(
+                    "Execution image or network profile changed after run creation."
+                )
+            stale = bool(
+                session.holder
+                and session.holder_expires_at
+                and repository.aware(session.holder_expires_at) <= now
+            )
+            until = now + timedelta(seconds=60)
+            if not await repository.claim(db, session.id, holder, until, now):
+                raise ExecutionBusy("Run sandbox is owned by another command.")
+            session.holder = holder
+            session.holder_expires_at = until
+            await repository.update_owned(db, session, holder)
+            await db.commit()
+            return session, run, False, stale
+
     async def publish(self, session, *, scope=None, **values):
         async with get_session_factory()() as db:
             if scope is not None:
