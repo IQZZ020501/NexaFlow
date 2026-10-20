@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import stat
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts.dev import (
@@ -12,6 +14,7 @@ from scripts.dev import (
     build_inputs_fingerprint,
     development_port,
     ensure_local_image,
+    infrastructure_configuration,
     is_managed_opensandbox_url,
     prepare,
     read_env,
@@ -59,12 +62,14 @@ class DevelopmentPortTests(unittest.TestCase):
 
 
 class DevelopmentPreparationTests(unittest.TestCase):
+    @patch("scripts.dev.infrastructure_configuration", return_value={})
     @patch("scripts.dev.ensure_local_image")
     @patch("scripts.dev.run")
     def test_infrastructure_start_does_not_force_image_build(
         self,
         run_mock,
         ensure_image_mock,
+        _configuration_mock,
     ) -> None:
         prepare({}, local_opensandbox=False)
 
@@ -76,14 +81,18 @@ class DevelopmentPreparationTests(unittest.TestCase):
         )
         self.assertNotIn("--build", compose_command)
 
+    @patch("scripts.dev.infrastructure_configuration", return_value={})
     @patch("scripts.dev.ensure_local_image")
     @patch("scripts.dev.run")
     def test_open_sandbox_uses_standalone_dockerfile(
         self,
         run_mock,
         ensure_image_mock,
+        _configuration_mock,
     ) -> None:
-        prepare({"OPENSANDBOX_IMAGE": "nexaflow/execution:test"}, local_opensandbox=True)
+        prepare(
+            {"OPENSANDBOX_IMAGE": "nexaflow/execution:test"}, local_opensandbox=True
+        )
 
         builds = [call.args[0] for call in ensure_image_mock.call_args_list]
         self.assertEqual(len(builds), 2)
@@ -94,6 +103,43 @@ class DevelopmentPreparationTests(unittest.TestCase):
         )
         self.assertIsNone(sandbox_build.target)
         self.assertEqual(sandbox_build.image, "nexaflow/execution:test")
+
+
+class InfrastructureConfigurationTests(unittest.TestCase):
+    @patch("scripts.dev.subprocess.run")
+    def test_reuses_one_topology_without_deployment_secrets_or_services(
+        self, run_mock
+    ) -> None:
+        run_mock.return_value = SimpleNamespace(
+            stdout=json.dumps(
+                {
+                    "services": {
+                        "db": {
+                            "image": "published/postgres",
+                            "environment": {"POSTGRES_PASSWORD": "deployment-only"},
+                            "healthcheck": {},
+                            "networks": {"default": None},
+                        },
+                        "redis": {"image": "redis:7-alpine"},
+                        "qdrant": {"image": "qdrant/qdrant:v1.19.0"},
+                        "api": {"image": "published/app"},
+                    }
+                }
+            )
+        )
+        config = infrastructure_configuration(
+            {"POSTGRES_PASSWORD": "local$credential", "POSTGRES_PORT": "15432"}
+        )
+        self.assertEqual(set(config["services"]), {"db", "redis", "qdrant"})
+        database = config["services"]["db"]
+        self.assertEqual(
+            database["environment"]["POSTGRES_PASSWORD"], "local$$credential"
+        )
+        self.assertEqual(database["ports"], ["127.0.0.1:15432:5432"])
+        self.assertEqual(database["container_name"], "nexaflow-db")
+        self.assertNotIn("networks", database)
+        self.assertNotIn("deployment-only", json.dumps(config))
+        self.assertEqual(run_mock.call_args.args[0].count("-f"), 1)
 
 
 class LocalImageBuildTests(unittest.TestCase):

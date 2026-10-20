@@ -140,12 +140,15 @@ not trigger unrelated cleanup.
 - Hand-written SQL goes under `backend/app/infra/db/sql/<feature>/` for
   explicit write workflows, seed data, and complex queries; keep parameter
   binding in Python services.
-- Root `.env.example` is the only environment template; host backend commands
-  and Compose both read root `.env`, while Compose explicitly overrides
-  container-only endpoints. It also selects the unified application and custom
-  PostgreSQL image tags for pull-only deployments. Real `.env` files are
-  local-only and gitignored; bootstrap admin credentials and managed-user
-  initial passwords must come from env values, not Python constants.
+- Root `docker-compose.yml` is the only Compose file and is self-contained for
+  single-host pull-only deployment: edit `x-settings` credentials and website
+  values, then use standard `docker compose pull` / `up -d --wait`. Published
+  immutable image digests live in `x-images`; OpenSandbox TOML is inline through
+  `configs.content`. Do not add per-environment Compose files or a deployment
+  wrapper. Root `.env.example` remains the only local-development env template;
+  host backend commands use private root `.env`, which is not injected into
+  deployment containers. Bootstrap admin credentials and managed-user initial
+  passwords come from process env values, not Python constants.
   Keep stable runtime policy defaults in `infra/config/settings.py` and omit
   them from the template; keep operator-managed product settings in PostgreSQL.
   Backward-compatible advanced environment overrides may remain supported
@@ -160,7 +163,7 @@ not trigger unrelated cleanup.
   from anything else, and never log them.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
-- The build-capable and pull-only Compose topologies both run Alembic through a
+- The unified Compose topology runs Alembic through a
   one-shot `migrate` service. API and worker startup depends on its successful
   completion; the service reuses the application image rather than requiring a
   separate migration image.
@@ -357,8 +360,8 @@ not trigger unrelated cleanup.
   renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
-- `deploy/` holds the Docker Compose topology, the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. Both business Workers (`worker` and `agent-worker`) drop all capabilities and retain default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
-- `deploy/opensandbox/` documents the separate pinned execution plane and generates a private Kata + dns+nft production configuration; ordinary Docker requires an explicit development profile, never an automatic downgrade. `deploy/dockerfiles/sandbox.Dockerfile` builds the execution image independently from the business image.
+- Root `docker-compose.yml` holds the deployment topology; `deploy/` holds the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. Both business Workers (`worker` and `agent-worker`) drop all capabilities and retain default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
+- Root `docker-compose.yml` explicitly selects ordinary Docker + dns+nft for default single-host deployment; only the OpenSandbox control plane mounts the Docker socket. Three one-shot `*-image` services make standard `docker compose pull` fetch execution/execd/egress images; they exit successfully before the control plane starts. `deploy/opensandbox/configure.py` remains the optional dedicated Kata generator and never automatically falls back from Kata. `deploy/dockerfiles/sandbox.Dockerfile` builds the execution image independently from the business image. Local development renders the same root Compose and applies private infrastructure settings in memory before passing JSON on stdin; preserve the previous local project/container names and `deploy/data` mounts.
   Production execution images use immutable digests. Agent runs freeze the
   non-secret image/network fingerprint so retries cannot silently switch it.
   `scripts/setup-hooks.sh` enables the repository Git hooks.
@@ -551,9 +554,11 @@ examples.
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
-- `deploy/` Compose changes: render the affected base (`deploy/docker-compose.yml`),
-  development override (`deploy/docker-compose.dev.yml`), and pull-only server
-  (`deploy/docker-compose.server.yml`) configurations and verify the image list.
+- Compose changes: run root `docker compose config --quiet` and verify
+  `docker compose config --images`; render the local infrastructure configuration
+  returned by `scripts.dev.infrastructure_configuration` on Compose stdin too.
+  Development tooling changes run
+  `uv run --project backend python -m unittest scripts.dev_test` from root.
   Build an image only when its build inputs or wiring changed. When the unified
   application image or sandbox wiring changes, also run the `sandbox-runtime`
   direct container checks and `tests.execution.opensandbox_smoke` against an

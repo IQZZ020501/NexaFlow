@@ -423,7 +423,7 @@ bun run build
 
 # Compose 静态；执行镜像/真实 OpenSandbox 命令见 deploy/opensandbox/README.md
 cd ..
-docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml config --quiet
+docker compose config --quiet
 ```
 
 迁移测试必须显式传入临时 PostgreSQL URL，并在执行前后分别记录：

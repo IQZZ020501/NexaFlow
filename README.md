@@ -56,7 +56,7 @@ flowchart LR
     Worker --> DB
     Worker --> Qdrant
     Worker --> Storage
-    Worker --> Sandbox[External OpenSandbox / Kata]
+    Worker --> Sandbox[OpenSandbox: Docker / optional Kata]
     AgentWorker --> DB
     AgentWorker --> Qdrant
     AgentWorker --> Storage
@@ -73,89 +73,82 @@ flowchart LR
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
 | 工具与 Skills | builtin / Python / MCP 统一目录、不可变版本、授权、策略、调用账本与按需加载的技能包 |
 | 检索 | PostgreSQL（权威文档、证据图谱与 revision）+ Qdrant（可重建的文档/Profile 派生向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、引用扩展、有界多跳路径、可选 reranker；不需要 Neo4j 或新数据库 |
-| 部署 | PostgreSQL 17 + `pg_search`、Docker Compose、Nginx、独立 OpenSandbox / Kata 执行主机（镜像以 digest 固定） |
+| 部署 | 单机 Docker Compose、PostgreSQL 17 + `pg_search`、OpenSandbox；可选 Nginx、独立 Kata 执行主机，定制镜像以 digest 固定 |
 
 ## 快速开始
 
-以下步骤适用于拉取镜像部署。需要在本机修改代码或体验完整开发环境时，可直接使用[本地开发](#本地开发)中的 `make dev`。
+默认在一台服务器上用普通 Docker 部署完整服务，无需预先安装 OpenSandbox 或 Kata。服务器需要已安装并运行的 Docker Engine，以及 Docker Compose v2.23.1+；不需要 Python、Make、uv、Bun 或 Node.js。需要修改代码时使用[本地开发](#本地开发)中的 `make dev`。
 
-### 前置要求
+### 1. 修改配置
 
-- Docker 与 Docker Compose v2
-- 已按[执行主机部署说明](deploy/opensandbox/README.md)配置、且 API/Worker 可访问的 OpenSandbox 服务；生产环境使用独立 Linux/Kata 执行主机和固定 digest 的执行镜像
-- 已获取本仓库，并在仓库根目录执行后续命令
+仓库只维护根目录的一份 [`docker-compose.yml`](docker-compose.yml)，也可从 [Releases](https://github.com/IQZZ020501/NexaFlow/releases) 的附件下载对应版本。将该文件单独复制到服务器的空目录中即可首次部署，OpenSandbox 配置已内置，不依赖 `.env` 或其他配置文件。
 
-### 1. 准备配置
+先编辑文件顶部 `x-settings`：
 
-```bash
-cp .env.example .env
-```
+| 配置 | 部署前填写 |
+| --- | --- |
+| `postgres-password` | 数据库强密码 |
+| `admin-password` | 首次管理员登录密码 |
+| `managed-user-password` | 管理员新建用户时的初始密码，用户首次登录必须修改 |
+| `sandbox-api-key` | 自行生成的随机密钥，无需申请；调用端和 OpenSandbox 服务端自动共用 |
+| `public-app-url` | 用户实际访问的网站地址，如 `http://你的服务器IP:8080`，不带 `/api` 等路径 |
+| `web-port` | `宿主端口:容器端口`，默认 `8080:3000`；按需修改左侧端口，并同步网站地址 |
+| `environment` | HTTP 使用 `development`；配置好 HTTPS 反向代理后使用 `production` |
 
-编辑根目录 `.env`，至少替换以下值：
+前四项分别生成独立随机值，可在服务器上分别执行 `openssl rand -hex 32`。只修改值，保留 `&postgres-password` 等 YAML anchor；对应服务会自动共用。替换所有 `CHANGE_ME`，妥善保存修改后的文件，避免提交真实凭据；自行设置的密码中的 `$` 按 Compose 规则写成 `$$`。
 
-- `POSTGRES_PASSWORD`
-- `BOOTSTRAP_ADMIN_PASSWORD`
-- `MANAGED_USER_INITIAL_PASSWORD`
-- `OPENSANDBOX_URL`、`OPENSANDBOX_API_KEY` 和 `OPENSANDBOX_IMAGE`（生产环境使用镜像 digest）
+管理员用户名、邮箱和显示名称可在同一文件的 `x-backend-environment` 中修改 `BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_NAME`。管理员密码仅用于创建初始账号，已有账号请在系统中修改密码。完整配置示例、HTTPS 和升级说明见[单机安装](docs/DEPLOYMENT.md#单机安装)。
 
-Compose 容器中的 `127.0.0.1` 指向容器自身，`OPENSANDBOX_URL` 必须填写容器可达的执行主机地址。执行镜像通过独立流程构建和部署，不包含在业务应用镜像内。
+### 2. 拉取并启动
 
-`JWT_SECRET_KEY` 与 `MODEL_SECRET_KEY` 不在 `.env.example` 中，也不需要写进 `.env`：
-首次启动时会自动生成并保存到 PostgreSQL（`platform_secrets`），之后始终以数据库中
-的值为准。只有需要由外部密钥管理提供初始密钥时才手动加入这两个变量，且只对空库
-生效；已有的存储值不会被环境变量覆盖，因此改错或重写 `.env` 不会再让已保存的凭据
-和会话失效。
-
-生产环境不要继续使用示例文件中的凭据。本地服务地址、执行预算和令牌有效期
-使用代码默认值；SMTP、企业身份、工作空间治理、模型和工具等可管理配置保存在
-数据库中，不需要复制进 `.env`。公开 Origin 默认是 `http://localhost:8080`；使用
-正式域名时通过 `PUBLIC_APP_URL` 覆盖。
-
-### 2. 初始化并启动
+在 `docker-compose.yml` 所在目录执行：
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.server.yml up -d
+docker compose config --quiet
+docker compose pull
+docker compose up -d --wait
 ```
 
-`up -d` 会自动等待数据库、执行尚未应用的 Alembic 迁移，再启动 API、前端与 Worker（沙箱运行在独立 OpenSandbox 执行主机，不在本 Compose 内）。迁移复用应用镜像，不需要单独构建迁移镜像。
-首次启动会自动拉取缺失镜像；升级已有部署时先执行 `pull`，再执行同一条 `up -d`。
+镜像地址和运行默认值直接写在 Compose，定制镜像以不可变 digest 固定，支持 `linux/amd64` 和 `linux/arm64`。`pull` 包含应用、PostgreSQL、执行镜像、OpenSandbox 官方镜像及 Redis/Qdrant，服务器无需构建。
 
-启动完成后通过唯一对外端口访问：
+启动时会等待基础服务和 OpenSandbox 健康，执行一次性 Alembic 迁移，再启动 API、Worker 与前端。三个 `*-image` 服务只负责预拉取执行及辅助镜像，和 `migrate` 一样以 `Exited (0)` 结束属于正常状态；常驻服务共 8 个，实际执行任务时另有临时沙箱和网络侧车。
 
-- Web：<http://localhost:8080>
-- API 健康检查：<http://localhost:8080/health>
-- OpenAPI：<http://localhost:8080/docs>
+完成后访问 `http://你的服务器IP:8080`；健康检查在 `/health`，OpenAPI 在 `/docs`。默认管理员为 `admin`，使用顶部 `admin-password` 登录，首次登录必须修改密码。模型、SMTP 等产品设置登录后配置。`JWT_SECRET_KEY` 和 `MODEL_SECRET_KEY` 由应用首次启动生成并保存在 PostgreSQL，无需手填。
 
-生产 Compose 默认只发布宿主机 `8080` 端口，可用 `NEXAFLOW_PORT` 覆盖；其余服务仅在内部网络访问。自定义镜像、外部数据库和 Nginx 配置见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
+HTTP 网站保留 `environment: development`，使登录 Cookie 可通过 HTTP 工作；前端仍使用已构建的正式镜像。配置 HTTPS 反向代理后，同时把 `public-app-url` 改成 HTTPS 地址、`environment` 改成 `production`，再执行 `docker compose up -d --wait`，启用 Secure Cookie 和 HTTPS 校验。
 
-使用根目录 `.env` 中的 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 登录。首次登录必须修改初始密码。
-
-### 3. 查看状态与日志
+### 3. 状态、日志与更新
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.server.yml ps
-docker compose --env-file .env -f deploy/docker-compose.server.yml logs -f api worker agent-worker frontend
+docker compose ps -a
+docker compose logs -f api worker agent-worker frontend
 ```
 
-`worker` 处理知识库、工具测试、邮件和清理任务，并内嵌唯一的 Beat，只能运行一个实例；`agent-worker` 专门执行 Agent 与工作流对话，单进程用线程池并发处理（默认 32 个），对话量大时可以横向扩容：
+`worker` 处理知识库、工具测试、邮件和清理，并内嵌唯一的 Beat，只运行一个实例；`agent-worker` 执行 Agent 与工作流对话，可按资源容量扩容：
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.server.yml up -d --scale agent-worker=2
+docker compose up -d --scale agent-worker=2
 ```
 
-停止服务：
+升级前备份修改后的 Compose、PostgreSQL 和上传目录，按发行说明更新 `x-images` 中的 digest，再执行相同的 `pull` / `up -d --wait`。保留自己的密码和网站配置。停止服务：
 
 ```bash
-docker compose --env-file .env -f deploy/docker-compose.server.yml down
+docker compose down
 ```
 
-数据保存在 `deploy/data` 的 bind mount 中，`down` 不会删除它。如需重置本地数据，必须先停止相关容器；不要在 Redis、PostgreSQL 或 Qdrant 运行时删除其挂载目录。
+数据保存在当前目录的 `deploy/data`，`down` 不删除它。不要在 PostgreSQL、Redis 或 Qdrant 运行时删除挂载目录；数据库迁移后的回滚需核对对应迁移的兼容要求。
 
-详细的部署、迁移、Nginx 和安全配置见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+### 单机隔离与网络
+
+默认普通 Docker 沙箱保留资源、进程、TTL、`dns+nft` 默认拒绝和内网/metadata 阻断，但共享宿主内核。只有 OpenSandbox 控制面挂载 Docker socket，执行容器不接收业务数据目录或业务密钥。默认最多同时存活 4 台沙箱，可修改共享后端配置中的 `OPENSANDBOX_MAX_SANDBOXES`。
+
+云安全组/外部防火墙只放行网站端口（默认 `8080`）和必要的运维端口。上游 OpenSandbox 会为临时沙箱动态映射宿主 `40000–60000` 端口，不要向公网放行这段端口或控制面 `8088`。数据库、Redis、Qdrant 不对外发布。
+
+对不受信任的公网用户开放任意代码执行时，建议选用[独立 Linux/Kata 执行主机](deploy/opensandbox/README.md)，增加虚拟机隔离；它是可选方案，普通 Docker 验证不代表 Kata 已验收。详细配置见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ## 创建第一个应用
 
-1. **登录并进入工作空间**：使用根目录 `.env` 中的引导账号登录，首次登录修改密码，再选择或创建工作空间。
+1. **登录并进入工作空间**：部署使用 Compose 中的管理员账号与 `admin-password` 登录；本地开发使用私有根 `.env` 的引导账号。首次登录修改密码，再选择或创建工作空间。
 2. **接入模型**：在「模型」页添加对话模型并检查连接；需要知识检索时再接入向量模型，需要图片生成时再接入生图模型。
 3. **准备知识与工具**：按任务需要创建知识库、上传文档并等待向量化完成；在「工具」页配置 MCP、Python 或导入 Skills，并为使用者授予相应权限。
 4. **创建并调试**：在「应用」页创建 Agent，选择模型、填写系统提示词并按需关联知识库、工具与 Skills，在右侧调试区验证。需要固定执行流程时，创建工作流并在画布中连接节点。
@@ -163,7 +156,7 @@ docker compose --env-file .env -f deploy/docker-compose.server.yml down
 
 ## 本地开发
 
-本地开发需要 Docker Compose v2、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。macOS 与 Linux 直接在仓库根目录运行：
+本地开发需要 Docker、Docker Compose v2.23.1+、Python 3.11+、[uv](https://docs.astral.sh/uv/)、Bun 1.3+ 和 GNU Make。macOS 与 Linux 直接在仓库根目录运行：
 
 ```bash
 make dev
@@ -177,16 +170,17 @@ make dev
 
 `bun run dev` 和 `bun run build` 会自动构建 PDF/Office 预览所需的本地静态资源。开发期间只修改文件预览器时，在 `frontend/` 运行 `bun run build:file-preview` 刷新资源。
 
-本地 `--development` OpenSandbox 使用普通 Docker，只用于功能开发，不代表生产级隔离；生产仍须使用独立 Linux/Kata 执行主机。原生 Windows 不支持，请在 WSL2 中运行。需要单独调试 API 或 Worker 时，仍可分别使用 `cd backend && make dev` 和 `cd backend && make worker`。
+本地 `--development` OpenSandbox 使用普通 Docker，隔离边界与默认单机部署一致；需要 VM 隔离时选用独立 Linux/Kata 执行主机。原生 Windows 不支持，请在 WSL2 中运行。需要单独调试 API 或 Worker 时，仍可分别使用 `cd backend && make dev` 和 `cd backend && make worker`。
 
 ## 仓库结构
 
 ```text
 NexaFlow/
+├── docker-compose.yml  唯一的单机部署配置
 ├── backend/    FastAPI API、服务、能力适配器、Celery 与 Alembic
 ├── frontend/   Next.js App Router、页面组件、API 客户端与三语词典
 ├── sandbox/    OpenSandbox 独立执行镜像、任务协议与固定文件渲染器
-├── deploy/     Docker Compose、Dockerfile 与 Nginx 示例
+├── deploy/     Dockerfile、OpenSandbox 可选配置与 Nginx 示例
 ├── docs/       模块、产品与工程文档
 ├── scripts/    仓库辅助脚本
 └── .github/     CI 工作流（Compose 校验与前后端套件）
@@ -267,7 +261,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 - stdio MCP 在独立 OpenSandbox 内运行；command/cwd 是执行镜像路径，不能读取业务宿主目录。仅注入该集成的环境值，出站域名须由部署 allowlist 批准。
 - Python Tool、Python Code、文件渲染与 Skill 脚本通过统一 execution port 执行；业务 Worker 无 Docker socket、namespace 特权或本地运行器回退。
 - HTML 与 Office/PDF 预览在不透明源的 sandbox iframe 中运行；渲染器使用本地静态资源，不向第三方预览服务发送文件或下载凭据。
-- 生产执行平面使用 Kata + `dns+nft`、持久化元数据与不可变镜像 digest；网络策略不满足要求时失败关闭。开发 Docker 测试不能替代生产 VM 隔离验收。
+- 默认单机执行平面使用普通 Docker + `dns+nft`、持久化元数据与不可变镜像 digest；网络策略不满足要求时失败关闭。Kata 是可选的 VM 隔离方案，普通 Docker 测试不能替代 VM 隔离验收。
 - 不要提交根目录 `.env`、模型凭据或其他真实密钥。
 
 ## 贡献

@@ -1,8 +1,21 @@
 # OpenSandbox execution host
 
-NexaFlow's API, database, Celery Worker and execution host are separate trust
-boundaries. Do not give the business containers a Docker socket or run arbitrary
-programs on the business host. The Worker talks to an authenticated OpenSandbox
+The default installation uses the root `docker-compose.yml`: edit its top-level
+settings, then run `docker compose pull` and `docker compose up -d --wait`.
+One Docker host runs the business services and the OpenSandbox control plane.
+Generate `sandbox-api-key` yourself (for example, `openssl rand -hex 32`); no
+OpenSandbox account or external API-key application is required. The YAML anchor
+shares that key between the business services and the control plane. Set the
+other credentials and the website origin as described in the
+[configuration guide](../../docs/DEPLOYMENT.md#单机安装).
+See the [quick start](../../README.md#快速开始). Only the control plane receives
+the Docker socket; guests receive no business mounts or business secrets.
+The inline control-plane configuration explicitly selects ordinary Docker with
+dns+nft filtering and immutable official auxiliary images. This shares the host
+kernel. A dedicated Kata host is an optional stronger isolation boundary.
+
+Do not give business containers a Docker socket or execute model programs
+inside them. The Worker talks to an authenticated OpenSandbox
 control plane. Python tools, Workflow code, artifact renderers, Skill scripts
 and bash commands reuse a database-backed Run-private sandbox so
 approved dependencies survive subsequent script calls; it is explicitly destroyed
@@ -34,10 +47,10 @@ installer. Every request is recorded in the unified Tool ledger and requires use
 approval; Python source builds and npm lifecycle scripts are disabled. Bake fixed
 renderer dependencies and reviewed MCP programs into a versioned execution image.
 
-## Dedicated Linux host
+## Optional dedicated Linux/Kata host
 
 Install Docker and configure the `kata-runtime` runtime on the **execution
-host** first. The production configuration requires Kata; missing Kata fails
+host** first. The generated configuration requires Kata; missing Kata fails
 creation rather than falling back to runc. Keep the OpenSandbox control plane
 private and authenticated. Its API key grants execution-host control, not a
 workspace permission; never expose it to browsers, MCP children or Skill code.
@@ -71,7 +84,9 @@ manual commands above for a dedicated execution host or focused diagnostics.
 
 ## NexaFlow configuration
 
-Set in the existing root `.env`:
+For container deployment, set these process variables in the root Compose
+shared `x-backend-environment` and keep the control-plane key consistent with
+`x-settings`. Host development uses the private root `.env` instead:
 
 ```dotenv
 OPENSANDBOX_URL=https://execution.internal.example
@@ -86,7 +101,7 @@ ARTIFACT_SANDBOX_TIMEOUT_SECONDS=30
 
 Production requires `OPENSANDBOX_MAX_SANDBOXES` to be a positive host limit and
 `OPENSANDBOX_URL` to use `https`: the control-plane key travels with every
-request. A loopback control plane may opt out of TLS with
+request. A loopback control plane or the private single-host Docker network may opt out of TLS with
 `OPENSANDBOX_ALLOW_INSECURE_HTTP=1`.
 
 The API/Worker must be able to reach this origin. Container `127.0.0.1` is not
@@ -127,8 +142,10 @@ Cleanup cannot replace a confirmed result, and an unconfirmed destroy retains
 its capacity reservation until reconciliation or native expiry. Never silently
 retry uncertain execution or MCP writes.
 
-Set `OPENSANDBOX_MAX_SANDBOXES` in the business `.env` to the number of live
-sandboxes this host can carry. Workers reserve a slot in Redis before creating a
+Set `OPENSANDBOX_MAX_SANDBOXES` in Compose's shared `x-backend-environment`
+(or the private root `.env` for host development) to the number of live
+sandboxes this host can carry. The single-host Compose starts with `4`.
+Workers reserve a slot in Redis before creating a
 sandbox and free it after a confirmed destroy; a slot left by a crashed worker
 expires with the sandbox's native TTL. A request that finds no slot within five
 seconds is requeued with its Run instead of failing, and nothing is created

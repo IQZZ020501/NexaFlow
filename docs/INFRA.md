@@ -10,7 +10,7 @@
 
 ### app/infra/config/
 
-- `backend/app/infra/config/settings.py` — `Settings` dataclass 配置：从仓库根 `.env`（`ENV_FILE` 指向仓库根，宿主机与 Compose 共用）读取 PostgreSQL/Qdrant 连接、密钥、引导账号和部署边界，安全构造 PostgreSQL 连接串（组件与 `DATABASE_URL` 不一致时强校验报错），并集中声明稳定服务地址、Agent 预算、执行器租约/轮询、限流和认证时长的代码默认值。既有高级环境覆盖继续兼容；普通 `.env` 不再复制整套运行策略。
+- `backend/app/infra/config/settings.py` — `Settings` dataclass 配置：从进程环境读取 PostgreSQL/Qdrant 连接、密钥、引导账号和部署边界；宿主机开发加载私有仓库根 `.env`（`ENV_FILE` 指向仓库根），容器部署由唯一根 Compose 显式注入配置，不依赖 `.env`。安全构造 PostgreSQL 连接串（组件与 `DATABASE_URL` 不一致时强校验报错），并集中声明稳定服务地址、Agent 预算、执行器租约/轮询、限流和认证时长的代码默认值。既有高级环境覆盖继续兼容；普通 `.env` 不再复制整套运行策略。
 
 ### app/infra/db/
 

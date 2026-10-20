@@ -1,0 +1,282 @@
+name: nexaflow
+
+# Edit these values before deployment. Keep real credentials private.
+# Use strong passwords without "$", or escape each "$" as "$$" for Compose.
+x-settings:
+  postgres-password: &postgres-password "CHANGE_ME_Postgres_123!"
+  admin-password: &admin-password "CHANGE_ME_Admin_123!"
+  managed-user-password: &managed-user-password "CHANGE_ME_User_123!"
+  sandbox-api-key: &sandbox-api-key "CHANGE_ME_OpenSandbox_API_Key"
+  public-app-url: &public-app-url http://localhost:8080
+  web-port: &web-port "8080:3000"
+  # With an HTTPS reverse proxy, also set public-app-url to the HTTPS origin.
+  environment: &environment development
+
+# Published multi-architecture images; changing a digest selects a new release.
+x-images:
+  app: &application-image registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow@sha256:d741327eebf9bdaa3cfa0f26c8014ec7fb715818a285d2edef91c8733552de06
+  postgres: &postgres-image registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-postgres@sha256:956799fcfbe928ea4cc44c7daa331405ce808ba55de918118ed83fe6025867df
+  execution: &execution-image registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-execution@sha256:0c4215a17f9111251e226373c6c1728e1f588e2b27eb1a3f84a250b7b7bcb904
+  server: &server-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server@sha256:ae8dfbb277f40a39ff01ef35e5e1c10675acfe0fa9db15259b8f323e5efab778
+  execd: &execd-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd@sha256:0d8f44cf4194732719aa79999d4b120c98bdab02bc61e9ad13f75f83af4c2684
+  egress: &egress-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress@sha256:db7345d567b0970f384b8e3fa7a93a71b7f43d4b16bb2009de34096e9a87b3b5
+
+x-app-image: &app-image
+  image: *application-image
+
+# These one-shot services make `docker compose pull` fetch every sandbox image.
+x-image-preload: &image-preload
+  entrypoint: ["/bin/true"]
+  restart: "no"
+  network_mode: none
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: *environment
+  PUBLIC_APP_URL: *public-app-url
+  BOOTSTRAP_ADMIN_USERNAME: admin
+  BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+  BOOTSTRAP_ADMIN_NAME: 系统管理员
+  BOOTSTRAP_ADMIN_PASSWORD: *admin-password
+  MANAGED_USER_INITIAL_PASSWORD: *managed-user-password
+  DATABASE_URL: ""
+  POSTGRES_DB: nexaflow
+  POSTGRES_USER: nexaflow
+  POSTGRES_PASSWORD: *postgres-password
+  POSTGRES_HOST: db
+  POSTGRES_PORT: "5432"
+  CELERY_BROKER_URL: redis://redis:6379/0
+  KNOWLEDGE_STORAGE_DIR: /data/knowledge
+  QDRANT_URL: http://qdrant:6333
+  OPENSANDBOX_URL: http://opensandbox:8088
+  OPENSANDBOX_API_KEY: *sandbox-api-key
+  OPENSANDBOX_IMAGE: *execution-image
+  OPENSANDBOX_ALLOW_INSECURE_HTTP: "1"
+  OPENSANDBOX_MAX_SANDBOXES: "4"
+
+services:
+  execution-image:
+    <<: *image-preload
+    image: *execution-image
+
+  execd-image:
+    <<: *image-preload
+    image: *execd-image
+
+  egress-image:
+    <<: *image-preload
+    image: *egress-image
+
+  opensandbox:
+    configs:
+      - source: opensandbox
+        target: /etc/opensandbox/config.toml
+    depends_on:
+      execution-image:
+        condition: service_completed_successfully
+      execd-image:
+        condition: service_completed_successfully
+      egress-image:
+        condition: service_completed_successfully
+    image: *server-image
+    init: true
+    restart: unless-stopped
+    environment:
+      OPENSANDBOX_SERVER_API_KEY: *sandbox-api-key
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./deploy/data/opensandbox:/var/lib/opensandbox
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  db:
+    image: *postgres-image
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nexaflow
+      POSTGRES_USER: nexaflow
+      POSTGRES_PASSWORD: *postgres-password
+    volumes:
+      - ./deploy/data/postgresql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "PGAPPNAME=nexaflow-healthcheck pg_isready -U nexaflow -d nexaflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ./deploy/data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    restart: unless-stopped
+    volumes:
+      - ./deploy/data/qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    <<: *app-image
+    init: true
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment: *backend-environment
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app-image
+    init: true
+    restart: unless-stopped
+    environment: *backend-environment
+    volumes:
+      - ./deploy/data/uploads:/data/knowledge
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      opensandbox:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  worker:
+    <<: *app-image
+    init: true
+    restart: unless-stopped
+    command:
+      - python
+      - scripts/worker.py
+      - --role=background
+      - --autoscale=10,0
+    environment:
+      <<: *backend-environment
+      AUTOSCALE_KEEPALIVE: "5"
+    volumes:
+      - ./deploy/data/uploads:/data/knowledge
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      opensandbox:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  agent-worker:
+    <<: *app-image
+    init: true
+    restart: unless-stopped
+    command:
+      - python
+      - scripts/worker.py
+      - --role=agents
+    environment: *backend-environment
+    volumes:
+      - ./deploy/data/uploads:/data/knowledge
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      opensandbox:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  frontend:
+    <<: *app-image
+    restart: unless-stopped
+    working_dir: /opt/frontend
+    command: ["/opt/node/bin/node", "server.js"]
+    environment:
+      HOSTNAME: 0.0.0.0
+      NEXAFLOW_API_PROXY: http://api:8000
+    ports:
+      - *web-port
+    healthcheck:
+      test: ["CMD", "/opt/node/bin/node", "-e", "require('http').get('http://127.0.0.1:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      api:
+        condition: service_healthy
+
+# Docker isolation is explicit. Kata is an optional separate execution host.
+configs:
+  opensandbox:
+    content: |
+      # Explicit single-host Docker deployment. For VM isolation, use configure.py
+      # on a Kata-capable execution host instead. The API key comes from the environment.
+      [server]
+      host = "0.0.0.0"
+      port = 8088
+      max_sandbox_timeout_seconds = 1860
+
+      [runtime]
+      type = "docker"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd@sha256:0d8f44cf4194732719aa79999d4b120c98bdab02bc61e9ad13f75f83af4c2684"
+
+      [store]
+      type = "sqlite"
+      path = "/var/lib/opensandbox/sandboxes.db"
+
+      [storage]
+      allowed_host_paths = []
+
+      [docker]
+      network_mode = "bridge"
+      host_ip = "host.docker.internal"
+      pids_limit = 96
+      no_new_privileges = true
+      drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+      sandbox_env = {}
+      sandbox_binds = []
+
+      [ingress]
+      mode = "direct"
+
+      [egress]
+      image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress@sha256:db7345d567b0970f384b8e3fa7a93a71b7f43d4b16bb2009de34096e9a87b3b5"
+      mode = "dns+nft"
+      disable_ipv6 = true
+      readiness_timeout = 30
