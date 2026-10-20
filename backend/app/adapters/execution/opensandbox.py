@@ -7,8 +7,10 @@ import json
 import logging
 import re
 import secrets
+import time
 from collections.abc import Hashable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
@@ -23,21 +25,26 @@ from opensandbox.models.execd import ExecutionHandlers, RunCommandOpts
 from opensandbox.transport import RetryPolicy
 
 from app.adapters.execution import pool
-from app.adapters.execution.capacity import SandboxCapacity
+from app.adapters.execution.capacity import CapacityScope, SandboxCapacity
 from app.adapters.execution.resources import RESOURCES, request_profile
 from app.infra.config.settings import Settings
 from app.infra.execution.network import DENIED_NETWORKS, validate_egress_domain
 from app.infra.execution.sessions import SessionStore
+from app.infra.observability.logger import log_event
 from app.ports.execution import (
     ExecutionBridge,
     ExecutionBusy,
     ExecutionError,
     ExecutionNotStarted,
+    ExecutionOutcomeUnknown,
     execution_scope,
 )
 
 logger = logging.getLogger(__name__)
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
+# Cold guest creation and cleanup happen inside the caller's budget.
+DEADLINE_OVERHEAD_SECONDS = 15.0
+CLEANUP_TIMEOUT_SECONDS = 10.0
 MAX_METADATA_LABEL_LENGTH = 63
 _INVALID_METADATA_LABEL_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _UNAVAILABLE = "OpenSandbox execution is unavailable or failed."
@@ -72,13 +79,25 @@ class _Session:
         self.expires_at = expires_at
 
 
+@dataclass
+class _RequestProgress:
+    dispatched: bool = False
+    response: dict | None = None
+
+
+def _scope_for_execution(scope) -> CapacityScope:
+    """Capacity scope for a request that has no durable session yet."""
+    workspace_id = getattr(scope, "workspace_id", None)
+    return CapacityScope(workspace_key=workspace_id or None)
+
+
 class OpenSandboxExecution:
     _sessions: dict[str, _Session] = {}
     _session_locks: WeakValueDictionary[tuple[Hashable, ...], asyncio.Lock] = (
         WeakValueDictionary()
     )
     _capacity_slots: dict[str, str] = {}
-    _consumer_slots: dict[str, str | None] = {}
+    _scope_slots: dict[str, CapacityScope] = {}
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -94,76 +113,109 @@ class OpenSandboxExecution:
         payload = json.dumps(request, ensure_ascii=False, allow_nan=False).encode()
         if len(payload) > MAX_REQUEST_BYTES:
             raise ExecutionNotStarted("Execution input exceeds 8 MiB.")
-        await self._close_expired_handles()
-        scope = execution_scope.get()
-        domains = self._network_domains(request)
-        session_key = self._session_key(request, scope)
-        if session_key is None:
-            sandbox = await self._create_sandbox(
-                scope,
-                domains,
-                timeout_seconds,
-                persistent=False,
-                profile=request_profile(request),
-            )
-            try:
-                return await self._run_request(
-                    sandbox,
-                    request,
-                    timeout_seconds,
-                    max_output_bytes,
+        # Creation, execution and cleanup share one budget. Without it a cold
+        # guest plus a failed destroy can occupy the caller for far longer than
+        # the requested timeout.
+        deadline = time.monotonic() + timeout_seconds + DEADLINE_OVERHEAD_SECONDS
+        progress = _RequestProgress()
+        try:
+            async with asyncio.timeout_at(deadline):
+                return await self._execute_request(
+                    request, timeout_seconds, max_output_bytes, deadline, progress
                 )
-            finally:
-                await self._destroy_sandbox(sandbox)
+        except Exception as exc:
+            if progress.response is not None:
+                # Session bookkeeping or cleanup cannot undo a confirmed result.
+                return progress.response
+            if progress.dispatched:
+                raise ExecutionOutcomeUnknown(
+                    "Execution command may have run, but its result could not be confirmed."
+                ) from exc
+            if isinstance(exc, TimeoutError):
+                raise ExecutionNotStarted("Execution deadline expired before dispatch.") from exc
+            raise
 
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
-        async with lock:
-            record, run, reset, stale = await self.store.acquire(
-                self.settings, scope, timeout_seconds
-            )
-            sandbox = None
-            try:
-
-                async def perform():
-                    nonlocal sandbox, reset
-                    sandbox, reset = await self._connect_record(
-                        record, scope, timeout_seconds, reset, run.resource_profile
+    async def _execute_request(self, request, timeout, max_bytes, deadline, progress):
+        work_deadline = deadline - min(
+            CLEANUP_TIMEOUT_SECONDS, DEADLINE_OVERHEAD_SECONDS
+        )
+        scope = execution_scope.get()
+        sandbox = record = lock = None
+        locked = False
+        failed = True
+        domains = []
+        try:
+            async with asyncio.timeout_at(work_deadline):
+                await self._close_expired_handles()
+                domains = self._network_domains(request)
+                session_key = self._session_key(request, scope)
+                if session_key is None:
+                    sandbox = await self._create_sandbox(
+                        scope, domains, timeout, persistent=False,
+                        profile=request_profile(request), deadline=deadline,
                     )
-                    if stale:
-                        await self._stop_stale_processes(sandbox)
-                    if not await self.store.current(record, scope):
-                        raise ExecutionBusy("Run sandbox lease was lost.")
-                    if domains:
-                        await self._allow_egress(sandbox, domains)
-                    else:
-                        await self._require_enforcement(sandbox, [])
-                    response = await self._execute_record(
-                        sandbox,
-                        record,
-                        request,
-                        timeout_seconds,
-                        max_output_bytes,
+                    response = await self._run_request(
+                        sandbox, request, timeout, max_bytes, progress=progress
                     )
-                    if domains:
-                        await sandbox.delete_egress_rules(domains)
-                        await self._require_enforcement(sandbox, [])
-                    return response
+                else:
+                    lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+                    await lock.acquire()
+                    locked = True
+                    record, run, reset, stale = await self.store.acquire(
+                        self.settings, scope, timeout
+                    )
 
-                response = await self._fenced(record, scope, perform())
-                if reset:
-                    response["workspace_reset"] = True
+                    async def perform():
+                        nonlocal sandbox, reset
+                        sandbox, reset = await self._connect_record(
+                            record, scope, timeout, reset, run.resource_profile,
+                            deadline=deadline,
+                        )
+                        if stale:
+                            await self._stop_stale_processes(sandbox)
+                        if not await self.store.current(record, scope):
+                            raise ExecutionBusy("Run sandbox lease was lost.")
+                        await self._reconcile_egress(sandbox, domains)
+                        return await self._execute_record(
+                            sandbox, record, request, timeout, max_bytes, progress
+                        )
+
+                    response = await self._fenced(record, scope, perform())
+                    if reset:
+                        response["workspace_reset"] = True
+                progress.response = response
+                failed = False
                 return response
-            except BaseException:
-                # A worker that lost the holder cannot destroy its successor's guest.
-                if sandbox is not None and await self.store.closing(record, owned=True):
-                    self._sessions.pop(record.id, None)
-                    if await self._destroy_sandbox(sandbox):
-                        await self.store.closed(record)
-                raise
+        finally:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    if record is not None:
+                        try:
+                            if failed and sandbox is not None:
+                                # Only the current holder may destroy this guest.
+                                await self._close_record(record, owned=True, deadline=deadline)
+                            elif sandbox is not None and domains:
+                                # Leave time to fence a guest whose policy cannot
+                                # be restored before the overall deadline.
+                                revoke_deadline = deadline - min(
+                                    1.0, DEADLINE_OVERHEAD_SECONDS / 10
+                                )
+                                try:
+                                    async with asyncio.timeout_at(revoke_deadline):
+                                        await self._revoke_egress(sandbox, domains)
+                                except TimeoutError:
+                                    await self._close_record(record, owned=True, deadline=deadline)
+                        finally:
+                            await self.store.release(record)
+                    elif sandbox is not None:
+                        await self._destroy_sandbox(sandbox, deadline=deadline)
+            except Exception:
+                logger.warning("OpenSandbox cleanup deferred to reconciliation or native TTL")
             finally:
-                await self.store.release(record)
+                if locked:
+                    lock.release()
 
-    async def _execute_record(self, sandbox, record, request, timeout, max_bytes):
+    async def _execute_record(self, sandbox, record, request, timeout, max_bytes, progress):
         staged = set(record.staged_packages)
         shell = request.get("shell")
         environment_key = None
@@ -184,7 +236,8 @@ class OpenSandboxExecution:
                     **installed,
                 }
         response = await self._run_request(
-            sandbox, request, timeout, max_bytes, staged=staged, record=record
+            sandbox, request, timeout, max_bytes, staged=staged, record=record,
+            progress=progress,
         )
         environments = dict(record.environments)
         if environment_key and response.get("ok") and response.get("environment_hash"):
@@ -200,8 +253,11 @@ class OpenSandboxExecution:
         return response
 
     async def _connect_record(
-        self, record, scope, timeout, reset=False, profile="standard"
+        self, record, scope, timeout, reset=False, profile="standard", *,
+        allow_create=True, deadline=None,
     ):
+        if not record.sandbox_id and not allow_create:
+            raise ExecutionNotStarted("Run sandbox no longer exists.")
         cached = self._sessions.get(record.id)
         sandbox = (
             cached.sandbox
@@ -229,12 +285,17 @@ class OpenSandboxExecution:
                 )
                 if status != 404:
                     raise ExecutionNotStarted(_UNAVAILABLE) from exc
+                if not allow_create and not await self.store.closing(record, owned=True):
+                    raise ExecutionBusy("Run sandbox lease was lost.") from exc
                 if sandbox is not None:
                     await sandbox.close()
                 self._sessions.pop(record.id, None)
                 self._capacity_slots.pop(record.sandbox_id, None)
-                self._consumer_slots.pop(record.sandbox_id, None)
-                await self.capacity.release(record.capacity_token, record.consumer_key)
+                self._scope_slots.pop(record.sandbox_id, None)
+                await self.capacity.release(record.capacity_token, self._record_scope(record))
+                if not allow_create:
+                    await self.store.closed(record)
+                    raise ExecutionNotStarted("Run sandbox no longer exists.") from exc
                 sandbox = None
                 reset = True
         if sandbox is None:
@@ -245,8 +306,9 @@ class OpenSandboxExecution:
                 persistent=True,
                 lifetime=lifetime,
                 profile=profile,
-                consumer_key=record.consumer_key,
+                capacity_scope=self._record_scope(record),
                 session_id=record.id,
+                deadline=deadline,
             )
             try:
                 await self.store.publish(
@@ -259,17 +321,25 @@ class OpenSandboxExecution:
                     environments={},
                 )
             except BaseException:
-                await self._destroy_sandbox(sandbox)
+                await self._destroy_sandbox(sandbox, deadline=deadline)
                 raise
         else:
             await self.capacity.renew(
-                record.capacity_token, lifetime, record.consumer_key
+                record.capacity_token, lifetime, self._record_scope(record)
             )
             if record.capacity_token:
                 self._capacity_slots[sandbox.id] = record.capacity_token
-                self._consumer_slots[sandbox.id] = record.consumer_key
+                self._scope_slots[sandbox.id] = self._record_scope(record)
         self._sessions[record.id] = _Session(sandbox, record.expires_at)
         return sandbox, reset
+
+    @staticmethod
+    def _record_scope(record) -> CapacityScope:
+        """Capacity scope of a durable session: its caller and its workspace."""
+        return CapacityScope(
+            consumer_key=record.consumer_key,
+            workspace_key=record.workspace_id or None,
+        )
 
     async def _close_expired_handles(self):
         now = datetime.now(UTC)
@@ -277,7 +347,7 @@ class OpenSandboxExecution:
             if _utc_time(cached.expires_at) <= now:
                 self._sessions.pop(key, None)
                 self._capacity_slots.pop(cached.sandbox.id, None)
-                self._consumer_slots.pop(cached.sandbox.id, None)
+                self._scope_slots.pop(cached.sandbox.id, None)
                 await cached.sandbox.close()
 
     async def _fenced(self, record, scope, operation):
@@ -375,14 +445,16 @@ class OpenSandboxExecution:
         persistent,
         lifetime=None,
         profile="small",
-        consumer_key=None,
+        capacity_scope=None,
         session_id=None,
+        deadline=None,
     ):
         settings = self.settings
         lifetime = lifetime or self._lifetime_seconds(
             timeout_seconds, persistent=persistent
         )
-        slot = await self.capacity.acquire(lifetime, consumer_key)
+        capacity_scope = capacity_scope or _scope_for_execution(scope)
+        slot = await self.capacity.acquire(lifetime, capacity_scope)
         config = self._connection_config(timeout_seconds)
         sandbox = None
         metadata = {
@@ -403,7 +475,7 @@ class OpenSandboxExecution:
             sandbox = await pool.acquire(self, profile, lifetime)
             if sandbox is not None:
                 self._capacity_slots[sandbox.id] = slot
-                self._consumer_slots[sandbox.id] = consumer_key
+                self._scope_slots[sandbox.id] = capacity_scope
                 await sandbox.patch_metadata({**metadata, "pool": ""})
                 if domains:
                     await self._allow_egress(sandbox, domains)
@@ -430,14 +502,26 @@ class OpenSandboxExecution:
                     ),
                 )
                 self._capacity_slots[sandbox.id] = slot
-                self._consumer_slots[sandbox.id] = consumer_key
+                self._scope_slots[sandbox.id] = capacity_scope
+            log_event(
+                logger,
+                logging.INFO,
+                "OpenSandbox guest created.",
+                sandbox_id=sandbox.id,
+                profile=profile,
+                persistent=persistent,
+                domains=len(domains),
+            )
             await self._require_enforcement(sandbox, domains)
         except BaseException as exc:
             if sandbox is not None:
-                await self._destroy_sandbox(sandbox)
+                await self._destroy_sandbox(sandbox, deadline=deadline)
             else:
                 await config.close_transport_if_owned()
-                await self.capacity.release(slot, consumer_key)
+                # A cancelled create may have reached the control plane without
+                # returning an ID. Keep its reservation until native expiry.
+                if not isinstance(exc, (asyncio.CancelledError, TimeoutError)):
+                    await self.capacity.release(slot, capacity_scope)
             if isinstance(exc, asyncio.CancelledError):
                 raise
             raise ExecutionNotStarted(_UNAVAILABLE) from exc
@@ -454,23 +538,41 @@ class OpenSandboxExecution:
         except Exception as exc:
             raise ExecutionNotStarted(_UNAVAILABLE) from exc
 
-    def _package_entries(self, request) -> tuple[str, list[WriteEntry]]:
+    async def _revoke_egress(self, sandbox, domains) -> None:
+        """Remove the egress a command used; never fail the command for it."""
+        try:
+            await sandbox.delete_egress_rules(list(domains))
+        except Exception:
+            logger.warning(
+                "OpenSandbox egress revocation failed",
+                extra={"sandbox_id": sandbox.id, "domains": list(domains)},
+            )
+        try:
+            await self._require_enforcement(sandbox, [])
+        except Exception:
+            logger.warning(
+                "OpenSandbox egress policy verification failed",
+                extra={"sandbox_id": sandbox.id},
+            )
+
+    def _package_root(self, request) -> str:
         environment = request.get("skill_environment")
         if environment is not None and (
             not isinstance(environment, str)
             or re.fullmatch(r"[a-f0-9]{32}", environment) is None
         ):
             raise ExecutionNotStarted("Invalid Skill environment.")
-        package_root = (
+        return (
             f"/tmp/nexaflow-skill/{environment}"
             if environment is not None
             else "/tmp/nexaflow-skill"
         )
+
+    def _package_files(self, request) -> dict:
         files = request.get("files", {})
         if not isinstance(files, dict):
             raise ExecutionNotStarted("Invalid execution package.")
-        entries = []
-        for name, encoded in files.items():
+        for name in files:
             if (
                 not isinstance(name, str)
                 or PurePosixPath(name).is_absolute()
@@ -479,6 +581,22 @@ class OpenSandboxExecution:
                 or ":" in name
             ):
                 raise ExecutionNotStarted("Invalid execution package path.")
+        return files
+
+    def _package_key(self, package_root: str, files: dict) -> str:
+        """Identity of a package: its root plus a digest of its content.
+
+        Computed from the encoded payload so an already staged package can be
+        recognized without decoding it again.
+        """
+        digest = hashlib.sha256(
+            json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return f"{package_root}:{digest}"
+
+    def _package_entries(self, package_root: str, files: dict) -> list[WriteEntry]:
+        entries = []
+        for name, encoded in files.items():
             try:
                 data = base64.b64decode(encoded, validate=True)
             except (TypeError, ValueError) as exc:
@@ -492,10 +610,7 @@ class OpenSandboxExecution:
                     group="root",
                 )
             )
-        digest = hashlib.sha256(
-            json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        return f"{package_root}:{digest}", entries
+        return entries
 
     async def _run_request(
         self,
@@ -506,37 +621,45 @@ class OpenSandboxExecution:
         *,
         staged: set[str] | None = None,
         record=None,
+        progress,
     ):
-        package_key, entries = self._package_entries(request)
-        if staged is not None and package_key in staged:
-            entries = []
-        package_pending = bool(entries)
+        package_root = self._package_root(request)
+        files = self._package_files(request)
+        package_key = self._package_key(package_root, files)
+        entries = []
+        package_pending = False
+        if staged is None or package_key not in staged:
+            # Decode only what still has to be written. A reused session
+            # already holds these bytes in the guest.
+            entries = self._package_entries(package_root, files)
+            package_pending = bool(entries)
         mounted = request.get("skill_mounts", {})
         if not isinstance(mounted, dict):
             raise ExecutionNotStarted("Invalid Skill mounts.")
-        for name, files in mounted.items():
+        for name, mount_files in mounted.items():
             if not isinstance(name, str) or not re.fullmatch(
                 r"[a-z0-9][a-z0-9-]{0,63}", name
             ):
                 raise ExecutionNotStarted("Invalid Skill mount name.")
-            mount_key, mount_entries = self._package_entries({"files": files})
-            mount_key = f"/skills/{name}:{mount_key}"
-            if staged is None or mount_key not in staged:
-                entries.extend(
-                    WriteEntry(
-                        path=entry.path.replace(
-                            "/tmp/nexaflow-skill/", f"/skills/{name}/", 1
-                        ),
-                        data=entry.data,
-                        mode=444,
-                        owner="root",
-                        group="root",
-                    )
-                    for entry in mount_entries
+            mount_files = self._package_files({"files": mount_files})
+            mount_root = self._package_root({})
+            mount_key = f"/skills/{name}:{self._package_key(mount_root, mount_files)}"
+            if staged is not None and mount_key in staged:
+                continue
+            entries.extend(
+                WriteEntry(
+                    path=entry.path.replace(
+                        "/tmp/nexaflow-skill/", f"/skills/{name}/", 1
+                    ),
+                    data=entry.data,
+                    mode=444,
+                    owner="root",
+                    group="root",
                 )
-                if staged is not None:
-                    staged.add(mount_key)
-        files = request.get("files", {})
+                for entry in self._package_entries(mount_root, mount_files)
+            )
+            if staged is not None:
+                staged.add(mount_key)
         # Package contents are staged as root-owned files; job.py only needs
         # their names, so a reused session does not upload them again.
         job_request = (
@@ -590,6 +713,11 @@ class OpenSandboxExecution:
                 record, execution_scope.get()
             ):
                 raise ExecutionBusy("Run sandbox lease was lost.")
+            # From dispatch onward, losing the reply cannot prove nothing ran.
+            progress.dispatched = True
+            scope = execution_scope.get()
+            if scope is not None:
+                scope.attempt.unconfirmed = True
             result = await sandbox.commands.run(
                 f"/opt/nexaflow/.venv/bin/python -I /opt/nexaflow/job.py {request_path} {response_path}",
                 opts=RunCommandOpts(
@@ -619,6 +747,8 @@ class OpenSandboxExecution:
                 ) from exc
             if not isinstance(value, dict):
                 raise ExecutionError("OpenSandbox returned an invalid response.")
+            if scope is not None:
+                scope.attempt.unconfirmed = False
             return value
 
     async def close_session(self, workspace_id: str, run_id: str) -> None:
@@ -781,10 +911,14 @@ class OpenSandboxExecution:
         scope = execution_scope.get()
         if not scope or (scope.workspace_id, scope.run_id) != (workspace_id, run_id):
             raise ExecutionNotStarted("Run execution scope is unavailable.")
-        record, run, _, stale = await self.store.acquire(self.settings, scope, 30)
+        # A read never creates a guest: a missing session means the workspace
+        # is gone, and a fresh guest would only hold an empty workspace.
+        record, run, _, stale = await self.store.acquire_existing(
+            self.settings, scope, 30
+        )
         try:
             sandbox, reset = await self._connect_record(
-                record, scope, 30, profile=run.resource_profile
+                record, scope, 30, profile=run.resource_profile, allow_create=False
             )
             if stale:
                 await self._stop_stale_processes(sandbox)
@@ -807,7 +941,7 @@ class OpenSandboxExecution:
         finally:
             await self.store.release(record)
 
-    async def _close_record(self, record, *, owned=False):
+    async def _close_record(self, record, *, owned=False, deadline=None):
         if not await self.store.closing(record, owned=owned):
             return
         cached = self._sessions.pop(record.id, None)
@@ -831,20 +965,25 @@ class OpenSandboxExecution:
                 getattr(exc, "response", None), "status_code", None
             )
             if status == 404:
-                await self.capacity.release(record.capacity_token, record.consumer_key)
+                await self.capacity.release(
+                    record.capacity_token, self._record_scope(record)
+                )
                 await self.store.closed(record)
             return
         self._capacity_slots[sandbox.id] = record.capacity_token
-        self._consumer_slots[sandbox.id] = record.consumer_key
-        if await self._destroy_sandbox(sandbox):
+        self._scope_slots[sandbox.id] = self._record_scope(record)
+        if await self._destroy_sandbox(sandbox, deadline=deadline):
             await self.store.closed(record)
 
-    async def _destroy_sandbox(self, sandbox) -> bool:
-        slot = self._capacity_slots.pop(sandbox.id, None)
-        consumer = self._consumer_slots.pop(sandbox.id, None)
+    async def _destroy_sandbox(self, sandbox, *, deadline=None) -> bool:
+        slot = self._capacity_slots.get(sandbox.id)
+        scope = self._scope_slots.get(sandbox.id)
         cleanup = asyncio.create_task(sandbox.destroy())
         try:
-            await asyncio.wait_for(asyncio.shield(cleanup), 10)
+            remaining = CLEANUP_TIMEOUT_SECONDS
+            if deadline is not None:
+                remaining = min(remaining, max(0, deadline - time.monotonic()))
+            await asyncio.wait_for(asyncio.shield(cleanup), remaining)
         except asyncio.CancelledError:
             cleanup.add_done_callback(_consume_cleanup)
             raise
@@ -856,10 +995,20 @@ class OpenSandboxExecution:
             )
             cleanup.add_done_callback(_consume_cleanup)
             return False
-        await self.capacity.release(slot, consumer)
+        await self.capacity.release(slot, scope)
+        self._capacity_slots.pop(sandbox.id, None)
+        self._scope_slots.pop(sandbox.id, None)
         return True
 
-    async def _require_enforcement(self, sandbox, domains):
+    async def _read_policy(self, sandbox) -> tuple[dict, dict, set, set]:
+        """Read the effective egress policy of a guest.
+
+        Returns the raw status, the policy, the denied targets and the
+        currently allowed targets.
+        """
+        return await self._fetch_policy(sandbox)
+
+    async def _fetch_policy(self, sandbox) -> tuple[dict, dict, set, set]:
         endpoint = await sandbox.get_endpoint(18080)
         url = f"{self.settings.opensandbox_url.rstrip('/')}/v1/sandboxes/{sandbox.id}/proxy/18080/policy"
         async with httpx.AsyncClient(
@@ -886,15 +1035,52 @@ class OpenSandboxExecution:
         rules = policy.get("egress", [])
         denies = {rule.get("target") for rule in rules if rule.get("action") == "deny"}
         allows = {rule.get("target") for rule in rules if rule.get("action") == "allow"}
+        return status, policy, denies, allows
+
+    def _assert_enforcement(self, status, policy, denies) -> None:
+        """Enforce the security invariants that no rule change can relax."""
         if (
             status.get("enforcementMode") != "dns+nft"
             or policy.get("defaultAction") != "deny"
             or not set(DENIED_NETWORKS).issubset(denies)
-            or allows != set(domains)
         ):
             raise ExecutionError(
                 "OpenSandbox requires dns+nft enforcement with private-network denial; execution is disabled."
             )
+
+    async def _require_enforcement(self, sandbox, domains):
+        status, policy, denies, allows = await self._read_policy(sandbox)
+        self._assert_enforcement(status, policy, denies)
+        if allows != set(domains):
+            raise ExecutionError(
+                "OpenSandbox network policy does not match the requested egress; execution is disabled."
+            )
+
+    async def _reconcile_egress(self, sandbox, domains) -> None:
+        """Make the guest's allow list exactly the requested domains.
+
+        A worker that died between granting and revoking an egress rule leaves
+        the guest with a wider allow list than the current request. Reconciling
+        instead of demanding an exact match keeps the workspace: the leftover
+        rule is removed before any new code runs.
+        """
+        try:
+            status, policy, denies, allows = await self._read_policy(sandbox)
+            self._assert_enforcement(status, policy, denies)
+            desired = set(domains)
+            stale = sorted(allows - desired)
+            missing = sorted(desired - allows)
+            if stale:
+                await sandbox.delete_egress_rules(stale)
+            if missing:
+                await sandbox.patch_egress_rules(
+                    [NetworkRule(action="allow", target=domain) for domain in missing]
+                )
+            await self._require_enforcement(sandbox, domains)
+        except ExecutionError as exc:
+            raise ExecutionNotStarted(str(exc)) from exc
+        except Exception as exc:
+            raise ExecutionNotStarted(_UNAVAILABLE) from exc
 
 
 def _consume_cleanup(task):

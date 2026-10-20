@@ -10,7 +10,7 @@
 
 ### app/infra/config/
 
-- `backend/app/infra/config/settings.py` — `Settings` dataclass 配置：从仓库根 `.env`（`ENV_FILE` 指向仓库根，宿主机与 Compose 共用）读取 PostgreSQL/Qdrant 连接、密钥、引导账号和部署边界，安全构造 PostgreSQL 连接串（组件与 `DATABASE_URL` 不一致时强校验报错），并集中声明稳定服务地址、Agent 预算、执行器租约/轮询、限流和认证时长的代码默认值。既有高级环境覆盖继续兼容；普通 `.env` 不再复制整套运行策略。
+- `backend/app/infra/config/settings.py` — `Settings` dataclass 配置：从进程环境读取 PostgreSQL/Qdrant 连接、密钥、引导账号和部署边界；宿主机开发加载私有仓库根 `.env`（`ENV_FILE` 指向仓库根），容器部署由唯一根 Compose 显式注入配置，不依赖 `.env`。安全构造 PostgreSQL 连接串（组件与 `DATABASE_URL` 不一致时强校验报错），并集中声明稳定服务地址、Agent 预算、执行器租约/轮询、限流和认证时长的代码默认值。既有高级环境覆盖继续兼容；普通 `.env` 不再复制整套运行策略。
 
 ### app/infra/db/
 
@@ -59,8 +59,8 @@
 
 ### app/infra/sandbox/
 
-- `backend/app/infra/sandbox/client.py` — Workflow/Artifact 语义与结果校验：通过 `app/ports/execution.py` 委托外部 OpenSandbox，保持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact` 契约；无 Unix socket 或宿主进程回退。
-- `backend/app/infra/execution/` — 公网域名语法/私网 deny 列表、非敏感执行配置指纹；生命周期在 `adapters/execution/opensandbox.py`，运行器在独立执行镜像。
+- `backend/app/infra/sandbox/client.py` — Workflow/Artifact 语义与结果校验：通过 `app/ports/execution.py` 委托外部 OpenSandbox，保持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact` 契约；无 Unix socket 或宿主进程回退。Workflow 代码节点与文档/Skill 渲染各用一份预算（`WORKFLOW_SANDBOX_TIMEOUT_SECONDS` 与 `ARTIFACT_SANDBOX_TIMEOUT_SECONDS`），内外层使用同一个值，避免内层先超时造成的“随机失败”。
+- `backend/app/infra/execution/` — 公网域名语法/私网 deny 列表、非敏感执行配置指纹；生命周期在 `adapters/execution/opensandbox.py`，运行器在独立执行镜像。`sessions.py::SessionStore.acquire_existing` 只认领既有会话、绝不新建，用于产物读取这类只读路径。
 
 ### app/infra/runtime/
 

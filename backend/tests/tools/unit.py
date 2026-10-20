@@ -1256,6 +1256,28 @@ def test_skill_runtime_capacity_requeues_instead_of_failing() -> None:
                 raise AssertionError("Exhausted Skill capacity failed the Tool call")
 
 
+def test_execution_tools_preserve_uncertain_outcomes() -> None:
+    from tests.support import settings
+
+    from app.application.agent_skills import dependencies, scripts
+    from app.application.tools.runtime.adapters import builtin
+    from app.ports.execution import ExecutionOutcomeUnknown
+
+    adapter = builtin.BuiltinToolAdapter(settings())
+    for module, function, spec, arguments in (
+        (scripts, "execute_skill_script", {"builtin": "skill_script"}, {}),
+        (dependencies, "execute_skill_dependency_install", {"builtin": "skill_dependency_install"}, {}),
+        (builtin, "execute_artifact_code", {"builtin": "artifact"}, {"filename": "report.pdf", "content": "pass"}),
+        (builtin, "execute_skill_artifact", {"builtin": "skill", "skill": "documents"}, {"filename": "report.docx"}),
+        (builtin, "execute_workflow_code", {"builtin": "inline_python"}, {"code": "pass", "inputs": {}}),
+    ):
+        with patch.object(module, function, AsyncMock(side_effect=ExecutionOutcomeUnknown("reply lost"))):
+            result = asyncio.run(adapter.invoke(
+                SimpleNamespace(execution_spec=spec), arguments, SimpleNamespace(origin="workflow")
+            ))
+        assert not result.ok and result.outcome == "uncertain", spec
+
+
 def main() -> None:
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_summary_projects_effective_public_access_and_mcp_policy()
@@ -1280,6 +1302,7 @@ def main() -> None:
     test_normalize_mcp_url()
     test_mcp_adapter_marks_only_sent_writes_uncertain()
     test_skill_runtime_capacity_requeues_instead_of_failing()
+    test_execution_tools_preserve_uncertain_outcomes()
     print("TOOLS_UNIT_OK")
 
 

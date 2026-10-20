@@ -29,7 +29,7 @@ from app.infra.sandbox.client import (
     execute_skill_artifact,
     execute_workflow_code,
 )
-from app.ports.execution import ExecutionBusy, ExecutionError
+from app.ports.execution import ExecutionBusy, ExecutionError, ExecutionOutcomeUnknown
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
 
 
@@ -52,6 +52,8 @@ class BuiltinToolAdapter:
                 return await execute_shell(self.settings, arguments, context)
             except ExecutionBusy as exc:
                 raise ToolAdapterBusy("Command runtime is busy.") from exc
+            except ExecutionOutcomeUnknown as exc:
+                return _failure("shell_failed", str(exc)[:1000], uncertain=True)
             except (ValueError, ExecutionError, OSError, TimeoutError) as exc:
                 return _failure("shell_failed", str(exc)[:1000])
         if builtin == "image_generation":
@@ -82,6 +84,8 @@ class BuiltinToolAdapter:
                 return await execute_skill_script(self.settings, arguments, context)
             except ExecutionBusy as exc:
                 raise ToolAdapterBusy("Skill runtime is busy.") from exc
+            except ExecutionOutcomeUnknown as exc:
+                return _failure("skill_script_failed", str(exc)[:1000], uncertain=True)
             except (ValueError, WorkflowSandboxError) as exc:
                 return _failure("skill_script_failed", str(exc)[:1000])
         if builtin == "skill_dependency_install":
@@ -97,6 +101,8 @@ class BuiltinToolAdapter:
                 )
             except ExecutionBusy as exc:
                 raise ToolAdapterBusy("Skill runtime is busy.") from exc
+            except ExecutionOutcomeUnknown as exc:
+                return _failure("skill_dependency_install_failed", str(exc)[:1000], uncertain=True)
             except (ValueError, WorkflowSandboxError) as exc:
                 return _failure("skill_dependency_install_failed", str(exc)[:1000])
         if builtin in {"artifact", "python_artifact", "skill"}:
@@ -192,6 +198,8 @@ class BuiltinToolAdapter:
                         artifact_exit_code = artifact.exit_code
             except WorkflowSandboxBusyError as exc:
                 raise ToolAdapterBusy("File runtime is busy.") from exc
+            except ExecutionOutcomeUnknown as exc:
+                return _failure(failure_code, str(exc)[:1000], uncertain=True)
             except WorkflowSandboxError as exc:
                 return _failure(failure_code, _artifact_error_message(exc))
             except (KeyError, TypeError):
@@ -259,6 +267,8 @@ class BuiltinToolAdapter:
             )
         except WorkflowSandboxBusyError as exc:
             raise ToolAdapterBusy("Python sandbox is busy.") from exc
+        except ExecutionOutcomeUnknown as exc:
+            return _failure("python_execution_failed", str(exc)[:1000], uncertain=True)
         except (KeyError, TypeError, WorkflowSandboxError):
             return _failure("python_execution_failed", "Python Tool execution failed.")
         return ToolRuntimeResult(

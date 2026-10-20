@@ -27,7 +27,11 @@ from app.domain.tools.catalog.service import build_shell_tool
 from app.entities.agent_skills import AgentSkillSnapshot
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
-from app.ports.execution import ExecutionBusy
+from app.ports.execution import (
+    ExecutionBusy,
+    ExecutionNotStarted,
+    ExecutionOutcomeUnknown,
+)
 
 
 @asynccontextmanager
@@ -196,6 +200,13 @@ async def check():
             pass
         else:
             raise AssertionError("Busy capacity failed the Tool instead of requeueing")
+    for error, expected in (
+        (ExecutionOutcomeUnknown("reply lost after dispatch"), "uncertain"),
+        (ExecutionNotStarted("staging failed"), "confirmed"),
+    ):
+        with patch.object(shell, "execute_shell", AsyncMock(side_effect=error)):
+            result = await BuiltinToolAdapter(config).invoke(snapshot, {}, context)
+        assert not result.ok and result.outcome == expected
     try:
         await shell.execute_shell(
             config, {"command": "true"}, SimpleNamespace(run_id=None)

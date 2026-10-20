@@ -28,6 +28,11 @@ MAX_FILE = 5 * 1024 * 1024
 MAX_DEPENDENCY_FILE = 32 * 1024 * 1024
 MAX_DEPENDENCY_STORAGE = 128 * 1024 * 1024
 MAX_DEPENDENCY_FILES = 4096
+# A program may write into its temporary directory. RLIMIT_FSIZE caps one
+# file, not the directory, so cap the total the guest can leave behind.
+MAX_JOB_STORAGE = 256 * 1024 * 1024
+MAX_JOB_FILES = 8192
+STORAGE_CHECK_SECONDS = 1.0
 BUILTIN_SKILLS = {
     "documents": "docx",
     "pdf": "pdf",
@@ -140,6 +145,26 @@ def _require_bounded_dependency_storage(*directories):
                 or total > MAX_DEPENDENCY_STORAGE
             ):
                 raise ValueError("Dependency environment exceeds its storage limit.")
+
+
+def _directory_usage(directory, limit_bytes=None, limit_files=None):
+    """Bytes and file count under a directory, without following symlinks."""
+    files = 0
+    total = 0
+    for path in directory.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        files += 1
+        total += info.st_size
+        if limit_bytes is not None and total > limit_bytes:
+            return total, files
+        if limit_files is not None and files > limit_files:
+            return total, files
+    return total, files
 
 
 def _replace_dependency_directory(staged, target):
@@ -427,6 +452,7 @@ def execute(request):
             )
             try:
                 deadline = time.monotonic() + seconds
+                storage_check = time.monotonic() + STORAGE_CHECK_SECONDS
                 while process.poll() is None:
                     if time.monotonic() >= deadline:
                         raise TimeoutError("Program execution timed out.")
@@ -436,6 +462,13 @@ def execute(request):
                         > max_log
                     ):
                         raise ValueError("Program output exceeds 128 KiB.")
+                    if time.monotonic() >= storage_check:
+                        storage_check = time.monotonic() + STORAGE_CHECK_SECONDS
+                        total, files = _directory_usage(
+                            directory, MAX_JOB_STORAGE, MAX_JOB_FILES
+                        )
+                        if total > MAX_JOB_STORAGE or files > MAX_JOB_FILES:
+                            raise ValueError("Program storage exceeds its limit.")
                     time.sleep(0.02)
             finally:
                 try:

@@ -48,6 +48,13 @@ async def check():
     store = sessions.SessionStore()
     try:
         with patch.object(sessions, "get_session_factory", return_value=factory):
+            try:
+                await store.acquire_existing(config, scope, 10)
+            except ExecutionNotStarted:
+                pass
+            else:
+                raise AssertionError("Read created a missing session")
+            assert await store.for_run(scope.workspace_id, scope.run_id) == []
             first, _, reset, _ = await store.acquire(config, scope, 10)
             assert (
                 not reset
@@ -105,6 +112,21 @@ async def check():
                 )
                 await db.commit()
             takeover, _, _, stale = await store.acquire(
+                config, replace(scope, worker_task_id="worker-2"), 10
+            )
+            assert stale and takeover.sandbox_id == "guest"
+            assert not await store.current(
+                current, replace(scope, worker_task_id="worker-2")
+            )
+            current = takeover
+            async with factory() as db:
+                await db.execute(
+                    update(Row)
+                    .where(Row.id == current.id)
+                    .values(holder_expires_at=utc_now() - timedelta(seconds=1))
+                )
+                await db.commit()
+            takeover, _, _, stale = await store.acquire_existing(
                 config, replace(scope, worker_task_id="worker-2"), 10
             )
             assert stale and takeover.sandbox_id == "guest"

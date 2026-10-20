@@ -32,7 +32,8 @@ with RAG, LLM-powered agents, and MCP tool integration — with a trilingual UI
 ```text
 backend/   FastAPI application (api → application → domain/adapters + ports → infra)
 frontend/  Next.js application (app routes, components, i18n, lib/api)
-deploy/    Docker Compose topology, Dockerfiles, Nginx examples
+docker-compose.yml  Self-contained single-host deployment topology
+deploy/    Dockerfiles, optional OpenSandbox configuration, Nginx examples
 docs/      module documentation — start at docs/INDEX.md
 ```
 
@@ -40,8 +41,11 @@ docs/      module documentation — start at docs/INDEX.md
 
 Knowledge processing and Agent runs are published to Redis through Celery.
 
-Backend entry points, Alembic, and Celery load the repository-root `.env`.
-Create it from `.env.example`; do not create a second file under `backend/`.
+For host development, backend entry points, Alembic, and Celery load the
+repository-root `.env`. Create it from `.env.example`; do not create a second
+file under `backend/`. Container deployment receives configuration directly
+from the root Compose file and does not need `.env`; see the
+[deployment guide](../docs/DEPLOYMENT.md#单机安装).
 When `DATABASE_URL` is empty, the backend safely constructs it from the shared
 `POSTGRES_*` components.
 

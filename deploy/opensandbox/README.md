@@ -1,8 +1,21 @@
 # OpenSandbox execution host
 
-NexaFlow's API, database, Celery Worker and execution host are separate trust
-boundaries. Do not give the business containers a Docker socket or run arbitrary
-programs on the business host. The Worker talks to an authenticated OpenSandbox
+The default installation uses the root `docker-compose.yml`: edit its top-level
+settings, then run `docker compose pull` and `docker compose up -d --wait`.
+One Docker host runs the business services and the OpenSandbox control plane.
+Generate `sandbox-api-key` yourself (for example, `openssl rand -hex 32`); no
+OpenSandbox account or external API-key application is required. The YAML anchor
+shares that key between the business services and the control plane. Set the
+other credentials and the website origin as described in the
+[configuration guide](../../docs/DEPLOYMENT.md#单机安装).
+See the [quick start](../../README.md#快速开始). Only the control plane receives
+the Docker socket; guests receive no business mounts or business secrets.
+The inline control-plane configuration explicitly selects ordinary Docker with
+dns+nft filtering and immutable official auxiliary images. This shares the host
+kernel. A dedicated Kata host is an optional stronger isolation boundary.
+
+Do not give business containers a Docker socket or execute model programs
+inside them. The Worker talks to an authenticated OpenSandbox
 control plane. Python tools, Workflow code, artifact renderers, Skill scripts
 and bash commands reuse a database-backed Run-private sandbox so
 approved dependencies survive subsequent script calls; it is explicitly destroyed
@@ -34,10 +47,10 @@ installer. Every request is recorded in the unified Tool ledger and requires use
 approval; Python source builds and npm lifecycle scripts are disabled. Bake fixed
 renderer dependencies and reviewed MCP programs into a versioned execution image.
 
-## Dedicated Linux host
+## Optional dedicated Linux/Kata host
 
 Install Docker and configure the `kata-runtime` runtime on the **execution
-host** first. The production configuration requires Kata; missing Kata fails
+host** first. The generated configuration requires Kata; missing Kata fails
 creation rather than falling back to runc. Keep the OpenSandbox control plane
 private and authenticated. Its API key grants execution-host control, not a
 workspace permission; never expose it to browsers, MCP children or Skill code.
@@ -71,14 +84,25 @@ manual commands above for a dedicated execution host or focused diagnostics.
 
 ## NexaFlow configuration
 
-Set in the existing root `.env`:
+For container deployment, set these process variables in the root Compose
+shared `x-backend-environment` and keep the control-plane key consistent with
+`x-settings`. Host development uses the private root `.env` instead:
 
 ```dotenv
 OPENSANDBOX_URL=https://execution.internal.example
 OPENSANDBOX_API_KEY=<same private control-plane key>
 OPENSANDBOX_IMAGE=<immutable execution image digest>
 OPENSANDBOX_EGRESS_DOMAINS=
+OPENSANDBOX_MAX_SANDBOXES=20
+OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER=2
+OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE=2
+ARTIFACT_SANDBOX_TIMEOUT_SECONDS=30
 ```
+
+Production requires `OPENSANDBOX_MAX_SANDBOXES` to be a positive host limit and
+`OPENSANDBOX_URL` to use `https`: the control-plane key travels with every
+request. A loopback control plane or the private single-host Docker network may opt out of TLS with
+`OPENSANDBOX_ALLOW_INSECURE_HTTP=1`.
 
 The API/Worker must be able to reach this origin. Container `127.0.0.1` is not
 the developer host: use a reachable private origin (for local Docker Desktop,
@@ -104,17 +128,43 @@ this on the chosen execution host; do not substitute DNS filtering or gVisor
 for this tested networking profile. The upstream nft NAT profile currently
 requires a compatible Linux network stack.
 
+The adapter reconciles the guest's allow list before each command: a rule left
+behind by a worker that died is removed, and a missing rule is granted. A
+leftover rule therefore no longer costs the Run its workspace, and the guest
+still holds exactly the requested egress while the command runs.
+
 Cold creation, command execution and cleanup share the caller's overall deadline.
 Set Agent/Workflow tool deadlines to accommodate a cold sandbox; pre-pull the
-locked images on the execution host. Never silently retry uncertain MCP writes;
-the unified invocation ledger records approval, idempotency and uncertainty.
+locked images on the execution host. Before command dispatch, a timeout is a
+confirmed failure. Once dispatched, a missing response is recorded as `uncertain`
+in the unified Tool ledger, including when the outer Tool deadline expires.
+Cleanup cannot replace a confirmed result, and an unconfirmed destroy retains
+its capacity reservation until reconciliation or native expiry. Never silently
+retry uncertain execution or MCP writes.
 
-Set `OPENSANDBOX_MAX_SANDBOXES` in the business `.env` to the number of live
-sandboxes this host can carry; `0` (the default) leaves creation unbounded.
-Workers reserve a slot in Redis before creating a sandbox and free it after a
-confirmed destroy; a slot left by a crashed worker expires with the sandbox's
-native TTL. A request that finds no slot within five seconds is requeued with
-its Run instead of failing, and nothing is created while Redis is unavailable.
+Set `OPENSANDBOX_MAX_SANDBOXES` in Compose's shared `x-backend-environment`
+(or the private root `.env` for host development) to the number of live
+sandboxes this host can carry. The single-host Compose starts with `4`.
+Workers reserve a slot in Redis before creating a
+sandbox and free it after a confirmed destroy; a slot left by a crashed worker
+expires with the sandbox's native TTL. A request that finds no slot within five
+seconds is requeued with its Run instead of failing, and nothing is created
+while Redis is unavailable.
+
+Capacity is booked on three dimensions: the deployment-wide host limit, the
+external consumer of a public or API Run
+(`OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER`) and the workspace that owns the Run
+(`OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE`). The workspace bound applies to
+console Runs as well, so one tenant cannot occupy the whole deployment.
+`0` for the host limit keeps the previous unbounded behaviour and no Redis
+dependency; production rejects it. A warm pool without a host limit is rejected
+as well, because it would bypass capacity accounting entirely.
+
+`OPENSANDBOX_WARM_POOL_SIZE` defaults to `0`. When enabled, the SDK's Redis-backed
+pools share a deployment-wide idle quota across small/standard/heavy resources.
+Each guest passes dns+nft verification before entering the pool and receives Run
+labels on acquisition. Set the host limit above the pool size: on-demand capacity
+is `OPENSANDBOX_MAX_SANDBOXES - OPENSANDBOX_WARM_POOL_SIZE`.
 
 `execution_sessions` persists sandbox IDs, staged packages, dependency locks and
 short command leases. A worker reconnects by ID; the command watchdog renews the
@@ -142,6 +192,14 @@ and streams up to eight generated files of 5 MiB each. Its trusted supervisor
 stays root inside the guest to stop all UID 65532 processes after the command;
 the model's shell and all of its descendants run as UID 65532. Authorized Skills
 are root-owned read-only files under `/skills/`.
+
+Guest storage is bounded inside the guest: the shell workspace is capped at
+512 MiB and 20 000 files, and a program that keeps growing it is stopped with
+exit code 125 instead of filling the execution host. A Python or Skill job may
+write at most 256 MiB and 8 192 files in its temporary directory. Export
+directories are reclaimed once they fall outside a small retention window. The
+execution host must still carry a filesystem quota for the guest data root:
+these bounds limit one guest, not the host.
 
 Resource sizes are provisional: small = 1 CPU / 512 MiB, standard = 1 CPU / 1 GiB,
 heavy = 2 CPU / 2 GiB. A shared Run guest uses the largest profile required by

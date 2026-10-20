@@ -229,15 +229,14 @@ async def execute_tool_invocation(
     result = _failure("tool_adapter_mismatch", "Tool provider is unavailable.")
     if selected_adapter.kind == snapshot.kind:
         remaining = max(0.001, (context.deadline_at - utc_now()).total_seconds())
+        from app.ports.execution import ExecutionScope, execution_scope
+
+        scope = ExecutionScope(
+            context.workspace_id, context.invocation_id, context.run_id, run_worker_task_id
+        )
         try:
             async with asyncio.timeout(remaining):
-                from app.ports.execution import ExecutionScope, execution_scope
-
-                scope_token = execution_scope.set(
-                    ExecutionScope(
-                        context.workspace_id, context.invocation_id, context.run_id, run_worker_task_id
-                    )
-                )
+                scope_token = execution_scope.set(scope)
                 try:
                     result = await selected_adapter.invoke(
                         snapshot,
@@ -268,13 +267,13 @@ async def execute_tool_invocation(
             result = _failure(
                 "tool_deadline_exceeded",
                 "Tool invocation deadline expired.",
-                uncertain=snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=scope.attempt.unconfirmed or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
         except Exception:
             result = _failure(
                 "tool_execution_failed",
                 "Tool execution failed.",
-                uncertain=snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=scope.attempt.unconfirmed or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
 
     if result.ok:
@@ -293,7 +292,7 @@ async def execute_tool_invocation(
             return _failure(
                 "tool_result_not_persisted",
                 "Tool result could not be persisted.",
-                uncertain=snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=result.outcome == "uncertain" or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
         _apply_result(stored, result)
         saved = await tool_repository.finalize_tool_invocation(
@@ -308,7 +307,7 @@ async def execute_tool_invocation(
             return _failure(
                 "tool_result_not_persisted",
                 "Tool result could not be persisted.",
-                uncertain=snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=result.outcome == "uncertain" or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
     return result
 

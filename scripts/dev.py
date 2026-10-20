@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -16,13 +17,12 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
-
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -175,12 +175,20 @@ def is_managed_opensandbox_url(url: str) -> bool:
     )
 
 
-def run(command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
+def run(
+    command: list[str],
+    *,
+    cwd: Path = ROOT,
+    env: dict[str, str] | None = None,
+    input: str | None = None,
+) -> None:
     log(f"[setup] {shlex.join(command)}")
     try:
-        subprocess.run(command, cwd=cwd, env=env, check=True)
+        subprocess.run(command, cwd=cwd, env=env, input=input, text=True, check=True)
     except subprocess.CalledProcessError as exc:
-        raise DevError(f"Command failed with exit code {exc.returncode}: {shlex.join(command)}") from exc
+        raise DevError(
+            f"Command failed with exit code {exc.returncode}: {shlex.join(command)}"
+        ) from exc
 
 
 def _is_ignored_build_input(path: Path) -> bool:
@@ -278,10 +286,13 @@ def ensure_local_image(build: LocalImageBuild, *, force: bool = False) -> bool:
     return True
 
 
-def require_commands() -> None:
-    missing = [name for name in ("docker", "uv", "bun") if shutil.which(name) is None]
+def require_commands(*, infrastructure_only: bool = False) -> None:
+    commands = ("docker", "uv") if infrastructure_only else ("docker", "uv", "bun")
+    missing = [name for name in commands if shutil.which(name) is None]
     if missing:
-        raise DevError(f"Install the missing local development commands: {', '.join(missing)}")
+        raise DevError(
+            f"Install the missing local development commands: {', '.join(missing)}"
+        )
     try:
         subprocess.run(
             ["docker", "info"],
@@ -296,7 +307,9 @@ def require_commands() -> None:
             check=True,
         )
     except subprocess.CalledProcessError as exc:
-        raise DevError("Docker Desktop/Engine is not running or Docker Compose v2 is unavailable.") from exc
+        raise DevError(
+            "Docker Desktop/Engine is not running or Docker Compose v2 is unavailable."
+        ) from exc
 
 
 def ensure_local_opensandbox(values: dict[str, str]) -> tuple[dict[str, str], bool]:
@@ -340,14 +353,53 @@ def ensure_local_opensandbox(values: dict[str, str]) -> tuple[dict[str, str], bo
     return read_env(ENV_FILE), True
 
 
-def prepare(
-    values: dict[str, str],
-    *,
-    local_opensandbox: bool,
-    rebuild_images: bool = False,
+def infrastructure_configuration(values: dict[str, str]) -> dict:
+    """Reuse the single Compose topology with private host-development settings."""
+    try:
+        rendered = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(ROOT / "docker-compose.yml"),
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise DevError("Cannot read the root Docker Compose configuration.") from exc
+    services = json.loads(rendered.stdout)["services"]
+    infrastructure = {name: services[name] for name in ("db", "redis", "qdrant")}
+    for name, service in infrastructure.items():
+        service["container_name"] = f"nexaflow-{name}"
+        service.pop("networks", None)
+    database = infrastructure["db"]
+    database["image"] = (
+        values.get("NEXAFLOW_POSTGRES_IMAGE", "").strip() or POSTGRES_DEFAULT_IMAGE
+    )
+    database["environment"] = {
+        key: values.get(key, "nexaflow").replace("$", "$$")
+        for key in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD")
+    }
+    database["healthcheck"]["test"] = [
+        "CMD-SHELL",
+        'PGAPPNAME=nexaflow-healthcheck pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"',
+    ]
+    database["ports"] = [f"127.0.0.1:{values.get('POSTGRES_PORT', '5432')}:5432"]
+    infrastructure["redis"]["ports"] = ["127.0.0.1:6379:6379"]
+    infrastructure["qdrant"]["ports"] = ["127.0.0.1:6333:6333"]
+    # Preserve the project and container names used by the former dev override.
+    return {"name": "deploy", "services": infrastructure}
+
+
+def start_infrastructure(
+    values: dict[str, str], *, rebuild_images: bool = False
 ) -> None:
-    run(["uv", "sync", "--dev", "--frozen"], cwd=BACKEND)
-    run(["bun", "install", "--frozen-lockfile"], cwd=FRONTEND)
     ensure_local_image(
         LocalImageBuild(
             name="PostgreSQL",
@@ -362,22 +414,34 @@ def prepare(
         [
             "docker",
             "compose",
-            "--env-file",
-            str(ENV_FILE),
+            "--project-directory",
+            str(ROOT),
             "-f",
-            str(ROOT / "deploy" / "docker-compose.yml"),
-            "-f",
-            str(ROOT / "deploy" / "docker-compose.dev.yml"),
+            "-",
             "up",
             "-d",
             "--wait",
             "db",
             "redis",
             "qdrant",
-        ]
+        ],
+        input=json.dumps(infrastructure_configuration(values)),
     )
+
+
+def prepare(
+    values: dict[str, str],
+    *,
+    local_opensandbox: bool,
+    rebuild_images: bool = False,
+) -> None:
+    run(["uv", "sync", "--dev", "--frozen"], cwd=BACKEND)
+    run(["bun", "install", "--frozen-lockfile"], cwd=FRONTEND)
+    start_infrastructure(values, rebuild_images=rebuild_images)
     if local_opensandbox:
-        image = values.get("OPENSANDBOX_IMAGE", "").strip() or OPEN_SANDBOX_DEFAULT_IMAGE
+        image = (
+            values.get("OPENSANDBOX_IMAGE", "").strip() or OPEN_SANDBOX_DEFAULT_IMAGE
+        )
         ensure_local_image(
             LocalImageBuild(
                 name="OpenSandbox runtime",
@@ -648,16 +712,25 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-run local PostgreSQL and OpenSandbox image builds",
     )
+    parser.add_argument(
+        "--infrastructure-only",
+        action="store_true",
+        help="start only host-development PostgreSQL, Redis and Qdrant",
+    )
     args = parser.parse_args(argv)
     if sys.platform == "win32":
         log("Native Windows is unsupported; run make dev inside WSL2.")
         return 2
+
     def terminate(_signum: int, _frame: object) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, terminate)
     try:
-        require_commands()
+        require_commands(infrastructure_only=args.infrastructure_only)
+        if args.infrastructure_only:
+            start_infrastructure(ensure_env_file(), rebuild_images=args.rebuild_images)
+            return 0
         api_port = development_port("NEXAFLOW_DEV_API_PORT", 8000)
         frontend_port = development_port("NEXAFLOW_DEV_FRONTEND_PORT", 3000)
         require_development_ports(api_port, frontend_port)

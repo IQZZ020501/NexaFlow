@@ -2,7 +2,7 @@
 
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -17,8 +17,19 @@ class ExecutionNotStarted(ExecutionError):
     """Nothing ran: the request failed before the sandbox command started."""
 
 
+class ExecutionOutcomeUnknown(ExecutionError):
+    """The command may have run, but its result could not be confirmed."""
+
+
 class ExecutionBusy(ExecutionNotStarted):
     """Sandbox capacity is exhausted; the same request may be retried later."""
+
+
+@dataclass
+class ExecutionAttempt:
+    """Shared with the caller so an outer timeout retains dispatch evidence."""
+
+    unconfirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -27,6 +38,7 @@ class ExecutionScope:
     invocation_id: str
     run_id: str | None = None
     worker_task_id: str | None = None
+    attempt: ExecutionAttempt = field(default_factory=ExecutionAttempt, compare=False)
 
 
 @dataclass(frozen=True)

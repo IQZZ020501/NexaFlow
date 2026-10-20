@@ -11,6 +11,7 @@ from app.infra.config.settings import Settings
 from app.ports.execution import (
     ExecutionBusy,
     ExecutionError,
+    ExecutionOutcomeUnknown,
     build_execution_platform,
     execution_scope,
 )
@@ -19,7 +20,6 @@ RESULT_MARKER = "__NEXAFLOW_RESULT__="
 MAX_RESPONSE_BYTES = 128 * 1024
 MAX_ARTIFACT_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
-SKILL_REQUEST_TIMEOUT_SECONDS = 30
 
 
 class WorkflowSandboxError(RuntimeError):
@@ -115,6 +115,8 @@ async def _exchange(
         )
     except ExecutionBusy as exc:
         raise WorkflowSandboxBusyError("Code sandbox capacity is exhausted.") from exc
+    except ExecutionOutcomeUnknown:
+        raise
     except (ExecutionError, OSError, TimeoutError) as exc:
         raise WorkflowSandboxError("Code sandbox is unavailable.") from exc
     except ValueError as exc:
@@ -138,10 +140,11 @@ async def execute_workflow_code(
     inputs: dict[str, Any],
     skills: list[str] | None = None,
 ) -> WorkflowSandboxResult:
+    budget = settings.workflow_sandbox_timeout_seconds
     request = {
         "code": _program(code),
         "stdin": json.dumps(inputs, ensure_ascii=False, separators=(",", ":")),
-        "limits": {"timeout_ms": round(settings.workflow_sandbox_timeout_seconds * 1000)},
+        "limits": {"timeout_ms": round(budget * 1000)},
     }
     if skills is not None:
         request["skills"] = skills
@@ -150,7 +153,7 @@ async def execute_workflow_code(
         settings,
         request,
         MAX_RESPONSE_BYTES,
-        SKILL_REQUEST_TIMEOUT_SECONDS if skills else None,
+        budget,
     )
     stdout, stderr, exit_code = _execution_fields(response)
     marker_index = stdout.rfind(RESULT_MARKER)
@@ -179,6 +182,10 @@ async def execute_artifact_code(
     filename: str,
     skills: list[str],
 ) -> ArtifactSandboxResult:
+    # One budget for the guest and for the caller. A renderer that gets a
+    # smaller inner limit than the outer one is killed before the caller
+    # would have given up, which looks like a random timeout.
+    budget = settings.artifact_sandbox_timeout_seconds
     response = await _exchange(
         settings,
         {
@@ -186,12 +193,12 @@ async def execute_artifact_code(
             "artifact": {"format": artifact_format, "filename": filename},
             "skills": skills,
             "limits": {
-                "timeout_ms": round(settings.workflow_sandbox_timeout_seconds * 1000),
+                "timeout_ms": round(budget * 1000),
                 "max_file_bytes": MAX_ARTIFACT_BYTES,
             },
         },
         MAX_ARTIFACT_RESPONSE_BYTES,
-        SKILL_REQUEST_TIMEOUT_SECONDS if skills else None,
+        budget,
     )
     return _artifact_result(response, artifact_format, filename)
 
@@ -203,6 +210,7 @@ async def execute_skill_artifact(
     artifact_format: str,
     filename: str,
 ) -> ArtifactSandboxResult:
+    budget = settings.artifact_sandbox_timeout_seconds
     response = await _exchange(
         settings,
         {
@@ -210,12 +218,12 @@ async def execute_skill_artifact(
             "stdin": json.dumps(inputs, ensure_ascii=False, separators=(",", ":")),
             "artifact": {"format": artifact_format, "filename": filename},
             "limits": {
-                "timeout_ms": round(settings.workflow_sandbox_timeout_seconds * 1000),
+                "timeout_ms": round(budget * 1000),
                 "max_file_bytes": MAX_ARTIFACT_BYTES,
             },
         },
         MAX_ARTIFACT_RESPONSE_BYTES,
-        SKILL_REQUEST_TIMEOUT_SECONDS,
+        budget,
     )
     return _artifact_result(response, artifact_format, filename)
 

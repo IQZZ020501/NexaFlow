@@ -2,10 +2,9 @@
 
 HOST ?= 127.0.0.1
 PORT ?= 8000
-COMPOSE ?= docker compose --env-file ../.env -f ../deploy/docker-compose.yml -f ../deploy/docker-compose.dev.yml
 
 dev:
-	$(COMPOSE) up -d --wait db redis qdrant
+	uv run python ../scripts/dev.py --infrastructure-only
 	$(MAKE) migrate
 	uv run python scripts/dev.py --host $(HOST) --port $(PORT)
 
