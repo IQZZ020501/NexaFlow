@@ -1,10 +1,6 @@
 "use client"
 
-import * as React from "react"
 import {
-  CheckIcon,
-  CircleAlertIcon,
-  CopyIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
   ThumbsDownIcon,
@@ -12,6 +8,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import {
   Tooltip,
   TooltipContent,
@@ -19,7 +16,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { TFunction } from "@/i18n"
-import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 
 type FeedbackValue = "positive" | "negative" | null
@@ -69,46 +65,13 @@ export function RunActionBar({
   onFeedback,
   t,
 }: RunActionBarProps) {
-  const [copyFeedback, setCopyFeedback] = React.useState<{
-    result: string
-    status: "copied" | "error"
-  } | null>(null)
-  const resetCopyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
-  const copyStatus =
-    copyFeedback?.result === result ? copyFeedback.status : null
-  React.useEffect(
-    () => () => {
-      if (resetCopyTimer.current) clearTimeout(resetCopyTimer.current)
-    },
-    []
-  )
   const regenerateButtonDisabled =
     regenerateDisabled || regenerating || feedbackPending
   const feedbackButtonsDisabled = regenerating || feedbackPending
-  const copyLabel = t(
-    copyStatus === "copied"
-      ? "已复制"
-      : copyStatus === "error"
-        ? "复制失败"
-        : "复制"
-  )
   const positiveSelected = feedback === "positive"
   const negativeSelected = feedback === "negative"
   const positiveLabel = t(positiveSelected ? "取消点赞" : "点赞")
   const negativeLabel = t(negativeSelected ? "取消点踩" : "点踩")
-
-  async function handleCopy() {
-    if (resetCopyTimer.current) clearTimeout(resetCopyTimer.current)
-    try {
-      await copyText(result)
-      setCopyFeedback({ result, status: "copied" })
-    } catch {
-      setCopyFeedback({ result, status: "error" })
-    }
-    resetCopyTimer.current = setTimeout(() => setCopyFeedback(null), 2000)
-  }
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -187,40 +150,7 @@ export function RunActionBar({
           </TooltipTrigger>
           <TooltipContent>{negativeLabel}</TooltipContent>
         </Tooltip>
-        <span
-          role="status"
-          className={
-            copyStatus === "error" ? "text-xs text-destructive" : "sr-only"
-          }
-        >
-          {copyStatus ? copyLabel : ""}
-        </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className={
-                copyStatus === "error"
-                  ? "text-destructive"
-                  : "text-muted-foreground"
-              }
-              aria-label={copyLabel}
-              title={copyLabel}
-              onClick={() => void handleCopy()}
-            >
-              {copyStatus === "copied" ? (
-                <CheckIcon />
-              ) : copyStatus === "error" ? (
-                <CircleAlertIcon />
-              ) : (
-                <CopyIcon />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{copyLabel}</TooltipContent>
-        </Tooltip>
+        <CopyButton t={t} value={result} />
       </div>
     </TooltipProvider>
   )

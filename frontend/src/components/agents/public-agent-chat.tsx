@@ -6,12 +6,10 @@ import {
   ArrowUpIcon,
   BotIcon,
   BrainIcon,
-  CheckIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   CircleAlertIcon,
   CircleXIcon,
-  CopyIcon,
   DatabaseIcon,
   DownloadIcon,
   EllipsisIcon,
@@ -37,6 +35,7 @@ import { StopGenerationButton } from "@/components/agents/stop-generation-button
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import { IconButton } from "@/components/ui/icon-button"
 import {
   DropdownMenu,
@@ -120,35 +119,6 @@ import {
 type PublicAgentChatProps = {
   agentId: string
   initialConversationId?: string | null
-}
-
-function CopyMessageButton({ value }: { value: string }) {
-  const { t } = useLanguage()
-  const [copied, setCopied] = React.useState(false)
-  const label = t(copied ? "已复制" : "复制")
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground"
-      aria-label={label}
-      title={label}
-      onClick={handleCopy}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
-  )
 }
 
 function ReasoningBlock({ reasoning }: { reasoning: string }) {
@@ -2138,7 +2108,7 @@ export function PublicAgentChat({
                                 </div>
                               )}
                               <div className="flex items-start gap-1">
-                                <CopyMessageButton value={run.question} />
+                                <CopyButton t={t} value={run.question} />
                                 {canEdit && !isEditing ? (
                                   <Button
                                     type="button"
@@ -2204,7 +2174,7 @@ export function PublicAgentChat({
                                   <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
                                     {input.content}
                                   </div>
-                                  <CopyMessageButton value={input.content} />
+                                  <CopyButton t={t} value={input.content} />
                                 </div>
                               </React.Fragment>
                             ))}
@@ -2316,7 +2286,7 @@ export function PublicAgentChat({
                                 <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
                                   {input.content}
                                 </div>
-                                <CopyMessageButton value={input.content} />
+                                <CopyButton t={t} value={input.content} />
                               </div>
                             ))}
                         </article>

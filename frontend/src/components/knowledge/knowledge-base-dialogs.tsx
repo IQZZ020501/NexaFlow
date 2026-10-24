@@ -184,9 +184,13 @@ export function KnowledgeBaseDialogs({
               >
                 {t("取消")}
               </Button>
-              <Button type="submit" disabled={isSaving}>
+              <Button type="submit" disabled={isSaving} aria-busy={isSaving}>
                 {isSaving ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : null}
                 {t("新建知识库")}
               </Button>
@@ -275,9 +279,13 @@ export function KnowledgeBaseDialogs({
                 >
                   {t("取消")}
                 </Button>
-                <Button type="submit" disabled={isSaving}>
+                <Button type="submit" disabled={isSaving} aria-busy={isSaving}>
                   {isSaving ? (
-                    <LoaderCircleIcon data-icon="inline-start" />
+                    <LoaderCircleIcon
+                      data-icon="inline-start"
+                      aria-hidden="true"
+                      className="animate-spin motion-reduce:animate-none"
+                    />
                   ) : null}
                   {t("保存")}
                 </Button>
@@ -411,9 +419,14 @@ export function KnowledgeBaseDialogs({
                   <Button
                     type="submit"
                     disabled={isSaving || !shareTargets.length}
+                    aria-busy={isSaving}
                   >
                     {isSaving ? (
-                      <LoaderCircleIcon data-icon="inline-start" />
+                      <LoaderCircleIcon
+                        data-icon="inline-start"
+                        aria-hidden="true"
+                        className="animate-spin motion-reduce:animate-none"
+                      />
                     ) : null}
                     {t("保存授权")}
                   </Button>

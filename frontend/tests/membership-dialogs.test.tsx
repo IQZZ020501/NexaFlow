@@ -379,7 +379,9 @@ describe("WorkspaceMembersDialog", () => {
       name: "添加成员",
     }) as HTMLButtonElement
     expect(addButton.disabled).toBe(true)
-    expect(addButton.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      addButton.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
     expect((screen.getByLabelText("成员") as HTMLButtonElement).disabled).toBe(
       true
     )
@@ -481,6 +483,13 @@ describe("WorkspaceMembersDialog", () => {
     ) as HTMLButtonElement
     expect(remove.disabled).toBe(true)
     expect(remove.getAttribute("title")).toBe("不能移除最后一个管理员")
+    expect(roleTrigger.parentElement?.tabIndex).toBe(0)
+    fireEvent.focus(roleTrigger.parentElement!)
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        "不能移除最后一个管理员"
+      )
+    )
   })
 
   test("hides admin role management and protects admins when admins cannot be managed", async () => {
@@ -509,6 +518,12 @@ describe("WorkspaceMembersDialog", () => {
     expect(adminRemove.disabled).toBe(true)
     expect(adminRemove.getAttribute("title")).toBe(
       "只有系统管理员可以管理工作空间管理员"
+    )
+    fireEvent.focus(adminRemove.parentElement!)
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        "只有系统管理员可以管理工作空间管理员"
+      )
     )
     expect(
       (
@@ -739,7 +754,9 @@ describe("TeamMembersDialog", () => {
       name: "添加成员",
     }) as HTMLButtonElement
     expect(addButton.disabled).toBe(true)
-    expect(addButton.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      addButton.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
     expect((screen.getByLabelText("成员") as HTMLButtonElement).disabled).toBe(
       true
     )
@@ -820,6 +837,13 @@ describe("TeamMembersDialog", () => {
     ) as HTMLButtonElement
     expect(remove.disabled).toBe(true)
     expect(remove.getAttribute("title")).toBe("不能移除最后一个管理员")
+    expect(remove.parentElement?.tabIndex).toBe(0)
+    fireEvent.focus(remove.parentElement!)
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        "不能移除最后一个管理员"
+      )
+    )
   })
 
   test("hides role management and protects admin removal when admins cannot be managed", async () => {

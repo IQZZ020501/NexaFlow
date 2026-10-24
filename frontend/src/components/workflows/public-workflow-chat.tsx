@@ -3,12 +3,10 @@
 import * as React from "react"
 import {
   ArrowUpIcon,
-  CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDotDashedIcon,
-  CopyIcon,
   DownloadIcon,
   EllipsisIcon,
   HistoryIcon,
@@ -35,6 +33,7 @@ import {
   transferredFiles,
 } from "@/components/agents/agent-attachment-list"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import { SpeechInputButton } from "@/components/ui/speech-input-button"
 import {
   DropdownMenu,
@@ -104,35 +103,6 @@ function conversationResult(
 ) {
   const result = workflowSpeechText(outputs)
   return result && result !== "{}" ? result : fallback
-}
-
-function CopyMessageButton({ value }: { value: string }) {
-  const { t } = useLanguage()
-  const [copied, setCopied] = React.useState(false)
-  const label = t(copied ? "已复制" : "复制")
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground"
-      aria-label={label}
-      title={label}
-      onClick={handleCopy}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
-  )
 }
 
 type PublicWorkflowProgress = ExternalWorkflowRun["progress"][number]
@@ -1045,7 +1015,7 @@ export function PublicWorkflowChat({
                           <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
                             {questionValue}
                           </div>
-                          <CopyMessageButton value={questionValue} />
+                          <CopyButton t={t} value={questionValue} />
                         </div>
                         <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
                           <UserIcon className="size-3.5" />

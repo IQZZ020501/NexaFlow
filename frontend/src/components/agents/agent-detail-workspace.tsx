@@ -7,11 +7,9 @@ import {
   ArrowUpIcon,
   BotIcon,
   BrainIcon,
-  CheckIcon,
   CircleCheckIcon,
   ChevronDownIcon,
   CircleXIcon,
-  CopyIcon,
   DatabaseIcon,
   LoaderCircleIcon,
   MessageSquareIcon,
@@ -40,6 +38,7 @@ import { StopGenerationButton } from "@/components/agents/stop-generation-button
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import { DisabledButtonHint } from "@/components/ui/disabled-button-hint"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
@@ -462,34 +461,6 @@ export function collapsedProcessStatusKey(
   return hasActiveToolCall ? "执行过程" : null
 }
 
-function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
-  const [copied, setCopied] = React.useState(false)
-  const label = t(copied ? "已复制" : "复制")
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground"
-      aria-label={label}
-      title={label}
-      onClick={handleCopy}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
-  )
-}
-
 function InlineToolApproval({
   runId,
   call,
@@ -750,7 +721,7 @@ function RunExchange({
           </form>
         )}
         <div className="flex items-start gap-1">
-          <CopyMessageButton value={run.goal} t={t} />
+          <CopyButton t={t} value={run.goal} />
           {editable && editDraft === null ? (
             <Button
               type="button"
@@ -820,7 +791,7 @@ function RunExchange({
               <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
                 {input.content}
               </div>
-              <CopyMessageButton value={input.content} t={t} />
+              <CopyButton t={t} value={input.content} />
             </div>
           </React.Fragment>
         ))}
@@ -933,7 +904,7 @@ function RunExchange({
             <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
               {input.content}
             </div>
-            <CopyMessageButton value={input.content} t={t} />
+            <CopyButton t={t} value={input.content} />
           </div>
         ))}
     </article>

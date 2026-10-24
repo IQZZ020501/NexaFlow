@@ -1563,7 +1563,13 @@ function ModelDialog({
             >
               {t("取消")}
             </Button>
-            <Button type="submit" disabled={isSaving}>
+            <Button type="submit" disabled={isSaving} aria-busy={isSaving}>
+              {isSaving ? (
+                <LoaderCircleIcon
+                  aria-hidden="true"
+                  className="animate-spin motion-reduce:animate-none"
+                />
+              ) : null}
               {isSaving
                 ? t("测试并保存中...")
                 : isEditing

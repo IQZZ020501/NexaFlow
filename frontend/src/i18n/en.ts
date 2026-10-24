@@ -142,6 +142,7 @@ export const en = {
   用户名: "Username",
   密码: "Password",
   登录: "Sign in",
+  登录中: "Signing in",
   忘记密码: "Forgot password",
   或使用企业账号登录: "Or use a company account",
   "使用 {provider} 登录": "Continue with {provider}",
@@ -189,6 +190,7 @@ export const en = {
   "至少 6 位，并且包含一个大写字母":
     "At least 6 characters and one uppercase letter",
   保存: "Save",
+  导入中: "Importing",
   保存中: "Saving",
   发布中: "Publishing",
   取消发布中: "Unpublishing",
@@ -464,6 +466,8 @@ export const en = {
   不能移除最后一个管理员: "The last admin cannot be removed",
   只有系统管理员可以管理工作空间管理员:
     "Only global admins can manage workspace admins",
+  只有工作空间管理员可以管理团队管理员:
+    "Only workspace admins can manage team admins",
   "移除 {name}？": "Remove {name}?",
   全局账号: "Global accounts",
   新建用户: "Create user",

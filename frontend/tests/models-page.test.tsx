@@ -10,6 +10,7 @@ import {
   mockUseSession,
   renderPage,
   screen,
+  waitFor,
   within,
 } from "./helpers/dom"
 
@@ -205,10 +206,13 @@ describe("LlmPage", () => {
       )
     ).toBeTruthy()
 
+    let resolveSave!: (response: Response) => void
     const previousFetch = globalThis.fetch
     globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "PATCH") {
-        return new Promise<Response>(() => {})
+        return new Promise<Response>((resolve) => {
+          resolveSave = resolve
+        })
       }
       return previousFetch(input, init)
     }) as typeof fetch
@@ -225,5 +229,16 @@ describe("LlmPage", () => {
         }) as HTMLButtonElement
       ).disabled
     ).toBe(true)
+    const save = within(dialog).getByRole("button", {
+      name: "测试并保存中...",
+    }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    expect(save.getAttribute("aria-busy")).toBe("true")
+    expect(save.querySelector("svg.animate-spin")).toBeTruthy()
+
+    resolveSave(jsonResponse(model({})))
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog") === null).toBe(true)
+    )
   })
 })

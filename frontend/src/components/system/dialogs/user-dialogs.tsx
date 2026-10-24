@@ -294,9 +294,14 @@ export function CreateUserDialog({
                 isCreatingUser ||
                 (!me.user.is_global_admin && !selectedWorkspaceId)
               }
+              aria-busy={isCreatingUser}
             >
               {isCreatingUser ? (
-                <LoaderCircleIcon data-icon="inline-start" />
+                <LoaderCircleIcon
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                  className="animate-spin motion-reduce:animate-none"
+                />
               ) : (
                 <PlusIcon data-icon="inline-start" />
               )}
@@ -428,9 +433,13 @@ export function EditUserDialog({
               >
                 {t("取消")}
               </Button>
-              <Button disabled={isSavingUser}>
+              <Button disabled={isSavingUser} aria-busy={isSavingUser}>
                 {isSavingUser ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : null}
                 {t("保存")}
               </Button>
@@ -533,9 +542,16 @@ export function UserPasswordDialog({
               >
                 {t("取消")}
               </Button>
-              <Button disabled={isChangingUserPassword}>
+              <Button
+                disabled={isChangingUserPassword}
+                aria-busy={isChangingUserPassword}
+              >
                 {isChangingUserPassword ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : null}
                 {t("保存")}
               </Button>

@@ -1,6 +1,6 @@
 /* @jsxImportSource react */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { cleanup, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react"
 
 import { AgentApiDocumentation } from "@/components/agents/agent-api-documentation"
 import { WorkflowApiDocumentation } from "@/components/workflows/workflow-api-documentation"
@@ -28,6 +28,38 @@ afterEach(() => {
 })
 
 describe("API documentation browser session", () => {
+  test("shows a copy failure and lets the user retry", async () => {
+    const originalClipboard = navigator.clipboard
+    let attempts = 0
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async () => {
+          if (++attempts === 1) throw new Error("Clipboard denied")
+        },
+      },
+      configurable: true,
+    })
+    withFetch(() =>
+      jsonResponse({
+        agent_id: "agent-1",
+        agent_name: "Support Agent",
+        base_path: "/api/v1/agent-api/agent-1",
+      })
+    )
+    try {
+      renderPage(<AgentApiDocumentation agentId="agent-1" />)
+      fireEvent.click(await screen.findByRole("button", { name: "复制地址" }))
+      fireEvent.click(await screen.findByRole("button", { name: "复制失败" }))
+      await screen.findByRole("button", { name: "已复制" })
+      expect(attempts).toBe(2)
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        value: originalClipboard,
+        configurable: true,
+      })
+    }
+  })
+
   test("opens Agent documentation without asking for an API key", async () => {
     let requestedUrl = ""
     let authorization = ""

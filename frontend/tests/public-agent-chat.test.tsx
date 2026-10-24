@@ -3809,15 +3809,15 @@ describe("PublicAgentChat", () => {
     )
     await screen.findByText("可复制的回答")
 
-    // Failure keeps the copy label.
+    // Failure is visible and leaves the answer copy action available.
     const questionCopy = screen.getAllByTitle("复制")[0]
     fireEvent.click(questionCopy)
-    await waitFor(() => expect(written).toEqual([]))
-    expect(screen.getAllByTitle("复制").length).toBe(2)
+    await waitFor(() => expect(screen.getByTitle("复制失败")).toBeTruthy())
+    expect(written).toEqual([])
 
     // Success flips the label to 已复制.
     shouldReject = false
-    const resultCopy = screen.getAllByTitle("复制")[1]
+    const resultCopy = screen.getByTitle("复制")
     fireEvent.click(resultCopy)
     await waitFor(() => expect(written).toEqual(["可复制的回答"]))
     expect(screen.getByTitle("已复制")).toBeTruthy()

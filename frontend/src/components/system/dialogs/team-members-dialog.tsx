@@ -8,6 +8,7 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DisabledButtonHint } from "@/components/ui/disabled-button-hint"
 import {
   Dialog,
   DialogContent,
@@ -219,10 +220,15 @@ export function TeamMembersDialog({
                 size="sm"
                 className="w-full"
                 disabled={!newUserId || isLoading || isMutating}
+                aria-busy={isMutating}
                 onClick={() => void handleAdd()}
               >
                 {isMutating ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : (
                   <UserPlusIcon data-icon="inline-start" />
                 )}
@@ -244,6 +250,18 @@ export function TeamMembersDialog({
                   {members.map((member) => {
                     const isLastAdmin =
                       member.role === "admin" && adminCount <= 1
+                    const isProtectedAdmin =
+                      member.role === "admin" && !canManageTeamAdmins
+                    const roleDisabledReason = isLastAdmin
+                      ? t("不能移除最后一个管理员")
+                      : isMutating
+                        ? t("保存中")
+                        : undefined
+                    const removeDisabledReason =
+                      roleDisabledReason ??
+                      (isProtectedAdmin
+                        ? t("只有工作空间管理员可以管理团队管理员")
+                        : undefined)
 
                     return (
                       <div
@@ -261,24 +279,26 @@ export function TeamMembersDialog({
                         <div className="flex shrink-0 items-center gap-1.5">
                           {canManageTeamAdmins ? (
                             <DropdownMenu modal={false}>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={isMutating || isLastAdmin}
-                                  title={
-                                    isLastAdmin
-                                      ? t("不能移除最后一个管理员")
-                                      : t("更新成员角色")
-                                  }
-                                >
-                                  {member.role === "admin"
-                                    ? t("管理员")
-                                    : t("成员")}
-                                  <ChevronDownIcon data-icon="inline-end" />
-                                </Button>
-                              </DropdownMenuTrigger>
+                              <DisabledButtonHint reason={roleDisabledReason}>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={isMutating || isLastAdmin}
+                                    title={
+                                      isLastAdmin
+                                        ? t("不能移除最后一个管理员")
+                                        : t("更新成员角色")
+                                    }
+                                  >
+                                    {member.role === "admin"
+                                      ? t("管理员")
+                                      : t("成员")}
+                                    <ChevronDownIcon data-icon="inline-end" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                              </DisabledButtonHint>
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem
                                   disabled={member.role === "member"}
@@ -311,25 +331,23 @@ export function TeamMembersDialog({
                                 : t("成员")}
                             </Badge>
                           )}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-sm"
-                            disabled={
-                              isMutating ||
-                              isLastAdmin ||
-                              (member.role === "admin" && !canManageTeamAdmins)
-                            }
-                            title={
-                              isLastAdmin
-                                ? t("不能移除最后一个管理员")
-                                : t("移除成员")
-                            }
-                            aria-label={t("移除成员")}
-                            onClick={() => void onRemoveMember(member.user.id)}
-                          >
-                            <UserMinusIcon />
-                          </Button>
+                          <DisabledButtonHint reason={removeDisabledReason}>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              disabled={
+                                isMutating || isLastAdmin || isProtectedAdmin
+                              }
+                              title={removeDisabledReason ?? t("移除成员")}
+                              aria-label={t("移除成员")}
+                              onClick={() =>
+                                void onRemoveMember(member.user.id)
+                              }
+                            >
+                              <UserMinusIcon />
+                            </Button>
+                          </DisabledButtonHint>
                         </div>
                       </div>
                     )

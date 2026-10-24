@@ -116,9 +116,16 @@ export function EditWorkspaceDialog({
               >
                 {t("取消")}
               </Button>
-              <Button disabled={isSavingWorkspace}>
+              <Button
+                disabled={isSavingWorkspace}
+                aria-busy={isSavingWorkspace}
+              >
                 {isSavingWorkspace ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : null}
                 {t("保存")}
               </Button>
@@ -220,9 +227,16 @@ export function EditTeamDialog({
               >
                 {t("取消")}
               </Button>
-              <Button disabled={!selectedWorkspaceId || isSavingTeam}>
+              <Button
+                disabled={!selectedWorkspaceId || isSavingTeam}
+                aria-busy={isSavingTeam}
+              >
                 {isSavingTeam ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : null}
                 {t("保存")}
               </Button>
@@ -394,9 +408,14 @@ export function CreateWorkspaceDialog({
             </Button>
             <Button
               disabled={isCreatingWorkspace || !workspaceForm.adminUserId}
+              aria-busy={isCreatingWorkspace}
             >
               {isCreatingWorkspace ? (
-                <LoaderCircleIcon data-icon="inline-start" />
+                <LoaderCircleIcon
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                  className="animate-spin motion-reduce:animate-none"
+                />
               ) : (
                 <PlusIcon data-icon="inline-start" />
               )}
@@ -630,9 +649,14 @@ export function CreateTeamDialog({
               disabled={
                 !teamForm.workspaceId || !teamForm.adminUserId || isCreatingTeam
               }
+              aria-busy={isCreatingTeam}
             >
               {isCreatingTeam ? (
-                <LoaderCircleIcon data-icon="inline-start" />
+                <LoaderCircleIcon
+                  data-icon="inline-start"
+                  aria-hidden="true"
+                  className="animate-spin motion-reduce:animate-none"
+                />
               ) : (
                 <PlusIcon data-icon="inline-start" />
               )}

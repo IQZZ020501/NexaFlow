@@ -162,7 +162,7 @@ export function TeamsPanel({
                           </Button>
                           <Button
                             type="button"
-                            variant="ghost"
+                            variant="destructive"
                             size="icon-sm"
                             onClick={() => void handleDeleteTeam(team)}
                             title={t("永久删除团队")}

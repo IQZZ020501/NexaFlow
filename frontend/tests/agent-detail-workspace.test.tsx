@@ -2763,8 +2763,8 @@ describe("AgentDetailWorkspace edge behavior", () => {
     )
     await waitFor(() =>
       expect(
-        view.container.querySelectorAll('[aria-label="复制"]').length
-      ).toBe(2)
+        view.container.querySelector('[aria-label="复制失败"]')
+      ).toBeTruthy()
     )
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,

@@ -12,6 +12,94 @@ const definition = {
 }
 
 describe("SkillDialog", () => {
+  test("shows import progress without marking publication as busy", async () => {
+    let finish!: (response: Response) => void
+    globalThis.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        finish = resolve
+      })) as unknown as typeof fetch
+    renderPage(
+      <SkillDialog
+        open
+        token="test"
+        workspaceId="ws-1"
+        onSaved={() => undefined}
+        onOpenChange={() => undefined}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText("选择 Skill 文件"), {
+      target: { files: [new File(["zip"], "research.zip")] },
+    })
+
+    expect(
+      screen.getByRole("button", { name: "导入中" }).getAttribute("aria-busy")
+    ).toBe("true")
+    expect(
+      screen
+        .getByRole("button", { name: "保存并发布" })
+        .querySelector(".animate-spin")
+    ).toBeNull()
+    finish(
+      jsonResponse({
+        name: "research",
+        description: "Research tasks",
+        definition,
+      })
+    )
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("显示名称") as HTMLInputElement).value
+      ).toBe("research")
+    )
+    expect(
+      (screen.getByRole("button", { name: "导入 Skill" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false)
+  })
+
+  test("shows pending feedback on the draft button while saving a draft", async () => {
+    let finish!: (response: Response) => void
+    globalThis.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        finish = resolve
+      })) as unknown as typeof fetch
+    let saved = false
+    renderPage(
+      <SkillDialog
+        open
+        token="test"
+        workspaceId="ws-1"
+        onSaved={() => {
+          saved = true
+        }}
+        onOpenChange={() => undefined}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("显示名称"), {
+      target: { value: "research" },
+    })
+    fireEvent.change(screen.getByLabelText("描述"), {
+      target: { value: "Research tasks" },
+    })
+    fireEvent.change(screen.getByLabelText("技能指令"), {
+      target: { value: "Do the task." },
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "保存草稿" }))
+
+    expect(
+      screen.getByRole("button", { name: "保存中" }).getAttribute("aria-busy")
+    ).toBe("true")
+    expect(
+      screen
+        .getByRole("button", { name: "保存并发布" })
+        .querySelector(".animate-spin")
+    ).toBeNull()
+    finish(jsonResponse({ id: "skill-1" }))
+    await waitFor(() => expect(saved).toBe(true))
+  })
+
   test("rejects oversized imports locally and leaves server import errors retryable", async () => {
     let imports = 0
     globalThis.fetch = (async (input) => {

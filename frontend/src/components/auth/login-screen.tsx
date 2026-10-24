@@ -358,11 +358,20 @@ export function LoginScreen({
                   </div>
                 </Field>
               </FieldGroup>
-              <Button className="h-11 w-full" disabled={isSubmitting}>
+              <Button
+                type="submit"
+                className="h-11 w-full"
+                disabled={isSubmitting}
+                aria-busy={isSubmitting}
+              >
                 {isSubmitting ? (
-                  <LoaderCircleIcon data-icon="inline-start" />
+                  <LoaderCircleIcon
+                    data-icon="inline-start"
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
                 ) : null}
-                {t("登录")}
+                {t(isSubmitting ? "登录中" : "登录")}
               </Button>
             </form>
             {enterpriseConnections.length ? (

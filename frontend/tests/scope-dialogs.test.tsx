@@ -198,7 +198,9 @@ describe("EditWorkspaceDialog", () => {
     await screen.findByRole("dialog", { name: "编辑工作空间" })
     const save = submitButton("保存")
     expect(save.disabled).toBe(true)
-    expect(save.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      save.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("closes via the cancel button", async () => {
@@ -334,7 +336,9 @@ describe("EditTeamDialog", () => {
     await screen.findByRole("dialog", { name: "编辑团队" })
     const save = submitButton("保存")
     expect(save.disabled).toBe(true)
-    expect(save.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      save.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("closes via the cancel button", async () => {
@@ -521,7 +525,9 @@ describe("CreateWorkspaceDialog", () => {
     await screen.findByRole("dialog", { name: "新建工作空间" })
     const create = submitButton("新建")
     expect(create.disabled).toBe(true)
-    expect(create.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      create.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("closes via the cancel button", async () => {
@@ -799,7 +805,9 @@ describe("CreateTeamDialog", () => {
     await screen.findByRole("dialog", { name: "新建团队" })
     const create = submitButton("新建")
     expect(create.disabled).toBe(true)
-    expect(create.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      create.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("closes via the cancel button", async () => {
