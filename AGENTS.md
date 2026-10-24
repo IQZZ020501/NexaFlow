@@ -143,8 +143,11 @@ not trigger unrelated cleanup.
 - Root `docker-compose.yml` is the only Compose file and is self-contained for
   single-host pull-only deployment: edit `x-settings` credentials and website
   values, then use standard `docker compose pull` / `up -d --wait`. Published
-  immutable image digests live in `x-images`; OpenSandbox TOML is inline through
-  `configs.content`. Do not add per-environment Compose files or a deployment
+  immutable image digests live in `x-images`; the business process supervisor
+  and OpenSandbox TOML are inline through `configs.content`. Five resident
+  containers run `app`, PostgreSQL, Redis, Qdrant and OpenSandbox; the `app`
+  container supervises separate API, frontend, background Worker and Agent
+  Worker processes. Do not add per-environment Compose files or a deployment
   wrapper. Root `.env.example` remains the only local-development env template;
   host backend commands use private root `.env`, which is not injected into
   deployment containers. Bootstrap admin credentials and managed-user initial
@@ -164,7 +167,7 @@ not trigger unrelated cleanup.
 - `backend/alembic/` contains database migrations; production data is
   PostgreSQL-backed.
 - The unified Compose topology runs Alembic through a
-  one-shot `migrate` service. API and worker startup depends on its successful
+  one-shot `migrate` service. The `app` startup depends on its successful
   completion; the service reuses the application image rather than requiring a
   separate migration image.
 - Knowledge keyword retrieval uses `pg_search` 0.25.2 BM25 over
@@ -208,8 +211,9 @@ not trigger unrelated cleanup.
   development) serves every queue with the embedded Beat; `background` serves
   the `celery` queue with the embedded Beat and must stay a single instance;
   `agents` serves `agents-legacy`/`agents-v2` on a threads pool without Beat,
-  so concurrent runs share one process event loop. Compose runs one `worker`
-  (background) and a horizontally scalable `agent-worker`. Code reached from
+  so concurrent runs share one process event loop. Compose's single `app`
+  container runs separate background and agents processes; do not scale `app`
+  horizontally because it contains the singleton Beat. Code reached from
   Agent or Workflow runs must not block that event loop; offload blocking
   calls with `asyncio.to_thread`.
 - Beat re-publishes a claimable Agent Run only when its last delivery is
@@ -360,7 +364,7 @@ not trigger unrelated cleanup.
   renderer dependencies remain baked into the locked execution image.
   Keep the runtime independent from `backend/app/`.
 - `docs/` stores project planning and product/engineering documentation.
-- Root `docker-compose.yml` holds the deployment topology; `deploy/` holds the unified application Dockerfile shared by API/worker/frontend containers, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. Both business Workers (`worker` and `agent-worker`) drop all capabilities and retain default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers.
+- Root `docker-compose.yml` holds the deployment topology; `deploy/` holds the unified application Dockerfile used by `app` and `migrate`, the standalone sandbox Dockerfile, the custom PostgreSQL Dockerfile, and Nginx examples. The combined `app` container drops all capabilities and retains default AppArmor/seccomp plus `no-new-privileges`; there is no Docker socket, execution runtime or sandbox volume in business containers. Its supervisor stops all process groups if any service exits and forwards shutdown signals; health checks cover both API and frontend. Keep `api`/`frontend` network aliases for published Next.js proxy rewrites and Nginx examples. The frontend child receives only its own runtime environment, without backend credentials.
 - Root `docker-compose.yml` explicitly selects ordinary Docker + dns+nft for default single-host deployment; only the OpenSandbox control plane mounts the Docker socket. Three one-shot `*-image` services make standard `docker compose pull` fetch execution/execd/egress images; they exit successfully before the control plane starts. `deploy/opensandbox/configure.py` remains the optional dedicated Kata generator and never automatically falls back from Kata. `deploy/dockerfiles/sandbox.Dockerfile` builds the execution image independently from the business image. Local development renders the same root Compose and applies private infrastructure settings in memory before passing JSON on stdin; preserve the previous local project/container names and `deploy/data` mounts.
   Production execution images use immutable digests. Agent runs freeze the
   non-secret image/network fingerprint so retries cannot silently switch it.
@@ -558,7 +562,9 @@ examples.
   `docker compose config --images`; render the local infrastructure configuration
   returned by `scripts.dev.infrastructure_configuration` on Compose stdin too.
   Development tooling changes run
-  `uv run --project backend python -m unittest scripts.dev_test` from root.
+  `uv run --project backend python -m unittest scripts.dev_test scripts.compose_test`
+  from root. The deployment tests execute the supervisor embedded in Compose
+  and verify shutdown, process failures and startup cleanup.
   Build an image only when its build inputs or wiring changed. When the unified
   application image or sandbox wiring changes, also run the `sandbox-runtime`
   direct container checks and `tests.execution.opensandbox_smoke` against an
