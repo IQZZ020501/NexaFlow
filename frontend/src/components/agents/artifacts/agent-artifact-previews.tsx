@@ -21,6 +21,7 @@ import {
 import { ApiError, requestBlob } from "@/lib/api-client"
 import { FilePreviewFrame } from "./file-preview-frame"
 import { AgentArtifactPreviewContext } from "./agent-artifact-preview-context"
+import { ArtifactPreviewPane } from "./artifact-preview-pane"
 
 type PreviewState =
   | { status: "html"; document: string }
@@ -227,16 +228,10 @@ export function AgentArtifactPreviewPanel() {
   if (!preview || !selected) return null
 
   return (
-    <aside
+    <ArtifactPreviewPane
       id={preview.panelId}
-      aria-label={t("文件预览：{filename}", { filename: selected.filename })}
-      className="pb-safe flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l bg-background md:flex-[3]"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.defaultPrevented) {
-          event.preventDefault()
-          preview.close()
-        }
-      }}
+      label={t("文件预览：{filename}", { filename: selected.filename })}
+      onClose={preview.close}
     >
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <h2
@@ -256,6 +251,6 @@ export function AgentArtifactPreviewPanel() {
         </IconButton>
       </div>
       <ArtifactPreviewBody key={selected.downloadUrl} artifact={selected} />
-    </aside>
+    </ArtifactPreviewPane>
   )
 }

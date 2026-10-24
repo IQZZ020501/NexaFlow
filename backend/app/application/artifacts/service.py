@@ -4,7 +4,10 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.artifacts.services import validate_generated_artifact
+from app.domain.artifacts.services import (
+    artifact_workspace_path,
+    validate_generated_artifact,
+)
 from app.entities.artifacts import GeneratedArtifact
 from app.entities.defaults import utc_now
 from app.infra.config.settings import Settings
@@ -61,6 +64,7 @@ async def create_generated_artifact(
     artifact_format: str,
     filename: str,
     content: bytes,
+    relative_path: str | None = None,
 ) -> GeneratedArtifactLink:
     if not workspace_id or not idempotency_key or len(idempotency_key) > 255:
         raise ValueError("Artifact identity is invalid.")
@@ -73,6 +77,10 @@ async def create_generated_artifact(
         return _artifact_link(existing, settings)
 
     media_type = validate_generated_artifact(artifact_format, filename, content)
+    if relative_path is not None:
+        artifact_workspace_path(relative_path)
+        if relative_path.rsplit("/", 1)[-1] != filename:
+            raise ValueError("Artifact path does not match its filename.")
     now = utc_now()
     artifact = await repository.create_artifact(
         db,
@@ -82,6 +90,7 @@ async def create_generated_artifact(
             idempotency_key=idempotency_key,
             format=artifact_format,
             filename=filename,
+            relative_path=relative_path,
             media_type=media_type,
             content=content,
             size_bytes=len(content),

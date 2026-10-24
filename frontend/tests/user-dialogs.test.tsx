@@ -361,7 +361,9 @@ describe("CreateUserDialog", () => {
     const { menu } = await openWorkspaceDropdown()
     fireEvent.click(within(menu).getByText("Alpha"))
     await waitFor(() =>
-      expect(document.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+      expect(
+        document.querySelector("svg.lucide-loader-circle.animate-spin")
+      ).toBeTruthy()
     )
 
     await act(async () => {
@@ -465,7 +467,9 @@ describe("CreateUserDialog", () => {
       name: "新建",
     }) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
-    expect(document.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      document.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("cancels the dialog through the 取消 button", async () => {
@@ -621,7 +625,9 @@ describe("EditUserDialog", () => {
       name: "保存",
     }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
-    expect(document.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      document.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("does not render while closed", () => {
@@ -742,7 +748,9 @@ describe("UserPasswordDialog", () => {
       name: "保存",
     }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
-    expect(document.querySelector("svg.lucide-loader-circle")).toBeTruthy()
+    expect(
+      document.querySelector("svg.lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 
   test("does not render while closed", () => {

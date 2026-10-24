@@ -461,7 +461,9 @@ describe("KnowledgeBaseDialogs", () => {
       name: "保存授权",
     }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
-    expect(document.querySelector(".lucide-loader-circle")).toBeTruthy()
+    expect(
+      document.querySelector(".lucide-loader-circle.animate-spin")
+    ).toBeTruthy()
   })
 })
 

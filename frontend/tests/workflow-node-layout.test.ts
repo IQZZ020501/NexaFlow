@@ -129,12 +129,16 @@ test("form select options preserve the editing draft", () => {
 })
 
 test("mobile workflow actions keep accessible names", () => {
-  expect(detailSource).toContain('aria-label={t("保存")}')
+  expect(detailSource).toContain(
+    'aria-label={t(isSaving || isSavingApp ? "保存中" : "保存")}'
+  )
   expect(paletteSource).toContain('aria-label={t("添加节点")}')
   expect(detailSource).toContain(
     'aria-label={agent.can_edit ? t("调试运行") : t("运行已发布版本")}'
   )
-  expect(detailSource).toContain('aria-label={t("发布版本")}')
+  expect(detailSource).toContain(
+    'aria-label={t(isPublishing ? "发布中" : "发布版本")}'
+  )
 })
 
 test("confirmed workflow discards restore persisted graph and app settings", () => {

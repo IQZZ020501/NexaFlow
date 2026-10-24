@@ -163,6 +163,55 @@ test("surfaces create errors inside the dialog", async () => {
   expect(await screen.findByText("boom")).toBeTruthy()
 })
 
+test("shows saving feedback until a folder request settles and allows retry", async () => {
+  let rejectCreate!: (error: Error) => void
+  let resolveCreate!: () => void
+  let calls = 0
+  renderPage(
+    <Harness
+      onCreate={() => {
+        calls += 1
+        return new Promise<void>((resolve, reject) => {
+          resolveCreate = resolve
+          rejectCreate = reject
+        })
+      }}
+    />
+  )
+
+  fireEvent.click(screen.getByLabelText("新建子文件夹"))
+  fireEvent.change(screen.getByPlaceholderText("文件夹名称"), {
+    target: { value: "新目录" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "保存" }))
+  const pendingButton = screen.getByRole("button", {
+    name: "保存中",
+  }) as HTMLButtonElement
+  expect(pendingButton.disabled).toBe(true)
+  expect(pendingButton.getAttribute("aria-busy")).toBe("true")
+  expect(pendingButton.querySelector("svg.animate-spin")).toBeTruthy()
+  expect(
+    pendingButton
+      .querySelector("svg")!
+      .classList.contains("motion-reduce:animate-none")
+  ).toBe(true)
+
+  rejectCreate(new Error("暂时无法保存"))
+  await screen.findByText("暂时无法保存")
+  const retryButton = screen.getByRole("button", {
+    name: "保存",
+  }) as HTMLButtonElement
+  expect(retryButton.disabled).toBe(false)
+  expect(retryButton.getAttribute("aria-busy")).toBe("false")
+  expect(retryButton.querySelector("svg")).toBeNull()
+
+  fireEvent.click(retryButton)
+  expect(screen.getByRole("button", { name: "保存中" })).toBeTruthy()
+  resolveCreate()
+  await waitFor(() => expect(screen.queryByRole("dialog") === null).toBe(true))
+  expect(calls).toBe(2)
+})
+
 test("deletes after confirmation and reports the parent", async () => {
   const deleted: Array<[string, string | null]> = []
   renderPage(

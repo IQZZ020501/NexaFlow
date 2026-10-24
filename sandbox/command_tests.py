@@ -1,5 +1,6 @@
 """Host-safe command tests; Linux UID escape checks also run in the image."""
 
+import base64
 import sys
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ class CommandTests(unittest.TestCase):
         self.stack.enter_context(patch.object(command, "kill_user_processes"))
         self.stack.enter_context(patch.object(command.os, "geteuid", return_value=0))
         self.stack.enter_context(patch.object(command.os, "chown"))
+        self.stack.enter_context(patch.object(command.os, "fchown"))
         # The real export owner is checked in the Linux guest. Local tests
         # keep all files owned by the invoking developer.
         self.real_lstat = Path.lstat
@@ -69,6 +71,39 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(second["artifacts"], [])
         third = self.run_command("echo changed > outputs/result.txt; ln -s /etc/passwd outputs/link; ln outputs/result.txt outputs/hardlink")
         self.assertEqual(third["artifacts"], [])
+
+    def test_restore_then_edit_a_file_in_a_new_workspace(self):
+        first = self.run_command("printf '<h1>old</h1>' > outputs/page.html")
+        saved = Path(first["artifacts"][0]["path"]).read_bytes()
+        with patch.object(command, "WORKSPACE", self.workspace.parent / "next-run"):
+            command.restore_files({"page.html": base64.b64encode(saved).decode()})
+            unchanged = self.run_command("cat outputs/page.html")
+            self.assertEqual(unchanged["stdout"], "<h1>old</h1>")
+            self.assertEqual(unchanged["artifacts"], [])
+            changed = self.run_command(
+                "python3 -c \"from pathlib import Path; p=Path('outputs/page.html'); "
+                "p.write_text(p.read_text().replace('old','new'))\""
+            )
+            command.restore_files({"page.html": base64.b64encode(saved).decode()})
+            self.assertEqual(
+                (command.WORKSPACE / "outputs/page.html").read_text(), "<h1>new</h1>"
+            )
+            self.assertEqual(Path(changed["artifacts"][0]["path"]).read_bytes(), b"<h1>new</h1>")
+        self.assertEqual(Path(first["artifacts"][0]["path"]).read_bytes(), saved)
+
+    def test_restore_preserves_nested_paths_and_rejects_unsafe_paths(self):
+        encoded = base64.b64encode(b"saved").decode()
+        command.restore_files({"nested/page.html": encoded})
+        self.assertEqual((self.workspace / "outputs/nested/page.html").read_bytes(), b"saved")
+        for path in ("/absolute", "../escape", "nested/../escape", "a//b", "./page", "a\\b"):
+            with self.assertRaises(ValueError):
+                command.restore_files({path: encoded})
+        outside = self.workspace.parent / "outside"
+        outside.mkdir()
+        (self.workspace / "outputs/link").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(OSError):
+            command.restore_files({"link/page.html": encoded})
+        self.assertFalse((outside / "page.html").exists())
 
     def test_export_limits_and_input_validation(self):
         result = self.run_command("for n in {1..10}; do echo file > outputs/$n.txt; done")

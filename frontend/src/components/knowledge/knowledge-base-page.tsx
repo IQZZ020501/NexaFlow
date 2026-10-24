@@ -2819,7 +2819,7 @@ function KnowledgeBasePageContent({
                     </Button>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="destructive"
                       disabled={
                         !canEditDocuments ||
                         selectedKnowledgeTasks.length === 0 ||
@@ -3179,10 +3179,15 @@ function KnowledgeBasePageContent({
                           isTestingModels ||
                           !selectedKnowledgeBase.embedding_model_id
                         }
+                        aria-busy={isTestingModels}
                         onClick={() => void handleTestKnowledgeModels()}
                       >
                         {isTestingModels ? (
-                          <LoaderCircleIcon data-icon="inline-start" />
+                          <LoaderCircleIcon
+                            data-icon="inline-start"
+                            aria-hidden="true"
+                            className="animate-spin motion-reduce:animate-none"
+                          />
                         ) : (
                           <FlaskConicalIcon data-icon="inline-start" />
                         )}

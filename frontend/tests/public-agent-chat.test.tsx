@@ -1564,6 +1564,102 @@ describe("PublicWorkflowChat", () => {
     expect(screen.queryByText("a.pdf")).toBeNull()
     expect(screen.getByText("b.pdf")).toBeTruthy()
   })
+
+  test("shows voice input only when the workflow has enabled it", async () => {
+    let voiceEnabled = false
+    fetchHandler = (url) => {
+      if (url.endsWith("/profile")) {
+        const profile = workflowProfile()
+        return jsonResponse({
+          ...profile,
+          interaction_config: {
+            ...profile.interaction_config,
+            ...(voiceEnabled ? { stt_type: "BROWSER" } : {}),
+          },
+        })
+      }
+      if (url.includes("/conversations")) return jsonResponse({ items: [] })
+      return jsonResponse({})
+    }
+
+    renderPage(<PublicWorkflowChat workflowId="wf-1" />)
+    await screen.findByRole("heading", { name: "公开流程" })
+    expect(screen.queryByRole("button", { name: "开始语音输入" })).toBeNull()
+    cleanup()
+
+    voiceEnabled = true
+    renderPage(<PublicWorkflowChat workflowId="wf-1" />)
+    await screen.findByRole("heading", { name: "公开流程" })
+    expect(screen.getByRole("button", { name: "开始语音输入" })).toBeTruthy()
+  })
+
+  test("renders workflow runs as chat messages with an expandable node process", async () => {
+    fetchHandler = (url) => {
+      if (url.endsWith("/profile")) return jsonResponse(workflowProfile())
+      if (url.includes("/conversations")) {
+        return jsonResponse({
+          items: [
+            {
+              conversation_id: "conv-1",
+              inputs: { question: "查一下流程" },
+              outputs: { answer: "流程已完成" },
+              status: "succeeded",
+              run_count: 1,
+              created_at: "2026-08-10T00:00:00Z",
+              updated_at: "2026-08-10T00:00:01Z",
+            },
+          ],
+        })
+      }
+      if (url.includes("/runs?")) {
+        return jsonResponse({
+          items: [
+            workflowRun({
+              inputs: { question: "查一下流程" },
+              outputs: { answer: "流程已完成" },
+              progress: [
+                {
+                  id: "node-start",
+                  node_id: "start",
+                  node_title: "接收问题",
+                  node_type: "start",
+                  status: "succeeded",
+                  error: null,
+                  duration_ms: 12,
+                  inputs: { question: "查一下流程" },
+                  outputs: { question: "查一下流程" },
+                },
+              ],
+            }),
+          ],
+        })
+      }
+      return jsonResponse({})
+    }
+
+    renderPage(
+      <PublicWorkflowChat workflowId="wf-1" initialConversationId="conv-1" />
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "公开流程" })
+    ).toBeTruthy()
+    expect(screen.getAllByText("查一下流程").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("流程已完成").length).toBeGreaterThan(0)
+    expect(screen.getByText("接收问题")).toBeTruthy()
+    expect(screen.getByText("执行过程")).toBeTruthy()
+    expect(screen.getByText("12 毫秒")).toBeTruthy()
+    expect(screen.queryByText('{"answer":"流程已完成"}')).toBeNull()
+    fireEvent.click(screen.getByText("接收问题"))
+    expect(screen.getByText("输入内容")).toBeTruthy()
+    expect(
+      screen.getAllByText(/"question": "查一下流程"/).length
+    ).toBeGreaterThan(0)
+    expect(screen.getByText("输出内容")).toBeTruthy()
+    expect(screen.getByLabelText("请输入问题")).toBeTruthy()
+    expect(screen.getByLabelText("发送问题")).toBeTruthy()
+    expect(screen.queryByText("运行工作流")).toBeNull()
+  })
 })
 
 describe("PublicAgentChat", () => {
@@ -2778,7 +2874,11 @@ describe("PublicAgentChat", () => {
       (screen.getByLabelText("请输入问题") as HTMLTextAreaElement).disabled
     ).toBe(false)
     const textarea = screen.getByLabelText("请输入问题") as HTMLTextAreaElement
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
     fireEvent.change(textarea, { target: { value: "然后解释图片" } })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    expect(screen.getByLabelText("追加后续任务")).toBeTruthy()
     fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(1))
     expect(inputs[0]?.mode).toBe("follow_up")
@@ -2788,6 +2888,14 @@ describe("PublicAgentChat", () => {
       articleText.indexOf("web_search")
     )
     await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
+
+    fireEvent.change(textarea, { target: { value: "草稿" } })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    fireEvent.change(textarea, { target: { value: " \n " } })
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
 
     streamController?.close()
   }, 10_000)
@@ -3713,15 +3821,15 @@ describe("PublicAgentChat", () => {
     )
     await screen.findByText("可复制的回答")
 
-    // Failure keeps the copy label.
+    // Failure is visible and leaves the answer copy action available.
     const questionCopy = screen.getAllByTitle("复制")[0]
     fireEvent.click(questionCopy)
-    await waitFor(() => expect(written).toEqual([]))
-    expect(screen.getAllByTitle("复制").length).toBe(2)
+    await waitFor(() => expect(screen.getByTitle("复制失败")).toBeTruthy())
+    expect(written).toEqual([])
 
     // Success flips the label to 已复制.
     shouldReject = false
-    const resultCopy = screen.getAllByTitle("复制")[1]
+    const resultCopy = screen.getByTitle("复制")
     fireEvent.click(resultCopy)
     await waitFor(() => expect(written).toEqual(["可复制的回答"]))
     expect(screen.getByTitle("已复制")).toBeTruthy()

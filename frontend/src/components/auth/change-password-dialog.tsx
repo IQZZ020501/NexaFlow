@@ -218,11 +218,18 @@ export function ChangePasswordDialog({
             </Field>
           </FieldGroup>
           <DialogFooter className="pt-4">
-            <Button className="w-full" disabled={isSubmitting}>
+            <Button
+              className="w-full"
+              disabled={isSubmitting}
+              aria-busy={isSubmitting}
+            >
               {isSubmitting ? (
-                <LoaderCircleIcon data-icon="inline-start" />
+                <LoaderCircleIcon
+                  data-icon="inline-start"
+                  className="animate-spin motion-reduce:animate-none"
+                />
               ) : null}
-              {t("保存")}
+              {t(isSubmitting ? "保存中" : "保存")}
             </Button>
           </DialogFooter>
         </form>

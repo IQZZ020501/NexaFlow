@@ -4,14 +4,11 @@ import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
-  ArrowUpIcon,
   BotIcon,
   BrainIcon,
-  CheckIcon,
   CircleCheckIcon,
   ChevronDownIcon,
   CircleXIcon,
-  CopyIcon,
   DatabaseIcon,
   LoaderCircleIcon,
   MessageSquareIcon,
@@ -28,7 +25,6 @@ import {
   SendIcon,
   SettingsIcon,
   ShieldAlertIcon,
-  SquareIcon,
   Trash2Icon,
   Undo2Icon,
   UsersIcon,
@@ -37,9 +33,12 @@ import {
 
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
+import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
+import { DisabledButtonHint } from "@/components/ui/disabled-button-hint"
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
 import type {
@@ -123,7 +122,7 @@ type AgentDetailWorkspaceProps = {
   onPublish: () => void
   onViewChange: (view: AgentDetailView) => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
-  onCancelAsk: () => void
+  onCancelAsk: () => void | Promise<void>
   onNewConversation: () => void
   onToolCallDecision: (
     runId: string,
@@ -461,34 +460,6 @@ export function collapsedProcessStatusKey(
   return hasActiveToolCall ? "执行过程" : null
 }
 
-function CopyMessageButton({ value, t }: { value: string; t: TFunction }) {
-  const [copied, setCopied] = React.useState(false)
-  const label = t(copied ? "已复制" : "复制")
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground"
-      aria-label={label}
-      title={label}
-      onClick={handleCopy}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
-  )
-}
-
 function InlineToolApproval({
   runId,
   call,
@@ -749,7 +720,7 @@ function RunExchange({
           </form>
         )}
         <div className="flex items-start gap-1">
-          <CopyMessageButton value={run.goal} t={t} />
+          <CopyButton t={t} value={run.goal} />
           {editable && editDraft === null ? (
             <Button
               type="button"
@@ -819,7 +790,7 @@ function RunExchange({
               <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
                 {input.content}
               </div>
-              <CopyMessageButton value={input.content} t={t} />
+              <CopyButton t={t} value={input.content} />
             </div>
           </React.Fragment>
         ))}
@@ -932,7 +903,7 @@ function RunExchange({
             <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-foreground px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-background">
               {input.content}
             </div>
-            <CopyMessageButton value={input.content} t={t} />
+            <CopyButton t={t} value={input.content} />
           </div>
         ))}
     </article>
@@ -1251,46 +1222,93 @@ export function AgentDetailWorkspace({
           {agent.can_edit ? (
             <>
               {canManagePublishing ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={isSaving || isPublishing || isDirty}
-                  title={isDirty ? t("请先保存更改后再发布。") : undefined}
-                  onClick={onPublish}
-                >
-                  {isPublishing ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : publicationAction === "unpublish" ? (
-                    <Undo2Icon />
-                  ) : (
-                    <RocketIcon />
-                  )}
-                  <span className="hidden sm:inline">
-                    {t(
-                      publicationAction === "unpublish"
-                        ? "取消发布"
-                        : publicationAction === "republish"
-                          ? "重新发布"
-                          : "发布"
-                    )}
-                  </span>
-                </Button>
-              ) : null}
-              {visibleActiveView === "settings" ? (
-                <Button
-                  type="submit"
-                  form="agent-settings-form"
-                  disabled={
-                    isSaving || !isDirty || !form.name.trim() || !form.modelId
+                <DisabledButtonHint
+                  reason={
+                    isPublishing
+                      ? t(
+                          publicationAction === "unpublish"
+                            ? "取消发布中"
+                            : "发布中"
+                        )
+                      : isSaving
+                        ? t("保存中")
+                        : isDirty
+                          ? t("请先保存更改后再发布。")
+                          : undefined
                   }
                 >
-                  {isSaving ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : (
-                    <SaveIcon />
-                  )}
-                  <span className="hidden sm:inline">{t("保存")}</span>
-                </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-label={t(
+                      isPublishing
+                        ? publicationAction === "unpublish"
+                          ? "取消发布中"
+                          : "发布中"
+                        : publicationAction === "unpublish"
+                          ? "取消发布"
+                          : publicationAction === "republish"
+                            ? "重新发布"
+                            : "发布"
+                    )}
+                    aria-busy={isPublishing}
+                    disabled={isSaving || isPublishing || isDirty}
+                    onClick={onPublish}
+                  >
+                    {isPublishing ? (
+                      <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+                    ) : publicationAction === "unpublish" ? (
+                      <Undo2Icon />
+                    ) : (
+                      <RocketIcon />
+                    )}
+                    <span className="hidden sm:inline">
+                      {t(
+                        isPublishing
+                          ? publicationAction === "unpublish"
+                            ? "取消发布中"
+                            : "发布中"
+                          : publicationAction === "unpublish"
+                            ? "取消发布"
+                            : publicationAction === "republish"
+                              ? "重新发布"
+                              : "发布"
+                      )}
+                    </span>
+                  </Button>
+                </DisabledButtonHint>
+              ) : null}
+              {visibleActiveView === "settings" ? (
+                <DisabledButtonHint
+                  reason={
+                    isSaving
+                      ? t("保存中")
+                      : !isDirty
+                        ? t("没有需要保存的更改")
+                        : !form.name.trim() || !form.modelId
+                          ? t("请填写名称并选择模型后保存")
+                          : undefined
+                  }
+                >
+                  <Button
+                    type="submit"
+                    form="agent-settings-form"
+                    aria-label={t(isSaving ? "保存中" : "保存")}
+                    aria-busy={isSaving}
+                    disabled={
+                      isSaving || !isDirty || !form.name.trim() || !form.modelId
+                    }
+                  >
+                    {isSaving ? (
+                      <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <SaveIcon />
+                    )}
+                    <span className="hidden sm:inline">
+                      {t(isSaving ? "保存中" : "保存")}
+                    </span>
+                  </Button>
+                </DisabledButtonHint>
               ) : null}
               <Button
                 type="button"
@@ -1631,66 +1649,18 @@ export function AgentDetailWorkspace({
                             />
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
-                            {isAsking && question.trim() && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                className="rounded-full text-muted-foreground"
-                                aria-label={t("停止生成")}
-                                title={t("停止生成")}
-                                onClick={onCancelAsk}
-                              >
-                                <SquareIcon
-                                  className="size-4.5 fill-current"
-                                  strokeWidth={0}
-                                />
-                              </Button>
-                            )}
-                            <Button
-                              type={
-                                isAsking && !question.trim()
-                                  ? "button"
-                                  : "submit"
-                              }
-                              size="icon"
-                              className="rounded-full"
-                              aria-label={t(
-                                isAsking
-                                  ? question.trim()
-                                    ? "追加后续任务"
-                                    : "停止生成"
-                                  : "发送问题"
-                              )}
-                              title={t(
-                                isAsking
-                                  ? question.trim()
-                                    ? "追加后续任务"
-                                    : "停止生成"
-                                  : "发送问题"
-                              )}
-                              onClick={
-                                isAsking && !question.trim()
-                                  ? onCancelAsk
-                                  : undefined
-                              }
-                              disabled={
+                            <AgentChatSubmitButton
+                              isRunning={isAsking}
+                              hasInput={Boolean(question.trim())}
+                              sendDisabled={
                                 !isAsking &&
-                                (!question.trim() ||
-                                  isDirty ||
+                                (isDirty ||
                                   isRunsLoading ||
                                   agent.status !== "active")
                               }
-                            >
-                              {isAsking && !question.trim() ? (
-                                <SquareIcon
-                                  className="size-4.5 fill-current"
-                                  strokeWidth={0}
-                                />
-                              ) : (
-                                <ArrowUpIcon />
-                              )}
-                            </Button>
+                              onStop={onCancelAsk}
+                              t={t}
+                            />
                           </div>
                         </div>
                       </form>

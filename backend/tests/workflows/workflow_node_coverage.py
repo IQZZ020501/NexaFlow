@@ -2761,11 +2761,13 @@ def test_workflow_access_stream_mapping() -> None:
                "live_sequence": "1-1", "stream_epoch": "worker-1"}
         yield {"type": "run", "sequence": 1, "run": payload}
         yield {"type": "workflow_node_started", "node_id": "llm-1",
-               "node_type": "llm", "sequence": 2}
-        yield {"type": "workflow_node", "node_id": "llm-1", "node_type": "llm",
-               "status": "failed", "sequence": 2, "duration_ms": 12}
-        yield {"type": "workflow_node", "node_id": "llm-1", "node_type": "llm",
-               "status": "succeeded", "sequence": 3, "duration_ms": 4}
+               "node_title": "回答问题", "node_type": "llm", "sequence": 2}
+        yield {"type": "workflow_node", "node_id": "llm-1", "node_title": "回答问题",
+               "node_type": "llm", "status": "failed", "sequence": 2, "duration_ms": 12,
+               "inputs": {"prompt": "q"}, "outputs": {}}
+        yield {"type": "workflow_node", "node_id": "llm-1", "node_title": "回答问题",
+               "node_type": "llm", "status": "succeeded", "sequence": 3, "duration_ms": 4,
+               "inputs": {"prompt": "q"}, "outputs": {"text": "ok"}}
         yield {"type": "complete", "sequence": 4, "run": payload}
 
     async def run() -> None:
@@ -2794,16 +2796,21 @@ def test_workflow_access_stream_mapping() -> None:
             "event": {
                 "id": "workflow-node-llm-1",
                 "node_id": "llm-1",
+                "node_title": "回答问题",
                 "node_type": "llm",
                 "status": "running",
                 "error": None,
                 "duration_ms": None,
+                "inputs": {},
+                "outputs": {},
             },
         }
         assert events[3]["event"]["status"] == "failed"
         assert events[3]["event"]["error"] == "Workflow node failed."
         assert events[4]["event"]["status"] == "succeeded"
         assert events[4]["event"]["error"] is None
+        assert events[4]["event"]["inputs"] == {"prompt": "q"}
+        assert events[4]["event"]["outputs"] == {"text": "ok"}
         assert events[5]["type"] == "complete"
 
     asyncio.run(run())
@@ -4125,7 +4132,27 @@ def test_workflow_access_application_functions_direct() -> None:
 
         # list_external_workflow_runs
         runs = [AgentRun(id="run-1", agent_id="wf-1", status="succeeded")]
-        details = [WorkflowRunDetail(run_id="run-1", inputs={"question": "q"})]
+        details = [
+            WorkflowRunDetail(
+                run_id="run-1",
+                inputs={"question": "q"},
+                graph_snapshot={
+                    "nodes": [{"id": "llm-1", "data": {"title": "回答问题"}}]
+                },
+            )
+        ]
+        executions = [
+            SimpleNamespace(
+                id="execution-1",
+                run_id="run-1",
+                node_id="llm-1",
+                node_type="llm",
+                status="succeeded",
+                duration_ms=12,
+                inputs={"prompt": "q"},
+                outputs={"text": "ok"},
+            )
+        ]
         with patch(
             "app.application.workflows.access.service.get_published_workflow_context",
             new=AsyncMock(),
@@ -4141,12 +4168,20 @@ def test_workflow_access_application_functions_direct() -> None:
             workflow_repository,
             "list_run_details_for_external_conversations",
             new=AsyncMock(return_value=details),
+        ), patch.object(
+            workflow_repository,
+            "list_node_executions_for_runs",
+            new=AsyncMock(return_value=executions),
         ):
             listing = await list_external_workflow_runs(
                 object(), "wf-1", "public", "user-1", 10, 0  # type: ignore[arg-type]
             )
         assert listing.total == 1
         assert listing.items[0].id == "run-1"
+        assert listing.items[0].progress[0].node_id == "llm-1"
+        assert listing.items[0].progress[0].node_title == "回答问题"
+        assert listing.items[0].progress[0].inputs == {"prompt": "q"}
+        assert listing.items[0].progress[0].outputs == {"text": "ok"}
 
     asyncio.run(run())
 

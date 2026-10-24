@@ -14,6 +14,7 @@ from scripts.dev import (
     build_inputs_fingerprint,
     development_port,
     ensure_local_image,
+    ensure_local_opensandbox,
     infrastructure_configuration,
     is_managed_opensandbox_url,
     prepare,
@@ -54,6 +55,73 @@ class OpenSandboxUrlTests(unittest.TestCase):
         self.assertFalse(is_managed_opensandbox_url("https://127.0.0.1:8088"))
         self.assertFalse(is_managed_opensandbox_url("http://127.0.0.1:8089"))
         self.assertFalse(is_managed_opensandbox_url("http://execution.example:8088"))
+
+
+class OpenSandboxConfigurationTests(unittest.TestCase):
+    def test_upgrades_generated_legacy_timeout_without_changing_other_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "server.toml"
+            original = (
+                "# Generated for opensandbox-server==0.2.3; keep this file private.\n"
+                '[server]\napi_key = "local-test-key"\n'
+                "max_sandbox_timeout_seconds = 360\n"
+                '[docker]\nnetwork_mode = "bridge"\n'
+            )
+            path.write_text(original, encoding="utf-8")
+            values = {
+                "OPENSANDBOX_URL": "http://127.0.0.1:8088",
+                "OPENSANDBOX_API_KEY": "local-test-key",
+                "OPENSANDBOX_IMAGE": "nexaflow/execution:local",
+            }
+            with (
+                patch("scripts.dev.OPEN_SANDBOX_CONFIG", path),
+                patch("scripts.dev.read_env", return_value=values),
+                patch("scripts.dev.run") as run_mock,
+                patch("scripts.dev.log"),
+            ):
+                self.assertEqual(ensure_local_opensandbox(values), (values, True))
+                updated = path.read_text(encoding="utf-8")
+                self.assertEqual(updated, original.replace("= 360\n", "= 1860\n"))
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                ensure_local_opensandbox(values)
+                self.assertEqual(path.read_text(encoding="utf-8"), updated)
+                run_mock.assert_not_called()
+
+    def test_preserves_custom_and_current_configuration(self) -> None:
+        for header, timeout in (
+            ("# Operator-managed configuration\n", 360),
+            (
+                "# Generated for opensandbox-server==0.2.3; keep this file private.\n",
+                600,
+            ),
+            (
+                "# Generated for opensandbox-server==0.2.3; keep this file private.\n",
+                1860,
+            ),
+        ):
+            with (
+                self.subTest(header=header, timeout=timeout),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                path = Path(directory) / "server.toml"
+                original = (
+                    header + '[server]\napi_key = "local-test-key"\n'
+                    f"max_sandbox_timeout_seconds = {timeout}\n"
+                )
+                path.write_text(original, encoding="utf-8")
+                values = {
+                    "OPENSANDBOX_URL": "http://localhost:8088",
+                    "OPENSANDBOX_API_KEY": "local-test-key",
+                    "OPENSANDBOX_IMAGE": "nexaflow/execution:local",
+                }
+                with (
+                    patch("scripts.dev.OPEN_SANDBOX_CONFIG", path),
+                    patch("scripts.dev.read_env", return_value=values),
+                    patch("scripts.dev.run") as run_mock,
+                ):
+                    ensure_local_opensandbox(values)
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+                run_mock.assert_not_called()
 
 
 class DevelopmentPortTests(unittest.TestCase):

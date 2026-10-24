@@ -2977,6 +2977,131 @@ async def assert_mcp_discovery_rejects_untrusted_metadata() -> None:
         mcp_client_module.mcp_client = original_client
 
 
+def test_shell_catalog_upgrade_restores_existing_agent_runs() -> None:
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    from app.domain.tools.catalog import service as catalog
+
+    build_shell_tool = catalog.build_shell_tool
+
+    def legacy_shell_tool(workspace_id: str):
+        tool, version, policy = build_shell_tool(workspace_id)
+        legacy_id = catalog.stable_catalog_id(f"legacy-shell:{tool.id}")
+        return (
+            replace(tool, current_version_id=legacy_id),
+            replace(
+                version,
+                id=legacy_id,
+                description="Legacy bash",
+                definition_hash="a" * 64,
+            ),
+            replace(
+                policy,
+                tool_version_id=legacy_id,
+                definition_hash="a" * 64,
+                revision=4,
+                approval="each_call",
+                allowed_access_sources=["console", "public"],
+            ),
+        )
+
+    path = (
+        Path(__file__).parents[2]
+        / "alembic/versions/202610240001_shell_artifact_delivery.py"
+    )
+    spec = importlib.util.spec_from_file_location("shell_artifact_delivery", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    assert migration.down_revision == "202610140002"
+
+    async def upgrade_catalog(workspace_id: str) -> None:
+        async with get_session_factory()() as db:
+            connection = await db.connection()
+
+            def upgrade(sync_connection):
+                with patch.object(
+                    migration,
+                    "op",
+                    Operations(MigrationContext.configure(sync_connection)),
+                ):
+                    migration.upgrade()
+
+            await connection.run_sync(upgrade)
+            await connection.run_sync(upgrade)
+            await db.commit()
+
+    async def assert_catalog(workspace_id: str) -> None:
+        async with get_session_factory()() as db:
+            tool, version, _ = build_shell_tool(workspace_id)
+            current = await tool_repository.get_tool(db, workspace_id, tool.id)
+            assert current is not None and current.current_version_id == version.id
+            versions = await tool_repository.list_tool_versions(
+                db, workspace_id, tool.id
+            )
+            assert len(versions) == 2
+            assert versions[0].revision == 2
+            assert versions[1].description == "Legacy bash"
+            policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+            assert policy is not None and policy.tool_version_id == version.id
+            assert policy.definition_hash == version.definition_hash
+            assert policy.revision == 5
+            assert policy.approval == "each_call"
+            assert policy.allowed_access_sources == ["console", "public"]
+
+    with test_client() as client, agent_model_server() as model_base_url:
+        with patch.object(catalog, "build_shell_tool", legacy_shell_tool):
+            admin_token, workspace_id = activate_admin(client)
+        headers = auth_headers(admin_token)
+        model = client.post(
+            f"/api/v1/workspaces/{workspace_id}/models",
+            headers=headers,
+            json=model_payload(model_base_url, "Existing Catalog Model"),
+        )
+        assert model.status_code == 201, model.text
+        agent = client.post(
+            agents_url(workspace_id),
+            headers=headers,
+            json={
+                "name": "Existing Catalog Agent",
+                "instructions": "Answer.",
+                "model_id": model.json()["id"],
+            },
+        )
+        assert agent.status_code == 201, agent.text
+        agent_id = agent.json()["id"]
+        published = client.patch(
+            agents_url(workspace_id, f"/{agent_id}"),
+            headers=headers,
+            json={"published": True},
+        )
+        assert published.status_code == 200, published.text
+        model_calls = len(AgentModelHandler.calls)
+        urls = (
+            f"/api/v1/public/agents/{agent_id}/runs",
+            agents_url(workspace_id, f"/{agent_id}/runs"),
+        )
+        for url in urls:
+            failed = client.post(url, headers=headers, json={"goal": "Hello"})
+            assert failed.status_code == 422, failed.text
+            assert "Tool version is not available for binding." in failed.text
+
+        asyncio.run(upgrade_catalog(workspace_id))
+        with (
+            patch.object(agent_access, "enqueue_prepared_agent_run"),
+            patch.object(agent_runs, "enqueue_prepared_agent_run"),
+        ):
+            for url in urls:
+                created = client.post(url, headers=headers, json={"goal": "Hello"})
+                assert created.status_code == 201, created.text
+        asyncio.run(assert_catalog(workspace_id))
+        assert len(AgentModelHandler.calls) == model_calls
+
+
 def assert_external_agent_access() -> None:
     from app.infra.security.agent_rate_limit import (
         AgentRateLimitExceeded,
@@ -3814,6 +3939,7 @@ def main() -> None:
     asyncio.run(assert_structured_tool_and_event_safety())
     assert_mcp_url_validation()
     assert_public_access_migration_downgrade_drops_external_runs()
+    test_shell_catalog_upgrade_restores_existing_agent_runs()
     assert_external_agent_access()
 
     original_retrieve = agent_tools.retrieve_knowledge_base

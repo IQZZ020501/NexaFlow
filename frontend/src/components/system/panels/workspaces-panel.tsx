@@ -171,7 +171,7 @@ export function WorkspacesPanel({
                       {canCreateWorkspace ? (
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="destructive"
                           size="icon-sm"
                           onClick={() => void handleDeleteWorkspace(workspace)}
                           title={t("永久删除工作空间")}

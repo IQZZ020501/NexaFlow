@@ -232,11 +232,13 @@ def child(request):
 
 
 def execute(request):
-    if "command" in request:
+    if "command" in request or "restore_files" in request:
         import importlib.util
         spec = importlib.util.spec_from_file_location("nexaflow_command", Path(__file__).with_name("command.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        if "restore_files" in request:
+            return module.restore_files(request["restore_files"])
         return module.execute(request["command"], python_binary=sys.executable)
     max_log = 2 * 1024 * 1024 if "mcp" in request else MAX_LOG
     seconds = request.get("limits", {}).get("timeout_ms", 5000) / 1000

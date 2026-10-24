@@ -3,6 +3,7 @@ import type { TranslationKey } from "./zh-hans"
 export const en = {
   "预览文件：{filename}": "Preview file: {filename}",
   "文件预览：{filename}": "File preview: {filename}",
+  调整文件预览宽度: "Resize file preview",
   正在加载文件预览: "Loading file preview",
   "文件预览失败，可重试或下载原文件查看。":
     "Unable to preview this file. Retry or download the original.",
@@ -117,7 +118,18 @@ export const en = {
   密码重置链接无效或已过期: "Password reset link is invalid or expired",
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
+  应用名称已存在: "App name already exists",
+  "Skill 名称已存在": "Skill name already exists",
+  文件夹名称已存在: "Folder name already exists",
+  模型名称已存在: "Model name already exists",
+  模型已存在: "Model already exists",
+  "MCP 服务名称已存在": "MCP server name already exists",
   知识库名称已存在: "Knowledge base name already exists",
+  团队已存在: "Team already exists",
+  工作空间已存在: "Workspace already exists",
+  用户名或邮箱已存在: "Username or email already exists",
+  该成员已在团队中: "This member is already in the team",
+  该成员已在工作空间中: "This member is already in the workspace",
   "视觉模型尚未配置，暂时不支持图片解析":
     "No vision model is configured, so image parsing is not available yet",
   资源不存在或无权访问: "Resource not found or access denied",
@@ -131,6 +143,7 @@ export const en = {
   用户名: "Username",
   密码: "Password",
   登录: "Sign in",
+  登录中: "Signing in",
   忘记密码: "Forgot password",
   或使用企业账号登录: "Or use a company account",
   "使用 {provider} 登录": "Continue with {provider}",
@@ -178,6 +191,12 @@ export const en = {
   "至少 6 位，并且包含一个大写字母":
     "At least 6 characters and one uppercase letter",
   保存: "Save",
+  导入中: "Importing",
+  保存中: "Saving",
+  发布中: "Publishing",
+  取消发布中: "Unpublishing",
+  没有需要保存的更改: "No changes to save",
+  请填写名称并选择模型后保存: "Enter a name and select a model before saving",
   取消: "Cancel",
   编辑消息: "Edit message",
   重新发送: "Resend",
@@ -448,6 +467,8 @@ export const en = {
   不能移除最后一个管理员: "The last admin cannot be removed",
   只有系统管理员可以管理工作空间管理员:
     "Only global admins can manage workspace admins",
+  只有工作空间管理员可以管理团队管理员:
+    "Only workspace admins can manage team admins",
   "移除 {name}？": "Remove {name}?",
   全局账号: "Global accounts",
   新建用户: "Create user",
@@ -528,6 +549,8 @@ export const en = {
     "Choose based on how you will use the app; you can adjust it later in settings.",
   Agent: "Agent",
   工作流: "Workflow",
+  "输入问题，工作流会按照已发布配置执行。":
+    "Enter a question and the workflow will follow its published configuration.",
   "智能对话助手，自动规划并使用模型、知识和工具。":
     "A conversational assistant that plans and uses models, knowledge, and tools.",
   "按预设步骤编排固定流程，适合确定性的处理任务。":
@@ -1797,6 +1820,17 @@ export const en = {
   添加附件: "Add attachment",
   文字转语音: "Text to speech",
   浏览器语音: "Browser speech",
+  语音转文字: "Speech to text",
+  开始语音输入: "Start voice input",
+  停止语音输入: "Stop voice input",
+  当前浏览器不支持语音转文字: "Speech to text is not supported in this browser",
+  "请允许麦克风权限后重试。": "Allow microphone access and try again.",
+  "无法使用麦克风，请检查设备是否连接或被占用。":
+    "Microphone unavailable. Check that it is connected and not in use.",
+  "当前浏览器的语音识别服务不可用，请重试或尝试使用 Chrome。":
+    "This browser's speech recognition service is unavailable. Retry or try Chrome.",
+  "未检测到语音，请重试。": "No speech detected. Try again.",
+  "语音识别失败，请重试。": "Speech recognition failed. Try again.",
   文件上传: "File upload",
   文件上传设置: "File upload settings",
   "选择允许上传的文件类型。": "Choose the file types users can upload.",

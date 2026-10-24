@@ -370,11 +370,15 @@ describe("LoginScreen submission", () => {
 
     await waitFor(() => {
       expect(
-        (screen.getByRole("button", { name: "登录" }) as HTMLButtonElement)
+        (screen.getByRole("button", { name: "登录中" }) as HTMLButtonElement)
           .disabled
       ).toBe(true)
     })
-    expect(document.querySelector('[data-icon="inline-start"]')).not.toBeNull()
+    const pendingButton = screen.getByRole("button", { name: "登录中" })
+    expect(pendingButton.getAttribute("aria-busy")).toBe("true")
+    const spinner = pendingButton.querySelector("svg")!
+    expect(spinner.classList.contains("animate-spin")).toBe(true)
+    expect(spinner.classList.contains("motion-reduce:animate-none")).toBe(true)
     expect(loginCalled).toBe(false)
 
     resolveFetch(
@@ -394,5 +398,38 @@ describe("LoginScreen submission", () => {
       ).toBe(false)
     })
     expect(document.querySelector('[data-icon="inline-start"]')).toBeNull()
+  })
+
+  test("restores the login button after a pending request fails", async () => {
+    let resolveFetch!: (response: Response) => void
+    withFetch(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve
+        })
+    )
+    const notifications: string[] = []
+    renderPage(
+      <LoginScreen
+        onLogin={() => undefined}
+        onNotify={(_kind, message) => notifications.push(message)}
+      />
+    )
+
+    submitCredentials("alice", "wrong")
+    expect(screen.getByRole("button", { name: "登录中" })).toBeTruthy()
+    resolveFetch(
+      jsonResponse({ detail: "Incorrect username or password." }, 401)
+    )
+
+    await waitFor(() => {
+      const button = screen.getByRole("button", {
+        name: "登录",
+      }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+      expect(button.getAttribute("aria-busy")).toBe("false")
+      expect(button.querySelector("svg")).toBeNull()
+    })
+    expect(notifications).toHaveLength(1)
   })
 })

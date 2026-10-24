@@ -18,6 +18,7 @@ SUITES = (
     "execution.probe_unit",
     "execution.sessions",
     "tools.shell_unit",
+    "artifacts.conversations",
     "agents.evaluation",
     "tools.unit",
     "workflows.unit",

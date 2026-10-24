@@ -51,7 +51,10 @@ export function SkillDialog({
   const [definition, setDefinition] =
     React.useState<AgentSkillDefinition | null>(skill?.definition ?? null)
   const [savedId, setSavedId] = React.useState(skill?.id)
-  const [busy, setBusy] = React.useState(false)
+  const [busyAction, setBusyAction] = React.useState<
+    "import" | "save" | "publish" | null
+  >(null)
+  const busy = busyAction !== null
   const [error, setError] = React.useState<string | null>(null)
 
   async function importFile(file: File) {
@@ -59,7 +62,7 @@ export function SkillDialog({
       setError(t("Skill 包不能超过 2 MiB"))
       return
     }
-    setBusy(true)
+    setBusyAction("import")
     setError(null)
     try {
       const draft = await inspectSkillImport(token, workspaceId, file)
@@ -70,12 +73,12 @@ export function SkillDialog({
     } catch (cause) {
       setError(getErrorMessage(cause, t))
     } finally {
-      setBusy(false)
+      setBusyAction(null)
     }
   }
 
   async function save(publish: boolean) {
-    setBusy(true)
+    setBusyAction(publish ? "publish" : "save")
     setError(null)
     try {
       // The backend regenerates SKILL.md, preserving imported metadata and files.
@@ -112,7 +115,7 @@ export function SkillDialog({
     } catch (cause) {
       setError(getErrorMessage(cause, t))
     } finally {
-      setBusy(false)
+      setBusyAction(null)
     }
   }
 
@@ -207,10 +210,15 @@ export function SkillDialog({
             <Button
               variant="outline"
               disabled={busy}
+              aria-busy={busyAction === "import"}
               onClick={() => fileRef.current?.click()}
             >
-              <UploadIcon />
-              {t("导入 Skill")}
+              {busyAction === "import" ? (
+                <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <UploadIcon />
+              )}
+              {t(busyAction === "import" ? "导入中" : "导入 Skill")}
             </Button>
           ) : null}
           <Button
@@ -224,6 +232,7 @@ export function SkillDialog({
             <>
               <Button
                 variant="outline"
+                aria-busy={busyAction === "save"}
                 disabled={
                   busy ||
                   !name.trim() ||
@@ -232,9 +241,13 @@ export function SkillDialog({
                 }
                 onClick={() => void save(false)}
               >
-                {t("保存草稿")}
+                {busyAction === "save" ? (
+                  <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+                ) : null}
+                {t(busyAction === "save" ? "保存中" : "保存草稿")}
               </Button>
               <Button
+                aria-busy={busyAction === "publish"}
                 disabled={
                   busy ||
                   !name.trim() ||
@@ -243,8 +256,10 @@ export function SkillDialog({
                 }
                 onClick={() => void save(true)}
               >
-                {busy ? <LoaderCircleIcon className="animate-spin" /> : null}
-                {t("保存并发布")}
+                {busyAction === "publish" ? (
+                  <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+                ) : null}
+                {t(busyAction === "publish" ? "发布中" : "保存并发布")}
               </Button>
             </>
           ) : null}

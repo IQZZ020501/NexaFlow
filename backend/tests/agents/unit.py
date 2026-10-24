@@ -208,6 +208,34 @@ def test_agent_publication_snapshot_is_canonical_and_tool_versioned() -> None:
         raise AssertionError("A drifted Agent publication version was accepted.")
 
 
+def test_browser_speech_input_config_is_optional_and_round_trips() -> None:
+    from pydantic import ValidationError
+
+    from app.domain.agents.access.publications import normalized_interaction_config
+    from app.schemas.agents.contracts import AgentInteractionConfig
+
+    legacy = {
+        "prologue": "Hello",
+        "tts_type": "BROWSER",
+        "file_upload": False,
+        "file_upload_setting": {"file_upload_type": ["document", "image"]},
+        "user_input_title": "",
+    }
+    assert AgentInteractionConfig.model_validate(legacy).stt_type == "NONE"
+    assert normalized_interaction_config(legacy) == legacy
+
+    enabled = {**legacy, "stt_type": "BROWSER"}
+    assert normalized_interaction_config(enabled) == enabled
+    assert normalized_interaction_config({**enabled, "stt_type": "NONE"}) == legacy
+
+    try:
+        AgentInteractionConfig(stt_type="UNSUPPORTED")
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("An unsupported speech input mode was accepted.")
+
+
 def test_agent_runtime_snapshots_are_versioned_and_fail_closed() -> None:
     from app.application.agents.runs.snapshots import (
         AgentRuntimePolicy,
@@ -2931,7 +2959,12 @@ def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
     assert "Inline all CSS and JavaScript" in protocol
     assert "storage are unavailable in the preview" in protocol
     assert "If the user only asks for code or an explanation" in protocol
-    assert "authorized file-producing tool" in protocol
+    assert "use bash to create and export" in protocol
+    assert "/workspace/outputs/" in protocol
+    assert "artifacts[].download_url" in protocol
+    assert "PDF, Word, spreadsheet or presentation Skills" in protocol
+    assert "only when the user requests those formats" in protocol
+    assert "authorized file-producing tool" not in protocol
     assert messages[-1]["content"] == "Create an interactive page."
 
 
@@ -2940,6 +2973,7 @@ def main() -> None:
     test_effective_agent_permission_matrix()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()
+    test_browser_speech_input_config_is_optional_and_round_trips()
     test_agent_runtime_snapshots_are_versioned_and_fail_closed()
     test_agent_tool_binding_requires_current_available_policy()
     test_console_tool_access_also_allows_public_chat_but_not_api()

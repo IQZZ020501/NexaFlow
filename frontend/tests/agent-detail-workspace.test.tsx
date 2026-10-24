@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { useState } from "react"
-import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { cleanup } from "@testing-library/react"
 
 import {
@@ -548,7 +548,7 @@ describe("AgentDetailWorkspace header and navigation", () => {
 })
 
 describe("AgentDetailWorkspace preview", () => {
-  test("submits a follow-up with Enter while keeping cancellation available", () => {
+  test("switches between stopping and sending as the running draft changes", async () => {
     let submitted = 0
     let cancelled = false
     renderPage(
@@ -565,12 +565,24 @@ describe("AgentDetailWorkspace preview", () => {
     )
     const textarea = screen.getByPlaceholderText("向 Agent 提问...")
     expect((textarea as HTMLTextAreaElement).disabled).toBe(false)
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "追加后续任务" }) === null
+    ).toBe(true)
     fireEvent.change(textarea, { target: { value: "Then summarize" } })
+    expect(
+      screen.queryByRole("button", { name: "停止生成" }) === null
+    ).toBe(true)
+    expect(screen.getByRole("button", { name: "追加后续任务" })).toBeTruthy()
     fireEvent.keyDown(textarea, { key: "Enter" })
     expect(submitted).toBe(1)
-    expect(screen.queryByText("追加后续任务")).toBeNull()
-    expect(screen.getByRole("button", { name: "追加后续任务" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "停止生成" }))
+    fireEvent.change(textarea, { target: { value: " \n " } })
+    expect(
+      screen.queryByRole("button", { name: "追加后续任务" }) === null
+    ).toBe(true)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "停止生成" }))
+    })
     expect(cancelled).toBe(true)
   })
 
@@ -1634,13 +1646,16 @@ describe("AgentDetailWorkspace preview", () => {
     expect(submitted).toBeTruthy()
   })
 
-  test("submit button is disabled without a question or while busy", () => {
+  test("submit button is disabled without a question and allows running follow-ups", () => {
     renderPage(<Harness activeView="settings" />)
     expect(
       (screen.getByLabelText("发送问题") as HTMLButtonElement).disabled
     ).toBe(true)
     renderPage(<Harness activeView="settings" question="q" isAsking />)
-    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    expect(
+      (screen.getByLabelText("追加后续任务") as HTMLButtonElement).disabled
+    ).toBe(false)
   })
 
   test("ask controls are disabled for dirty or disabled agents", () => {
@@ -2763,8 +2778,8 @@ describe("AgentDetailWorkspace edge behavior", () => {
     )
     await waitFor(() =>
       expect(
-        view.container.querySelectorAll('[aria-label="复制"]').length
-      ).toBe(2)
+        view.container.querySelector('[aria-label="复制失败"]')
+      ).toBeTruthy()
     )
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,

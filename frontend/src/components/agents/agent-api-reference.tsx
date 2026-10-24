@@ -2,10 +2,8 @@
 
 import * as React from "react"
 import {
-  CheckIcon,
   ChevronRightIcon,
   Code2Icon,
-  CopyIcon,
   KeyRoundIcon,
   LockKeyholeIcon,
   ShieldCheckIcon,
@@ -13,9 +11,9 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import { useLanguage } from "@/contexts/language-provider"
 import { apiUrl } from "@/lib/api-client"
-import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
@@ -82,36 +80,6 @@ function resolveBaseUrl(origin: string, basePath: string) {
   if (/^https?:\/\//i.test(configuredPath)) return configuredPath
   if (!/^https?:\/\//i.test(origin)) return configuredPath
   return new URL(configuredPath, origin).toString().replace(/\/$/, "")
-}
-
-/**
- * Renders an accessible copy control with inline success feedback.
- *
- * @param value - Text copied to the clipboard
- * @param label - Accessible label for the copy action
- */
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const { t } = useLanguage()
-  const [copied, setCopied] = React.useState(false)
-
-  async function handleCopy() {
-    await copyText(value)
-    setCopied(true)
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="xs"
-      aria-label={label}
-      title={label}
-      onClick={() => void handleCopy()}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-      {t(copied ? "已复制" : "复制")}
-    </Button>
-  )
 }
 
 /**
@@ -321,7 +289,12 @@ function CodeSamples({ samples }: { samples: CodeSample[] }) {
             </button>
           ))}
         </div>
-        <CopyButton value={activeSample.code} label={t("复制代码")} />
+        <CopyButton
+          t={t}
+          showLabel
+          value={activeSample.code}
+          label={t("复制代码")}
+        />
       </div>
       <pre
         role="tabpanel"
@@ -406,6 +379,8 @@ function EndpointSection({ endpoint }: { endpoint: EndpointDocumentation }) {
         <div className="overflow-hidden rounded-lg border bg-zinc-950 text-zinc-100">
           <div className="flex justify-end border-b border-white/10 px-2 py-1.5">
             <CopyButton
+              t={t}
+              showLabel
               value={endpoint.responseExample}
               label={t("复制代码")}
             />
@@ -848,7 +823,12 @@ export function AgentApiReference({
                     {baseUrl}
                   </code>
                   <span className="shrink-0 border-l pl-1.5">
-                    <CopyButton value={baseUrl} label={t("复制地址")} />
+                    <CopyButton
+                      t={t}
+                      showLabel
+                      value={baseUrl}
+                      label={t("复制地址")}
+                    />
                   </span>
                 </div>
               </div>
@@ -878,6 +858,8 @@ export function AgentApiReference({
                     {t("请求头")}
                   </span>
                   <CopyButton
+                    t={t}
+                    showLabel
                     value="Authorization: Bearer <API_KEY>"
                     label={t("复制代码")}
                   />

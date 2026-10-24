@@ -9,6 +9,8 @@ export type AppType = "agent" | "workflow"
 export type AgentInteractionConfig = {
   prologue: string
   tts_type: "NONE" | "BROWSER"
+  /** Optional for profiles created before browser speech input was added. */
+  stt_type?: "NONE" | "BROWSER"
   file_upload: boolean
   file_upload_setting: {
     file_upload_type: Array<"document" | "image" | "audio">

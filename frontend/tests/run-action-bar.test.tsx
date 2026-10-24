@@ -11,8 +11,15 @@ import type { TFunction } from "@/i18n"
 import { renderPage } from "./helpers/dom"
 
 const t = ((key: string) => key) as TFunction
+const originalClipboard = navigator.clipboard
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  Object.defineProperty(navigator, "clipboard", {
+    value: originalClipboard,
+    configurable: true,
+  })
+})
 
 describe("RunActionBar", () => {
   test("localizes saved feedback confirmations", () => {
@@ -52,7 +59,6 @@ describe("RunActionBar", () => {
 
   test("orders actions consistently and exposes feedback selection", async () => {
     const feedback: Array<"positive" | "negative" | null> = []
-    const originalClipboard = navigator.clipboard
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: async () => undefined },
       configurable: true,
@@ -90,11 +96,84 @@ describe("RunActionBar", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy()
     )
+  })
 
+  test("restores the copy action after showing a confirmation", async () => {
     Object.defineProperty(navigator, "clipboard", {
-      value: originalClipboard,
+      value: { writeText: async () => undefined },
       configurable: true,
     })
+    renderPage(
+      <RunActionBar
+        result="Answer"
+        onRegenerate={() => undefined}
+        onFeedback={() => undefined}
+        t={t}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "复制" }))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy()
+    )
+    await waitFor(
+      () => expect(screen.getByRole("button", { name: "复制" })).toBeTruthy(),
+      { timeout: 2500 }
+    )
+    expect(screen.getByRole("status").textContent).toBe("")
+  })
+
+  test("shows a failed copy and allows retrying", async () => {
+    let attempts = 0
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async () => {
+          attempts++
+          if (attempts === 1) throw new Error("Clipboard denied")
+        },
+      },
+      configurable: true,
+    })
+    renderPage(
+      <RunActionBar
+        result="Answer"
+        onRegenerate={() => undefined}
+        onFeedback={() => undefined}
+        t={t}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "复制" }))
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("复制失败")
+    )
+    fireEvent.click(screen.getByRole("button", { name: "复制失败" }))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy()
+    )
+    expect(attempts).toBe(2)
+  })
+
+  test("does not keep a confirmation when the result changes", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: async () => undefined },
+      configurable: true,
+    })
+    const props = {
+      onRegenerate: () => undefined,
+      onFeedback: () => undefined,
+      t,
+    }
+    const view = renderPage(<RunActionBar {...props} result="First answer" />)
+
+    fireEvent.click(screen.getByRole("button", { name: "复制" }))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy()
+    )
+    view.rerender(<RunActionBar {...props} result="Next answer" />)
+
+    expect(screen.getByRole("button", { name: "复制" })).toBeTruthy()
+    expect(screen.getByRole("status").textContent).toBe("")
   })
 
   test("shows an accessible feedback tooltip", async () => {

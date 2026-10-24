@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   FolderIcon,
   FolderOpenIcon,
+  LoaderCircleIcon,
   MoreHorizontalIcon,
   PanelLeftCloseIcon,
   PencilIcon,
@@ -324,8 +325,18 @@ export function ResourceFolderTree({
               >
                 {t("取消")}
               </Button>
-              <Button type="submit" disabled={isSaving || !dialog?.name.trim()}>
-                {t("保存")}
+              <Button
+                type="submit"
+                disabled={isSaving || !dialog?.name.trim()}
+                aria-busy={isSaving}
+              >
+                {isSaving ? (
+                  <LoaderCircleIcon
+                    aria-hidden="true"
+                    className="animate-spin motion-reduce:animate-none"
+                  />
+                ) : null}
+                {t(isSaving ? "保存中" : "保存")}
               </Button>
             </DialogFooter>
           </form>

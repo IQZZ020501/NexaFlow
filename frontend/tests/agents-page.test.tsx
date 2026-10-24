@@ -15,7 +15,8 @@ import {
   mergeInitialAgentRun,
   type AgentFormState,
 } from "@/components/agents/agents-page"
-import { LanguageProvider } from "@/contexts/language-provider"
+import { LanguageProvider, useLanguage } from "@/contexts/language-provider"
+import { LANGUAGE_STORAGE_KEY, translate } from "@/i18n"
 import type {
   Agent,
   AgentRun,
@@ -1228,6 +1229,91 @@ describe("AgentsPage list view", () => {
 })
 
 describe("AgentsPage create flow", () => {
+  test("localizes duplicate-name errors after changing the language", async () => {
+    function LanguageSwitcher() {
+      const { setLanguage } = useLanguage()
+      return (
+        <>
+          <button type="button" onClick={() => setLanguage("en")}>
+            English
+          </button>
+          <button type="button" onClick={() => setLanguage("zh-Hant")}>
+            繁體中文
+          </button>
+        </>
+      )
+    }
+
+    const previousLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY)
+    localStorage.removeItem(LANGUAGE_STORAGE_KEY)
+    routes = [
+      ...baseRoutes([]),
+      {
+        method: "POST",
+        pathname: `/api/v1/workspaces/${WS}/agents`,
+        exact: true,
+        respond: () =>
+          jsonResponse({ detail: "Agent name already exists." }, 409),
+      },
+    ]
+    try {
+      renderPage(
+        <>
+          <LanguageSwitcher />
+          <AgentsPage />
+        </>
+      )
+      await waitFor(() => expect(screen.getByText("还没有应用")).toBeTruthy())
+
+      for (const [language, switchLabel, expected] of [
+        ["zh-Hans", null, "应用名称已存在"],
+        ["en", "English", "App name already exists"],
+        ["zh-Hant", "繁體中文", "應用名稱已存在"],
+      ] as const) {
+        if (switchLabel) {
+          fireEvent.click(screen.getByRole("button", { name: switchLabel }))
+        }
+        fireEvent.click(
+          screen.getAllByRole("button", {
+            name: translate(language, "新建应用"),
+          })[0]
+        )
+        fireEvent.click(
+          screen.getByText(
+            translate(
+              language,
+              "智能对话助手，自动规划并使用模型、知识和工具。"
+            )
+          )
+        )
+        const dialog = screen.getByRole("dialog")
+        const name = within(dialog).getByLabelText(
+          translate(language, "Agent 名称")
+        )
+        fireEvent.change(name, { target: { value: "Existing application" } })
+        notifyCalls.length = 0
+        fireEvent.submit(name.closest("form")!)
+        await waitFor(() =>
+          expect(notifyCalls).toContainEqual({
+            kind: "error",
+            message: expected,
+          })
+        )
+        fireEvent.click(
+          within(dialog).getByRole("button", {
+            name: translate(language, "取消"),
+          })
+        )
+      }
+    } finally {
+      if (previousLanguage === null) {
+        localStorage.removeItem(LANGUAGE_STORAGE_KEY)
+      } else {
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, previousLanguage)
+      }
+    }
+  })
+
   test("creates an agent from the type chooser dialog", async () => {
     let createdBody = ""
     let createdMethod = ""
@@ -2826,15 +2912,21 @@ describe("AgentsPage run flows", () => {
     fireEvent.change(textarea, { target: { value: "Start the task" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
     await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
     fireEvent.change(textarea, { target: { value: "Use Chinese" } })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
     fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(1))
     await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
     expect(screen.getByText("Use Chinese")).toBeTruthy()
     fireEvent.change(textarea, { target: { value: "Then summarize" } })
-    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    fireEvent.click(screen.getByLabelText("追加后续任务"))
     await waitFor(() => expect(inputs).toHaveLength(2))
     await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
     expect(inputs.map((input) => input.mode)).toEqual([
       "follow_up",
       "follow_up",

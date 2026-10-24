@@ -31,10 +31,19 @@ export type PublicWorkflowConversation = {
 export type ExternalWorkflowProgress = {
   id: string
   node_id: string
+  node_title?: string | null
   node_type: WorkflowNodeType
-  status: "running" | "awaiting_input" | "succeeded" | "failed" | "skipped"
+  status:
+    | "running"
+    | "awaiting_input"
+    | "awaiting_child"
+    | "succeeded"
+    | "failed"
+    | "skipped"
   error: string | null
   duration_ms: number | null
+  inputs?: Record<string, unknown>
+  outputs?: Record<string, unknown>
 }
 
 export type ExternalWorkflowRun = {
@@ -157,10 +166,7 @@ export function listPublicWorkflowRuns(
     total: number
     offset: number
     limit: number
-  }>(
-    path(workflowId, `/runs?${params.toString()}`),
-    { token }
-  )
+  }>(path(workflowId, `/runs?${params.toString()}`), { token })
 }
 
 /**

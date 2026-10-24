@@ -3,15 +3,12 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
-  ArrowUpIcon,
   BotIcon,
   BrainIcon,
-  CheckIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   CircleAlertIcon,
   CircleXIcon,
-  CopyIcon,
   DatabaseIcon,
   DownloadIcon,
   EllipsisIcon,
@@ -23,7 +20,6 @@ import {
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
-  SquareIcon,
   SearchIcon,
   UserIcon,
   XIcon,
@@ -34,9 +30,11 @@ import {
   RunActionBar,
 } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
+import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import { IconButton } from "@/components/ui/icon-button"
 import {
   DropdownMenu,
@@ -120,35 +118,6 @@ import {
 type PublicAgentChatProps = {
   agentId: string
   initialConversationId?: string | null
-}
-
-function CopyMessageButton({ value }: { value: string }) {
-  const { t } = useLanguage()
-  const [copied, setCopied] = React.useState(false)
-  const label = t(copied ? "已复制" : "复制")
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className="text-muted-foreground"
-      aria-label={label}
-      title={label}
-      onClick={handleCopy}
-    >
-      {copied ? <CheckIcon /> : <CopyIcon />}
-    </Button>
-  )
 }
 
 function ReasoningBlock({ reasoning }: { reasoning: string }) {
@@ -1899,7 +1868,7 @@ export function PublicAgentChat({
     cancelRequestedRef.current = true
     if (!runId) return
     cancelRequestedRef.current = false
-    void cancelActiveRun(runId, activePlaceholderIdRef.current, controller)
+    return cancelActiveRun(runId, activePlaceholderIdRef.current, controller)
   }
 
   if (isInitializing) {
@@ -2138,7 +2107,7 @@ export function PublicAgentChat({
                                 </div>
                               )}
                               <div className="flex items-start gap-1">
-                                <CopyMessageButton value={run.question} />
+                                <CopyButton t={t} value={run.question} />
                                 {canEdit && !isEditing ? (
                                   <Button
                                     type="button"
@@ -2204,7 +2173,7 @@ export function PublicAgentChat({
                                   <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
                                     {input.content}
                                   </div>
-                                  <CopyMessageButton value={input.content} />
+                                  <CopyButton t={t} value={input.content} />
                                 </div>
                               </React.Fragment>
                             ))}
@@ -2316,7 +2285,7 @@ export function PublicAgentChat({
                                 <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
                                   {input.content}
                                 </div>
-                                <CopyMessageButton value={input.content} />
+                                <CopyButton t={t} value={input.content} />
                               </div>
                             ))}
                         </article>
@@ -2436,56 +2405,12 @@ export function PublicAgentChat({
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {isSending && question.trim() ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="rounded-full text-muted-foreground"
-                        aria-label={t("停止生成")}
-                        title={t("停止生成")}
-                        onClick={handleCancelAsk}
-                      >
-                        <SquareIcon
-                          className="size-4.5 fill-current"
-                          strokeWidth={0}
-                        />
-                      </Button>
-                    ) : null}
-                    <Button
-                      type={isSending && !question.trim() ? "button" : "submit"}
-                      size="icon"
-                      className="rounded-full"
-                      aria-label={t(
-                        isSending
-                          ? question.trim()
-                            ? "追加后续任务"
-                            : "停止生成"
-                          : "发送问题"
-                      )}
-                      title={t(
-                        isSending
-                          ? question.trim()
-                            ? "追加后续任务"
-                            : "停止生成"
-                          : "发送问题"
-                      )}
-                      onClick={
-                        isSending && !question.trim()
-                          ? handleCancelAsk
-                          : undefined
-                      }
-                      disabled={!isSending && !question.trim()}
-                    >
-                      {isSending && !question.trim() ? (
-                        <SquareIcon
-                          className="size-4.5 fill-current"
-                          strokeWidth={0}
-                        />
-                      ) : (
-                        <ArrowUpIcon />
-                      )}
-                    </Button>
+                    <AgentChatSubmitButton
+                      isRunning={isSending}
+                      hasInput={Boolean(question.trim())}
+                      onStop={handleCancelAsk}
+                      t={t}
+                    />
                   </div>
                 </div>
               </form>

@@ -350,6 +350,22 @@ def ensure_local_opensandbox(values: dict[str, str]) -> tuple[dict[str, str], bo
             ],
             env=configure_env,
         )
+    else:
+        content = OPEN_SANDBOX_CONFIG.read_text(encoding="utf-8")
+        # Upgrade only the known generated default; preserve operator settings.
+        if content.startswith("# Generated for opensandbox-server==0.2.3;"):
+            updated = re.sub(
+                r"(?m)^max_sandbox_timeout_seconds = 360$",
+                "max_sandbox_timeout_seconds = 1860",
+                content,
+                count=1,
+            )
+            if updated != content:
+                _write_private(OPEN_SANDBOX_CONFIG, updated)
+                log(
+                    "[setup] Updated the legacy OpenSandbox timeout to 1860 seconds; "
+                    "restart OpenSandbox if it is already running."
+                )
     return read_env(ENV_FILE), True
 
 

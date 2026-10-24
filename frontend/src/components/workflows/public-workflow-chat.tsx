@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import {
+  ArrowUpIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDotDashedIcon,
@@ -11,9 +13,9 @@ import {
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
-  PaperclipIcon,
-  PlayIcon,
+  PlusIcon,
   SearchIcon,
+  UserIcon,
   WorkflowIcon,
   XIcon,
 } from "lucide-react"
@@ -28,9 +30,11 @@ import {
   AgentAttachmentList,
   appendAttachmentFiles,
   RunAttachmentCards,
+  transferredFiles,
 } from "@/components/agents/agent-attachment-list"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
+import { SpeechInputButton } from "@/components/ui/speech-input-button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,8 +49,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { IconButton } from "@/components/ui/icon-button"
+import { MessageTimestamp } from "@/components/agents/message-timestamp"
 import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-form"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
@@ -93,6 +97,160 @@ function conversationLabel(inputs: Record<string, unknown>, fallback: string) {
   )
 }
 
+function conversationResult(
+  outputs: Record<string, unknown>,
+  fallback: string
+) {
+  const result = workflowSpeechText(outputs)
+  return result && result !== "{}" ? result : fallback
+}
+
+type PublicWorkflowProgress = ExternalWorkflowRun["progress"][number]
+
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  )
+}
+
+function PublicWorkflowNodeDetails({
+  item,
+  label,
+  statusIcon,
+  statusDetail,
+}: {
+  item: PublicWorkflowProgress
+  label: string
+  statusIcon: React.ReactNode
+  statusDetail: string
+}) {
+  const { t } = useLanguage()
+  const inputs = item.inputs ?? {}
+  const outputs = item.outputs ?? {}
+
+  return (
+    <details className="group rounded-md border bg-background/60">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-2 transition-colors outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&::-webkit-details-marker]:hidden">
+        {statusIcon}
+        <span className="min-w-0 flex-1 truncate text-xs" title={item.node_id}>
+          {label}
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {statusDetail}
+        </span>
+        <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="grid gap-3 border-t bg-muted/20 px-2.5 py-3">
+        {item.error ? (
+          <section className="grid gap-1.5">
+            <h4 className="text-xs font-medium text-destructive">
+              {t("错误")}
+            </h4>
+            <p className="rounded-md bg-destructive/10 px-2.5 py-2 text-xs leading-5 break-words whitespace-pre-wrap text-destructive">
+              {workflowErrorMessage(item.error, t)}
+            </p>
+          </section>
+        ) : null}
+        <section className="grid gap-1.5">
+          <h4 className="text-xs font-medium text-muted-foreground">
+            {t("输入内容")}
+          </h4>
+          <JsonBlock value={inputs} />
+        </section>
+        <section className="grid gap-1.5">
+          <h4 className="text-xs font-medium text-muted-foreground">
+            {t("输出内容")}
+          </h4>
+          {Object.keys(outputs).length ? (
+            <JsonBlock value={outputs} />
+          ) : (
+            <p className="rounded-md border bg-background px-2.5 py-2 text-xs text-muted-foreground">
+              {t("暂无输出内容")}
+            </p>
+          )}
+        </section>
+      </div>
+    </details>
+  )
+}
+
+function PublicWorkflowExecutionProcess({ run }: { run: ExternalWorkflowRun }) {
+  const { t } = useLanguage()
+  const [isOpen, setIsOpen] = React.useState(true)
+  const progress = run.progress
+
+  function title(item: PublicWorkflowProgress) {
+    return item.node_title?.trim() || workflowNodeLabel(item.node_type, t)
+  }
+
+  function detail(item: PublicWorkflowProgress) {
+    if (item.status === "running") return t("运行中")
+    if (item.status === "awaiting_input") return t("等待填写表单")
+    if (item.status === "awaiting_child") return t("等待执行")
+    if (item.status === "failed") {
+      return item.error ? workflowErrorMessage(item.error, t) : t("运行失败")
+    }
+    if (item.status === "skipped") return t("已跳过")
+    return item.duration_ms === null || item.duration_ms === undefined
+      ? t("完成")
+      : t("{duration} 毫秒", { duration: item.duration_ms })
+  }
+
+  function statusIcon(item: PublicWorkflowProgress) {
+    if (item.status === "running") {
+      return <LoaderCircleIcon className="size-4 animate-spin text-sky-600" />
+    }
+    if (item.status === "failed") {
+      return <CircleAlertIcon className="size-4 text-destructive" />
+    }
+    if (["skipped", "awaiting_input", "awaiting_child"].includes(item.status)) {
+      return <CircleDotDashedIcon className="size-4 text-muted-foreground" />
+    }
+    return <CircleCheckIcon className="size-4 text-emerald-600" />
+  }
+
+  if (
+    progress.length === 0 &&
+    ["succeeded", "failed", "cancelled"].includes(run.status)
+  ) {
+    return null
+  }
+
+  return (
+    <details
+      className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+      open={isOpen}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        <WorkflowIcon className="size-4" />
+        <span className="flex-1">{t("执行过程")}</span>
+        <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-2 space-y-1.5 border-l pl-3">
+        {progress.length === 0 ? (
+          <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
+            <LoaderCircleIcon className="size-4 animate-spin" />
+            {t(run.status === "queued" ? "等待执行" : "正在生成回答")}
+          </div>
+        ) : (
+          progress.map((item) => (
+            <PublicWorkflowNodeDetails
+              key={item.id}
+              item={item}
+              label={title(item)}
+              statusIcon={statusIcon(item)}
+              statusDetail={detail(item)}
+            />
+          ))
+        )}
+      </div>
+    </details>
+  )
+}
+
 function updateRun(
   runs: ExternalWorkflowRun[],
   runId: string,
@@ -131,6 +289,10 @@ function updateRun(
     }
     return {
       ...event.run,
+      outputs:
+        Object.keys(event.run.outputs).length > 0
+          ? event.run.outputs
+          : run.outputs,
       progress: event.run.progress.length ? event.run.progress : run.progress,
     }
   })
@@ -174,11 +336,11 @@ function ConversationHistory({
   const filteredConversations = React.useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
     if (!normalized) return conversations
-    return conversations.filter((conversation) =>
-      conversationLabel(conversation.inputs, "")
-        .toLocaleLowerCase()
-        .includes(normalized)
-    )
+    return conversations.filter((conversation) => {
+      const question = conversationLabel(conversation.inputs, "")
+      const result = conversationResult(conversation.outputs, "")
+      return `${question} ${result}`.toLocaleLowerCase().includes(normalized)
+    })
   }, [conversations, query])
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -206,11 +368,11 @@ function ConversationHistory({
           {t("新建对话")}
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <p className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
+      <div className="flex min-h-0 flex-1 flex-col px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
           <HistoryIcon className="size-3.5" />
-          {t("历史记录")}
-        </p>
+          <span className="flex-1">{t("历史记录")}</span>
+        </div>
         <div className="relative mb-2">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -221,85 +383,87 @@ function ConversationHistory({
             aria-label={t("搜索历史记录")}
           />
         </div>
-        {filteredConversations.map((item) => (
-          <div
-            key={item.conversation_id}
-            className={`group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
-          >
-            <button
-              type="button"
-              className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-current={
-                conversationId === item.conversation_id ? "page" : undefined
-              }
-              onClick={() => onSelect(item.conversation_id)}
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+          {filteredConversations.map((item) => (
+            <div
+              key={item.conversation_id}
+              className={`group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
             >
-              <span className="block truncate text-sm font-medium">
-                {conversationLabel(item.inputs, t("工作流运行"))}
-              </span>
-              <span className="mt-1 block truncate text-xs text-muted-foreground">
-                {t("运行 {count} 次", { count: item.run_count })}
-              </span>
-            </button>
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="size-8 shrink-0 rounded-md p-0 text-muted-foreground sm:size-5"
-                  aria-label={t("更多")}
-                  title={t("更多")}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {deletingConversationId === item.conversation_id ||
-                  exportingConversationId === item.conversation_id ? (
-                    <LoaderCircleIcon className="animate-spin" />
-                  ) : (
-                    <EllipsisIcon />
-                  )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="bottom"
-                align="center"
-                sideOffset={4}
-                className="w-36 min-w-0 rounded-md p-1"
+              <button
+                type="button"
+                className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-current={
+                  conversationId === item.conversation_id ? "page" : undefined
+                }
+                onClick={() => onSelect(item.conversation_id)}
               >
-                <DropdownMenuItem
-                  className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
-                  disabled={Boolean(
-                    deletingConversationId || exportingConversationId
-                  )}
-                  onSelect={() => onExport(item.conversation_id)}
+                <span className="block truncate text-sm font-medium">
+                  {conversationLabel(item.inputs, t("工作流运行"))}
+                </span>
+                <span className="mt-1 block truncate text-xs text-muted-foreground">
+                  {conversationResult(item.outputs, t("等待回答"))}
+                </span>
+              </button>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="size-8 shrink-0 rounded-md p-0 text-muted-foreground sm:size-5"
+                    aria-label={t("更多")}
+                    title={t("更多")}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {deletingConversationId === item.conversation_id ||
+                    exportingConversationId === item.conversation_id ? (
+                      <LoaderCircleIcon className="animate-spin" />
+                    ) : (
+                      <EllipsisIcon />
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="bottom"
+                  align="center"
+                  sideOffset={4}
+                  className="w-36 min-w-0 rounded-md p-1"
                 >
-                  <DownloadIcon />
-                  {t("导出对话")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="h-8 px-2 py-1 text-xs"
-                  variant="destructive"
-                  disabled={Boolean(
-                    deletingConversationId || exportingConversationId
-                  )}
-                  onSelect={() => onDelete(item.conversation_id)}
-                >
-                  {t("删除对话")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ))}
-        {!conversations.length ? (
-          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            {t("暂无历史记录")}
-          </p>
-        ) : !filteredConversations.length ? (
-          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-            {t("暂无匹配的历史记录")}
-          </p>
-        ) : null}
+                  <DropdownMenuItem
+                    className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
+                    disabled={Boolean(
+                      deletingConversationId || exportingConversationId
+                    )}
+                    onSelect={() => onExport(item.conversation_id)}
+                  >
+                    <DownloadIcon />
+                    {t("导出对话")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="h-8 px-2 py-1 text-xs"
+                    variant="destructive"
+                    disabled={Boolean(
+                      deletingConversationId || exportingConversationId
+                    )}
+                    onSelect={() => onDelete(item.conversation_id)}
+                  >
+                    {t("删除对话")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ))}
+          {!conversations.length ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              {t("暂无历史记录")}
+            </p>
+          ) : !filteredConversations.length ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              {t("暂无匹配的历史记录")}
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -333,6 +497,7 @@ export function PublicWorkflowChat({
   )
   const [runs, setRuns] = React.useState<ExternalWorkflowRun[]>([])
   const [question, setQuestion] = React.useState("")
+  const [composerGeneration, setComposerGeneration] = React.useState(0)
   const [files, setFiles] = React.useState<File[]>([])
   const [loading, setLoading] = React.useState(true)
   const [runsLoading, setRunsLoading] = React.useState(false)
@@ -355,6 +520,7 @@ export function PublicWorkflowChat({
   >(null)
   const [error, setError] = React.useState<string | null>(null)
   const streamRef = React.useRef<AbortController | null>(null)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const conversationScrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => () => streamRef.current?.abort(), [])
@@ -367,10 +533,7 @@ export function PublicWorkflowChat({
         if (!active) return
         setProfile(nextProfile)
         setConversations(nextConversations.items)
-        const nextId =
-          initialConversationId ??
-          nextConversations.items[0]?.conversation_id ??
-          null
+        const nextId = initialConversationId
         setRunsLoading(Boolean(nextId))
         setConversationId(nextId)
       })
@@ -401,9 +564,12 @@ export function PublicWorkflowChat({
   }, [runs, runsLoading])
 
   function selectConversation(nextId: string | null) {
+    setComposerGeneration((current) => current + 1)
     streamRef.current?.abort()
+    setRunning(false)
     setRuns([])
     setFiles([])
+    setQuestion("")
     setRunsLoading(Boolean(nextId))
     setConversationId(nextId)
     setError(null)
@@ -664,6 +830,7 @@ export function PublicWorkflowChat({
   ) {
     if (!token || !run.pending_form || submittingFormRunId) return
     setSubmittingFormRunId(run.id)
+    setRunning(true)
     setError(null)
     try {
       const resumed = await submitPublicWorkflowForm(
@@ -706,14 +873,18 @@ export function PublicWorkflowChat({
         setError(getErrorMessage(reason, t))
       }
     } finally {
+      if (streamRef.current) streamRef.current = null
       setSubmittingFormRunId(null)
+      setRunning(false)
     }
   }
 
-  if (loading || !profile) {
+  if (loading) {
     return (
-      <main className="flex min-h-dvh items-center justify-center p-6 text-sm text-muted-foreground">
-        {error ?? (
+      <main className="flex min-h-dvh items-center justify-center bg-muted/30 p-6 text-sm text-muted-foreground">
+        {error ? (
+          <div className="max-w-md text-center text-destructive">{error}</div>
+        ) : (
           <>
             <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
             {t("正在加载")}
@@ -722,6 +893,24 @@ export function PublicWorkflowChat({
       </main>
     )
   }
+
+  if (error && !profile) {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-muted/30 p-6">
+        <div className="max-w-md text-center">
+          <span className="mx-auto flex size-12 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
+            <CircleAlertIcon className="size-5" />
+          </span>
+          <h1 className="mt-4 text-lg font-semibold">
+            {t("无法打开公开对话")}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!profile) return null
 
   const historyProps = {
     profile,
@@ -734,43 +923,45 @@ export function PublicWorkflowChat({
     onExport: handleExportConversation,
     exportingConversationId,
   }
+  const visibleRuns = [...runs].reverse()
+  const hasPendingForm = runs.some((run) => run.status === "awaiting_input")
+  const composerDisabled = running || runsLoading || hasPendingForm
 
   return (
     <main
-      className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 md:h-svh md:grid-cols-[16rem_minmax(0,1fr)]"
+      className="grid h-dvh min-h-0 overflow-hidden bg-muted/20 lg:h-svh lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]"
       style={viewportStyle}
     >
-      <aside className="hidden min-h-0 border-r md:block">
+      <aside className="hidden min-h-0 border-r lg:block">
         <ConversationHistory {...historyProps} />
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col">
-        <header className="flex min-h-16 items-center gap-2 border-b bg-background px-3 pt-[env(safe-area-inset-top)] sm:gap-3 sm:px-6">
+        <header className="flex min-h-16 shrink-0 items-center gap-2 border-b bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:gap-3 sm:px-6">
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="lg:hidden"
             aria-label={t("打开历史记录")}
             title={t("打开历史记录")}
             onClick={() => setHistoryOpen(true)}
           >
             <MenuIcon />
           </Button>
-          <span className="hidden size-9 items-center justify-center rounded-lg bg-foreground text-background sm:flex md:hidden">
+          <span className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground sm:flex">
             <WorkflowIcon className="size-4" />
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-semibold">{profile.name}</h1>
             <p className="truncate text-xs text-muted-foreground">
-              {profile.description || t("工作流")}
+              {profile.description || t("公开对话")}
             </p>
           </div>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="md:hidden"
             aria-label={t("新建对话")}
             title={t("新建对话")}
             onClick={() => selectConversation(null)}
@@ -783,237 +974,263 @@ export function PublicWorkflowChat({
           ref={conversationScrollRef}
           className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
         >
-          <div className="mx-auto w-full max-w-3xl space-y-6 px-3 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:px-8 sm:pt-8 sm:pb-[calc(2rem+env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 sm:px-8 sm:py-8">
             {runsLoading ? (
-              <p className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                 <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
                 {t("正在加载")}
-              </p>
-            ) : runs.length ? (
-              runs.map((run) => (
-                <article
-                  key={run.id}
-                  className="space-y-3 rounded-lg border bg-background p-3 shadow-xs sm:p-4"
-                >
-                  <div className="flex justify-end">
-                    <div className="grid max-w-[85%] justify-items-end gap-1">
-                      <RunAttachmentCards
-                        attachments={run.inputs.files}
-                        t={t}
-                      />
-                      <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                        {typeof run.inputs.question === "string" &&
-                        run.inputs.question.trim()
-                          ? run.inputs.question
-                          : t("工作流运行")}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold">{t("工作流运行")}</p>
-                    <Badge
-                      variant={
-                        run.status === "failed" ? "destructive" : "outline"
-                      }
-                    >
-                      {t(
-                        run.status === "succeeded"
-                          ? "运行成功"
-                          : run.status === "failed"
-                            ? "运行失败"
-                            : run.status === "awaiting_input"
-                              ? "等待填写表单"
-                              : "运行中"
-                      )}
-                    </Badge>
-                  </div>
-                  {run.progress.length ? (
-                    <section>
-                      <p className="mb-2 text-xs font-medium text-muted-foreground">
-                        {t("节点执行记录")}
-                      </p>
-                      <div className="divide-y rounded-md border">
-                        {run.progress.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex items-center gap-2 px-3 py-2 text-sm"
-                          >
-                            {item.status === "failed" ? (
-                              <CircleAlertIcon className="size-4 text-destructive" />
-                            ) : item.status === "succeeded" ? (
-                              <CircleCheckIcon className="size-4 text-emerald-600" />
-                            ) : ["skipped", "awaiting_input"].includes(
-                                item.status
-                              ) ? (
-                              <CircleDotDashedIcon className="size-4 text-muted-foreground" />
-                            ) : (
-                              <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
-                            )}
-                            <span
-                              className="min-w-0 flex-1 truncate"
-                              title={item.node_id}
-                            >
-                              {workflowNodeLabel(item.node_type, t)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
-                  {run.status === "awaiting_input" && run.pending_form ? (
-                    <WorkflowRuntimeForm
-                      key={run.pending_form.runtime_node_id}
-                      form={run.pending_form}
-                      submitting={submittingFormRunId === run.id}
-                      onSubmit={(data) => handleFormSubmit(run, data)}
-                    />
-                  ) : null}
-                  {typeof run.outputs.result === "string" ||
-                  run.status === "succeeded" ? (
-                    <section>
-                      <p className="mb-2 text-xs font-medium text-muted-foreground">
-                        {t("运行结果")}
-                      </p>
-                      <MarkdownContent
-                        content={workflowSpeechText(run.outputs)}
-                        className="text-sm leading-6"
-                      />
-                      {run.status === "succeeded" &&
-                      workflowSpeechText(run.outputs) ? (
-                        <RunActionBar
-                          result={workflowSpeechText(run.outputs)}
-                          feedback={run.feedback}
-                          regenerateDisabled={running || runsLoading}
-                          regenerating={regeneratingRunId === run.id}
-                          feedbackPending={feedbackPendingRunId === run.id}
-                          onRegenerate={() => void handleRegenerateRun(run.id)}
-                          onFeedback={(value) =>
-                            void handleRunFeedback(run.id, value)
-                          }
-                          t={t}
-                        />
-                      ) : null}
-                    </section>
-                  ) : null}
-                  {run.error ? (
-                    <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                      {workflowErrorMessage(run.error, t)}
-                    </p>
-                  ) : null}
-                </article>
-              ))
-            ) : profile.interaction_config.prologue ? (
-              <div className="rounded-lg border bg-background p-4 text-sm leading-6 whitespace-pre-wrap shadow-xs">
-                {profile.interaction_config.prologue}
               </div>
-            ) : null}
-
-            <form
-              className="rounded-lg border bg-background p-3 shadow-xs sm:p-4"
-              onSubmit={handleRun}
-            >
-              <div className="mb-4">
-                <h2 className="text-sm font-semibold">
-                  {profile.interaction_config.user_input_title ||
-                    t("运行工作流")}
+            ) : visibleRuns.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center text-center">
+                <span className="flex size-14 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                  <WorkflowIcon className="size-6" />
+                </span>
+                <h2 className="mt-4 text-base font-semibold">
+                  {t("开始新对话")}
                 </h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t("问题将作为开始节点的 question 输出注入已发布版本。")}
+                <p className="mt-2 max-w-md text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
+                  {profile.description ||
+                    profile.interaction_config.prologue ||
+                    t("输入问题，工作流会按照已发布配置执行。")}
                 </p>
               </div>
-              <div className="grid gap-4">
-                <label
-                  className="grid gap-1.5 text-sm font-medium"
-                  htmlFor="workflow-chat-question"
-                >
-                  {t("用户问题")}
-                  <textarea
-                    id="workflow-chat-question"
-                    rows={4}
-                    className="min-h-24 resize-y rounded-md border bg-background px-3 py-2 text-base leading-6 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
-                    value={question}
-                    onChange={(event) => setQuestion(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        (event.metaKey || event.ctrlKey)
-                      ) {
-                        event.preventDefault()
-                        event.currentTarget.form?.requestSubmit()
-                      }
-                    }}
-                  />
-                </label>
+            ) : (
+              <div className="space-y-6 sm:space-y-8">
+                {visibleRuns.map((run) => {
+                  const questionValue =
+                    typeof run.inputs.question === "string" &&
+                    run.inputs.question.trim()
+                      ? run.inputs.question
+                      : t("工作流运行")
+                  const result = workflowSpeechText(run.outputs) || ""
+                  const hasResult = Boolean(result.trim() && result !== "{}")
+                  return (
+                    <article key={run.id} className="space-y-4">
+                      <div className="flex items-start justify-end gap-2">
+                        <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
+                          <RunAttachmentCards
+                            attachments={run.inputs.files}
+                            t={t}
+                          />
+                          <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+                            {questionValue}
+                          </div>
+                          <CopyButton t={t} value={questionValue} />
+                        </div>
+                        <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
+                          <UserIcon className="size-3.5" />
+                        </span>
+                      </div>
+
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+                          <WorkflowIcon className="size-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+                            <PublicWorkflowExecutionProcess run={run} />
+                            {run.status === "awaiting_input" &&
+                            run.pending_form ? (
+                              <WorkflowRuntimeForm
+                                key={run.pending_form.runtime_node_id}
+                                form={run.pending_form}
+                                submitting={submittingFormRunId === run.id}
+                                onSubmit={(data) => handleFormSubmit(run, data)}
+                              />
+                            ) : null}
+                            {hasResult ? (
+                              <MarkdownContent
+                                content={result}
+                                className="text-sm leading-6"
+                              />
+                            ) : run.status === "failed" ? (
+                              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                                {run.error
+                                  ? workflowErrorMessage(run.error, t)
+                                  : t("运行失败")}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <MessageTimestamp
+                              value={run.started_at ?? run.created_at}
+                            />
+                            {run.status === "succeeded" && hasResult ? (
+                              <RunActionBar
+                                result={result}
+                                feedback={run.feedback}
+                                regenerateDisabled={running || runsLoading}
+                                regenerating={regeneratingRunId === run.id}
+                                feedbackPending={
+                                  feedbackPendingRunId === run.id
+                                }
+                                onRegenerate={() =>
+                                  void handleRegenerateRun(run.id)
+                                }
+                                onFeedback={(value) =>
+                                  void handleRunFeedback(run.id, value)
+                                }
+                                t={t}
+                              />
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 border-t bg-background p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {error ? (
+            <p
+              role="alert"
+              className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
+            >
+              {error}
+            </p>
+          ) : null}
+          <form
+            className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+            onSubmit={handleRun}
+            onDragOver={(event) => {
+              if (
+                profile.interaction_config.file_upload &&
+                event.dataTransfer.types.includes("Files")
+              ) {
+                event.preventDefault()
+              }
+            }}
+            onDrop={(event) => {
+              if (!profile.interaction_config.file_upload) return
+              const dropped = transferredFiles(event.dataTransfer)
+              if (!dropped.length) return
+              event.preventDefault()
+              if (composerDisabled) return
+              setError(null)
+              setFiles((current) => appendAttachmentFiles(current, dropped))
+            }}
+          >
+            {profile.interaction_config.file_upload ? (
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="sr-only"
+                multiple
+                accept={acceptedUploadExtensions(
+                  profile.interaction_config.file_upload_setting
+                    .file_upload_type
+                )}
+                disabled={composerDisabled}
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? [])
+                  setError(null)
+                  setFiles((current) =>
+                    appendAttachmentFiles(current, selected)
+                  )
+                }}
+              />
+            ) : null}
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onPaste={(event) => {
+                if (
+                  !profile.interaction_config.file_upload ||
+                  composerDisabled
+                ) {
+                  return
+                }
+                const pasted = transferredFiles(event.clipboardData)
+                if (!pasted.length) return
+                event.preventDefault()
+                setError(null)
+                setFiles((current) => appendAttachmentFiles(current, pasted))
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+              className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
+              placeholder={t("请输入问题")}
+              aria-label={t("请输入问题")}
+              enterKeyHint="send"
+              autoComplete="off"
+              maxLength={4000}
+              rows={1}
+              disabled={composerDisabled}
+            />
+            <AgentAttachmentList
+              files={files}
+              onRemove={(indexToRemove) =>
+                setFiles((current) =>
+                  current.filter((_, index) => index !== indexToRemove)
+                )
+              }
+              t={t}
+            />
+            <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+              <div className="flex min-w-0 items-center gap-1">
                 {profile.interaction_config.file_upload ? (
-                  <div className="grid gap-1.5 text-sm font-medium">
-                    <label
-                      htmlFor="workflow-chat-files"
-                      className="flex items-center gap-2"
-                    >
-                      <PaperclipIcon className="size-4" />
-                      {t("文件上传")}
-                    </label>
-                    <Input
-                      id="workflow-chat-files"
-                      type="file"
-                      multiple
-                      accept={acceptedUploadExtensions(
-                        profile.interaction_config.file_upload_setting
-                          .file_upload_type
-                      )}
-                      onClick={(event) => {
-                        event.currentTarget.value = ""
-                      }}
-                      onChange={(event) => {
-                        const selected = Array.from(event.target.files ?? [])
-                        setError(null)
-                        setFiles((current) =>
-                          appendAttachmentFiles(current, selected)
-                        )
-                      }}
-                    />
-                    <AgentAttachmentList
-                      files={files}
-                      onRemove={(indexToRemove) =>
-                        setFiles((current) =>
-                          current.filter((_, index) => index !== indexToRemove)
-                        )
-                      }
-                      t={t}
-                    />
-                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-md text-muted-foreground hover:text-foreground"
+                    aria-label={t("添加附件")}
+                    title={t("添加附件")}
+                    disabled={composerDisabled}
+                    onClick={() => {
+                      if (!fileInputRef.current) return
+                      fileInputRef.current.value = ""
+                      fileInputRef.current.click()
+                    }}
+                  >
+                    <PlusIcon />
+                  </Button>
+                ) : null}
+                {profile.interaction_config.stt_type === "BROWSER" ? (
+                  <SpeechInputButton
+                    key={`${workflowId}:${composerGeneration}`}
+                    value={question}
+                    onChange={setQuestion}
+                    onError={(message) => notify("error", message)}
+                    disabled={composerDisabled}
+                  />
                 ) : null}
               </div>
-              {error ? (
-                <p role="alert" className="mt-4 text-sm text-destructive">
-                  {error}
-                </p>
-              ) : null}
               <Button
                 type="submit"
-                className="mt-5 w-full sm:w-auto"
-                disabled={
-                  running ||
-                  runs.some((run) => run.status === "awaiting_input") ||
-                  !question.trim()
-                }
+                size="icon"
+                className="rounded-full"
+                aria-label={t("发送问题")}
+                title={t("发送问题")}
+                disabled={composerDisabled || !question.trim()}
               >
                 {running ? (
                   <LoaderCircleIcon className="animate-spin" />
                 ) : (
-                  <PlayIcon />
+                  <ArrowUpIcon />
                 )}
-                {t("开始运行")}
               </Button>
-            </form>
-          </div>
+            </div>
+          </form>
         </div>
       </section>
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
         <DialogContent
           side="right"
-          className="flex h-full min-h-0 flex-col gap-0 overflow-hidden p-0 max-sm:max-w-none md:hidden"
+          className="flex h-full min-h-0 flex-col gap-0 overflow-hidden p-0 max-sm:max-w-none lg:hidden"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>{t("历史记录")}</DialogTitle>

@@ -1648,6 +1648,8 @@ def build_shell_tool(workspace_id: str, created_at: datetime | None = None) -> t
     description = (
         "Run a bash command in this Run's persistent private workspace. Network is denied. "
         "Read authorized Skills under /skills/ and write deliverables to /workspace/outputs/. "
+        "Files written there, including self-contained HTML pages, are automatically exported "
+        "in artifacts[] with a filename and download_url. Use that URL to deliver the file. "
         "Files and installed Skill packages persist between calls; background processes are stopped after each command. "
         "Exit status and timeouts are returned as results. Output is limited to 30 KiB."
     )

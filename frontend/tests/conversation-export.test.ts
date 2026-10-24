@@ -25,7 +25,9 @@ test("conversationMarkdown sorts by creation time and fills answers from errors"
   ])
   expect(markdown.startsWith("# 周会\n\n")).toBe(true)
   // Sorted oldest first; the error text fills the assistant slot.
-  expect(markdown.indexOf("先问的")).toBeLessThan(markdown.indexOf("下半年计划"))
+  expect(markdown.indexOf("先问的")).toBeLessThan(
+    markdown.indexOf("下半年计划")
+  )
   expect(markdown).toContain("### 助手\n\n出错了")
   // A message without an answer or error leaves the assistant slot empty
   // (the final section ends with the trailing newline).
@@ -55,8 +57,15 @@ test("downloadConversationMarkdown sanitizes the filename", () => {
   click.mockRestore()
 })
 
-test("workflowSpeechText prefers result then text and stringifies the rest", () => {
+test("workflowSpeechText prefers answer, result, then text and unwraps answer JSON", () => {
   expect(workflowSpeechText({ result: "结果", text: "文本" })).toBe("结果")
+  expect(workflowSpeechText({ answer: "答案" })).toBe("答案")
+  expect(workflowSpeechText({ answer: "答案", result: "汇总结果" })).toBe(
+    "答案"
+  )
+  expect(workflowSpeechText({ result: '{"answer":"包装答案"}' })).toBe(
+    "包装答案"
+  )
   expect(workflowSpeechText({ text: "文本" })).toBe("文本")
   expect(workflowSpeechText({ other: 1 })).toBe('{"other":1}')
   expect(workflowSpeechText({})).toBe("{}")

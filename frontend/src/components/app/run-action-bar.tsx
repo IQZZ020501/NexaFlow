@@ -1,9 +1,6 @@
 "use client"
 
-import * as React from "react"
 import {
-  CheckIcon,
-  CopyIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
   ThumbsDownIcon,
@@ -11,6 +8,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import {
   Tooltip,
   TooltipContent,
@@ -18,7 +16,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { TFunction } from "@/i18n"
-import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 
 type FeedbackValue = "positive" | "negative" | null
@@ -68,45 +65,41 @@ export function RunActionBar({
   onFeedback,
   t,
 }: RunActionBarProps) {
-  const [copied, setCopied] = React.useState(false)
   const regenerateButtonDisabled =
     regenerateDisabled || regenerating || feedbackPending
   const feedbackButtonsDisabled = regenerating || feedbackPending
-  const copyLabel = t(copied ? "已复制" : "复制")
   const positiveSelected = feedback === "positive"
   const negativeSelected = feedback === "negative"
   const positiveLabel = t(positiveSelected ? "取消点赞" : "点赞")
   const negativeLabel = t(negativeSelected ? "取消点踩" : "点踩")
 
-  async function handleCopy() {
-    try {
-      await copyText(result)
-      setCopied(true)
-    } catch {
-      setCopied(false)
-    }
-  }
-
   return (
     <TooltipProvider delayDuration={250}>
       <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          aria-label={t(regenerating ? "正在重新生成" : "重新生成")}
-          title={t(regenerating ? "正在重新生成" : "重新生成")}
-          aria-busy={regenerating}
-          disabled={regenerateButtonDisabled}
-          onClick={onRegenerate}
-        >
-          {regenerating ? (
-            <LoaderCircleIcon className="animate-spin" />
-          ) : (
-            <RefreshCwIcon />
-          )}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              aria-label={t(regenerating ? "正在重新生成" : "重新生成")}
+              title={t(regenerating ? "正在重新生成" : "重新生成")}
+              aria-busy={regenerating}
+              disabled={regenerateButtonDisabled}
+              onClick={onRegenerate}
+            >
+              {regenerating ? (
+                <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <RefreshCwIcon />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {t(regenerating ? "正在重新生成" : "重新生成")}
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -157,17 +150,7 @@ export function RunActionBar({
           </TooltipTrigger>
           <TooltipContent>{negativeLabel}</TooltipContent>
         </Tooltip>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          aria-label={copyLabel}
-          title={copyLabel}
-          onClick={() => void handleCopy()}
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </Button>
+        <CopyButton t={t} value={result} />
       </div>
     </TooltipProvider>
   )
