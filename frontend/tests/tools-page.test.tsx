@@ -565,8 +565,8 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage initialKind="builtin" />)
     await screen.findByText("生成 PDF")
     expect(screen.getByRole("heading", { name: "内置 Skills" })).toBeTruthy()
-    expect(screen.getByRole("heading", { name: "工作区 Skills" })).toBeTruthy()
-    expect(screen.getByText("还没有工作区 Skill")).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "我的 Skills" })).toBeTruthy()
+    expect(screen.getByText("还没有自己的 Skill")).toBeTruthy()
     const searchToolbar = screen.getByRole("search")
     expect(within(searchToolbar).getByRole("searchbox")).toBeTruthy()
     expect(
@@ -772,7 +772,7 @@ describe("ToolsPage", () => {
     expect(within(emptySourceCard).getByText("没有匹配的工具")).toBeTruthy()
   })
 
-  test("lets an MCP owner choose safe policies without exposing disable", async () => {
+  test("lets an MCP owner manage policies and disable their own tool", async () => {
     const remote = tool({
       id: "tool-mcp",
       kind: "mcp",
@@ -819,7 +819,7 @@ describe("ToolsPage", () => {
     expect(
       screen.getByRole("menuitem", { name: "每次调用前审批" })
     ).toBeTruthy()
-    expect(screen.queryByRole("menuitem", { name: "禁用" })).toBeNull()
+    expect(screen.getByRole("menuitem", { name: "禁用" })).toBeTruthy()
 
     fireEvent.click(screen.getByRole("menuitem", { name: "每次调用前审批" }))
     await waitFor(() =>
@@ -1244,7 +1244,7 @@ describe("ToolsPage", () => {
     ).toBeNull()
   })
 
-  test("locks the policy menu for disabled tools of non-admins", async () => {
+  test("lets owners restore their disabled MCP tool policy without an admin role", async () => {
     const remote = tool({
       id: "tool-mcp",
       kind: "mcp",
@@ -1278,10 +1278,10 @@ describe("ToolsPage", () => {
     fireEvent.pointerDown(manage)
     fireEvent.click(manage)
     expect(
-      await screen.findByRole("menuitem", { name: "工具调用已禁用" })
+      await screen.findByRole("menuitem", { name: "每次调用前审批" })
     ).toBeTruthy()
     expect(
-      screen.queryByRole("menuitem", { name: "每次调用前审批" })
+      screen.queryByRole("menuitem", { name: "工具调用已禁用" })
     ).toBeNull()
   })
 

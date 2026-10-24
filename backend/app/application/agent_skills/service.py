@@ -191,12 +191,10 @@ async def list_agent_skills(
     limit: int,
     offset: int,
 ) -> list[AgentSkillResponse]:
-    include_all = workspace_role == "admin" or actor.is_global_admin
     rows = await repository.list_agent_skill_rows(
         db,
         workspace_id,
         actor.id,
-        include_all=include_all,
         limit=limit,
         offset=offset,
     )

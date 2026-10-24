@@ -1,5 +1,7 @@
 """Pure unit tests for the versioned Agent Skill control plane."""
 
+from dataclasses import replace
+
 import tests.support  # noqa: F401
 from pydantic import ValidationError
 
@@ -80,6 +82,14 @@ def test_skill_access_requires_use_grant_for_members() -> None:
     )
     assert not evaluate_agent_skill_access(skill, member, "member", view_grant).can_use
     assert evaluate_agent_skill_access(skill, member, "member", use_grant).can_use
+    for role, global_admin in (("admin", False), (None, True)):
+        admin = User(id="other-admin", is_global_admin=global_admin)
+        access = evaluate_agent_skill_access(skill, admin, role, None)
+        assert not access.can_view and not access.can_use and not access.can_manage
+        granted = evaluate_agent_skill_access(
+            skill, admin, role, replace(use_grant, user_id=admin.id)
+        )
+        assert granted.can_use and not granted.can_manage
 
 
 def test_packages_and_retired_policies():

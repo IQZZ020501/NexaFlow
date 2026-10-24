@@ -260,7 +260,12 @@ not trigger unrelated cleanup.
   undefined variables fail the node, and reference-only replies stringify one
   selected upstream field.
 - MCP tools use workspace-scoped Streamable HTTP, legacy SSE, or stdio Server
-  registrations. Remote Bearer tokens and full stdio configurations are
+  registrations owned and managed by their creator. Workspace/global admins
+  have no implicit access to another user's MCP configuration or custom Skill;
+  explicit view/use grants never confer configuration management. Custom MCP,
+  Tool source, and Skill names are unique per creator within a workspace;
+  system Tool source names remain unique per workspace. Remote Bearer tokens
+  and full stdio configurations are
   encrypted; remote endpoints may use HTTP or HTTPS, while private and loopback
   addresses require `MCP_ALLOW_PRIVATE_NETWORKS=true`. Workspace admins submit
   stdio commands, arguments, working directories, environment values and egress
@@ -274,8 +279,11 @@ not trigger unrelated cleanup.
   Within a Run, remote/bridged Streamable HTTP sessions are reused per worker process and
   closed when the Run ends or idles for 60 seconds. Only a call that may have
   reached the server marks a side-effecting Tool uncertain; connection or
-  start-up failures are confirmed failures, and oversized results are cut to a
-  text prefix rather than failed.
+  start-up failures are confirmed failures. MCP results up to 2 MiB retain
+  their complete JSON in `tool_invocations.full_result` when larger than the
+  24 KiB context limit; the preview includes a Run-scoped `result_id` for
+  `read_tool_result` character-range reads. Larger results keep an explicit
+  prefix-only notice rather than failing an already executed call.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `src/app/` route groups `(auth)`,
   `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for

@@ -1311,6 +1311,8 @@ async def save_agent_tool_call_result(
     tool_call_id: str,
     worker_task_id: str,
     result: AgentToolCallEntity,
+    *,
+    full_result: str | None = None,
 ) -> bool:
     updated = await db.execute(
         update(ToolInvocation)
@@ -1321,6 +1323,7 @@ async def save_agent_tool_call_result(
         )
         .values(
             status=result.status,
+            full_result=full_result,
             result_data={
                 "content": result.result_content,
                 "output": result.result_output,

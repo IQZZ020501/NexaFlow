@@ -31,15 +31,12 @@ def evaluate_agent_skill_access(
     ):
         return AgentSkillAccess(False, False, False, None)
     owner = skill.created_by_user_id == actor.id
-    admin = actor.is_global_admin or workspace_role == "admin"
     permission: AgentSkillPermissionLabel | None = None
     if owner:
         permission = "owner"
-    elif admin:
-        permission = "admin"
     elif grant is not None and grant.permission in AGENT_SKILL_GRANTS:
         permission = cast(AgentSkillPermissionLabel, grant.permission)
-    can_manage = owner or admin
+    can_manage = owner
     can_use = can_manage or permission == "use"
     return AgentSkillAccess(
         can_view=can_use or permission == "view",
@@ -66,5 +63,5 @@ def require_agent_skill_manage(access: AgentSkillAccess) -> None:
     require_agent_skill_view(access)
     if not access.can_manage:
         raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "Agent Skill owner or admin required."
+            status.HTTP_403_FORBIDDEN, "Agent Skill owner required."
         )

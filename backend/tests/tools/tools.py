@@ -138,6 +138,7 @@ EXPECTED_COLUMNS = {
         "worker_task_id",
         "lease_expires_at",
         "result_data",
+        "full_result",
         "result_summary",
         "outcome",
         "error_code",
@@ -1758,7 +1759,7 @@ def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
     )) in foreign_key_columns(ToolInvocation.__table__)
 
     assert ("workspace_id", "id") in unique_columns(ToolSource.__table__)
-    assert ("workspace_id", "kind", "name") in unique_columns(
+    assert ("workspace_id", "kind", "created_by_user_id", "name") in unique_columns(
         ToolSource.__table__
     )
     assert ("workspace_id", "function_name") in unique_columns(Tool.__table__)
@@ -6847,6 +6848,13 @@ def test_tool_tasks_are_registered() -> None:
 
 
 def main() -> None:
+    from tests.tools.personal import (
+        test_personal_configuration,
+        test_personal_name_migration,
+    )
+
+    test_personal_configuration()
+    asyncio.run(test_personal_name_migration())
     test_stable_catalog_contract_matches_legacy_mcp_identity()
     test_generic_artifact_migration_matches_catalog()
     test_artifact_contract_downgrade_rejects_durable_references()

@@ -716,6 +716,12 @@ export const en = {
   "参数写在 frontmatter 或稍后在表单里补。":
     "Declare parameters in front matter, or add them in the form later.",
   "内置 Skills": "Built-in Skills",
+  "我的 Skills": "My Skills",
+  "还没有自己的 Skill": "No Skills of your own yet",
+  "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。":
+    "Manage your own MCP connections, Skills, and Python tools. Shared resources follow their granted permissions.",
+  "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。":
+    "You manage this connection. Shared tools run through it. Saving discovers the available tools.",
   "工作区 Skills": "Workspace Skills",
   "还没有工作区 Skill": "No workspace Skills yet",
   "从添加工具新建或导入 Skill。": "Create or import a Skill from Add tool.",
@@ -1227,6 +1233,7 @@ export const en = {
   "Agent 已删除": "Agent deleted",
   "Agent 回答超时": "Agent response timed out",
   "Agent 回答失败": "Agent response failed",
+  "模型回答被截断，请重试。": "The model response was truncated. Please retry.",
   "返回 Agent 列表": "Back to Agents",
   新建对话: "New conversation",
   "放弃未保存的更改？": "Discard unsaved changes?",

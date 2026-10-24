@@ -539,6 +539,7 @@ class DurableToolLedger:
                 stored.id,
                 self.worker_task_id,
                 stored,
+                full_result=result.full_result,
             )
             await db.commit()
             if not saved:
@@ -886,7 +887,14 @@ async def _execute_claimed_agent_run(
         async with get_session_factory()() as db:
             await require_pinned_skill_access(db, run.workspace_id, snapshot)
 
-    registry = CapabilityRegistry(extensions, scope.skill_snapshots, authorize_skill)
+    from app.application.agents.tools.results import read_run_tool_result
+
+    async def result_reader(result_id: str, offset: int, limit: int):
+        return await read_run_tool_result(run, result_id, offset, limit)
+
+    registry = CapabilityRegistry(
+        extensions, scope.skill_snapshots, authorize_skill, result_reader=result_reader
+    )
     chat_model = build_chat_model(settings, scope.model)
 
     async def session_inputs(consumed: list[int]):

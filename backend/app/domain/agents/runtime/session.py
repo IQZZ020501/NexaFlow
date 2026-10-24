@@ -58,10 +58,13 @@ class AgentSession:
         usage = state["model_usage"]
         harness = {**state.get("harness", {}), **self.capabilities.snapshot()}
         if self.context is not None:
+            self.context.restore(harness.get("context_memory"))
             messages, compaction_usage = await self.context.prepare(
                 messages, self.capabilities.tools
             )
             usage = merge_usage(usage, compaction_usage)
+            if self.context.memory is not None:
+                harness["context_memory"] = self.context.snapshot()
             if compaction_usage["model_calls"]:
                 harness["compaction_count"] = (
                     int(harness.get("compaction_count", 0)) + 1

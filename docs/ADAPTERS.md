@@ -38,7 +38,7 @@
 
 ### mcp/
 
-- `client.py` — 统一 MCP 客户端（`MultiTransportMcpClient`）：Streamable HTTP、legacy SSE、加密 stdio 配置；HTTP DNS/重定向/代理防护，stdio 经 execution port 在 OpenSandbox 内执行；完整保留 content/structuredContent/_meta，超过上界明确失败而非截断为无效 JSON。
+- `client.py` — 统一 MCP 客户端（`MultiTransportMcpClient`）：Streamable HTTP、legacy SSE、加密 stdio 配置；HTTP DNS/重定向/代理防护，stdio 经 execution port 在 OpenSandbox 内执行；完整保留 2 MiB 内的 content/structuredContent/_meta，应用层将超过 24 KiB 的结果原子保存到工具账本并返回预览与读取引用。超过存储上限时只返回带明确提示的文本前缀，保留远端调用状态，不因结果太大而把已执行动作改判为失败。
 
 ### execution/
 

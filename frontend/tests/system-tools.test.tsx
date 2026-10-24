@@ -421,25 +421,22 @@ describe("McpToolsPage", () => {
     expect(selects[2].textContent).toContain("只读自动执行")
   })
 
-  test("renders an empty state and hides actions for non-admins", async () => {
+  test("lets members add their own MCP servers", async () => {
     setSession({ me: memberMe })
     handler = () => jsonResponse([])
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    expect(screen.getByText("只有空间管理员可以添加、刷新或删除 MCP Server。")).toBeTruthy()
-    expect(screen.queryAllByRole("button", { name: "添加 MCP Server" })).toHaveLength(0)
+    expect(screen.queryAllByRole("button", { name: "添加 MCP Server" }).length).toBeGreaterThan(0)
   })
 
-  test("non-admins see a read-only policy badge and no manage buttons", async () => {
+  test("members can manage policies and connections returned by their own list", async () => {
     setSession({ me: memberMe })
     handler = () => jsonResponse([mcpServer()])
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    expect(screen.queryByLabelText("刷新工具")).toBeNull()
-    expect(screen.queryByLabelText("删除 MCP Server")).toBeNull()
-    expect(screen.getByText("每次调用前审批")).toBeTruthy()
-    expect(screen.getByText("禁用")).toBeTruthy()
-    expect(screen.queryByLabelText("工具执行策略")).toBeNull()
+    expect(screen.getByLabelText("刷新工具")).toBeTruthy()
+    expect(screen.getByLabelText("删除 MCP Server")).toBeTruthy()
+    expect(screen.getAllByLabelText("工具执行策略").length).toBeGreaterThan(0)
   })
 
   test("reports list errors through notifications", async () => {
@@ -604,7 +601,7 @@ describe("McpToolsPage", () => {
     await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
     fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    expect(screen.getByText("保存时会连接 Server 并发现可用工具。")).toBeTruthy()
+    expect(screen.getByText("连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。")).toBeTruthy()
 
     // preset fills the form
     fireEvent.click(screen.getByText("Tavily"))

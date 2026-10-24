@@ -4,6 +4,8 @@
 
 Agent 业务领域与运行时：Agent CRUD、发布与应用、外部访问身份（公开访客/API 凭据）、知识库/工具绑定与权限校验；基于 LangGraph 的多轮工具调用执行（模型 → 可选工具 → 结果 → 模型/回答），事件流式输出，跨模型供应商的会话记忆压缩与用量记录，以及 durable 运行执行（租约/checkpoint、四表持久化、Workflow Agent 子运行续延）。Agent/Workflow 共用同一套 durable Tool 运行时与运行派发入口，工具执行统一记账于 `tool_invocations`。
 
+自建 MCP 连接与 Skills 按创建者管理，工作空间及全局管理员没有隐式访问他人配置的权限；明确的 view/use 授权只允许查看或使用，不允许修改。名称在工作空间内按创建者区分，内置 Skills 继续作为系统能力。既有资源保留原创建者；过去仅凭管理员身份绑定他人 Skill 的应用，需要资源所有者明确授予 use 权限后才能继续执行。共享 MCP 工具继续使用该连接所有者配置的账号，连接凭据不返回给获授权用户。手填 Token 的连接不具备 OAuth 自动续期或远端撤销语义。
+
 ## 分层关系
 
 ```text
@@ -101,6 +103,7 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - `tests/agents/agent_runtime_coverage.py` — 执行内核覆盖：durable Run executor/runs service、记忆、domain runtime（executor/usage/tools/callbacks）与 Redis 实时流基础设施。
 - `tests/agents/evaluation.py` — 无网络的确定性生产门禁：直接回答、通用工具循环、无核验即时流式输出、usage 与必需用例聚合规则。
 - `tests/agents/harness.py` — harness 确定性循环、能力授权/恢复、Skill 渐进加载、context/扩展 hooks，以及数据库队列/终态与 Console/公开/API Key 隔离、本地模拟模型 durable 执行。
+- `tests/agents/result_recovery.py` — MCP 完整结果与账本原子保存、字符分页重组、执行身份隔离、checkpoint 恢复、旧 Worker 写入防护及增量迁移保护；由 harness 套件一并执行。
 
 ## 运行策略与生产边界
 
@@ -117,7 +120,9 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - 会话生成文件独立于沙箱保存：有持久 Run 的生成物随会话保留，独立工具测试等无 Run 文件仍按 24 小时清理；下载链接保持 24 小时有效期。bash 执行前，按工作空间、应用、访问来源、consumer、执行用户和会话筛选文件，将此前成功轮次（及本轮已导出文件）的最新版本恢复到 `/workspace/outputs/`，保留子目录；旧数据没有路径时使用文件名。每个路径在单个沙箱内只恢复一次，不覆盖本轮编辑，沙箱重建后重新恢复已保存版本。每次修改导出新生成物，历史版本和链接不被替换；重新生成已取代的历史轮次和失败轮次不作为后续编辑来源。删除会话或应用时在同一事务内删除对应文件，工作空间删除沿用级联清理。沙箱仍在每轮结束后销毁，不跨用户共享，也不提供多人共同编辑。
 - Run 内 stdio 注册各用独立宿主沙箱，桥接进程只启动一次服务并通过控制面代理暴露 Streamable HTTP。应用认证使用专用 X-NexaFlow-MCP-Token 头，控制面密钥被代理剥离；连接池按 Run 复用，关闭/60 秒空闲会销毁宿主。发现与非 Run 调用继续使用一次性沙箱。公开/API 消费方最多同时占两台，主 Run 和 stdio 宿主都计数；SDK 预热池默认关闭，启用时扣减按需容量。
 - 运行中的后续任务通过各来源 `POST runs/{run_id}/inputs` 追加到既有事件表，并只在当前任务产生普通答案后继续执行；`input_id` 幂等、最大 32 条/每条 4000 字符，消费 ID 随 checkpoint 保存。输入与成功终态共用 RunState 行锁，已接受但未消费的任务阻止成功收尾；失败/取消仍保留可读任务。它们不会重置整次执行预算或解除工具审批。Console 与公开聊天在运行中按回车发送后续任务，API Key 使用同一输入接口。
-- 执行中的消息也在每轮前检查窗口；旧消息可摘要，系统协议和最近工具消息组保持完整。若当前交互或工具 schema 已无法容纳，则显式报错，原始 durable 记录不删除；这与历史轮次准备阶段的最佳努力摘要是两个不同边界。不是无限上下文，也没有引入 pi 的树形分支或用户扩展安装。
+- 执行中的消息在每轮前检查窗口；被压缩的全部旧历史按连续分块进入摘要模型，长消息在块边界重叠，不再先裁掉中段。目标、用户约束、关键决策、文件位置、待办、已完成工作和重要结果分别写入 `checkpoint.harness.context_memory`，跨次压缩确定性合并并去重，不再截断摘要尾部；后来的用户变更优先于先前冲突要求。系统协议和最近工具消息组保持完整。摘要无效、被供应商截断、结构化记忆或当前交互无法容纳时显式失败，原消息和检查点不被替换；这与历史轮次准备阶段的最佳努力摘要是两个不同边界。
+- 模型适配层统一 OpenAI-compatible、Anthropic、Gemini、Bedrock、Ollama 等结束字段，`length`、`max_tokens`、`MAX_TOKENS`、`model_context_window_exceeded` 等均表示截断。Harness 不接受残缺答案为最终成功结果，已流出的残缺正文发送 reset；截断的工具调用沿用未执行错误反馈，让模型缩小参数后重试，不会执行部分参数或重放已经执行的动作。
+- MCP 单次完整结果以 UTF-8 JSON 计，最多保存 2 MiB；超过 24 KiB 上下文上限时，模型收到文本预览、摘要、`result_id` 与字符总数，完整 `content` / `structuredContent` / `_meta` 随结果在同一租约校验事务中写入 `tool_invocations.full_result`，不额外建动作账本。内置 `read_tool_result` 按 `result_id`、字符 `offset` 和 `limit` 读取，每页最多 12,000 字符且编码后不超过 24 KiB，依 `next_offset` 继续到 null；每次读取校验工作区、Run、执行用户、访问来源及结果终态，不开放跨 Run 读取。完整结果随账本清理，Worker 重启后可继续读取。超过 2 MiB 的结果明确标记仅有前缀且完整内容未保存，保留远端实际成功/错误状态。
 - 历史成功 Run 以真实 `user`/`assistant` 角色恢复。上下文在保守 token 预算内直接复用；超预算时用当前注册模型压缩较旧轮次，摘要持久化在最后被覆盖的成功 Run 上，同时保留最近 6 轮。摘要调用失败时回退到截断历史，不阻断当前问题，原始 Run 记录始终保留。
 - `model_usage` 累加 Agent loop 与摘要调用的实际供应商用量，并单列 compaction、cache read/create 与未上报调用数。系统不会为未返回 usage 的供应商猜测计费 token；服务端 prompt cache 的写法仍由各供应商 SDK 决定，不伪造跨供应商通用的 `cache_control`。
 - Run 创建时冻结整次执行时长、模型轮次和工具调用次数三项生效执行预算；`max_knowledge_calls`/`max_knowledge_rounds`/`max_model_tokens` 继续写入快照以兼容历史 Run，但自适应检索与 Agent 执行已不再用它们作为硬门禁。总截止时间只在第一次成功 claim 时写入，worker 重试、租约接管和 checkpoint 恢复不会刷新；人工审批或输入等待时间会显式加回截止时间。每次工具调用仍有独立硬超时，达到最后一轮时不再向模型暴露工具。工具预算耗尽时，所有能力一致撤下工具 schema，允许模型用已有结果完成答案；超预算批次在执行前整批拒绝并返回失败工具结果，随后撤下工具让模型用已有信息收尾，而不是令整个 Run 失败。模型供应商的上下文窗口和单次输出限制仍然生效。

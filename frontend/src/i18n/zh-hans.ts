@@ -677,6 +677,12 @@ export const zhHans = {
   "参数写在 frontmatter 或稍后在表单里补。":
     "参数写在 frontmatter 或稍后在表单里补。",
   "内置 Skills": "内置 Skills",
+  "我的 Skills": "我的 Skills",
+  "还没有自己的 Skill": "还没有自己的 Skill",
+  "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。":
+    "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。",
+  "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。":
+    "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。",
   "工作区 Skills": "工作区 Skills",
   "还没有工作区 Skill": "还没有工作区 Skill",
   "从添加工具新建或导入 Skill。": "从添加工具新建或导入 Skill。",
@@ -1172,6 +1178,7 @@ export const zhHans = {
   "Agent 已删除": "Agent 已删除",
   "Agent 回答超时": "Agent 回答超时",
   "Agent 回答失败": "Agent 回答失败",
+  "模型回答被截断，请重试。": "模型回答被截断，请重试。",
   "返回 Agent 列表": "返回 Agent 列表",
   新建对话: "新建对话",
   "放弃未保存的更改？": "放弃未保存的更改？",

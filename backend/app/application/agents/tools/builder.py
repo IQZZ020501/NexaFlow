@@ -35,6 +35,7 @@ from app.domain.tools.mcp.service import (
     mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
+from app.domain.tools.results import prepare_mcp_result
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
 from app.entities.runs import AgentRun
@@ -811,13 +812,16 @@ def build_mcp_agent_tool(
                         exc.request_sent and effective_policy_mode != "read_only"
                     ),
                 )
-        safe_output = result.payload()
+        safe_output, full_result = prepare_mcp_result(
+            result.payload(), _tool_idempotency_key.get()
+        )
         content = json.dumps(safe_output, ensure_ascii=False)
         return AgentToolResult(
             content=content,
             summary=f"{tool.server.name}: {definition.name} completed.",
             output=safe_output,
             is_error=result.is_error,
+            full_result=full_result,
         )
 
     return create_agent_tool(

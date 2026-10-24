@@ -4410,7 +4410,7 @@ def main() -> None:
                 headers=auth_headers(admin_token),
             )
             assert admin_sources.status_code == 200, admin_sources.text
-            assert member_public_data["id"] in {
+            assert member_public_data["id"] not in {
                 item["id"] for item in admin_sources.json()
             }
 
@@ -4434,7 +4434,7 @@ def main() -> None:
                 headers=auth_headers(member_token),
                 json={"mode": "disabled"},
             )
-            assert owner_disabled_policy.status_code == 403, (
+            assert owner_disabled_policy.status_code == 200, (
                 owner_disabled_policy.text
             )
 

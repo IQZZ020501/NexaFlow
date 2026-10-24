@@ -8,10 +8,12 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,8 +39,18 @@ class ToolSource(Base):
         UniqueConstraint(
             "workspace_id",
             "kind",
+            "created_by_user_id",
             "name",
-            name="uq_tool_sources_workspace_kind_name",
+            name="uq_tool_sources_owner_kind_name",
+        ),
+        Index(
+            "uq_tool_sources_system_kind_name",
+            "workspace_id",
+            "kind",
+            "name",
+            unique=True,
+            postgresql_where=text("created_by_user_id IS NULL"),
+            sqlite_where=text("created_by_user_id IS NULL"),
         ),
         CheckConstraint(
             "kind IN ('builtin', 'python', 'mcp')",
@@ -465,6 +477,7 @@ class ToolInvocation(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     result_data: Mapped[Any] = mapped_column(JSON, nullable=True)
+    full_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -487,7 +500,12 @@ class ToolInvocation(Base):
 class McpServer(Base):
     __tablename__ = "mcp_servers"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", name="uq_mcp_servers_workspace_name"),
+        UniqueConstraint(
+            "workspace_id",
+            "created_by_user_id",
+            "name",
+            name="uq_mcp_servers_owner_name",
+        ),
         UniqueConstraint("workspace_id", "id", name="uq_mcp_servers_workspace_id"),
         CheckConstraint(
             "status IN ('active', 'disabled')",

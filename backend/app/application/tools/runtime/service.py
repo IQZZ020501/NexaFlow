@@ -602,6 +602,7 @@ def _apply_result(invocation: ToolInvocation, result: ToolRuntimeResult) -> None
         else TOOL_INVOCATION_FAILED
     )
     invocation.result_data = result.data
+    invocation.full_result = result.full_result
     invocation.result_summary = result.summary[:1000]
     invocation.outcome = result.outcome
     invocation.error_code = result.error_code
@@ -615,6 +616,7 @@ def _stored_result(invocation: ToolInvocation) -> ToolRuntimeResult:
     return ToolRuntimeResult(
         ok=invocation.status == TOOL_INVOCATION_SUCCEEDED,
         data=invocation.result_data,
+        full_result=invocation.full_result,
         summary=invocation.result_summary,
         error_code=invocation.error_code,
         error_message=invocation.error_message,

@@ -2965,7 +2965,253 @@ def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
     assert messages[-1]["content"] == "Create an interactive page."
 
 
+def test_provider_truncation_never_completes_agent() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.domain.agents.runtime import AgentRunnerError, create_agent_tool, run_agent
+
+    async def check():
+        invoked = []
+
+        async def execute(raw):
+            invoked.append(raw)
+            raise AssertionError("A truncated tool call was executed")
+
+        tool = create_agent_tool(
+            name="echo",
+            description="Echo",
+            parameters={"type": "object", "properties": {}},
+            execute=execute,
+        )
+        for metadata in (
+            {"stop_reason": "max_tokens"},
+            {"finish_reason": "MAX_TOKENS"},
+            {"stopReason": "max_tokens"},
+            {"finish_reason": "length"},
+            {"done_reason": "length"},
+            {"finish_reason": "lengthlength"},
+            {"finish_reason": "MAX_TOKENSMAX_TOKENS"},
+            {"stopReason": "model_context_window_exceeded"},
+        ):
+            for streaming in (False, True):
+                for with_tools in (False, True):
+                    events = []
+                    calls = (
+                        [{"name": "echo", "args": {}, "id": "c1"}]
+                        if with_tools else []
+                    )
+
+                    class Model:
+                        def __init__(self):
+                            self.turn = 0
+
+                        def bind_tools(self, _tools):
+                            return self
+
+                        def response(self):
+                            self.turn += 1
+                            return AIMessage(
+                                content="Incomplete answer" if self.turn == 1 else "Stopped safely",
+                                response_metadata=metadata if self.turn == 1 else {"finish_reason": "stop"},
+                                tool_calls=calls if self.turn == 1 else [],
+                            )
+
+                        async def ainvoke(self, _messages):
+                            return self.response()
+
+                        async def astream(self, _messages):
+                            response = self.response()
+                            yield AIMessageChunk(content=response.content)
+                            yield AIMessageChunk(
+                                content="", response_metadata=response.response_metadata, tool_calls=response.tool_calls
+                            )
+
+                    async def record(event):
+                        events.append(event)
+
+                    try:
+                        result = await run_agent(
+                            Model(), [{"role": "user", "content": "Work"}], [tool],
+                            on_event=record if streaming else None,
+                        )
+                    except AgentRunnerError as exc:
+                        assert "truncated" in str(exc), str(exc)
+                    else:
+                        assert with_tools, f"Truncated response succeeded: {metadata}"
+                        assert result.content == "Stopped safely"
+                        assert any(event.get("status") == "failed" for event in result.events)
+                    if streaming:
+                        assert any(event["type"] == "answer_reset" for event in events)
+        assert not invoked
+
+    asyncio.run(check())
+
+
+def test_context_compaction_reads_middle_history_and_restores_constraints() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    from app.domain.agents.runtime.context import AgentContextManager
+
+    marker = "Never publish the source files; save changes under /workspace/project."
+    requests = []
+
+    class Summarizer:
+        async def ainvoke(self, messages):
+            requests.append(messages)
+            memory = {
+                "goals": ["Complete the project"],
+                "user_constraints": [marker] if marker in messages[-1].content else [],
+                "decisions": [], "files": [], "pending_work": [],
+                "completed_work": [], "important_results": [],
+            }
+            return AIMessage(content=json.dumps(memory), usage_metadata={
+                "input_tokens": 10, "output_tokens": 10, "total_tokens": 20,
+            })
+
+    messages = [
+        SystemMessage(content="Trusted rules"),
+        HumanMessage(content="Complete the project " + "x" * 1800),
+        AIMessage(content="Analyzing " + "y" * 1000),
+        HumanMessage(content="a" * 5000 + "\n" + marker + "\n" + "b" * 5000),
+        AIMessage(content="Completed one step"),
+        *[HumanMessage(content=f"Continue {index}") for index in range(6)],
+    ]
+    manager = AgentContextManager(Summarizer(), 4096)
+    prepared, usage = asyncio.run(manager.prepare(messages, []))
+    assert any(marker in request[-1].content for request in requests), (
+        "A constraint in the middle never reached the summary model"
+    )
+    assert len(requests) > 1
+    assert usage["compaction"]["model_calls"] == len(requests)
+    assert marker in str(prepared)
+    assert manager.memory["user_constraints"] == [marker]
+    restored = AgentContextManager(Summarizer(), 4096)
+    restored.restore(manager.memory)
+    # A later summary must keep earlier constraints even if the model omits them.
+    subsequent = [*prepared[:2], AIMessage(content="c" * 5000), *prepared[2:]]
+    again, _ = asyncio.run(restored.prepare(subsequent, []))
+    assert marker in str(again)
+    assert restored.memory["user_constraints"] == [marker]
+    assert manager.tokens(again, []) <= int(4096 * 0.8) - 1024
+    assert messages[3].content == "a" * 5000 + "\n" + marker + "\n" + "b" * 5000
+
+
+def test_structured_context_memory_checkpoint_and_failure_atomicity() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    from app.domain.agents.runtime import deserialize_agent_state, serialize_agent_state
+    from app.domain.agents.runtime.capabilities import CapabilityRegistry
+    from app.domain.agents.runtime.context import MEMORY_FIELDS, AgentContextManager
+    from app.domain.agents.runtime.extensions import ExtensionRuntime
+    from app.domain.agents.runtime.session import AgentSession
+    from app.domain.agents.runtime.usage import empty_usage
+
+    memory = {key: [] for key in MEMORY_FIELDS}
+    memory["user_constraints"] = ["Keep the private source files local"]
+    memory["files"] = ["/workspace/project/main.py"]
+    messages = [
+        SystemMessage(content="System rules"), HumanMessage(content="Build the project"),
+        AIMessage(content="old work " * 1000),
+        *[HumanMessage(content=f"Latest request {index}") for index in range(6)],
+    ]
+
+    async def check():
+        model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content=json.dumps(memory))))
+        registry = CapabilityRegistry(ExtensionRuntime([]), [])
+        manager = AgentContextManager(model, 4096)
+        session = AgentSession(registry, manager)
+        state = deserialize_agent_state({
+            "messages": serialize_agent_state({"messages": messages})["messages"],
+            "model_usage": empty_usage(), "harness": {},
+        })
+        prepared = await session.prepare_turn(state)
+        assert prepared["harness"]["context_memory"] == memory
+        assert prepared["harness"]["compaction_count"] == 1
+        checkpoint = json.loads(json.dumps(serialize_agent_state(prepared)))
+        restored_state = deserialize_agent_state(checkpoint)
+        restored_manager = AgentContextManager(model, 4096)
+        restored_session = AgentSession(CapabilityRegistry(ExtensionRuntime([]), []), restored_manager)
+        await restored_session.prepare_turn(restored_state)
+        assert restored_manager.snapshot() == memory
+        assert state["harness"] == {} and state["messages"] == messages
+
+        bad_responses = (
+            AIMessage(content=""), AIMessage(content="not JSON"),
+            AIMessage(content='{"goals": []}'),
+            AIMessage(content=json.dumps(memory), response_metadata={"stopReason": "max_tokens"}),
+            AIMessage(content=json.dumps({**memory, "user_constraints": ["x" * 5000]})),
+        )
+        for response in bad_responses:
+            model.ainvoke = AsyncMock(return_value=response)
+            failed_manager = AgentContextManager(model, 4096)
+            failed_manager.restore(memory)
+            try:
+                await failed_manager.prepare(messages, [])
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Invalid compaction silently removed history")
+            assert failed_manager.snapshot() == memory
+            assert len(messages[2].content) == 9000
+
+    asyncio.run(check())
+
+
+def test_context_memory_keeps_latest_repeated_requirement() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    from app.domain.agents.runtime.context import MEMORY_FIELDS, AgentContextManager
+
+    original = {key: [] for key in MEMORY_FIELDS}
+    original["user_constraints"] = ["Use dark mode", "Use light mode"]
+    update = {**original, "user_constraints": ["Use dark mode"]}
+    model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(content=json.dumps(update))))
+    manager = AgentContextManager(model, 4096)
+    manager.restore(original)
+    messages = [AIMessage(content="Earlier work " * 600), *[HumanMessage(content="Continue") for _ in range(6)]]
+    asyncio.run(manager.prepare(messages, []))
+    assert manager.memory["user_constraints"] == ["Use light mode", "Use dark mode"]
+    manager.restore({**original, "user_constraints": ["Use dark mode", "Use light mode", "Use dark mode"]})
+    assert manager.memory["user_constraints"] == ["Use light mode", "Use dark mode"]
+
+
+def test_context_summary_keeps_tool_result_declaration_context() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from app.domain.agents.runtime.context import MEMORY_FIELDS, AgentContextManager
+
+    path = "/workspace/project/main.py"
+    requests = []
+
+    async def summarize(messages):
+        source = messages[-1].content
+        requests.append(messages)
+        memory = {key: [] for key in MEMORY_FIELDS}
+        if "Saved successfully" in source and path in source:
+            memory["completed_work"] = [f"Saved {path}"]
+        return AIMessage(content=json.dumps(memory))
+
+    messages = [
+        HumanMessage(content="Earlier user request " * 400),
+        AIMessage(content="", tool_calls=[{
+            "name": "write_file", "args": {"path": path}, "id": "save-1",
+        }]),
+        ToolMessage(content="log " * 600 + "\nSaved successfully", tool_call_id="save-1"),
+        *[HumanMessage(content="Continue") for _ in range(6)],
+    ]
+    manager = AgentContextManager(SimpleNamespace(ainvoke=summarize), 4096)
+    asyncio.run(manager.prepare(messages, []))
+    assert manager.memory["completed_work"] == [f"Saved {path}"]
+    for request in requests:
+        assert manager.tokens(request, []) <= int(4096 * 0.8) - 1024
+
+
 def main() -> None:
+    test_context_summary_keeps_tool_result_declaration_context()
+    test_context_memory_keeps_latest_repeated_requirement()
+    test_structured_context_memory_checkpoint_and_failure_atomicity()
+    test_context_compaction_reads_middle_history_and_restores_constraints()
+    test_provider_truncation_never_completes_agent()
     test_web_page_delivery_instructions_match_preview_capabilities()
     test_effective_agent_permission_matrix()
     test_tool_ref_requires_stable_ids()
