@@ -117,7 +117,18 @@ export const en = {
   密码重置链接无效或已过期: "Password reset link is invalid or expired",
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
+  应用名称已存在: "App name already exists",
+  "Skill 名称已存在": "Skill name already exists",
+  文件夹名称已存在: "Folder name already exists",
+  模型名称已存在: "Model name already exists",
+  模型已存在: "Model already exists",
+  "MCP 服务名称已存在": "MCP server name already exists",
   知识库名称已存在: "Knowledge base name already exists",
+  团队已存在: "Team already exists",
+  工作空间已存在: "Workspace already exists",
+  用户名或邮箱已存在: "Username or email already exists",
+  该成员已在团队中: "This member is already in the team",
+  该成员已在工作空间中: "This member is already in the workspace",
   "视觉模型尚未配置，暂时不支持图片解析":
     "No vision model is configured, so image parsing is not available yet",
   资源不存在或无权访问: "Resource not found or access denied",
