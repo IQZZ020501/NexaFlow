@@ -2884,11 +2884,6 @@ def test_maintenance_dispatches_recoverable_work() -> None:
         ) as cleanup_artifacts,
         patch.object(
             maintenance,
-            "reconcile_knowledge_graphs",
-            new=AsyncMock(return_value=["graph-1"]),
-        ),
-        patch.object(
-            maintenance,
             "list_due_knowledge_storage_cleanup_ids",
             new=AsyncMock(return_value=["knowledge-cleanup-1"]),
         ),
@@ -2897,13 +2892,11 @@ def test_maintenance_dispatches_recoverable_work() -> None:
             "prepare_due_upload_cleanups",
             new=AsyncMock(return_value=["upload-cleanup-1"]),
         ),
-        patch.object(maintenance.run_knowledge_task_job, "apply_async") as graph,
         patch.object(maintenance.run_storage_cleanup_job, "apply_async") as storage,
     ):
         maintenance.run_maintenance_job.run("minutely")
 
     cleanup_artifacts.assert_awaited_once_with()
-    assert graph.call_args.kwargs == {"args": ("graph-1",)}
     assert [item.kwargs for item in storage.call_args_list] == [
         {"args": ("knowledge", "knowledge-cleanup-1")},
         {"args": ("upload", "upload-cleanup-1")},

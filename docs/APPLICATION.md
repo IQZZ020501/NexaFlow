@@ -41,8 +41,7 @@ app/application/
 ├── knowledge/              # 知识库用例
 │   ├── documents/service.py
 │   ├── retrieval/service.py
-│   ├── evaluation/runner.py
-│   └── graph/{service,build,query,maintenance}.py
+│   └── evaluation/runner.py
 ├── tools/                  # 统一工具用例
 │   ├── __init__.py         # 门面
 │   ├── management/service.py
@@ -93,12 +92,8 @@ app/application/
 
 ### knowledge/
 
-- `knowledge/documents/service.py` — 知识库/文档 API 的入口（规则：API 不得直达 domain/仓储；Graph 用例见 `knowledge/graph/service.py`）：知识库/文档 CRUD、文档生命周期与启停、附件与资产访问、任务派发。
+- `knowledge/documents/service.py` — 知识库/文档 API 的入口（规则：API 不得直达 domain/仓储）：知识库/文档 CRUD、文档生命周期与启停、附件与资产访问、任务派发。
 - `knowledge/retrieval/service.py` — 统一检索编排（API、Agent、Workflow 共用）：分块、向量召回、重排、证据裁剪与相似度计算。
-- `knowledge/graph/service.py` — 图谱用例编排：图设置/schema/状态、实体与 Claim 查询与详情、评审流、重建触发与任务派发（细粒度查询与维护见 query/maintenance）。
-- `knowledge/graph/query.py` — 图谱查询执行：查询意图规划、实体消歧/链接、邻域/路径遍历与多路融合排序。
-- `knowledge/graph/build.py` — 图谱构建流水线：抽取批次暂存、实体/Claim 抽取与消解、版本（revision）与来源版本追踪。
-- `knowledge/graph/maintenance.py` — 图谱维护：到期任务扫描与入队、孤立 revision 恢复、pending profile 修补、图谱对账。
 - `knowledge/evaluation/runner.py` — 检索评估 runner：执行评估任务（相似度/重排等指标）并汇总评估结果。
 
 ### tools/
@@ -164,7 +159,7 @@ app/application/
 | `app/application/workflow_tool_runtime.py` | `workflows/tools/runtime.py` |
 | `app/application/workflow_access.py` | `workflows/access/service.py` |
 | `app/application/workflow_uploads.py` | `workflows/uploads/service.py`（旧文档未列出但存在） |
-| `app/application/knowledge*.py`（知识相关散件） | `knowledge/{documents,retrieval,evaluation,graph}/…` 按职责拆分 |
+| `app/application/knowledge*.py`（知识相关散件） | `knowledge/{documents,retrieval,evaluation}/…` 按职责拆分 |
 | `app/application/agent_skill*.py`（Skill 相关散件） | `agent_skills/{service,dependencies,execution,scripts,packages}.py` |
 | `app/application/announcement*.py`（公告相关散件） | `announcements/{service,live}.py`（另新增 `app/ports/announcements.py` + `app/adapters/announcements/live_stream.py`） |
 | `app/application/agent_runs.py` 中的取消/反馈逻辑 | 抽出为共享用例 `runs/{lifecycle,feedback}.py`，由 Agent 与 Workflow 复用 |

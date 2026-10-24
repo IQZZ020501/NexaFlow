@@ -17,7 +17,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 
 - 工作空间上下文：路径参数 `/workspaces/{workspace_id}/...`；非成员按不可枚举策略返回 404，已确认成员但工作空间非 active 或操作权限不足时返回 403。
 - 状态码：创建 201、删除 204、异步任务 202；错误统一 FastAPI `{"detail": ...}`。
-- 分页：列表端点使用 `limit` + `offset`（`offset` 统一 `ge=0`）；`limit` 上界与默认值按模块不同——多数为 `ge=1 le=200` 默认 100，Agent 会话/日志与公开会话默认 50，评测运行默认 20、公告消息默认 50（均为 `le=100`），图谱实体/审查为 `le=100` 默认 50，评测用例列表为 `le=200` 默认 200。
+- 分页：列表端点使用 `limit` + `offset`（`offset` 统一 `ge=0`）；`limit` 上界与默认值按模块不同——多数为 `ge=1 le=200` 默认 100，Agent 会话/日志与公开会话默认 50，评测运行默认 20、公告消息默认 50（均为 `le=100`），评测用例列表为 `le=200` 默认 200。
 - 鉴权：`/auth/login|refresh|logout`、`/auth/password-reset/request|confirm`、`/auth/invitations/accept`、`/auth/enterprise/*`、`/health` 与已发布应用资料页的 `/public/agents/{agent_id}/*`、`/public/workflows/{workflow_id}/*` 不要求登录；公开资料页之外的应用访问（会话、Run 提交与流式）仍需登录 Bearer，且属于该工作空间的成员，消费方标识即登录用户 id（不存在访客 Cookie）。`/agent-api/{agent_id}/*` 与 `/workflow-api/{workflow_id}/*` 使用应用级 API Key Bearer 鉴权；其余接口使用登录 Bearer，且需完成初始改密（`require_password_changed`）。
 - API 文档：后端 `/docs` 与 `/openapi.json` 保留完整 FastAPI 文档。应用概览的专属文档入口使用 `/agent-api/{agent_id}/documentation` 或 `/workflow-api/{workflow_id}/documentation`，验证对应 API Key 后只展示该应用的 Run 创建、查询和流式订阅接口。
 - 流式：登录态 Agent 先 `POST /runs` 持久提交，再 `GET /runs/{run_id}/stream?after={sequence}&live_after={redis_stream_id}` 订阅 NDJSON。`after` 重放 PostgreSQL 过程/终态事件，`live_after` 补发短期 Redis 答案/推理增量；实时事件的 `stream_epoch` 变化表示新 worker 已接管，客户端必须清空已累积的答案和推理后重新累积。公开/API Key 流复用同一 durable Run，只输出固定枚举的安全进度摘要、知识片段数量、答案增量、模型思考过程（`reasoning_delta` 增量与 progress 累积文本）和终态白名单，不返回工具名称/参数、检索原文、System Prompt 或 trace。终态 Run 快照始终覆盖实时片段，断线不取消 Run。请求中的旧 `preview` 字段仅为兼容保留并被忽略，所有 Run 都是持久执行。所有 `/api` 响应默认 `no-store`。
@@ -40,7 +40,6 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/knowledge/lifecycle.py` — 同前缀文档生命周期：文档下载、解析资产下载、删除、激活状态更新（PATCH）
 - `backend/app/api/v1/knowledge/retrieval.py` — 同前缀 RAG 检索接口：兼容结果列表 `POST /{kb_id}/query` 与带生产链路 trace 的 `POST /{kb_id}/query/inspect`
 - `backend/app/api/v1/knowledge/evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
-- `backend/app/api/v1/knowledge/graph.py` — 同前缀 `/{kb_id}/graph`：`links` 返回确定性 Markdown 文档链接图（包含未解析目标与重复次数）；settings/schema/status/rebuild/entities/overview/path/neighborhood/import/reviews 与 review resolve 继续对应 Evidence Graph RAG（查询请求的 `graph_mode` 等字段见 `schemas/knowledge`）
 - `backend/app/api/v1/models/routes.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
 - `backend/app/api/v1/tools/sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
 - `backend/app/api/v1/tools/routes.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权
@@ -69,7 +68,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/schemas/identity/contracts.py` — 登录/Token/改密/用户信息/成员关系模型（含密码强度校验）；企业身份与邀请契约分别在 `identity/enterprise.py`、`identity/invitations.py`
 - `backend/app/schemas/workspaces/contracts.py` — 工作区及其成员、管理员创建请求的请求/响应模型
 - `backend/app/schemas/teams/contracts.py` — 团队创建/更新/响应模型
-- `backend/app/schemas/knowledge/contracts.py` — 知识库、文档、QA 导入模式、分块、解析参数、任务、检索命中/trace 与检索评测请求/响应模型；Graph 契约在 `knowledge/graph.py`
+- `backend/app/schemas/knowledge/contracts.py` — 知识库、文档、QA 导入模式、分块、解析参数、任务、检索命中/trace 与检索评测请求/响应模型
 - `backend/app/schemas/agents/contracts.py` — Agent 创建/更新/响应与运行/计划/事件/流式响应模型
 - `backend/app/schemas/tools/contracts.py` — 统一 Tool/Source/Version/Policy/Permission/Invocation 与固定 `ToolRefSchema` 契约；MCP Server 契约在 `tools/mcp.py`
 - `backend/app/schemas/workflows/contracts.py` — Workflow 图、节点配置、版本、运行、节点审计、表单恢复与 Tool/Agent 固定引用契约

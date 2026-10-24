@@ -65,7 +65,6 @@ from app.schemas.knowledge import (
     KnowledgeTaskBulkDeleteRequest,
     KnowledgeTaskBulkDeleteResponse,
     KnowledgeTaskResponse,
-    KnowledgeTaskRetryRequest,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
@@ -121,10 +120,6 @@ async def get_workspace_knowledge_base(
         status=knowledge_base.status,
         embedding_model_id=knowledge_base.embedding_model_id,
         reranker_model_id=knowledge_base.reranker_model_id,
-        graph_enabled=knowledge_base.graph_enabled,
-        active_graph_schema_id=knowledge_base.active_graph_schema_id,
-        active_graph_revision_id=knowledge_base.active_graph_revision_id,
-        graph_extraction_model_id=knowledge_base.graph_extraction_model_id,
         created_by_user_id=knowledge_base.created_by_user_id,
         created_at=knowledge_base.created_at,
         updated_at=knowledge_base.updated_at,
@@ -447,7 +442,6 @@ async def retry_workspace_knowledge_task(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    payload: Annotated[KnowledgeTaskRetryRequest | None, Body()] = None,
 ) -> KnowledgeTaskResponse:
     knowledge_base = await get_knowledge_base(db, context.workspace.id, knowledge_base_id)
     await require_knowledge_base_permission(
@@ -461,7 +455,6 @@ async def retry_workspace_knowledge_task(
         knowledge_base,
         task_id,
         context.user,
-        payload.mode if payload is not None else "all",
     )
     await dispatch_knowledge_task(task.id, settings)
     return task

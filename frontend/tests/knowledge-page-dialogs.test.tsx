@@ -1304,8 +1304,7 @@ describe("lib/api/knowledge", () => {
       "tok",
       "ws-1",
       "kb-1",
-      "task-1",
-      "unfinished"
+      "task-1"
     )
     await knowledgeApi.stopKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
     await knowledgeApi.deleteKnowledgeTask("tok", "ws-1", "kb-1", "task-1")
@@ -1318,7 +1317,7 @@ describe("lib/api/knowledge", () => {
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/task-1/retry",
       method: "POST",
     })
-    expect(JSON.parse(retryBody)).toEqual({ mode: "unfinished" })
+    expect(retryBody).toBe("")
     expect(calls[1]).toEqual({
       url: "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/tasks/task-1/stop",
       method: "POST",
@@ -1367,7 +1366,6 @@ describe("lib/api/knowledge", () => {
       limit: 7,
       search_mode: "keywords",
       similarity: 0.4,
-      include_references: true,
     })
     expect(calls[0].url).toBe(
       "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query/inspect"
@@ -1377,7 +1375,6 @@ describe("lib/api/knowledge", () => {
       limit: 7,
       search_mode: "keywords",
       similarity: 0.4,
-      include_references: true,
     })
   })
 

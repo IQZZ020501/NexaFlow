@@ -26,7 +26,7 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 | --- | --- |
 | 应用构建与发布 | 统一管理 Agent 和工作流，保留草稿与不可变发布版本，提供访问页面、独立 API Key 和接口文档。 |
 | Agent 运行时 | 支持流式回答、对话记忆、上下文压缩、运行中追加输入、工具审批和模型用量记录；通过 Celery、租约、checkpoint 与事件恢复执行。新建 Run 默认具备在隔离环境中执行 bash 的能力。 |
-| 知识库与 RAG | 支持文档与 QA 导入、智能层级分段、规范化 Markdown 预览、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/可选重排、引用、证据图谱和检索评测。 |
+| 知识库与 RAG | 支持文档与 QA 导入、智能层级分段、规范化 Markdown 预览、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/可选重排、引用和检索评测。 |
 | 可视化工作流 | React Flow 画布支持模型、知识检索、分类、条件、表单、变量、工具、Python 代码与已发布 Agent 等节点，提供草稿调试、版本管理和节点执行记录。 |
 | MCP 与统一工具 | 内置、Python、MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
 | Skills | 导入 `SKILL.md` 或 ZIP 技能包，按需加载指令、参考文件和 Python/JavaScript 脚本；固定版本绑定到 Agent，脚本依赖安装需逐次审批。 |
@@ -47,7 +47,7 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 flowchart LR
     Browser[Browser] --> Web[Next.js frontend]
     Web --> API[FastAPI API]
-    API --> DB[("PostgreSQL 17 + pg_search + Graph authority")]
+    API --> DB[("PostgreSQL 17 + pg_search")]
     API --> Redis[(Redis)]
     API --> Qdrant[("Qdrant derived vectors")]
     API --> Storage[("Shared upload storage")]
@@ -72,7 +72,7 @@ flowchart LR
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
 | 工具与 Skills | builtin / Python / MCP 统一目录、不可变版本、授权、策略、调用账本与按需加载的技能包 |
-| 检索 | PostgreSQL（权威文档、证据图谱与 revision）+ Qdrant（可重建的文档/Profile 派生向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、引用扩展、有界多跳路径、可选 reranker；不需要 Neo4j 或新数据库 |
+| 检索 | PostgreSQL（文档、分段与评测）+ Qdrant（文档向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、可选 reranker |
 | 部署 | 单机 Docker Compose、PostgreSQL 17 + `pg_search`、OpenSandbox；可选 Nginx、独立 Kata 执行主机，定制镜像以 digest 固定 |
 
 ## 快速开始
@@ -196,7 +196,7 @@ NexaFlow/
 | 业务服务部署、配置与数据存储 | [部署说明](docs/DEPLOYMENT.md) |
 | 独立执行主机、镜像与网络策略 | [OpenSandbox 部署](deploy/opensandbox/README.md) |
 | Agent 运行、持久化与恢复 | [Agent 运行时](docs/AGENTS_RUNTIME.md) |
-| 知识导入、检索、证据图谱与评测 | [知识库](docs/KNOWLEDGE.md) |
+| 知识导入、检索与评测 | [知识库](docs/KNOWLEDGE.md) |
 | 工作流节点与执行语义 | [工作流设计](docs/WORKFLOW_DESIGN.md) |
 | 技能包格式、授权与脚本执行 | [Skills](docs/SKILLS.md) |
 | 模型供应商与适配方式 | [模型接入矩阵](docs/model-providers.md) |
@@ -296,7 +296,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 
 ### 知识库文档管理
 
-集中查看文档、分段数量和向量化状态，并进入关系图谱、后台任务、检索评测与设置。
+集中查看文档、分段数量和向量化状态，并进入后台任务、检索评测与设置。
 
 ![知识库文档管理：文档列表、向量化进度和文档操作](docs/assets/knowledge-base-documents.png)
 

@@ -37,7 +37,6 @@ type KnowledgeHitTestProps = {
     limit: number
     searchMode: KnowledgeSearchMode
     similarity: number
-    includeReferences: boolean
   }) => void
 }
 
@@ -84,10 +83,7 @@ function sourceLabel(
   t: TFunction,
   source: KnowledgeRetrievalSource
 ) {
-  if (source === "vector") return t("向量检索")
-  if (source === "keywords") return t("关键词检索")
-  if (source === "reference") return t("文档引用")
-  return t("知识关联")
+  return t(source === "vector" ? "向量检索" : "关键词检索")
 }
 
 /**
@@ -129,7 +125,6 @@ export function KnowledgeHitTest({
   const [searchMode, setSearchMode] =
     React.useState<KnowledgeSearchMode>("blend")
   const [minSimilarity, setMinSimilarity] = React.useState(0.6)
-  const [includeReferences, setIncludeReferences] = React.useState(true)
   const [result, setResult] =
     React.useState<KnowledgeQueryInspectResult | null>(null)
   const [isQuerying, setIsQuerying] = React.useState(false)
@@ -162,7 +157,6 @@ export function KnowledgeHitTest({
           limit: queryLimit,
           search_mode: searchMode,
           similarity: minSimilarity,
-          include_references: includeReferences,
         }
       )
       setResult(nextResult)
@@ -172,7 +166,6 @@ export function KnowledgeHitTest({
         limit: queryLimit,
         searchMode,
         similarity: minSimilarity,
-        includeReferences,
       })
     } catch (error) {
       setResult(null)
@@ -258,15 +251,6 @@ export function KnowledgeHitTest({
                 }
               />
             </label>
-            <label className="flex min-h-11 items-center gap-2 text-sm font-medium sm:min-h-9 sm:self-end">
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={includeReferences}
-                onChange={(event) => setIncludeReferences(event.target.checked)}
-              />
-              {t("扩展文档引用")}
-            </label>
           </div>
           <Button
             type="submit"
@@ -306,12 +290,6 @@ export function KnowledgeHitTest({
               {t("{label}：{value}", {
                 label: t("关键词候选"),
                 value: trace.keyword_candidates,
-              })}
-            </span>
-            <span>
-              {t("{label}：{value}", {
-                label: t("引用候选"),
-                value: trace.reference_candidates,
               })}
             </span>
             <span>
@@ -406,14 +384,6 @@ export function KnowledgeHitTest({
                   ) : (
                     <span className="text-xs text-muted-foreground">-</span>
                   )}
-                  {hit.reference_hops > 0 ? (
-                    <Badge variant="secondary">
-                      {t("{label}：{value}", {
-                        label: t("引用跳数"),
-                        value: hit.reference_hops,
-                      })}
-                    </Badge>
-                  ) : null}
                 </div>
                 <p className="mt-3 line-clamp-3 text-sm leading-5 text-muted-foreground">
                   {hitSummary(hit)}
@@ -510,14 +480,6 @@ export function KnowledgeHitTest({
                             </Badge>
                           ))
                         : "-"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">
-                      {t("引用跳数")}
-                    </dt>
-                    <dd className="mt-1 tabular-nums">
-                      {selectedHit.reference_hops}
                     </dd>
                   </div>
                   <div>

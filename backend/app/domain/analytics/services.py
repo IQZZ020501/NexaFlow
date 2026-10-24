@@ -15,7 +15,6 @@ from app.domain.tools.runtime import (
     TOOL_INVOCATION_UNCERTAIN,
 )
 from app.entities.analytics import (
-    WorkspaceAnalyticsGraphBuild,
     WorkspaceAnalyticsInventory,
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
@@ -97,13 +96,6 @@ class _PeriodSummary:
     unreported_runs: int
     success_rate: float | None
     average_duration_ms: float | None
-
-
-@dataclass(frozen=True)
-class _GraphPeriodSummary:
-    builds: int
-    total_tokens: int
-    unreported_builds: int
 
 
 def resolve_analytics_period(
@@ -223,28 +215,6 @@ def _summarize_period(runs: list[WorkspaceAnalyticsRun]) -> _PeriodSummary:
     )
 
 
-def _graph_build_usage(build: WorkspaceAnalyticsGraphBuild) -> tuple[int, bool]:
-    return (
-        _number(build.model_usage.get("charged_tokens")),
-        _number(build.model_usage.get("estimated_tokens")) > 0,
-    )
-
-
-def _summarize_graph_period(
-    builds: list[WorkspaceAnalyticsGraphBuild],
-) -> _GraphPeriodSummary:
-    total_tokens = unreported_builds = 0
-    for build in builds:
-        charged_tokens, unreported = _graph_build_usage(build)
-        total_tokens += charged_tokens
-        unreported_builds += int(unreported)
-    return _GraphPeriodSummary(
-        builds=len(builds),
-        total_tokens=total_tokens,
-        unreported_builds=unreported_builds,
-    )
-
-
 def _change_percent(current: float | None, previous: float | None) -> float | None:
     if current is None or previous is None:
         return None
@@ -281,7 +251,6 @@ def _distribution(counter: Counter[str]) -> list[WorkspaceAnalyticsDistributionI
 
 def _build_trends(
     runs: list[WorkspaceAnalyticsRun],
-    graph_builds: list[WorkspaceAnalyticsGraphBuild],
     period: AnalyticsPeriod,
 ) -> list[WorkspaceAnalyticsTrendPoint]:
     """
@@ -298,11 +267,9 @@ def _build_trends(
     values = {
         period.from_date + timedelta(days=index): {
             "runs": 0,
-            "graph_builds": 0,
             "input_tokens": 0,
             "output_tokens": 0,
             "application_tokens": 0,
-            "graph_tokens": 0,
             "total_tokens": 0,
         }
         for index in range(days)
@@ -319,16 +286,6 @@ def _build_trends(
         values[day]["output_tokens"] += run_output
         values[day]["application_tokens"] += run_total
         values[day]["total_tokens"] += run_total
-    for build in graph_builds:
-        if build.created_at is None:
-            continue
-        day = _analytics_time(build.created_at).date()
-        if day not in values:
-            continue
-        graph_tokens, _ = _graph_build_usage(build)
-        values[day]["graph_builds"] += 1
-        values[day]["graph_tokens"] += graph_tokens
-        values[day]["total_tokens"] += graph_tokens
     return [
         WorkspaceAnalyticsTrendPoint(date=day, **day_values)
         for day, day_values in values.items()
@@ -675,12 +632,6 @@ async def get_workspace_analytics(
         period.previous_start_at,
         period.end_at,
     )
-    all_graph_builds = await analytics_repository.list_workspace_analytics_graph_builds(
-        db,
-        workspace.id,
-        period.previous_start_at,
-        period.end_at,
-    )
     all_tool_calls = await analytics_repository.list_workspace_analytics_tool_calls(
         db,
         workspace.id,
@@ -697,16 +648,6 @@ async def get_workspace_analytics(
         for run in all_runs
         if run.created_at is not None and _utc(run.created_at) < period.start_at
     ]
-    current_graph_builds = [
-        build
-        for build in all_graph_builds
-        if build.created_at is not None and _utc(build.created_at) >= period.start_at
-    ]
-    previous_graph_builds = [
-        build
-        for build in all_graph_builds
-        if build.created_at is not None and _utc(build.created_at) < period.start_at
-    ]
     current_tool_calls = [
         call
         for call in all_tool_calls
@@ -719,10 +660,8 @@ async def get_workspace_analytics(
     ]
     current = _summarize_period(current_runs)
     previous = _summarize_period(previous_runs)
-    current_graph = _summarize_graph_period(current_graph_builds)
-    previous_graph = _summarize_graph_period(previous_graph_builds)
-    current_total = current.total_tokens + current_graph.total_tokens
-    previous_total = previous.total_tokens + previous_graph.total_tokens
+    current_total = current.total_tokens
+    previous_total = previous.total_tokens
 
     response = WorkspaceAnalyticsResponse(
         summary=WorkspaceAnalyticsSummary(
@@ -740,10 +679,8 @@ async def get_workspace_analytics(
                 input=current.input_tokens,
                 output=current.output_tokens,
                 application_total=current.total_tokens,
-                graph_total=current_graph.total_tokens,
                 total=current_total,
                 unreported_runs=current.unreported_runs,
-                unreported_graph_builds=current_graph.unreported_builds,
                 previous_total=previous_total,
                 change_percent=_change_percent(
                     current_total,
@@ -761,7 +698,7 @@ async def get_workspace_analytics(
         ),
         inventory=_inventory_response(inventory),
         tool_usage=_build_tool_usage(current_tool_calls, previous_tool_calls),
-        trends=_build_trends(current_runs, current_graph_builds, period),
+        trends=_build_trends(current_runs, period),
         hourly_runs=_build_hourly_runs(current_runs),
         distributions=WorkspaceAnalyticsDistributions(
             run_types=_distribution(Counter(run.app_type for run in current_runs)),

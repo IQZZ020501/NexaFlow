@@ -1,5 +1,4 @@
 from app.schemas.knowledge.contracts import (
-    GraphMode,
     KnowledgeAssetResponse,
     KnowledgeAttachmentResponse,
     KnowledgeBaseCreateRequest,
@@ -20,8 +19,6 @@ from app.schemas.knowledge.contracts import (
     KnowledgeEvaluationResultResponse,
     KnowledgeEvaluationRunRequest,
     KnowledgeEvaluationSummaryResponse,
-    KnowledgeGraphEvaluationExpectation,
-    KnowledgeGraphEvaluationMetrics,
     KnowledgeImportMode,
     KnowledgeModelTestRequest,
     KnowledgeModelTestResponse,
@@ -32,13 +29,11 @@ from app.schemas.knowledge.contracts import (
     KnowledgeTaskBulkDeleteRequest,
     KnowledgeTaskBulkDeleteResponse,
     KnowledgeTaskResponse,
-    KnowledgeTaskRetryRequest,
     ResourcePermissionResponse,
     ResourcePermissionUpsertRequest,
 )
 
 __all__ = [
-    "GraphMode",
     "KnowledgeAssetResponse",
     "KnowledgeAttachmentResponse",
     "KnowledgeBaseCreateRequest",
@@ -59,8 +54,6 @@ __all__ = [
     "KnowledgeEvaluationResultResponse",
     "KnowledgeEvaluationRunRequest",
     "KnowledgeEvaluationSummaryResponse",
-    "KnowledgeGraphEvaluationExpectation",
-    "KnowledgeGraphEvaluationMetrics",
     "KnowledgeImportMode",
     "KnowledgeModelTestRequest",
     "KnowledgeModelTestResponse",
@@ -71,7 +64,6 @@ __all__ = [
     "KnowledgeTaskBulkDeleteRequest",
     "KnowledgeTaskBulkDeleteResponse",
     "KnowledgeTaskResponse",
-    "KnowledgeTaskRetryRequest",
     "ResourcePermissionResponse",
     "ResourcePermissionUpsertRequest",
 ]

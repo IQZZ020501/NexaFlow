@@ -417,7 +417,7 @@ export function WorkspaceAnalyticsPage() {
   if (!session.me || !canAccess) return null
   const hasActivity =
     data !== null &&
-    (data.summary.runs.value > 0 || data.summary.tokens.graph_total > 0)
+    data.summary.runs.value > 0
 
   const chartVars = {
     "--analytics-hourly":

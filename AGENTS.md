@@ -45,7 +45,7 @@ not trigger unrelated cleanup.
   module-owned business domains under `domain/`; shared cross-domain ORM
   entities live in `domain/platform/` (User, Workspace, Team, permissions).
   Within each layer, feature packages group the files (for example
-  `application/agents/runs/`, `domain/knowledge/graph/`), with large features
+  `application/agents/runs/`, `domain/knowledge/documents/`), with large features
   split further by real responsibility (`access`, `runs`, `tools`, `retrieval`,
   `documents`, `catalog`). Schemas stay in `app/schemas/` and Celery task entry
   points in `app/tasks/`.
@@ -177,10 +177,11 @@ not trigger unrelated cleanup.
   migrations and preload `pg_search` before PostgreSQL starts. Qdrant remains
   the application vector store. Do not silently fall back to `ts_rank_cd`,
   because that changes the declared ranking semantics.
-- Evidence Graph entities, claims, evidence, reviews, schemas, revisions and
-  relationships are authoritative in PostgreSQL. Qdrant's graph Profile
-  collection is a derived, rebuildable index; never use it as the source of
-  truth or delete PostgreSQL Graph history to repair it.
+- Knowledge retrieval uses vector search and PostgreSQL BM25 with optional
+  reranking. Knowledge graph extraction, traversal, visualization, reference
+  expansion and their ORM storage have been removed. Historical migrations
+  remain in the Alembic chain; the removal migration deletes obsolete data,
+  imported files and derived collections. Keep answer source citations intact.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing, indexing, and durable deletion cleanup run through Celery
@@ -188,10 +189,6 @@ not trigger unrelated cleanup.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
-- Graph incremental and rebuild work uses the leased `KnowledgeTask` runner
-  (`graph_sync` / `graph_rebuild`). Celery Beat's graph reconcile recovers
-  expired work, orphaned revisions, and Profile repair intents; it must remain
-  persistent and retryable rather than becoming best-effort post-commit work.
 - Knowledge retrieval evaluation also runs through the leased Celery knowledge
   task runner and reuses the production retrieval path. Evaluation is mutually
   exclusive with parse/index/rebuild work for the same knowledge base; result
@@ -553,8 +550,8 @@ examples.
   `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.harness, agents.agent_access,
   agents.agent_services_coverage, agents.agent_runtime_coverage, workflows.workflows,
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
-  knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
-  knowledge.knowledge_graph_edge_coverage, knowledge.knowledge_domain_coverage,
+  knowledge.knowledge, knowledge.unit, knowledge.graph_removal,
+  knowledge.knowledge_domain_coverage,
   knowledge.knowledge_api_coverage, tools.tools, tools.unit, tools.shell_unit, artifacts.conversations, identity.identity,
   identity.enterprise_identity, identity.email, identity.smtp,
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,

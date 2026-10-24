@@ -133,7 +133,6 @@ def knowledge_inspect_result(
             ),
             vector_candidates=len(resolved_hits),
             keyword_candidates=0,
-            reference_candidates=0,
             fused_candidates=len(resolved_hits),
             rerank_status=resolved_status,
             returned_hits=len(resolved_hits),
@@ -2087,7 +2086,6 @@ async def assert_knowledge_tool_paths(
         )
 
     async def succeed_retrieve(_db, knowledge_base, payload, _settings):
-        assert payload.include_references is True
         return knowledge_inspect_result(
             knowledge_base,
             payload,

@@ -27,9 +27,6 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
 )
 from app.domain.knowledge.models import (
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-)
-from app.domain.knowledge.models import (
     KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
 )
 from app.domain.knowledge.models import (
@@ -47,8 +44,6 @@ from app.entities.knowledge import (
     DOCUMENT_STAGED_META_KEY,
     TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
     VISIBLE_DOCUMENT_STATUSES,
@@ -173,21 +168,6 @@ async def set_knowledge_base_embedding_model_id(
     )
 
 
-async def clear_legacy_graph_extraction_model_reference(
-    db: AsyncSession,
-    workspace_id: str,
-    model_id: str,
-) -> None:
-    await db.execute(
-        update(KnowledgeBaseORM)
-        .where(
-            KnowledgeBaseORM.workspace_id == workspace_id,
-            KnowledgeBaseORM.graph_extraction_model_id == model_id,
-        )
-        .values(graph_extraction_model_id=None)
-    )
-
-
 async def refresh_knowledge_base(
     db: AsyncSession,
     entity: KnowledgeBase,
@@ -199,7 +179,7 @@ async def delete_knowledge_base(db: AsyncSession, entity: KnowledgeBase) -> None
     if row is not None:
         await db.delete(row)
 
-async def delete_knowledge_base_graph(
+async def delete_knowledge_base_data(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     resource_type: str,
@@ -208,14 +188,6 @@ async def delete_knowledge_base_graph(
         delete(KnowledgeEvaluationCaseORM).where(
             KnowledgeEvaluationCaseORM.workspace_id == knowledge_base.workspace_id,
             KnowledgeEvaluationCaseORM.knowledge_base_id == knowledge_base.id,
-        )
-    )
-    await db.execute(
-        delete(KnowledgeDocumentReferenceORM).where(
-            KnowledgeDocumentReferenceORM.workspace_id
-            == knowledge_base.workspace_id,
-            KnowledgeDocumentReferenceORM.knowledge_base_id
-            == knowledge_base.id,
         )
     )
     await db.execute(

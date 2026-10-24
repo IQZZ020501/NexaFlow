@@ -1051,18 +1051,10 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
                         {
                             "content": "alpha",
                             "distance": 0.2,
-                            "sources": ["graph"],
-                            "graph_claim_ids": ["claim-1"],
-                            "graph_hops": 2,
+                            "sources": ["vector"],
                         },
                         {"content": "beta", "distance": 0.9},
                     ],
-                    "graph": {
-                        "revision_id": "revision-1",
-                        "operation": "path",
-                        "paths": [{"steps": [{"claim_id": "claim-1"}]}],
-                        "truncated": False,
-                    },
                     "evidence_status": "found",
                 },
             )
@@ -1218,11 +1210,6 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
                 "knowledge_base_ids": ["base-1"],
                 "query": "question",
                 "limit": 2,
-                "graph_mode": "path",
-                "source_entity": "{{start.question}}",
-                "target_entity": "Policy B",
-                "max_hops": 4,
-                "relation_filters": ["references"],
             },
         )
         try:
@@ -1269,34 +1256,20 @@ def test_nodes_template_classifier_reranker_document_knowledge() -> None:
             {
                 "content": "alpha",
                 "distance": 0.2,
-                "sources": ["graph"],
-                "graph_claim_ids": ["claim-1"],
-                "graph_hops": 2,
+                "sources": ["vector"],
             },
             {"content": "beta", "distance": 0.9},
         ]
         assert knowledge.outputs["content"] == "alpha\n\nbeta"
-        assert knowledge.outputs["paragraph_list"][0]["sources"] == ["graph"]
-        assert knowledge.outputs["paragraph_list"][0]["graph_claim_ids"] == [
-            "claim-1"
-        ]
-        assert knowledge.outputs["graph_revision_id"] == "revision-1"
-        assert knowledge.outputs["graph_paths"] == [
-            {"steps": [{"claim_id": "claim-1"}]}
-        ]
+        assert knowledge.outputs["paragraph_list"][0]["sources"] == ["vector"]
+        assert "graph_revision_id" not in knowledge.outputs
         assert fake_knowledge_tool.arguments == {
             "query": "question",
             "limit": 2,
             "search_mode": "embedding",
             "similarity": 0.6,
-            "graph_mode": "path",
-            "source_entity": "hi",
-            "target_entity": "Policy B",
-            "max_hops": 4,
-            "relation_filters": ["references"],
         }
-        assert knowledge.inputs["graph_mode"] == "path"
-        assert knowledge.inputs["source_entity"] == "hi"
+        assert "graph_mode" not in knowledge.inputs
 
     asyncio.run(run())
 

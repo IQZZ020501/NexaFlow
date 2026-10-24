@@ -67,7 +67,7 @@ Skill 版本在 Agent 发布和 Run 创建时冻结到 resource_snapshot / skill
 ## 保留的生产边界
 
 1. agent_runs / agent_run_states / agent_run_snapshots / agent_run_events 和 tool_invocations 是唯一运行及动作账本。
-2. PostgreSQL 是 Run、Skill、知识图谱和审计事实源；Qdrant 是可重建检索索引。
+2. PostgreSQL 是 Run、Skill、知识文档和审计事实源；Qdrant 是可重建检索索引。
 3. 租约、checkpoint、重试幂等、租户隔离、授权重验、外部写入审批和独立工具超时不变。
 4. 累计模型 token 不再作为执行门禁；用量仍记录。总运行时长、模型轮次与工具数是防失控熔断；预算耗尽后各类工具统一撤下 schema，给模型最终回答机会。供应商的上下文和单次输出上限无法由平台移除。
 5. 评测针对答案、真实工具调用、权限、用量和延迟，不再要求 grounding 状态。

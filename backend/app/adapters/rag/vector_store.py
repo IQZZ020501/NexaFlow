@@ -15,8 +15,6 @@ from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.ports.vector_store import (
-    GraphProfileVector,
-    GraphProfileVectorHit,
     VectorChunk,
     VectorHit,
 )
@@ -28,10 +26,6 @@ QDRANT_UPLOAD_BATCH_SIZE = 64
 
 def vector_collection_name(knowledge_base_id: str) -> str:
     return f"kb_{knowledge_base_id.replace('-', '')}"
-
-
-def graph_profile_collection_name(knowledge_base_id: str) -> str:
-    return f"{vector_collection_name(knowledge_base_id)}_graph"
 
 
 def validate_embedding_vectors(
@@ -340,121 +334,6 @@ def query_vectors(
     return hits
 
 
-def upsert_graph_profile_vectors(
-    settings: Settings,
-    knowledge_base_id: str,
-    workspace_id: str,
-    embedding_model: RegisteredModel,
-    profiles: list[GraphProfileVector],
-) -> None:
-    if not profiles:
-        return
-    vectors = build_registered_embeddings(
-        embedding_model,
-        settings,
-    ).embed_documents([item.content for item in profiles])
-    validate_embedding_vectors(vectors, len(profiles))
-    client = _client(settings)
-    collection_name = graph_profile_collection_name(knowledge_base_id)
-    _ensure_collection(client, collection_name, len(vectors[0]))
-    client.upload_points(
-        collection_name,
-        points=[
-            models.PointStruct(
-                id=item.entity_id,
-                vector=vector,
-                payload={
-                    "entity_id": item.entity_id,
-                    "profile_hash": item.profile_hash,
-                    "workspace_id": workspace_id,
-                    "knowledge_base_id": knowledge_base_id,
-                },
-            )
-            for item, vector in zip(profiles, vectors, strict=True)
-        ],
-        batch_size=QDRANT_UPLOAD_BATCH_SIZE,
-        wait=True,
-    )
-
-
-def query_graph_profile_vectors(
-    settings: Settings,
-    knowledge_base_id: str,
-    workspace_id: str,
-    embedding_model: RegisteredModel,
-    query: str,
-    limit: int,
-) -> list[GraphProfileVectorHit]:
-    if limit <= 0:
-        return []
-    client = _client(settings)
-    collection_name = graph_profile_collection_name(knowledge_base_id)
-    if not client.collection_exists(collection_name):
-        return []
-    query_embedding = build_registered_embeddings(
-        embedding_model,
-        settings,
-    ).embed_query(query)
-    points = client.query_points(
-        collection_name,
-        # See the compatibility note in query_vectors above.
-        query=cast(Any, models.NearestQuery(nearest=query_embedding)),
-        limit=limit,
-        with_payload=["entity_id", "profile_hash"],
-        query_filter=models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="workspace_id",
-                    match=models.MatchValue(value=workspace_id),
-                ),
-                models.FieldCondition(
-                    key="knowledge_base_id",
-                    match=models.MatchValue(value=knowledge_base_id),
-                ),
-            ]
-        ),
-    ).points
-    hits: list[GraphProfileVectorHit] = []
-    for point in points:
-        if not isinstance(point.payload, dict):
-            continue
-        entity_id = point.payload.get("entity_id")
-        profile_hash = point.payload.get("profile_hash")
-        if not isinstance(entity_id, str) or not isinstance(profile_hash, str):
-            continue
-        hits.append(
-            GraphProfileVectorHit(
-                entity_id=entity_id,
-                profile_hash=profile_hash,
-                distance=1.0 - point.score,
-            )
-        )
-    return hits
-
-
-def delete_graph_profile_vectors(
-    settings: Settings,
-    knowledge_base_id: str,
-    entity_ids: list[str],
-) -> None:
-    if not entity_ids:
-        return
-    client = _client(settings)
-    collection_name = graph_profile_collection_name(knowledge_base_id)
-    if client.collection_exists(collection_name):
-        client.delete(collection_name, points_selector=entity_ids, wait=True)
-
-
-def delete_graph_profile_collection(
-    settings: Settings,
-    knowledge_base_id: str,
-) -> None:
-    client = _client(settings)
-    collection_name = graph_profile_collection_name(knowledge_base_id)
-    if client.collection_exists(collection_name):
-        client.delete_collection(collection_name)
-
-
 class QdrantVectorStore:
     """Adapter implementing the ``app.ports.vector_store.VectorStore`` contract."""
 
@@ -507,49 +386,3 @@ class QdrantVectorStore:
             score_threshold,
             document_ids,
         )
-
-    def upsert_graph_profile_vectors(
-        self,
-        knowledge_base_id: str,
-        workspace_id: str,
-        embedding_model: RegisteredModel,
-        profiles: list[GraphProfileVector],
-    ) -> None:
-        upsert_graph_profile_vectors(
-            self._settings,
-            knowledge_base_id,
-            workspace_id,
-            embedding_model,
-            profiles,
-        )
-
-    def query_graph_profile_vectors(
-        self,
-        knowledge_base_id: str,
-        workspace_id: str,
-        embedding_model: RegisteredModel,
-        query: str,
-        limit: int,
-    ) -> list[GraphProfileVectorHit]:
-        return query_graph_profile_vectors(
-            self._settings,
-            knowledge_base_id,
-            workspace_id,
-            embedding_model,
-            query,
-            limit,
-        )
-
-    def delete_graph_profile_vectors(
-        self,
-        knowledge_base_id: str,
-        entity_ids: list[str],
-    ) -> None:
-        delete_graph_profile_vectors(
-            self._settings,
-            knowledge_base_id,
-            entity_ids,
-        )
-
-    def delete_graph_profile_collection(self, knowledge_base_id: str) -> None:
-        delete_graph_profile_collection(self._settings, knowledge_base_id)

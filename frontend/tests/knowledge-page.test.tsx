@@ -1138,47 +1138,6 @@ function renderDetailPage(
     if (url.includes("/models")) return jsonResponse(options.models ?? models)
     if (url.includes("/knowledge-bases?")) return jsonResponse(knowledgeBases)
     if (url.includes("/documents")) return jsonResponse(documents)
-    if (url.endsWith("/graph/links")) {
-      return jsonResponse({
-        revision: "empty-graph",
-        nodes: [],
-        edges: [],
-        document_count: 0,
-        unresolved_count: 0,
-        edge_count: 0,
-        truncated: false,
-      })
-    }
-    if (url.endsWith("/graph/settings")) {
-      return jsonResponse({
-        enabled: false,
-        extraction_model_id: null,
-        active_schema_id: null,
-        active_revision_id: null,
-      })
-    }
-    if (url.endsWith("/graph/status")) {
-      return jsonResponse({
-        enabled: false,
-        active_schema_id: null,
-        active_revision_id: null,
-        revision_no: null,
-        revision_status: null,
-        source_watermark: null,
-        stats: {},
-        model_usage: {},
-        pending_review_count: 0,
-        last_error: null,
-        published_at: null,
-      })
-    }
-    if (url.endsWith("/graph/schema")) return jsonResponse(null)
-    if (url.includes("/graph/entities")) {
-      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
-    }
-    if (url.includes("/graph/reviews")) {
-      return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 })
-    }
     if (url.includes("/tasks")) return jsonResponse([])
     if (url.includes("/members")) return jsonResponse([])
     return jsonResponse([])
@@ -1198,7 +1157,7 @@ describe("KnowledgeBasePage documents tab", () => {
       `https://nexaflow.example/app/knowledge/${KB_ID}`
     )
     expect(parseKnowledgeBaseDetailTab("tasks")).toBe("tasks")
-    expect(parseKnowledgeBaseDetailTab("graph")).toBe("graph")
+    expect(parseKnowledgeBaseDetailTab("graph")).toBeNull()
     expect(parseKnowledgeBaseDetailTab("unknown")).toBeNull()
     expect(knowledgeBaseDetailPath(KB_ID, "documents")).toBe(
       `/app/knowledge/${KB_ID}`
@@ -1206,17 +1165,8 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(knowledgeBaseDetailPath(KB_ID, "evaluation")).toBe(
       `/app/knowledge/${KB_ID}/evaluation`
     )
-    expect(knowledgeBaseDetailPath(KB_ID, "graph")).toBe(
-      `/app/knowledge/${KB_ID}/graph`
-    )
-
     renderDetailPage()
-    fireEvent.click(await screen.findByRole("button", { name: "关系图谱" }))
-    expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/graph`)
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "关系图谱" })).toBeTruthy()
-    )
-
+    expect(screen.queryByRole("button", { name: "关系图谱" })).toBeNull()
     fireEvent.click(await screen.findByText("任务"))
     expect(window.location.pathname).toBe(`/app/knowledge/${KB_ID}/tasks`)
     await waitFor(() => expect(screen.getByText("暂无任务")).toBeTruthy())
@@ -2380,8 +2330,8 @@ describe("KnowledgeBasePage tasks tab", () => {
         taskFetches += 1
         return jsonResponse([
           makeTask({
-            id: "graph-progress-task",
-            task_type: "graph_rebuild",
+            id: "rebuild-progress-task",
+            task_type: "rebuild_index",
             status: "running",
             total_items: 175,
             processed_items: taskFetches,
@@ -2552,47 +2502,6 @@ describe("KnowledgeBasePage tasks tab", () => {
     expect(
       notifications.some(([, message]) => message === "已删除 2 个任务")
     ).toBe(true)
-  })
-
-  test("offers retry-all and checkpoint retry for a failed graph task", async () => {
-    const retryModes: string[] = []
-    const task = makeTask({
-      id: "graph-retry-task",
-      task_type: "graph_rebuild",
-      status: "failed",
-      attempts: 1,
-      max_attempts: 3,
-      total_items: 175,
-      processed_items: 42,
-    })
-    fetchHandler = (url, init) => {
-      const method = init?.method ?? "GET"
-      if (method === "POST" && url.includes("/retry")) {
-        retryModes.push(JSON.parse(String(init?.body)).mode)
-        return jsonResponse({ ...task, status: "queued" })
-      }
-      if (url.includes("/models")) return jsonResponse(models)
-      if (url.includes("/knowledge-bases?"))
-        return jsonResponse([makeKnowledgeBase()])
-      if (url.includes("/documents")) return jsonResponse([])
-      if (url.includes("/tasks")) return jsonResponse([task])
-      return jsonResponse([])
-    }
-    routeParams.id = KB_ID
-    renderPage(<KnowledgeBasePage />)
-
-    fireEvent.click(await screen.findByText("任务"))
-    const moreActions = await screen.findByRole("button", {
-      name: "操作 graph-retry-task",
-    })
-    openMenu(moreActions)
-    const unfinished = await screen.findByRole("menuitem", {
-      name: "重试未完成分片",
-    })
-    expect(screen.getByRole("menuitem", { name: "重试全部分片" })).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: "删除" })).toBeTruthy()
-    fireEvent.click(unfinished)
-    await waitFor(() => expect(retryModes).toEqual(["unfinished"]))
   })
 
   test("paginates tasks and changes the page size", async () => {
@@ -2776,10 +2685,7 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
               kind: "document",
               question: null,
               source: null,
-              sources: ["vector", "reference", "graph"],
-              reference_hops: 1,
-              graph_claim_ids: ["claim-1"],
-              graph_hops: 2,
+              sources: ["vector", "keywords"],
               rerank_score: 0.91,
             },
             {
@@ -2797,7 +2703,6 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
               question: null,
               source: null,
               sources: ["keywords"],
-              reference_hops: 0,
               rerank_score: null,
             },
           ],
@@ -2809,7 +2714,6 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
             max_distance: 0.4,
             vector_candidates: 4,
             keyword_candidates: 3,
-            reference_candidates: 2,
             fused_candidates: 6,
             rerank_status: "applied",
             returned_hits: 2,
@@ -2840,10 +2744,7 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     fireEvent.change(similarityInput, {
       target: { value: "0.8" },
     })
-    const includeReferences = screen.getByLabelText(
-      "扩展文档引用"
-    ) as HTMLInputElement
-    expect(includeReferences.checked).toBe(true)
+    expect(screen.queryByLabelText("扩展文档引用")).toBeNull()
     expect(
       (screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement)
         .disabled
@@ -2868,15 +2769,12 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     expect(within(firstCard).getByText("相似度：0.9383")).toBeTruthy()
     expect(within(secondCard).getByText("相似度：-")).toBeTruthy()
     expect(within(firstCard).getByText("向量检索")).toBeTruthy()
-    expect(within(firstCard).getByText("文档引用")).toBeTruthy()
-    expect(within(firstCard).getByText("知识关联")).toBeTruthy()
-    expect(within(firstCard).getByText("引用跳数：1")).toBeTruthy()
+    expect(within(firstCard).getByText("关键词检索")).toBeTruthy()
     expect(screen.queryByText("chunk-1", { exact: true })).toBeNull()
     expect(screen.queryByText("正文内容", { exact: true })).toBeNull()
     expect(screen.getByText("追踪 ID：trace-123")).toBeTruthy()
     expect(screen.getByText("向量候选：4")).toBeTruthy()
     expect(screen.getByText("关键词候选：3")).toBeTruthy()
-    expect(screen.getByText("引用候选：2")).toBeTruthy()
     expect(screen.getByText("融合候选：6")).toBeTruthy()
     expect(screen.getByText("重排状态：已应用")).toBeTruthy()
     expect(screen.getByText("总耗时：12.345 毫秒")).toBeTruthy()
@@ -2886,7 +2784,6 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
       limit: 20,
       search_mode: "keywords",
       similarity: 0.8,
-      include_references: true,
     })
 
     fireEvent.click(firstCard)

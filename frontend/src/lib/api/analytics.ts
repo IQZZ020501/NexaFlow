@@ -22,10 +22,8 @@ export type WorkspaceAnalytics = {
       input: number
       output: number
       application_total: number
-      graph_total: number
       total: number
       unreported_runs: number
-      unreported_graph_builds: number
       previous_total: number
       change_percent: number | null
     }
@@ -71,11 +69,9 @@ export type WorkspaceAnalytics = {
   trends: Array<{
     date: string
     runs: number
-    graph_builds: number
     input_tokens: number
     output_tokens: number
     application_tokens: number
-    graph_tokens: number
     total_tokens: number
   }>
   hourly_runs: Array<{

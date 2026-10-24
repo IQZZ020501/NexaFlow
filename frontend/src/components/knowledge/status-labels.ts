@@ -63,8 +63,6 @@ export function taskTypeLabel(taskType: string, t: TFunction) {
     index: "向量化",
     rebuild_index: "重建索引",
     evaluate: "检索评测",
-    graph_sync: "图谱同步",
-    graph_rebuild: "图谱重建",
   }
 
   const labelKey = labels[taskType]

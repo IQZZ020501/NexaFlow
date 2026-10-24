@@ -76,7 +76,6 @@ from app.entities.knowledge import (
     DOCUMENT_INDEXED_STATUS,
     DOCUMENT_PARSED_STATUS,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -2396,10 +2395,6 @@ async def run_task_runner_direct_tests(
             new=AsyncMock(return_value=SimpleNamespace(id=embedding_model_id)),
         ), patch.object(
             task_runner_service,
-            "rebuild_knowledge_base_references",
-            new=AsyncMock(),
-        ) as rebuild_references, patch.object(
-            task_runner_service,
             "upsert_vectors",
             new=Mock(),
         ):
@@ -2412,7 +2407,6 @@ async def run_task_runner_direct_tests(
                 settings,
                 asyncio.Event(),
             )
-        rebuild_references.assert_not_awaited()
         await db.commit()
         db_kb = await knowledge_repository.get_knowledge_base_by_id(db, indexed_kb_id)
         assert db_kb is not None and db_kb.embedding_model_id == embedding_model_id
@@ -2454,10 +2448,6 @@ async def run_task_runner_direct_tests(
             new=AsyncMock(return_value=SimpleNamespace(id=embedding_model_id)),
         ), patch.object(
             task_runner_service,
-            "rebuild_knowledge_base_references",
-            new=AsyncMock(),
-        ) as rebuild_references, patch.object(
-            task_runner_service,
             "upsert_vectors",
             new=Mock(),
         ):
@@ -2470,7 +2460,6 @@ async def run_task_runner_direct_tests(
                 settings,
                 asyncio.Event(),
             )
-        rebuild_references.assert_awaited_once()
         await db.commit()
         assert task_entity.total_items >= 1
         assert task_entity.processed_items == task_entity.total_items
@@ -3181,32 +3170,6 @@ def run_celery_job_tests(
         {"args": ("task-recover-2",)},
     ]
 
-    with (
-        patch.object(
-            maintenance_tasks_module,
-            "reconcile_knowledge_graphs",
-            new=AsyncMock(return_value=["graph-task-1", "graph-task-2"]),
-        ),
-        patch.object(
-            maintenance_tasks_module.run_knowledge_task_job,
-            "apply_async",
-        ) as apply_async,
-        patch.object(
-            maintenance_tasks_module,
-            "MINUTELY_MAINTENANCE_STEPS",
-            ((
-                "reconcile_knowledge_graphs",
-                maintenance_tasks_module._reconcile_knowledge_graphs,
-            ),),
-        ),
-        patch.object(maintenance_tasks_module, "configure_task_worker"),
-    ):
-        maintenance_tasks_module.run_maintenance_job.run("minutely")
-    assert [call.kwargs for call in apply_async.call_args_list] == [
-        {"args": ("graph-task-1",)},
-        {"args": ("graph-task-2",)},
-    ]
-
     # run_storage_cleanup_job: knowledge success
     cleanup_kb_id = _create_kb(client, research_token, workspace_id, "Cleanup Job KB")
     cleanup_id = asyncio.run(create_cleanup_record(workspace_id, cleanup_kb_id))
@@ -3352,25 +3315,6 @@ def run_celery_job_tests(
         else:
             raise AssertionError("non-eager dispatch failure must propagate")
     asyncio.run(_assert_task_failed_dispatch(dispatch_fail_task.id))
-
-    graph_dispatch_task = asyncio.run(
-        create_task_row(
-            workspace_id,
-            no_model_kb_id,
-            None,
-            TASK_GRAPH_SYNC,
-            actor_user_id,
-        )
-    )
-    graph_dispatch = Mock()
-    with patch.object(
-        celery_app,
-        "send_task",
-        new=graph_dispatch,
-    ):
-        asyncio.run(enqueue_knowledge_task(graph_dispatch_task.id, non_eager_settings))
-    assert graph_dispatch.call_args.kwargs["soft_time_limit"] == 28_800
-    assert graph_dispatch.call_args.kwargs["time_limit"] == 29_100
 
     celery_app.conf.update(
         broker_url=settings.celery_broker_url,
@@ -3970,7 +3914,7 @@ async def run_repository_direct_tests(
             == []
         )
 
-        # delete_knowledge_base_graph cascades
+        # delete_knowledge_base_data cascades
         marker_kb = KnowledgeBase(
             id=new_id(),
             workspace_id=workspace_id,
@@ -4059,7 +4003,7 @@ async def run_repository_direct_tests(
             [],
         )
         await db.commit()
-        await knowledge_repository.delete_knowledge_base_graph(
+        await knowledge_repository.delete_knowledge_base_data(
             db,
             marker_kb,
             "knowledge_base",

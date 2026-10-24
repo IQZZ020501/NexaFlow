@@ -27,9 +27,6 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
 )
 from app.domain.knowledge.models import (
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-)
-from app.domain.knowledge.models import (
     KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
 )
 from app.domain.knowledge.models import (
@@ -47,8 +44,6 @@ from app.entities.knowledge import (
     DOCUMENT_STAGED_META_KEY,
     TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
     VISIBLE_DOCUMENT_STATUSES,
@@ -612,32 +607,6 @@ async def list_active_documents_by_ids(
     )
     return [to_entity(KnowledgeDocument, row) for row in result]
 
-async def list_retrievable_document_ids(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    document_ids: set[str],
-) -> set[str]:
-    active_document_ids = {
-        document.id
-        for document in await list_active_documents_by_ids(
-            db,
-            knowledge_base,
-            document_ids,
-        )
-    }
-    if not active_document_ids:
-        return set()
-    rows = await db.scalars(
-        select(KnowledgeDocumentChunkORM.document_id)
-        .where(
-            KnowledgeDocumentChunkORM.workspace_id == knowledge_base.workspace_id,
-            KnowledgeDocumentChunkORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS,
-            KnowledgeDocumentChunkORM.document_id.in_(active_document_ids),
-        )
-        .distinct()
-    )
-    return set(rows)
 
 async def query_keyword_chunk_ids(
     db: AsyncSession,
@@ -662,39 +631,6 @@ async def query_keyword_chunk_ids(
     )
     return list(result.scalars())
 
-async def list_indexed_chunk_ids_for_parent_ids(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    parent_ids: list[str],
-) -> list[str]:
-    if not parent_ids:
-        return []
-    rows = list(
-        await db.scalars(
-            select(KnowledgeDocumentChunkORM)
-            .where(
-                KnowledgeDocumentChunkORM.workspace_id
-                == knowledge_base.workspace_id,
-                KnowledgeDocumentChunkORM.knowledge_base_id
-                == knowledge_base.id,
-                KnowledgeDocumentChunkORM.status == CHUNK_INDEXED_STATUS,
-                KnowledgeDocumentChunkORM.parent_id.in_(parent_ids),
-            )
-            .order_by(KnowledgeDocumentChunkORM.chunk_index)
-        )
-    )
-    positions = {parent_id: index for index, parent_id in enumerate(parent_ids)}
-    return [
-        row.id
-        for row in sorted(
-            rows,
-            key=lambda row: (
-                positions.get(row.parent_id, len(positions)),
-                row.chunk_index,
-                row.id,
-            ),
-        )
-    ]
 
 async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
     await db.execute(
@@ -712,35 +648,3 @@ async def delete_document_chunks(db: AsyncSession, document_id: str) -> None:
             KnowledgeDocumentParentChunkORM.document_id == document_id
         )
     )
-
-async def get_queued_graph_sync(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-) -> KnowledgeTask | None:
-    row = await db.scalar(
-        select(KnowledgeTaskORM)
-        .where(
-            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
-            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeTaskORM.task_type == "graph_sync",
-            KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
-        )
-        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
-    )
-    return to_entity(KnowledgeTask, row) if row else None
-
-async def get_queued_graph_rebuild(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-) -> KnowledgeTask | None:
-    row = await db.scalar(
-        select(KnowledgeTaskORM)
-        .where(
-            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
-            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeTaskORM.task_type == "graph_rebuild",
-            KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
-        )
-        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
-    )
-    return to_entity(KnowledgeTask, row) if row else None
