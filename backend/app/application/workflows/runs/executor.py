@@ -415,6 +415,7 @@ async def _execute_claimed_workflow_run(
                     {
                         "type": "workflow_node_started",
                         "node_id": node.id,
+                        "node_title": node.data.title,
                         "node_type": node.data.type,
                         "sequence": sequence,
                     },
@@ -532,6 +533,7 @@ async def _execute_claimed_workflow_run(
                     {
                         "type": "workflow_node",
                         "node_id": transition.node.id,
+                        "node_title": transition.node.data.title,
                         "node_type": transition.node.data.type,
                         "status": transition.status.value,
                         "execution_sequence": transition.sequence,

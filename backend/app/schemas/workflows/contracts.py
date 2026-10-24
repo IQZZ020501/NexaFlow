@@ -611,6 +611,7 @@ class WorkflowUploadResponse(BaseModel):
 class ExternalWorkflowProgressEventResponse(BaseModel):
     id: str
     node_id: str
+    node_title: str | None = None
     node_type: WorkflowNodeType
     status: Literal[
         "running",
@@ -622,6 +623,8 @@ class ExternalWorkflowProgressEventResponse(BaseModel):
     ]
     error: str | None = None
     duration_ms: int | None = None
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExternalWorkflowRunResponse(BaseModel):

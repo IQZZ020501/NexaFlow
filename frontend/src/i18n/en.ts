@@ -539,6 +539,8 @@ export const en = {
     "Choose based on how you will use the app; you can adjust it later in settings.",
   Agent: "Agent",
   工作流: "Workflow",
+  "输入问题，工作流会按照已发布配置执行。":
+    "Enter a question and the workflow will follow its published configuration.",
   "智能对话助手，自动规划并使用模型、知识和工具。":
     "A conversational assistant that plans and uses models, knowledge, and tools.",
   "按预设步骤编排固定流程，适合确定性的处理任务。":

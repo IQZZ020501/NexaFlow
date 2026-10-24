@@ -23,6 +23,7 @@ from app.application.workflows.uploads.service import (
     resolve_public_workflow_files,
 )
 from app.domain.agents.models import agent_run_display_status
+from app.domain.agents.runtime import safe_event_value
 from app.entities.identity.user import User
 from app.entities.runs import AgentRun
 from app.infra.config.settings import Settings
@@ -58,6 +59,50 @@ def _external_error(status_value: str) -> str | None:
 
 def _progress_id(event: dict[str, Any]) -> str:
     return f"workflow-node-{event.get('node_id', '')}"
+
+
+def _node_title(detail: Any, node_id: str) -> str | None:
+    graph = getattr(detail, "graph_snapshot", None) or {}
+    nodes = graph.get("nodes") if isinstance(graph, dict) else None
+    if not isinstance(nodes, list):
+        return None
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("id") != node_id:
+            continue
+        data = node.get("data")
+        title = data.get("title") if isinstance(data, dict) else None
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+    return None
+
+
+def _safe_progress_value(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    sanitized = safe_event_value(
+        value,
+        max_string_chars=None,
+        max_list_items=None,
+    )
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+def _external_progress(
+    execution: Any,
+    detail: Any = None,
+) -> ExternalWorkflowProgressEventResponse:
+    node_id = str(getattr(execution, "node_id", "") or "")
+    return ExternalWorkflowProgressEventResponse(
+        id=execution.id,
+        node_id=node_id,
+        node_title=_node_title(detail, node_id) if detail is not None else None,
+        node_type=execution.node_type,
+        status=execution.status,
+        error=("Workflow node failed." if execution.status == "failed" else None),
+        duration_ms=execution.duration_ms,
+        inputs=_safe_progress_value(getattr(execution, "inputs", {})),
+        outputs=_safe_progress_value(getattr(execution, "outputs", {})),
+    )
 
 
 def _external_run_response(
@@ -283,17 +328,7 @@ async def get_external_workflow_run(
     return _external_run_response(
         run,
         detail,
-        [
-            ExternalWorkflowProgressEventResponse(
-                id=execution.id,
-                node_id=execution.node_id,
-                node_type=execution.node_type,
-                status=execution.status,
-                error=("Workflow node failed." if execution.status == "failed" else None),
-                duration_ms=execution.duration_ms,
-            )
-            for execution in executions
-        ],
+        [_external_progress(execution, detail) for execution in executions],
     )
 
 
@@ -427,11 +462,27 @@ async def list_external_workflow_runs(
             db, [run.id for run in runs]
         )
     }
+    executions_by_run: dict[str, list[Any]] = {}
+    if runs:
+        executions = await workflow_repository.list_node_executions_for_runs(
+            db, [run.id for run in runs]
+        )
+        for execution in executions:
+            executions_by_run.setdefault(execution.run_id, []).append(execution)
     items = []
     for run in runs:
         detail = details.get(run.id)
         if detail is not None:
-            items.append(_external_run_response(run, detail))
+            items.append(
+                _external_run_response(
+                    run,
+                    detail,
+                    [
+                        _external_progress(execution, detail)
+                        for execution in executions_by_run.get(run.id, [])
+                    ],
+                )
+            )
     return ExternalWorkflowRunListResponse(
         items=items, total=total, offset=offset, limit=limit
     )
@@ -537,10 +588,13 @@ async def stream_external_workflow_run(
                 "event": {
                     "id": _progress_id(event),
                     "node_id": str(event.get("node_id") or ""),
+                    "node_title": str(event.get("node_title") or "") or None,
                     "node_type": str(event.get("node_type") or "variable"),
                     "status": "running",
                     "error": None,
                     "duration_ms": None,
+                    "inputs": {},
+                    "outputs": {},
                 },
             }
         elif event_type == "workflow_node":
@@ -550,6 +604,7 @@ async def stream_external_workflow_run(
                 "event": {
                     "id": _progress_id(event),
                     "node_id": str(event.get("node_id") or ""),
+                    "node_title": str(event.get("node_title") or "") or None,
                     "node_type": str(event.get("node_type") or "variable"),
                     "status": event.get("status", "failed"),
                     "error": (
@@ -558,5 +613,7 @@ async def stream_external_workflow_run(
                         else None
                     ),
                     "duration_ms": event.get("duration_ms"),
+                    "inputs": _safe_progress_value(event.get("inputs")),
+                    "outputs": _safe_progress_value(event.get("outputs")),
                 },
             }

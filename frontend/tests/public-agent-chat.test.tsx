@@ -1564,6 +1564,74 @@ describe("PublicWorkflowChat", () => {
     expect(screen.queryByText("a.pdf")).toBeNull()
     expect(screen.getByText("b.pdf")).toBeTruthy()
   })
+
+  test("renders workflow runs as chat messages with an expandable node process", async () => {
+    fetchHandler = (url) => {
+      if (url.endsWith("/profile")) return jsonResponse(workflowProfile())
+      if (url.includes("/conversations")) {
+        return jsonResponse({
+          items: [
+            {
+              conversation_id: "conv-1",
+              inputs: { question: "查一下流程" },
+              outputs: { answer: "流程已完成" },
+              status: "succeeded",
+              run_count: 1,
+              created_at: "2026-08-10T00:00:00Z",
+              updated_at: "2026-08-10T00:00:01Z",
+            },
+          ],
+        })
+      }
+      if (url.includes("/runs?")) {
+        return jsonResponse({
+          items: [
+            workflowRun({
+              inputs: { question: "查一下流程" },
+              outputs: { answer: "流程已完成" },
+              progress: [
+                {
+                  id: "node-start",
+                  node_id: "start",
+                  node_title: "接收问题",
+                  node_type: "start",
+                  status: "succeeded",
+                  error: null,
+                  duration_ms: 12,
+                  inputs: { question: "查一下流程" },
+                  outputs: { question: "查一下流程" },
+                },
+              ],
+            }),
+          ],
+        })
+      }
+      return jsonResponse({})
+    }
+
+    renderPage(
+      <PublicWorkflowChat workflowId="wf-1" initialConversationId="conv-1" />
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "公开流程" })
+    ).toBeTruthy()
+    expect(screen.getAllByText("查一下流程").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("流程已完成").length).toBeGreaterThan(0)
+    expect(screen.getByText("接收问题")).toBeTruthy()
+    expect(screen.getByText("执行过程")).toBeTruthy()
+    expect(screen.getByText("12 毫秒")).toBeTruthy()
+    expect(screen.queryByText('{"answer":"流程已完成"}')).toBeNull()
+    fireEvent.click(screen.getByText("接收问题"))
+    expect(screen.getByText("输入内容")).toBeTruthy()
+    expect(
+      screen.getAllByText(/"question": "查一下流程"/).length
+    ).toBeGreaterThan(0)
+    expect(screen.getByText("输出内容")).toBeTruthy()
+    expect(screen.getByLabelText("请输入问题")).toBeTruthy()
+    expect(screen.getByLabelText("发送问题")).toBeTruthy()
+    expect(screen.queryByText("运行工作流")).toBeNull()
+  })
 })
 
 describe("PublicAgentChat", () => {
