@@ -2874,7 +2874,11 @@ describe("PublicAgentChat", () => {
       (screen.getByLabelText("请输入问题") as HTMLTextAreaElement).disabled
     ).toBe(false)
     const textarea = screen.getByLabelText("请输入问题") as HTMLTextAreaElement
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
     fireEvent.change(textarea, { target: { value: "然后解释图片" } })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    expect(screen.getByLabelText("追加后续任务")).toBeTruthy()
     fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(1))
     expect(inputs[0]?.mode).toBe("follow_up")
@@ -2884,6 +2888,14 @@ describe("PublicAgentChat", () => {
       articleText.indexOf("web_search")
     )
     await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
+
+    fireEvent.change(textarea, { target: { value: "草稿" } })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    fireEvent.change(textarea, { target: { value: " \n " } })
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
 
     streamController?.close()
   }, 10_000)

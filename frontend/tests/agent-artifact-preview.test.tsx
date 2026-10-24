@@ -575,6 +575,87 @@ test("shares a single non-modal preview across answers and leaves the composer u
   expect((input as HTMLTextAreaElement).value).toBe("Make the heading bigger")
 })
 
+test("resizes the preview with a captured pointer, bounds both panes and keeps the loaded frame", async () => {
+  let loads = 0
+  withFetch(() => {
+    loads++
+    return htmlResponse()
+  })
+  const bounds = spyOn(
+    HTMLElement.prototype,
+    "getBoundingClientRect"
+  ).mockReturnValue(new DOMRect(100, 0, 1200, 800))
+  try {
+    renderPage(<AgentArtifactPreviews events={[event]} />)
+    fireEvent.click(screen.getByRole("button", { name: "预览文件：page.html" }))
+    const frame = await screen.findByTitle("文件预览：page.html")
+    const panel = screen.getByRole("complementary")
+    const handle = screen.getByRole("separator", { name: "调整文件预览宽度" })
+    const capture = spyOn(handle, "setPointerCapture")
+    const move = (clientX: number, pointerId = 1) =>
+      fireEvent.pointerMove(handle, { clientX, pointerId })
+
+    move(460)
+    expect(handle.getAttribute("aria-valuenow")).toBe("60")
+    fireEvent.pointerDown(handle, { button: 2, pointerId: 1 })
+    move(460)
+    expect(capture).not.toHaveBeenCalled()
+    fireEvent.pointerDown(handle, { button: 0, pointerId: 1 })
+    expect(capture).toHaveBeenCalledWith(1)
+    move(1100, 2)
+    expect(handle.getAttribute("aria-valuenow")).toBe("60")
+    move(460)
+    expect(panel.style.getPropertyValue("--artifact-preview-width")).toBe("70%")
+    move(-1000)
+    expect(Number(handle.getAttribute("aria-valuenow"))).toBe(73)
+    move(3000)
+    expect(Number(handle.getAttribute("aria-valuenow"))).toBe(27)
+    move(700)
+    fireEvent.pointerUp(handle, { pointerId: 1 })
+    move(460)
+    expect(panel.style.getPropertyValue("--artifact-preview-width")).toBe("50%")
+    expect(screen.getByTitle("文件预览：page.html") === frame).toBe(true)
+    expect(loads).toBe(1)
+  } finally {
+    bounds.mockRestore()
+  }
+})
+
+test("supports keyboard resizing and releases resizing after pointer cancellation or capture loss", async () => {
+  withFetch(() => htmlResponse())
+  const bounds = spyOn(
+    HTMLElement.prototype,
+    "getBoundingClientRect"
+  ).mockReturnValue(new DOMRect(0, 0, 800, 600))
+  try {
+    renderPage(<AgentArtifactPreviews events={[event]} />)
+    fireEvent.click(screen.getByRole("button", { name: "预览文件：page.html" }))
+    await screen.findByTitle("文件预览：page.html")
+    const handle = screen.getByRole("separator", { name: "调整文件预览宽度" })
+    expect(handle.getAttribute("aria-controls")).toBe(
+      screen.getByRole("complementary").id
+    )
+    fireEvent.keyDown(handle, { key: "ArrowRight" })
+    expect(handle.getAttribute("aria-valuenow")).toBe("55")
+    fireEvent.keyDown(handle, { key: "ArrowLeft" })
+    expect(handle.getAttribute("aria-valuenow")).toBe("60")
+    fireEvent.keyDown(handle, { key: "Home" })
+    expect(handle.getAttribute("aria-valuenow")).toBe("40")
+    fireEvent.keyDown(handle, { key: "End" })
+    expect(handle.getAttribute("aria-valuenow")).toBe("60")
+    for (const end of [fireEvent.pointerCancel, fireEvent.lostPointerCapture]) {
+      fireEvent.pointerDown(handle, { button: 0, pointerId: 1 })
+      fireEvent.pointerMove(handle, { pointerId: 1, clientX: 400 })
+      end(handle, { pointerId: 1 })
+      fireEvent.pointerMove(handle, { pointerId: 1, clientX: 320 })
+      expect(handle.getAttribute("aria-valuenow")).toBe("50")
+      expect(handle.getAttribute("data-resizing")).toBe("false")
+    }
+  } finally {
+    bounds.mockRestore()
+  }
+})
+
 test("keeps a loaded preview when a follow-up moves its card into a previous answer", async () => {
   let loads = 0
   withFetch(() => {

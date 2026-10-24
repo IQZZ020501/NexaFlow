@@ -3,6 +3,7 @@ import type { TranslationKey } from "./zh-hans"
 export const en = {
   "预览文件：{filename}": "Preview file: {filename}",
   "文件预览：{filename}": "File preview: {filename}",
+  调整文件预览宽度: "Resize file preview",
   正在加载文件预览: "Loading file preview",
   "文件预览失败，可重试或下载原文件查看。":
     "Unable to preview this file. Retry or download the original.",

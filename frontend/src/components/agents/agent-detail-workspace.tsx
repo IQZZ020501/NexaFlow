@@ -4,7 +4,6 @@ import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
-  ArrowUpIcon,
   BotIcon,
   BrainIcon,
   CircleCheckIcon,
@@ -34,7 +33,7 @@ import {
 
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
-import { StopGenerationButton } from "@/components/agents/stop-generation-button"
+import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -1650,30 +1649,18 @@ export function AgentDetailWorkspace({
                             />
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
-                            {isAsking ? (
-                              <StopGenerationButton
-                                onStop={onCancelAsk}
-                                t={t}
-                              />
-                            ) : null}
-                            <Button
-                              type="submit"
-                              size="icon"
-                              className="rounded-full"
-                              aria-label={t(
-                                isAsking ? "追加后续任务" : "发送问题"
-                              )}
-                              title={t(isAsking ? "追加后续任务" : "发送问题")}
-                              disabled={
-                                !question.trim() ||
-                                (!isAsking &&
-                                  (isDirty ||
-                                    isRunsLoading ||
-                                    agent.status !== "active"))
+                            <AgentChatSubmitButton
+                              isRunning={isAsking}
+                              hasInput={Boolean(question.trim())}
+                              sendDisabled={
+                                !isAsking &&
+                                (isDirty ||
+                                  isRunsLoading ||
+                                  agent.status !== "active")
                               }
-                            >
-                              <ArrowUpIcon />
-                            </Button>
+                              onStop={onCancelAsk}
+                              t={t}
+                            />
                           </div>
                         </div>
                       </form>

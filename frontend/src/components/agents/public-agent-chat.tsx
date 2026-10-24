@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
-  ArrowUpIcon,
   BotIcon,
   BrainIcon,
   ChevronDownIcon,
@@ -31,7 +30,7 @@ import {
   RunActionBar,
 } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
-import { StopGenerationButton } from "@/components/agents/stop-generation-button"
+import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
@@ -2406,19 +2405,12 @@ export function PublicAgentChat({
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {isSending ? (
-                      <StopGenerationButton onStop={handleCancelAsk} t={t} />
-                    ) : null}
-                    <Button
-                      type="submit"
-                      size="icon"
-                      className="rounded-full"
-                      aria-label={t(isSending ? "追加后续任务" : "发送问题")}
-                      title={t(isSending ? "追加后续任务" : "发送问题")}
-                      disabled={!question.trim()}
-                    >
-                      <ArrowUpIcon />
-                    </Button>
+                    <AgentChatSubmitButton
+                      isRunning={isSending}
+                      hasInput={Boolean(question.trim())}
+                      onStop={handleCancelAsk}
+                      t={t}
+                    />
                   </div>
                 </div>
               </form>

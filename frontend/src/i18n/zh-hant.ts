@@ -3,6 +3,7 @@ import type { TranslationKey } from "./zh-hans"
 export const zhHant = {
   "预览文件：{filename}": "預覽檔案：{filename}",
   "文件预览：{filename}": "檔案預覽：{filename}",
+  调整文件预览宽度: "調整檔案預覽寬度",
   正在加载文件预览: "正在載入檔案預覽",
   "文件预览失败，可重试或下载原文件查看。":
     "檔案預覽失敗，可重試或下載原檔案查看。",

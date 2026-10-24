@@ -2912,15 +2912,21 @@ describe("AgentsPage run flows", () => {
     fireEvent.change(textarea, { target: { value: "Start the task" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
     await waitFor(() => expect(screen.getByLabelText("停止生成")).toBeTruthy())
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
     fireEvent.change(textarea, { target: { value: "Use Chinese" } })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
     fireEvent.keyDown(textarea, { key: "Enter" })
     await waitFor(() => expect(inputs).toHaveLength(1))
     await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
+    expect(screen.queryByLabelText("追加后续任务") === null).toBe(true)
     expect(screen.getByText("Use Chinese")).toBeTruthy()
     fireEvent.change(textarea, { target: { value: "Then summarize" } })
-    fireEvent.keyDown(textarea, { key: "Enter" })
+    expect(screen.queryByLabelText("停止生成") === null).toBe(true)
+    fireEvent.click(screen.getByLabelText("追加后续任务"))
     await waitFor(() => expect(inputs).toHaveLength(2))
     await waitFor(() => expect(textarea.value).toBe(""))
+    expect(screen.getByLabelText("停止生成")).toBeTruthy()
     expect(inputs.map((input) => input.mode)).toEqual([
       "follow_up",
       "follow_up",
