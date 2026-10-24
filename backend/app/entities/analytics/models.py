@@ -37,14 +37,6 @@ class WorkspaceAnalyticsRun:
 
 
 @dataclass(frozen=True)
-class WorkspaceAnalyticsGraphBuild:
-    id: str = ""
-    status: str = "building"
-    model_usage: dict[str, Any] = field(default_factory=dict)
-    created_at: datetime | None = None
-
-
-@dataclass(frozen=True)
 class WorkspaceAnalyticsInventoryApplications:
     total: int = 0
     agents: int = 0

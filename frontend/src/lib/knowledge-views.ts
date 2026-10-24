@@ -2,7 +2,6 @@ import type { KnowledgeBaseDetailTab } from "@/lib/api/knowledge"
 
 const KNOWLEDGE_BASE_DETAIL_TABS = [
   "documents",
-  "graph",
   "tasks",
   "evaluation",
   "settings",

@@ -48,7 +48,6 @@ from app.domain.knowledge.models import (
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
-    KnowledgeDocumentReference,
     KnowledgeEvaluationCase,
     KnowledgeEvaluationExpectation,
     KnowledgeEvaluationResult,
@@ -225,107 +224,6 @@ async def document_chunk_search_texts(document_id: str) -> list[str]:
                 .order_by(KnowledgeDocumentChunk.chunk_index)
             )
         )
-
-
-async def assert_document_reference_target(
-    source_document_id: str,
-    target_document_id: str | None,
-    target_parent_title: str | None = None,
-) -> None:
-    async with get_session_factory()() as db:
-        references = list(
-            await db.scalars(
-                select(KnowledgeDocumentReference)
-                .where(
-                    KnowledgeDocumentReference.source_document_id
-                    == source_document_id
-                )
-                .order_by(KnowledgeDocumentReference.source_ordinal)
-            )
-        )
-        assert len(references) == 1
-        reference = references[0]
-        assert reference.target_label == "rollback.md"
-        assert reference.target_section == "rollback-procedure"
-        assert reference.reference_type == "markdown"
-        assert reference.source_ordinal == 0
-        assert reference.target_document_id == target_document_id
-        if target_parent_title is None:
-            assert reference.target_parent_id is None
-        else:
-            parent = await db.get(
-                KnowledgeDocumentParentChunk,
-                reference.target_parent_id,
-            )
-            assert parent is not None
-            assert parent.document_id == target_document_id
-            assert parent.title == target_parent_title
-
-
-async def assert_reference_parent_requires_document(
-    source_document_id: str,
-    target_document_id: str,
-) -> None:
-    async with get_session_factory()() as db:
-        source_chunk = await db.scalar(
-            select(KnowledgeDocumentChunk).where(
-                KnowledgeDocumentChunk.document_id == source_document_id
-            )
-        )
-        target_parent = await db.scalar(
-            select(KnowledgeDocumentParentChunk).where(
-                KnowledgeDocumentParentChunk.document_id == target_document_id
-            )
-        )
-        assert source_chunk is not None
-        assert target_parent is not None
-        db.add(
-            KnowledgeDocumentReference(
-                id="invalid-parent-reference",
-                workspace_id=source_chunk.workspace_id,
-                knowledge_base_id=source_chunk.knowledge_base_id,
-                source_document_id=source_document_id,
-                source_chunk_id=source_chunk.id,
-                target_document_id=None,
-                target_parent_id=target_parent.id,
-                target_label="invalid-parent.md",
-                target_section="Invalid",
-                reference_type="markdown",
-                source_ordinal=99,
-            )
-        )
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-        else:
-            raise AssertionError("Parent references must include their target document.")
-
-
-async def assert_wikilink_references(
-    source_document_id: str,
-    target_document_id: str,
-) -> None:
-    async with get_session_factory()() as db:
-        references = list(
-            await db.scalars(
-                select(KnowledgeDocumentReference)
-                .where(
-                    KnowledgeDocumentReference.source_document_id
-                    == source_document_id
-                )
-                .order_by(KnowledgeDocumentReference.source_ordinal)
-            )
-        )
-        assert len(references) == 2
-        resolved, unresolved = references
-        assert resolved.target_label == "rollback.md"
-        assert resolved.target_section == "Rollback Procedure"
-        assert resolved.target_document_id == target_document_id
-        assert resolved.occurrence_count == 2
-        assert unresolved.target_label == "missing.md"
-        assert unresolved.target_document_id is None
-        assert unresolved.occurrence_count == 1
 
 
 async def clear_knowledge_base_embedding_model(knowledge_base_id: str) -> None:
@@ -943,7 +841,6 @@ async def assert_query_aggregates_hybrid_hits(
     assert result.trace.rerank_status == "applied"
     assert result.trace.vector_candidates == 5
     assert result.trace.keyword_candidates == 1
-    assert result.trace.reference_candidates == 0
     assert result.trace.returned_hits == 2
     assert result.trace.duration_ms >= 0
     assert all(value >= 0 for value in result.trace.stage_duration_ms.values())
@@ -1278,140 +1175,6 @@ async def assert_hierarchical_retrieval(
     assert "SECOND" in hits[0].content and "FIRST" not in hits[0].content
     assert "FIRST" in hits[1].content and "SECOND" not in hits[1].content
     assert len(hits[1].content) > 2000
-
-
-async def assert_one_hop_reference_retrieval(
-    knowledge_base_id: str,
-    source_document_id: str,
-    target_document_id: str,
-) -> None:
-    async with get_session_factory()() as db:
-        source_chunk = await db.scalar(
-            select(KnowledgeDocumentChunk).where(
-                KnowledgeDocumentChunk.document_id == source_document_id
-            )
-        )
-        target_chunk = await db.scalar(
-            select(KnowledgeDocumentChunk).where(
-                KnowledgeDocumentChunk.document_id == target_document_id
-            )
-        )
-        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
-        assert source_chunk is not None
-        assert target_chunk is not None
-        assert knowledge_base is not None
-
-        original_query_vectors = knowledge_retrieval_application.query_vectors
-        original_list_references = (
-            knowledge_retrieval_application.knowledge_reference_repository
-            .list_resolved_references_for_chunks
-        )
-        reference_calls = 0
-
-        def fake_query_vectors(
-            _settings,
-            selected_knowledge_base_id,
-            _embedding_model,
-            query,
-            limit,
-            _score_threshold=None,
-            document_ids=None,
-        ):
-            assert selected_knowledge_base_id == knowledge_base_id
-            assert query == "release overview"
-            assert limit == 10
-            if document_ids is None:
-                return [VectorHit(chunk_id=source_chunk.id, distance=0.05)]
-            assert document_ids == {target_document_id}
-            return [VectorHit(chunk_id=target_chunk.id, distance=0.1)]
-
-        knowledge_retrieval_application.query_vectors = fake_query_vectors
-        try:
-            enabled = await knowledge_retrieval_application.retrieve_knowledge_base(
-                db,
-                knowledge_base,
-                KnowledgeQueryRequest(
-                    query="release overview",
-                    limit=2,
-                    search_mode="embedding",
-                    include_references=True,
-                ),
-                test_settings(),
-            )
-            disabled = await knowledge_retrieval_application.retrieve_knowledge_base(
-                db,
-                knowledge_base,
-                KnowledgeQueryRequest(
-                    query="release overview",
-                    limit=2,
-                    search_mode="embedding",
-                    include_references=False,
-                ),
-                test_settings(),
-            )
-
-            async def capped_references(
-                _db,
-                _knowledge_base,
-                source_chunk_ids,
-                limit,
-            ):
-                nonlocal reference_calls
-                reference_calls += 1
-                assert source_chunk_ids == [source_chunk.id]
-                assert limit == 100
-                return [
-                    SimpleNamespace(
-                        target_document_id=f"unretrievable-{index}",
-                        target_parent_id=None,
-                    )
-                    for index in range(8)
-                ] + [
-                    SimpleNamespace(
-                        target_document_id=target_document_id,
-                        target_parent_id=None,
-                    )
-                ]
-
-            (
-                knowledge_retrieval_application.knowledge_reference_repository
-                .list_resolved_references_for_chunks
-            ) = capped_references
-            capped = await knowledge_retrieval_application.retrieve_knowledge_base(
-                db,
-                knowledge_base,
-                KnowledgeQueryRequest(
-                    query="release overview",
-                    limit=2,
-                    search_mode="embedding",
-                    include_references=True,
-                ),
-                test_settings(),
-            )
-        finally:
-            knowledge_retrieval_application.query_vectors = original_query_vectors
-            (
-                knowledge_retrieval_application.knowledge_reference_repository
-                .list_resolved_references_for_chunks
-            ) = original_list_references
-
-    assert [hit.document_filename for hit in enabled.hits] == [
-        "overview.md",
-        "rollback.md",
-    ]
-    assert enabled.hits[0].sources == ["vector"]
-    assert enabled.hits[0].reference_hops == 0
-    assert enabled.hits[1].sources == ["reference"]
-    assert enabled.hits[1].reference_hops == 1
-    assert enabled.hits[1].parent_title == "Rollback Procedure"
-    assert enabled.trace.reference_candidates >= 1
-    assert [hit.document_filename for hit in disabled.hits] == ["overview.md"]
-    assert disabled.trace.reference_candidates == 0
-    assert [hit.document_filename for hit in capped.hits] == [
-        "overview.md",
-        "rollback.md",
-    ]
-    assert reference_calls == 1
 
 
 async def assert_document_open_tasks_failed(
@@ -2663,7 +2426,6 @@ def main() -> None:
             json={"auto_index": False},
         )
         assert reference_source_parse.status_code == 202, reference_source_parse.text
-        asyncio.run(assert_document_reference_target(reference_source_id, None))
 
         reference_target = upload_document(
             client,
@@ -2684,115 +2446,6 @@ def main() -> None:
             json={"strategy": "hierarchical", "auto_index": False},
         )
         assert reference_target_parse.status_code == 202, reference_target_parse.text
-        asyncio.run(
-            assert_document_reference_target(
-                reference_source_id,
-                reference_target_id,
-                "Rollback Procedure",
-            )
-        )
-        asyncio.run(
-            assert_reference_parent_requires_document(
-                reference_source_id,
-                reference_target_id,
-            )
-        )
-
-        wikilink_source = upload_document(
-            client,
-            alice_token,
-            default_workspace_id,
-            knowledge_base_id,
-            "wiki.md",
-            (
-                b"See [[rollback.md#Rollback Procedure|rollback]] twice: "
-                b"[[rollback.md#Rollback Procedure]]. Missing [[missing.md]]."
-            ),
-            "text/markdown",
-        )
-        wikilink_source_id = wikilink_source["id"]
-        wikilink_parse = client.post(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents/{wikilink_source_id}/parse",
-            ),
-            headers=auth_headers(alice_token),
-            json={"auto_index": False},
-        )
-        assert wikilink_parse.status_code == 202, wikilink_parse.text
-        asyncio.run(
-            assert_wikilink_references(
-                wikilink_source_id,
-                reference_target_id,
-            )
-        )
-        link_graph = client.get(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/graph/links",
-            ),
-            headers=auth_headers(alice_token),
-        )
-        assert link_graph.status_code == 200, link_graph.text
-        link_graph_payload = link_graph.json()
-        assert link_graph_payload["document_count"] >= 3
-        assert link_graph_payload["unresolved_count"] >= 1
-        missing_node = next(
-            node
-            for node in link_graph_payload["nodes"]
-            if node["kind"] == "unresolved" and node["filename"] == "missing.md"
-        )
-        assert any(
-            edge["source"] == wikilink_source_id
-            and edge["target"] == reference_target_id
-            and edge["count"] == 2
-            for edge in link_graph_payload["edges"]
-        )
-        assert any(
-            edge["source"] == wikilink_source_id
-            and edge["target"] == missing_node["id"]
-            and edge["resolved"] is False
-            for edge in link_graph_payload["edges"]
-        )
-
-        duplicate_reference_target = upload_document(
-            client,
-            alice_token,
-            default_workspace_id,
-            knowledge_base_id,
-            "rollback.md",
-            b"# Rollback Procedure\n\nAmbiguous duplicate target.",
-            "text/markdown",
-        )
-        duplicate_reference_target_id = duplicate_reference_target["id"]
-        duplicate_reference_parse = client.post(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents/"
-                f"{duplicate_reference_target_id}/parse",
-            ),
-            headers=auth_headers(alice_token),
-            json={"strategy": "hierarchical", "auto_index": False},
-        )
-        assert duplicate_reference_parse.status_code == 202, duplicate_reference_parse.text
-        asyncio.run(assert_document_reference_target(reference_source_id, None))
-        deleted_duplicate_reference_target = client.delete(
-            knowledge_url(
-                default_workspace_id,
-                f"/{knowledge_base_id}/documents/{duplicate_reference_target_id}",
-            ),
-            headers=auth_headers(alice_token),
-        )
-        assert (
-            deleted_duplicate_reference_target.status_code == 204
-        ), deleted_duplicate_reference_target.text
-        asyncio.run(
-            assert_document_reference_target(
-                reference_source_id,
-                reference_target_id,
-                "Rollback Procedure",
-            )
-        )
 
         for reference_document_id in (reference_source_id, reference_target_id):
             reference_index = client.post(
@@ -2803,13 +2456,6 @@ def main() -> None:
                 headers=auth_headers(alice_token),
             )
             assert reference_index.status_code == 202, reference_index.text
-        asyncio.run(
-            assert_one_hop_reference_retrieval(
-                knowledge_base_id,
-                reference_source_id,
-                reference_target_id,
-            )
-        )
 
         evaluation_base = knowledge_url(
             default_workspace_id,
@@ -2918,7 +2564,6 @@ def main() -> None:
                     ),
                     vector_candidates=1,
                     keyword_candidates=0,
-                    reference_candidates=0,
                     fused_candidates=1,
                     rerank_status="not_configured",
                     returned_hits=1,
@@ -2939,7 +2584,6 @@ def main() -> None:
                     "case_ids": evaluation_case_ids,
                     "limit": 3,
                     "search_mode": "blend",
-                    "include_references": True,
                 },
             )
             assert queued_run.status_code == 202, queued_run.text
@@ -3133,7 +2777,6 @@ def main() -> None:
             headers=auth_headers(alice_token),
         )
         assert deleted_reference_target.status_code == 204, deleted_reference_target.text
-        asyncio.run(assert_document_reference_target(reference_source_id, None))
         deleted_reference_source = client.delete(
             knowledge_url(
                 default_workspace_id,

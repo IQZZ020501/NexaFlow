@@ -35,7 +35,6 @@ const evaluationCase = {
   knowledge_base_id: "kb-1",
   question: "如何回滚？",
   expected_document_ids: ["doc-1"],
-  graph_expectation: null,
   created_by_user_id: "user-1",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
@@ -98,7 +97,6 @@ describe("knowledge evaluation", () => {
               question: null,
               source: null,
               sources: ["keywords"],
-              reference_hops: 0,
               rerank_score: null,
             },
           ],
@@ -110,7 +108,6 @@ describe("knowledge evaluation", () => {
             max_distance: 0.8,
             vector_candidates: 0,
             keyword_candidates: 1,
-            reference_candidates: 0,
             fused_candidates: 1,
             rerank_status: "skipped",
             returned_hits: 1,
@@ -123,7 +120,7 @@ describe("knowledge evaluation", () => {
         const body = JSON.parse(String(init?.body))
         requestBodies.push(body)
         return jsonResponse(
-          { ...evaluationCase, graph_expectation: body.graph_expectation },
+          evaluationCase,
           201,
         )
       }
@@ -154,16 +151,7 @@ describe("knowledge evaluation", () => {
               reciprocal_rank: 1,
               ndcg_at_k: 1,
               latency_ms: 12,
-              trace: { graph: { revision_id: "revision-1" } },
-              graph_metrics: {
-                entity_precision: 1,
-                entity_recall: 1,
-                claim_precision: 1,
-                claim_recall: 1,
-                path_exact_match: 1,
-                path_edge_accuracy: 1,
-                citation_coverage: 1,
-              },
+              trace: {},
               error: null,
               created_at: "2026-01-01T00:00:00Z",
             },
@@ -197,7 +185,6 @@ describe("knowledge evaluation", () => {
     expect(screen.getByText("检索模式：混合检索")).toBeTruthy()
     expect(screen.getByText("返回数量：5")).toBeTruthy()
     expect(screen.getByText("相似度：0.6")).toBeTruthy()
-    expect(screen.getByText("扩展文档引用：是")).toBeTruthy()
     const queryInput = screen.getByLabelText("查询内容") as HTMLTextAreaElement
     fireEvent.change(queryInput, {
       target: { value: "如何回滚？" },
@@ -214,40 +201,14 @@ describe("knowledge evaluation", () => {
     expect(inspectBodies[0]?.search_mode).toBe("keywords")
     await screen.findByText("检索模式：关键词检索")
     await screen.findByText("保存当前检索")
-    fireEvent.click(screen.getByText("知识关联期望"))
-    fireEvent.change(screen.getByLabelText("实体名称"), {
-      target: { value: "制度 A, 账号管理办法" },
-    })
-    fireEvent.change(screen.getByLabelText("关系类型"), {
-      target: { value: "references" },
-    })
-    fireEvent.change(screen.getByLabelText("路径实体序列"), {
-      target: { value: "制度 A,账号管理办法" },
-    })
-    fireEvent.change(screen.getByLabelText("路径关系序列"), {
-      target: { value: "references" },
-    })
     fireEvent.click(screen.getByRole("button", { name: "添加用例" }))
     await screen.findByRole("checkbox", { name: "选择用例：如何回滚？" })
     expect(requestBodies[0]).toEqual({
       question: "如何回滚？",
       expected_document_ids: ["doc-1"],
-      graph_expectation: {
-        entity_names: ["制度 A", "账号管理办法"],
-        predicates: ["references"],
-        path_entity_names: ["制度 A", "账号管理办法"],
-        path_predicates: ["references"],
-      },
     })
 
-    const graphModeTrigger = screen.getByRole("button", {
-      name: "图谱检索模式",
-    })
-    fireEvent.pointerDown(graphModeTrigger)
-    fireEvent.click(await screen.findByText("路径图谱检索"))
-    fireEvent.change(screen.getByLabelText("最大图谱跳数"), {
-      target: { value: "5" },
-    })
+    expect(screen.queryByRole("button", { name: "图谱检索模式" })).toBeNull()
     fireEvent.click(
       await screen.findByRole("button", { name: "开始评测（1 条）" }),
     )
@@ -260,19 +221,12 @@ describe("knowledge evaluation", () => {
     expect(evaluationHelp.getAttribute("aria-expanded")).toBe("true")
     await screen.findByText("评测指标说明")
     expect(screen.getByText("测试问题：怎么申请年假？")).toBeTruthy()
-    const graphMetrics = screen.getByText("知识关联指标")
-    fireEvent.click(graphMetrics)
-    expect(screen.getByText("图谱修订：revision-1")).toBeTruthy()
-    expect(screen.getByText("引用覆盖率")).toBeTruthy()
     expect(screen.getAllByText("1").length).toBeGreaterThan(0)
     expect(requestBodies[1]).toEqual({
       case_ids: ["case-1"],
       limit: 5,
       search_mode: "keywords",
       similarity: 0.6,
-      include_references: true,
-      graph_mode: "path",
-      max_hops: 5,
     })
     expect(errors).toEqual([])
   })

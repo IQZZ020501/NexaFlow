@@ -10,12 +10,10 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     ForeignKeyConstraint,
-    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
-    false,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -39,30 +37,6 @@ class KnowledgeBase(Base):
             "status IN ('active', 'archived')",
             name="ck_knowledge_bases_status",
         ),
-        ForeignKeyConstraint(
-            ["workspace_id", "id", "active_graph_schema_id"],
-            [
-                "knowledge_graph_schemas.workspace_id",
-                "knowledge_graph_schemas.knowledge_base_id",
-                "knowledge_graph_schemas.id",
-            ],
-            name="fk_knowledge_active_graph_schema",
-            use_alter=True,
-            deferrable=True,
-            initially="DEFERRED",
-        ),
-        ForeignKeyConstraint(
-            ["workspace_id", "id", "active_graph_revision_id"],
-            [
-                "knowledge_graph_revisions.workspace_id",
-                "knowledge_graph_revisions.knowledge_base_id",
-                "knowledge_graph_revisions.id",
-            ],
-            name="fk_knowledge_active_graph_revision",
-            use_alter=True,
-            deferrable=True,
-            initially="DEFERRED",
-        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -80,21 +54,6 @@ class KnowledgeBase(Base):
         ForeignKey("model.id"),
         nullable=True,
         index=True,
-    )
-    graph_enabled: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        server_default=false(),
-    )
-    active_graph_schema_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True, index=True
-    )
-    active_graph_revision_id: Mapped[str | None] = mapped_column(
-        String(36), nullable=True, index=True
-    )
-    graph_extraction_model_id: Mapped[str | None] = mapped_column(
-        ForeignKey("model.id"), nullable=True, index=True
     )
     created_by_user_id: Mapped[str] = mapped_column(
         String(36),
@@ -321,7 +280,7 @@ class KnowledgeDocumentChunk(Base):
             name="ck_knowledge_document_chunks_status",
         ),
         CheckConstraint(
-            "kind IN ('document', 'qa', 'graph_record')",
+            "kind IN ('document', 'qa')",
             name="ck_knowledge_document_chunks_kind",
         ),
         CheckConstraint(
@@ -350,119 +309,6 @@ class KnowledgeDocumentChunk(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="preview")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
-
-
-class KnowledgeDocumentReference(Base):
-    __tablename__ = "knowledge_document_references"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["workspace_id", "knowledge_base_id"],
-            ["knowledge.workspace_id", "knowledge.id"],
-            name="fk_knowledge_document_references_knowledge_workspace",
-        ),
-        ForeignKeyConstraint(
-            [
-                "workspace_id",
-                "knowledge_base_id",
-                "source_document_id",
-                "source_chunk_id",
-            ],
-            [
-                "knowledge_document_chunks.workspace_id",
-                "knowledge_document_chunks.knowledge_base_id",
-                "knowledge_document_chunks.document_id",
-                "knowledge_document_chunks.id",
-            ],
-            name="fk_knowledge_document_references_source_chunk_scope",
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["workspace_id", "knowledge_base_id", "target_document_id"],
-            [
-                "knowledge_documents.workspace_id",
-                "knowledge_documents.knowledge_base_id",
-                "knowledge_documents.id",
-            ],
-            name="fk_knowledge_document_references_target_document_scope",
-        ),
-        ForeignKeyConstraint(
-            [
-                "workspace_id",
-                "knowledge_base_id",
-                "target_document_id",
-                "target_parent_id",
-            ],
-            [
-                "knowledge_document_parent_chunks.workspace_id",
-                "knowledge_document_parent_chunks.knowledge_base_id",
-                "knowledge_document_parent_chunks.document_id",
-                "knowledge_document_parent_chunks.id",
-            ],
-            name="fk_knowledge_document_references_target_parent_scope",
-        ),
-        UniqueConstraint(
-            "source_chunk_id",
-            "target_label",
-            "target_section",
-            "reference_type",
-            name="uq_knowledge_document_references_source_label",
-        ),
-        CheckConstraint(
-            "reference_type IN ('markdown', 'text')",
-            name="ck_knowledge_document_references_type",
-        ),
-        CheckConstraint(
-            "source_ordinal >= 0",
-            name="ck_knowledge_document_references_source_ordinal",
-        ),
-        CheckConstraint(
-            "occurrence_count >= 1",
-            name="ck_knowledge_document_references_occurrence_count",
-        ),
-        CheckConstraint(
-            "target_parent_id IS NULL OR target_document_id IS NOT NULL",
-            name="ck_knowledge_document_references_parent_requires_document",
-        ),
-        Index(
-            "ix_knowledge_document_references_source_scope",
-            "workspace_id",
-            "knowledge_base_id",
-            "source_chunk_id",
-        ),
-        Index(
-            "ix_knowledge_document_references_target_document",
-            "workspace_id",
-            "knowledge_base_id",
-            "target_document_id",
-        ),
-        Index(
-            "ix_knowledge_document_references_target_label",
-            "workspace_id",
-            "knowledge_base_id",
-            "target_label",
-            "target_document_id",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id"), nullable=False
-    )
-    knowledge_base_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    source_document_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    source_chunk_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    target_document_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    target_parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    target_label: Mapped[str] = mapped_column(String(255), nullable=False)
-    target_section: Mapped[str] = mapped_column(String(500), nullable=False, default="")
-    reference_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    source_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
-    occurrence_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now
-    )
 
 
 class KnowledgeChunkAsset(Base):
@@ -513,8 +359,7 @@ class KnowledgeTask(Base):
             name="fk_knowledge_tasks_knowledge_workspace",
         ),
         CheckConstraint(
-            "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate', "
-            "'graph_sync', 'graph_rebuild')",
+            "task_type IN ('parse', 'index', 'rebuild_index', 'evaluate')",
             name="ck_knowledge_tasks_task_type",
         ),
         CheckConstraint(
@@ -582,12 +427,6 @@ class KnowledgeEvaluationCase(Base):
         JSON,
         nullable=False,
         server_default="[]",
-    )
-    graph_expectation: Mapped[dict[str, Any]] = mapped_column(
-        JSON,
-        nullable=False,
-        default=dict,
-        server_default="{}",
     )
     created_by_user_id: Mapped[str] = mapped_column(
         String(36), nullable=False, index=True
@@ -692,12 +531,6 @@ class KnowledgeEvaluationResult(Base):
     ndcg_at_k: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     trace: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    graph_metrics: Mapped[dict[str, Any]] = mapped_column(
-        JSON,
-        nullable=False,
-        default=dict,
-        server_default="{}",
-    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -729,10 +562,3 @@ class KnowledgeStorageCleanup(Base):
         default=utc_now,
         onupdate=utc_now,
     )
-
-
-# The knowledge table owns active graph foreign keys, so its metadata import must
-# also register the referenced graph tables for application and test startup.
-from app.domain.knowledge.graph import (
-    models as _knowledge_graph_models,  # noqa: F401
-)

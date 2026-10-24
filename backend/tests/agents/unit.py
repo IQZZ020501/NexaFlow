@@ -291,7 +291,6 @@ def test_agent_runtime_snapshots_are_versioned_and_fail_closed() -> None:
             id="kb-a",
             workspace_id="ws-1",
             name="A",
-            active_graph_revision_id="revision-1",
             updated_at=now,
         ),
     ]
@@ -2260,7 +2259,6 @@ def test_knowledge_tool_message_keeps_every_selected_hit() -> None:
                 "distance": 0.2,
                 "similarity": 0.9,
                 "trace_id": "trace-id",
-                "graph_claim_ids": [f"claim-{index}" for index in range(400)],
                 "sources": ["keywords", "vector"],
             },
             {
@@ -2281,7 +2279,6 @@ def test_knowledge_tool_message_keeps_every_selected_hit() -> None:
     assert "distance" not in hit
     assert "similarity" not in hit
     assert "trace_id" not in hit
-    assert len(hit["graph_claim_ids"]) <= 20
     assert compact["context_truncated"] is True
 
 

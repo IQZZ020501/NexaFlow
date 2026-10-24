@@ -143,8 +143,12 @@ services:
     restart: "no"
     command: ["alembic", "upgrade", "head"]
     environment: *backend-environment
+    volumes:
+      - ./deploy/data/uploads:/data/knowledge
     depends_on:
       db:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
 
   app:

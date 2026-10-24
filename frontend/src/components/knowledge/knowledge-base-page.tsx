@@ -20,9 +20,7 @@ import {
   FlaskConicalIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
-  NetworkIcon,
   PencilIcon,
-  PlayIcon,
   PlusIcon,
   RotateCcwIcon,
   SearchIcon,
@@ -101,7 +99,6 @@ import type {
   KnowledgeDocument,
   KnowledgeModelTestResult,
   KnowledgeTask,
-  KnowledgeTaskRetryMode,
   ResourcePermission,
 } from "@/lib/api/knowledge"
 import { listRegisteredModels } from "@/lib/api/llm"
@@ -123,7 +120,6 @@ import { knowledgeBaseDetailPath } from "@/lib/knowledge-views"
 import { KnowledgeBaseDialogs } from "@/components/knowledge/knowledge-base-dialogs"
 import { KnowledgeUploadFlow } from "@/components/knowledge/knowledge-upload-flow"
 import { KnowledgeEvaluation } from "@/components/knowledge/knowledge-evaluation"
-import { KnowledgeLinkGraph } from "@/components/knowledge/knowledge-link-graph"
 import {
   ResourceBulkMoveBar,
   toggleResourceSelection,
@@ -1391,10 +1387,7 @@ function KnowledgeBasePageContent({
     }
   }
 
-  async function handleRetryKnowledgeTask(
-    task: KnowledgeTask,
-    mode: KnowledgeTaskRetryMode = "all"
-  ) {
+  async function handleRetryKnowledgeTask(task: KnowledgeTask) {
     if (!selectedWorkspaceId || !selectedKnowledgeBase) {
       return
     }
@@ -1405,8 +1398,7 @@ function KnowledgeBasePageContent({
         token,
         selectedWorkspaceId,
         selectedKnowledgeBase.id,
-        task.id,
-        mode
+        task.id
       )
       await Promise.all([loadDocuments(), loadKnowledgeTasks()])
       notify("success", t("已重新提交任务"))
@@ -1644,7 +1636,6 @@ function KnowledgeBasePageContent({
     icon: React.ElementType
   }> = [
     { key: "documents", label: t("文档"), icon: FileTextIcon },
-    { key: "graph", label: t("关系图谱"), icon: NetworkIcon },
     { key: "tasks", label: t("任务"), icon: RotateCcwIcon },
     { key: "evaluation", label: t("检索评测"), icon: FlaskConicalIcon },
     { key: "settings", label: t("设置"), icon: SettingsIcon },
@@ -1711,16 +1702,13 @@ function KnowledgeBasePageContent({
     const isTaskActionDisabled =
       !canEditDocuments || isKnowledgeTaskMutationBusy
     const canStopTask = ["queued", "running"].includes(task.status)
-    const canRetryTask = ["failed", "cancelled"].includes(task.status)
-    const canRetryUnfinishedGraphTask =
-      canRetryTask &&
-      task.processed_items > 0 &&
-      task.processed_items < task.total_items
+    const canRetryTask =
+      ["parse", "index", "rebuild_index", "evaluate"].includes(task.task_type) &&
+      ["failed", "cancelled"].includes(task.status)
     const canDeleteTask = !["queued", "running", "cancelling"].includes(
       task.status
     )
     const hasAvailableAction = canStopTask || canRetryTask || canDeleteTask
-    const isGraphTask = ["graph_sync", "graph_rebuild"].includes(task.task_type)
 
     return (
       <DropdownMenu>
@@ -1746,28 +1734,7 @@ function KnowledgeBasePageContent({
               {t("停止")}
             </DropdownMenuItem>
           ) : null}
-          {isGraphTask ? (
-            <>
-              {canRetryUnfinishedGraphTask ? (
-                <DropdownMenuItem
-                  onSelect={() =>
-                    void handleRetryKnowledgeTask(task, "unfinished")
-                  }
-                >
-                  <PlayIcon />
-                  {t("重试未完成分片")}
-                </DropdownMenuItem>
-              ) : null}
-              {canRetryTask ? (
-                <DropdownMenuItem
-                  onSelect={() => void handleRetryKnowledgeTask(task, "all")}
-                >
-                  <RotateCcwIcon />
-                  {t("重试全部分片")}
-                </DropdownMenuItem>
-              ) : null}
-            </>
-          ) : canRetryTask ? (
+          {canRetryTask ? (
             <DropdownMenuItem
               onSelect={() => void handleRetryKnowledgeTask(task)}
             >
@@ -3078,18 +3045,6 @@ function KnowledgeBasePageContent({
                 knowledgeBaseId={selectedKnowledgeBase.id}
                 documents={documents}
                 canEdit={canEditDocuments}
-                reportError={reportError}
-              />
-            ) : null}
-
-            {activeDetailTab === "graph" ? (
-              <KnowledgeLinkGraph
-                key={selectedKnowledgeBase.id}
-                token={token}
-                workspaceId={selectedKnowledgeBase.workspace_id}
-                knowledgeBaseId={selectedKnowledgeBase.id}
-                canEdit={canEditDocuments}
-                notify={notify}
                 reportError={reportError}
               />
             ) : null}

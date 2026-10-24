@@ -3,7 +3,6 @@ import os
 
 from app.application.knowledge.documents.service import enqueue_knowledge_task
 from app.application.knowledge.evaluation.runner import run_evaluation_task
-from app.application.knowledge.graph.build import run_graph_build_task
 from app.domain.knowledge.tasks.runner import (
     TASK_LEASE_RENEW_SECONDS,
     TASK_RUN_BUSY,
@@ -43,7 +42,6 @@ def run_knowledge_task_job(self, task_id: str) -> None:
                 settings,
                 enqueue_knowledge_task,
                 evaluation_runner=run_evaluation_task,
-                graph_runner=run_graph_build_task,
             )
         )
     except Exception as exc:

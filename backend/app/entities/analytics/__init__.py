@@ -1,6 +1,5 @@
 from app.entities.analytics.models import (
     WorkspaceAnalyticsCounts,
-    WorkspaceAnalyticsGraphBuild,
     WorkspaceAnalyticsInventory,
     WorkspaceAnalyticsInventoryApplications,
     WorkspaceAnalyticsInventoryKnowledge,
@@ -12,7 +11,6 @@ from app.entities.analytics.models import (
 
 __all__ = [
     "WorkspaceAnalyticsCounts",
-    "WorkspaceAnalyticsGraphBuild",
     "WorkspaceAnalyticsInventory",
     "WorkspaceAnalyticsInventoryApplications",
     "WorkspaceAnalyticsInventoryKnowledge",

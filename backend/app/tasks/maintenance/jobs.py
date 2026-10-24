@@ -9,7 +9,6 @@ from app.application.agents.runs.executor import (
 )
 from app.application.artifacts.service import cleanup_expired_generated_artifacts
 from app.application.email.delivery import list_due_email_delivery_ids
-from app.application.knowledge.graph.maintenance import reconcile_knowledge_graphs
 from app.application.tools.runtime.service import (
     list_recoverable_tool_test_invocation_ids,
 )
@@ -80,12 +79,6 @@ def _reclaim_execution_sessions(settings: Settings) -> None:
     run_task_async(build_execution_platform(settings).reclaim_sessions())
 
 
-def _reconcile_knowledge_graphs(settings: Settings) -> None:
-    task_ids = run_task_async(reconcile_knowledge_graphs(settings))
-    for task_id in task_ids:
-        run_knowledge_task_job.apply_async(args=(task_id,))
-
-
 def _recover_knowledge_storage_cleanups(_settings: Settings) -> None:
     cleanup_ids = run_task_async(list_due_knowledge_storage_cleanup_ids())
     for cleanup_id in cleanup_ids:
@@ -108,7 +101,6 @@ FREQUENT_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
 MINUTELY_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("reclaim_execution_sessions", _reclaim_execution_sessions),
     ("cleanup_expired_artifacts", _cleanup_expired_artifacts),
-    ("reconcile_knowledge_graphs", _reconcile_knowledge_graphs),
     ("recover_knowledge_storage_cleanups", _recover_knowledge_storage_cleanups),
     ("recover_upload_storage_cleanups", _recover_upload_storage_cleanups),
 )

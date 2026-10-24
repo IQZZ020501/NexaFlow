@@ -39,18 +39,13 @@ TASK_PARSE = "parse"
 TASK_INDEX = "index"
 TASK_REBUILD_INDEX = "rebuild_index"
 TASK_EVALUATE = "evaluate"
-TASK_GRAPH_SYNC = "graph_sync"
-TASK_GRAPH_REBUILD = "graph_rebuild"
+KNOWLEDGE_TASK_TYPES = (TASK_PARSE, TASK_INDEX, TASK_REBUILD_INDEX, TASK_EVALUATE)
 TASK_QUEUED_STATUS = "queued"
 TASK_RUNNING_STATUS = "running"
 TASK_SUCCEEDED_STATUS = "succeeded"
 TASK_FAILED_STATUS = "failed"
 TASK_CANCELLING_STATUS = "cancelling"
 TASK_CANCELLED_STATUS = "cancelled"
-GRAPH_RETRY_ALL = "all"
-GRAPH_RETRY_UNFINISHED = "unfinished"
-GRAPH_RETRY_MODE_OPTION = "graph_retry_mode"
-GRAPH_RESUME_REVISION_ID_OPTION = "graph_resume_revision_id"
 
 
 @dataclass
@@ -63,10 +58,6 @@ class KnowledgeBase:
     status: str = "active"
     embedding_model_id: str | None = None
     reranker_model_id: str | None = None
-    graph_enabled: bool = False
-    active_graph_schema_id: str | None = None
-    active_graph_revision_id: str | None = None
-    graph_extraction_model_id: str | None = None
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -162,23 +153,6 @@ class KnowledgeDocumentChunk:
 
 
 @dataclass
-class KnowledgeDocumentReference:
-    id: str = field(default_factory=new_id)
-    workspace_id: str = ""
-    knowledge_base_id: str = ""
-    source_document_id: str = ""
-    source_chunk_id: str = ""
-    target_document_id: str | None = None
-    target_parent_id: str | None = None
-    target_label: str = ""
-    target_section: str = ""
-    reference_type: str = "text"
-    source_ordinal: int = 0
-    occurrence_count: int = 1
-    created_at: datetime = field(default_factory=utc_now)
-
-
-@dataclass
 class KnowledgeChunkAsset:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
@@ -220,7 +194,6 @@ class KnowledgeEvaluationCase:
     knowledge_base_id: str = ""
     question: str = ""
     answer_points: list[str] = field(default_factory=list)
-    graph_expectation: dict[str, Any] = field(default_factory=dict)
     created_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
@@ -250,7 +223,6 @@ class KnowledgeEvaluationResult:
     ndcg_at_k: float = 0.0
     latency_ms: float = 0.0
     trace: dict[str, Any] = field(default_factory=dict)
-    graph_metrics: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     created_at: datetime = field(default_factory=utc_now)
 

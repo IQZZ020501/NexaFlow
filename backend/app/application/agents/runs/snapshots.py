@@ -133,7 +133,6 @@ def build_knowledge_resource_snapshot(
             "status": item.status,
             "embedding_model_id": item.embedding_model_id,
             "reranker_model_id": item.reranker_model_id,
-            "active_graph_revision_id": item.active_graph_revision_id,
             "updated_at": _isoformat(item.updated_at),
             "content_fingerprint": _canonical_hash(
                 {

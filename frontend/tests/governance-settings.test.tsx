@@ -99,9 +99,6 @@ const degradedHealth = {
   },
   pending_tasks: 2,
   failed_logs_24h: 3,
-  pending_graph_tasks: 1,
-  failed_graph_tasks_24h: 1,
-  pending_graph_profile_repairs: 1,
   checked_at: "2026-08-20T12:00:00Z",
 }
 
@@ -645,9 +642,6 @@ describe("system operation logs", () => {
           },
           pending_tasks: 0,
           failed_logs_24h: 0,
-          pending_graph_tasks: 0,
-          failed_graph_tasks_24h: 0,
-          pending_graph_profile_repairs: 0,
           checked_at: "2026-08-20T12:00:00Z",
         })
       }
@@ -708,9 +702,6 @@ describe("system operation logs", () => {
           },
           pending_tasks: 0,
           failed_logs_24h: 0,
-          pending_graph_tasks: 0,
-          failed_graph_tasks_24h: 0,
-          pending_graph_profile_repairs: 0,
           checked_at: "2026-08-20T12:00:00Z",
         })
       }

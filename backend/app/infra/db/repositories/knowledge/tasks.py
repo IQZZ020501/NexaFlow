@@ -27,9 +27,6 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
 )
 from app.domain.knowledge.models import (
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-)
-from app.domain.knowledge.models import (
     KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
 )
 from app.domain.knowledge.models import (
@@ -45,10 +42,9 @@ from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
     DOCUMENT_INDEXED_STATUS,
     DOCUMENT_STAGED_META_KEY,
+    KNOWLEDGE_TASK_TYPES,
     TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
     VISIBLE_DOCUMENT_STATUSES,
@@ -78,7 +74,6 @@ _QUERY_KEYWORD_CHUNK_IDS = text(
         / "query_keyword_chunk_ids.sql"
     ).read_text(encoding="utf-8")
 )
-
 
 
 async def list_knowledge_tasks(
@@ -124,6 +119,7 @@ async def list_recoverable_tasks(
     result = await db.scalars(
         select(KnowledgeTaskORM)
         .where(
+            KnowledgeTaskORM.task_type.in_(KNOWLEDGE_TASK_TYPES),
             or_(
                 and_(
                     KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
@@ -198,41 +194,12 @@ async def claim_knowledge_task(
     lease_expires_at: datetime,
     worker_task_id: str,
 ) -> bool:
-    earlier_graph_task = KnowledgeTaskORM.__table__.alias("earlier_graph_task")
-    # ponytail: serialize graph publication per knowledge base; split extraction
-    # workers only when measured backlog shows this ceiling is material.
-    earlier_graph_task_exists = (
-        select(1)
-        .select_from(earlier_graph_task)
-        .where(
-            earlier_graph_task.c.workspace_id == KnowledgeTaskORM.workspace_id,
-            earlier_graph_task.c.knowledge_base_id
-            == KnowledgeTaskORM.knowledge_base_id,
-            earlier_graph_task.c.task_type.in_(["graph_sync", "graph_rebuild"]),
-            earlier_graph_task.c.status.in_(
-                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
-            ),
-            or_(
-                earlier_graph_task.c.created_at < KnowledgeTaskORM.created_at,
-                and_(
-                    earlier_graph_task.c.created_at == KnowledgeTaskORM.created_at,
-                    earlier_graph_task.c.id < KnowledgeTaskORM.id,
-                ),
-            ),
-        )
-        .exists()
-    )
     result = await db.execute(
         update(KnowledgeTaskORM)
         .where(
             KnowledgeTaskORM.id == task_id,
             KnowledgeTaskORM.attempts < KnowledgeTaskORM.max_attempts,
-            or_(
-                KnowledgeTaskORM.task_type.not_in(
-                    ["graph_sync", "graph_rebuild"]
-                ),
-                ~earlier_graph_task_exists,
-            ),
+            KnowledgeTaskORM.task_type.in_(KNOWLEDGE_TASK_TYPES),
             or_(
                 KnowledgeTaskORM.status == TASK_QUEUED_STATUS,
                 (KnowledgeTaskORM.status == TASK_RUNNING_STATUS)
@@ -254,59 +221,6 @@ async def claim_knowledge_task(
     )
     return result.rowcount == 1
 
-async def get_running_graph_task(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-) -> KnowledgeTask | None:
-    row = await db.scalar(
-        select(KnowledgeTaskORM)
-        .where(
-            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
-            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeTaskORM.task_type.in_(["graph_sync", "graph_rebuild"]),
-            KnowledgeTaskORM.status == TASK_RUNNING_STATUS,
-        )
-        .order_by(KnowledgeTaskORM.created_at, KnowledgeTaskORM.id)
-    )
-    return to_entity(KnowledgeTask, row) if row else None
-
-async def get_open_graph_task(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-) -> KnowledgeTask | None:
-    row = await db.scalar(
-        select(KnowledgeTaskORM)
-        .where(
-            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
-            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeTaskORM.task_type.in_([TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD]),
-            KnowledgeTaskORM.status.in_(
-                [TASK_QUEUED_STATUS, TASK_RUNNING_STATUS, TASK_CANCELLING_STATUS]
-            ),
-        )
-        .order_by(KnowledgeTaskORM.created_at.desc(), KnowledgeTaskORM.id.desc())
-    )
-    return to_entity(KnowledgeTask, row) if row else None
-
-async def get_latest_graph_task(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-) -> KnowledgeTask | None:
-    row = await db.scalar(
-        select(KnowledgeTaskORM)
-        .where(
-            KnowledgeTaskORM.workspace_id == knowledge_base.workspace_id,
-            KnowledgeTaskORM.knowledge_base_id == knowledge_base.id,
-            KnowledgeTaskORM.task_type.in_([TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD]),
-        )
-        .order_by(
-            KnowledgeTaskORM.updated_at.desc(),
-            KnowledgeTaskORM.created_at.desc(),
-            KnowledgeTaskORM.id.desc(),
-        )
-        .limit(1)
-    )
-    return to_entity(KnowledgeTask, row) if row else None
 
 async def renew_knowledge_task_lease(
     db: AsyncSession,

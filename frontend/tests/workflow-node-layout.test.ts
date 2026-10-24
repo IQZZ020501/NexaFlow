@@ -563,24 +563,12 @@ test("knowledge node presents graph settings and seven documented outputs", () =
   expect(source).toContain(
     '{ field: "directly_return", label: "满足直接回答的分段内容" }'
   )
-  expect(source).toContain('{ field: "graph", label: "图谱结果" }')
-  expect(source).toContain(
-    '{ field: "graph_revision_id", label: "图谱修订 ID" }'
-  )
-  expect(source).toContain('{ field: "graph_paths", label: "图谱路径" }')
-  expect(source).toContain('t("图谱检索模式")')
-  expect(source).toContain(
-    'graphMode === "path" || graphMode === "neighborhood"'
-  )
-  expect(source).toContain(
-    "updateConfig({ relation_filters: relationFiltersValue })"
-  )
-  expect(graphSource).toContain('graph_mode: "auto"')
-  expect(graphSource).toContain("relation_filters: []")
+  expect(source).not.toContain('t("图谱检索模式")')
+  expect(graphSource).not.toContain('graph_mode: "auto"')
   expect(source).toContain("displayValue={t(item.label)}")
   expect(source).toContain("reference={`{{${nodeId}.${item.field}}}`}")
   expect(source).toContain("<OutputFieldRow")
-  expect(source.match(/<NumberStepper/g)?.length).toBe(5)
+  expect(source.match(/<NumberStepper/g)?.length).toBe(4)
   expect(source).toContain("grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem]")
   expect(source).toContain("px-1 text-center text-xs")
   expect(source).toContain('aria-label={t("增加数值")}')
