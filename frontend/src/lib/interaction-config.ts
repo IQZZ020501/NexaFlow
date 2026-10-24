@@ -46,6 +46,7 @@ export function defaultInteractionConfig(): AgentInteractionConfig {
   return {
     prologue: "",
     tts_type: "BROWSER",
+    stt_type: "NONE",
     file_upload: false,
     file_upload_setting: { ...AGENT_FILE_UPLOAD_SETTING },
     user_input_title: "",
@@ -68,6 +69,7 @@ export function normalizeInteractionConfigForAppType(
       ...config,
       prologue: "",
       tts_type: "NONE",
+      stt_type: "NONE",
       file_upload: true,
       file_upload_setting: { ...AGENT_FILE_UPLOAD_SETTING },
       user_input_title: "",

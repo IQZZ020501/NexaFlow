@@ -1810,6 +1810,17 @@ export const en = {
   添加附件: "Add attachment",
   文字转语音: "Text to speech",
   浏览器语音: "Browser speech",
+  语音转文字: "Speech to text",
+  开始语音输入: "Start voice input",
+  停止语音输入: "Stop voice input",
+  当前浏览器不支持语音转文字: "Speech to text is not supported in this browser",
+  "请允许麦克风权限后重试。": "Allow microphone access and try again.",
+  "无法使用麦克风，请检查设备是否连接或被占用。":
+    "Microphone unavailable. Check that it is connected and not in use.",
+  "当前浏览器的语音识别服务不可用，请重试或尝试使用 Chrome。":
+    "This browser's speech recognition service is unavailable. Retry or try Chrome.",
+  "未检测到语音，请重试。": "No speech detected. Try again.",
+  "语音识别失败，请重试。": "Speech recognition failed. Try again.",
   文件上传: "File upload",
   文件上传设置: "File upload settings",
   "选择允许上传的文件类型。": "Choose the file types users can upload.",

@@ -128,6 +128,39 @@ export function InteractionConfigFields({
         </button>
       </label>
 
+      <label
+        htmlFor={`${idPrefix}-stt`}
+        className="flex min-h-10 cursor-pointer items-center justify-between gap-3 text-sm font-medium sm:min-h-0"
+      >
+        <span>{t("语音转文字")}</span>
+        <button
+          type="button"
+          role="switch"
+          id={`${idPrefix}-stt`}
+          aria-checked={value.stt_type === "BROWSER"}
+          aria-label={t("语音转文字")}
+          disabled={readOnly}
+          onClick={() =>
+            update({
+              stt_type: value.stt_type === "BROWSER" ? "NONE" : "BROWSER",
+            })
+          }
+          className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            value.stt_type === "BROWSER"
+              ? "bg-primary"
+              : "bg-muted-foreground/40"
+          }`}
+        >
+          <span
+            className={`block size-4 rounded-full bg-background shadow-sm transition-transform ${
+              value.stt_type === "BROWSER"
+                ? "translate-x-[18px]"
+                : "translate-x-0.5"
+            }`}
+          />
+        </button>
+      </label>
+
       <fieldset
         className={
           compact

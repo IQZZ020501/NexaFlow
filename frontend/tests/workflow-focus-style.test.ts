@@ -46,6 +46,7 @@ test("workflow basic info fields use a single focus border", () => {
 test("workflow binary settings use switches", () => {
   const controls = [
     openingTag(interactionFieldsSource, "${idPrefix}-tts"),
+    openingTag(interactionFieldsSource, "${idPrefix}-stt"),
     openingTag(interactionFieldsSource, "${idPrefix}-file-upload"),
   ]
 
@@ -54,5 +55,6 @@ test("workflow binary settings use switches", () => {
     expect(control).not.toContain('type="checkbox"')
   }
   expect(controls[0]).toContain('aria-checked={value.tts_type === "BROWSER"}')
-  expect(controls[1]).toContain("aria-checked={value.file_upload}")
+  expect(controls[1]).toContain('aria-checked={value.stt_type === "BROWSER"}')
+  expect(controls[2]).toContain("aria-checked={value.file_upload}")
 })

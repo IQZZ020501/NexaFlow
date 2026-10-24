@@ -1690,6 +1690,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
                 "interaction_config": {
                     "prologue": "Choose inputs to start.",
                     "tts_type": "BROWSER",
+                    "stt_type": "BROWSER",
                     "file_upload": True,
                     "file_upload_setting": {
                         "file_upload_type": ["document"],
@@ -2052,6 +2053,7 @@ def test_workflow_api_definition_publish_run_and_audit() -> None:
         assert public_profile.json()["interaction_config"] == {
             "prologue": "Choose inputs to start.",
             "tts_type": "BROWSER",
+            "stt_type": "BROWSER",
             "file_upload": True,
             "file_upload_setting": {
                 "file_upload_type": ["document"],

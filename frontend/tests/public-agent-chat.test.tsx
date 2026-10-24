@@ -1565,6 +1565,34 @@ describe("PublicWorkflowChat", () => {
     expect(screen.getByText("b.pdf")).toBeTruthy()
   })
 
+  test("shows voice input only when the workflow has enabled it", async () => {
+    let voiceEnabled = false
+    fetchHandler = (url) => {
+      if (url.endsWith("/profile")) {
+        const profile = workflowProfile()
+        return jsonResponse({
+          ...profile,
+          interaction_config: {
+            ...profile.interaction_config,
+            ...(voiceEnabled ? { stt_type: "BROWSER" } : {}),
+          },
+        })
+      }
+      if (url.includes("/conversations")) return jsonResponse({ items: [] })
+      return jsonResponse({})
+    }
+
+    renderPage(<PublicWorkflowChat workflowId="wf-1" />)
+    await screen.findByRole("heading", { name: "公开流程" })
+    expect(screen.queryByRole("button", { name: "开始语音输入" })).toBeNull()
+    cleanup()
+
+    voiceEnabled = true
+    renderPage(<PublicWorkflowChat workflowId="wf-1" />)
+    await screen.findByRole("heading", { name: "公开流程" })
+    expect(screen.getByRole("button", { name: "开始语音输入" })).toBeTruthy()
+  })
+
   test("renders workflow runs as chat messages with an expandable node process", async () => {
     fetchHandler = (url) => {
       if (url.endsWith("/profile")) return jsonResponse(workflowProfile())

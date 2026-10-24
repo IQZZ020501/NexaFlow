@@ -47,6 +47,7 @@ import {
 import type { AgentFormState } from "@/components/agents/agents-page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { SpeechInputButton } from "@/components/ui/speech-input-button"
 import {
   Dialog,
   DialogContent,
@@ -1351,6 +1352,7 @@ export function WorkflowDetailWorkspace({
                         <textarea
                           id="workflow-run-question"
                           rows={3}
+                          maxLength={4000}
                           aria-label={
                             form.interactionConfig.user_input_title ||
                             t("请输入问题")
@@ -1418,6 +1420,20 @@ export function WorkflowDetailWorkspace({
                             >
                               <PaperclipIcon />
                             </Button>
+                          ) : null}
+                          {form.interactionConfig.stt_type === "BROWSER" ? (
+                            <SpeechInputButton
+                              key={`${agent.id}:${runVersionNumber ?? "draft"}:${currentRun?.id ?? "new"}`}
+                              value={runQuestion}
+                              onChange={(value) => {
+                                setRunQuestion(value)
+                                if (runQuestionInvalid && value.trim()) {
+                                  setRunQuestionInvalid(false)
+                                }
+                              }}
+                              onError={(message) => notify("error", message)}
+                              disabled={runInputDisabled}
+                            />
                           ) : null}
                           <Button
                             type="submit"

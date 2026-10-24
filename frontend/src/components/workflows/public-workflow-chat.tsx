@@ -35,6 +35,7 @@ import {
   transferredFiles,
 } from "@/components/agents/agent-attachment-list"
 import { Button } from "@/components/ui/button"
+import { SpeechInputButton } from "@/components/ui/speech-input-button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -526,6 +527,7 @@ export function PublicWorkflowChat({
   )
   const [runs, setRuns] = React.useState<ExternalWorkflowRun[]>([])
   const [question, setQuestion] = React.useState("")
+  const [composerGeneration, setComposerGeneration] = React.useState(0)
   const [files, setFiles] = React.useState<File[]>([])
   const [loading, setLoading] = React.useState(true)
   const [runsLoading, setRunsLoading] = React.useState(false)
@@ -592,6 +594,7 @@ export function PublicWorkflowChat({
   }, [runs, runsLoading])
 
   function selectConversation(nextId: string | null) {
+    setComposerGeneration((current) => current + 1)
     streamRef.current?.abort()
     setRunning(false)
     setRuns([])
@@ -1224,6 +1227,15 @@ export function PublicWorkflowChat({
                   >
                     <PlusIcon />
                   </Button>
+                ) : null}
+                {profile.interaction_config.stt_type === "BROWSER" ? (
+                  <SpeechInputButton
+                    key={`${workflowId}:${composerGeneration}`}
+                    value={question}
+                    onChange={setQuestion}
+                    onError={(message) => notify("error", message)}
+                    disabled={composerDisabled}
+                  />
                 ) : null}
               </div>
               <Button

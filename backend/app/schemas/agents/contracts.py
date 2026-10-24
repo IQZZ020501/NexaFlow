@@ -39,6 +39,12 @@ class AgentFileUploadSetting(BaseModel):
 class AgentInteractionConfig(BaseModel):
     prologue: str = Field(default="", max_length=1000)
     tts_type: Literal["NONE", "BROWSER"] = "BROWSER"
+    # Keep the default out of serialized legacy profiles so adding this
+    # optional browser capability does not rewrite every existing snapshot.
+    stt_type: Literal["NONE", "BROWSER"] = Field(
+        default="NONE",
+        exclude_if=lambda value: value == "NONE",
+    )
     file_upload: bool = False
     file_upload_setting: AgentFileUploadSetting = Field(
         default_factory=AgentFileUploadSetting

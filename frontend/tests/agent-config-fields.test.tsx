@@ -623,7 +623,7 @@ describe("InteractionConfigFields", () => {
     }
   }
 
-  test("edits prologue and input title and toggles tts and upload", () => {
+  test("edits prologue and input title and toggles speech and upload", () => {
     renderPage(<InteractionHarness />)
     const prologue = screen.getByLabelText("开场白") as HTMLTextAreaElement
     fireEvent.change(prologue, { target: { value: "Hello there" } })
@@ -637,6 +637,11 @@ describe("InteractionConfigFields", () => {
     expect(
       screen.getByLabelText("文字转语音").getAttribute("aria-checked")
     ).toBe("false")
+
+    fireEvent.click(screen.getByLabelText("语音转文字"))
+    expect(
+      screen.getByLabelText("语音转文字").getAttribute("aria-checked")
+    ).toBe("true")
 
     fireEvent.click(screen.getByLabelText("文件上传"))
     expect(screen.getByLabelText("文件上传").getAttribute("aria-checked")).toBe(
@@ -678,6 +683,9 @@ describe("InteractionConfigFields", () => {
     ).toBe(true)
     expect(
       (screen.getByLabelText("文字转语音") as HTMLButtonElement).disabled
+    ).toBe(true)
+    expect(
+      (screen.getByLabelText("语音转文字") as HTMLButtonElement).disabled
     ).toBe(true)
   })
 })
