@@ -2675,14 +2675,16 @@ export function AgentsPage({
               type="button"
               className={resourceCardClass({
                 interactive: true,
-                className: "gap-2 p-4",
+                className: "items-start gap-2.5 p-3.5 text-left",
               })}
               onClick={() => chooseAppType("agent")}
             >
-              <ResourceCardIcon tone="violet">
-                <BotIcon className="size-5" />
-              </ResourceCardIcon>
-              <span className="text-sm font-semibold">{t("Agent")}</span>
+              <span className="flex items-center gap-2.5">
+                <ResourceCardIcon tone="violet" className="size-8">
+                  <BotIcon className="size-4" />
+                </ResourceCardIcon>
+                <span className="text-sm font-semibold">{t("Agent")}</span>
+              </span>
               <span className="text-sm leading-5 text-muted-foreground">
                 {t("智能对话助手，自动规划并使用模型、知识和工具。")}
               </span>
@@ -2691,14 +2693,16 @@ export function AgentsPage({
               type="button"
               className={resourceCardClass({
                 interactive: true,
-                className: "gap-2 p-4",
+                className: "items-start gap-2.5 p-3.5 text-left",
               })}
               onClick={() => chooseAppType("workflow")}
             >
-              <ResourceCardIcon tone="violet">
-                <WorkflowIcon className="size-5" />
-              </ResourceCardIcon>
-              <span className="text-sm font-semibold">{t("工作流")}</span>
+              <span className="flex items-center gap-2.5">
+                <ResourceCardIcon tone="violet" className="size-8">
+                  <WorkflowIcon className="size-4" />
+                </ResourceCardIcon>
+                <span className="text-sm font-semibold">{t("工作流")}</span>
+              </span>
               <span className="text-sm leading-5 text-muted-foreground">
                 {t("按预设步骤编排固定流程，适合确定性的处理任务。")}
               </span>
