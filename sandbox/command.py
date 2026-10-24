@@ -1,5 +1,6 @@
 """Trusted command supervisor. The model's shell always runs as UID 65532."""
 
+import base64
 import hashlib
 import os
 import resource
@@ -10,7 +11,7 @@ import stat
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 UID = 65532
@@ -136,6 +137,72 @@ def _prune_exports() -> None:
     directories.sort()
     for _, child in directories[:-KEPT_EXPORT_DIRECTORIES]:
         shutil.rmtree(child, ignore_errors=True)
+
+
+def restore_files(files):
+    """Copy authorized saved versions into a guest without following user links."""
+    if os.geteuid() != 0:
+        raise RuntimeError("File restoration requires the trusted supervisor.")
+    if not isinstance(files, dict) or len(files) > 64:
+        raise ValueError("Invalid conversation files.")
+    decoded = {}
+    for path, encoded in files.items():
+        if (
+            not isinstance(path, str) or not path or len(path) > 512
+            or "\\" in path or PurePosixPath(path).is_absolute()
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or any(ord(character) < 32 or ord(character) == 127 for character in path)
+            or not isinstance(encoded, str) or len(encoded) > (MAX_FILE + 2) // 3 * 4
+        ):
+            raise ValueError("Invalid conversation file path or content.")
+        content = base64.b64decode(encoded, validate=True)
+        if not 0 < len(content) <= MAX_FILE:
+            raise ValueError("Conversation file exceeds 5 MiB.")
+        decoded[path] = content
+    if sum(map(len, decoded.values())) > MAX_FILE:
+        raise ValueError("Conversation file transfer exceeds 5 MiB.")
+    WORKSPACE.mkdir(mode=0o700, exist_ok=True)
+    if WORKSPACE.is_symlink():
+        raise ValueError("Invalid workspace directory.")
+    os.chown(WORKSPACE, UID, UID)
+    if _workspace_usage()[0] + sum(map(len, decoded.values())) > MAX_WORKSPACE_BYTES:
+        raise ValueError("Conversation files exceed the workspace size limit.")
+    for path, content in decoded.items():
+        descriptors = [os.open(WORKSPACE, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
+        try:
+            for name in ["outputs", *path.split("/")[:-1]]:
+                try:
+                    os.mkdir(name, mode=0o700, dir_fd=descriptors[-1])
+                except FileExistsError:
+                    pass
+                descriptor = os.open(
+                    name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=descriptors[-1],
+                )
+                descriptors.append(descriptor)
+                os.fchown(descriptor, UID, UID)
+            try:
+                descriptor = os.open(
+                    path.rsplit("/", 1)[-1],
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600, dir_fd=descriptors[-1],
+                )
+            except FileExistsError:
+                # A retried import must preserve an edit already made in this guest.
+                info = os.stat(
+                    path.rsplit("/", 1)[-1], dir_fd=descriptors[-1],
+                    follow_symlinks=False,
+                )
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError("Invalid existing conversation file.")
+                continue
+            with os.fdopen(descriptor, "wb") as stream:
+                os.fchown(stream.fileno(), UID, UID)
+                stream.write(content)
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+    return {"ok": True, "exit_code": 0}
 
 
 def execute(command, *, python_binary):

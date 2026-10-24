@@ -1138,6 +1138,47 @@ async def assert_lease_loss_during_staging_never_starts_program():
     "_fetch_policy",
     new=AsyncMock(return_value=policy_state()),
 )
+async def assert_conversation_files_stage_once_per_guest():
+    class RestoreFiles(Files):
+        async def read_bytes_stream(self, path):
+            assert re.fullmatch(r"/tmp/nexaflow-protocol/[a-f0-9]{32}-response.json", path)
+
+            async def chunks():
+                yield b'{"ok":true,"exit_code":0}'
+
+            return chunks()
+
+    guest = sandbox(files=RestoreFiles())
+    platform = adapter.OpenSandboxExecution(runtime_settings())
+    scope = execution_scope.set(ExecutionScope("restore-workspace", "restore", "restore-run"))
+    request = {
+        "execution_session": "agent_run",
+        "restore_files": {"nested/page.html": base64.b64encode(b"original").decode()},
+    }
+    try:
+        with patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)):
+            for _ in range(2):
+                response = await platform.execute(request, timeout_seconds=10, max_output_bytes=4096)
+                assert response["ok"]
+            guest.commands.run.assert_awaited_once()
+            entry = guest.files.entries[0]
+            assert entry.owner == "root" and entry.mode == 400
+            assert json.loads(entry.data)["restore_files"] == request["restore_files"]
+            assert guest.commands.run.await_args.kwargs["opts"].uid == 0
+            await platform.close_session("restore-workspace", "restore-run")
+            await platform.execute(request, timeout_seconds=10, max_output_bytes=4096)
+            assert guest.commands.run.await_count == 2
+            await platform.close_session("restore-workspace", "restore-run")
+    finally:
+        execution_scope.reset(scope)
+
+
+@patch.object(adapter.OpenSandboxExecution, "_require_enforcement", new=AsyncMock())
+@patch.object(
+    adapter.OpenSandboxExecution,
+    "_fetch_policy",
+    new=AsyncMock(return_value=policy_state()),
+)
 async def assert_lost_mcp_owner_never_stages_secrets_or_starts_bridge():
     platform = adapter.OpenSandboxExecution(runtime_settings())
     platform.store.current = AsyncMock(return_value=False)
@@ -1568,6 +1609,7 @@ def main():
         assert_egress_cleanup_timeout_preserves_result_and_fences_guest,
         assert_orphan_cleanup_respects_live_work,
         assert_lease_loss_during_staging_never_starts_program,
+        assert_conversation_files_stage_once_per_guest,
         assert_lost_mcp_owner_never_stages_secrets_or_starts_bridge,
         assert_stdio_dispatch,
         assert_workflow_port,

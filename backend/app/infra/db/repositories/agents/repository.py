@@ -41,6 +41,7 @@ from app.domain.agents.models import (
     AgentRunState,
     agent_run_storage_statuses,
 )
+from app.domain.artifacts.models import GeneratedArtifact
 from app.domain.platform.models import ResourcePermission as ResourcePermissionORM
 from app.domain.tools.models import ToolInvocation
 from app.domain.workflows.models import WorkflowNodeExecution
@@ -788,6 +789,11 @@ async def delete_consumer_conversation(
     )
     if active is not None:
         return False, True
+    await db.execute(
+        delete(GeneratedArtifact).where(
+            GeneratedArtifact.run_id.in_(select(AgentRun.id).where(*scope))
+        )
+    )
     result = await db.execute(delete(AgentRun).where(*scope))
     return bool(result.rowcount), False
 
@@ -1494,6 +1500,14 @@ async def delete_agent_graph(
     agent_id: str,
     resource_type: str,
 ) -> None:
+    await db.execute(
+        delete(GeneratedArtifact).where(
+            GeneratedArtifact.workspace_id == workspace_id,
+            GeneratedArtifact.run_id.in_(
+                select(AgentRun.id).where(AgentRun.agent_id == agent_id)
+            ),
+        )
+    )
     await db.execute(delete(AgentRun).where(AgentRun.agent_id == agent_id))
     await db.execute(
         delete(AgentApiCredential).where(AgentApiCredential.agent_id == agent_id)
@@ -1552,6 +1566,9 @@ async def list_agent_run_ids(db: AsyncSession, agent_id: str) -> list[str]:
 
 
 async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> None:
+    await db.execute(
+        delete(GeneratedArtifact).where(GeneratedArtifact.workspace_id == workspace_id)
+    )
     await db.execute(delete(AgentRun).where(AgentRun.workspace_id == workspace_id))
     await db.execute(
         delete(AgentApiCredential).where(

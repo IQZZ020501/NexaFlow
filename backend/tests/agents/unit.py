@@ -2959,7 +2959,12 @@ def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
     assert "Inline all CSS and JavaScript" in protocol
     assert "storage are unavailable in the preview" in protocol
     assert "If the user only asks for code or an explanation" in protocol
-    assert "authorized file-producing tool" in protocol
+    assert "use bash to create and export" in protocol
+    assert "/workspace/outputs/" in protocol
+    assert "artifacts[].download_url" in protocol
+    assert "PDF, Word, spreadsheet or presentation Skills" in protocol
+    assert "only when the user requests those formats" in protocol
+    assert "authorized file-producing tool" not in protocol
     assert messages[-1]["content"] == "Create an interactive page."
 
 

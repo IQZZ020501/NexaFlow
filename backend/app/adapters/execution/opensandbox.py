@@ -217,6 +217,20 @@ class OpenSandboxExecution:
 
     async def _execute_record(self, sandbox, record, request, timeout, max_bytes, progress):
         staged = set(record.staged_packages)
+        restore = request.get("restore_files")
+        if restore is not None:
+            if not isinstance(restore, dict) or not all(
+                isinstance(path, str) and isinstance(content, str)
+                for path, content in restore.items()
+            ):
+                raise ExecutionNotStarted("Invalid conversation files.")
+            restore = {
+                path: content for path, content in restore.items()
+                if f"workspace:{path}" not in staged
+            }
+            if not restore:
+                return {"ok": True, "exit_code": 0}
+            request = {**request, "restore_files": restore}
         shell = request.get("shell")
         environment_key = None
         if shell:
@@ -239,6 +253,8 @@ class OpenSandboxExecution:
             sandbox, request, timeout, max_bytes, staged=staged, record=record,
             progress=progress,
         )
+        if restore and response.get("ok"):
+            staged.update(f"workspace:{path}" for path in restore)
         environments = dict(record.environments)
         if environment_key and response.get("ok") and response.get("environment_hash"):
             environments[environment_key] = {
@@ -668,7 +684,7 @@ class OpenSandboxExecution:
         job_request = {
             key: value for key, value in job_request.items() if key != "skill_mounts"
         }
-        command_mode = "command" in request
+        command_mode = "command" in request or "restore_files" in request
         protocol = (
             f"/tmp/nexaflow-protocol/{uuid4().hex}" if command_mode else "/tmp/nexaflow"
         )

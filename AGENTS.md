@@ -224,10 +224,17 @@ not trigger unrelated cleanup.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
-- Agent-generated files use safe filenames with arbitrary common extensions,
-  are capped at 5 MiB, stored in PostgreSQL for at most 24 hours, and downloaded
-  through scoped signed bearer URLs. Generated PNGs use random UUIDv4 bearer
-  URLs instead, limited to image content and the same 24-hour lifetime; older
+- Agent-generated files use safe filenames with arbitrary common extensions
+  and are capped at 5 MiB. Files linked to a persisted Run stay in PostgreSQL
+  until their conversation/application is deleted; standalone files expire
+  after 24 hours. Download bearer URLs still expire after 24 hours. Before bash
+  executes, the latest saved version of each file in that same workspace,
+  application, access source, consumer, execution user and conversation is
+  restored into the Run-private `/workspace/outputs/`. Restoring a path happens
+  once per guest and never replaces in-progress edits; each changed export
+  creates a separate immutable artifact and preserves its relative path.
+  Generated PNGs use random UUIDv4 bearer
+  URLs instead, limited to image content and the same 24-hour download lifetime; older
   signed PNG URLs remain valid until expiration. A generated image is named
   after the request instead of a fixed placeholder: the image Tool accepts an
   optional `filename`, the model names it from the user's own wording, and
@@ -548,7 +555,7 @@ examples.
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
   knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
   knowledge.knowledge_graph_edge_coverage, knowledge.knowledge_domain_coverage,
-  knowledge.knowledge_api_coverage, tools.tools, tools.unit, tools.shell_unit, identity.identity,
+  knowledge.knowledge_api_coverage, tools.tools, tools.unit, tools.shell_unit, artifacts.conversations, identity.identity,
   identity.enterprise_identity, identity.email, identity.smtp,
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,
   platform.teams, platform.system_governance, platform.resource_folders,

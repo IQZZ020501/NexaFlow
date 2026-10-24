@@ -43,8 +43,9 @@ class GeneratedArtifact(Base):
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     format: Mapped[str] = mapped_column(String(32), nullable=False)
     filename: Mapped[str] = mapped_column(String(120), nullable=False)
+    relative_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     media_type: Mapped[str] = mapped_column(String(120), nullable=False)
-    # ponytail: bounded 5 MiB/24h DB blobs; move to ObjectStorage when volume warrants it.
+    # Run files follow conversation retention; standalone downloads expire in 24h.
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(

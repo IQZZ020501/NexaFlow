@@ -1,7 +1,7 @@
 import mimetypes
 import re
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
 
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
@@ -32,6 +32,20 @@ ARTIFACT_FILENAME_RESERVED_CHARS = '<>:"/\\|?*'
 # A caption is only useful as a name while it stays short, so the label stops at
 # its first clause before the length cap applies.
 ARTIFACT_FILENAME_CLAUSE_SEPARATORS = r"[。！？!?；;，,、\n.]"
+
+
+def artifact_workspace_path(path: str) -> str:
+    if (
+        not isinstance(path, str)
+        or not path
+        or len(path) > 512
+        or "\\" in path
+        or any(ord(character) < 32 or ord(character) == 127 for character in path)
+        or PurePosixPath(path).is_absolute()
+        or any(part in {"", ".", ".."} for part in path.split("/"))
+    ):
+        raise ValueError("Artifact workspace path is invalid.")
+    return path
 
 
 def artifact_filename_from_label(

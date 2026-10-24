@@ -12,6 +12,7 @@ class GeneratedArtifact:
     idempotency_key: str = ""
     format: str = "html"
     filename: str = ""
+    relative_path: str | None = None
     media_type: str = "text/html; charset=utf-8"
     content: bytes = b""
     size_bytes: int = 0

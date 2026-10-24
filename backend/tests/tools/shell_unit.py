@@ -142,6 +142,7 @@ async def check():
         patch.object(shell, "_installed_dependency_plans", AsyncMock(return_value=[])),
         patch.object(shell, "require_pinned_skill_access", AsyncMock()) as access,
         patch.object(shell, "build_execution_platform", return_value=platform),
+        patch.object(shell, "restore_conversation_files", AsyncMock()) as restore,
         patch.object(
             shell, "create_generated_artifact", AsyncMock(return_value=link)
         ) as create,
@@ -157,6 +158,8 @@ async def check():
             and result.data["workspace_reset"]
         )
         assert result.data["artifacts"][0]["artifact_id"] == "artifact"
+        restore.assert_awaited_once()
+        assert create.call_args.kwargs["relative_path"] == "nested/result.txt"
         key = create.call_args.kwargs["idempotency_key"]
         assert key == hashlib.sha256(b"command-identity:nested/result.txt").hexdigest()
         assert set(platform.execute.call_args.args[0]["skill_mounts"]) == {
@@ -217,8 +220,83 @@ async def check():
         raise AssertionError("Command ran without a Run")
 
 
+async def check_html_export_for_chat_sources():
+    content = b"<!doctype html><html><body>Preview</body></html>"
+    response = {
+        "ok": True,
+        "exit_code": 0,
+        "artifacts": [
+            {
+                "path": "/tmp/nexaflow-exports/page/0",
+                "relative_path": "page.html",
+                "filename": "page.html",
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        ],
+    }
+    link = SimpleNamespace(
+        artifact_id="html-artifact",
+        filename="page.html",
+        format="html",
+        download_url="/api/v1/artifacts/html-artifact",
+        size_bytes=len(content),
+        expires_at=utc_now(),
+        media_type="text/html",
+    )
+    platform = SimpleNamespace(
+        execute=AsyncMock(return_value=response),
+        read_session_file=AsyncMock(return_value=content),
+    )
+    for source in ("console", "public"):
+        run = AgentRun(
+            workspace_id="workspace",
+            execution_user_id="user",
+            access_source=source,
+            status="running_v2",
+            execution_deadline_at=utc_now() + timedelta(seconds=900),
+        )
+        context = ToolInvocationContext(
+            workspace_id="workspace",
+            origin="agent",
+            root_run_id=run.id,
+            run_id=run.id,
+            invocation_id="html-call",
+            execution_user_id="user",
+            access_source=source,
+            deadline_at=utc_now() + timedelta(seconds=120),
+            idempotency_key=f"html-{source}",
+        )
+        with (
+            patch.object(shell, "get_session_factory", return_value=database),
+            patch.object(
+                shell.runs, "get_agent_run_by_id", AsyncMock(return_value=run)
+            ),
+            patch.object(shell, "build_execution_platform", return_value=platform),
+            patch.object(shell, "restore_conversation_files", AsyncMock()),
+            patch.object(
+                shell, "create_generated_artifact", AsyncMock(return_value=link)
+            ) as create,
+        ):
+            result = await BuiltinToolAdapter(settings()).invoke(
+                SimpleNamespace(execution_spec={"builtin": "shell"}),
+                {
+                    "command": "printf '%s' '<html>Preview</html>' > /workspace/outputs/page.html"
+                },
+                context,
+            )
+        assert result.ok, (source, result.error_message)
+        assert result.data["artifacts"][0]["filename"] == "page.html"
+        assert result.data["artifacts"][0]["mime_type"] == "text/html"
+        assert result.data["artifacts"][0]["download_url"] == link.download_url
+        assert create.await_args.kwargs["content"] == content
+        assert create.await_args.kwargs["run_id"] == run.id
+        assert platform.execute.await_args.args[0]["skill_mounts"] == {}
+
+
 def main():
     asyncio.run(check())
+    asyncio.run(check_html_export_for_chat_sources())
     print("SHELL_UNIT_OK")
 
 

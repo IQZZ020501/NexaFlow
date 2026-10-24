@@ -9,6 +9,7 @@ from app.application.agent_skills.scripts import (
     restore_skill_dependencies,
 )
 from app.application.artifacts.service import create_generated_artifact
+from app.application.artifacts.workspace import restore_conversation_files
 from app.application.tools.runtime.contracts import ToolRuntimeResult
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agent_skills.paths import skill_mount_name
@@ -31,6 +32,7 @@ async def execute_shell(settings, arguments, context):
             not run
             or run.workspace_id != context.workspace_id
             or run.execution_user_id != context.execution_user_id
+            or run.access_source != context.access_source
             or run.status not in AGENT_RUN_RUNNING_STATUSES
         ):
             raise ValueError("Command execution requires an active authorized Run.")
@@ -66,6 +68,7 @@ async def execute_shell(settings, arguments, context):
             await restore_skill_dependencies(skill, installed, context, platform)
             or reset
         )
+    await restore_conversation_files(run, platform, timeout_seconds=seconds + 10)
     response = await platform.execute(
         {
             "execution_session": "agent_run",
@@ -117,6 +120,7 @@ async def execute_shell(settings, arguments, context):
                     idempotency_key=key,
                     artifact_format=artifact_format,
                     filename=filename,
+                    relative_path=item["relative_path"],
                     content=content,
                 )
                 await db.commit()
