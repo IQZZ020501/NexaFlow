@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   CheckIcon,
+  CircleAlertIcon,
   CopyIcon,
   LoaderCircleIcon,
   RefreshCwIcon,
@@ -68,45 +69,74 @@ export function RunActionBar({
   onFeedback,
   t,
 }: RunActionBarProps) {
-  const [copied, setCopied] = React.useState(false)
+  const [copyFeedback, setCopyFeedback] = React.useState<{
+    result: string
+    status: "copied" | "error"
+  } | null>(null)
+  const resetCopyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  )
+  const copyStatus =
+    copyFeedback?.result === result ? copyFeedback.status : null
+  React.useEffect(
+    () => () => {
+      if (resetCopyTimer.current) clearTimeout(resetCopyTimer.current)
+    },
+    []
+  )
   const regenerateButtonDisabled =
     regenerateDisabled || regenerating || feedbackPending
   const feedbackButtonsDisabled = regenerating || feedbackPending
-  const copyLabel = t(copied ? "已复制" : "复制")
+  const copyLabel = t(
+    copyStatus === "copied"
+      ? "已复制"
+      : copyStatus === "error"
+        ? "复制失败"
+        : "复制"
+  )
   const positiveSelected = feedback === "positive"
   const negativeSelected = feedback === "negative"
   const positiveLabel = t(positiveSelected ? "取消点赞" : "点赞")
   const negativeLabel = t(negativeSelected ? "取消点踩" : "点踩")
 
   async function handleCopy() {
+    if (resetCopyTimer.current) clearTimeout(resetCopyTimer.current)
     try {
       await copyText(result)
-      setCopied(true)
+      setCopyFeedback({ result, status: "copied" })
     } catch {
-      setCopied(false)
+      setCopyFeedback({ result, status: "error" })
     }
+    resetCopyTimer.current = setTimeout(() => setCopyFeedback(null), 2000)
   }
 
   return (
     <TooltipProvider delayDuration={250}>
       <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          aria-label={t(regenerating ? "正在重新生成" : "重新生成")}
-          title={t(regenerating ? "正在重新生成" : "重新生成")}
-          aria-busy={regenerating}
-          disabled={regenerateButtonDisabled}
-          onClick={onRegenerate}
-        >
-          {regenerating ? (
-            <LoaderCircleIcon className="animate-spin" />
-          ) : (
-            <RefreshCwIcon />
-          )}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              aria-label={t(regenerating ? "正在重新生成" : "重新生成")}
+              title={t(regenerating ? "正在重新生成" : "重新生成")}
+              aria-busy={regenerating}
+              disabled={regenerateButtonDisabled}
+              onClick={onRegenerate}
+            >
+              {regenerating ? (
+                <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <RefreshCwIcon />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {t(regenerating ? "正在重新生成" : "重新生成")}
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -157,17 +187,40 @@ export function RunActionBar({
           </TooltipTrigger>
           <TooltipContent>{negativeLabel}</TooltipContent>
         </Tooltip>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="text-muted-foreground"
-          aria-label={copyLabel}
-          title={copyLabel}
-          onClick={() => void handleCopy()}
+        <span
+          role="status"
+          className={
+            copyStatus === "error" ? "text-xs text-destructive" : "sr-only"
+          }
         >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </Button>
+          {copyStatus ? copyLabel : ""}
+        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={
+                copyStatus === "error"
+                  ? "text-destructive"
+                  : "text-muted-foreground"
+              }
+              aria-label={copyLabel}
+              title={copyLabel}
+              onClick={() => void handleCopy()}
+            >
+              {copyStatus === "copied" ? (
+                <CheckIcon />
+              ) : copyStatus === "error" ? (
+                <CircleAlertIcon />
+              ) : (
+                <CopyIcon />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{copyLabel}</TooltipContent>
+        </Tooltip>
       </div>
     </TooltipProvider>
   )

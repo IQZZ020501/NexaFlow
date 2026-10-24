@@ -189,6 +189,11 @@ export const en = {
   "至少 6 位，并且包含一个大写字母":
     "At least 6 characters and one uppercase letter",
   保存: "Save",
+  保存中: "Saving",
+  发布中: "Publishing",
+  取消发布中: "Unpublishing",
+  没有需要保存的更改: "No changes to save",
+  请填写名称并选择模型后保存: "Enter a name and select a model before saving",
   取消: "Cancel",
   编辑消息: "Edit message",
   重新发送: "Resend",

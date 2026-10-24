@@ -113,13 +113,13 @@ export function AgentAttachmentList({
         <li
           key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
           title={file.name}
-          className="flex max-w-48 items-center gap-1 rounded-md bg-muted py-1 pr-1 pl-2 text-xs text-muted-foreground"
+          className="flex max-w-48 items-center gap-1 rounded-md bg-muted py-0.5 pr-0.5 pl-2 text-xs text-muted-foreground"
         >
           <PaperclipIcon className="size-3" />
           <span className="truncate">{file.name}</span>
           <button
             type="button"
-            className="rounded-sm p-0.5 hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-6"
             aria-label={t("移除 {value}", { value: file.name })}
             title={t("移除 {value}", { value: file.name })}
             onClick={() => onRemove(index)}

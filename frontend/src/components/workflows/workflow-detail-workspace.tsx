@@ -47,6 +47,7 @@ import {
 import type { AgentFormState } from "@/components/agents/agents-page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DisabledButtonHint } from "@/components/ui/disabled-button-hint"
 import { SpeechInputButton } from "@/components/ui/speech-input-button"
 import {
   Dialog,
@@ -902,20 +903,33 @@ export function WorkflowDetailWorkspace({
           </IconButton>
         ) : null}
         {visibleActiveView === "settings" && agent.can_edit ? (
-          <Button
-            type="button"
-            variant="outline"
-            aria-label={t("保存")}
-            disabled={(!isDirty && !isAppDirty) || isSaving || isSavingApp}
-            onClick={() => void handleSaveAll()}
+          <DisabledButtonHint
+            reason={
+              isSaving || isSavingApp
+                ? t("保存中")
+                : !isDirty && !isAppDirty
+                  ? t("没有需要保存的更改")
+                  : undefined
+            }
           >
-            {isSaving || isSavingApp ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <SaveIcon />
-            )}
-            <span className="hidden sm:inline">{t("保存")}</span>
-          </Button>
+            <Button
+              type="button"
+              variant="outline"
+              aria-label={t(isSaving || isSavingApp ? "保存中" : "保存")}
+              aria-busy={isSaving || isSavingApp}
+              disabled={(!isDirty && !isAppDirty) || isSaving || isSavingApp}
+              onClick={() => void handleSaveAll()}
+            >
+              {isSaving || isSavingApp ? (
+                <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <SaveIcon />
+              )}
+              <span className="hidden sm:inline">
+                {t(isSaving || isSavingApp ? "保存中" : "保存")}
+              </span>
+            </Button>
+          </DisabledButtonHint>
         ) : null}
         {visibleActiveView === "settings" && agent.can_edit && graph ? (
           <WorkflowNodePalette
@@ -957,21 +971,35 @@ export function WorkflowDetailWorkspace({
           </Button>
         ) : null}
         {canManagePublishing ? (
-          <Button
-            type="button"
-            aria-label={t("发布版本")}
+          <DisabledButtonHint
             className="max-sm:hidden"
-            disabled={isPublishing || agent.status !== "active" || isAppDirty}
-            title={isAppDirty ? t("请先保存更改后再发布。") : undefined}
-            onClick={() => void handlePublish()}
+            reason={
+              isPublishing
+                ? t("发布中")
+                : agent.status !== "active"
+                  ? t("已停用")
+                  : isAppDirty
+                    ? t("请先保存更改后再发布。")
+                    : undefined
+            }
           >
-            {isPublishing ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <UploadIcon />
-            )}
-            <span className="hidden sm:inline">{t("发布版本")}</span>
-          </Button>
+            <Button
+              type="button"
+              aria-label={t(isPublishing ? "发布中" : "发布版本")}
+              aria-busy={isPublishing}
+              disabled={isPublishing || agent.status !== "active" || isAppDirty}
+              onClick={() => void handlePublish()}
+            >
+              {isPublishing ? (
+                <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <UploadIcon />
+              )}
+              <span className="hidden sm:inline">
+                {t(isPublishing ? "发布中" : "发布版本")}
+              </span>
+            </Button>
+          </DisabledButtonHint>
         ) : null}
         {agent.can_edit ? (
           <DropdownMenu>

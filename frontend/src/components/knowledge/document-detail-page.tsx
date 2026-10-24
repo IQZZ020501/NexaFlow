@@ -245,7 +245,7 @@ function DocumentDetailPageContent({
             </Button>
             <button
               type="button"
-              className="max-w-28 truncate text-muted-foreground outline-none hover:text-foreground sm:max-w-48"
+              className="max-w-28 truncate rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:max-w-48"
               title={knowledgeBase.name}
               onClick={() => router.push(`/app/knowledge/${knowledgeBaseId}`)}
             >

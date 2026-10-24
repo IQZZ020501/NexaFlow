@@ -2819,7 +2819,7 @@ function KnowledgeBasePageContent({
                     </Button>
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="destructive"
                       disabled={
                         !canEditDocuments ||
                         selectedKnowledgeTasks.length === 0 ||
