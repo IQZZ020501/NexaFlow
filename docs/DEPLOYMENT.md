@@ -8,7 +8,7 @@
 
 ### 部署拓扑与 deploy/
 
-- 根 `docker-compose.yml` — 唯一 Compose 文件；默认单机拉取部署，内置密码/网站设置、应用与数据库/执行镜像 digest、OpenSandbox 控制面配置。`docker compose pull` 拉取全部依赖；一次性 `migrate` 成功后启动业务服务
+- 根 `docker-compose.yml` — 唯一 Compose 文件；默认单机拉取部署，内置密码/网站设置、应用与数据库/执行镜像 digest、业务进程监督脚本及 OpenSandbox 控制面配置。`docker compose pull` 拉取全部依赖；一次性 `migrate` 成功后启动合并的 `app`
 - `deploy/opensandbox/README.md` / `configure.py` — 可选独立执行主机与私有配置生成；该生成器默认 Kata + dns+nft，缺少 Kata 不自动回退
 - `deploy/nginx/default.conf` — 可选反向代理：`/api/` 与 `/health` 到 API，前端静态资源带缓存头转发 Next.js
 - `deploy/dockerfiles/app.Dockerfile` — 多阶段业务镜像，API/两个 Worker/前端复用；不含沙箱源码
@@ -19,7 +19,7 @@
 
 - `scripts/dev.py` — 根 `make dev` / `make dev-rebuild` 的本地开发监督器；创建私有 `.env`、按输入指纹构建本地 PostgreSQL 与执行镜像、迁移并托管开发进程。基础设施从唯一 Compose 渲染后在内存中覆盖本地数据库凭据/镜像/回环端口，再通过 stdin 交给 Compose；不生成第二份配置文件
 - `scripts/dev.py --infrastructure-only` — `cd backend && make dev` 复用的基础设施入口，不启动前端或 OpenSandbox
-- `scripts/dev_test.py` — 开发入口与配置隔离的回归测试，CI 调用
+- `scripts/dev_test.py` / `scripts/compose_test.py` — 开发入口、配置隔离及单文件部署进程生命周期的回归测试，CI 调用
 - `scripts/setup-hooks.sh` — 设置 `git config core.hooksPath .githooks` 启用仓库 Git hooks
 
 ### 仓库根
@@ -97,7 +97,9 @@ docker compose ps -a
 
 `config --quiet` 校验配置，不启动服务。定制应用、PostgreSQL 和执行镜像已公开发布，固定 digest 且同时提供 AMD64/ARM64，默认地址可直接匿名拉取；Redis、Qdrant 和 OpenSandbox 辅助组件使用公开镜像。日常安装沿用 `x-images` 中的镜像和 `db`、`redis`、`qdrant`、`opensandbox` 等容器内部地址。
 
-OpenSandbox 配置通过 Compose `configs.content` 内置，控制面走容器内网 `http://opensandbox:8088`；只有控制面拥有 Docker socket。三个 `*-image` 服务和 `migrate` 是正常退出的一次性容器，8 个常驻服务以健康状态或持续运行作为就绪条件。执行容器及网络侧车按任务创建。
+业务监督脚本和 OpenSandbox 配置通过 Compose `configs.content` 内置，无需重新构建应用镜像。常驻容器为 `app`、`db`、`redis`、`qdrant`、`opensandbox`，共 5 个；`app` 内运行 API、前端、后台 Worker 和 Agent Worker 四个独立进程。任一进程退出，监督器停止其余进程并以失败状态退出，Docker 按 `unless-stopped` 策略重启 `app`；正常停止会转发信号并在 20 秒后清理仍未退出的进程组，容器保留 30 秒停止宽限。日志按进程加前缀，健康检查同时覆盖 API 和前端代理。
+
+控制面走容器内网 `http://opensandbox:8088`；只有控制面拥有 Docker socket。三个 `*-image` 服务和 `migrate` 是另外 4 个正常退出的一次性容器。执行容器及网络侧车按任务创建。`app` 保留 `api` / `frontend` 网络别名，兼容已发布 Next.js 镜像中的代理地址及 Nginx 示例。
 
 使用配置的网站地址访问，健康检查路径为 `/health`，API 文档为 `/docs`。默认管理员用户名是 `admin`，密码为设置的 `admin-password`。模型凭据、SMTP、企业身份和工作空间产品设置登录后管理，不写到部署文件。
 
@@ -117,13 +119,31 @@ HTTP 网站使用 `environment: development`，前端仍运行已经构建的镜
 #### 4. 日志、升级与数据保留
 
 ```bash
-docker compose logs -f api worker agent-worker frontend
+docker compose logs -f app
 docker compose down
 ```
 
 `down` 停止并移除容器及网络，数据仍保存在 Compose 所在目录的 `deploy/data`。不要在服务运行时删除或移动数据库、Redis、Qdrant 及上传目录。
 
 升级前备份 Compose、PostgreSQL 和上传目录，按发行说明更新 `x-images` digest，再拉取并启动。若升级 execd/egress，同时更新内置 TOML 中对应的镜像 digest。保留自己的密码和网站设置；升级数据库结构后须核对迁移兼容要求，不能假定切回旧镜像就完全回滚。原部署的数据目录仍是 `deploy/data`，移动 Compose 文件时也要保持这些挂载路径指向原数据，不能误启空库。
+
+从独立 `api` / `frontend` / `worker` / `agent-worker` 的旧拓扑升级时，先用旧配置执行 `docker compose down` 再替换文件；若已换成新配置，先执行 `docker compose down --remove-orphans`。之后再拉取并启动，避免旧 Worker 与新 `app` 同时运行。`app` 中包含唯一的 Beat，不能通过 `--scale app=N` 扩容。
+
+### 资源容量
+
+以下建议按模型、Embedding 和 reranker 使用外部 API、知识库数据较少、普通 Docker 单机部署估算，不含本地模型推理资源，也不是已完成满载压测的硬件下限：
+
+| 使用范围 | CPU / 内存 | 配置和限制 |
+| --- | --- | --- |
+| 单人轻量体验 | 2 vCPU / 4 GB | `OPENSANDBOX_MAX_SANDBOXES=1`，避免批量文档解析和并行执行 |
+| 小规模完整使用，推荐起步 | 4 vCPU / 8 GB | 沙箱上限设为 `2`，保留业务与宿主机余量 |
+| 默认 4 台沙箱，可能同时执行重任务 | 8 vCPU / 16 GB | 保留沙箱上限 `4`；大量解析、索引和模型并发需继续按负载扩容 |
+
+容量值在 Compose 的 `x-backend-environment.OPENSANDBOX_MAX_SANDBOXES` 中修改。默认预热池关闭，空闲时不保留执行沙箱。后台 Worker 仍按任务自动伸缩；低配环境避免同时导入大量文档，仅启动成功不能证明峰值内存足够。
+
+执行档位由 `backend/app/adapters/execution/resources.py` 定义：small 为 1 vCPU / 512 MiB，standard 为 1 vCPU / 1 GiB，heavy 为 2 vCPU / 2 GiB。bash、Skill 与文件渲染会申请 heavy；这是每台沙箱的限额，不代表始终占满。4 台 heavy 接近上限时，仅执行沙箱就可能使用约 8 GiB，此外还有业务进程、数据库、向量索引、网络侧车和宿主机。
+
+一个 Run 可能同时持有代码执行沙箱和独立 stdio MCP 宿主，上限设为 `1` 时不能组合使用这两类能力；完整组合使用至少保留 `2` 个槽位。大知识库会增加 PostgreSQL/Qdrant 的存储、索引和查询需求，向量容量需按数据量另算，参见 [Qdrant 官方容量说明](https://qdrant.tech/documentation/capacity-planning/)。合并容器简化的是部署和进程管理，不会消除业务进程的 CPU/内存开销。
 
 ### 环境变量与产品配置
 
@@ -158,9 +178,9 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
 ## 关键约定
 
 - 根 `docker-compose.yml` 是唯一部署配置；镜像在 `x-images`，凭据和网站设置在 `x-settings`。本地开发仍单独读取私有根 `.env`，不会把它注入部署容器。
-- API、Worker 与 Frontend 共享业务镜像并保持独立容器；OpenSandbox 控制面默认与业务服务一起运行，也可改用外部服务。执行容器由控制面按需创建，不挂载业务数据。两个 Worker 都丢弃全部 capability，保留默认 AppArmor/seccomp 和 `no-new-privileges`，不需要 Docker socket 或 root 隔离启动流程。
+- API、两个 Worker 与 Frontend 在单个 `app` 容器中保持独立进程，共用业务镜像；前端进程不继承后端凭据环境变量。整个 `app` 丢弃全部 capability，保留默认 AppArmor/seccomp 和 `no-new-privileges`，不挂 Docker socket。OpenSandbox 控制面默认与业务服务同机运行，也可改用外部服务；执行容器由控制面按需创建，不挂载业务数据。
 - API 与 Worker 必须共享 `KNOWLEDGE_STORAGE_DIR` 并连接同一个 `QDRANT_URL`，否则 worker 会漏读上传文件或写入不同向量库。
-- `backend/scripts/worker.py --role` 决定一个 Worker 的职责：`all`（默认，本地开发）消费全部队列并内嵌 Beat；`background` 只消费 `celery` 队列（知识库、工具测试、邮件、清理）并内嵌 Beat，用 prefork 自动伸缩；`agents` 只消费 `agents-legacy`/`agents-v2`，不带 Beat，用线程池让同一进程的所有对话共享一个事件循环，默认并发 32（可追加 `--concurrency=N`）。Worker 使用 NullPool，每个执行中的 Run 会短暂占用 PostgreSQL 连接，调大并发或 `--scale agent-worker=N` 前要确认 `max_connections` 足够。
+- `backend/scripts/worker.py --role` 决定一个 Worker 的职责：`all`（默认，本地开发）消费全部队列并内嵌 Beat；`background` 只消费 `celery` 队列（知识库、工具测试、邮件、清理）并内嵌 Beat，用 prefork 自动伸缩；`agents` 只消费 `agents-legacy`/`agents-v2`，不带 Beat，用线程池让同一进程的所有对话共享一个事件循环，默认并发 32（可追加 `--concurrency=N`）。部署监督器分别启动 background 与 agents，不将两种池混合；两者使用不同 Celery 节点名，避免同一容器主机名造成控制消息冲突。Worker 使用 NullPool，每个执行中的 Run 会短暂占用 PostgreSQL 连接，调大并发前要确认 `max_connections` 足够。
 - API 与内嵌 Beat 的后台 Worker 必须连接同一 PostgreSQL/Redis；后台 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Agent Run 只在消息超过租约时长仍未被消费、或租约刚过期时才重新派发，并记录在 `agent_run_states.redispatched_at`，积压时不会每轮重复投递；发现 Run 已被其他 Worker 持有有效租约的重复消息直接结束，不再定时重试。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - Compose 中设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。stdio MCP 和已批准的 Skill 依赖安装可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent/Workflow Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
 - `execution_sessions` 持久化 Run 的沙箱 ID、短租约和依赖锁；任意 Worker 按 ID 接回，Python、生成文件、渲染器、Workflow 代码节点和 bash 共用 Run 沙箱。结束/取消主动销毁，Beat 按分钟回收过期、孤儿和待关闭会话。Run 内 stdio 服务通过另一台宿主沙箱的 HTTP 桥接进程复用，工具发现仍然一次性。

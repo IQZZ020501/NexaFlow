@@ -147,37 +147,15 @@ services:
       db:
         condition: service_healthy
 
-  api:
+  app:
     <<: *app-image
     init: true
     restart: unless-stopped
-    environment: *backend-environment
-    volumes:
-      - ./deploy/data/uploads:/data/knowledge
-    healthcheck:
-      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
-      interval: 10s
-      timeout: 3s
-      retries: 20
-    depends_on:
-      opensandbox:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-
-  worker:
-    <<: *app-image
-    init: true
-    restart: unless-stopped
-    command:
-      - python
-      - scripts/worker.py
-      - --role=background
-      - --autoscale=10,0
+    stop_grace_period: 30s
+    command: ["python", "/etc/nexaflow/app.py"]
+    configs:
+      - source: app-supervisor
+        target: /etc/nexaflow/app.py
     environment:
       <<: *backend-environment
       AUTOSCALE_KEEPALIVE: "5"
@@ -187,62 +165,187 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    depends_on:
-      opensandbox:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-
-  agent-worker:
-    <<: *app-image
-    init: true
-    restart: unless-stopped
-    command:
-      - python
-      - scripts/worker.py
-      - --role=agents
-    environment: *backend-environment
-    volumes:
-      - ./deploy/data/uploads:/data/knowledge
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    depends_on:
-      opensandbox:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-
-  frontend:
-    <<: *app-image
-    restart: unless-stopped
-    working_dir: /opt/frontend
-    command: ["/opt/node/bin/node", "server.js"]
-    environment:
-      HOSTNAME: 0.0.0.0
-      NEXAFLOW_API_PROXY: http://api:8000
+    # Published Next.js builds and the optional Nginx example use these names.
+    networks:
+      default:
+        aliases: [api, frontend]
     ports:
       - *web-port
     healthcheck:
-      test: ["CMD", "/opt/node/bin/node", "-e", "require('http').get('http://127.0.0.1:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "python", "/etc/nexaflow/app.py", "--healthcheck"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
+      start_period: 30s
       retries: 20
     depends_on:
-      api:
+      opensandbox:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
 
 # Docker isolation is explicit. Kata is an optional separate execution host.
 configs:
+  app-supervisor:
+    content: |
+      """Run the four trusted business processes in one container."""
+
+      import os
+      import signal
+      import subprocess
+      import sys
+      import threading
+      import time
+      import urllib.request
+
+      SHUTDOWN_TIMEOUT = 20
+      SERVICES = (
+          (
+              "api",
+              [
+                  sys.executable,
+                  "-m",
+                  "uvicorn",
+                  "app.main:app",
+                  "--host",
+                  "0.0.0.0",
+                  "--port",
+                  "8000",
+                  "--timeout-graceful-shutdown",
+                  "8",
+              ],
+              "/app",
+          ),
+          (
+              "worker",
+              [
+                  sys.executable,
+                  "scripts/worker.py",
+                  "--role=background",
+                  "--hostname=background@%h",
+                  "--autoscale=10,0",
+              ],
+              "/app",
+          ),
+          (
+              "agent-worker",
+              [sys.executable, "scripts/worker.py", "--role=agents", "--hostname=agents@%h"],
+              "/app",
+          ),
+          ("frontend", ["/opt/node/bin/node", "server.js"], "/opt/frontend"),
+      )
+
+
+      def environment(label):
+          if label != "frontend":
+              return os.environ.copy()
+          # Keep backend credentials out of the frontend process environment.
+          return {
+              "PATH": os.environ.get("PATH", os.defpath),
+              "NODE_ENV": "production",
+              "NEXT_TELEMETRY_DISABLED": "1",
+              "HOSTNAME": "0.0.0.0",
+              "NEXAFLOW_API_PROXY": "http://api:8000",
+          }
+
+
+      def forward_output(label, stream):
+          with stream:
+              for line in stream:
+                  print(f"[{label}] {line.rstrip()}", flush=True)
+
+
+      def signal_group(process, signum):
+          try:
+              os.killpg(process.pid, signum)
+          except ProcessLookupError:
+              pass
+
+
+      def supervise(services):
+          processes = []
+          output_threads = []
+          stopping = False
+          result = 0
+
+          def request_stop(signum, frame):
+              nonlocal stopping
+              stopping = True
+
+          previous = {
+              signum: signal.signal(signum, request_stop)
+              for signum in (signal.SIGTERM, signal.SIGINT)
+          }
+          try:
+              for label, command, cwd in services:
+                  if stopping:
+                      break
+                  process = subprocess.Popen(
+                      command,
+                      cwd=cwd,
+                      env=environment(label),
+                      start_new_session=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT,
+                      text=True,
+                      errors="replace",
+                      bufsize=1,
+                  )
+                  processes.append((label, process))
+                  thread = threading.Thread(
+                      target=forward_output, args=(label, process.stdout), daemon=True
+                  )
+                  thread.start()
+                  output_threads.append(thread)
+              while not stopping:
+                  for label, process in processes:
+                      code = process.poll()
+                      if code is not None:
+                          print(f"[app] {label} exited ({code}); stopping app", flush=True)
+                          result = 1
+                          stopping = True
+                          break
+                  if not stopping:
+                      time.sleep(0.2)
+          except OSError as exc:
+              print(f"[app] Cannot start service: {exc}", file=sys.stderr, flush=True)
+              result = 1
+          finally:
+              for label, process in processes:
+                  signal_group(process, signal.SIGTERM)
+              deadline = time.monotonic() + SHUTDOWN_TIMEOUT
+              for label, process in processes:
+                  try:
+                      process.wait(timeout=max(0, deadline - time.monotonic()))
+                  except subprocess.TimeoutExpired:
+                      pass
+              # Also remove descendants left behind by an exited process leader.
+              for label, process in processes:
+                  signal_group(process, signal.SIGKILL)
+              for label, process in processes:
+                  process.wait()
+              for thread in output_threads:
+                  thread.join(timeout=1)
+              for signum, handler in previous.items():
+                  signal.signal(signum, handler)
+          return result
+
+
+      def healthcheck():
+          for port in (8000, 3000):
+              with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2):
+                  pass
+
+
+      if __name__ == "__main__":
+          if sys.argv[1:] == ["--healthcheck"]:
+              healthcheck()
+          else:
+              sys.exit(supervise(SERVICES))
+
   opensandbox:
     content: |
       # Explicit single-host Docker deployment. For VM isolation, use configure.py

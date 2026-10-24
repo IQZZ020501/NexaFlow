@@ -111,7 +111,11 @@ docker compose up -d --wait
 
 镜像地址和运行默认值直接写在 Compose，定制镜像以不可变 digest 固定，支持 `linux/amd64` 和 `linux/arm64`。`pull` 包含应用、PostgreSQL、执行镜像、OpenSandbox 官方镜像及 Redis/Qdrant，服务器无需构建。
 
-启动时会等待基础服务和 OpenSandbox 健康，执行一次性 Alembic 迁移，再启动 API、Worker 与前端。三个 `*-image` 服务只负责预拉取执行及辅助镜像，和 `migrate` 一样以 `Exited (0)` 结束属于正常状态；常驻服务共 8 个，实际执行任务时另有临时沙箱和网络侧车。
+启动时会等待基础服务和 OpenSandbox 健康，执行一次性 Alembic 迁移，再启动 `app`。常驻容器共 **5 个**：`app`、`db`、`redis`、`qdrant`、`opensandbox`；`app` 内分别运行前端、API、后台 Worker 和 Agent Worker。任一业务进程退出会停止其余进程，由 Docker 重启整个 `app`，健康检查同时检查 API 和前端代理。进程管理脚本同样内置在 Compose 中，可直接复用已发布的应用镜像。
+
+三个 `*-image` 服务只负责预拉取执行及辅助镜像，和 `migrate` 一样以 `Exited (0)` 结束属于正常状态；它们是另外 **4 个一次性容器**。实际执行任务时另有临时沙箱和网络侧车。
+
+按外部模型 API、少量知识库数据估算：单人轻量体验最低建议 **2 vCPU / 4 GB**（将 `OPENSANDBOX_MAX_SANDBOXES` 改为 `1`，避免批量解析和并行执行）；小规模完整使用推荐 **4 vCPU / 8 GB**（沙箱上限 `2`）；保留默认 `4` 台沙箱并发重任务时建议 **8 vCPU / 16 GB**。上限为 `1` 时，同一 Run 无法同时持有代码执行沙箱和 stdio MCP 宿主，完整组合使用至少保留 `2` 个槽位。这些是容量建议，尚未在对应服务器规格上做满载验收。详见[资源容量说明](docs/DEPLOYMENT.md#资源容量)。
 
 完成后访问 `http://你的服务器IP:8080`；健康检查在 `/health`，OpenAPI 在 `/docs`。默认管理员为 `admin`，使用顶部 `admin-password` 登录，首次登录必须修改密码。模型、SMTP 等产品设置登录后配置。`JWT_SECRET_KEY` 和 `MODEL_SECRET_KEY` 由应用首次启动生成并保存在 PostgreSQL，无需手填。
 
@@ -121,16 +125,12 @@ HTTP 网站保留 `environment: development`，使登录 Cookie 可通过 HTTP �
 
 ```bash
 docker compose ps -a
-docker compose logs -f api worker agent-worker frontend
+docker compose logs -f app
 ```
 
-`worker` 处理知识库、工具测试、邮件和清理，并内嵌唯一的 Beat，只运行一个实例；`agent-worker` 执行 Agent 与工作流对话，可按资源容量扩容：
+日志以 `[api]`、`[frontend]`、`[worker]`、`[agent-worker]` 区分进程。后台 Worker 处理知识库、工具测试、邮件和清理，并内嵌唯一的 Beat；Agent Worker 保持独立线程池，执行 Agent 与工作流对话。`app` 只运行一个实例，不要用 `--scale app=N` 复制其中的定时调度器；重启 `app` 会一起重启四个业务进程。
 
-```bash
-docker compose up -d --scale agent-worker=2
-```
-
-升级前备份修改后的 Compose、PostgreSQL 和上传目录，按发行说明更新 `x-images` 中的 digest，再执行相同的 `pull` / `up -d --wait`。保留自己的密码和网站配置。停止服务：
+升级前备份修改后的 Compose、PostgreSQL 和上传目录，按发行说明更新配置，再执行相同的 `pull` / `up -d --wait`。保留自己的密码和网站配置。从独立 `api` / `frontend` / `worker` / `agent-worker` 的旧拓扑升级时，先用旧配置执行 `docker compose down` 再替换文件；若已替换，先执行 `docker compose down --remove-orphans`，防止旧 Worker 和新 `app` 同时消费任务或重复调度。停止服务：
 
 ```bash
 docker compose down
