@@ -80,7 +80,6 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/knowledge/chunk-preview-list.tsx` — 分段预览列表（智能模式按 Parent 分组，高级模式平铺，高亮同 Parent 相邻重叠文本）
 - `frontend/src/components/knowledge/knowledge-hit-test.tsx` — 命中测试与评测用例入口
 - `frontend/src/components/knowledge/knowledge-evaluation.tsx` — 检索评测用例/运行/指标
-- `frontend/src/components/knowledge/knowledge-link-graph.tsx`、`knowledge-graph-canvas.tsx`、`knowledge-graph.worker.ts` — Markdown 文档关系图谱、Local Graph 过滤、Worker 力导向布局与 PixiJS WebGL 画布；`knowledge-graph.tsx` 与 `knowledge-evidence-graph-canvas.tsx` 保留 Evidence Graph 管理/检索界面实现，但知识库主图谱入口使用文档链接图
 - `frontend/src/components/knowledge/markdown-content.tsx` — react-markdown + GFM 渲染；`markdown-code-block.tsx` 代码高亮
 - `frontend/src/components/knowledge/document-file-icon.tsx` — 文档类型图标
 - `frontend/src/components/knowledge/status-badges.tsx` — 状态/权限徽章
@@ -209,7 +208,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 
 **lib/api/**（按域划分的 API 客户端）
 - `frontend/src/lib/api/auth.ts` — 认证 API：登录/登出/me/刷新/改密/找回密码/会话
-- `frontend/src/lib/api/knowledge.ts` — 知识库 API：知识库/文档/任务/chunk/检索/图谱/评测
+- `frontend/src/lib/api/knowledge.ts` — 知识库 API：知识库/文档/任务/chunk/检索/评测
 - `frontend/src/lib/api/agents.ts` — Agent API：CRUD、发布、API 凭据、日志/统计/用户、Run 提交/游标订阅/自动重连、工具审批
 - `frontend/src/lib/api/public-agents.ts` — 公开 Agent 资料、公开会话、历史和脱敏 Run 流
 - `frontend/src/lib/api/run-stream.ts` — 登录态与公开 Run 共用的 NDJSON 双游标重连器

@@ -122,14 +122,13 @@ export type KnowledgeTask = {
   updated_at: string
 }
 
-export type KnowledgeTaskRetryMode = "all" | "unfinished"
 
 export type KnowledgeTaskBulkDeleteResult = {
   deleted_task_ids: string[]
 }
 
 export type KnowledgeRetrievalSource =
-  "vector" | "keywords" | "reference" | "graph"
+  "vector" | "keywords"
 
 export type KnowledgeQueryHit = {
   chunk_id: string
@@ -147,13 +146,10 @@ export type KnowledgeQueryHit = {
   contributing_chunk_ids: string[]
   distance: number | null
   similarity: number | null
-  kind: "document" | "qa" | "graph_record"
+  kind: "document" | "qa"
   question: string | null
   source: string | null
   sources: KnowledgeRetrievalSource[]
-  reference_hops: 0 | 1
-  graph_claim_ids: string[]
-  graph_hops: number
   rerank_score: number | null
 }
 
@@ -164,12 +160,6 @@ export type KnowledgeQueryInspectRequest = {
   limit: number
   search_mode: KnowledgeSearchMode
   similarity: number | null
-  include_references: boolean
-  graph_mode?: KnowledgeGraphMode
-  source_entity?: string | null
-  target_entity?: string | null
-  max_hops?: number
-  relation_filters?: string[]
 }
 
 export type KnowledgeRetrievalTrace = {
@@ -180,18 +170,6 @@ export type KnowledgeRetrievalTrace = {
   max_distance: number | null
   vector_candidates: number
   keyword_candidates: number
-  reference_candidates: number
-  graph_mode: KnowledgeGraphMode
-  graph_intent: string | null
-  graph_revision_id: string | null
-  graph_entity_candidates: number
-  graph_profile_candidates: number
-  graph_claim_candidates: number
-  graph_path_count: number
-  graph_visited_nodes: number
-  graph_hops: number
-  graph_truncated: boolean
-  graph_limit_reason: string | null
   fused_candidates: number
   rerank_status: "not_configured" | "applied" | "fallback" | "skipped"
   returned_hits: number
@@ -203,192 +181,6 @@ export type KnowledgeRetrievalTrace = {
 export type KnowledgeQueryInspectResult = {
   hits: KnowledgeQueryHit[]
   trace: KnowledgeRetrievalTrace
-  graph: KnowledgeGraphQueryResult | null
-}
-
-export type KnowledgeGraphEvaluationExpectation = {
-  entity_names: string[]
-  predicates: string[]
-  path_entity_names: string[]
-  path_predicates: string[]
-}
-
-export type KnowledgeGraphEvaluationMetrics = {
-  entity_precision: number
-  entity_recall: number
-  claim_precision: number
-  claim_recall: number
-  path_exact_match: number
-  path_edge_accuracy: number
-  citation_coverage: number
-}
-
-export type KnowledgeGraphMode = "off" | "auto" | "path" | "neighborhood"
-
-export type KnowledgeGraphSettings = {
-  enabled: boolean
-  extraction_model_id: string | null
-  active_schema_id: string | null
-  active_revision_id: string | null
-}
-
-export type KnowledgeGraphStatus = {
-  enabled: boolean
-  active_schema_id: string | null
-  active_revision_id: string | null
-  revision_no: number | null
-  revision_status: string | null
-  source_watermark: string | null
-  stats: Record<string, unknown>
-  model_usage: Record<string, unknown>
-  pending_review_count: number
-  last_error: string | null
-  published_at: string | null
-  build_task_id: string | null
-  build_task_status: string | null
-}
-
-export type KnowledgeGraphSchema = {
-  id: string
-  version: number
-  status: "draft" | "active" | "retired"
-  schema_json: Record<string, unknown>
-  schema_hash: string
-}
-
-export type KnowledgeGraphEntity = {
-  id: string
-  entity_type: string
-  canonical_name: string
-  aliases: string[]
-  properties: Record<string, unknown>
-  profile_markdown: string
-  component_id: string | null
-  degree: number
-}
-
-export type KnowledgeGraphEvidence = {
-  id: string
-  claim_id: string
-  document_id: string
-  document_filename: string
-  chunk_id: string
-  quote: string
-  start_offset: number
-  end_offset: number
-  source_kind: string
-}
-
-export type KnowledgeGraphClaim = {
-  id: string
-  subject_entity_id: string
-  predicate: string
-  object_entity_id: string | null
-  object_value: unknown
-  properties: Record<string, unknown>
-  quality_score: number
-  support_count: number
-  evidence_ids: string[]
-}
-
-export type KnowledgeGraphEntityDetail = KnowledgeGraphEntity & {
-  claims: KnowledgeGraphClaim[]
-  evidence: KnowledgeGraphEvidence[]
-}
-
-export type KnowledgeGraphPathStep = {
-  claim_id: string
-  predicate: string
-  source_entity_id: string
-  target_entity_id: string
-  semantic_direction: "forward" | "reverse"
-  quality_score: number
-  support_count: number
-  evidence_ids: string[]
-}
-
-export type KnowledgeGraphPath = {
-  nodes: KnowledgeGraphEntity[]
-  steps: KnowledgeGraphPathStep[]
-}
-
-export type KnowledgeGraphQueryResult = {
-  revision_id: string
-  operation: string
-  resolved_entities: KnowledgeGraphEntity[]
-  nodes: KnowledgeGraphEntity[]
-  claims: KnowledgeGraphClaim[]
-  paths: KnowledgeGraphPath[]
-  evidence: KnowledgeGraphEvidence[]
-  visited_nodes: number
-  truncated: boolean
-  limit_reason: string | null
-}
-
-export type KnowledgeGraphEntityList = {
-  items: KnowledgeGraphEntity[]
-  total: number
-  limit: number
-  offset: number
-}
-
-export type KnowledgeGraphReviewItem = {
-  id: string
-  kind: string
-  payload: Record<string, unknown>
-  status: string
-  revision_id: string
-  created_at: string
-}
-
-export type KnowledgeGraphReviewList = {
-  items: KnowledgeGraphReviewItem[]
-  total: number
-  limit: number
-  offset: number
-}
-
-export type KnowledgeLinkGraphNode = {
-  id: string
-  kind: "document" | "entity" | "unresolved"
-  document_id: string | null
-  label: string
-  filename: string
-  content_type: string | null
-  status: string | null
-  entity_type: string | null
-  properties: Record<string, unknown>
-  incoming: number
-  outgoing: number
-  degree: number
-}
-
-export type KnowledgeLinkGraphEdge = {
-  id: string
-  source: string
-  target: string
-  target_label: string
-  target_sections: string[]
-  resolved: boolean
-  count: number
-  predicate: string | null
-  source_kind: string | null
-  quality_score: number | null
-  support_count: number
-  evidence_ids: string[]
-}
-
-export type KnowledgeLinkGraph = {
-  revision: string
-  nodes: KnowledgeLinkGraphNode[]
-  edges: KnowledgeLinkGraphEdge[]
-  document_count: number
-  entity_count: number
-  unresolved_count: number
-  edge_count: number
-  graph_revision_id: string | null
-  source: "evidence_graph" | "legacy_references"
-  truncated: boolean
 }
 
 export type KnowledgeEvaluationCase = {
@@ -397,7 +189,6 @@ export type KnowledgeEvaluationCase = {
   knowledge_base_id: string
   question: string
   expected_document_ids: string[]
-  graph_expectation: KnowledgeGraphEvaluationExpectation | null
   created_by_user_id: string
   created_at: string
   updated_at: string
@@ -408,9 +199,6 @@ export type KnowledgeEvaluationRunRequest = {
   limit: number
   search_mode: KnowledgeSearchMode
   similarity: number | null
-  include_references: boolean
-  graph_mode: KnowledgeGraphMode
-  max_hops: number
 }
 
 export type KnowledgeEvaluationResult = {
@@ -425,7 +213,6 @@ export type KnowledgeEvaluationResult = {
   ndcg_at_k: number
   latency_ms: number
   trace: Record<string, unknown>
-  graph_metrics: KnowledgeGraphEvaluationMetrics | null
   error: string | null
   created_at: string
 }
@@ -461,7 +248,7 @@ export type KnowledgeBasePermissionForm = {
 }
 
 export type KnowledgeBaseDetailTab =
-  "documents" | "graph" | "tasks" | "evaluation" | "settings"
+  "documents" | "tasks" | "evaluation" | "settings"
 
 export type KnowledgeModelTestResult = {
   embedding_model_id: string
@@ -875,15 +662,13 @@ export function retryKnowledgeTask(
   token: string,
   workspaceId: string,
   knowledgeBaseId: string,
-  taskId: string,
-  mode: KnowledgeTaskRetryMode = "all"
+  taskId: string
 ) {
   return request<KnowledgeTask>(
     `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/${taskId}/retry`,
     {
       method: "POST",
       token,
-      body: JSON.stringify({ mode }),
     }
   )
 }
@@ -1002,246 +787,6 @@ export function inspectKnowledgeBase(
   )
 }
 
-function knowledgeGraphPath(
-  workspaceId: string,
-  knowledgeBaseId: string,
-  suffix = ""
-) {
-  return `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/graph${suffix}`
-}
-
-export function getKnowledgeGraphSettings(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  signal?: AbortSignal
-) {
-  return request<KnowledgeGraphSettings>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/settings"),
-    { token, signal }
-  )
-}
-
-export function updateKnowledgeGraphSettings(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  payload: { enabled: boolean }
-) {
-  return request<KnowledgeGraphSettings>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/settings"),
-    { method: "PATCH", token, body: JSON.stringify(payload) }
-  )
-}
-
-export function getKnowledgeGraphStatus(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  signal?: AbortSignal
-) {
-  return request<KnowledgeGraphStatus>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/status"),
-    { token, signal }
-  )
-}
-
-export function getKnowledgeGraphSchema(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  signal?: AbortSignal
-) {
-  return request<KnowledgeGraphSchema | null>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/schema"),
-    { token, signal }
-  )
-}
-
-export function updateKnowledgeGraphSchema(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  schemaJson: Record<string, unknown>
-) {
-  return request<KnowledgeGraphSchema>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/schema"),
-    {
-      method: "PUT",
-      token,
-      body: JSON.stringify({ schema_json: schemaJson }),
-    }
-  )
-}
-
-export function rebuildKnowledgeGraph(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string
-) {
-  return request<KnowledgeTask>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/rebuild"),
-    { method: "POST", token }
-  )
-}
-
-export function listKnowledgeGraphEntities(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  options: {
-    query?: string
-    entity_type?: string
-    limit?: number
-    offset?: number
-  } = {},
-  signal?: AbortSignal
-) {
-  const params = new URLSearchParams()
-  if (options.query) params.set("query", options.query)
-  if (options.entity_type) params.set("entity_type", options.entity_type)
-  if (options.limit !== undefined) params.set("limit", String(options.limit))
-  if (options.offset !== undefined) params.set("offset", String(options.offset))
-  const query = params.toString()
-  return request<KnowledgeGraphEntityList>(
-    `${knowledgeGraphPath(workspaceId, knowledgeBaseId, "/entities")}${query ? `?${query}` : ""}`,
-    { token, signal }
-  )
-}
-
-export function getKnowledgeGraphOverview(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  signal?: AbortSignal
-) {
-  return request<KnowledgeGraphQueryResult>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/overview"),
-    { token, signal }
-  )
-}
-
-export function getKnowledgeLinkGraph(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  signal?: AbortSignal
-) {
-  return request<KnowledgeLinkGraph>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/links"),
-    { token, signal }
-  )
-}
-
-export function getKnowledgeGraphEntity(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  entityId: string,
-  signal?: AbortSignal
-) {
-  return request<KnowledgeGraphEntityDetail>(
-    knowledgeGraphPath(
-      workspaceId,
-      knowledgeBaseId,
-      `/entities/${encodeURIComponent(entityId)}`
-    ),
-    { token, signal }
-  )
-}
-
-export function queryKnowledgeGraphPath(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  payload: {
-    source_entity: string
-    target_entity: string
-    max_hops: number
-    relation_filters: string[]
-  }
-) {
-  return request<KnowledgeGraphQueryResult>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/path"),
-    { method: "POST", token, body: JSON.stringify(payload) }
-  )
-}
-
-export function queryKnowledgeGraphNeighborhood(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  payload: {
-    entity: string
-    max_hops: number
-    relation_filters: string[]
-  }
-) {
-  return request<KnowledgeGraphQueryResult>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/neighborhood"),
-    { method: "POST", token, body: JSON.stringify(payload) }
-  )
-}
-
-export function importKnowledgeGraphRecords(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  file: File
-) {
-  const body = new FormData()
-  body.set("file", file)
-  return request<KnowledgeTask>(
-    knowledgeGraphPath(workspaceId, knowledgeBaseId, "/import"),
-    { method: "POST", token, body }
-  )
-}
-
-export function listKnowledgeGraphReviews(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  options: { limit?: number; offset?: number } = {},
-  signal?: AbortSignal
-) {
-  return request<KnowledgeGraphReviewList>(
-    `${knowledgeGraphPath(workspaceId, knowledgeBaseId, "/reviews")}${listQuery(options)}`,
-    { token, signal }
-  )
-}
-
-export function resolveKnowledgeGraphReview(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  reviewId: string,
-  payload: {
-    action: "approve_claim" | "reject_claim" | "merge_entities" | "split_entity"
-    target_entity_id?: string | null
-    canonical_name?: string | null
-    entity_type?: string | null
-    mention_ids?: string[]
-    claim_ids?: string[]
-  }
-) {
-  return request<KnowledgeTask>(
-    knowledgeGraphPath(
-      workspaceId,
-      knowledgeBaseId,
-      `/reviews/${encodeURIComponent(reviewId)}/resolve`
-    ),
-    { method: "POST", token, body: JSON.stringify(payload) }
-  )
-}
-
-/**
- * Builds the API path for knowledge-base evaluation operations.
- *
- * @param workspaceId - The workspace identifier
- * @param knowledgeBaseId - The knowledge-base identifier
- * @param suffix - An optional path suffix appended to the evaluations path
- * @returns The evaluation API path
- */
 function evaluationPath(
   workspaceId: string,
   knowledgeBaseId: string,
@@ -1250,11 +795,6 @@ function evaluationPath(
   return `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/evaluations${suffix}`
 }
 
-/**
- * Lists evaluation cases for a knowledge base.
- *
- * @returns The knowledge base's evaluation cases
- */
 export function listKnowledgeEvaluationCases(
   token: string,
   workspaceId: string,
@@ -1279,7 +819,6 @@ export function createKnowledgeEvaluationCase(
   payload: {
     question: string
     expected_document_ids: string[]
-    graph_expectation?: KnowledgeGraphEvaluationExpectation | null
   }
 ) {
   return request<KnowledgeEvaluationCase>(

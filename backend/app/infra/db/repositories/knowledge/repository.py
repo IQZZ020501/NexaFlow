@@ -27,9 +27,6 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
 )
 from app.domain.knowledge.models import (
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-)
-from app.domain.knowledge.models import (
     KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
 )
 from app.domain.knowledge.models import (
@@ -47,8 +44,6 @@ from app.entities.knowledge import (
     DOCUMENT_STAGED_META_KEY,
     TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
     VISIBLE_DOCUMENT_STATUSES,
@@ -85,7 +80,7 @@ _QUERY_KEYWORD_CHUNK_IDS = text(
 from app.infra.db.repositories.knowledge.bases import (
     create_knowledge_base,
     delete_knowledge_base,
-    delete_knowledge_base_graph,
+    delete_knowledge_base_data,
     get_knowledge_base_by_id,
     list_and_lock_knowledge_bases_in_workspace,
     list_knowledge_bases_with_user_grants,
@@ -106,8 +101,6 @@ from app.infra.db.repositories.knowledge.documents import (
     get_document_asset,
     get_knowledge_attachment_by_id,
     get_knowledge_document_by_id,
-    get_queued_graph_rebuild,
-    get_queued_graph_sync,
     has_indexed_knowledge_document,
     list_active_documents_by_ids,
     list_chunk_assets,
@@ -116,12 +109,10 @@ from app.infra.db.repositories.knowledge.documents import (
     list_document_assets,
     list_document_chunks,
     list_indexable_chunks,
-    list_indexed_chunk_ids_for_parent_ids,
     list_knowledge_base_rows,
     list_knowledge_content_revisions,
     list_knowledge_documents,
     list_parent_chunks_by_ids,
-    list_retrievable_document_ids,
     lock_knowledge_attachments,
     query_keyword_chunk_ids,
     refresh_knowledge_attachment,
@@ -144,12 +135,9 @@ from app.infra.db.repositories.knowledge.tasks import (
     delete_knowledge_task,
     fail_open_document_tasks,
     get_knowledge_task_by_id,
-    get_latest_graph_task,
     get_open_document_task,
-    get_open_graph_task,
     get_open_knowledge_base_task,
     get_open_knowledge_task,
-    get_running_graph_task,
     list_knowledge_tasks,
     list_recoverable_tasks,
     lock_knowledge_task,

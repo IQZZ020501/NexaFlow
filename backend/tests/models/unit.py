@@ -20,7 +20,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 import asyncio
 import time
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
@@ -192,7 +192,92 @@ def test_run_knowledge_model_test_uses_injected_providers() -> None:
         knowledge_kb.build_reranker = original_reranker
 
 
+def test_chat_adapters_normalize_sync_async_and_stream_finish_reasons() -> None:
+    from enum import Enum
+
+    from langchain_core.messages import AIMessage, AIMessageChunk
+    from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+
+    from app.adapters.llm import runtime
+    from app.ports.llm import MODEL_TRUNCATED_META_KEY, normalize_finish_reason
+
+    class GeminiReason(Enum):
+        MAX_TOKENS = "MAX_TOKENS"
+
+    assert normalize_finish_reason({"finish_reason": GeminiReason.MAX_TOKENS}) == "length"
+    assert normalize_finish_reason({"finish_reason": "stop", "stop_reason": "max_tokens"}) == "length"
+    for native in ("stop", "end_turn", "STOP", "stop_sequence"):
+        assert normalize_finish_reason({"stop_reason": native}) == "stop"
+    for native in ("tool_use", "function_call", "tool_calls"):
+        assert normalize_finish_reason({"stop_reason": native}) == "tool_calls"
+    assert normalize_finish_reason({}, default=None) is None
+
+    providers = (
+        (runtime.AnthropicChatModel, runtime.ChatAnthropic, {"stop_reason": "max_tokens"}),
+        (runtime.BedrockChatModel, runtime.ChatBedrockConverse, {"stopReason": "max_tokens"}),
+        (runtime.GoogleChatModel, runtime.ChatGoogleGenerativeAI, {"finish_reason": "MAX_TOKENS"}),
+        (runtime.OllamaChatModel, runtime.ChatOllama, {"done_reason": "length"}),
+        (runtime.OpenAICompatibleChatModel, runtime.ChatOpenAI, {"finish_reason": "length"}),
+        (runtime.AzureChatModel, runtime.AzureChatOpenAI, {"finish_reason": "length"}),
+        (runtime.DeepSeekChatModel, runtime.ChatDeepSeek, {"finish_reason": "length"}),
+    )
+    for adapter_type, parent, metadata in providers:
+        model = adapter_type.model_construct(model="test")
+
+        def result(*_args, **_kwargs):
+            # Anthropic returns stop_reason in llm_output, Bedrock on the
+            # message, and OpenAI/Gemini in generation_info.
+            return ChatResult(
+                generations=[ChatGeneration(
+                    message=AIMessage(
+                        content="Partial",
+                        response_metadata=metadata.copy() if parent is runtime.ChatBedrockConverse else {},
+                    ),
+                    generation_info=None if parent in (runtime.ChatAnthropic, runtime.ChatBedrockConverse) else metadata.copy(),
+                )],
+                llm_output=metadata.copy() if parent is runtime.ChatAnthropic else None,
+            )
+
+        def stream(*_args, **_kwargs):
+            yield ChatGenerationChunk(message=AIMessageChunk(content="Partial"))
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(content="", response_metadata=metadata.copy())
+            )
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(content="", response_metadata=metadata.copy())
+            )
+            yield ChatGenerationChunk(message=AIMessageChunk(content=""))
+
+        async def astream(*args, **kwargs):
+            for chunk in stream(*args, **kwargs):
+                yield chunk
+
+        async def check_async():
+            response = await model._agenerate([])
+            assert response.generations[0].generation_info["finish_reason"] == "length"
+            return [chunk async for chunk in model._astream([])]
+
+        with (
+            patch.object(parent, "_generate", side_effect=result),
+            patch.object(parent, "_agenerate", AsyncMock(side_effect=result)),
+            patch.object(parent, "_stream", stream),
+            patch.object(parent, "_astream", astream),
+        ):
+            generated = model._generate([]).generations[0]
+            assert generated.generation_info["finish_reason"] == "length"
+            assert generated.message.response_metadata["finish_reason"] == "length"
+            for chunks in (list(model._stream([])), asyncio.run(check_async())):
+                assert "finish_reason" not in chunks[0].message.response_metadata
+                assert chunks[1].message.response_metadata["finish_reason"] == "length"
+                aggregate = chunks[0]
+                for chunk in chunks[1:]:
+                    aggregate += chunk
+                assert aggregate.message.response_metadata[MODEL_TRUNCATED_META_KEY] is True
+                assert normalize_finish_reason(aggregate.message.response_metadata) == "length"
+
+
 def main() -> None:
+    test_chat_adapters_normalize_sync_async_and_stream_finish_reasons()
     test_model_type_normalization()
     test_siliconflow_embedding_catalog_includes_existing_bge_model()
     test_registered_model_connection_test_has_a_hard_deadline()

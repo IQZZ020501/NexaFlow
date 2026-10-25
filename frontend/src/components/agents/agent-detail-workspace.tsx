@@ -61,6 +61,7 @@ import {
   withArtifactDownloadLinks,
 } from "@/lib/tool-display"
 import { isRegularTool } from "@/lib/tool-visibility"
+import { getErrorMessage } from "@/lib/errors"
 
 import { AgentConfigFields } from "./agent-config-fields"
 import {
@@ -173,7 +174,10 @@ function processSummary(
   run: AgentRun,
   t: TFunction
 ) {
-  if (run.status === "cancelled" && event.status !== "succeeded")
+  if (
+    run.status === "cancelled" &&
+    (event.status !== "succeeded" || event.summary === "agent.answer_ready")
+  )
     return t("已停止")
   if (event.summary === "agent.analyzing") return t("正在分析问题")
   if (event.summary === "agent.reviewing_tool_results")
@@ -183,6 +187,8 @@ function processSummary(
   if (event.summary === "agent.tools_selected") return t("已完成分析")
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
+  if (event.summary === "agent.answer_ready" && run.status === "failed")
+    return t("Agent 回答失败")
   if (event.summary === "agent.answer_ready")
     return t(run.status === "running" ? "正在生成回答" : "回答已生成")
   if (event.summary.startsWith("agent.knowledge_chunks_returned:")) {
@@ -201,11 +207,17 @@ function processSummary(
 }
 
 function effectiveProcessStatus(
-  eventStatus: AgentRun["events"][number]["status"],
+  event: AgentRun["events"][number],
   runStatus: AgentRun["status"]
 ) {
-  if (eventStatus !== "running") return eventStatus
-  if (runStatus === "cancelled") return "failed"
+  if (
+    (runStatus === "failed" || runStatus === "cancelled") &&
+    event.summary === "agent.answer_ready"
+  )
+    return "failed"
+  if (event.status !== "running") return event.status
+  if (runStatus === "cancelled" || runStatus === "failed") return "failed"
+  if (runStatus === "succeeded") return "succeeded"
   return "running"
 }
 
@@ -233,7 +245,7 @@ function ToolEventDetails({
       : processToolName(event, t)
   const label = toolName
   const detail = isPreparing ? null : processSummary(event, run, t)
-  const status = effectiveProcessStatus(event.status, run.status)
+  const status = effectiveProcessStatus(event, run.status)
 
   return (
     <div className="overflow-hidden rounded-md border border-border/70 bg-background/60">
@@ -410,10 +422,9 @@ function ProcessTimelineRows({
         className="relative px-1 text-xs leading-5 text-muted-foreground"
       >
         <div className="flex items-start gap-2">
-          {effectiveProcessStatus(event.status, run.status) === "running" ? (
+          {effectiveProcessStatus(event, run.status) === "running" ? (
             <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-          ) : effectiveProcessStatus(event.status, run.status) ===
-            "succeeded" ? (
+          ) : effectiveProcessStatus(event, run.status) === "succeeded" ? (
             <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
           ) : (
             <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
@@ -764,7 +775,7 @@ function RunExchange({
                             completedTimeline,
                             inlineCallIds
                           )}
-                          run={run}
+                          run={{ ...run, status: "succeeded" }}
                           t={t}
                         />
                       </div>
@@ -852,7 +863,9 @@ function RunExchange({
               />
             ) : run.status === "failed" ? (
               <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                {run.last_error ?? t("Agent 未返回结果")}
+                {run.last_error
+                  ? getErrorMessage(new Error(run.last_error), t)
+                  : t("Agent 未返回结果")}
               </p>
             ) : (run.status === "awaiting_approval" || hasActiveToolCall) &&
               isProcessOpen ? null : collapsedProcessStatus ? (

@@ -51,7 +51,10 @@ export function McpToolsPage() {
   const [busyServerId, setBusyServerId] = React.useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
 
-  const canManage = getMembershipRole(me, selectedWorkspaceId) === "admin"
+  const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
+  const canManage = Boolean(workspaceRole || me?.user.is_global_admin)
+  const canUsePrivileged =
+    workspaceRole === "admin" || Boolean(me?.user.is_global_admin)
 
   const transportLabels: Record<McpTransport, string> = {
     streamable_http: t("Streamable HTTP"),
@@ -241,12 +244,6 @@ export function McpToolsPage() {
         ) : null}
       </div>
 
-      {!canManage ? (
-        <p className="mt-4 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-          {t("只有空间管理员可以添加、刷新或删除 MCP Server。")}
-        </p>
-      ) : null}
-
       {isLoading ? (
         <div className="mt-6 flex min-h-72 items-center justify-center rounded-lg border text-muted-foreground">
           <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
@@ -424,7 +421,7 @@ export function McpToolsPage() {
       <McpConnectionDialog
         open={isDialogOpen}
         onOpenChange={setDialogOpen}
-        canUsePrivileged={canManage}
+        canUsePrivileged={canUsePrivileged}
         onSubmit={async (payload) => {
           if (!token || !selectedWorkspaceId) return
           const created = await createMcpServer(

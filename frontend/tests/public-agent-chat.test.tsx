@@ -2546,6 +2546,108 @@ describe("PublicAgentChat", () => {
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
+  test("does not label a truncated public response as generated", async () => {
+    const progress: ExternalAgentProgressEvent[] = [
+      {
+        id: "answer-truncated",
+        type: "answer",
+        status: "running",
+        stage: "running",
+        turn: 1,
+        count: null,
+        hits: [],
+      },
+    ]
+    fetchHandler = agentFetchHandler({
+      streamResponses: [
+        () =>
+          ndjsonResponse([
+            {
+              type: "run",
+              sequence: 0,
+              run: run({ status: "running", result: "", progress }),
+            },
+            {
+              type: "error",
+              sequence: 1,
+              run: run({
+                status: "failed",
+                result: "",
+                error: "Agent response was truncated.",
+                progress,
+              }),
+            },
+          ]),
+      ],
+    })
+    const { container } = renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("开始新对话")
+    sendMessage("会截断的请求")
+    expect(await screen.findByText("模型回答被截断，请重试。")).toBeTruthy()
+    expect(screen.getByText("Agent 回答失败")).toBeTruthy()
+    expect(Boolean(screen.queryByText("回答已生成"))).toBe(false)
+    expect(Boolean(screen.queryByText("正在生成回答"))).toBe(false)
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
+  })
+
+  test.each(["failed", "cancelled"] as const)(
+    "preserves a completed public answer when follow-up is %s",
+    async (status) => {
+      const progress: ExternalAgentProgressEvent[] = [1, 2].map((turn) => ({
+        id: "answer-" + turn,
+        type: "answer",
+        status: "failed",
+        stage: "failed",
+        turn,
+        count: null,
+        hits: [],
+      }))
+      fetchHandler = agentFetchHandler({
+        streamResponses: [
+          () =>
+            ndjsonResponse([
+              {
+                type: "run",
+                sequence: 0,
+                run: run({ status: "running", result: "" }),
+              },
+              {
+                type: "error",
+                sequence: 1,
+                run: run({
+                  status,
+                  result: "",
+                  error: "Agent response was truncated.",
+                  progress,
+                  session_inputs: [
+                    {
+                      input_id: "follow-up",
+                      mode: "follow_up",
+                      content: "Second question",
+                      sequence: 1,
+                      run_id: "run-1",
+                      status: "applied",
+                      previous_answer: "First answer remains valid",
+                      previous_answer_turn: 1,
+                    },
+                  ],
+                }),
+              },
+            ]),
+        ],
+      })
+      const { container } = renderPage(<PublicAgentChat agentId="agent-1" />)
+      await screen.findByText("开始新对话")
+      sendMessage("First question")
+      expect(await screen.findByText("First answer remains valid")).toBeTruthy()
+      expect(screen.getAllByText("回答已生成")).toHaveLength(1)
+      expect(
+        screen.getByText(status === "failed" ? "Agent 回答失败" : "已停止")
+      ).toBeTruthy()
+      expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
+    }
+  )
+
   test("shows a failed bubble when creating the run fails", async () => {
     fetchHandler = agentFetchHandler({
       conversations: { items: [conversation("conv-1", "第一个会话")] },

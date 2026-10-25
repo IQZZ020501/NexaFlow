@@ -511,15 +511,28 @@ function PublicExecutionProcess({
   const hasToolCalls = React.Children.count(children) > 0
 
   function effectiveStatus(event: ExternalAgentProgressEvent) {
-    if (completed && event.status === "running") return "succeeded"
+    if (completed && (event.type === "answer" || event.status === "running"))
+      return "succeeded"
+    if (
+      (run.status === "failed" || runCancelled) &&
+      (event.type === "answer" || event.status === "running")
+    )
+      return "failed"
     if (event.status !== "running" || !runCancelled) return event.status
     return "failed"
   }
 
   function title(event: ExternalAgentProgressEvent) {
-    if (runCancelled && event.status !== "succeeded") return t("已停止")
+    if (
+      !completed &&
+      runCancelled &&
+      (event.status !== "succeeded" || event.type === "answer")
+    )
+      return t("已停止")
     if (event.type === "knowledge") return t("知识库检索")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
+    if (event.type === "answer" && effectiveStatus(event) === "failed")
+      return t("Agent 回答失败")
     if (event.type === "answer")
       return t(
         effectiveStatus(event) === "succeeded" ? "回答已生成" : "正在生成回答"
@@ -1608,7 +1621,11 @@ export function PublicAgentChat({
             restorePrevious()
           }
           if (event.type === "error") {
-            setSendError(event.run.error || t("回答失败，请稍后重试。"))
+            setSendError(
+              event.run.error
+                ? getErrorMessage(new Error(event.run.error), t)
+                : t("回答失败，请稍后重试。")
+            )
           }
         },
         controller.signal
@@ -2230,7 +2247,9 @@ export function PublicAgentChat({
                                   />
                                 ) : run.status === "failed" ? (
                                   <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                                    {run.error || t("回答失败，请稍后重试。")}
+                                    {run.error
+                                      ? getErrorMessage(new Error(run.error), t)
+                                      : t("回答失败，请稍后重试。")}
                                   </p>
                                 ) : run.status === "cancelled" ? (
                                   <p className="text-sm text-muted-foreground">

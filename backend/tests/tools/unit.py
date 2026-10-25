@@ -1278,7 +1278,67 @@ def test_execution_tools_preserve_uncertain_outcomes() -> None:
         assert not result.ok and result.outcome == "uncertain", spec
 
 
+def test_mcp_transport_keeps_complete_bounded_results() -> None:
+    from app.adapters.mcp.client import _bounded_call_result
+    from app.ports.mcp import McpCallResult
+
+    payload = McpCallResult(
+        content=[{"type": "text", "text": "查询结果" * 9000}],
+        structured_content={"rows": [{"id": "last-row", "value": 42}]},
+        meta={"cursor": "original-cursor"},
+    )
+    assert _bounded_call_result(payload).payload() == payload.payload()
+
+
+def test_mcp_result_previews_and_pages_are_bounded_and_lossless() -> None:
+    import json
+
+    from app.adapters.mcp.client import _bounded_call_result
+    from app.domain.tools.results import prepare_mcp_result, tool_result_page
+    from app.ports.mcp import (
+        MAX_MCP_RESULT_BYTES,
+        MAX_MCP_STORED_RESULT_BYTES,
+        McpCallResult,
+    )
+
+    for text in ("中文查询😀" * 5000, "\\\"\n\x00" * 10000):
+        payload = McpCallResult(
+            content=[{"type": "text", "text": text}],
+            structured_content={"rows": [1, 2, {"last": "tail-value"}]},
+            meta={"original": "metadata"}, is_error=True,
+        ).payload()
+        preview, full = prepare_mcp_result(payload, "result-1")
+        assert preview["isError"] is True
+        assert preview["result_id"] == "result-1"
+        assert preview["_meta"]["nexaflow/full_result_available"] is True
+        assert len(json.dumps(preview, ensure_ascii=False).encode()) <= MAX_MCP_RESULT_BYTES
+        assert json.loads(full) == payload
+        parts = []
+        offset = 0
+        while True:
+            page = tool_result_page("result-1", full[offset:offset + 12000], offset, len(full))
+            assert len(json.dumps(page, ensure_ascii=False).encode()) <= MAX_MCP_RESULT_BYTES
+            parts.append(page["content"])
+            if page["next_offset"] is None:
+                break
+            assert page["next_offset"] > offset
+            offset = page["next_offset"]
+        assert "".join(parts) == full
+        unsaved, body = prepare_mcp_result(payload, None)
+        assert body is None and "result_id" not in unsaved
+        assert unsaved["_meta"]["nexaflow/full_result_available"] is False
+    small = McpCallResult(content=[{"type": "text", "text": "small"}]).payload()
+    assert prepare_mcp_result(small, "r1") == (small, None)
+    oversized = _bounded_call_result(McpCallResult(
+        content=[{"type": "text", "text": "x" * MAX_MCP_STORED_RESULT_BYTES}], is_error=True,
+    ))
+    assert oversized.is_error and oversized.meta["nexaflow/full_result_available"] is False
+    assert len(json.dumps(oversized.payload()).encode()) <= MAX_MCP_RESULT_BYTES
+
+
 def main() -> None:
+    test_mcp_result_previews_and_pages_are_bounded_and_lossless()
+    test_mcp_transport_keeps_complete_bounded_results()
     test_builtin_tool_summary_accepts_system_owner()
     test_tool_summary_projects_effective_public_access_and_mcp_policy()
     test_image_generation_is_a_bounded_approval_backed_builtin()

@@ -740,11 +740,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                       <DropdownMenuItem disabled>
                         {t("来源已禁用")}
                       </DropdownMenuItem>
-                    ) : tool.status === "disabled" &&
-                      membershipRole !== "admin" ? (
-                      <DropdownMenuItem disabled>
-                        {t("工具调用已禁用")}
-                      </DropdownMenuItem>
                     ) : (
                       <>
                         <DropdownMenuItem
@@ -763,8 +758,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                           <ShieldCheckIcon />
                           {t("每次调用前审批")}
                         </DropdownMenuItem>
-                        {membershipRole === "admin" &&
-                        tool.status !== "disabled" ? (
+                        {tool.status !== "disabled" ? (
                           <DropdownMenuItem
                             variant="destructive"
                             disabled={Boolean(busyId)}
@@ -837,7 +831,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("工具")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("统一管理 Python、MCP 与内置工具，以及它们的版本和授权。")}
+            {t(
+              "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。"
+            )}
           </p>
         </div>
         <DropdownMenu>
@@ -1208,7 +1204,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                     id="workspace-skills-heading"
                     className="text-sm font-semibold"
                   >
-                    {t("工作区 Skills")}
+                    {t("我的 Skills")}
                   </h2>
                   <Badge variant="secondary">{workspaceSkills.length}</Badge>
                 </div>
@@ -1234,6 +1230,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                           {skill.description}
                         </p>
                         <div className="mt-auto flex items-center gap-2 pt-3">
+                          {!skill.can_manage ? (
+                            <Badge variant="outline">{t("共享给我的")}</Badge>
+                          ) : null}
                           <Badge variant="secondary">
                             {skill.status === "disabled"
                               ? t("已停用")
@@ -1279,7 +1278,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   </div>
                 ) : (
                   <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
-                    <p className="font-medium">{t("还没有工作区 Skill")}</p>
+                    <p className="font-medium">{t("还没有自己的 Skill")}</p>
                     <p className="mt-1 max-w-md text-sm text-muted-foreground">
                       {t("从添加工具新建或导入 Skill。")}
                     </p>

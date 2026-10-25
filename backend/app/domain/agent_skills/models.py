@@ -21,7 +21,12 @@ from app.infra.db.base import Base
 class AgentSkill(Base):
     __tablename__ = "agent_skills"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", name="uq_agent_skills_workspace_name"),
+        UniqueConstraint(
+            "workspace_id",
+            "created_by_user_id",
+            "name",
+            name="uq_agent_skills_owner_name",
+        ),
         UniqueConstraint("workspace_id", "id", name="uq_agent_skills_workspace_id"),
         CheckConstraint(
             "status IN ('active', 'disabled')",

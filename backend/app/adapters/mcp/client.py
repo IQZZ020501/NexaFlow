@@ -36,6 +36,8 @@ from app.ports.execution import (
     execution_scope,
 )
 from app.ports.mcp import (
+    MAX_MCP_RESULT_BYTES,
+    MAX_MCP_STORED_RESULT_BYTES,
     MAX_MCP_TOOL_PAGES,
     McpCallResult,
     McpClientError,
@@ -48,8 +50,6 @@ from app.ports.mcp import (
 logger = get_logger(__name__)
 
 MAX_MCP_TOOLS = 64
-# Stays below the 32 KiB Tool result limit once the runtime re-encodes it.
-MAX_MCP_RESULT_BYTES = 24 * 1024
 MAX_MCP_TOOL_DESCRIPTION_CHARS = 1_000
 MAX_MCP_TOOL_SCHEMA_CHARS = 20_000
 
@@ -487,18 +487,19 @@ async def _call_in_run_session(connection, settings, run_id, invoke) -> Any:
 
 
 def _bounded_call_result(result: McpCallResult) -> McpCallResult:
-    """Keep an executed call's outcome, cutting an oversized result to a text prefix."""
+    """Preserve results for durable storage, with a hard transport safety cap."""
     try:
         encoded = json.dumps(result.payload(), ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise McpClientError("MCP tool returned an invalid result.") from exc
     size = len(encoded.encode())
-    if size <= MAX_MCP_RESULT_BYTES:
+    if size <= MAX_MCP_STORED_RESULT_BYTES:
         return result
     raw = encoded.encode()
     notice = (
-        f"\n[Result truncated from {size} bytes; request a narrower result "
-        "for the rest.]"
+        f"\n[Result exceeds the {MAX_MCP_STORED_RESULT_BYTES}-byte storage limit "
+        f"({size} bytes). Only this prefix is available; the full result was not "
+        "saved. Request a narrower result if the server supports it.]"
     )
     budget = MAX_MCP_RESULT_BYTES
     while True:
@@ -506,7 +507,11 @@ def _bounded_call_result(result: McpCallResult) -> McpCallResult:
         truncated = McpCallResult(
             content=[{"type": "text", "text": prefix + notice}],
             is_error=result.is_error,
-            meta={"nexaflow/truncated": True},
+            meta={
+                "nexaflow/truncated": True,
+                "nexaflow/full_result_available": False,
+                "nexaflow/result_bytes": size,
+            },
         )
         bounded = json.dumps(truncated.payload(), ensure_ascii=False)
         if len(bounded.encode()) <= MAX_MCP_RESULT_BYTES:

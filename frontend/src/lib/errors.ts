@@ -21,6 +21,7 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "String should have at least 20 characters": "输入内容过短，请检查后重试",
   "New password must be different.": "新密码不能与原密码相同",
   "Agent name already exists.": "应用名称已存在",
+  "Agent response was truncated.": "模型回答被截断，请重试。",
   "Agent Skill name already exists.": "Skill 名称已存在",
   "Folder name already exists.": "文件夹名称已存在",
   "Model name already exists.": "模型名称已存在",
@@ -61,7 +62,8 @@ export function getErrorMessage(error: unknown, t: TFunction) {
     if (/failed to fetch|networkerror|load failed/i.test(error.message)) {
       return t("网络连接失败，请稍后重试")
     }
-    return error.message
+    const labelKey = API_ERROR_LABEL_KEYS[error.message]
+    return labelKey ? t(labelKey) : error.message
   }
 
   return t("请求失败")

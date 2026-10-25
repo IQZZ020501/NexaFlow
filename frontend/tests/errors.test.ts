@@ -10,6 +10,25 @@ function tFor(language: Language): TFunction {
 
 describe("API error localization", () => {
   test.each([
+    ["zh-Hans", "模型回答被截断，请重试。"],
+    ["zh-Hant", "模型回答遭到截斷，請重試。"],
+    ["en", "The model response was truncated. Please retry."],
+  ] as const)("localizes truncation errors in %s", (language, expected) => {
+    expect(
+      getErrorMessage(
+        new Error("Agent response was truncated."),
+        tFor(language)
+      )
+    ).toBe(expected)
+    expect(
+      getErrorMessage(
+        new ApiError(502, "Agent response was truncated."),
+        tFor(language)
+      )
+    ).toBe(expected)
+  })
+
+  test.each([
     [
       "Agent name already exists.",
       "应用名称已存在",

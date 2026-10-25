@@ -440,6 +440,7 @@ class ToolInvocation:
     worker_task_id: str | None = None
     lease_expires_at: datetime | None = None
     result_data: Any = None
+    full_result: str | None = None
     result_summary: str = ""
     outcome: str | None = None
     error_code: str | None = None

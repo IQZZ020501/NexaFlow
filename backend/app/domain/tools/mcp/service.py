@@ -230,7 +230,6 @@ async def list_mcp_servers(
             db,
             workspace_id,
             actor.id,
-            _is_workspace_admin(actor, workspace_role),
             limit,
             offset,
         )
@@ -247,7 +246,7 @@ async def get_mcp_server(
     server = await mcp_repository.get_mcp_server_by_id(db, server_id)
     if server is None or server.workspace_id != workspace_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP server not found.")
-    if actor is not None and not _is_workspace_admin(actor, workspace_role):
+    if actor is not None:
         source_rows = await tools_repository.list_mcp_tool_sources(
             db,
             workspace_id,
@@ -273,10 +272,7 @@ async def _require_mcp_source_manager(
     source = sources[0] if sources else None
     if source is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP server not found.")
-    if (
-        not _is_workspace_admin(actor, workspace_role)
-        and source.created_by_user_id != actor.id
-    ):
+    if source.created_by_user_id != actor.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP server not found.")
     return source
 
@@ -673,18 +669,6 @@ async def set_mcp_tool_policy(
     )
     if leaf is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP tool not found.")
-    is_admin = _is_workspace_admin(actor, workspace_role)
-    if mode == "disabled" and not is_admin:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Workspace admin required to disable an MCP Tool.",
-        )
-    if leaf.tool.status == "disabled" and not is_admin:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            "Workspace admin disabled this MCP Tool.",
-        )
-
     effective_mode = mode
     if effective_mode == "read_only":
         approval = "auto"

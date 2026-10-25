@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from app.infra.tools.mcp_stdio import McpStdioConfig
 
 MAX_MCP_TOOL_PAGES = 32
+MAX_MCP_RESULT_BYTES = 24 * 1024
+MAX_MCP_STORED_RESULT_BYTES = 2 * 1024 * 1024
 
 
 class McpClientError(ExternalServiceError):
@@ -148,6 +150,8 @@ async def close_mcp_run_sessions(run_id: str) -> None:
 
 __all__ = [
     "MAX_MCP_TOOL_PAGES",
+    "MAX_MCP_RESULT_BYTES",
+    "MAX_MCP_STORED_RESULT_BYTES",
     "McpClient",
     "McpClientError",
     "McpCallResult",

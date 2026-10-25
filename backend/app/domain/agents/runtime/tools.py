@@ -21,6 +21,7 @@ class AgentToolResult:
     is_error: bool = False
     outcome_uncertain: bool = False
     evidence_ids: frozenset[str] = frozenset()
+    full_result: str | None = None
 
 
 class AgentExecutionPaused(Exception):

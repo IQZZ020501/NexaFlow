@@ -17,6 +17,7 @@ from app.application.tools.runtime.contracts import (
     ToolRuntimeResult,
 )
 from app.domain.tools.mcp.service import mcp_server_connection
+from app.domain.tools.results import prepare_mcp_result
 from app.domain.tools.runtime import TOOL_UNCERTAIN_EFFECTS
 from app.entities.tools import McpServer, ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
@@ -62,9 +63,11 @@ class McpToolAdapter:
                 usage={},
             )
         is_error = result.is_error
+        data, full_result = prepare_mcp_result(result.payload(), context.idempotency_key)
         return ToolRuntimeResult(
             ok=not is_error,
-            data=result.payload(),
+            data=data,
+            full_result=full_result,
             summary="MCP Tool completed." if not is_error else "MCP Tool returned an error.",
             error_code="mcp_tool_error" if is_error else None,
             error_message="MCP Tool returned an error." if is_error else None,

@@ -36,6 +36,7 @@ from app.ports.llm import (
     ModelCompletion,
     ModelProviderError,
     ModelToolCall,
+    normalize_finish_reason,
 )
 
 MAX_AGENT_TURNS = 8
@@ -346,7 +347,7 @@ def model_completion(message: AIMessage) -> ModelCompletion:
         if key not in seen:
             tool_calls.append(call)
             seen.add(key)
-    finish_reason = message.response_metadata.get("finish_reason") or "stop"
+    finish_reason = normalize_finish_reason(message.response_metadata)
     return ModelCompletion(
         content=content,
         tool_calls=tuple(tool_calls),
@@ -639,6 +640,10 @@ async def agent_node(
     if not isinstance(message, AIMessage):
         raise AgentRunnerError("Agent model returned an invalid response message.")
     completion = model_completion(message)
+    if completion.finish_reason == "length" and not completion.tool_calls:
+        if answer_started:
+            await callback.answer_reset()
+        raise AgentRunnerError("Agent response was truncated.")
     if not completion.tool_calls and callback.enabled:
         await emit_answer_delta(trailing_text)
     message = sanitized_model_message(message, completion)
@@ -673,8 +678,6 @@ async def agent_node(
             "harness": state.get("harness", {}),
         }
 
-    if completion.finish_reason == "length":
-        raise AgentRunnerError("Agent response was truncated.")
     if not completion.content.strip():
         raise AgentRunnerError("Agent returned an empty response.")
     result: dict[str, Any] = {

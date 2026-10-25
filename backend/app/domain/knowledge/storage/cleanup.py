@@ -14,7 +14,6 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.session import get_session_factory
 from app.ports.vector_store import (
-    delete_graph_profile_collection,
     delete_vector_collection,
 )
 
@@ -27,11 +26,6 @@ async def purge_knowledge_base_storage(
     storage = knowledge_object_storage(settings)
     await asyncio.gather(
         asyncio.to_thread(delete_vector_collection, settings, knowledge_base_id),
-        asyncio.to_thread(
-            delete_graph_profile_collection,
-            settings,
-            knowledge_base_id,
-        ),
         asyncio.to_thread(
             storage.delete_prefix,
             f"{workspace_id}/{knowledge_base_id}",
@@ -78,7 +72,7 @@ async def delete_workspace_knowledge_bases(
         cleanup_ids.append(
             await create_knowledge_storage_cleanup(db, knowledge_base)
         )
-        await knowledge_repository.delete_knowledge_base_graph(
+        await knowledge_repository.delete_knowledge_base_data(
             db,
             knowledge_base,
             RESOURCE_TYPE,

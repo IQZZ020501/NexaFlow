@@ -35,6 +35,7 @@ from app.domain.tools.mcp.service import (
     mcp_tool_definition_hash,
     resolve_mcp_tools,
 )
+from app.domain.tools.results import prepare_mcp_result
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
 from app.entities.runs import AgentRun
@@ -91,8 +92,6 @@ _MODEL_KNOWLEDGE_HIT_FIELDS = (
     "question",
     "source",
     "sources",
-    "graph_claim_ids",
-    "graph_hops",
 )
 _MODEL_KNOWLEDGE_STRING_FIELDS = {
     "knowledge_base",
@@ -109,7 +108,6 @@ _MODEL_KNOWLEDGE_LIST_FIELDS = {
     "section_path",
     "contributing_chunk_ids",
     "sources",
-    "graph_claim_ids",
 }
 _MODEL_KNOWLEDGE_TRUNCATION_MARKER = "\n[… model context truncated …]"
 
@@ -137,19 +135,14 @@ class KnowledgeSearchInput(BaseModel):
             "Omit to search every configured source."
         ),
     )
-    graph_mode: Literal["off", "auto", "path", "neighborhood"] = "auto"
-    source_entity: str | None = Field(default=None, max_length=500)
-    target_entity: str | None = Field(default=None, max_length=500)
-    max_hops: int = Field(default=6, ge=1, le=8)
-    relation_filters: list[str] = Field(default_factory=list, max_length=32)
 
 
 def knowledge_tool_output(payload: dict[str, Any]) -> dict[str, Any]:
     """Normalize the knowledge tool payload without dropping any hit.
 
     Retrieval already returns bounded logical evidence packets, and hit count is
-    decided by ``KnowledgeSearchInput.limit``. This step only keeps hit objects,
-    bounds the graph structure and records truncation, so the durable payload and
+    decided by ``KnowledgeSearchInput.limit``. This step keeps hit objects and
+    records truncation, so the durable payload and
     the model-facing message always describe the same evidence.
     """
     hits = payload.get("hits")
@@ -161,36 +154,6 @@ def knowledge_tool_output(payload: dict[str, Any]) -> dict[str, Any]:
         if key not in {"hits", "context_truncated"}
     }
     truncated = bool(payload.get("context_truncated"))
-    graph = result.get("graph")
-    if isinstance(graph, dict) and isinstance(graph.get("paths"), list):
-        graph = dict(graph)
-        graph_trimmed = False
-        raw_paths = graph["paths"]
-        paths: list[dict[str, Any]] = []
-        for raw_path in raw_paths[:3]:
-            if not isinstance(raw_path, dict):
-                graph_trimmed = True
-                truncated = True
-                continue
-            path = dict(raw_path)
-            steps = path.get("steps")
-            if isinstance(steps, list):
-                if len(steps) > 8:
-                    graph_trimmed = True
-                    truncated = True
-                path["steps"] = steps[:8]
-                nodes = path.get("nodes")
-                if isinstance(nodes, list):
-                    path["nodes"] = nodes[: len(path["steps"]) + 1]
-            paths.append(path)
-        if len(raw_paths) > 3:
-            graph_trimmed = True
-            truncated = True
-        graph["paths"] = paths
-        if graph_trimmed:
-            graph["truncated"] = True
-        result["graph"] = graph
-
     selected = [item for item in hits if isinstance(item, dict)]
     truncated = truncated or len(selected) < len(hits)
     result["hits"] = selected
@@ -604,7 +567,6 @@ def build_knowledge_search_tool(
                 }
                 retrieval_stats.append(stats_entry)
             hit_groups = []
-            graph_results: dict[str, Any] = {}
             failed_sources = 0
             for knowledge_base in available_knowledge_bases:
                 stats_entry = next(
@@ -621,12 +583,6 @@ def build_knowledge_search_tool(
                             limit=payload.limit,
                             search_mode=payload.search_mode,
                             similarity=payload.similarity,
-                            include_references=True,
-                            graph_mode=payload.graph_mode,
-                            source_entity=payload.source_entity,
-                            target_entity=payload.target_entity,
-                            max_hops=payload.max_hops,
-                            relation_filters=payload.relation_filters,
                         ),
                         settings,
                     )
@@ -639,8 +595,6 @@ def build_knowledge_search_tool(
                 stats_entry["reranked"] = result.trace.rerank_status == "applied"
                 stats_entry["trace_id"] = result.trace.trace_id
                 hit_groups.append((knowledge_base, result.hits))
-                if result.graph is not None:
-                    graph_results[knowledge_base.id] = result.graph
 
             selected_hits: list[tuple[KnowledgeBase, Any]] = []
             for index in range(payload.limit):
@@ -687,9 +641,6 @@ def build_knowledge_search_tool(
                         "trace_id": str(stats_entry["trace_id"])[:64],
                         "rerank_status": stats_entry["rerank_status"],
                         "sources": hit.sources[:3],
-                        "reference_hops": hit.reference_hops,
-                        "graph_claim_ids": hit.graph_claim_ids,
-                        "graph_hops": hit.graph_hops,
                     }
                 )
 
@@ -701,35 +652,9 @@ def build_knowledge_search_tool(
                 evidence_status = "partial_failure"
             else:
                 evidence_status = "not_found"
-            graph_result = next(
-                (
-                    graph_results[knowledge_base.id]
-                    for knowledge_base, _ in selected_hits
-                    if knowledge_base.id in graph_results
-                ),
-                next(iter(graph_results.values()), None),
-            )
-            graph_output = (
-                {
-                    "revision_id": graph_result.revision_id,
-                    "operation": graph_result.operation,
-                    "paths": [
-                        path.model_dump(mode="json")
-                        for path in graph_result.paths[:3]
-                    ],
-                    "truncated": (
-                        graph_result.truncated
-                        or len(graph_result.paths) > 3
-                        or len(graph_results) > 1
-                    ),
-                }
-                if graph_result is not None
-                else None
-            )
             output = knowledge_tool_output({
                 "query": payload.query,
                 "hits": tool_hits,
-                "graph": graph_output,
                 "retrieval_stats": retrieval_stats,
                 "evidence_status": evidence_status,
             })
@@ -887,13 +812,16 @@ def build_mcp_agent_tool(
                         exc.request_sent and effective_policy_mode != "read_only"
                     ),
                 )
-        safe_output = result.payload()
+        safe_output, full_result = prepare_mcp_result(
+            result.payload(), _tool_idempotency_key.get()
+        )
         content = json.dumps(safe_output, ensure_ascii=False)
         return AgentToolResult(
             content=content,
             summary=f"{tool.server.name}: {definition.name} completed.",
             output=safe_output,
             is_error=result.is_error,
+            full_result=full_result,
         )
 
     return create_agent_tool(

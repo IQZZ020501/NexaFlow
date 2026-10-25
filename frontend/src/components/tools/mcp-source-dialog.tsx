@@ -150,7 +150,9 @@ export function McpConnectionDialog({
         <DialogHeader>
           <DialogTitle>{t("添加 MCP Server")}</DialogTitle>
           <DialogDescription>
-            {t("保存时会连接 Server 并发现可用工具。")}
+            {t(
+              "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。"
+            )}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>

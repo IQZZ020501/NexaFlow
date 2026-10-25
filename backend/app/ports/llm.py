@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 VISION_MODEL_REQUIRED_MESSAGE = "Vision model is not configured for this workspace."
 
 MODEL_REQUEST_PARAMS_META_KEY = "request_params"
+MODEL_TRUNCATED_META_KEY = "nexaflow/response_truncated"
 DEFAULT_MODEL_REQUEST_PARAMS: dict[str, object] = {}
 SUPPORTED_PROVIDER_TYPES = {
     "openai_compatible",
@@ -65,6 +66,36 @@ class ModelCompletion:
     content: str
     tool_calls: tuple[ModelToolCall, ...]
     finish_reason: str
+
+
+def normalize_finish_reason(
+    metadata: dict[str, Any], *, default: str | None = "stop"
+) -> str | None:
+    """Canonical termination reasons shared by adapters and custom chat ports."""
+    if metadata.get(MODEL_TRUNCATED_META_KEY) is True:
+        return "length"
+    reasons = []
+    for key in ("finish_reason", "stop_reason", "stopReason", "done_reason"):
+        value = metadata.get(key)
+        if value:
+            reasons.append(str(getattr(value, "name", value)).strip().lower())
+    incomplete = metadata.get("incomplete_details")
+    if isinstance(incomplete, dict) and incomplete.get("reason"):
+        reasons.append(str(incomplete["reason"]).strip().lower())
+    if any(
+        reason and any(not reason.replace(limit, "") for limit in {
+            "length", "max_tokens", "max_output_tokens", "max_completion_tokens",
+            "model_context_window_exceeded",
+        })
+        for reason in reasons
+    ):
+        return "length"
+    for reason in reasons:
+        if reason in {"tool_calls", "tool_use", "function_call"}:
+            return "tool_calls"
+        if reason in {"stop", "end_turn", "stop_sequence", "completed"}:
+            return "stop"
+    return reasons[0] if reasons else default
 
 
 class EmbeddingProvider(Protocol):
@@ -160,6 +191,7 @@ def test_model_connection(
 __all__ = [
     "DEFAULT_MODEL_REQUEST_PARAMS",
     "MODEL_REQUEST_PARAMS_META_KEY",
+    "MODEL_TRUNCATED_META_KEY",
     "SUPPORTED_PROVIDER_TYPES",
     "VISION_MODEL_REQUIRED_MESSAGE",
     "ChatProvider",
@@ -176,5 +208,6 @@ __all__ = [
     "build_reranker",
     "extract_image_text",
     "generate_image",
+    "normalize_finish_reason",
     "test_model_connection",
 ]

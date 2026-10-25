@@ -73,12 +73,6 @@ from app.schemas.knowledge import (
     KnowledgeQueryInspectResponse,
     KnowledgeRetrievalTraceResponse,
 )
-from app.schemas.knowledge.graph import (
-    KnowledgeGraphEntityResponse,
-    KnowledgeGraphPathResponse,
-    KnowledgeGraphPathStepResponse,
-    KnowledgeGraphQueryResultResponse,
-)
 
 MEMBER_PASSWORD = "AgentMember@12345."
 
@@ -1049,7 +1043,6 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
                 ),
                 vector_candidates=0,
                 keyword_candidates=len(hits),
-                reference_candidates=0,
                 fused_candidates=len(hits),
                 rerank_status="not_configured",
                 returned_hits=len(hits),
@@ -1107,7 +1100,7 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         def __call__(self):
             return FakeSession()
 
-    retrieve_calls: list[tuple[str, str, str | None, str | None, int]] = []
+    retrieve_calls: list[tuple[str, str, int]] = []
 
     def hit(knowledge_base: KnowledgeBase) -> KnowledgeQueryHitResponse:
         return KnowledgeQueryHitResponse(
@@ -1117,36 +1110,20 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             chunk_index=0,
             content=f"content-{knowledge_base.id}",
             distance=0.1,
-            sources=["vector", "reference"],
-            reference_hops=1,
-            graph_claim_ids=[f"claim-{knowledge_base.id}"],
-            graph_hops=2,
+            sources=["vector"],
             rerank_score=1.0 if knowledge_base.id == "base-applied" else None,
         )
 
     async def fake_retrieve(_db, knowledge_base, payload, _settings):
-        assert payload.relation_filters == ["references"]
         retrieve_calls.append(
             (
                 knowledge_base.id,
-                payload.graph_mode,
-                payload.source_entity,
-                payload.target_entity,
-                payload.max_hops,
+                payload.query,
+                payload.limit,
             )
         )
         rerank_status = (
             "applied" if knowledge_base.id == "base-applied" else "fallback"
-        )
-        source = KnowledgeGraphEntityResponse(
-            id="entity-source",
-            entity_type="Document",
-            canonical_name="Release policy",
-        )
-        target = KnowledgeGraphEntityResponse(
-            id="entity-target",
-            entity_type="Document",
-            canonical_name="Rollback guide",
         )
         return KnowledgeQueryInspectResponse(
             hits=[hit(knowledge_base)],
@@ -1162,43 +1139,11 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
                 ),
                 vector_candidates=2,
                 keyword_candidates=2,
-                reference_candidates=0,
                 fused_candidates=4,
                 rerank_status=rerank_status,
                 returned_hits=1,
                 duration_ms=1,
                 stage_duration_ms={"rerank": 0.5},
-            ),
-            graph=(
-                KnowledgeGraphQueryResultResponse(
-                    revision_id="revision-applied",
-                    operation="path",
-                    resolved_entities=[source, target],
-                    nodes=[source, target],
-                    claims=[],
-                    paths=[
-                        KnowledgeGraphPathResponse(
-                            nodes=[source, target],
-                            steps=[
-                                KnowledgeGraphPathStepResponse(
-                                    claim_id="claim-base-applied",
-                                    predicate="references",
-                                    source_entity_id=source.id,
-                                    target_entity_id=target.id,
-                                    semantic_direction="forward",
-                                    quality_score=1,
-                                    support_count=1,
-                                    evidence_ids=["evidence-1"],
-                                )
-                            ],
-                        )
-                    ],
-                    evidence=[],
-                    visited_nodes=2,
-                    truncated=False,
-                )
-                if knowledge_base.id == "base-applied"
-                else None
             ),
         )
 
@@ -1222,11 +1167,6 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             {
                 "query": "release",
                 "limit": 2,
-                "graph_mode": "path",
-                "source_entity": "Release policy",
-                "target_entity": "Rollback guide",
-                "max_hops": 4,
-                "relation_filters": ["references"],
             }
         )
     finally:
@@ -1235,20 +1175,8 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         agent_tools.retrieve_knowledge_base = original_retrieve
 
     assert retrieve_calls == [
-        (
-            "base-applied",
-            "path",
-            "Release policy",
-            "Rollback guide",
-            4,
-        ),
-        (
-            "base-fallback",
-            "path",
-            "Release policy",
-            "Rollback guide",
-            4,
-        ),
+        ("base-applied", "release", 2),
+        ("base-fallback", "release", 2),
     ]
     assert [item["chunk_id"] for item in result.output["hits"]] == [
         "chunk-base-applied",
@@ -1264,9 +1192,6 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             item["trace_id"],
             item["rerank_status"],
             item["sources"],
-            item["reference_hops"],
-            item["graph_claim_ids"],
-            item["graph_hops"],
         )
         for item in result.output["hits"]
     ] == [
@@ -1274,25 +1199,16 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             "chunk-base-applied",
             "trace-base-applied",
             "applied",
-            ["vector", "reference"],
-            1,
-            ["claim-base-applied"],
-            2,
+            ["vector"],
         ),
         (
             "chunk-base-fallback",
             "trace-base-fallback",
             "fallback",
-            ["vector", "reference"],
-            1,
-            ["claim-base-fallback"],
-            2,
+            ["vector"],
         ),
     ]
-    assert result.output["graph"]["revision_id"] == "revision-applied"
-    assert result.output["graph"]["paths"][0]["steps"][0]["evidence_ids"] == [
-        "evidence-1"
-    ]
+    assert "graph" not in result.output
     assert result.output["retrieval_stats"] == [
         {
             "knowledge_base_id": "base-applied",
@@ -1316,44 +1232,8 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
         },
     ]
 
-    path = result.output["graph"]["paths"][0]
-    oversized_graph = {
-        **result.output["graph"],
-        "paths": [
-            {
-                **path,
-                "nodes": [*(path["nodes"] * 5), {"profile": "x" * 2_000}],
-                "steps": path["steps"] * 9,
-            }
-        ]
-        * 4,
-    }
-    bounded = agent_tools.knowledge_tool_output(
-        {"graph": oversized_graph, "hits": result.output["hits"]},
-    )
-    assert len(bounded["graph"]["paths"]) == 3
-    assert len(bounded["graph"]["paths"][0]["steps"]) == 8
-    assert len(bounded["graph"]["paths"][0]["nodes"]) == 9
     atomic_hit = {"chunk_id": "atomic", "content": "complete evidence"}
-    graph_path = {"nodes": [{"profile": "x" * 2_000}], "steps": []}
-    normalized = agent_tools.knowledge_tool_output(
-        {
-            "graph": {
-                "revision_id": "revision-applied",
-                "operation": "path",
-                "paths": [graph_path],
-                "truncated": False,
-            },
-            "hits": [atomic_hit],
-        },
-    )
-    assert normalized == {
-        "graph": {
-            "revision_id": "revision-applied",
-            "operation": "path",
-            "paths": [graph_path],
-            "truncated": False,
-        },
+    assert agent_tools.knowledge_tool_output({"hits": [atomic_hit]}) == {
         "hits": [atomic_hit],
         "context_truncated": False,
     }
@@ -3991,7 +3871,6 @@ def main() -> None:
                 ),
                 vector_candidates=0,
                 keyword_candidates=len(hits),
-                reference_candidates=0,
                 fused_candidates=len(hits),
                 rerank_status="not_configured",
                 returned_hits=len(hits),
@@ -4531,7 +4410,7 @@ def main() -> None:
                 headers=auth_headers(admin_token),
             )
             assert admin_sources.status_code == 200, admin_sources.text
-            assert member_public_data["id"] in {
+            assert member_public_data["id"] not in {
                 item["id"] for item in admin_sources.json()
             }
 
@@ -4555,7 +4434,7 @@ def main() -> None:
                 headers=auth_headers(member_token),
                 json={"mode": "disabled"},
             )
-            assert owner_disabled_policy.status_code == 403, (
+            assert owner_disabled_policy.status_code == 200, (
                 owner_disabled_policy.text
             )
 

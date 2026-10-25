@@ -54,10 +54,12 @@ from app.infra.security.keyring import application_secret_key
 from app.ports.llm import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
+    MODEL_TRUNCATED_META_KEY,
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
     ModelProviderTimeoutError,
+    normalize_finish_reason,
 )
 from app.ports.llm import (
     ModelCompletion as ModelCompletion,
@@ -145,19 +147,20 @@ def _reasoning_content(value: Any) -> str:
 class _ProviderErrorChatMixin(BaseChatModel):
     def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
         try:
-            return super()._generate(*args, **kwargs)
+            return _normalized_chat_result(super()._generate(*args, **kwargs))
         except PROVIDER_EXCEPTIONS as exc:
             raise _model_provider_error(exc) from exc
 
     async def _agenerate(self, *args: Any, **kwargs: Any) -> ChatResult:
         try:
-            return await super()._agenerate(*args, **kwargs)
+            return _normalized_chat_result(await super()._agenerate(*args, **kwargs))
         except PROVIDER_EXCEPTIONS as exc:
             raise _model_provider_error(exc) from exc
 
     def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
         try:
-            yield from super()._stream(*args, **kwargs)
+            for chunk in super()._stream(*args, **kwargs):
+                yield _normalized_generation(chunk)
         except PROVIDER_EXCEPTIONS as exc:
             raise _model_provider_error(exc) from exc
 
@@ -168,7 +171,7 @@ class _ProviderErrorChatMixin(BaseChatModel):
     ) -> AsyncIterator[ChatGenerationChunk]:
         try:
             async for chunk in super()._astream(*args, **kwargs):
-                yield chunk
+                yield _normalized_generation(chunk)
         except PROVIDER_EXCEPTIONS as exc:
             raise _model_provider_error(exc) from exc
 
@@ -197,7 +200,36 @@ class OllamaChatModel(_ProviderErrorChatMixin, ChatOllama):
     pass
 
 
-class OpenAICompatibleChatModel(ChatOpenAI):
+def _normalized_generation(
+    generation: Any, provider_metadata: dict[str, Any] | None = None
+) -> Any:
+    # Do not add a default to unfinished chunks: LangChain concatenates string
+    # metadata during aggregation, so only a terminal chunk carries a reason.
+    metadata = {
+        **(provider_metadata or {}),
+        **(generation.generation_info or {}),
+        **generation.message.response_metadata,
+    }
+    reason = normalize_finish_reason(metadata, default=None)
+    if reason is not None:
+        generation.generation_info = {
+            **(generation.generation_info or {}), "finish_reason": reason
+        }
+        generation.message.response_metadata["finish_reason"] = reason
+        if reason == "length":
+            # LangChain concatenates repeated string metadata, but this flag
+            # survives duplicate terminal/usage chunks without ambiguity.
+            generation.message.response_metadata[MODEL_TRUNCATED_META_KEY] = True
+    return generation
+
+
+def _normalized_chat_result(result: ChatResult) -> ChatResult:
+    for generation in result.generations:
+        _normalized_generation(generation, result.llm_output)
+    return result
+
+
+class OpenAICompatibleChatModel(_ProviderErrorChatMixin, ChatOpenAI):
     def _create_chat_result(
         self,
         response: dict[str, Any] | Any,
@@ -242,36 +274,6 @@ class OpenAICompatibleChatModel(ChatOpenAI):
         ):
             generation.message.additional_kwargs["reasoning_content"] = reasoning
         return generation
-
-    def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
-        try:
-            return super()._generate(*args, **kwargs)
-        except OpenAIError as exc:
-            raise _model_provider_error(exc) from exc
-
-    async def _agenerate(self, *args: Any, **kwargs: Any) -> ChatResult:
-        try:
-            return await super()._agenerate(*args, **kwargs)
-        except OpenAIError as exc:
-            raise _model_provider_error(exc) from exc
-
-    def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
-        try:
-            yield from super()._stream(*args, **kwargs)
-        except OpenAIError as exc:
-            raise _model_provider_error(exc) from exc
-
-    async def _astream(
-        self,
-        *args: Any,
-        **kwargs: Any,
-    ) -> AsyncIterator[ChatGenerationChunk]:
-        try:
-            async for chunk in super()._astream(*args, **kwargs):
-                yield chunk
-        except OpenAIError as exc:
-            raise _model_provider_error(exc) from exc
-
 
 class CheckedEmbeddings(Embeddings):
     def __init__(self, delegate: Embeddings) -> None:

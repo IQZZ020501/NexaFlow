@@ -45,7 +45,7 @@ not trigger unrelated cleanup.
   module-owned business domains under `domain/`; shared cross-domain ORM
   entities live in `domain/platform/` (User, Workspace, Team, permissions).
   Within each layer, feature packages group the files (for example
-  `application/agents/runs/`, `domain/knowledge/graph/`), with large features
+  `application/agents/runs/`, `domain/knowledge/documents/`), with large features
   split further by real responsibility (`access`, `runs`, `tools`, `retrieval`,
   `documents`, `catalog`). Schemas stay in `app/schemas/` and Celery task entry
   points in `app/tasks/`.
@@ -177,10 +177,11 @@ not trigger unrelated cleanup.
   migrations and preload `pg_search` before PostgreSQL starts. Qdrant remains
   the application vector store. Do not silently fall back to `ts_rank_cd`,
   because that changes the declared ranking semantics.
-- Evidence Graph entities, claims, evidence, reviews, schemas, revisions and
-  relationships are authoritative in PostgreSQL. Qdrant's graph Profile
-  collection is a derived, rebuildable index; never use it as the source of
-  truth or delete PostgreSQL Graph history to repair it.
+- Knowledge retrieval uses vector search and PostgreSQL BM25 with optional
+  reranking. Knowledge graph extraction, traversal, visualization, reference
+  expansion and their ORM storage have been removed. Historical migrations
+  remain in the Alembic chain; the removal migration deletes obsolete data,
+  imported files and derived collections. Keep answer source citations intact.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing, indexing, and durable deletion cleanup run through Celery
@@ -188,10 +189,6 @@ not trigger unrelated cleanup.
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
-- Graph incremental and rebuild work uses the leased `KnowledgeTask` runner
-  (`graph_sync` / `graph_rebuild`). Celery Beat's graph reconcile recovers
-  expired work, orphaned revisions, and Profile repair intents; it must remain
-  persistent and retryable rather than becoming best-effort post-commit work.
 - Knowledge retrieval evaluation also runs through the leased Celery knowledge
   task runner and reuses the production retrieval path. Evaluation is mutually
   exclusive with parse/index/rebuild work for the same knowledge base; result
@@ -263,7 +260,12 @@ not trigger unrelated cleanup.
   undefined variables fail the node, and reference-only replies stringify one
   selected upstream field.
 - MCP tools use workspace-scoped Streamable HTTP, legacy SSE, or stdio Server
-  registrations. Remote Bearer tokens and full stdio configurations are
+  registrations owned and managed by their creator. Workspace/global admins
+  have no implicit access to another user's MCP configuration or custom Skill;
+  explicit view/use grants never confer configuration management. Custom MCP,
+  Tool source, and Skill names are unique per creator within a workspace;
+  system Tool source names remain unique per workspace. Remote Bearer tokens
+  and full stdio configurations are
   encrypted; remote endpoints may use HTTP or HTTPS, while private and loopback
   addresses require `MCP_ALLOW_PRIVATE_NETWORKS=true`. Workspace admins submit
   stdio commands, arguments, working directories, environment values and egress
@@ -277,8 +279,11 @@ not trigger unrelated cleanup.
   Within a Run, remote/bridged Streamable HTTP sessions are reused per worker process and
   closed when the Run ends or idles for 60 seconds. Only a call that may have
   reached the server marks a side-effecting Tool uncertain; connection or
-  start-up failures are confirmed failures, and oversized results are cut to a
-  text prefix rather than failed.
+  start-up failures are confirmed failures. MCP results up to 2 MiB retain
+  their complete JSON in `tool_invocations.full_result` when larger than the
+  24 KiB context limit; the preview includes a Run-scoped `result_id` for
+  `read_tool_result` character-range reads. Larger results keep an explicit
+  prefix-only notice rather than failing an already executed call.
 - `frontend/` is a Next.js (App Router) + TypeScript app using Bun, shadcn/ui,
   and Tailwind CSS. Pages live under the `src/app/` route groups `(auth)`,
   `(platform)`, `(dashboard)`, and `(public)` (anonymous share pages for
@@ -553,8 +558,8 @@ examples.
   `uv run python -m tests.<suite>` (agents.agents, agents.unit, agents.evaluation, agents.harness, agents.agent_access,
   agents.agent_services_coverage, agents.agent_runtime_coverage, workflows.workflows,
   workflows.unit, workflows.workflow_run_coverage, workflows.workflow_node_coverage,
-  knowledge.knowledge, knowledge.unit, knowledge.knowledge_graph,
-  knowledge.knowledge_graph_edge_coverage, knowledge.knowledge_domain_coverage,
+  knowledge.knowledge, knowledge.unit, knowledge.graph_removal,
+  knowledge.knowledge_domain_coverage,
   knowledge.knowledge_api_coverage, tools.tools, tools.unit, tools.shell_unit, artifacts.conversations, identity.identity,
   identity.enterprise_identity, identity.email, identity.smtp,
   platform.workspaces, platform.unit, platform.workspace_admin_coverage,

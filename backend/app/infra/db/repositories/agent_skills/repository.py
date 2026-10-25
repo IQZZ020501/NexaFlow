@@ -25,7 +25,6 @@ async def list_agent_skill_rows(
     workspace_id: str,
     actor_id: str,
     *,
-    include_all: bool,
     limit: int,
     offset: int,
 ) -> list[tuple[AgentSkill, ResourcePermission | None]]:
@@ -41,12 +40,11 @@ async def list_agent_skill_rows(
                 grant.user_id == actor_id,
             ),
         )
-        .where(AgentSkillOrm.workspace_id == workspace_id)
-    )
-    if not include_all:
-        statement = statement.where(
-            or_(AgentSkillOrm.created_by_user_id == actor_id, grant.id.is_not(None))
+        .where(
+            AgentSkillOrm.workspace_id == workspace_id,
+            or_(AgentSkillOrm.created_by_user_id == actor_id, grant.id.is_not(None)),
         )
+    )
     result = await db.execute(
         statement.order_by(AgentSkillOrm.updated_at.desc(), AgentSkillOrm.id.desc())
         .limit(limit)

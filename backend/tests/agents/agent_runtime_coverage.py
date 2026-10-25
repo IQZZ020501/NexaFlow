@@ -133,7 +133,6 @@ def knowledge_inspect_result(
             ),
             vector_candidates=len(resolved_hits),
             keyword_candidates=0,
-            reference_candidates=0,
             fused_candidates=len(resolved_hits),
             rerank_status=resolved_status,
             returned_hits=len(resolved_hits),
@@ -2087,7 +2086,6 @@ async def assert_knowledge_tool_paths(
         )
 
     async def succeed_retrieve(_db, knowledge_base, payload, _settings):
-        assert payload.include_references is True
         return knowledge_inspect_result(
             knowledge_base,
             payload,
@@ -6272,7 +6270,7 @@ async def assert_tool_service_paths(
                 }
             ],
             status="active",
-            created_by_user_id=admin_user_id,
+            created_by_user_id=member_id,
         )
         await mcp_repository.save_mcp_server(db, toggle_server)
         toggle_source = await tool_repository.save_tool_source(
@@ -6293,45 +6291,35 @@ async def assert_tool_service_paths(
         )
         await db.commit()
 
-        # non-admin cannot disable a tool (671)
+        # Administrators cannot change another owner's personal tool.
         try:
             await tool_services.set_mcp_tool_policy(
                 db,
                 toggle_server,
                 "toggle_tool",
                 "disabled",
-                member,
-                "member",
+                actor,
+                "admin",
             )
         except HTTPException as exc:
-            assert exc.status_code == 403
+            assert exc.status_code == 404
         else:
-            raise AssertionError("Member disabled an MCP tool.")
+            raise AssertionError("Administrator changed another owner's tool.")
 
-        # admin creates a disabled policy (704, 722)
+        # The owner can disable and restore a policy without an admin role.
         disabled_policy = await tool_services.set_mcp_tool_policy(
             db,
             toggle_server,
             "toggle_tool",
             "disabled",
-            actor,
-            "admin",
+            member,
+            "member",
         )
         assert disabled_policy.mode == "disabled"
-        # a disabled tool cannot be re-policied by a member (676)
-        try:
-            await tool_services.set_mcp_tool_policy(
-                db,
-                toggle_server,
-                "toggle_tool",
-                "read_only",
-                member,
-                "member",
-            )
-        except HTTPException as exc:
-            assert exc.status_code == 403
-        else:
-            raise AssertionError("Member re-policied a disabled tool.")
+        restored_policy = await tool_services.set_mcp_tool_policy(
+            db, toggle_server, "toggle_tool", "read_only", member, "member"
+        )
+        assert restored_policy.mode == "read_only"
 
         # each_call branch (695-699) through the revision update path
         each_policy = await tool_services.set_mcp_tool_policy(
@@ -6339,8 +6327,8 @@ async def assert_tool_service_paths(
             toggle_server,
             "toggle_tool",
             "each_call",
-            actor,
-            "admin",
+            member,
+            "member",
         )
         assert each_policy.mode == "approval_required"
 
@@ -6350,15 +6338,15 @@ async def assert_tool_service_paths(
             toggle_server,
             "toggle_tool",
             "disabled",
-            actor,
-            "admin",
+            member,
+            "member",
         )
         enabled_response = await tool_services.set_mcp_server_enabled(
             db,
             toggle_server,
             True,
-            actor,
-            "admin",
+            member,
+            "member",
         )
         assert enabled_response.status == "active"
         toggle_leaf = await get_mcp_catalog_leaf(
@@ -6383,8 +6371,8 @@ async def assert_tool_service_paths(
                     toggle_server,
                     "toggle_tool",
                     "read_only",
-                    actor,
-                    "admin",
+                    member,
+                    "member",
                 )
             except HTTPException as exc:
                 assert exc.status_code == 409
@@ -6414,8 +6402,8 @@ async def assert_tool_service_paths(
                 toggle_server,
                 "no-such-tool",
                 "read_only",
-                actor,
-                "admin",
+                member,
+                "member",
             )
         except HTTPException as exc:
             assert exc.status_code == 404

@@ -106,7 +106,14 @@ jobs:
         run: uv run python -m tests.models.llm
 
       - name: Run agent tests
-        run: uv run python -m tests.agents.agents
+        run: |
+          uv run python -m tests.agents.agents
+          uv run python -m tests.agents.result_recovery
+
+      - name: Run Tool persistence and ownership tests
+        run: |
+          uv run python -m tests.tools.tools
+          uv run python -m tests.tools.personal
 
       - name: Run Skill package and invocation tests
         run: uv run python -m tests.agent_skills.api

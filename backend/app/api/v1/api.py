@@ -13,7 +13,6 @@ from app.api.v1.artifacts import routes as artifacts
 from app.api.v1.identity import auth
 from app.api.v1.identity import enterprise as enterprise_identity
 from app.api.v1.knowledge import evaluation as knowledge_evaluation
-from app.api.v1.knowledge import graph as knowledge_graph
 from app.api.v1.knowledge import lifecycle as knowledge_lifecycle
 from app.api.v1.knowledge import retrieval as knowledge_retrieval
 from app.api.v1.knowledge import routes as knowledge
@@ -48,7 +47,6 @@ api_router.include_router(workspaces.router)
 api_router.include_router(teams.router)
 api_router.include_router(knowledge.router)
 api_router.include_router(knowledge_evaluation.router)
-api_router.include_router(knowledge_graph.router)
 api_router.include_router(knowledge_lifecycle.router)
 api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)

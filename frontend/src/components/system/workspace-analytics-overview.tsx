@@ -243,8 +243,7 @@ export function AnalyticsKeyMetricsPanel({
               : formatTokenCount(derived.averageTokens)
           }
           detail={
-            data.summary.tokens.unreported_runs ||
-            data.summary.tokens.unreported_graph_builds
+            data.summary.tokens.unreported_runs
               ? t("存在用量缺报")
               : undefined
           }

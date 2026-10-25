@@ -27,9 +27,6 @@ from app.domain.knowledge.models import (
     KnowledgeDocumentParentChunk as KnowledgeDocumentParentChunkORM,
 )
 from app.domain.knowledge.models import (
-    KnowledgeDocumentReference as KnowledgeDocumentReferenceORM,
-)
-from app.domain.knowledge.models import (
     KnowledgeEvaluationCase as KnowledgeEvaluationCaseORM,
 )
 from app.domain.knowledge.models import (
@@ -47,8 +44,6 @@ from app.entities.knowledge import (
     DOCUMENT_STAGED_META_KEY,
     TASK_CANCELLING_STATUS,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_QUEUED_STATUS,
     TASK_RUNNING_STATUS,
     VISIBLE_DOCUMENT_STATUSES,

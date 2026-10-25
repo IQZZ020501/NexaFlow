@@ -570,9 +570,9 @@ describe("AgentDetailWorkspace preview", () => {
       screen.queryByRole("button", { name: "追加后续任务" }) === null
     ).toBe(true)
     fireEvent.change(textarea, { target: { value: "Then summarize" } })
-    expect(
-      screen.queryByRole("button", { name: "停止生成" }) === null
-    ).toBe(true)
+    expect(screen.queryByRole("button", { name: "停止生成" }) === null).toBe(
+      true
+    )
     expect(screen.getByRole("button", { name: "追加后续任务" })).toBeTruthy()
     fireEvent.keyDown(textarea, { key: "Enter" })
     expect(submitted).toBe(1)
@@ -1289,6 +1289,89 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" runs={[run]} />)
     expect(screen.getByText("model timeout")).toBeTruthy()
   })
+
+  test.each(["running", "succeeded"] as const)(
+    "does not label a truncated response as generated (%s)",
+    (status) => {
+      const run = makeRun({
+        status: "failed",
+        result: "",
+        last_error: "Agent response was truncated.",
+        events: [
+          {
+            type: "thought",
+            turn: 1,
+            tool_name: "",
+            status,
+            summary: "agent.answer_ready",
+            call_id: "",
+            tool_label: "",
+            tool_kind: "unknown",
+            server_name: "",
+            input: {},
+            output: null,
+            duration_ms: 0,
+          },
+        ],
+      })
+      const { container } = renderPage(
+        <Harness activeView="settings" runs={[run]} />
+      )
+      expect(Boolean(screen.queryByText("回答已生成"))).toBe(false)
+      expect(screen.getByText("Agent 回答失败")).toBeTruthy()
+      expect(screen.getByText("模型回答被截断，请重试。")).toBeTruthy()
+      expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
+      expect(container.querySelectorAll(".text-emerald-600")).toHaveLength(0)
+    }
+  )
+
+  test.each(["failed", "cancelled"] as const)(
+    "preserves an earlier successful answer when follow-up is %s",
+    (status) => {
+      const event: AgentRun["events"][number] = {
+        type: "thought",
+        turn: 1,
+        tool_name: "",
+        status: "succeeded",
+        summary: "agent.answer_ready",
+        call_id: "",
+        tool_label: "",
+        tool_kind: "unknown",
+        server_name: "",
+        input: {},
+        output: null,
+        duration_ms: 0,
+      }
+      const run = makeRun({
+        status,
+        result: "",
+        last_error: "Agent response was truncated.",
+        events: [event, { ...event, turn: 2 }],
+        session_inputs: [
+          {
+            input_id: "follow-up",
+            mode: "follow_up",
+            content: "Second question",
+            sequence: 1,
+            run_id: "run-1",
+            status: "applied",
+            previous_answer: "First answer remains valid",
+            previous_answer_turn: 1,
+          },
+        ],
+      })
+      const { container } = renderPage(
+        <Harness activeView="settings" runs={[run]} />
+      )
+      expect(screen.getByText("First answer remains valid")).toBeTruthy()
+      expect(screen.getAllByText("回答已生成")).toHaveLength(1)
+      expect(
+        screen.getByText(status === "failed" ? "Agent 回答失败" : "已停止")
+      ).toBeTruthy()
+      expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
+      expect(container.querySelectorAll(".text-emerald-600")).toHaveLength(1)
+    }
+  )
 
   test("renders queued and cancelled runs", () => {
     const { container } = renderPage(

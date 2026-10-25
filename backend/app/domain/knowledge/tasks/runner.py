@@ -14,9 +14,6 @@ from app.domain.knowledge.documents.parsing import (
     SEGMENTATION_VERSION,
     KnowledgePipelineError,
 )
-from app.domain.knowledge.documents.references import (
-    rebuild_knowledge_base_references,
-)
 from app.domain.knowledge.service import (
     RESOURCE_TYPE,
     knowledge_object_storage,
@@ -24,8 +21,6 @@ from app.domain.knowledge.service import (
 from app.domain.knowledge.tasks.orchestration import (
     TASK_STOPPED_MESSAGE,
     chunk_search_text,
-    enqueue_graph_rebuild,
-    enqueue_graph_sync,
     enqueue_index_knowledge_document,
     extract_document_chunk_contents,
     parse_task_options_from_task,
@@ -49,8 +44,6 @@ from app.entities.knowledge import (
     TASK_CANCELLING_STATUS,
     TASK_EVALUATE,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
@@ -65,7 +58,7 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.session import get_session_factory
-from app.infra.observability.errors import classify_error, log_error
+from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event
 from app.ports.vector_store import (
     VectorChunk,
@@ -91,7 +84,6 @@ EvaluationTaskRunner = Callable[
     ],
     Awaitable[None],
 ]
-GraphTaskRunner = EvaluationTaskRunner
 
 
 async def persist_owned_knowledge_task_progress(
@@ -258,7 +250,6 @@ async def run_index_task(
         document.id if document else None,
         {CHUNK_INDEXED_STATUS} if task.task_type == TASK_REBUILD_INDEX else None,
     )
-    chunks = [chunk for chunk in chunks if chunk.kind != "graph_record"]
     if not chunks:
         raise KnowledgePipelineError("Knowledge task has no chunks to index.")
 
@@ -289,14 +280,6 @@ async def run_index_task(
         if chunk.search_text != search_text:
             chunk.search_text = search_text
             await knowledge_base_repository.save_knowledge_document_chunk(db, chunk)
-
-    if task.task_type == TASK_REBUILD_INDEX:
-        await rebuild_knowledge_base_references(
-            db,
-            knowledge_base,
-            list(documents.values()),
-            chunks,
-        )
 
     if task.task_type != TASK_REBUILD_INDEX:
         for chunk_document in documents.values():
@@ -449,20 +432,11 @@ async def mark_knowledge_task_failed(
     await knowledge_base_repository.save_knowledge_task(db, task)
     actor = await user_repository.get_user_by_id(db, task.created_by_user_id)
     if actor is not None:
-        details = (
-            {
-                "knowledge_base_id": task.knowledge_base_id,
-                "task_id": task.id,
-                "action": "fail",
-                "status": "failed",
-            }
-            if task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
-            else {
-                "knowledge_base_id": task.knowledge_base_id,
-                "document_id": task.document_id,
-                "error": message,
-            }
-        )
+        details = {
+            "knowledge_base_id": task.knowledge_base_id,
+            "document_id": task.document_id,
+            "error": message,
+        }
         record_audit_log(
             db,
             actor,
@@ -559,7 +533,6 @@ async def run_knowledge_task(
     enqueue_task: Callable[[str, Settings], Awaitable[None]] | None = None,
     worker_task_id: str | None = None,
     evaluation_runner: EvaluationTaskRunner | None = None,
-    graph_runner: GraphTaskRunner | None = None,
 ) -> str:
     chained_task_ids: list[str] = []
     worker_task_id = worker_task_id or new_id()
@@ -659,18 +632,6 @@ async def run_knowledge_task(
                     settings,
                     lease_lost,
                 )
-            elif (
-                task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
-                and graph_runner is not None
-            ):
-                await graph_runner(
-                    db,
-                    task,
-                    knowledge_base,
-                    actor,
-                    settings,
-                    lease_lost,
-                )
             else:
                 raise KnowledgePipelineError("Unsupported knowledge task type.")
 
@@ -742,35 +703,6 @@ async def run_knowledge_task(
                         document,
                     )
                     await db.commit()
-            if knowledge_base.graph_enabled:
-                try:
-                    graph_task = None
-                    if task.task_type == TASK_INDEX and document is not None:
-                        graph_task = await enqueue_graph_sync(
-                            db,
-                            knowledge_base,
-                            actor,
-                            [document.id],
-                        )
-                    elif task.task_type == TASK_REBUILD_INDEX:
-                        graph_task = await enqueue_graph_rebuild(
-                            db,
-                            knowledge_base,
-                            actor,
-                        )
-                    if graph_task is not None and graph_task.id not in chained_task_ids:
-                        chained_task_ids.append(graph_task.id)
-                except Exception as exc:
-                    log_error(
-                        logger,
-                        "Knowledge graph chain enqueue failed.",
-                        None,
-                        source=classify_error(exc),
-                        task_id=task.id,
-                        task_type=task.task_type,
-                        error_type=type(exc).__name__,
-                    )
-                    await db.rollback()
         except Exception as exc:
             await db.rollback()
             if lease_lost.is_set():
@@ -782,28 +714,13 @@ async def run_knowledge_task(
                 )
                 if current is None or current.status == TASK_CANCELLED_STATUS:
                     return TASK_RUN_FINISHED
-            if task is not None and task.task_type in {
-                TASK_GRAPH_SYNC,
-                TASK_GRAPH_REBUILD,
-            }:
-                log_error(
-                    logger,
-                    "Knowledge task failed.",
-                    None,
-                    source=classify_error(exc),
-                    task_id=task_id,
-                    worker_task_id=worker_task_id,
-                    task_type=task.task_type,
-                    error_type=type(exc).__name__,
-                )
-            else:
-                log_error(
-                    logger,
-                    "Knowledge task failed.",
-                    exc,
-                    task_id=task_id,
-                    worker_task_id=worker_task_id,
-                )
+            log_error(
+                logger,
+                "Knowledge task failed.",
+                exc,
+                task_id=task_id,
+                worker_task_id=worker_task_id,
+            )
             await mark_knowledge_task_failed(
                 db,
                 task_id,
@@ -824,7 +741,6 @@ async def run_knowledge_task(
                 chained_task_id,
                 settings,
                 evaluation_runner=evaluation_runner,
-                graph_runner=graph_runner,
             )
     return TASK_RUN_FINISHED
 
@@ -832,7 +748,6 @@ async def run_knowledge_task(
 async def recover_knowledge_tasks(
     settings: Settings,
     evaluation_runner: EvaluationTaskRunner | None = None,
-    graph_runner: GraphTaskRunner | None = None,
 ) -> None:
     task_ids = await list_recoverable_knowledge_task_ids(settings)
     await asyncio.gather(
@@ -841,7 +756,6 @@ async def recover_knowledge_tasks(
                 task_id,
                 settings,
                 evaluation_runner=evaluation_runner,
-                graph_runner=graph_runner,
             )
             for task_id in task_ids
         )

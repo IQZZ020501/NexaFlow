@@ -962,11 +962,6 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                 "limit": 2,
                 "search_mode": "embedding",
                 "similarity": 0.6,
-                "graph_mode": "auto",
-                "source_entity": None,
-                "target_entity": None,
-                "max_hops": 6,
-                "relation_filters": [],
             }
             return SimpleNamespace(
                 is_error=False,
@@ -981,8 +976,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                             "similarity": 0.85,
                             "trace_id": "trace-1",
                             "rerank_status": "applied",
-                            "sources": ["vector", "reference"],
-                            "reference_hops": 1,
+                            "sources": ["vector"],
                         },
                         {
                             "chunk_id": "chunk-2",
@@ -992,7 +986,6 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                             "trace_id": "trace-2",
                             "rerank_status": "fallback",
                             "sources": ["keywords"],
-                            "reference_hops": 0,
                         },
                         {
                             "chunk_id": "chunk-3",
@@ -1077,7 +1070,6 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                 item["trace_id"],
                 item["rerank_status"],
                 item["sources"],
-                item["reference_hops"],
             )
             for item in result.outputs["paragraph_list"]
         ] == [
@@ -1085,10 +1077,9 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                 "chunk-1",
                 "trace-1",
                 "applied",
-                ["vector", "reference"],
-                1,
+                ["vector"],
             ),
-            ("chunk-2", "trace-2", "fallback", ["keywords"], 0),
+            ("chunk-2", "trace-2", "fallback", ["keywords"]),
         ]
         assert result.outputs["retrieval_stats"] == [
             {
@@ -1162,11 +1153,6 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
                 "limit": 8,
                 "search_mode": "keywords",
                 "similarity": 0.8,
-                "graph_mode": "auto",
-                "source_entity": None,
-                "target_entity": None,
-                "max_hops": 6,
-                "relation_filters": [],
             }
             return SimpleNamespace(
                 is_error=False,

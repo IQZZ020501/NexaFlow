@@ -31,7 +31,6 @@ from app.domain.audit.services import record_audit_log
 from app.domain.models.registered import RegisteredModel
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
-from app.infra.db.repositories.knowledge import bases as knowledge_base_repository
 from app.infra.db.repositories.models import registry as model_repository
 from app.infra.runtime.validation import normalize_name
 from app.ports.llm import DEFAULT_MODEL_REQUEST_PARAMS, MODEL_REQUEST_PARAMS_META_KEY
@@ -406,9 +405,6 @@ async def delete_registered_model(db: AsyncSession, model: RegisteredModel, acto
         workspace_id=model.workspace_id,
     )
     try:
-        await knowledge_base_repository.clear_legacy_graph_extraction_model_reference(
-            db, model.workspace_id, model.id
-        )
         await model_repository.delete_registered_model_by_id(db, model.id)
         await db.commit()
     except IntegrityError as exc:

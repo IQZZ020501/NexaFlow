@@ -45,6 +45,7 @@ class ToolRuntimeResult:
     error_message: str | None
     outcome: Literal["confirmed", "uncertain"]
     usage: dict[str, Any]
+    full_result: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "data", freeze_json(self.data))

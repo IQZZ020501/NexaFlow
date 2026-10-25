@@ -59,10 +59,6 @@ def knowledge_base_to_response(
         status=knowledge_base.status,
         embedding_model_id=knowledge_base.embedding_model_id,
         reranker_model_id=knowledge_base.reranker_model_id,
-        graph_enabled=knowledge_base.graph_enabled,
-        active_graph_schema_id=knowledge_base.active_graph_schema_id,
-        active_graph_revision_id=knowledge_base.active_graph_revision_id,
-        graph_extraction_model_id=knowledge_base.graph_extraction_model_id,
         created_by_user_id=knowledge_base.created_by_user_id,
         created_at=knowledge_base.created_at,
         updated_at=knowledge_base.updated_at,
@@ -226,7 +222,6 @@ async def create_knowledge_base(
         status=ACTIVE_STATUS,
         embedding_model_id=embedding_model.id if embedding_model else None,
         reranker_model_id=reranker_model.id if reranker_model else None,
-        graph_enabled=payload.graph_enabled,
         created_by_user_id=actor.id,
     )
 
@@ -434,7 +429,7 @@ async def delete_knowledge_base_permanently(
         workspace_id=knowledge_base.workspace_id,
     )
     cleanup_id = await create_knowledge_storage_cleanup(db, knowledge_base)
-    await knowledge_base_repository.delete_knowledge_base_graph(
+    await knowledge_base_repository.delete_knowledge_base_data(
         db,
         knowledge_base,
         RESOURCE_TYPE,

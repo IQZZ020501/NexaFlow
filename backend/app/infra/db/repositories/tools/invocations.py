@@ -23,8 +23,10 @@ from app.domain.tools.runtime import (
     TOOL_INVOCATION_APPROVED,
     TOOL_INVOCATION_AWAITING_APPROVAL,
     TOOL_INVOCATION_CLAIMABLE_STATUSES,
+    TOOL_INVOCATION_FAILED,
     TOOL_INVOCATION_QUEUED,
     TOOL_INVOCATION_RUNNING,
+    TOOL_INVOCATION_SUCCEEDED,
     TOOL_INVOCATION_TERMINAL_STATUSES,
     TOOL_INVOCATION_UNCERTAIN,
     exhausted_tool_invocation_terminal_state,
@@ -114,6 +116,37 @@ async def get_tool_invocation_by_idempotency_key(
         )
     )
     return to_entity(ToolInvocation, row) if row is not None else None
+
+
+async def read_agent_tool_result(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    run_id: str,
+    execution_user_id: str,
+    access_source: str,
+    result_id: str,
+    offset: int,
+    limit: int,
+) -> tuple[str, int] | None:
+    row = (
+        await db.execute(
+            select(
+                func.substr(ToolInvocationOrm.full_result, offset + 1, limit),
+                func.length(ToolInvocationOrm.full_result),
+            ).where(
+                ToolInvocationOrm.workspace_id == workspace_id,
+                ToolInvocationOrm.run_id == run_id,
+                ToolInvocationOrm.execution_user_id == execution_user_id,
+                ToolInvocationOrm.access_source == access_source,
+                ToolInvocationOrm.origin == "agent",
+                ToolInvocationOrm.idempotency_key == result_id,
+                ToolInvocationOrm.status.in_((TOOL_INVOCATION_SUCCEEDED, TOOL_INVOCATION_FAILED)),
+                ToolInvocationOrm.full_result.is_not(None),
+            )
+        )
+    ).one_or_none()
+    return (row[0], row[1]) if row is not None else None
 
 async def create_or_get_tool_invocation(
     db: AsyncSession,
@@ -279,6 +312,7 @@ async def finalize_tool_invocation(
         .values(
             status=result.status,
             result_data=result.result_data,
+            full_result=result.full_result,
             result_summary=result.result_summary,
             outcome=result.outcome,
             error_code=result.error_code,
@@ -320,6 +354,7 @@ async def fail_pending_tool_invocation(
             status=result.status,
             result_data=result.result_data,
             result_summary=result.result_summary,
+            full_result=result.full_result,
             outcome=result.outcome,
             error_code=result.error_code,
             error_message=result.error_message,

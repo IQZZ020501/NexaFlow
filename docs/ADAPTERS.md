@@ -13,7 +13,7 @@
 ## app/ports/（能力契约）
 
 - `llm.py` — LLM 供应商端口：`ChatProvider` / `EmbeddingProvider` / `RerankProvider` 结构化协议；工厂 `build_chat_model` / `build_embeddings` / `build_reranker` 依据注册模型配置构造实例；`generate_image` 与 `extract_image_text` 供图片生成与视觉模型抽取图片文字；同时再导出运行时数据类型与统一异常（`ModelCompletion`、`ModelToolCall`、`ModelProviderError` 及状态码/超时子类）、`SUPPORTED_PROVIDER_TYPES`、`MODEL_REQUEST_PARAMS_META_KEY`、`DEFAULT_MODEL_REQUEST_PARAMS`、`test_model_connection` 与 `VISION_MODEL_REQUIRED_MESSAGE`（`RegisteredModel` 仅为类型标注导入，不在导出列表）。业务代码经此构造模型，不触碰具体厂商实现。
-- `vector_store.py` — 向量库端口：`VectorStore` Protocol 描述完整契约（健康检查、collection 删除、向量 upsert/查询/删除、图谱画像向量的 upsert/查询与 collection 删除；collection 创建在首次 upsert 时隐式完成），`build_vector_store()` 为组合点，另有同名委托函数（`check_vector_store_health`、`upsert_vectors`、`query_vectors`、`delete_vectors` 与图谱画像系列）；值类型 `VectorChunk` / `VectorHit` / `GraphProfileVector` / `GraphProfileVectorHit` 一并由此再导出。
+- `vector_store.py` — 向量库端口：`VectorStore` Protocol 描述完整契约（健康检查、collection 删除、向量 upsert/查询/删除；collection 创建在首次 upsert 时隐式完成），`build_vector_store()` 为组合点，另有同名委托函数（`check_vector_store_health`、`upsert_vectors`、`query_vectors`、`delete_vectors`）；值类型 `VectorChunk` / `VectorHit` 一并由此再导出。
 - `mcp.py` — MCP 客户端端口：`McpClient` Protocol（`discover_mcp_tools` / `call_mcp_tool`），委托函数 `discover_mcp_tools` / `call_mcp_tool` / `normalize_mcp_url`，`build_mcp_client()` 返回多传输客户端实现；连接、发现与错误类型（`McpConnection`、`McpDiscovery`、`McpCallResult`、`McpTransport`、`McpClientError`、`MAX_MCP_TOOL_PAGES` 等）一并再导出。
 - `execution.py` — 私有执行能力端口：`ExecutionError`、`ExecutionScope`、`execution_scope` ContextVar、`ExecutionPlatform` Protocol（`execute` / `close_session`）、`build_execution_platform()` 与 `close_execution_session()`；stdio MCP 与 Skill 依赖安装在 OpenSandbox 内执行所依赖的接缝。
 - `enterprise_identity.py` — 企业身份端口：`EnterpriseIdentityProvider` Protocol，并再导出实现层契约面（`build_authorization_url`、`resolve_external_principal`、`ExternalPrincipal`、`EnterpriseProviderError`）。
@@ -34,11 +34,11 @@
 
 ### rag/（向量检索）
 
-- `vector_store.py` — Qdrant 向量库封装：collection 管理（并发创建竞态处理）、向量 upsert/查询/删除、图谱画像 collection（`graph_profile_collection_name` 与 upsert/query/delete/deletion）、结构化日志（`source=external` 分类）。
+- `vector_store.py` — Qdrant 向量库封装：collection 管理（并发创建竞态处理）、向量 upsert/查询/删除、结构化日志（`source=external` 分类）。
 
 ### mcp/
 
-- `client.py` — 统一 MCP 客户端（`MultiTransportMcpClient`）：Streamable HTTP、legacy SSE、加密 stdio 配置；HTTP DNS/重定向/代理防护，stdio 经 execution port 在 OpenSandbox 内执行；完整保留 content/structuredContent/_meta，超过上界明确失败而非截断为无效 JSON。
+- `client.py` — 统一 MCP 客户端（`MultiTransportMcpClient`）：Streamable HTTP、legacy SSE、加密 stdio 配置；HTTP DNS/重定向/代理防护，stdio 经 execution port 在 OpenSandbox 内执行；完整保留 2 MiB 内的 content/structuredContent/_meta，应用层将超过 24 KiB 的结果原子保存到工具账本并返回预览与读取引用。超过存储上限时只返回带明确提示的文本前缀，保留远端调用状态，不因结果太大而把已执行动作改判为失败。
 
 ### execution/
 

@@ -8,9 +8,6 @@ from sqlalchemy.orm import aliased
 from app.domain.agents.models import Agent as AgentOrm
 from app.domain.agents.models import AgentRun as AgentRunOrm
 from app.domain.agents.models import AgentRunState as AgentRunStateOrm
-from app.domain.knowledge.graph.models import (
-    KnowledgeGraphRevision as KnowledgeGraphRevisionOrm,
-)
 from app.domain.knowledge.models import KnowledgeBase as KnowledgeBaseOrm
 from app.domain.knowledge.models import KnowledgeDocument as KnowledgeDocumentOrm
 from app.domain.knowledge.models import (
@@ -27,7 +24,6 @@ from app.domain.tools.models import ToolVersion as ToolVersionOrm
 from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailOrm
 from app.entities.analytics import (
     WorkspaceAnalyticsCounts,
-    WorkspaceAnalyticsGraphBuild,
     WorkspaceAnalyticsInventory,
     WorkspaceAnalyticsInventoryApplications,
     WorkspaceAnalyticsInventoryKnowledge,
@@ -340,37 +336,3 @@ async def get_workspace_analytics_inventory(
         tools=tools,
         models=int(models or 0),
     )
-
-
-async def list_workspace_analytics_graph_builds(
-    db: AsyncSession,
-    workspace_id: str,
-    start_at: datetime,
-    end_at: datetime,
-) -> list[WorkspaceAnalyticsGraphBuild]:
-    rows = await db.execute(
-        select(
-            KnowledgeGraphRevisionOrm.id,
-            KnowledgeGraphRevisionOrm.status,
-            KnowledgeGraphRevisionOrm.model_usage_json,
-            KnowledgeGraphRevisionOrm.created_at,
-        )
-        .where(
-            KnowledgeGraphRevisionOrm.workspace_id == workspace_id,
-            KnowledgeGraphRevisionOrm.created_at >= start_at,
-            KnowledgeGraphRevisionOrm.created_at < end_at,
-        )
-        .order_by(
-            KnowledgeGraphRevisionOrm.created_at,
-            KnowledgeGraphRevisionOrm.id,
-        )
-    )
-    return [
-        WorkspaceAnalyticsGraphBuild(
-            id=row.id,
-            status=row.status,
-            model_usage=dict(row.model_usage_json or {}),
-            created_at=row.created_at,
-        )
-        for row in rows.all()
-    ]

@@ -21,7 +21,7 @@
   - `agents/repository.py` — Agent/绑定/API 凭据、Agent 维度的 Run 列表与会话记忆，以及统一 ToolInvocation 投影的数据访问
   - `runs/runs.py`、`runs/leases.py`、`runs/events.py`、`runs/session_inputs.py` — 四表 Run 身份/状态/快照，执行租约认领与续约，Run 事件追加与读取，以及 append-only 会话输入队列的数据访问
   - `workflows/repository.py` — Workflow 发布版本与 Run 数据访问
-  - `knowledge/repository.py`、`knowledge/documents.py`、`knowledge/bases.py`、`knowledge/tasks.py`、`knowledge/storage.py`、`knowledge/evaluation.py`、`knowledge/graph.py`、`knowledge/references.py` — 知识库/文档/分块（含 `query_keyword_chunk_ids`）、知识库基础设置、任务、存储清理、评估、证据图与文档引用数据访问
+  - `knowledge/repository.py`、`knowledge/documents.py`、`knowledge/bases.py`、`knowledge/tasks.py`、`knowledge/storage.py`、`knowledge/evaluation.py`、`knowledge/references.py` — 知识库/文档/分块（含 `query_keyword_chunk_ids`）、知识库基础设置、任务、存储清理、评估数据访问
   - `tools/repository.py`、`tools/catalog.py`、`tools/bindings.py`、`tools/invocations.py`、`tools/drafts.py`、`tools/mcp.py` — Tool Source/Tool/Version/Policy、应用绑定、durable ToolInvocation 生命周期、草稿，以及 MCP Server 与本地审核工具策略数据访问
   - `agent_skills/repository.py`、`announcements/repository.py` — 技能包与公告数据访问
   - `identity/users.py`、`identity/enterprise.py`、`identity/invitations.py` — 用户/刷新会话、企业身份连接、邀请数据访问
@@ -33,7 +33,6 @@
   - `email/delivery.py`、`email/smtp.py` — 邮件投递记录与 SMTP 设置数据访问
 - `backend/app/infra/db/sql/<feature>/…` — 手写 SQL：
   - `knowledge/query_keyword_chunk_ids.sql` — 使用 `pg_search` Jieba 匹配与 BM25 分数排序的关键词 chunk 查询
-  - `knowledge/graph/neighborhood.sql`、`knowledge/graph/query_entity_candidates.sql`、`knowledge/graph/shortest_path.sql` — 知识图谱邻域/实体候选/最短路径查询（`sql/` 目前仅含 `knowledge/` 一个特性目录）
 
 ### app/infra/queue/
 
@@ -88,7 +87,7 @@
 
 ## Alembic 迁移链
 
-- `backend/alembic/env.py` — Alembic 迁移环境：导入 ORM 模型注册到 `Base.metadata`，覆盖 `app.domain` 各特性模型（agent/tool/knowledge/workflow/graph/platform/identity-enterprise/email/audit/artifacts/resource_folders/agent_skills/announcements 与 `app.domain.models.registered.RegisteredModel`）及 `app.infra.observability.system_log.SystemLog`；从 Settings 读 `DATABASE_URL`，支持在线/离线迁移。
+- `backend/alembic/env.py` — Alembic 迁移环境：导入 ORM 模型注册到 `Base.metadata`，覆盖 `app.domain` 各特性模型（agent/tool/knowledge/workflow/platform/identity-enterprise/email/audit/artifacts/resource_folders/agent_skills/announcements 与 `app.domain.models.registered.RegisteredModel`）及 `app.infra.observability.system_log.SystemLog`；从 Settings 读 `DATABASE_URL`，支持在线/离线迁移。
 - 迁移版本（`backend/alembic/versions/*.py`，时间戳编号，单链演进）：从 `202607040001_identity_workspace_foundation`（users / workspaces / teams 初始表）到 `202609250001_platform_secrets`，先后覆盖租户约束与系统/审计日志、知识库文档分块流水线与 BM25 检索、模型注册与凭据、Agent 发布/公开访问/四表 Run 存储/会话记忆、统一 Tool 持久化与 Workflow 基础、MCP 传输与网络策略、生成 Artifact 与资源文件夹、企业身份、治理与邀请、技能与内建工具、上海时区、视觉模型、公告、文档引用模板、Agent 运行时治理、当前时间工具、知识调用预算与查询模式移除、技能控制面与依赖安装、PPT/图片生成技能、用户引用解耦、部署密钥持久化等演进。`202609250001` 建 `platform_secrets`（`app.domain.platform.models.PlatformSecret`）；downgrade 在仍有密钥行时拒绝执行。
 - 根配置：`backend/alembic.ini`（`script_location = alembic`、`prepend_sys_path = .`）与 `backend/Makefile` 目标 `dev`/`migrate`/`worker`/`coverage`。
 

@@ -25,10 +25,8 @@ class WorkspaceAnalyticsTokenSummary(BaseModel):
     input: int
     output: int
     application_total: int
-    graph_total: int
     total: int
     unreported_runs: int
-    unreported_graph_builds: int
     previous_total: int
     change_percent: float | None
 
@@ -46,11 +44,9 @@ class WorkspaceAnalyticsSummary(BaseModel):
 class WorkspaceAnalyticsTrendPoint(BaseModel):
     date: date
     runs: int
-    graph_builds: int
     input_tokens: int
     output_tokens: int
     application_tokens: int
-    graph_tokens: int
     total_tokens: int
 
 

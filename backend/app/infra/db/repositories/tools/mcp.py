@@ -36,7 +36,6 @@ async def list_manageable_mcp_servers(
     db: AsyncSession,
     workspace_id: str,
     actor_id: str,
-    is_workspace_admin: bool,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[McpServer]:
@@ -50,10 +49,9 @@ async def list_manageable_mcp_servers(
         .where(
             McpServerOrm.workspace_id == workspace_id,
             ToolSourceOrm.kind == "mcp",
+            ToolSourceOrm.created_by_user_id == actor_id,
         )
     )
-    if not is_workspace_admin:
-        statement = statement.where(ToolSourceOrm.created_by_user_id == actor_id)
     rows = await db.scalars(
         statement
         .order_by(McpServerOrm.created_at.desc(), McpServerOrm.id.desc())

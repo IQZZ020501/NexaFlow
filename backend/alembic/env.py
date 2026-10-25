@@ -29,17 +29,6 @@ from app.domain.identity.enterprise.models import (  # noqa: F401
     EnterpriseIdentityConnection,
     EnterpriseLoginState,
 )
-from app.domain.knowledge.graph.models import (  # noqa: F401
-    KnowledgeGraphAlias,
-    KnowledgeGraphClaim,
-    KnowledgeGraphClaimEvidence,
-    KnowledgeGraphEntity,
-    KnowledgeGraphMention,
-    KnowledgeGraphReviewItem,
-    KnowledgeGraphRevision,
-    KnowledgeGraphRevisionChange,
-    KnowledgeGraphSchema,
-)
 from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeAsset,
     KnowledgeAttachment,
@@ -48,7 +37,6 @@ from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeDocument,
     KnowledgeDocumentChunk,
     KnowledgeDocumentParentChunk,
-    KnowledgeDocumentReference,
     KnowledgeEvaluationCase,
     KnowledgeEvaluationExpectation,
     KnowledgeEvaluationResult,

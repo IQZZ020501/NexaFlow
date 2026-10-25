@@ -27,10 +27,6 @@ from app.domain.knowledge.documents.qa_import import (
     extract_qa_rows,
     qa_rows_to_markdown,
 )
-from app.domain.knowledge.documents.references import (
-    prepare_document_reference_rebuild,
-    rebuild_document_references,
-)
 from app.domain.knowledge.service import (
     get_knowledge_model,
     knowledge_document_path,
@@ -51,22 +47,16 @@ from app.entities.knowledge import (
     DOCUMENT_PARSE_QUEUED_STATUS,
     DOCUMENT_PARSED_STATUS,
     DOCUMENT_STAGED_META_KEY,
-    GRAPH_RESUME_REVISION_ID_OPTION,
-    GRAPH_RETRY_ALL,
-    GRAPH_RETRY_MODE_OPTION,
-    GRAPH_RETRY_UNFINISHED,
+    KNOWLEDGE_TASK_TYPES,
     TASK_CANCELLED_STATUS,
     TASK_CANCELLING_STATUS,
     TASK_EVALUATE,
     TASK_FAILED_STATUS,
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     TASK_INDEX,
     TASK_PARSE,
     TASK_QUEUED_STATUS,
     TASK_REBUILD_INDEX,
     TASK_RUNNING_STATUS,
-    TASK_SUCCEEDED_STATUS,
     KnowledgeAsset,
     KnowledgeBase,
     KnowledgeDocument,
@@ -74,9 +64,7 @@ from app.entities.knowledge import (
     KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
-from app.entities.knowledge.graph import GRAPH_REVISION_FAILED
 from app.infra.config.settings import Settings
-from app.infra.db.repositories.knowledge import graph as graph_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.observability.logger import get_logger
 from app.schemas.knowledge import (
@@ -409,11 +397,6 @@ async def replace_document_chunks(
         document.id,
     )
     vector_ids = [chunk.vector_id for chunk in existing_chunks if chunk.vector_id]
-    await prepare_document_reference_rebuild(
-        db,
-        knowledge_base,
-        document.id,
-    )
     stale_object_keys = await knowledge_base_repository.delete_document_assets(
         db,
         document.id,
@@ -556,12 +539,6 @@ async def replace_document_chunks(
             assets,
             chunk_asset_links,
         )
-        await rebuild_document_references(
-            db,
-            knowledge_base,
-            document,
-            children,
-        )
     except Exception:
         for object_key in written_object_keys:
             storage.delete(object_key)
@@ -592,25 +569,8 @@ async def create_knowledge_task(
         task_type,
         document_id,
     )
-    follows_running_graph = (
-        conflict is not None
-        and task_type == TASK_GRAPH_REBUILD
-        and conflict.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
-        and conflict.status == TASK_RUNNING_STATUS
-        and task_options.get("follower_of_task_id") == conflict.id
-    )
-    if conflict is not None and not follows_running_graph:
+    if conflict is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
-    if (
-        task_type == TASK_INDEX
-        and document is not None
-        and (document.meta or {}).get("import_mode") == "graph"
-    ):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Graph import documents do not use the chunk vector index.",
-        )
-
     if task_type in {TASK_INDEX, TASK_REBUILD_INDEX}:
         had_embedding_model = knowledge_base.embedding_model_id is not None
         embedding_model = await resolve_embedding_model(db, knowledge_base)
@@ -649,7 +609,6 @@ async def create_knowledge_task(
                 knowledge_base,
                 statuses={CHUNK_INDEXED_STATUS},
             )
-            if chunk.kind != "graph_record"
         ]
         if not chunks:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Knowledge base has no indexed chunks.")
@@ -661,54 +620,6 @@ async def create_knowledge_task(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Evaluation task has no cases.",
             )
-    elif task_type == TASK_GRAPH_SYNC:
-        if not knowledge_base.graph_enabled:
-            raise HTTPException(status.HTTP_409_CONFLICT, "Graph RAG is disabled.")
-        changed_document_ids = list(
-            dict.fromkeys(
-                str(item)
-                for item in task_options.get("changed_document_ids", [])
-                if str(item)
-            )
-        )
-        if not changed_document_ids and not isinstance(
-            task_options.get("review_decision"),
-            dict,
-        ):
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Graph sync requires changed documents.",
-            )
-        if document is not None and document.status != DOCUMENT_INDEXED_STATUS:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "Document must be indexed before graph sync.",
-            )
-        total_items = len(
-            await knowledge_base_repository.list_chunks_for_documents(
-                db,
-                knowledge_base,
-                set(changed_document_ids),
-            )
-        )
-        task_options = {
-            **task_options,
-            "changed_document_ids": changed_document_ids,
-        }
-    elif task_type == TASK_GRAPH_REBUILD:
-        if not knowledge_base.graph_enabled:
-            raise HTTPException(status.HTTP_409_CONFLICT, "Graph RAG is disabled.")
-        chunks = await knowledge_base_repository.list_indexable_chunks(
-            db,
-            knowledge_base,
-            statuses={CHUNK_INDEXED_STATUS},
-        )
-        if not chunks and knowledge_base.active_graph_revision_id is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Knowledge base has no indexed chunks.",
-            )
-        total_items = len(chunks)
     else:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid knowledge task.")
 
@@ -751,28 +662,8 @@ async def get_conflicting_open_task(
     task_type: str,
     document_id: str | None,
 ) -> KnowledgeTask | None:
-    if task_type in {TASK_REBUILD_INDEX, TASK_EVALUATE, TASK_GRAPH_REBUILD}:
+    if task_type in {TASK_REBUILD_INDEX, TASK_EVALUATE}:
         return await knowledge_base_repository.get_open_knowledge_base_task(db, knowledge_base)
-    if task_type == TASK_GRAPH_SYNC:
-        queued_graph = await knowledge_base_repository.get_queued_graph_sync(
-            db,
-            knowledge_base,
-        ) or await knowledge_base_repository.get_queued_graph_rebuild(
-            db,
-            knowledge_base,
-        )
-        if queued_graph is not None:
-            return queued_graph
-        for blocking_task_type in (TASK_REBUILD_INDEX, TASK_EVALUATE):
-            blocking_task = await knowledge_base_repository.get_open_knowledge_task(
-                db,
-                knowledge_base,
-                blocking_task_type,
-                None,
-            )
-            if blocking_task is not None:
-                return blocking_task
-        return None
     if document_id is None:
         return await knowledge_base_repository.get_open_knowledge_task(
             db,
@@ -790,7 +681,6 @@ async def get_conflicting_open_task(
     for blocking_task_type in (
         TASK_REBUILD_INDEX,
         TASK_EVALUATE,
-        TASK_GRAPH_REBUILD,
     ):
         blocking_task = await knowledge_base_repository.get_open_knowledge_task(
             db,
@@ -801,119 +691,6 @@ async def get_conflicting_open_task(
         if blocking_task is not None:
             return blocking_task
     return None
-
-
-async def enqueue_graph_sync(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    actor: User,
-    changed_document_ids: list[str],
-    *,
-    options: dict[str, Any] | None = None,
-) -> KnowledgeTask:
-    locked = await knowledge_base_repository.lock_knowledge_base(db, knowledge_base)
-    if locked is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
-    queued = await knowledge_base_repository.get_queued_graph_sync(db, locked)
-    if queued is not None:
-        queued_options = queued.options or {}
-        incoming_options = options or {}
-        queued.options = {
-            **queued_options,
-            **incoming_options,
-            "changed_document_ids": sorted(
-                {
-                    *queued_options.get("changed_document_ids", []),
-                    *changed_document_ids,
-                }
-            ),
-        }
-        structured_document_ids = {
-            *queued_options.get("structured_document_ids", []),
-            *incoming_options.get("structured_document_ids", []),
-        }
-        if structured_document_ids:
-            queued.options["structured_document_ids"] = sorted(
-                structured_document_ids
-            )
-        await knowledge_base_repository.save_knowledge_task(db, queued)
-        await db.commit()
-        return await knowledge_base_repository.refresh_knowledge_task(db, queued)
-    queued_rebuild = await knowledge_base_repository.get_queued_graph_rebuild(
-        db,
-        locked,
-    )
-    if queued_rebuild is not None:
-        return queued_rebuild
-    response = await create_knowledge_task(
-        db,
-        locked,
-        None,
-        TASK_GRAPH_SYNC,
-        actor,
-        options={
-            **(options or {}),
-            "changed_document_ids": sorted(set(changed_document_ids)),
-        },
-    )
-    task = await knowledge_base_repository.get_knowledge_task_by_id(db, response.id)
-    assert task is not None
-    return task
-
-
-async def enqueue_graph_rebuild(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    actor: User,
-    *,
-    follow_running: bool = True,
-) -> KnowledgeTask:
-    locked = await knowledge_base_repository.lock_knowledge_base(
-        db,
-        knowledge_base,
-    )
-    if locked is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge base not found.")
-    queued = await knowledge_base_repository.get_queued_graph_rebuild(
-        db,
-        locked,
-    )
-    queued_sync = await knowledge_base_repository.get_queued_graph_sync(db, locked)
-    if queued is not None:
-        if queued_sync is not None:
-            queued_sync.status = TASK_SUCCEEDED_STATUS
-            queued_sync.last_error = f"Coalesced into graph rebuild {queued.id}."
-            queued_sync.finished_at = utc_now()
-            await knowledge_base_repository.save_knowledge_task(db, queued_sync)
-            await db.commit()
-        return queued
-    running = await knowledge_base_repository.get_running_graph_task(db, locked)
-    if running is not None and not follow_running and running.task_type == TASK_GRAPH_REBUILD:
-        return running
-    if queued_sync is not None:
-        queued_sync.status = TASK_SUCCEEDED_STATUS
-        queued_sync.last_error = "Coalesced into graph rebuild."
-        queued_sync.finished_at = utc_now()
-        await knowledge_base_repository.save_knowledge_task(db, queued_sync)
-    response = await create_knowledge_task(
-        db,
-        locked,
-        None,
-        TASK_GRAPH_REBUILD,
-        actor,
-        options=(
-            {"follower_of_task_id": running.id}
-            if running is not None
-            else {}
-        ),
-    )
-    task = await knowledge_base_repository.get_knowledge_task_by_id(db, response.id)
-    assert task is not None
-    if queued_sync is not None:
-        queued_sync.last_error = f"Coalesced into graph rebuild {task.id}."
-        await knowledge_base_repository.save_knowledge_task(db, queued_sync)
-        await db.commit()
-    return task
 
 
 async def enqueue_parse_knowledge_document(
@@ -964,7 +741,6 @@ async def retry_knowledge_task(
     knowledge_base: KnowledgeBase,
     task_id: str,
     actor: User,
-    retry_mode: str = GRAPH_RETRY_ALL,
 ) -> KnowledgeTaskResponse:
     knowledge_base = await knowledge_base_repository.lock_knowledge_base(
         db,
@@ -976,6 +752,8 @@ async def retry_knowledge_task(
     task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
     if task is None or task.workspace_id != knowledge_base.workspace_id or task.knowledge_base_id != knowledge_base.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge task not found.")
+    if task.task_type not in KNOWLEDGE_TASK_TYPES:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Invalid knowledge task.")
     if task.status not in {TASK_FAILED_STATUS, TASK_CANCELLED_STATUS}:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -986,41 +764,7 @@ async def retry_knowledge_task(
     if await get_conflicting_open_task(db, knowledge_base, task.task_type, task.document_id) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
 
-    if retry_mode not in {GRAPH_RETRY_ALL, GRAPH_RETRY_UNFINISHED}:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown retry mode.")
-    is_graph_task = task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}
-    if retry_mode == GRAPH_RETRY_UNFINISHED:
-        if not is_graph_task:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "Only graph tasks can retry unfinished chunks.",
-            )
-        if not 0 < task.processed_items < task.total_items:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "No unfinished graph chunks are available to retry.",
-            )
-        revision = await graph_repository.get_latest_revision(db, knowledge_base)
-        if (
-            revision is None
-            or revision.status != GRAPH_REVISION_FAILED
-            or str((revision.stats_json or {}).get("task_id") or "") != task.id
-        ):
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "The graph task checkpoint is no longer available; retry all chunks.",
-            )
-        task.options = {
-            **(task.options or {}),
-            GRAPH_RETRY_MODE_OPTION: GRAPH_RETRY_UNFINISHED,
-            GRAPH_RESUME_REVISION_ID_OPTION: revision.id,
-        }
-    else:
-        options = dict(task.options or {})
-        options.pop(GRAPH_RETRY_MODE_OPTION, None)
-        options.pop(GRAPH_RESUME_REVISION_ID_OPTION, None)
-        task.options = options
-        task.processed_items = 0
+    task.processed_items = 0
 
     if task.document_id is not None:
         document = await get_knowledge_document(
@@ -1053,7 +797,6 @@ async def retry_knowledge_task(
         {
             "knowledge_base_id": knowledge_base.id,
             "document_id": task.document_id,
-            "retry_mode": retry_mode,
         },
         workspace_id=knowledge_base.workspace_id,
     )

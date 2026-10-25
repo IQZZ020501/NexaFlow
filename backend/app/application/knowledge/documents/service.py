@@ -16,8 +16,6 @@ from app.application.knowledge.evaluation.runner import (
     get_latest_evaluation_summary,
     run_evaluation_task,
 )
-from app.application.knowledge.graph.build import run_graph_build_task
-from app.application.knowledge.graph.service import import_graph_records
 from app.application.knowledge.retrieval.service import (
     query_knowledge_base,
     retrieve_knowledge_base,
@@ -76,8 +74,6 @@ from app.domain.knowledge.tasks.orchestration import (
 )
 from app.entities.identity.user import User
 from app.entities.knowledge import (
-    TASK_GRAPH_REBUILD,
-    TASK_GRAPH_SYNC,
     KnowledgeAsset,
     KnowledgeBase,
     KnowledgeDocument,
@@ -97,10 +93,6 @@ from app.domain.knowledge.tasks.runner import (
 )
 from app.infra.db.session import get_session_factory
 from app.infra.observability.errors import classify_error
-
-GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS = 28_800
-GRAPH_TASK_TIME_LIMIT_SECONDS = 29_100
-
 
 
 async def upload_knowledge_attachment(
@@ -146,33 +138,6 @@ async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
         ) from exc
 
 
-async def _dispatch_queued_document_graph_task(
-    db: AsyncSession,
-    knowledge_base: KnowledgeBase,
-    settings: Settings,
-) -> None:
-    if not knowledge_base.graph_enabled:
-        return
-    task = await knowledge_base_repository.get_queued_graph_sync(
-        db,
-        knowledge_base,
-    ) or await knowledge_base_repository.get_queued_graph_rebuild(
-        db,
-        knowledge_base,
-    )
-    if task is None:
-        return
-    try:
-        await enqueue_knowledge_task(task.id, settings)
-    except Exception as exc:
-        log_error(
-            logger,
-            "Knowledge graph task dispatch deferred after document change.",
-            exc,
-            task_id=task.id,
-        )
-
-
 async def delete_knowledge_document(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -187,7 +152,6 @@ async def delete_knowledge_document(
         actor,
         settings,
     )
-    await _dispatch_queued_document_graph_task(db, knowledge_base, settings)
 
 
 async def set_knowledge_document_active(
@@ -198,7 +162,6 @@ async def set_knowledge_document_active(
     is_active: bool,
     settings: Settings,
 ) -> KnowledgeDocument:
-    changed = document.is_active != is_active
     document = await set_knowledge_document_active_record(
         db,
         knowledge_base,
@@ -206,8 +169,6 @@ async def set_knowledge_document_active(
         actor,
         is_active,
     )
-    if changed:
-        await _dispatch_queued_document_graph_task(db, knowledge_base, settings)
     return document
 
 
@@ -318,7 +279,6 @@ __all__ = [
     "get_knowledge_document",
     "get_knowledge_document_markdown_file",
     "get_latest_evaluation_summary",
-    "import_graph_records",
     "knowledge_document_path",
     "list_evaluation_cases",
     "list_evaluation_runs",
@@ -362,25 +322,16 @@ async def enqueue_knowledge_task(task_id: str, settings: Settings) -> None:
             settings,
             enqueue_knowledge_task,
             evaluation_runner=run_evaluation_task,
-            graph_runner=run_graph_build_task,
         )
         return
 
     from app.infra.queue.celery import publish_task
 
-    async with get_session_factory()() as db:
-        task = await knowledge_base_repository.get_knowledge_task_by_id(db, task_id)
-    soft_time_limit = time_limit = None
-    if task is not None and task.task_type in {TASK_GRAPH_SYNC, TASK_GRAPH_REBUILD}:
-        soft_time_limit = GRAPH_TASK_SOFT_TIME_LIMIT_SECONDS
-        time_limit = GRAPH_TASK_TIME_LIMIT_SECONDS
     try:
         await publish_task(
             "app.knowledge.run_task",
             (task_id,),
             settings=settings,
-            soft_time_limit=soft_time_limit,
-            time_limit=time_limit,
         )
     except Exception as exc:
         log_error(

@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -599,7 +600,11 @@ async def assert_follow_up_queue():
 
 async def assert_context_compaction_and_hooks():
     model = ScriptedModel(
-        [answer_message("Goal: complete the task. Retain constraints.")]
+        [answer_message(json.dumps({
+            "goals": ["Complete the task"], "user_constraints": ["Retain constraints"],
+            "decisions": [], "files": [], "pending_work": [],
+            "completed_work": [], "important_results": [],
+        })) for _ in range(10)]
     )
     messages = [
         SystemMessage(content="Trusted system rules"),
@@ -616,7 +621,7 @@ async def assert_context_compaction_and_hooks():
     manager = AgentContextManager(model, 4096)
     compacted, usage = await manager.prepare(messages, [])
     assert compacted[0] == messages[0]
-    assert usage["compaction"]["model_calls"] == 1
+    assert usage["compaction"]["model_calls"] == len(model.requests)
     assert messages[1].content.startswith("Original goal")
     assert manager.tokens(compacted, []) < manager.tokens(messages, [])
     assert any(
@@ -931,6 +936,13 @@ def assert_session_input_api_isolation():
 
 
 def main():
+    from tests.agents.result_recovery import (
+        assert_retained_mcp_results,
+        assert_tool_result_migration,
+    )
+
+    asyncio.run(assert_retained_mcp_results())
+    asyncio.run(assert_tool_result_migration())
     asyncio.run(assert_capabilities_and_lazy_skills())
     asyncio.run(assert_skill_file_reads_and_revocation())
     asyncio.run(assert_loading_script_skill_activates_authorized_runner())

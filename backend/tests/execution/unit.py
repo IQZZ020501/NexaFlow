@@ -1249,9 +1249,18 @@ async def assert_stdio_dispatch():
             "mcp": {"content": [], "structuredContent": {"big": "中" * 21000}},
         }
         result = await mcp.call_mcp_tool(connection, settings(), "echo", {})
+        assert result.structured_content == {"big": "中" * 21000}
+        assert result.meta is None
+        # The transport preserves complete data for the application ledger;
+        # only the model-facing projection is reduced to 24 KiB.
+        platform.execute.return_value = {
+            "ok": True,
+            "mcp": {"content": [], "structuredContent": {"big": "x" * mcp.MAX_MCP_STORED_RESULT_BYTES}},
+        }
+        result = await mcp.call_mcp_tool(connection, settings(), "echo", {})
         assert result.structured_content is None
-        assert result.meta == {"nexaflow/truncated": True}
-        assert "Result truncated from" in result.content[0]["text"]
+        assert result.meta["nexaflow/full_result_available"] is False
+        assert "full result was not saved" in result.content[0]["text"]
         assert (
             len(json.dumps(result.payload(), ensure_ascii=False).encode())
             <= mcp.MAX_MCP_RESULT_BYTES
