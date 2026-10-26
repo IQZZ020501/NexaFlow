@@ -136,6 +136,7 @@ import {
   documentStatusDotClassName,
   documentStatusLabel,
   formatBytes,
+  taskDurationLabel,
   taskStatusDotClassName,
   taskStatusLabel,
   taskTypeLabel,
@@ -465,6 +466,11 @@ function KnowledgeBasePageContent({
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
+  )
+  const [knowledgeTaskNow, setKnowledgeTaskNow] = React.useState(Date.now)
+  const documentsById = React.useMemo(
+    () => new Map(documents.map((document) => [document.id, document])),
+    [documents]
   )
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
     string[]
@@ -843,6 +849,7 @@ function KnowledgeBasePageContent({
           selectedWorkspaceId,
           selectedKnowledgeBaseId
         )
+        setKnowledgeTaskNow(Date.now())
         setKnowledgeTasks(tasks)
         setSelectedKnowledgeTaskIds((current) =>
           current.filter((taskId) =>
@@ -922,6 +929,23 @@ function KnowledgeBasePageContent({
   const shouldPollTasks =
     (activeDetailTab === "tasks" && hasProcessingTasks) ||
     activeRebuildIndexTask !== undefined
+  const hasRunningTaskDuration =
+    activeDetailTab === "tasks" &&
+    visibleKnowledgeTasks.some(
+      (task) =>
+        task.started_at &&
+        (task.status === "running" || task.status === "cancelling")
+    )
+
+  React.useEffect(() => {
+    if (!hasRunningTaskDuration) return
+
+    const timer = window.setInterval(
+      () => setKnowledgeTaskNow(Date.now()),
+      1000
+    )
+    return () => window.clearInterval(timer)
+  }, [hasRunningTaskDuration])
 
   React.useEffect(() => {
     if (!hasProcessingDocuments && !shouldPollTasks) {
@@ -1695,6 +1719,41 @@ function KnowledgeBasePageContent({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+    )
+  }
+
+  function renderKnowledgeTaskDocument(task: KnowledgeTask) {
+    if (
+      !task.document_id &&
+      (task.task_type === "rebuild_index" || task.task_type === "evaluate")
+    ) {
+      return <span className="text-muted-foreground">{t("整个知识库")}</span>
+    }
+
+    const document = task.document_id
+      ? documentsById.get(task.document_id)
+      : undefined
+    if (!document) {
+      return (
+        <span className="text-muted-foreground">
+          {isDocumentLoading ? "—" : t("文档不可用")}
+        </span>
+      )
+    }
+
+    return (
+      <button
+        type="button"
+        className="block max-w-full truncate text-left outline-none hover:text-primary focus-visible:underline"
+        title={document.filename}
+        onClick={() =>
+          router.push(
+            `/app/knowledge/${task.knowledge_base_id}/documents/${document.id}`
+          )
+        }
+      >
+        {document.filename}
+      </button>
     )
   }
 
@@ -2879,6 +2938,14 @@ function KnowledgeBasePageContent({
                                     </span>
                                   </p>
                                   <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                    <div className="flex w-full min-w-0 items-center gap-1">
+                                      <dt className="shrink-0">
+                                        {t("关联文档")}
+                                      </dt>
+                                      <dd className="min-w-0 flex-1 text-foreground">
+                                        {renderKnowledgeTaskDocument(task)}
+                                      </dd>
+                                    </div>
                                     <div className="flex items-center gap-1">
                                       <dt>{t("进度")}</dt>
                                       <dd className="font-semibold text-foreground">
@@ -2890,6 +2957,16 @@ function KnowledgeBasePageContent({
                                       <dt>{t("尝试次数")}</dt>
                                       <dd className="font-semibold text-foreground">
                                         {task.attempts}/{task.max_attempts}
+                                      </dd>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <dt>{t("执行耗时")}</dt>
+                                      <dd className="text-foreground tabular-nums">
+                                        {taskDurationLabel(
+                                          task,
+                                          knowledgeTaskNow,
+                                          t
+                                        )}
                                       </dd>
                                     </div>
                                     <div className="flex w-full items-center gap-1">
@@ -2924,8 +3001,8 @@ function KnowledgeBasePageContent({
                       )}
                     </ul>
                   ) : null}
-                  <div className="min-w-[920px] max-md:hidden">
-                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                  <div className="min-w-[1120px] max-md:hidden">
+                    <div className="grid grid-cols-[44px_96px_minmax(180px,1fr)_104px_104px_96px_208px_136px_64px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
                       <label className="flex items-center justify-center">
                         <input
                           ref={selectAllKnowledgeTasksRef}
@@ -2944,10 +3021,12 @@ function KnowledgeBasePageContent({
                         />
                       </label>
                       <span>{t("类型")}</span>
+                      <span>{t("关联文档")}</span>
                       <span>{t("状态")}</span>
                       <span>{t("进度")}</span>
                       <span>{t("尝试次数")}</span>
                       <span>{t("更新时间 / 错误")}</span>
+                      <span>{t("执行耗时")}</span>
                       <span className="text-center">{t("操作")}</span>
                     </div>
                     {isKnowledgeTaskLoading ? (
@@ -2958,7 +3037,7 @@ function KnowledgeBasePageContent({
                       visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
-                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm last:border-b-0"
+                          className="grid min-h-16 grid-cols-[44px_96px_minmax(180px,1fr)_104px_104px_96px_208px_136px_64px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
                           <label className="flex items-center justify-center">
                             <input
@@ -2988,6 +3067,9 @@ function KnowledgeBasePageContent({
                           <span className="font-medium">
                             {taskTypeLabel(task.task_type, t)}
                           </span>
+                          <span className="min-w-0 pr-4">
+                            {renderKnowledgeTaskDocument(task)}
+                          </span>
                           <span className="flex items-center gap-2">
                             <span
                               className={cn(
@@ -3012,6 +3094,9 @@ function KnowledgeBasePageContent({
                                 {task.last_error}
                               </span>
                             ) : null}
+                          </span>
+                          <span className="tabular-nums">
+                            {taskDurationLabel(task, knowledgeTaskNow, t)}
                           </span>
                           <span className="flex items-center justify-center">
                             {renderKnowledgeTaskActionMenu(task)}

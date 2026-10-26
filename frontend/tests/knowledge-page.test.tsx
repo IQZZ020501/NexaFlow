@@ -1,5 +1,5 @@
 /* @jsxImportSource react */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import {
   cleanup,
   fireEvent,
@@ -22,6 +22,7 @@ import {
   knowledgeBaseDetailPath,
   parseKnowledgeBaseDetailTab,
 } from "@/lib/knowledge-views"
+import { PHONE_LIST_QUERY } from "@/lib/use-media-query"
 import {
   jsonResponse,
   makeSession,
@@ -86,6 +87,7 @@ mockNextNavigation({
 
 let fetchHandler: FetchHandler = () => jsonResponse([])
 const originalFetch = globalThis.fetch
+const originalMatchMedia = window.matchMedia
 function installFetchStub() {
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
@@ -143,6 +145,8 @@ async function respondToConfirm(label: string) {
 
 afterEach(() => {
   cleanup()
+  setSystemTime()
+  window.matchMedia = originalMatchMedia
   notifications.length = 0
   pushes.length = 0
   replaces.length = 0
@@ -2319,6 +2323,91 @@ describe("KnowledgeBasePage documents tab", () => {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage tasks tab", () => {
+  test.each([false, true])(
+    "shows linked documents, unavailable documents and execution time (phone: %s)",
+    async (phone) => {
+      window.matchMedia = (query) => ({
+        matches: phone && query === PHONE_LIST_QUERY,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => false,
+      })
+      const filename = "法律条文第一册及相关司法解释汇编.pdf"
+      const tasks = [
+        makeTask({
+          started_at: "2026-01-01T00:00:00Z",
+          finished_at: "2026-01-01T00:01:23Z",
+        }),
+        makeTask({ id: "missing-task", document_id: "deleted-document" }),
+        makeTask({ id: "detached-task", document_id: null }),
+        makeTask({
+          id: "whole-base-task",
+          task_type: "rebuild_index",
+          document_id: null,
+        }),
+      ]
+      fetchHandler = (url) => {
+        if (url.includes("/models")) return jsonResponse(models)
+        if (url.includes("/knowledge-bases?"))
+          return jsonResponse([makeKnowledgeBase()])
+        if (url.includes("/documents"))
+          return jsonResponse([makeDocument({ filename })])
+        if (url.includes("/tasks")) return jsonResponse(tasks)
+        return jsonResponse([])
+      }
+      routeParams.id = KB_ID
+      const { container } = renderPage(
+        <KnowledgeBasePage initialDetailTab="tasks" />
+      )
+      const view = within(phone ? await screen.findByRole("list") : container)
+      const documentButton = await view.findByRole("button", { name: filename })
+
+      expect(documentButton.getAttribute("title")).toBe(filename)
+      fireEvent.click(documentButton)
+      expect(pushes).toContain(`/app/knowledge/${KB_ID}/documents/doc-1`)
+      expect(view.getByText("整个知识库")).toBeTruthy()
+      expect(view.getAllByText("文档不可用")).toHaveLength(2)
+      expect(view.getByText("1 分 23 秒")).toBeTruthy()
+    }
+  )
+
+  test("updates running duration each second and freezes it on completion", async () => {
+    const now = new Date("2026-01-01T00:00:12Z")
+    setSystemTime(now)
+    let task = makeTask({
+      status: "running",
+      started_at: "2026-01-01T00:00:00Z",
+    })
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([makeDocument()])
+      if (url.includes("/tasks")) return jsonResponse([task])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage initialDetailTab="tasks" />)
+    await screen.findByText("12 秒")
+
+    setSystemTime(new Date(now.getTime() + 1000))
+    await screen.findByText("13 秒", {}, { timeout: 2000 })
+
+    task = makeTask({
+      started_at: "2026-01-01T00:00:00Z",
+      finished_at: "2026-01-01T00:00:13Z",
+    })
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }))
+    await screen.findByText("成功")
+    setSystemTime(new Date(now.getTime() + 60_000))
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    expect(screen.getByText("13 秒")).toBeTruthy()
+  })
+
   test("polls running task progress without a processing document", async () => {
     let taskFetches = 0
     fetchHandler = (url) => {

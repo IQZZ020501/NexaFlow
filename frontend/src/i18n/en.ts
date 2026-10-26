@@ -1032,6 +1032,12 @@ export const en = {
   "先确认分段效果，点击开始导入后才会写入知识库。":
     "Review the chunks first; files are added to the knowledge base only after you start the import.",
   文档: "Documents",
+  关联文档: "Related document",
+  整个知识库: "Entire knowledge base",
+  文档不可用: "Document unavailable",
+  执行耗时: "Execution time",
+  "{minutes} 分 {seconds} 秒": "{minutes} min {seconds} s",
+  "{hours} 小时 {minutes} 分": "{hours} h {minutes} min",
   文档已停用: "Document deactivated",
   文档已删除: "Document deleted",
   文档已启用: "Document activated",
