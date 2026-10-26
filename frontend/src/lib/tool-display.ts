@@ -77,6 +77,7 @@ export function withArtifactDownloadLinksInContent(content: string) {
 }
 
 export function builtinToolDisplayName(functionName: string, t: TFunction) {
+  if (functionName === "search_knowledge") return t("知识库检索")
   if (functionName === "bash") return t("命令行")
   if (functionName === "inline_python") return t("Python 代码")
   if (functionName === "current_time") return t("当前时间")

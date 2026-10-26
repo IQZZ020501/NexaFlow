@@ -1461,6 +1461,7 @@ export const en = {
   未提供问题: "No question provided",
   来源: "Source",
   回答来源: "Answer sources",
+  "回答来源（{count}）": "Answer sources ({count})",
   "片段 {value}": "Segment {value}",
   "查看公开访问、API 和控制台产生的运行记录。":
     "Review runs from public access, API, and the console.",
