@@ -164,12 +164,12 @@ export function TopBar() {
               className="flex size-10 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
             >
               <Image
-                src="/NexaFlow-logo.png"
+                src="/NexaFlow-icon.svg"
                 alt="NexaFlow"
                 width={32}
                 height={32}
                 priority
-                className="size-8 rounded-full dark:invert"
+                className="size-8 dark:invert"
               />
             </Link>
             <span

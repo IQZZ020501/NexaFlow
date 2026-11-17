@@ -59,7 +59,7 @@ describe("LoginScreen submission", () => {
     expect(artwork).toHaveLength(2)
     expect(
       artwork.every(
-        (image) => image.getAttribute("src") === "/NexaFlow-log.png"
+        (image) => image.getAttribute("src") === "/NexaFlow-logo.svg"
       )
     ).toBe(true)
   })
