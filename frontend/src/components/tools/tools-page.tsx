@@ -1340,13 +1340,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       >
         <DialogContent
           className={cn(
-            "max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto",
-            skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl"
+            "flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden p-0",
+            skillMarkdown ? "max-w-4xl" : "max-w-2xl"
           )}
         >
           <IconButton
             label={t("关闭")}
-            className="absolute top-3 right-3 z-20 bg-background/90 shadow-sm backdrop-blur"
+            className="absolute top-4 right-4 z-20 text-muted-foreground hover:text-foreground sm:top-5 sm:right-5"
             onClick={() => {
               setDetailTarget(null)
               setDetailTool(null)
@@ -1355,7 +1355,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           >
             <XIcon />
           </IconButton>
-          <DialogHeader className="pr-10">
+          <DialogHeader className="min-w-0 shrink-0 border-b bg-muted/20 px-5 py-5 pr-16 sm:px-8 sm:py-6 sm:pr-20">
             {skillMarkdown ? (
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/70">
@@ -1364,18 +1364,18 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                     className="size-6"
                   />
                 </span>
-                <div className="min-w-0">
-                  <DialogTitle>
+                <div className="min-w-0 flex-1">
+                  <DialogTitle className="text-lg leading-7">
                     {detailTool
                       ? displayToolName(detailTool)
                       : detailTarget
                         ? displayToolName(detailTarget)
                         : t("工具详情")}{" "}
-                    <span className="font-normal text-muted-foreground">
+                    <span className="text-sm font-normal text-muted-foreground">
                       {t("Skill")}
                     </span>
                   </DialogTitle>
-                  <DialogDescription className="mt-1">
+                  <DialogDescription className="mt-1 leading-6 [overflow-wrap:anywhere]">
                     {detailTool
                       ? displayToolDescription(detailTool)
                       : detailTarget
@@ -1403,67 +1403,76 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
               </>
             )}
           </DialogHeader>
-          {isDetailLoading ? (
-            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <LoaderCircleIcon className="size-4 animate-spin" />
-              {t("正在加载")}
-            </div>
-          ) : detailError && detailTarget ? (
-            <div
-              role="alert"
-              className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center"
-            >
-              <p className="font-medium">{t("工具加载失败")}</p>
-              <p className="max-w-sm text-xs text-muted-foreground">
-                {detailError}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void loadDetail(detailTarget)}
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-6 sm:px-8 sm:py-8">
+            {isDetailLoading ? (
+              <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <LoaderCircleIcon className="size-4 animate-spin" />
+                {t("正在加载")}
+              </div>
+            ) : detailError && detailTarget ? (
+              <div
+                role="alert"
+                className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center"
               >
-                <RefreshCwIcon />
-                {t("重试")}
-              </Button>
-            </div>
-          ) : detailTool && skillMarkdown ? (
-            <div className="rounded-xl border bg-muted/20 p-4">
-              <MarkdownContent content={skillMarkdown} />
-            </div>
-          ) : detailTool ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Badge>{t(kindLabel(detailTool.kind))}</Badge>
-                <Badge variant="outline">
-                  {toolSourceDisplayName(detailTool.source, t)}
-                </Badge>
-                <Badge variant="outline">
-                  {detailTool.permission
-                    ? t(permissionLabel(detailTool.permission))
-                    : t("无权限")}
-                </Badge>
-              </div>
-              <div>
-                <h3 className="mb-2 text-sm font-medium">{t("输入 Schema")}</h3>
-                <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
-                  {JSON.stringify(detailTool.input_schema ?? {}, null, 2)}
-                </pre>
-              </div>
-              <div>
-                <h3 className="mb-2 text-sm font-medium">{t("输出 Schema")}</h3>
-                <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
-                  {JSON.stringify(detailTool.output_schema ?? {}, null, 2)}
-                </pre>
-              </div>
-              {!detailTool.can_manage ? (
-                <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
-                  {t(
-                    "只显示已发布的脱敏详情；草稿和代码仅所有者或管理员可见。"
-                  )}
+                <p className="font-medium">{t("工具加载失败")}</p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                  {detailError}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadDetail(detailTarget)}
+                >
+                  <RefreshCwIcon />
+                  {t("重试")}
+                </Button>
+              </div>
+            ) : detailTool && skillMarkdown ? (
+              <article className="mx-auto max-w-[76ch] min-w-0">
+                <MarkdownContent
+                  content={skillMarkdown}
+                  className="leading-7 [overflow-wrap:anywhere] [&_h1]:mb-5 [&_h1]:text-xl [&_h1]:leading-8 [&_h2]:mt-8 [&_h2]:text-base [&_h2]:leading-7 [&_h2:first-child]:mt-0 [&_h3]:mt-6 [&_li]:my-1.5 [&_p]:my-3"
+                />
+              </article>
+            ) : detailTool ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Badge>{t(kindLabel(detailTool.kind))}</Badge>
+                  <Badge variant="outline">
+                    {toolSourceDisplayName(detailTool.source, t)}
+                  </Badge>
+                  <Badge variant="outline">
+                    {detailTool.permission
+                      ? t(permissionLabel(detailTool.permission))
+                      : t("无权限")}
+                  </Badge>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-medium">
+                    {t("输入 Schema")}
+                  </h3>
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                    {JSON.stringify(detailTool.input_schema ?? {}, null, 2)}
+                  </pre>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-medium">
+                    {t("输出 Schema")}
+                  </h3>
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                    {JSON.stringify(detailTool.output_schema ?? {}, null, 2)}
+                  </pre>
+                </div>
+                {!detailTool.can_manage ? (
+                  <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
+                    {t(
+                      "只显示已发布的脱敏详情；草稿和代码仅所有者或管理员可见。"
+                    )}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </DialogContent>
       </Dialog>
       {confirmDialog}
