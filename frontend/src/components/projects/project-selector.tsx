@@ -2,10 +2,18 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { CheckIcon, ChevronDownIcon, FolderIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { useLanguage } from "@/contexts/language-provider"
 import { getErrorMessage } from "@/lib/errors"
 import { listProjects, type AgentProject } from "@/lib/api/projects"
+import { cn } from "@/lib/utils"
 
 export function ProjectSelector({
   token,
@@ -25,6 +33,11 @@ export function ProjectSelector({
   const { t } = useLanguage()
   const [projects, setProjects] = React.useState<AgentProject[]>([])
   const [error, setError] = React.useState<string | null>(null)
+  const projectName = value
+    ? (projects.find((project) => project.id === value)?.name ??
+      boundName ??
+      value)
+    : t("未绑定项目")
   React.useEffect(() => {
     if (disabled) return
     let active = true
@@ -58,19 +71,63 @@ export function ProjectSelector({
             : t("未绑定项目")}
         </span>
       ) : (
-        <select
-          aria-label={t("选择项目")}
-          value={value ?? ""}
-          onChange={(e) => onChange(e.target.value || null)}
-          className="h-8 max-w-48 min-w-0 rounded-md border bg-background px-2 text-xs"
-        >
-          <option value="">{t("未绑定项目")}</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              aria-label={t("选择项目")}
+              title={projectName}
+              className={cn(
+                "max-w-36 min-w-0 shrink gap-1.5 rounded-md bg-muted/50 px-2 font-normal text-muted-foreground hover:text-foreground sm:max-w-48",
+                value && "text-foreground"
+              )}
+            >
+              <FolderIcon aria-hidden="true" className="size-3.5" />
+              <span className="truncate">{projectName}</span>
+              <ChevronDownIcon
+                aria-hidden="true"
+                className="size-3.5 opacity-60"
+              />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            side="top"
+            sideOffset={6}
+            aria-label={t("选择项目")}
+            className="max-h-[min(16rem,var(--radix-dropdown-menu-content-available-height))] w-64 min-w-0"
+          >
+            <DropdownMenuItem
+              role="menuitemradio"
+              aria-checked={!value}
+              className={cn("text-muted-foreground", !value && "bg-muted/70")}
+              onSelect={() => onChange(null)}
+            >
+              <span className="min-w-0 flex-1">{t("未绑定项目")}</span>
+              {!value ? (
+                <CheckIcon aria-hidden="true" className="size-3.5" />
+              ) : null}
+            </DropdownMenuItem>
+            {projects.map((project) => (
+              <DropdownMenuItem
+                key={project.id}
+                role="menuitemradio"
+                aria-checked={project.id === value}
+                className={cn(project.id === value && "bg-muted/70")}
+                onSelect={() => onChange(project.id)}
+              >
+                <span className="min-w-0 flex-1 break-words whitespace-normal">
+                  {project.name}
+                </span>
+                {project.id === value ? (
+                  <CheckIcon aria-hidden="true" className="size-3.5" />
+                ) : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       <Button type="button" size="xs" variant="link" asChild>
         <Link href={value ? `/app/projects/${value}` : "/app/projects"}>

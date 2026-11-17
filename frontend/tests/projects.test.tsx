@@ -1,5 +1,6 @@
 /* @jsxImportSource react */
 import { afterEach, expect, test } from "bun:test"
+import { useState } from "react"
 import { ProjectsPage } from "@/components/projects/projects-page"
 import { ProjectSelector } from "@/components/projects/project-selector"
 import { uploadProjectFile } from "@/lib/api/projects"
@@ -60,21 +61,52 @@ test("project overwrite sends its exact base version and private bearer", async 
 test("new conversation selects a project while a bound conversation stays fixed", async () => {
   const selected: Array<string | null> = []
   withFetch(() => jsonResponse([project]))
-  const view = renderPage(
-    <ProjectSelector
-      token="test-token"
-      workspaceId="ws-1"
-      disabled={false}
-      onChange={(id) => {
-        selected.push(id)
-      }}
-    />
-  )
-  await screen.findByRole("option", { name: project.name })
-  fireEvent.change(screen.getByRole("combobox", { name: "选择项目" }), {
-    target: { value: project.id },
+  function Selector() {
+    const [value, setValue] = useState<string | null>(null)
+    return (
+      <ProjectSelector
+        token="test-token"
+        workspaceId="ws-1"
+        value={value}
+        disabled={false}
+        onChange={(id) => {
+          selected.push(id)
+          setValue(id)
+        }}
+      />
+    )
+  }
+  const view = renderPage(<Selector />)
+  fireEvent.keyDown(screen.getByRole("button", { name: "选择项目" }), {
+    key: "ArrowDown",
   })
+  fireEvent.keyDown(
+    await screen.findByRole("menuitemradio", { name: project.name }),
+    { key: "Enter" }
+  )
   expect(selected).toEqual([project.id])
+  expect(screen.queryByRole("menu")).toBeNull()
+  expect(
+    screen.getByRole("button", { name: "选择项目" }).textContent
+  ).toContain(project.name)
+  expect(screen.getByRole("button", { name: "选择项目" }).title).toBe(
+    project.name
+  )
+  expect(screen.getByRole("link").getAttribute("href")).toBe(
+    `/app/projects/${project.id}`
+  )
+  fireEvent.pointerDown(screen.getByRole("button", { name: "选择项目" }))
+  expect(
+    (
+      await screen.findByRole("menuitemradio", { name: project.name })
+    ).getAttribute("aria-checked")
+  ).toBe("true")
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "未绑定项目" }))
+  expect(selected).toEqual([project.id, null])
+  expect(
+    screen.getByRole("button", { name: "选择项目" }).textContent
+  ).toContain("未绑定项目")
+  expect(screen.getByRole("link").getAttribute("href")).toBe("/app/projects")
   view.unmount()
   renderPage(
     <ProjectSelector
@@ -88,7 +120,7 @@ test("new conversation selects a project while a bound conversation stays fixed"
       }}
     />
   )
-  expect(screen.queryByRole("combobox")).toBeNull()
+  expect(screen.queryByRole("button", { name: "选择项目" })).toBeNull()
   expect(screen.getByRole("link").getAttribute("href")).toBe(
     `/app/projects/${project.id}`
   )
