@@ -235,6 +235,53 @@ test("renders worksheet values as text, uses cached formulas, switches sheets an
   expect(container.childElementCount).toBe(0)
 })
 
+test("previews openpyxl workbooks containing charts without modifying the source bytes", async () => {
+  // openpyxl uses the valid default spreadsheetDrawing namespace; ExcelJS's
+  // drawing parser expects the literal xdr: prefix and otherwise fails to load.
+  const bytes = await Bun.file(
+    new URL("./fixtures/openpyxl-chart.xlsx", import.meta.url)
+  ).arrayBuffer()
+  const original = bytes.slice(0)
+  validateOfficeArchive(bytes)
+  const container = document.createElement("div")
+  const viewer = await openSpreadsheet(container, bytes, "Empty")
+  viewer.render({ page: 1, sheet: 0, zoom: 1 })
+  expect(viewer.metadata.sheets).toEqual(["Summary"])
+  expect(container.querySelectorAll("tbody tr")).toHaveLength(3)
+  expect(container.querySelector("tbody tr:nth-child(2) td")?.textContent).toBe(
+    "00123"
+  )
+  expect(
+    container.querySelector("tbody tr:nth-child(2) td:nth-of-type(2)")
+      ?.textContent
+  ).toBe("7")
+  expect(new Uint8Array(bytes)).toEqual(new Uint8Array(original))
+  viewer.destroy()
+})
+
+test("previews cell values in workbooks with images and comments", async () => {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet("Notes")
+  sheet.getCell("A1").value = "00123"
+  sheet.getCell("A1").note = "Source comment"
+  sheet.getCell("B1").value = { formula: "1+2", result: 3 }
+  const imageId = workbook.addImage({
+    base64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDVkAAAAASUVORK5CYII=",
+    extension: "png",
+  })
+  sheet.addImage(imageId, "D1:E2")
+  const bytes = new Uint8Array(await workbook.xlsx.writeBuffer()).buffer
+  const container = document.createElement("div")
+  const viewer = await openSpreadsheet(container, bytes, "Empty")
+  viewer.render({ page: 1, sheet: 0, zoom: 1 })
+  expect(container.querySelector("tbody tr td")?.textContent).toBe("00123")
+  expect(
+    container.querySelector("tbody tr td:nth-of-type(2)")?.textContent
+  ).toBe("3")
+  viewer.destroy()
+})
+
 const file = {
   filename: "page.html",
   download_url: "/api/v1/artifacts/signed-token",
