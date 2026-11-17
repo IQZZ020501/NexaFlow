@@ -174,7 +174,7 @@ def restore_files(files, *, project_role=None):
         ):
             raise ValueError("Invalid conversation file path or content.")
         content = base64.b64decode(encoded, validate=True)
-        if not 0 < len(content) <= MAX_FILE:
+        if not (0 if project_role else 1) <= len(content) <= MAX_FILE:
             raise ValueError("Conversation file exceeds 5 MiB.")
         decoded[path] = content
     if sum(map(len, decoded.values())) > MAX_FILE:
@@ -387,10 +387,10 @@ def execute(command, *, python_binary):
                 descriptor = os.open(project_root / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
                 with os.fdopen(descriptor, "rb") as stream:
                     info = os.fstat(stream.fileno())
-                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 < info.st_size <= MAX_FILE:
-                        raise ValueError("Each project file must be a regular file between 1 byte and 5 MiB.")
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 <= info.st_size <= MAX_FILE:
+                        raise ValueError("Each project file must be a regular file no larger than 5 MiB.")
                     content = stream.read(MAX_FILE + 1)
-                if not 0 < len(content) <= MAX_FILE:
+                if not 0 <= len(content) <= MAX_FILE:
                     raise ValueError("Project file exceeds 5 MiB.")
                 changes.append((relative, content))
             if changes:

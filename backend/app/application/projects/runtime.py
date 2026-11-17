@@ -26,13 +26,31 @@ from app.ports.execution import (
 
 async def _authorized_project(db, run, *, lock=False):
     frozen = run.application_snapshot.get("project")
-    if (
-        not isinstance(frozen, dict)
-        or frozen.get("owner_id") != run.execution_user_id
-        or run.access_source != "console"
-    ):
-        raise ExecutionNotStarted("Project access is unavailable.")
-    actor = await users.get_user_by_id(db, run.execution_user_id)
+    scope = [
+        run.workspace_id,
+        run.agent_id,
+        run.access_source,
+        run.consumer_id,
+        run.conversation_id,
+    ]
+    if not isinstance(frozen, dict) or run.access_source not in {"console", "public"}:
+        raise ExecutionNotStarted("Conversation file access is unavailable.")
+    if frozen.get("conversation_scope"):
+        if (
+            frozen["conversation_scope"] != scope
+            or frozen.get("owner_id") != run.consumer_id
+        ):
+            raise ExecutionNotStarted("Conversation file scope is invalid.")
+        owner_id = run.consumer_id
+    else:
+        # Existing queued console Runs keep their frozen legacy file access.
+        if (
+            run.access_source != "console"
+            or frozen.get("owner_id") != run.execution_user_id
+        ):
+            raise ExecutionNotStarted("Conversation file access is unavailable.")
+        owner_id = run.execution_user_id
+    actor = await users.get_user_by_id(db, owner_id)
     if actor is None or not actor.is_active:
         raise ExecutionNotStarted("Project owner is no longer active.")
     await build_workspace_context(db, actor, run.workspace_id)
@@ -115,7 +133,7 @@ def _manifest(response):
             or not isinstance(item.get("path"), str)
             or not isinstance(item.get("sha256"), str)
             or type(item.get("size_bytes")) is not int
-            or not 0 < item["size_bytes"] <= 5 * 1024 * 1024
+            or not 0 <= item["size_bytes"] <= 5 * 1024 * 1024
             or item.get("deleted") is not False
         ):
             raise ValueError("Project snapshot is invalid.")
@@ -209,6 +227,11 @@ async def save_project_files(
             for change in changes:
                 if change.get("deleted"):
                     conflicts.append({"relative_path": change["path"], "deleted": True})
+                    continue
+                if not change["content"]:
+                    conflicts.append(
+                        {"relative_path": change["path"], "empty_file": True}
+                    )
                     continue
                 digest = hashlib.sha256(change["content"]).hexdigest()
                 filename = f"project-conflict-{digest[:16]}.bin"

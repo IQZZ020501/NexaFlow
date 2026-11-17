@@ -1,8 +1,8 @@
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.domain.agents.models import (
-    AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_RUNNING_STATUSES,
+    AgentRunSnapshot,
     AgentRunState,
 )
 from app.domain.projects.models import AgentProject as ProjectRow
@@ -20,32 +20,9 @@ async def get_project(db, project_id, *, lock=False):
     return mapping.to_entity(AgentProject, row) if row else None
 
 
-async def list_projects(db, workspace_id, owner_id, limit, offset):
-    rows = (
-        await db.scalars(
-            select(ProjectRow)
-            .where(
-                ProjectRow.workspace_id == workspace_id,
-                ProjectRow.created_by_user_id == owner_id,
-            )
-            .order_by(ProjectRow.updated_at.desc(), ProjectRow.id)
-            .limit(limit)
-            .offset(offset)
-        )
-    ).all()
-    return [mapping.to_entity(AgentProject, row) for row in rows]
-
-
 async def save_project(db, project):
     row = await mapping.save(db, ProjectRow, project)
     return mapping.to_entity(AgentProject, row)
-
-
-async def delete_project(db, project):
-    row = await db.get(ProjectRow, project.id)
-    if row:
-        await db.delete(row)
-        await db.flush()
 
 
 async def latest_files(db, project_id):
@@ -89,28 +66,6 @@ async def get_version(db, project_id, version_id):
     return mapping.to_entity(ProjectFileVersion, row) if row else None
 
 
-async def list_versions(db, project_id, path, limit, offset):
-    fields = [
-        getattr(VersionRow, name)
-        for name in ProjectFileVersion.__dataclass_fields__
-        if name != "content"
-    ]
-    rows = (
-        (
-            await db.execute(
-                select(*fields)
-                .where(VersionRow.project_id == project_id, VersionRow.path == path)
-                .order_by(VersionRow.revision.desc())
-                .limit(limit)
-                .offset(offset)
-            )
-        )
-        .mappings()
-        .all()
-    )
-    return [ProjectFileVersion(**dict(row)) for row in rows]
-
-
 async def history_bytes(db, project_id):
     return int(
         await db.scalar(
@@ -150,21 +105,6 @@ async def save_run_state(db, state):
     return mapping.to_entity(ProjectRunState, row)
 
 
-async def has_active_runs(db, project_id):
-    return (
-        await db.scalar(
-            select(StateRow.run_id)
-            .join(AgentRunState, AgentRunState.run_id == StateRow.run_id)
-            .where(
-                StateRow.project_id == project_id,
-                AgentRunState.status.in_(AGENT_RUN_ACTIVE_STATUSES),
-            )
-            .limit(1)
-        )
-        is not None
-    )
-
-
 async def lock_run_writer(db, run_id, worker_task_id, now):
     return (
         await db.scalar(
@@ -180,3 +120,25 @@ async def lock_run_writer(db, run_id, worker_task_id, now):
         )
         is not None
     )
+
+
+async def delete_conversation_files(db, run_ids):
+    snapshots = await db.scalars(
+        select(AgentRunSnapshot.application_snapshot).where(
+            AgentRunSnapshot.run_id.in_(run_ids)
+        )
+    )
+    ids = {
+        payload["project"]["id"]
+        for payload in snapshots
+        if payload.get("project", {}).get("conversation_scope")
+    }
+    if ids:
+        still_referenced = select(StateRow.project_id).where(
+            StateRow.run_id.not_in(run_ids)
+        )
+        await db.execute(
+            delete(ProjectRow).where(
+                ProjectRow.id.in_(ids), ProjectRow.id.not_in(still_referenced)
+            )
+        )

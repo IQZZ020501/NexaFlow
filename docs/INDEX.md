@@ -33,7 +33,7 @@
 | [知识库](KNOWLEDGE.md) | 文档解析、索引、BM25/向量检索与检索评测 |
 | [身份与工作空间](IDENTITY_WORKSPACE.md) | 用户、租户、团队、资源权限与工具目录 |
 | [Skills](SKILLS.md) | 版本化包、渐进加载、脚本、依赖安装与内置指南 |
-| [项目文件](PROJECT_FILES.md) | 私有项目、源文件、工作副本、输出与 Run 绑定 |
+| [对话文件](PROJECT_FILES.md) | 文件夹/ZIP 导入、对话工作文件、版本与交付 |
 | [运行可靠性](RUN_RELIABILITY.md) | 请求幂等、文件身份、资源等待、准入与精确引用 |
 | [执行主机](EXECUTION_HOSTS.md) | 可选多主机配置、固定放置、容量与故障边界 |
 | [可信扩展](EXTENSIONS.md) | 扩展 API、生命周期与部署时组合 |

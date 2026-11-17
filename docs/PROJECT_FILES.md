@@ -1,27 +1,31 @@
-# 私有项目文件
+# 对话文件
 
-项目属于一个 workspace 和一个创建者。只有当前仍可访问该 workspace 的创建者可以管理或读取项目，workspace/global admin 没有额外文件权限。用于直接 Console Agent Run，公开聊天、API 消费者和 Workflow child Run 不继承私有项目。
+控制台和公开 Agent 对话都支持直接上传文件、文件夹或 ZIP。上传后直接提问，无须创建项目或选择绑定；独立项目页面和管理 API 已移除。浏览器文件夹选择和目录拖入保留相对路径，单独选择的 ZIP 在导入时展开并保留内部路径；文件夹和 ZIP 内嵌的 ZIP 作为原始文件保留。普通文档仍提供有界文本摘录，原始文件同时进入对话文件树，Agent 可按需读取、修改和运行脚本。
 
-应用列表和新 Agent 对话提供“项目文件”入口。新对话可选择项目，已有对话保留原绑定，切换项目需要新建对话。`/app/projects` 与 `/app/projects/[id]` 支持创建、重命名、上传、文件重命名、删除和历史下载；存在活动 Run 时拒绝删除整个项目。
+## 保存与隔离
 
-| 内容 | guest 路径 | 持久化 |
-| --- | --- | --- |
-| 源资料 | `/project/sources/<相对路径>` | Run 冻结版本，root 所有、只读；模型不能重命名其父目录 |
-| 工作文件、脚本 | `/workspace/project/<相对路径>` | 每次 bash 后按 Run 的版本游标与项目当前版本做原子 CAS 保存 |
-| 交付文件 | `/workspace/outputs/<相对路径>` | 原有不可变 artifact、检查记录与授权下载 |
+文件树按 workspace、Agent、访问来源、当前使用者和 conversation 隔离。公开对话的文件属于聊天用户，模型、工具和 Skill 仍按发布者的执行授权运行，两种身份分别校验。API 消费者与 Workflow child Run 不自动继承交互对话文件。
 
-项目最多 64 个有效文件、64 MiB；单文件 1 字节至 5 MiB；历史最多 256 MiB、路径索引最多 256 项。工作树不保存 `.git`、`.venv`、`venv`、`node_modules`、`__pycache__`、`.cache`、`.nexaflow`，也不保存进程。受控 Skill 安装继续要求每次调用批准，当前 Run 保存精确安装计划和环境 hash，同 Run 的 guest 重建仍通过原有锁重放；新 Run 不会静默取得旧安装授权。
+每个直接交互 Run 自动冻结文件版本，并在执行前恢复到 `/workspace/project/`。后续命令不会覆盖同一 guest 中的编辑；guest 重建会从 Run 文件游标恢复。每次 bash 后保存完整工作树中的变更、重命名和删除，后续消息及重新打开同一对话可继续使用。运行依赖和进程不随文件持久化，新的 Run 不继承依赖安装审批。
 
-`agent_projects` 保存所有权与修订；`project_file_versions` 只追加字节、SHA-256、前版本、路径和删除标记；`project_run_states` 保存独立于模型 checkpoint 的文件游标与本 Run 的依赖锁。作者 id 为不透明历史值，无 users 外键；workspace 删除级联清理。Run 删除只清理其游标，项目文件中的 Run/invocation 身份不阻止历史保留。
+交付文件仍写入 `/workspace/outputs/`，复用已有的不可变 artifact、文件检查、预览和下载；Agent 可复制单个工作文件或生成 ZIP 进行交付。聊天附件属于输入，导入文件不会自动成为经过检查的输出。
 
-上传、删除和重命名提交 `expected_version_id`，新路径为空。过时版本返回 409，精确重试不添加版本；重命名在一次事务中写旧路径删除标记与新路径版本。模型摘要不能改写项目身份，精确引用持续保留项目 id 和三个根路径。
+## 边界
 
-每个 Run 冻结初始文件，工作游标随后前移。导入每个路径一次，不覆盖 guest 内编辑。每次 bash 返回有界的完整工作树清单，后端只读取 hash 已改变的文件，因此保存失败后下次命令仍可捕获改动。guest 重建从游标恢复并跳过删除标记。
+普通单独附件保留原有总计 100 MiB 的上传与文本摘录能力；超过 5 MiB 的单独文档或图片仅提供有界文本摘录，界面会标注，原件不进入可编辑文件树。文件夹和 ZIP 的展开内容按下列文件空间配额校验。
 
-保存前重新检查账号、workspace 和项目所有权，并锁定有效的 Run Worker 租约与项目。任一文件冲突会拒绝本批全部变更。冲突字节保留为本 Run 的 `.bin` 恢复 artifact，原路径与删除意图在 `project_conflicts` 返回；这些字节不宣称通过 Office/PDF 检查。`project_saved: false` 及原因直接返回模型。失租 Worker 不得写入项目或新 Worker 的游标。
+每段对话最多保存 64 个有效文件、合计 64 MiB，单个展开后的文件不超过 5 MiB，保留空文件；历史最多 256 MiB，路径索引最多 256 项。ZIP 最多检查 4096 个条目，拒绝无效路径、重复路径、文件/目录冲突、链接、特殊文件、加密条目以及超限或损坏的内容。解压不会执行代码或授予能力。
 
-API 前缀为 `/api/v1/workspaces/{workspace_id}/projects`：集合 GET/POST；项目 GET/PATCH/DELETE；文件 GET/POST/DELETE `/files`；重命名 POST `/files/rename`；历史 GET `/versions?path=...`；当前用户授权下载 GET `/versions/{version_id}/content`。迁移为 `202611160003`。
+依赖目录、缓存和 Git 元数据不导入或保存：`.git`、`.venv`、`venv`、`node_modules`、`__pycache__`、`.cache`、`.nexaflow`；导入同时跳过 `__MACOSX` 和 `.DS_Store`。文件夹上传只发送用户选中的文件，不读取本地其他目录。
+
+保存前重新校验用户、workspace、文件所有权与 Run Worker 租约。批次使用版本比较及原子保存，失租 Worker 不得写入；冲突不会覆盖现有版本，恢复字节保留为本 Run 的 artifact，并明确返回保存失败。
+
+## 数据兼容与清理
+
+内部继续复用 `agent_projects`、`project_file_versions` 和 `project_run_states` 保存不可变字节、SHA-256、删除标记与 Run 文件游标，由 `202611170007` 迁移放宽上传记录、清理队列和持久文件中必须非空的约束，保留文件夹中的空 `__init__.py` 等文件。文件树身份由服务端从对话确定，客户端不提交项目 id。
+
+已有对话绑定的旧项目在下一次消息时复制为该对话的独立工作树，保留原有字节；历史快照与旧独立项目数据不被重写或删除。删除对话或应用时，在同一事务内清理其自动创建的文件树和版本；旧独立项目数据仍随 workspace 删除级联清理。
 
 ## 检查入口
 
-从 `backend/` 运行 `uv run python -m tests.projects.api` 和 `uv run python -m tests.projects.runtime`；前端项目交互覆盖在 `frontend/tests/projects.test.tsx`。真实执行平面检查由 `tests.projects.opensandbox_smoke.check(settings)` 提供，只能使用隔离的控制面、数据库和 Redis；覆盖源文件写保护、guest 重建、跨 Run 恢复、重命名/删除与不可变交付文件。普通 Docker 检查不能证明 Kata 隔离。
+从 `backend/` 运行 `uv run python -m tests.projects.api`、`uv run python -m tests.projects.migration` 和 `uv run python -m tests.projects.runtime`，覆盖 ZIP 导入、路径及配额、真实上传/Run 持久化、公开用户隔离、跨 Run 恢复、旧字节保留、失租拒写和删除清理。新约束需应用迁移，执行镜像需包含当前 `sandbox/command.py`；标准 `make dev` 会根据输入变化构建镜像并执行迁移。前端入口与目录路径覆盖在 `frontend/tests/agent-file-picker.test.tsx` 及 Agent 对话套件。执行 guest 的文件恢复和工作树导出由 `sandbox/command_tests.py` 覆盖；这些测试不代表 Kata 隔离验收。

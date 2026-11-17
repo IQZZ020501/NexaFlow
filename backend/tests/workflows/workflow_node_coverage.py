@@ -1822,7 +1822,7 @@ class _FakeUploadStorage:
         self.keys: list[str] = []
         self.put_calls = 0
 
-    async def put_chunks(self, key, chunks, max_bytes=None):
+    async def put_chunks(self, key, chunks, max_bytes=None, *, allow_empty=False):
         self.put_calls += 1
         if self.error is not None:
             raise self.error
@@ -1841,7 +1841,7 @@ class _FakeUploadStorage:
             self.keys.remove(key)
 
     def path(self, key):
-        return f"/tmp/fake/{key}"
+        return SimpleNamespace(open=lambda _mode: io.BytesIO(b"raw"))
 
 
 def _upload_file(filename: str, content: bytes = b"hello") -> object:
@@ -2294,11 +2294,16 @@ def test_workflow_uploads_resolve_branches() -> None:
                 raise AssertionError("extraction failure was swallowed")
 
         # agent text resolution
-        text, attachments = await _resolve_agent_file_text(
-            db, agent, "user-1", [], _UPLOAD_SETTINGS  # type: ignore[arg-type]
+        text, attachments, imported = await _resolve_agent_file_text(
+            db,
+            agent,
+            "user-1",
+            [],
+            _UPLOAD_SETTINGS,  # type: ignore[arg-type]
         )
         assert text == ""
         assert attachments == []
+        assert imported == []
         try:
             await _resolve_agent_file_text(
                 db, agent, "user-1", ["u1", "u1"], _UPLOAD_SETTINGS  # type: ignore[arg-type]
@@ -2332,10 +2337,16 @@ def test_workflow_uploads_resolve_branches() -> None:
             "app.application.uploads.service.queue_upload_cleanups",
             new=AsyncMock(),
         ):
-            text, attachments = await _resolve_agent_file_text(
-                db, agent, "user-1", ["u1"], _UPLOAD_SETTINGS  # type: ignore[arg-type]
+            text, attachments, imported = await _resolve_agent_file_text(
+                db,
+                agent,
+                "user-1",
+                ["u1"],
+                _UPLOAD_SETTINGS,  # type: ignore[arg-type]
             )
-        assert text == "--- u1.txt ---\nagent text"
+        assert text.startswith("--- u1.txt ---\nagent text")
+        assert "/workspace/project/" in text
+        assert imported == [{"path": "u1.txt", "content": b"raw"}]
         assert attachments == [
             {
                 "filename": "u1.txt",
@@ -2465,30 +2476,39 @@ def test_workflow_uploads_workspace_wrappers() -> None:
             )
         assert resolved == [{"id": "u1", "name": "notes.txt"}]
 
-        with patch(
-            "app.application.uploads.service.get_agent",
-            new=AsyncMock(return_value=agent),
-        ), patch(
-            "app.application.uploads.service.require_agent_view",
-            new=AsyncMock(),
-        ), patch(
-            "app.application.uploads.service._resolve_agent_file_text",
-            new=AsyncMock(
-                return_value=(
-                    "--- notes.txt ---\nhello",
-                    [
-                        {
-                            "filename": "notes.txt",
-                            "content_type": "text/plain",
-                            "size_bytes": 5,
-                            "category": "document",
-                        }
-                    ],
-                )
+        with (
+            patch(
+                "app.application.uploads.service.get_agent",
+                new=AsyncMock(return_value=agent),
+            ),
+            patch(
+                "app.application.uploads.service.require_agent_view",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.application.uploads.service._resolve_agent_file_text",
+                new=AsyncMock(
+                    return_value=(
+                        "--- notes.txt ---\nhello",
+                        [
+                            {
+                                "filename": "notes.txt",
+                                "content_type": "text/plain",
+                                "size_bytes": 5,
+                                "category": "document",
+                            }
+                        ],
+                        [],
+                    )
+                ),
             ),
         ):
-            text, attachments = await resolve_workspace_agent_files(
-                db, "ws-1", "agent-1", actor, "member",  # type: ignore[arg-type]
+            text, attachments, imported = await resolve_workspace_agent_files(
+                db,
+                "ws-1",
+                "agent-1",
+                actor,
+                "member",  # type: ignore[arg-type]
                 ["u1"],
                 SimpleNamespace(),
             )

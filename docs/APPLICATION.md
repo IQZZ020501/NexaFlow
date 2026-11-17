@@ -128,7 +128,7 @@ app/application/
 - `audit/system_logs.py` — 系统日志用例：带敏感字段脱敏的分页查询（`SystemLog`）。
 - `analytics/__init__.py` — 工作区分析用例门面（`get_workspace_analytics`）。
 - `artifacts/service.py` — 生成物用例：创建/下载链接签发与校验、过期清理。
-- `projects/service.py`、`projects/runtime.py` — 创建者私有项目、不可变文件版本、Run 绑定与工作树恢复/保存，详见 [项目文件](PROJECT_FILES.md)。
+- `projects/service.py`、`projects/runtime.py` — 用户与对话隔离的文件树、不可变文件版本、Run 冻结与工作树恢复/保存，详见 [对话文件](PROJECT_FILES.md)。
 - `email/delivery.py` — 事务邮件：入队（含身份类邮件）、due 投递扫描、按租约投递与终态处理、来源撤销。
 - `email/smtp.py` — SMTP 设置用例：读写（密码密文存储）、连通性测试、transport 配置构建。
 - `agent_skills/service.py` — Agent Skill 用例：技能包 CRUD、版本与发布、应用绑定同步与 `view/use` 授权。

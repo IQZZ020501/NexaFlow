@@ -212,7 +212,7 @@ class WorkflowUpload(Base):
             "category IN ('document', 'image', 'audio')",
             name="ck_workflow_uploads_category",
         ),
-        CheckConstraint("size_bytes > 0", name="ck_workflow_uploads_size"),
+        CheckConstraint("size_bytes >= 0", name="ck_workflow_uploads_size"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -238,7 +238,7 @@ class WorkflowUpload(Base):
 class WorkflowUploadStorageCleanup(Base):
     __tablename__ = "workflow_upload_storage_cleanups"
     __table_args__ = (
-        CheckConstraint("size_bytes > 0", name="ck_workflow_upload_cleanups_size"),
+        CheckConstraint("size_bytes >= 0", name="ck_workflow_upload_cleanups_size"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

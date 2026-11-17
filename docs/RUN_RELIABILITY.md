@@ -72,4 +72,4 @@ NEXAFLOW_TEST_REDIS_URL=redis://127.0.0.1:6379/15 uv run python -m tests.executi
 
 准入与恢复的其他检查入口：`tests.execution.wakeup`、`tests.execution.admissions`、`tests.execution.load`。它们分别覆盖释放后的唤醒、创建结果不明时的容量保留，以及工作空间轮转/FIFO。测试通过不代表完成生产创建耗时、峰值资源和 P50/P95 负载校准。
 
-可选多主机与故障边界见 [执行主机](EXECUTION_HOSTS.md)，项目文件、MCP 外部授权和持久任务分别见 [项目文件](PROJECT_FILES.md)、[MCP OAuth](MCP_OAUTH.md)、[MCP 远端任务](MCP_TASKS.md)。
+可选多主机与故障边界见 [执行主机](EXECUTION_HOSTS.md)，对话文件、MCP 外部授权和持久任务分别见 [对话文件](PROJECT_FILES.md)、[MCP OAuth](MCP_OAUTH.md)、[MCP 远端任务](MCP_TASKS.md)。

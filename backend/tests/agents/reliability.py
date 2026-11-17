@@ -275,7 +275,7 @@ class RequestTests(unittest.TestCase):
             ) as external_enqueue,
             patch(
                 "app.application.uploads.service.resolve_workspace_agent_files",
-                AsyncMock(return_value=("Original attachment text", [])),
+                AsyncMock(return_value=("Original attachment text", [], [])),
             ) as resolve_upload,
         ):
             token, workspace_id = activate_admin(client)

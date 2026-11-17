@@ -773,6 +773,8 @@ async def delete_consumer_conversation(
     Returns ``(deleted, active)``. Active runs are left intact so a worker
     cannot continue writing into a conversation while it is being removed.
     """
+    if await lock_agent(db, agent_id) is None:
+        return False, False
     scope = (
         AgentRun.agent_id == agent_id,
         AgentRun.access_source == access_source,
@@ -790,10 +792,18 @@ async def delete_consumer_conversation(
     )
     if active is not None:
         return False, True
+    from app.infra.db.repositories.projects import repository as file_trees
+
+    await file_trees.delete_conversation_files(db, select(AgentRun.id).where(*scope))
     await db.execute(
         delete(GeneratedArtifact).where(
             GeneratedArtifact.run_id.in_(select(AgentRun.id).where(*scope))
         )
+    )
+    await db.execute(
+        update(AgentRun)
+        .where(AgentRun.regenerated_from_run_id.in_(select(AgentRun.id).where(*scope)))
+        .values(regenerated_from_run_id=None)
     )
     result = await db.execute(delete(AgentRun).where(*scope))
     return bool(result.rowcount), False
@@ -1530,6 +1540,20 @@ async def delete_agent_graph(
     agent_id: str,
     resource_type: str,
 ) -> None:
+    from app.infra.db.repositories.projects import repository as file_trees
+
+    await file_trees.delete_conversation_files(
+        db, select(AgentRun.id).where(AgentRun.agent_id == agent_id)
+    )
+    await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.regenerated_from_run_id.in_(
+                select(AgentRun.id).where(AgentRun.agent_id == agent_id)
+            )
+        )
+        .values(regenerated_from_run_id=None)
+    )
     await db.execute(
         delete(GeneratedArtifact).where(
             GeneratedArtifact.workspace_id == workspace_id,

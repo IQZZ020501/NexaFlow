@@ -52,7 +52,6 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/app/(public)/chat/[id]/page.tsx` — 已发布 Agent/Workflow 的公开对话入口（由 `components/apps/public-application-chat.tsx` 分派）
 - `frontend/src/app/(public)/agent-api/[id]/docs/page.tsx` — API Key 解锁的单 Agent API 文档页
 - `frontend/src/app/(public)/workflow-api/[id]/docs/page.tsx` — API Key 解锁的单 Workflow API 文档页
-- `frontend/src/app/(platform)/app/projects/page.tsx`、`frontend/src/app/(platform)/app/projects/[id]/page.tsx` — 私有项目列表与文件管理
 - `frontend/src/app/(platform)/app/models/page.tsx` — 模型管理页
 - `frontend/src/app/(auth)/login/page.tsx` — 登录页（登录回调与已登录跳转）
 - `frontend/src/app/(auth)/auth/complete/page.tsx` — 企业扫码登录回调
@@ -125,8 +124,8 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/resource-folders/resource-folder-picker-dialog.tsx`、`resource-bulk-move-bar.tsx` — 归入文件夹与批量移动
 - `frontend/src/components/resource-folders/use-resource-folders.ts` — 知识库/应用/模型/工具共用的文件夹状态 hook
 
-**projects/**（私有项目文件）
-- `frontend/src/components/projects/` — 项目列表、详情和 Agent 新对话的项目选择，文件版本与冲突行为见 [PROJECT_FILES.md](PROJECT_FILES.md)
+**Agent 对话文件**
+- `frontend/src/components/agents/agent-file-picker.tsx` — 控制台与公开对话共用的文件/文件夹上传入口，`frontend/src/lib/agent-upload.ts` 保留相对路径并读取拖入的目录；文件持久化见 [对话文件](PROJECT_FILES.md)。
 
 **apps/**（公开应用对话分派）
 - `frontend/src/components/apps/public-application-chat.tsx` — `/chat/[id]` 的分派器：按应用类型渲染公开 Agent 或 Workflow 对话

@@ -15,7 +15,6 @@ import {
   LoaderCircleIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
-  PlusIcon,
   ChartNoAxesColumnIcon,
   LayoutDashboardIcon,
   PanelLeftCloseIcon,
@@ -35,7 +34,8 @@ import {
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
-import { ProjectSelector } from "@/components/projects/project-selector"
+import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import { useAgentFileDrop } from "@/components/agents/use-agent-file-drop"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,10 +54,6 @@ import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
 import { splitAgentSessionEvents } from "@/lib/agent-session-handoff"
-import {
-  AGENT_FILE_UPLOAD_SETTING,
-  acceptedUploadExtensions,
-} from "@/lib/interaction-config"
 import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
@@ -107,8 +103,6 @@ type AgentDetailWorkspaceProps = {
   question: string
   setQuestion: React.Dispatch<React.SetStateAction<string>>
   approvalMode: AgentApprovalMode
-  projectId?: string | null
-  onProjectChange?: (id: string | null) => void
   onApprovalModeChange: (value: AgentApprovalMode) => void
   files: File[]
   setFiles: React.Dispatch<React.SetStateAction<File[]>>
@@ -916,8 +910,6 @@ export function AgentDetailWorkspace({
   question,
   setQuestion,
   approvalMode,
-  projectId,
-  onProjectChange,
   onApprovalModeChange,
   files,
   setFiles,
@@ -956,10 +948,15 @@ export function AgentDetailWorkspace({
   )
   const hasArtifactPreview = !!artifactPreview.selection
   const previewScrollRef = React.useRef<HTMLDivElement>(null)
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const shouldFollowPreviewRef = React.useRef(true)
   const tabStripRef = React.useRef<HTMLElement>(null)
   const activeTabRef = React.useRef<HTMLButtonElement | null>(null)
+  const fileDrop = useAgentFileDrop(
+    `${workspaceId}:${agent.id}:${activeView}:${runs[0]?.conversation_id ?? ""}`,
+    isDirty || isAsking || isRunsLoading || agent.status !== "active",
+    (dropped) => setFiles((current) => appendAttachmentFiles(current, dropped)),
+    () => notify("error", t("文件夹读取失败，请重试"))
+  )
 
   React.useEffect(() => {
     const scrollContainer = previewScrollRef.current
@@ -1140,6 +1137,7 @@ export function AgentDetailWorkspace({
                 title={t("新建对话")}
                 onClick={() => {
                   artifactPreview.close()
+                  fileDrop.cancel()
                   onNewConversation()
                 }}
               >
@@ -1468,7 +1466,12 @@ export function AgentDetailWorkspace({
                     <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                       <form
                         className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                        aria-busy={fileDrop.isReadingFiles}
                         onSubmit={(event) => {
+                          if (fileDrop.isReadingFiles) {
+                            event.preventDefault()
+                            return
+                          }
                           shouldFollowPreviewRef.current = true
                           onAsk(event)
                         }}
@@ -1477,46 +1480,8 @@ export function AgentDetailWorkspace({
                             event.preventDefault()
                           }
                         }}
-                        onDrop={(event) => {
-                          const dropped = transferredFiles(event.dataTransfer)
-                          if (!dropped.length) return
-                          event.preventDefault()
-                          if (
-                            isDirty ||
-                            isAsking ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          ) {
-                            return
-                          }
-                          setFiles((current) =>
-                            appendAttachmentFiles(current, dropped)
-                          )
-                        }}
+                        onDrop={fileDrop.onDrop}
                       >
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          className="sr-only"
-                          multiple
-                          accept={acceptedUploadExtensions(
-                            AGENT_FILE_UPLOAD_SETTING.file_upload_type
-                          )}
-                          disabled={
-                            isDirty ||
-                            isAsking ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          }
-                          onChange={(event) => {
-                            const selected = Array.from(
-                              event.target.files ?? []
-                            )
-                            setFiles((current) =>
-                              appendAttachmentFiles(current, selected)
-                            )
-                          }}
-                        />
                         <textarea
                           value={question}
                           onChange={(event) => setQuestion(event.target.value)}
@@ -1569,28 +1534,21 @@ export function AgentDetailWorkspace({
                         />
                         <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
                           <div className="flex min-w-0 items-center gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              className="rounded-md text-muted-foreground hover:text-foreground"
-                              aria-label={t("添加附件")}
-                              title={t("添加附件")}
+                            <AgentFilePicker
                               disabled={
                                 isDirty ||
                                 isAsking ||
                                 isRunsLoading ||
+                                fileDrop.isReadingFiles ||
                                 agent.status !== "active"
                               }
-                              onClick={() => {
-                                if (!fileInputRef.current) return
-                                fileInputRef.current.value = ""
-                                fileInputRef.current.click()
-                              }}
-                            >
-                              <PlusIcon />
-                            </Button>
-                            {onProjectChange ? <ProjectSelector token={token} workspaceId={workspaceId} value={runs.length ? runs[0].project_id : projectId} boundName={runs[0]?.project_name} disabled={runs.length > 0 || isAsking || isRunsLoading} onChange={onProjectChange} /> : null}
+                              onFiles={(selected) =>
+                                setFiles((current) =>
+                                  appendAttachmentFiles(current, selected)
+                                )
+                              }
+                              t={t}
+                            />
                             <AgentApprovalModeMenu
                               value={approvalMode}
                               onChange={onApprovalModeChange}
@@ -1611,6 +1569,7 @@ export function AgentDetailWorkspace({
                                 !isAsking &&
                                 (isDirty ||
                                   isRunsLoading ||
+                                  fileDrop.isReadingFiles ||
                                   agent.status !== "active")
                               }
                               onStop={onCancelAsk}

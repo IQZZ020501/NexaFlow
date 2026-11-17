@@ -159,26 +159,23 @@ async def check(config):
                         ),
                     )
                     await db.commit()
-                    await service.put_file(
+                    await service.save_changes(
                         db,
-                        ws.id,
-                        project.id,
-                        owner.id,
-                        "source.csv",
-                        "source",
-                        b"amount\n12\n",
-                        None,
+                        project,
+                        [
+                            {
+                                "path": "source.csv",
+                                "role": "source",
+                                "content": b"amount\n12\n",
+                            },
+                            {
+                                "path": "script.py",
+                                "role": "work",
+                                "content": b"from pathlib import Path\nprint(int(Path('/project/sources/source.csv').read_text().splitlines()[1])*2)\n",
+                            },
+                        ],
                     )
-                    await service.put_file(
-                        db,
-                        ws.id,
-                        project.id,
-                        owner.id,
-                        "script.py",
-                        "work",
-                        b"from pathlib import Path\nprint(int(Path('/project/sources/source.csv').read_text().splitlines()[1])*2)\n",
-                        None,
-                    )
+                    await db.commit()
                 first = await new_run(project)
                 original = await command(
                     first,

@@ -17,7 +17,6 @@ import {
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
-  PlusIcon,
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
@@ -32,6 +31,8 @@ import {
 } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import { useAgentFileDrop } from "@/components/agents/use-agent-file-drop"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
@@ -107,10 +108,6 @@ import {
 } from "@/lib/conversation-export"
 import { latestRunVersions } from "@/lib/run-versions"
 import { useVisualViewportShellStyle } from "@/lib/visual-viewport"
-import {
-  AGENT_FILE_UPLOAD_SETTING,
-  acceptedUploadExtensions,
-} from "@/lib/interaction-config"
 import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
@@ -1215,11 +1212,19 @@ export function PublicAgentChat({
     mode: "follow_up"
     content: string
   } | null>(null)
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
+  const fileDrop = useAgentFileDrop(
+    `${agentId}:${activeConversationId ?? ""}`,
+    isSending || isRunsLoading,
+    (dropped) => {
+      setSendError(null)
+      setFiles((current) => appendAttachmentFiles(current, dropped))
+    },
+    () => setSendError(t("文件夹读取失败，请重试"))
+  )
 
   const loadRunToolCalls = React.useCallback(
     async (runId: string, controller?: AbortController) => {
@@ -2402,40 +2407,18 @@ export function PublicAgentChat({
                 ) : null}
                 <form
                   className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
-                  onSubmit={handleAsk}
+                  aria-busy={fileDrop.isReadingFiles}
+                  onSubmit={(event) => {
+                    if (fileDrop.isReadingFiles) event.preventDefault()
+                    else void handleAsk(event)
+                  }}
                   onDragOver={(event) => {
                     if (event.dataTransfer.types.includes("Files")) {
                       event.preventDefault()
                     }
                   }}
-                  onDrop={(event) => {
-                    const dropped = transferredFiles(event.dataTransfer)
-                    if (!dropped.length) return
-                    event.preventDefault()
-                    if (isSending) return
-                    setSendError(null)
-                    setFiles((current) =>
-                      appendAttachmentFiles(current, dropped)
-                    )
-                  }}
+                  onDrop={fileDrop.onDrop}
                 >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="sr-only"
-                    multiple
-                    accept={acceptedUploadExtensions(
-                      AGENT_FILE_UPLOAD_SETTING.file_upload_type
-                    )}
-                    disabled={isSending}
-                    onChange={(event) => {
-                      const selected = Array.from(event.target.files ?? [])
-                      setSendError(null)
-                      setFiles((current) =>
-                        appendAttachmentFiles(current, selected)
-                      )
-                    }}
-                  />
                   <textarea
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
@@ -2478,22 +2461,18 @@ export function PublicAgentChat({
                   />
                   <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
                     <div className="flex min-w-0 items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="rounded-md text-muted-foreground hover:text-foreground"
-                        aria-label={t("添加附件")}
-                        title={t("添加附件")}
-                        disabled={isSending}
-                        onClick={() => {
-                          if (!fileInputRef.current) return
-                          fileInputRef.current.value = ""
-                          fileInputRef.current.click()
+                      <AgentFilePicker
+                        disabled={
+                          isSending || isRunsLoading || fileDrop.isReadingFiles
+                        }
+                        onFiles={(selected) => {
+                          setSendError(null)
+                          setFiles((current) =>
+                            appendAttachmentFiles(current, selected)
+                          )
                         }}
-                      >
-                        <PlusIcon />
-                      </Button>
+                        t={t}
+                      />
                       <AgentApprovalModeMenu
                         value={approvalMode}
                         onChange={setApprovalMode}
@@ -2505,6 +2484,7 @@ export function PublicAgentChat({
                       <AgentChatSubmitButton
                         isRunning={isSending}
                         hasInput={Boolean(question.trim())}
+                        sendDisabled={fileDrop.isReadingFiles}
                         onStop={handleCancelAsk}
                         t={t}
                       />

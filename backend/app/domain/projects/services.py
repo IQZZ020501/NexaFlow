@@ -47,8 +47,8 @@ def validate_project_tree(files):
     paths = {(item.role, item.path) for item in active}
     for item in active:
         project_file_path(item.path, item.role)
-        if not 0 < item.size_bytes <= MAX_ARTIFACT_BYTES:
-            raise ValueError("Each project file must be between 1 byte and 5 MiB.")
+        if not 0 <= item.size_bytes <= MAX_ARTIFACT_BYTES:
+            raise ValueError("Each project file must not exceed 5 MiB.")
         parts = item.path.split("/")
         if any(
             (item.role, "/".join(parts[:end])) in paths for end in range(1, len(parts))

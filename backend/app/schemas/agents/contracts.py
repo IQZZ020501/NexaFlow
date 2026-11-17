@@ -175,7 +175,6 @@ AgentApprovalMode = Literal["always_ask", "ask_risky", "full_access"]
 
 
 class AgentRunCreateRequest(BaseModel):
-    project_id: str | None = Field(default=None, min_length=1, max_length=36)
     request_id: str | None = Field(
         default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
     )
@@ -295,8 +294,6 @@ class AgentRunResponse(BaseModel):
     agent_id: str
     requested_by_user_id: str | None
     conversation_id: str
-    project_id: str | None = None
-    project_name: str | None = None
     regenerated_from_run_id: str | None = None
     goal: str
     session_inputs: list[AgentSessionInputResponse] = Field(

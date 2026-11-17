@@ -144,6 +144,16 @@ class CommandTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "frozen"):
                 command.restore_files({"data.csv": base64.b64encode(b"different").decode()}, project_role="source")
 
+    def test_project_preserves_empty_files(self):
+        command.restore_files({"pkg/__init__.py": ""}, project_role="work")
+        self.assertEqual((self.workspace / "project/pkg/__init__.py").read_bytes(), b"")
+        snapshot = command.execute({"command": ":", "timeout_seconds": 2, "project": True}, python_binary=sys.executable)
+        self.assertTrue(snapshot["project_snapshot"])
+        self.assertEqual(snapshot["project_changes"][0]["relative_path"], "pkg/__init__.py")
+        self.assertEqual(snapshot["project_changes"][0]["size_bytes"], 0)
+        with self.assertRaises(ValueError):
+            command.restore_files({"empty-output.txt": ""})
+
     def test_export_limits_and_input_validation(self):
         result = self.run_command("for n in {1..10}; do echo file > outputs/$n.txt; done")
         self.assertEqual(len(result["artifacts"]), 8)

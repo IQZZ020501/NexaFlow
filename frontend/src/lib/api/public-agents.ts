@@ -1,3 +1,4 @@
+import { agentUploadForm } from "@/lib/agent-upload"
 import { requestRun } from "@/lib/api/run-request"
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
@@ -292,8 +293,7 @@ export function uploadPublicAgentFiles(
   token: string,
   files: File[]
 ) {
-  const body = new FormData()
-  files.forEach((file) => body.append("files", file))
+  const body = agentUploadForm(files)
   return request<AgentUpload[]>(publicAgentPath(agentId, "/uploads"), {
     method: "POST",
     body,

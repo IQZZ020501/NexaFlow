@@ -10,10 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.agents.access.permissions import require_agent_view
 from app.domain.agents.service import get_agent
+from app.domain.artifacts.services import MAX_ARTIFACT_BYTES
 from app.domain.knowledge.service import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     get_default_knowledge_model,
 )
+from app.domain.projects.imports import import_file_tree, upload_file_path
+from app.domain.projects.services import MAX_PROJECT_BYTES, MAX_PROJECT_FILES
 from app.domain.uploads.service import queue_upload_cleanups
 from app.domain.workflows.definitions.service import get_workflow_agent
 from app.entities.agents import Agent
@@ -235,16 +238,26 @@ async def _upload_files(
         raise HTTPException(status.HTTP_409_CONFLICT, "File upload is disabled.")
     if not uploads:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Upload files.")
-    if len(uploads) > MAX_WORKFLOW_UPLOAD_FILES:
+    file_limit = (
+        MAX_PROJECT_FILES if application_type == "agent" else MAX_WORKFLOW_UPLOAD_FILES
+    )
+    if len(uploads) > file_limit:
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            f"Upload at most {MAX_WORKFLOW_UPLOAD_FILES} files per request.",
+            f"Upload at most {file_limit} files per request.",
         )
     upload_config = config.file_upload_setting
     prepared_uploads: list[tuple[UploadFile, str, str]] = []
     for upload in uploads:
-        filename = Path(upload.filename or "").name.strip()[:255]
-        category = _upload_category(filename)
+        if application_type == "agent":
+            try:
+                filename = upload_file_path(upload.filename or "")
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            category = _upload_category(filename) or "document"
+        else:
+            filename = Path(upload.filename or "").name.strip()[:255]
+            category = _upload_category(filename)
         if (
             not filename
             or category not in upload_config.file_upload_type
@@ -266,7 +279,10 @@ async def _upload_files(
         agent.id,
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Upload application not found.")
-    if any(category == "image" for _upload, _filename, category in prepared_uploads):
+    if any(
+        category == "image" and "/" not in filename
+        for _upload, filename, category in prepared_uploads
+    ):
         await _vision_text_extractor(db, agent.workspace_id, settings)
 
     storage = create_object_storage(settings.knowledge_storage_dir)
@@ -285,10 +301,21 @@ async def _upload_files(
                 while chunk := await current_upload.read(UPLOAD_CHUNK_BYTES):
                     yield chunk
 
+            maximum = MAX_WORKFLOW_UPLOAD_BYTES
+            if application_type == "agent":
+                if "/" in filename:
+                    maximum = MAX_ARTIFACT_BYTES
+                elif filename.lower().endswith(".zip"):
+                    maximum = MAX_PROJECT_BYTES
+                elif (
+                    Path(filename).suffix.lower() not in EXTRACTABLE_DOCUMENT_EXTENSIONS
+                ):
+                    maximum = MAX_ARTIFACT_BYTES
             size_bytes = await storage.put_chunks(
                 object_key,
                 chunks(),
-                MAX_WORKFLOW_UPLOAD_BYTES - total_size,
+                min(MAX_WORKFLOW_UPLOAD_BYTES - total_size, maximum),
+                allow_empty=application_type == "agent",
             )
             total_size += size_bytes
             stored_keys.append(object_key)
@@ -492,7 +519,7 @@ async def resolve_public_agent_files(
     user_id: str,
     file_ids: list[str],
     settings: Settings,
-) -> tuple[str, list[dict[str, object]]]:
+) -> tuple[str, list[dict[str, object]], list[dict]]:
     return await _resolve_agent_file_text(
         db,
         context.agent,
@@ -510,7 +537,7 @@ async def resolve_workspace_agent_files(
     workspace_role: str | None,
     file_ids: list[str],
     settings: Settings,
-) -> tuple[str, list[dict[str, object]]]:
+) -> tuple[str, list[dict[str, object]], list[dict]]:
     agent = await get_agent(db, workspace_id, agent_id)
     await require_agent_view(db, agent, actor)
     return await _resolve_agent_file_text(
@@ -528,9 +555,11 @@ async def _resolve_agent_file_text(
     user_id: str,
     file_ids: list[str],
     settings: Settings,
-) -> tuple[str, list[dict[str, object]]]:
+) -> tuple[str, list[dict[str, object]], list[dict]]:
     if not file_ids:
-        return "", []
+        return "", [], []
+    if len(file_ids) > MAX_PROJECT_FILES:
+        raise HTTPException(413, "Upload at most 64 files per request.")
     config = AGENT_ATTACHMENT_CONFIG
     if len(file_ids) != len(set(file_ids)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid agent files.")
@@ -547,17 +576,61 @@ async def _resolve_agent_file_text(
 
     ordered = [by_id[file_id] for file_id in file_ids]
     _validate_upload_policy(ordered, config, "agent")
+    if sum(item.size_bytes for item in ordered) > MAX_WORKFLOW_UPLOAD_BYTES:
+        raise HTTPException(413, "Agent uploads are too large.")
 
     storage = create_object_storage(settings.knowledge_storage_dir)
+    text_only = {
+        item.id
+        for item in ordered
+        if "/" not in item.filename
+        and Path(item.filename).suffix.lower()
+        in EXTRACTABLE_DOCUMENT_EXTENSIONS - {".zip"}
+        and item.size_bytes > MAX_ARTIFACT_BYTES
+    }
+
+    def read_inputs():
+        inputs = []
+        for item in ordered:
+            if item.id in text_only:
+                continue
+            maximum = (
+                MAX_PROJECT_BYTES
+                if "/" not in item.filename and item.filename.lower().endswith(".zip")
+                else MAX_ARTIFACT_BYTES
+            )
+            with storage.path(item.object_key).open("rb") as stream:
+                content = stream.read(maximum + 1)
+            if len(content) > maximum:
+                raise ValueError("Conversation upload exceeds its size limit.")
+            inputs.append((item.filename, content))
+        return import_file_tree(inputs) if inputs else []
+
+    try:
+        input_files = await asyncio.to_thread(read_inputs)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(422, "Agent upload could not be read.") from exc
     image_text_extractor = (
         await _vision_text_extractor(db, agent.workspace_id, settings)
-        if any(item.category == "image" for item in ordered)
+        if any(
+            item.category == "image" and "/" not in item.filename for item in ordered
+        )
         else None
     )
     sections: list[str] = []
     remaining = AGENT_ATTACHMENT_CONTEXT_LIMIT
     try:
         for item in ordered:
+            if (
+                not item.size_bytes
+                or "/" in item.filename
+                or Path(item.filename).suffix.lower() == ".zip"
+                or Path(item.filename).suffix.lower()
+                not in EXTRACTABLE_DOCUMENT_EXTENSIONS
+            ):
+                continue
             extracted, _assets = await asyncio.to_thread(
                 extract_document,
                 item.filename,
@@ -576,6 +649,16 @@ async def _resolve_agent_file_text(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Agent attachment text could not be extracted.",
         ) from exc
+    if input_files:
+        sections.append(
+            "Files available in /workspace/project/ (read them as needed with bash):\n"
+            + "\n".join(item["path"] for item in input_files)
+        )
+    if text_only:
+        sections.append(
+            "Large standalone attachments provide text excerpts only; their originals are not in the file workspace:\n"
+            + "\n".join(item.filename for item in ordered if item.id in text_only)
+        )
     result = "\n\n".join(sections)
     attachments = [
         {
@@ -587,7 +670,7 @@ async def _resolve_agent_file_text(
         for item in ordered
     ]
     await _consume_uploads(db, ordered)
-    return result, attachments
+    return result, attachments, input_files
 
 
 __all__ = [

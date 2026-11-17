@@ -51,7 +51,7 @@ class ProjectFileVersion(Base):
             "size_bytes BETWEEN 0 AND 5242880", name="ck_project_file_size"
         ),
         CheckConstraint(
-            "(deleted AND size_bytes = 0) OR (NOT deleted AND size_bytes > 0)",
+            "NOT deleted OR size_bytes = 0",
             name="ck_project_file_deleted_size",
         ),
         Index("ix_project_file_versions_path", "project_id", "path", "revision"),

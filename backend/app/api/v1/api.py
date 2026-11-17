@@ -17,7 +17,6 @@ from app.api.v1.knowledge import lifecycle as knowledge_lifecycle
 from app.api.v1.knowledge import retrieval as knowledge_retrieval
 from app.api.v1.knowledge import routes as knowledge
 from app.api.v1.models import routes as models
-from app.api.v1.projects import routes as projects
 from app.api.v1.resource_folders import routes as resource_folders
 from app.api.v1.teams import routes as teams
 from app.api.v1.tools import mcp as mcp_servers
@@ -53,7 +52,6 @@ api_router.include_router(knowledge_evaluation.router)
 api_router.include_router(knowledge_lifecycle.router)
 api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)
-api_router.include_router(projects.router)
 api_router.include_router(resource_folders.router)
 api_router.include_router(mcp_servers.router)
 api_router.include_router(mcp_oauth.router)

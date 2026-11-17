@@ -1,76 +1,94 @@
-"""Private project API, immutable versions, atomic renames and stale writes."""
+"""Conversation upload boundaries and bounded ZIP tree imports."""
 
-from tests.support import activate_admin, auth_headers, create_active_user, test_client
+import stat
+import unittest
+from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+from app.domain.projects.imports import import_file_tree
 
 
-def main():
-    with test_client() as client:
-        token, workspace_id = activate_admin(client)
-        headers = auth_headers(token)
-        root = f"/api/v1/workspaces/{workspace_id}/projects"
-        created = client.post(root, json={"name": "Durable files"}, headers=headers)
-        assert created.status_code == 201, created.text
-        project = created.json()
-        base = f"{root}/{project['id']}"
+def archive(files):
+    output = BytesIO()
+    with ZipFile(output, "w", compression=ZIP_DEFLATED) as target:
+        for path, content in files:
+            target.writestr(path, content)
+    return output.getvalue()
 
-        def upload(path, content, expected=None, role="work"):
-            data = {"path": path, "role": role}
-            if expected:
-                data["expected_version_id"] = expected
-            return client.post(f"{base}/files", headers=headers, data=data, files={"file": ("file.txt", content)})
 
-        source = upload("data/source.csv", b"value\n12\n", role="source")
-        assert source.status_code == 200, source.text
-        first = upload("scripts/convert.py", b"print(12)")
-        assert first.status_code == 200, first.text
-        first = first.json()
-        assert upload("scripts/convert.py", b"stale").status_code == 409
-        second = upload("scripts/convert.py", b"print(24)", first["id"])
-        assert second.status_code == 200, second.text
-        second = second.json()
-        retry = upload("scripts/convert.py", b"print(24)", first["id"])
-        assert retry.status_code == 200 and retry.json()["id"] == second["id"]
-        assert upload("scripts/convert.py", b"print(36)", first["id"]).status_code == 409
-        old = client.get(f"{base}/versions/{first['id']}/content", headers=headers)
-        assert old.content == b"print(12)" and old.headers["x-content-type-options"] == "nosniff"
-        rename = {"path": "scripts/convert.py", "new_path": "scripts/main.py", "expected_version_id": second["id"]}
-        renamed = client.post(f"{base}/files/rename", headers=headers, json=rename)
-        assert renamed.status_code == 200, renamed.text
-        assert client.post(f"{base}/files/rename", headers=headers, json=rename).json()["id"] == renamed.json()["id"]
-        heads = {item["path"]: item for item in client.get(f"{base}/files", headers=headers).json()}
-        assert heads["scripts/convert.py"]["deleted"] and not heads["scripts/main.py"]["deleted"]
-        delete = {"path": "scripts/main.py", "expected_version_id": renamed.json()["id"]}
-        deleted = client.request("DELETE", f"{base}/files", headers=headers, json=delete)
-        assert deleted.status_code == 200 and deleted.json()["deleted"], deleted.text
-        assert client.request("DELETE", f"{base}/files", headers=headers, json=delete).json()["id"] == deleted.json()["id"]
-        assert upload("scripts/main.py", b"resurrect", renamed.json()["id"]).status_code == 409
-        history = client.get(f"{base}/versions", headers=headers, params={"path": "scripts/main.py"})
-        assert [item["deleted"] for item in history.json()] == [True, False]
-        for path in ("../escape.txt", "a//b.txt", "node_modules/package.json", ".git/config", "a\\b.txt"):
-            assert upload(path, b"bad").status_code == 422, path
-        assert upload("parent.txt", b"file").status_code == 200
-        assert upload("parent.txt/child.txt", b"collision").status_code == 409
-        assert upload("empty.txt", b"").status_code == 422
-        owner_id = client.get("/api/v1/auth/me", headers=headers).json()["user"]["id"]
-        other_workspace = client.post("/api/v1/workspaces", headers=headers, json={"name": "Other", "admin_user_id": owner_id})
-        assert other_workspace.status_code == 201, other_workspace.text
-        other_root = f"/api/v1/workspaces/{other_workspace.json()['workspace']['id']}/projects"
-        assert client.get(f"{other_root}/{project['id']}", headers=headers).status_code == 404
-        assert client.get(f"{other_root}/{project['id']}/versions/{first['id']}/content", headers=headers).status_code == 404
-        other_id, other_token = create_active_user(client, token, "project-other")
-        member = client.post(f"/api/v1/workspaces/{workspace_id}/members", headers=headers, json={"user_id": other_id, "role": "admin"})
-        assert member.status_code == 201, member.text
-        other_headers = auth_headers(other_token)
-        assert client.get(base, headers=other_headers).status_code == 404
-        assert client.get(f"{base}/versions/{first['id']}/content", headers=other_headers).status_code == 404
-        own = client.post(root, json={"name": "Other owner"}, headers=other_headers)
-        assert own.status_code == 201, own.text
-        # A global/workspace administrator has no implicit access to another owner's files.
-        assert client.get(f"{root}/{own.json()['id']}", headers=headers).status_code == 404
-        assert client.delete(base, headers=headers).status_code == 204
-        assert client.get(base, headers=headers).status_code == 404
-    print("PROJECT_API_OK")
+class ImportTests(unittest.TestCase):
+    def test_preserves_paths_and_original_bytes(self):
+        nested_zip = archive([("inner.txt", b"keep zipped")])
+        files = import_file_tree(
+            [
+                ("folder/source.csv", b"amount\n12\n"),
+                ("folder/__init__.py", b""),
+                ("folder/nested.zip", nested_zip),
+                (
+                    "project.zip",
+                    archive(
+                        [
+                            ("src/main.py", b"print(12)"),
+                            ("README", b"example"),
+                            ("src/__init__.py", b""),
+                            ("node_modules/dependency.js", b"ignored"),
+                            (".git/config", b"ignored"),
+                            ("__MACOSX/metadata", b"ignored"),
+                        ]
+                    ),
+                ),
+            ]
+        )
+        self.assertEqual(
+            {item["path"]: item["content"] for item in files},
+            {
+                "folder/source.csv": b"amount\n12\n",
+                "folder/__init__.py": b"",
+                "folder/nested.zip": nested_zip,
+                "src/main.py": b"print(12)",
+                "README": b"example",
+                "src/__init__.py": b"",
+            },
+        )
+
+    def test_rejects_unsafe_entries_duplicates_and_path_collisions(self):
+        for path in (
+            "../escape.txt",
+            "/escape.txt",
+            "a//b.txt",
+            "a\\b.txt",
+            "a/./b.txt",
+        ):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                import_file_tree([("files.zip", archive([(path, b"unsafe")]))])
+        for files in [
+            [("a.txt", b"a"), ("a.txt", b"b")],
+            [("a.txt", b"a"), ("a.txt/child.txt", b"b")],
+            [("large.txt", b"x" * (5 * 1024 * 1024 + 1))],
+            [(f"{i}.txt", b"x") for i in range(65)],
+        ]:
+            with self.assertRaises(ValueError):
+                import_file_tree([("files.zip", archive(files))])
+        with self.assertRaises(ValueError):
+            import_file_tree(
+                [("a.txt", b"a"), ("files.zip", archive([("a.txt", b"b")]))]
+            )
+
+    def test_rejects_links_invalid_archives_and_empty_imports(self):
+        link = ZipInfo("link.txt")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        corrupt = bytearray(archive([("a.txt", b"payload")]))
+        corrupt[35:37] = b"\xff\xff"
+        for content in (
+            b"not a zip",
+            bytes(corrupt),
+            archive([(link, b"/etc/passwd")]),
+            archive([(".git/config", b"ignored")]),
+        ):
+            with self.assertRaises(ValueError):
+                import_file_tree([("files.zip", content)])
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()

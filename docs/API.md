@@ -1,6 +1,6 @@
 # API 模块（backend/app/api + schemas）
 
-私有项目文件接口及 Run 绑定见 [PROJECT_FILES.md](PROJECT_FILES.md)。
+对话中的文件、文件夹与 ZIP 导入及持久化见 [对话文件](PROJECT_FILES.md)。
 
 MCP 外部授权及持久任务接口见 [MCP_OAUTH.md](MCP_OAUTH.md) 和 [MCP_TASKS.md](MCP_TASKS.md)。
 
@@ -53,7 +53,6 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/workflows/routes.py` — `/workspaces/{workspace_id}/workflows`（路径参数仍命名为 `{agent_id}`）：Workflow 草稿定义、资源校验、不可变版本、恢复、附件上传、调试运行、表单恢复与节点审计
 - `backend/app/api/v1/workflows/access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、文档页、API 文档、Run 和安全流
 - `backend/app/api/v1/artifacts/routes.py` — `/artifacts`：生成物 bearer 下载与图片预览，以及 `GET /artifacts/{artifact_id}/content` 的当前用户授权下载（响应 `Cache-Control: private, no-store`）
-- `backend/app/api/v1/projects/routes.py` — `/workspaces/{workspace_id}/projects`：创建者私有项目、文件版本、重命名与授权下载
 - `backend/app/api/v1/tools/oauth.py` — MCP 外部账号授权开始、回调交换、状态与断开
 - `backend/app/api/v1/tools/remote_tasks.py` — MCP 持久远端任务映射配置（`GET/PUT /mcp-servers/{server_id}/long-tasks`）
 - `backend/app/api/v1/agent_skills/routes.py` — `/workspaces/{workspace_id}/agent-skills`：技能包导入检查、CRUD、发布、版本列表与 view/use 授权

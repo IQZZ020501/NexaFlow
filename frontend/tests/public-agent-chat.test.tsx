@@ -3856,7 +3856,7 @@ describe("PublicAgentChat", () => {
       dataTransfer: { files: [dropped], types: ["Files"] },
     })
     fireEvent.drop(form, { dataTransfer: { files: [dropped] } })
-    expect(screen.getByText("dropped.webp")).toBeTruthy()
+    await screen.findByText("dropped.webp")
 
     const fileInput = document.querySelector(
       'input[type="file"]'

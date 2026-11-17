@@ -1,3 +1,4 @@
+import { agentUploadForm } from "@/lib/agent-upload"
 import { requestRun } from "@/lib/api/run-request"
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
@@ -138,8 +139,6 @@ export type AgentRun = {
   agent_id: string
   requested_by_user_id: string
   conversation_id: string
-  project_id?: string | null
-  project_name?: string | null
   regenerated_from_run_id?: string | null
   goal: string
   session_inputs?: AgentSessionInput[]
@@ -599,8 +598,7 @@ export function createAgentRun(
   conversationId?: string | null,
   fileIds: string[] = [],
   approvalMode: AgentApprovalMode = "always_ask",
-  requestId?: string,
-  projectId?: string | null
+  requestId?: string
 ) {
   return requestRun<AgentRun>(
     agentsPath(workspaceId, `/${agentId}/runs`),
@@ -610,7 +608,6 @@ export function createAgentRun(
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
       approval_mode: approvalMode,
-      ...(projectId ? { project_id: projectId } : {}),
     },
     { token, signal }
   )
@@ -622,8 +619,7 @@ export function uploadAgentFiles(
   agentId: string,
   files: File[]
 ) {
-  const body = new FormData()
-  files.forEach((file) => body.append("files", file))
+  const body = agentUploadForm(files)
   return request<AgentUpload[]>(
     agentsPath(workspaceId, `/${agentId}/uploads`),
     {
@@ -816,8 +812,7 @@ export async function streamAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "always_ask",
-  projectId?: string | null
+  approvalMode: AgentApprovalMode = "always_ask"
 ) {
   const run = await createAgentRun(
     token,
@@ -827,9 +822,7 @@ export async function streamAgentRun(
     signal,
     conversationId,
     fileIds,
-    approvalMode,
-    undefined,
-    projectId
+    approvalMode
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_RUN_STATUSES.has(run.status)) {

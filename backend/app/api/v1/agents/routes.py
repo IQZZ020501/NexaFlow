@@ -459,7 +459,6 @@ async def create_workspace_agent_run(
         file_ids=payload.file_ids,
         approval_mode=payload.approval_mode,
         request_id=payload.request_id,
-        project_id=payload.project_id,
     )
 
 
@@ -594,7 +593,7 @@ async def stream_workspace_agent_run(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
-    attachment_context, attachments = await resolve_workspace_agent_files(
+    attachment_context, attachments, input_files = await resolve_workspace_agent_files(
         db,
         context.workspace.id,
         agent_id,
@@ -614,6 +613,7 @@ async def stream_workspace_agent_run(
         conversation_id=payload.conversation_id,
         attachment_context=attachment_context,
         attachments=attachments,
+        input_files=input_files,
         settings=settings,
         approval_mode=payload.approval_mode,
     )

@@ -2045,6 +2045,11 @@ def test_object_storage() -> None:
         )
         assert empty is not None
         assert not (root / "data/empty.bin").exists()
+        assert (
+            run(storage.put_chunks("data/empty.bin", _chunks(), None, allow_empty=True))
+            == 0
+        )
+        assert (root / "data/empty.bin").read_bytes() == b""
 
         class _ExplodingChunks:
             def __init__(self):

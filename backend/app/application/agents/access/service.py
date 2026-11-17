@@ -848,6 +848,7 @@ async def create_external_agent_run(
     if context.publication is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
     attachment_context = ""
+    input_files = []
     attachments: list[dict[str, Any]] = []
     if file_ids:
         if access_source != "public":
@@ -855,7 +856,7 @@ async def create_external_agent_run(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Agent API runs do not accept public upload ids.",
             )
-        attachment_context, attachments = await resolve_public_agent_files(
+        attachment_context, attachments, input_files = await resolve_public_agent_files(
             db,
             context,
             consumer_id,
@@ -876,6 +877,7 @@ async def create_external_agent_run(
         publication_version=context.publication_version,
         attachment_context=attachment_context,
         attachments=attachments,
+        input_files=input_files,
         settings=settings,
         approval_mode=approval_mode,
         request_id=request_id,

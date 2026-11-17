@@ -36,6 +36,7 @@ os.environ.update(
     }
 )
 
+from app.domain.projects import models as project_models  # noqa: F401
 from app.infra.config.settings import Settings
 from app.infra.db.base import Base
 from app.infra.db.session import get_engine

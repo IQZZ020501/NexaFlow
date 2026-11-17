@@ -3786,8 +3786,8 @@ async def assert_create_agent_run_paths(
                 _workspace_role,
                 file_ids,
                 _settings,
-            ) -> tuple[str, list[dict[str, object]]]:
-                return f"attachment:{','.join(file_ids)}", []
+            ) -> tuple[str, list[dict[str, object]], list[dict]]:
+                return f"attachment:{','.join(file_ids)}", [], []
 
             workflow_uploads_module.resolve_workspace_agent_files = fake_resolve
             try:
