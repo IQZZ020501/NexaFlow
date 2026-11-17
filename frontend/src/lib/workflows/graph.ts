@@ -21,7 +21,6 @@ export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
   "condition",
   "variable",
   "mcp",
-  "code",
   "tool",
   "agent",
 ]
@@ -56,7 +55,6 @@ const WORKFLOW_NODE_LABELS: Record<WorkflowNodeType, TranslationKey> = {
   tool: "工具",
   agent: "Agent",
   mcp: "MCP 工具节点",
-  code: "Python 代码",
 }
 
 const WORKFLOW_ERROR_LABELS: Partial<Record<string, TranslationKey>> = {
@@ -272,11 +270,6 @@ export function defaultNodeConfig(
       }
     case "mcp":
       return { server_id: "", tool_name: "", arguments: {} }
-    case "code":
-      return {
-        code: "result = inputs",
-        inputs: { input: questionReference },
-      }
   }
 }
 

@@ -14,7 +14,6 @@ from app.domain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
 )
 from app.domain.tools.models import Tool as ToolOrm
-from app.domain.tools.models import ToolDraft as ToolDraftOrm
 from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.domain.tools.models import ToolPolicy as ToolPolicyOrm
 from app.domain.tools.models import ToolSource as ToolSourceOrm
@@ -35,7 +34,6 @@ from app.entities.identity.user import User
 from app.entities.tools import (
     ApplicationToolBinding,
     Tool,
-    ToolDraft,
     ToolInvocation,
     ToolPolicy,
     ToolRef,
@@ -49,14 +47,13 @@ ToolCatalogRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
-    ToolDraft | None,
+    ToolPolicy | None,
     ResourcePermission | None,
 ]
 ToolCatalogDetailRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
-    ToolDraft | None,
     ToolPolicy | None,
     ResourcePermission | None,
 ]
@@ -72,7 +69,6 @@ ApplicationToolSnapshotRow = tuple[
     str | None,
     ResourcePermission | None,
 ]
-
 
 
 def _tool_invocation_effect(invocation: ToolInvocationOrm) -> str | None:

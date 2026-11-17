@@ -103,7 +103,7 @@ const analytics: WorkspaceAnalytics = {
       active: 3,
     },
     knowledge: { bases: 2, documents: 12, chunks: 340 },
-    tools: { total: 9, mcp: 3, python: 2, builtin: 4, active: 8 },
+    tools: { total: 7, mcp: 3, builtin: 4, active: 6 },
     models: 5,
   },
   tool_usage: {
@@ -285,9 +285,7 @@ describe("workspace analytics", () => {
       within(inventoryCard).getByText("Agent 2 · 工作流 1 · 已发布 1")
     ).toBeTruthy()
     expect(within(inventoryCard).getByText("文档 12 · 片段 340")).toBeTruthy()
-    expect(
-      within(inventoryCard).getByText("MCP 3 · Python 2 · 内置 4")
-    ).toBeTruthy()
+    expect(within(inventoryCard).getByText("MCP 3 · 内置 4")).toBeTruthy()
 
     const toolUsageCard = screen
       .getByText("工具调用")

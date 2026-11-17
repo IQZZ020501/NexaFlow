@@ -17,7 +17,7 @@ const tools: ToolSummary[] = [
   {
     id: "tool-use",
     workspace_id: "ws-1",
-    kind: "python",
+    kind: "mcp",
     function_name: "lookup",
     display_name: "Lookup account",
     description: "Find an account by email",
@@ -27,7 +27,7 @@ const tools: ToolSummary[] = [
     source: {
       id: "source-1",
       name: "Finance",
-      kind: "python",
+      kind: "mcp",
       transport: null,
     },
     created_by_user_id: "u-1",
@@ -201,7 +201,7 @@ describe("ToolPicker", () => {
     const categories = within(screen.getByRole("group", { name: "工具分类" }))
     expect(screen.getByRole("region", { name: "内置工具" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "MCP 工具" })).toBeTruthy()
-    expect(screen.getByRole("region", { name: "Python" })).toBeTruthy()
+    expect(screen.queryByRole("region", { name: "Python" })).toBeNull()
     expect(screen.queryByText("Install Skill dependencies")).toBeNull()
     expect(screen.queryByText("命令行") === null).toBe(true)
     expect(screen.queryByText("图片生成")).toBeNull()
@@ -211,7 +211,7 @@ describe("ToolPicker", () => {
 
     fireEvent.click(categories.getByRole("button", { name: "MCP 工具" }))
     expect(screen.queryByText("图片生成")).toBeNull()
-    expect(screen.queryByText("Lookup account")).toBeNull()
+    expect(screen.getByText("Lookup account")).toBeTruthy()
     fireEvent.click(screen.getByRole("checkbox", { name: "Private report" }))
     expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
 

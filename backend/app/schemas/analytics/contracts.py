@@ -124,7 +124,6 @@ class WorkspaceAnalyticsInventoryKnowledge(BaseModel):
 class WorkspaceAnalyticsInventoryTools(BaseModel):
     total: int
     mcp: int
-    python: int
     builtin: int
     active: int
 

@@ -60,6 +60,7 @@ SUITES = (
     "workflows.workflow_run_coverage",
     "workflows.workflow_node_coverage",
     "tools.tools",
+    "tools.retirement",
     "smoke.test_main",
 )
 COMMAND_TIMEOUT_SECONDS = 30 * 60

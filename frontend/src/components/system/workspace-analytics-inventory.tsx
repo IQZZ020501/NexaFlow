@@ -35,7 +35,6 @@ const TONE_TILE = {
 const TOOL_KIND_LABELS: Record<string, TranslationKey> = {
   builtin: "内置工具",
   mcp: "MCP 工具",
-  python: "Python",
 }
 
 /**
@@ -143,9 +142,8 @@ export function AnalyticsInventoryPanel({
           tone="amber"
           label={t("工具")}
           value={count(inventory.tools.total)}
-          detail={t("MCP {mcp} · Python {python} · 内置 {builtin}", {
+          detail={t("MCP {mcp} · 内置 {builtin}", {
             mcp: count(inventory.tools.mcp),
-            python: count(inventory.tools.python),
             builtin: count(inventory.tools.builtin),
           })}
         />
@@ -184,7 +182,9 @@ export function AnalyticsToolUsagePanel({
       <CardHeader className="px-5">
         <CardTitle>{t("工具调用")}</CardTitle>
         <CardDescription>
-          {t("所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）")}
+          {t(
+            "所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）"
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-4 px-5">

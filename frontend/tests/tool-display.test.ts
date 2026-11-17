@@ -17,10 +17,26 @@ const translated = (language: Language) =>
 describe("tool display helpers", () => {
   test("preserves the whole authenticated artifact path when normalizing links", () => {
     const id = "23291174-58e4-42ad-9656-2ee0aad1328a"
-    const file = {artifact_id: id, filename: "report.html", relative_path: "reports/report.html", download_url: "/api/v1/artifacts/expired"}
-    const result = withArtifactDownloadLinks("[report](/api/v1/artifacts/expired)", [{tool_name: "create_artifact", status: "succeeded", output: file}])
-    expect(result).toBe(`[reports/report.html](/api/v1/artifacts/${id}/content)`)
-    expect(withArtifactDownloadLinksInContent(`filename: report.html\n/api/v1/artifacts/${id}/content`)).toBe(`filename: report.html\n[report.html](/api/v1/artifacts/${id}/content)`)
+    const file = {
+      artifact_id: id,
+      filename: "report.html",
+      relative_path: "reports/report.html",
+      download_url: "/api/v1/artifacts/expired",
+    }
+    const result = withArtifactDownloadLinks(
+      "[report](/api/v1/artifacts/expired)",
+      [{ tool_name: "create_artifact", status: "succeeded", output: file }]
+    )
+    expect(result).toBe(
+      `[reports/report.html](/api/v1/artifacts/${id}/content)`
+    )
+    expect(
+      withArtifactDownloadLinksInContent(
+        `filename: report.html\n/api/v1/artifacts/${id}/content`
+      )
+    ).toBe(
+      `filename: report.html\n[report.html](/api/v1/artifacts/${id}/content)`
+    )
   })
 
   test("localizes bash and expands command artifact lists", () => {
@@ -61,26 +77,6 @@ describe("tool display helpers", () => {
     expect(content).toContain("[result.txt](/api/v1/artifacts/shell-token)")
   })
   test("localizes built-in tool display names", () => {
-    expect(
-      toolDisplayName(
-        {
-          function_name: "inline_python",
-          display_name: "Python",
-          description: "Runs code",
-        },
-        t
-      )
-    ).toBe("Python 代码")
-    expect(
-      toolDisplayName(
-        {
-          function_name: "current_time",
-          display_name: "Time",
-          description: "UTC time",
-        },
-        t
-      )
-    ).toBe("当前时间")
     expect(
       toolDisplayName(
         {
@@ -157,26 +153,6 @@ describe("tool display helpers", () => {
   })
 
   test("localizes built-in tool display descriptions", () => {
-    expect(
-      toolDisplayDescription(
-        {
-          function_name: "inline_python",
-          display_name: "Python",
-          description: "Runs code",
-        },
-        t
-      )
-    ).toBe("在工作流沙箱中运行 Python 代码。")
-    expect(
-      toolDisplayDescription(
-        {
-          function_name: "current_time",
-          display_name: "Time",
-          description: "UTC time",
-        },
-        t
-      )
-    ).toBe("返回当前时间。")
     expect(
       toolDisplayDescription(
         {

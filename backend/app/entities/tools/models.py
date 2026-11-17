@@ -10,7 +10,6 @@ from jsonschema.exceptions import SchemaError
 
 from app.entities.defaults import new_id, utc_now
 
-MAX_PYTHON_TOOL_CODE_BYTES = 8 * 1024
 MAX_TOOL_SCHEMA_BYTES = 16 * 1024
 MAX_TOOL_SCHEMA_DEPTH = 8
 MAX_TOOL_SCHEMA_PROPERTIES = 64
@@ -113,7 +112,7 @@ class ToolRef:
             raise ValueError("Tool references require tool and version IDs.")
 
 
-ToolKind = Literal["builtin", "python", "mcp"]
+ToolKind = Literal["builtin", "mcp"]
 ToolApproval = Literal["auto", "each_call", "disabled"]
 ToolEffect = Literal["pure", "external_read", "external_write", "unknown"]
 
@@ -193,7 +192,7 @@ def effective_tool_access(
 
 
 def validate_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Return a closed, bounded copy of a Python Tool JSON Schema."""
+    """Return a closed, bounded copy of a Tool or Skill JSON Schema."""
 
     if not isinstance(schema, dict) or schema.get("type") != "object":
         raise ValueError("Tool schemas must describe an object.")
@@ -318,12 +317,6 @@ def validate_tool_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return restricted
 
 
-def validate_python_tool_code(code: str) -> str:
-    if len(code.encode("utf-8")) > MAX_PYTHON_TOOL_CODE_BYTES:
-        raise ValueError("Python Tool code is too large.")
-    return code
-
-
 @dataclass
 class ToolSource:
     id: str = field(default_factory=new_id)
@@ -350,22 +343,6 @@ class Tool:
     status: str = "active"
     availability: str = "available"
     created_by_user_id: str | None = None
-    created_at: datetime = field(default_factory=utc_now)
-    updated_at: datetime = field(default_factory=utc_now)
-
-
-@dataclass
-class ToolDraft:
-    id: str = field(default_factory=new_id)
-    workspace_id: str = ""
-    tool_id: str = ""
-    display_name: str = ""
-    description: str = ""
-    input_schema: dict[str, Any] = field(default_factory=dict)
-    output_schema: dict[str, Any] | None = None
-    execution_spec: dict[str, Any] = field(default_factory=dict)
-    revision: int = 1
-    updated_by_user_id: str = ""
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
 

@@ -23,7 +23,8 @@ structural validation do not constitute visual review or prove full format fidel
 The old PPT fixed layout, composition, PPTD/WASM and compatibility implementations
 have been removed. The three remaining render.py files serve only existing
 DOCX/PDF/XLSX frozen legacy contracts. New calls use direct Python workflows;
-Workflow file generation uses Python Code nodes, not instruction loaders.
+Workflows use authorized MCP Tools or Agent nodes for file work. Standalone Python
+Tools and Python Code nodes have been removed.
 
 See [Skills](../../docs/SKILLS.md) for permissions, package imports, migration and
 delivery, and [OpenSandbox deployment](../../deploy/opensandbox/README.md) for the

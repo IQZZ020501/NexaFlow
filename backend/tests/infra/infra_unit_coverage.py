@@ -2222,7 +2222,6 @@ def test_settings_defaults_and_validation() -> None:
     assert base.agent_external_agent_runs_per_minute == 60
     assert base.agent_external_consumer_runs_per_minute == 10
     assert base.opensandbox_url == "http://127.0.0.1:8088"
-    assert base.workflow_sandbox_timeout_seconds == 5.0
     assert base.jwt_expires_minutes == 1440
     assert base.refresh_token_expires_days == 30
     assert config_mod.Settings.public_app_url == "http://localhost:8080"
@@ -2293,14 +2292,6 @@ def test_settings_defaults_and_validation() -> None:
             "AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE",
         ),
         (replace(base, opensandbox_url="file:///host"), "OPENSANDBOX_URL"),
-        (
-            replace(base, workflow_sandbox_timeout_seconds=0.05),
-            "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
-        ),
-        (
-            replace(base, workflow_sandbox_timeout_seconds=31),
-            "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
-        ),
         (
             replace(base, artifact_sandbox_timeout_seconds=0.05),
             "ARTIFACT_SANDBOX_TIMEOUT_SECONDS",

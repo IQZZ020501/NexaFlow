@@ -39,7 +39,7 @@ function tool(overrides: Partial<ToolSummary> = {}): ToolSummary {
   return {
     id: "tool-owner",
     workspace_id: "ws-1",
-    kind: "python",
+    kind: "mcp",
     function_name: "formatter",
     display_name: "Owned formatter",
     description: "Formats text",
@@ -47,9 +47,9 @@ function tool(overrides: Partial<ToolSummary> = {}): ToolSummary {
     status: "active",
     availability: "available",
     source: {
-      id: "source-python",
-      name: "Python",
-      kind: "python",
+      id: "source-owned",
+      name: "Owned source",
+      kind: "mcp",
       transport: null,
     },
     created_by_user_id: "u-1",
@@ -74,7 +74,6 @@ function detail(summary: ToolSummary): ToolDetail {
     effect: "pure",
     workflow_callable: true,
     parallel_safe: false,
-    draft: null,
   }
 }
 
@@ -508,12 +507,12 @@ describe("ToolsPage", () => {
     await screen.findByRole("heading", { name: "内置 Skills" })
     expect(screen.queryByRole("button", { name: "批量管理" })).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "Python" }))
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }))
     await screen.findByText("Owned formatter")
     expect(screen.getByRole("button", { name: "批量管理" })).toBeTruthy()
   })
 
-  test("filters the current catalog with Skills, MCP, and Python tabs", async () => {
+  test("filters Skills and MCP while excluding retired Python tools", async () => {
     const builtinTool = tool({
       id: "tool-skill",
       kind: "builtin",
@@ -529,7 +528,7 @@ describe("ToolsPage", () => {
     })
     const timeTool = tool({
       id: "tool-current-time",
-      kind: "python",
+      kind: "python" as ToolSummary["kind"],
       function_name: "current_time",
       display_name: "Current time",
       created_by_user_id: null,
@@ -538,7 +537,7 @@ describe("ToolsPage", () => {
       source: {
         id: "source-python-system",
         name: "Python",
-        kind: "python",
+        kind: "python" as ToolSummary["kind"],
         transport: null,
       },
     })
@@ -585,16 +584,8 @@ describe("ToolsPage", () => {
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
     expect(screen.queryByText("生成 PDF")).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "Python" }))
-    await screen.findByText("Owned formatter")
-    expect(screen.getByText("当前时间")).toBeTruthy()
-    expect(screen.queryByText("Remote lookup")).toBeNull()
-    expect(screen.queryByText("Remote tools")).toBeNull()
-    expect(
-      screen
-        .getByRole("button", { name: "Python" })
-        .getAttribute("aria-pressed")
-    ).toBe("true")
+    expect(screen.queryByRole("button", { name: "Python" })).toBeNull()
+    expect(screen.queryByText("当前时间")).toBeNull()
   })
 
   test("hides image generation, bash and the Skill installer from the Tool catalog", async () => {
@@ -685,7 +676,7 @@ describe("ToolsPage", () => {
     const trigger = screen.getByRole("button", { name: "添加工具" })
     fireEvent.pointerDown(trigger)
     fireEvent.click(trigger)
-    expect(await screen.findByText("Python 工具")).toBeTruthy()
+    expect(screen.queryByText("Python 工具")).toBeNull()
     expect(screen.getByText("MCP Server")).toBeTruthy()
     fireEvent.click(screen.getByRole("menuitem", { name: "Skills" }))
     expect(
@@ -974,17 +965,16 @@ describe("ToolsPage", () => {
     })
     fireEvent.pointerDown(manage)
     fireEvent.click(manage)
-    expect(await screen.findByRole("menuitem", { name: "编辑" })).toBeTruthy()
+    expect(
+      await screen.findByRole("menuitem", { name: "查看详情" })
+    ).toBeTruthy()
     expect(screen.getByRole("menuitem", { name: "授权" })).toBeTruthy()
     expect(screen.getByRole("menuitem", { name: "禁用" })).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: "归档" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "归档" })).toBeNull()
     fireEvent.keyDown(document, { key: "Escape" })
 
     fireEvent.click(screen.getByText("Shared viewer").closest("article")!)
-    await screen.findByRole("heading", { name: "Python 工具详情" })
-    expect(
-      screen.getByText("你拥有查看权限；草稿与代码不会显示。")
-    ).toBeTruthy()
+    await screen.findByRole("heading", { name: "Shared viewer" })
     expect(screen.queryByLabelText("Python 代码")).toBeNull()
   })
 
@@ -1007,13 +997,13 @@ describe("ToolsPage", () => {
   test("shows builtin tools without a group heading", async () => {
     const timeTool = tool({
       id: "tool-current-time",
-      kind: "python",
+      kind: "python" as ToolSummary["kind"],
       function_name: "current_time",
       display_name: "Current time",
       source: {
         id: "source-python",
         name: "Python",
-        kind: "python",
+        kind: "python" as ToolSummary["kind"],
         transport: null,
       },
       created_by_user_id: null,
@@ -1042,12 +1032,9 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
-    await screen.findByText("当前时间")
-    expect(screen.getByText("生成 PDF")).toBeTruthy()
+    await screen.findByText("生成 PDF")
+    expect(screen.queryByText("当前时间")).toBeNull()
     expect(screen.queryByText("内置工具")).toBeNull()
-    const timeCard = screen.getByText("当前时间").closest("article")!
-    expect(within(timeCard).getAllByText("Python").length).toBeGreaterThan(0)
-    expect(within(timeCard).getByText("可用")).toBeTruthy()
     const skillCard = screen.getByText("生成 PDF").closest("article")!
     expect(within(skillCard).getAllByText("内置").length).toBeGreaterThan(0)
   })
@@ -1083,7 +1070,9 @@ describe("ToolsPage", () => {
     expect(
       await screen.findByRole("heading", { name: "生成 PDF Skill" })
     ).toBeTruthy()
-    expect(await screen.findByRole("heading", { name: "PDF operations" })).toBeTruthy()
+    expect(
+      await screen.findByRole("heading", { name: "PDF operations" })
+    ).toBeTruthy()
     expect(screen.queryByText("输入 Schema")).toBeNull()
     expect(screen.queryByText("输出 Schema")).toBeNull()
 
@@ -1553,145 +1542,6 @@ describe("ToolsPage", () => {
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
   }, 20000)
 
-  test("disables an owned python tool only after confirmation", async () => {
-    const owned = tool()
-    const requests: Array<{ method: string }> = []
-    const notifications: Array<[string, string]> = []
-    Object.assign(session, {
-      notify: (kind: string, value: string) =>
-        notifications.push([kind, value]),
-    })
-    let state = detail(owned)
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-owner/disable")) {
-        requests.push({ method: init?.method ?? "GET" })
-        state = { ...state, status: "disabled", availability: "unavailable" }
-        return jsonResponse(state)
-      }
-      if (url.includes("/tools?")) return jsonResponse([owned])
-      if (url.includes("/tool-sources?")) return jsonResponse([])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Owned formatter",
-    })
-
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "禁用" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "取消" }
-      )
-    )
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
-    )
-    expect(requests).toEqual([])
-
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "禁用" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "禁用" }
-      )
-    )
-    await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
-    expect(notifications).toContainEqual(["success", "工具已禁用"])
-    const card = screen.getByText("Owned formatter").closest("article")!
-    await waitFor(() => expect(within(card).getByText("不可用")).toBeTruthy())
-  }, 20000)
-
-  test("enables a disabled python tool without confirmation", async () => {
-    const owned = tool({
-      status: "disabled",
-      availability: "unavailable",
-      current_version_id: null,
-    })
-    const requests: Array<{ method: string }> = []
-    const notifications: Array<[string, string]> = []
-    Object.assign(session, {
-      notify: (kind: string, value: string) =>
-        notifications.push([kind, value]),
-    })
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-owner/enable")) {
-        requests.push({ method: init?.method ?? "GET" })
-        return jsonResponse({
-          ...detail(owned),
-          status: "active",
-          availability: "available",
-          current_version_id: "version-1",
-        })
-      }
-      if (url.includes("/tools?")) return jsonResponse([owned])
-      if (url.includes("/tool-sources?")) return jsonResponse([])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Owned formatter",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "启用" }))
-    await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
-    expect(notifications).toContainEqual(["success", "工具已启用"])
-    const card = screen.getByText("Owned formatter").closest("article")!
-    await waitFor(() => expect(within(card).getByText("可用")).toBeTruthy())
-  })
-
-  test("keeps the tool card when the disable request fails", async () => {
-    const owned = tool()
-    const notifications: Array<[string, string]> = []
-    Object.assign(session, {
-      notify: (kind: string, value: string) =>
-        notifications.push([kind, value]),
-    })
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-owner/disable"))
-        return jsonResponse({ detail: "nope" }, 503)
-      if (url.includes("/tools?")) return jsonResponse([owned])
-      if (url.includes("/tool-sources?")) return jsonResponse([])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Owned formatter",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "禁用" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "禁用" }
-      )
-    )
-    await waitFor(() => expect(notifications).toContainEqual(["error", "nope"]))
-    const card = screen.getByText("Owned formatter").closest("article")!
-    expect(within(card).getByText("可用")).toBeTruthy()
-  })
-
   test("marks an MCP tool read-only only after explicit confirmation", async () => {
     const remote = tool({
       id: "tool-mcp",
@@ -1838,85 +1688,6 @@ describe("ToolsPage", () => {
     expect(requests).toEqual([{ mode: "approval_required" }])
   }, 20000)
 
-  test("archives an owned python tool only after confirmation", async () => {
-    const owned = tool()
-    const requests: Array<{ method: string }> = []
-    const notifications: Array<[string, string]> = []
-    Object.assign(session, {
-      notify: (kind: string, value: string) =>
-        notifications.push([kind, value]),
-    })
-    let archiveFails = true
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-owner")) {
-        requests.push({ method: init?.method ?? "GET" })
-        if (archiveFails) return jsonResponse({ detail: "archive failed" }, 503)
-        return jsonResponse(null)
-      }
-      if (url.includes("/tools?")) return jsonResponse([owned])
-      if (url.includes("/tool-sources?")) return jsonResponse([])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
-    const openManageMenu = () => {
-      const manage = screen.getByRole("button", {
-        name: "管理工具 Owned formatter",
-      })
-      fireEvent.pointerDown(manage)
-      fireEvent.click(manage)
-    }
-
-    // cancelling leaves the tool in place
-    openManageMenu()
-    fireEvent.click(await screen.findByRole("menuitem", { name: "归档" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "取消" }
-      )
-    )
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
-    )
-    expect(requests).toEqual([])
-
-    // a failing archive keeps the card and reports the error
-    openManageMenu()
-    fireEvent.click(await screen.findByRole("menuitem", { name: "归档" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "归档" }
-      )
-    )
-    await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "archive failed"])
-    )
-    expect(screen.getByText("Owned formatter")).toBeTruthy()
-
-    // a successful archive removes the card
-    archiveFails = false
-    openManageMenu()
-    fireEvent.click(await screen.findByRole("menuitem", { name: "归档" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "归档" }
-      )
-    )
-    await waitFor(() =>
-      expect(screen.queryByText("Owned formatter")).toBeNull()
-    )
-    expect(notifications).toContainEqual(["success", "工具已归档"])
-    await screen.findByText("还没有工具")
-  }, 20000)
-
   test("deletes an MCP source with confirmation and removes its tools", async () => {
     const src = source({ name: "Remote tools", tool_count: 1 })
     const remote = tool({
@@ -2053,94 +1824,6 @@ describe("ToolsPage", () => {
     await screen.findByText(note)
     fireEvent.keyDown(document, { key: "Escape" })
     await waitFor(() => expect(screen.queryByText(note)).toBeNull())
-  })
-
-  test("opens the python editor from the manage menu", async () => {
-    const owned = tool()
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-owner")) return jsonResponse(detail(owned))
-      if (url.includes("/tools?")) return jsonResponse([owned])
-      if (url.includes("/tool-sources?")) return jsonResponse([])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Owned formatter",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }))
-
-    const pythonDialog = await screen.findByRole("dialog", {
-      name: "Python 工具详情",
-    })
-    expect(within(pythonDialog).getByText("已发布")).toBeTruthy()
-    fireEvent.keyDown(document, { key: "Escape" })
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "Python 工具详情" })
-      ).toBeNull()
-    )
-    expect(screen.getByText("Owned formatter")).toBeTruthy()
-  })
-
-  test("creates a python tool from the add menu", async () => {
-    const created = detail(
-      tool({
-        id: "tool-created",
-        function_name: "brand_new",
-        display_name: "Brand new tool",
-      })
-    )
-    const requests: Array<{ body: Record<string, unknown> }> = []
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tools/python")) {
-        requests.push({ body: JSON.parse(String(init?.body)) })
-        return jsonResponse(created)
-      }
-      if (url.includes("/tools?")) return jsonResponse([])
-      if (url.includes("/tool-sources?")) return jsonResponse([])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findByText("还没有工具")
-    const addTrigger = screen.getByRole("button", { name: "添加工具" })
-    fireEvent.pointerDown(addTrigger)
-    fireEvent.click(addTrigger)
-    fireEvent.click(await screen.findByText("Python 工具"))
-    await screen.findByRole("heading", { name: "创建 Python 工具" })
-    fireEvent.change(screen.getByLabelText("显示名称"), {
-      target: { value: "Brand new tool" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "创建" }))
-    await screen.findByText("Brand new tool")
-    expect(requests).toEqual([
-      {
-        body: {
-          display_name: "Brand new tool",
-          description: "",
-          input_schema: {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          },
-          output_schema: {
-            type: "object",
-            properties: {},
-            additionalProperties: false,
-          },
-          code: "result = inputs",
-        },
-      },
-    ])
   })
 
   test("creates a public MCP source from the add dialog", async () => {

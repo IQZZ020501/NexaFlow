@@ -270,12 +270,11 @@ describe("WorkflowNodeCard", () => {
       ["tool", "工具"],
       ["agent", "Agent"],
       ["mcp", "MCP 工具节点"],
-      ["code", "Python 代码"],
     ]
     for (const [type, label] of labels) {
       renderNode(nodeData(type))
       expect(screen.getByText(`Node ${type}`)).toBeTruthy()
-      if (type === "tool" || type === "agent" || type === "code") {
+      if (type === "tool" || type === "agent") {
         expect(screen.getAllByText(label).length).toBeGreaterThan(0)
       } else {
         expect(screen.getByText(label)).toBeTruthy()
@@ -532,19 +531,6 @@ describe("WorkflowNodeCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "添加字段" }))
     const fields = updates.at(-1)?.config.form_field_list as unknown[]
     expect(fields?.length).toBe(1)
-  })
-
-  test("code node edits its code body", () => {
-    const updates: WorkflowNodeData[] = []
-    renderNode(
-      nodeData("code", {
-        onUpdate: (data) => updates.push(data),
-        config: { code: "print(1)" },
-      })
-    )
-    const editor = screen.getByLabelText("Python 代码")
-    fireEvent.change(editor, { target: { value: "print(2)" } })
-    expect(updates.at(-1)?.config.code).toBe("print(2)")
   })
 
   test("end node adds and removes an output mapping", () => {
@@ -1373,21 +1359,6 @@ describe("WorkflowNodeCard", () => {
       target: { value: "doc-1" },
     })
     expect(updates.at(-1)?.config.document_list).toBe("doc-1")
-  })
-
-  test("code node edits its JSON inputs", () => {
-    const updates: WorkflowNodeData[] = []
-    renderNode(
-      nodeData("code", {
-        onUpdate: (data) => updates.push(data),
-        config: { code: "print(1)", inputs: { x: 1 } },
-      })
-    )
-    expect(screen.getByText("代码输入 · 1")).toBeTruthy()
-    fireEvent.change(screen.getByLabelText("代码输入"), {
-      target: { value: '{"x": 2}' },
-    })
-    expect(updates.at(-1)?.config.inputs).toEqual({ x: 2 })
   })
 
   test("agent node summary resolves via published version", () => {

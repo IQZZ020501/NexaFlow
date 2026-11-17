@@ -22,7 +22,6 @@ export type WorkflowNodeType =
   | "tool"
   | "agent"
   | "mcp"
-  | "code"
 
 export type WorkflowNodeData = Record<string, unknown> & {
   type: WorkflowNodeType

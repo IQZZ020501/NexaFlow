@@ -68,10 +68,7 @@ function ndjson(events: unknown[]): Response {
 
 function recordingFetch() {
   const calls: Array<{ url: string; method: string; body?: string }> = []
-  globalThis.fetch = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit
-  ) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({
       url: String(input),
       method: init?.method ?? "GET",
@@ -207,12 +204,20 @@ describe("lib/api/workflows", () => {
   })
 
   test("uploadWorkflowFiles sends multipart form data", async () => {
-    const calls: Array<{ url: string; method: string; body: BodyInit | null | undefined }> = []
+    const calls: Array<{
+      url: string
+      method: string
+      body: BodyInit | null | undefined
+    }> = []
     globalThis.fetch = (async (
       input: RequestInfo | URL,
       init?: RequestInit
     ) => {
-      calls.push({ url: String(input), method: init?.method ?? "GET", body: init?.body })
+      calls.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body,
+      })
       return jsonResponse([
         {
           id: "up-1",
@@ -224,7 +229,12 @@ describe("lib/api/workflows", () => {
       ])
     }) as unknown as typeof fetch
     const files = [new File(["a"], "a.txt", { type: "text/plain" })]
-    const uploaded = await uploadWorkflowFiles("token", "ws-1", "workflow-1", files)
+    const uploaded = await uploadWorkflowFiles(
+      "token",
+      "ws-1",
+      "workflow-1",
+      files
+    )
     expect(uploaded).toEqual([
       {
         id: "up-1",
@@ -254,7 +264,10 @@ describe("lib/api/workflows", () => {
 
   test("listWorkflowRuns builds the query string", async () => {
     const calls = recordingFetch()
-    await listWorkflowRuns("token", "ws-1", "workflow-1", { limit: 10, offset: 20 })
+    await listWorkflowRuns("token", "ws-1", "workflow-1", {
+      limit: 10,
+      offset: 20,
+    })
     expect(calls[0].url).toBe(
       "/api/v1/workspaces/ws-1/workflows/workflow-1/runs?limit=10&offset=20"
     )
@@ -267,25 +280,50 @@ describe("lib/api/workflows", () => {
   test("listWorkflowNodeExecutions lists node executions", async () => {
     const calls = recordingFetch()
     await listWorkflowNodeExecutions("token", "ws-1", "workflow-1", "run-1")
-    expect(calls[0].url).toContain(
-      "/workflows/workflow-1/runs/run-1/nodes"
-    )
+    expect(calls[0].url).toContain("/workflows/workflow-1/runs/run-1/nodes")
   })
 
   test("observeWorkflowRun delivers stream events until the terminal event", async () => {
     const finished = runFixture({ status: "succeeded" })
     globalThis.fetch = (async () =>
       ndjson([
-        { type: "workflow_node_started", sequence: 1, node_id: "llm-1", node_type: "llm", execution_sequence: 1 },
-        { type: "workflow_node", sequence: 2, node_id: "llm-1", node_type: "llm", status: "succeeded", execution_sequence: 1, inputs: {}, outputs: { result: "ok" }, model_usage: {}, error: null, duration_ms: 10 },
+        {
+          type: "workflow_node_started",
+          sequence: 1,
+          node_id: "llm-1",
+          node_type: "llm",
+          execution_sequence: 1,
+        },
+        {
+          type: "workflow_node",
+          sequence: 2,
+          node_id: "llm-1",
+          node_type: "llm",
+          status: "succeeded",
+          execution_sequence: 1,
+          inputs: {},
+          outputs: { result: "ok" },
+          model_usage: {},
+          error: null,
+          duration_ms: 10,
+        },
         { type: "complete", sequence: 3, run: finished },
       ])) as unknown as typeof fetch
 
     const seen: Array<{ type: string; node_id?: string }> = []
-    await observeWorkflowRun("token", "ws-1", "workflow-1", "run-1", (event) => {
-      const nodeId = "node_id" in event && typeof event.node_id === "string" ? event.node_id : undefined
-      seen.push({ type: event.type, node_id: nodeId })
-    })
+    await observeWorkflowRun(
+      "token",
+      "ws-1",
+      "workflow-1",
+      "run-1",
+      (event) => {
+        const nodeId =
+          "node_id" in event && typeof event.node_id === "string"
+            ? event.node_id
+            : undefined
+        seen.push({ type: event.type, node_id: nodeId })
+      }
+    )
     expect(seen.map((item) => item.type)).toEqual([
       "workflow_node_started",
       "workflow_node",
@@ -300,9 +338,17 @@ describe("lib/api/workflows", () => {
       return ndjson([{ type: "complete", sequence: 9, run: runFixture() }])
     }) as unknown as typeof fetch
     const seen: unknown[] = []
-    await observeWorkflowRun("token", "ws-1", "workflow-1", "run-1", (event) => {
-      seen.push(event)
-    }, undefined, 9)
+    await observeWorkflowRun(
+      "token",
+      "ws-1",
+      "workflow-1",
+      "run-1",
+      (event) => {
+        seen.push(event)
+      },
+      undefined,
+      9
+    )
     expect(requestedUrl).toContain("after=9")
     expect(seen).toHaveLength(1)
   })
@@ -324,9 +370,8 @@ describe("lib/workflows/graph", () => {
     expect(workflowNodeLabel("template", t)).toBe("模板转换")
     expect(workflowNodeLabel("variable", t)).toBe("变量赋值")
     expect(workflowNodeLabel("mcp", t)).toBe("MCP 工具节点")
-    expect(workflowNodeLabel("code", t)).toBe("Python 代码")
     expect(WORKFLOW_NODE_TYPES).toContain("reply-node")
-    expect(WORKFLOW_NODE_TYPES).toContain("code")
+    expect(WORKFLOW_NODE_TYPES).not.toContain("code" as never)
     expect(WORKFLOW_START_GLOBALS.map((item) => item.value)).toEqual([
       "time",
       "history_context",
@@ -354,9 +399,15 @@ describe("lib/workflows/graph", () => {
       edges: [],
       viewport: { x: 0, y: 0, zoom: 1 },
     }
-    expect(workflowExecutionNodeLabel("llm-1", "llm", graph, t)).toBe("摘要生成")
-    expect(workflowExecutionNodeLabel("missing", "llm", graph, t)).toBe("大语言模型")
-    expect(workflowExecutionNodeLabel("llm-1", "llm", null, t)).toBe("大语言模型")
+    expect(workflowExecutionNodeLabel("llm-1", "llm", graph, t)).toBe(
+      "摘要生成"
+    )
+    expect(workflowExecutionNodeLabel("missing", "llm", graph, t)).toBe(
+      "大语言模型"
+    )
+    expect(workflowExecutionNodeLabel("llm-1", "llm", null, t)).toBe(
+      "大语言模型"
+    )
   })
 
   test("workflowErrorMessage maps known errors and passes through others", () => {
@@ -426,10 +477,6 @@ describe("lib/workflows/graph", () => {
       tool_name: "",
       arguments: {},
     })
-    expect(defaultNodeConfig("code")).toEqual({
-      code: "result = inputs",
-      inputs: { input: "{{start.question}}" },
-    })
     expect(defaultNodeConfig("knowledge")).toEqual({
       knowledge_base_ids: [],
       query: "{{start.question}}",
@@ -495,18 +542,37 @@ describe("lib/workflows/graph", () => {
     }
     const graph: WorkflowGraph = {
       nodes: [
-        { id: "start", type: "workflow", position: { x: 0, y: 0 }, data: { type: "start", title: "Start", config: {} } },
+        {
+          id: "start",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { type: "start", title: "Start", config: {} },
+        },
         conditionNode,
       ],
       edges: [
-        { id: "edge-1", source: "condition-1", target: "end-1", sourceHandle: "else-1" },
+        {
+          id: "edge-1",
+          source: "condition-1",
+          target: "end-1",
+          sourceHandle: "else-1",
+        },
       ],
       viewport: { x: 0, y: 0, zoom: 1 },
     }
     const migrated = ensureConditionElseIfBranches(graph)
-    const branches = migrated.nodes[1].data.config.branch as Array<{ type: string; id: string }>
-    expect(branches.map((branch) => branch.type)).toEqual(["IF", "ELSE IF", "ELSE"])
-    expect(migrated.edges.map((edge) => edge.sourceHandle)).toContain(branches[1].id)
+    const branches = migrated.nodes[1].data.config.branch as Array<{
+      type: string
+      id: string
+    }>
+    expect(branches.map((branch) => branch.type)).toEqual([
+      "IF",
+      "ELSE IF",
+      "ELSE",
+    ])
+    expect(migrated.edges.map((edge) => edge.sourceHandle)).toContain(
+      branches[1].id
+    )
 
     // Single-branch conditions and non-condition nodes are untouched.
     const untouchedInput: WorkflowGraph = {
@@ -516,7 +582,9 @@ describe("lib/workflows/graph", () => {
           data: {
             ...conditionNode.data,
             config: {
-              branch: [{ id: "if-1", type: "IF", condition: "and", conditions: [] }],
+              branch: [
+                { id: "if-1", type: "IF", condition: "and", conditions: [] },
+              ],
             },
           },
         },
@@ -534,8 +602,18 @@ describe("lib/workflows/graph", () => {
             config: {
               branch: [
                 { id: "if-1", type: "IF", condition: "and", conditions: [] },
-                { id: "eif-1", type: "ELSE IF", condition: "and", conditions: [] },
-                { id: "else-1", type: "ELSE", condition: "and", conditions: [] },
+                {
+                  id: "eif-1",
+                  type: "ELSE IF",
+                  condition: "and",
+                  conditions: [],
+                },
+                {
+                  id: "else-1",
+                  type: "ELSE",
+                  condition: "and",
+                  conditions: [],
+                },
               ],
             },
           },
@@ -572,7 +650,13 @@ describe("lib/workflows/graph", () => {
         } as never,
       ],
       [
-        { id: "edge-1", source: "start", target: "end", sourceHandle: "h", selected: true } as never,
+        {
+          id: "edge-1",
+          source: "start",
+          target: "end",
+          sourceHandle: "h",
+          selected: true,
+        } as never,
       ],
       { x: 0, y: 0, zoom: 2 }
     )
@@ -590,16 +674,42 @@ describe("lib/workflows/graph", () => {
     })
     expect(serialized.viewport).toEqual({ x: 0, y: 0, zoom: 2 })
     expect(workflowGraphSignature(serialized)).toBe(
-      JSON.stringify(serializeWorkflowGraph(serialized.nodes, serialized.edges, serialized.viewport))
+      JSON.stringify(
+        serializeWorkflowGraph(
+          serialized.nodes,
+          serialized.edges,
+          serialized.viewport
+        )
+      )
     )
   })
 
   test("upstreamWorkflowFields collects reachable fields and guards cycles", () => {
     const nodes: WorkflowNode[] = [
-      { id: "start", type: "workflow", position: { x: 0, y: 0 }, data: { type: "start", title: "Start", config: {} } },
-      { id: "llm-1", type: "workflow", position: { x: 0, y: 0 }, data: { type: "llm", title: "LLM", config: {} } },
-      { id: "knowledge-1", type: "workflow", position: { x: 0, y: 0 }, data: { type: "knowledge", title: "Knowledge", config: {} } },
-      { id: "end-1", type: "workflow", position: { x: 0, y: 0 }, data: { type: "end", title: "End", config: {} } },
+      {
+        id: "start",
+        type: "workflow",
+        position: { x: 0, y: 0 },
+        data: { type: "start", title: "Start", config: {} },
+      },
+      {
+        id: "llm-1",
+        type: "workflow",
+        position: { x: 0, y: 0 },
+        data: { type: "llm", title: "LLM", config: {} },
+      },
+      {
+        id: "knowledge-1",
+        type: "workflow",
+        position: { x: 0, y: 0 },
+        data: { type: "knowledge", title: "Knowledge", config: {} },
+      },
+      {
+        id: "end-1",
+        type: "workflow",
+        position: { x: 0, y: 0 },
+        data: { type: "end", title: "End", config: {} },
+      },
     ]
     const edges = [
       { id: "e1", source: "start", target: "llm-1" },
@@ -607,9 +717,22 @@ describe("lib/workflows/graph", () => {
       { id: "e3", source: "knowledge-1", target: "end-1" },
     ]
     const fieldsOf = (node: { type: string }) =>
-      node.type === "start" ? [] : node.type === "llm" ? ["answer"] : node.type === "knowledge" ? ["chunks"] : []
-    const upstream = upstreamWorkflowFields(nodes, edges, "end-1", fieldsOf as never)
-    const byId = Object.fromEntries(upstream.map((item) => [item.id, item.fields]))
+      node.type === "start"
+        ? []
+        : node.type === "llm"
+          ? ["answer"]
+          : node.type === "knowledge"
+            ? ["chunks"]
+            : []
+    const upstream = upstreamWorkflowFields(
+      nodes,
+      edges,
+      "end-1",
+      fieldsOf as never
+    )
+    const byId = Object.fromEntries(
+      upstream.map((item) => [item.id, item.fields])
+    )
     expect(byId["llm-1"]).toEqual(["answer"])
     expect(byId["knowledge-1"]).toEqual(["chunks"])
     expect(byId["start"]).toBeUndefined()
@@ -618,9 +741,18 @@ describe("lib/workflows/graph", () => {
     const cyclic = upstreamWorkflowFields(
       [
         ...nodes,
-        { id: "ghost", type: "workflow", position: { x: 0, y: 0 }, data: { type: "llm", title: "Ghost", config: {} } },
+        {
+          id: "ghost",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { type: "llm", title: "Ghost", config: {} },
+        },
       ],
-      [...edges, { id: "e4", source: "end-1", target: "llm-1" }, { id: "e5", source: "missing", target: "end-1" }],
+      [
+        ...edges,
+        { id: "e4", source: "end-1", target: "llm-1" },
+        { id: "e5", source: "missing", target: "end-1" },
+      ],
       "end-1",
       fieldsOf as never
     )
@@ -630,8 +762,18 @@ describe("lib/workflows/graph", () => {
   test("removeWorkflowNode drops inbound and outbound edges", () => {
     const result = removeWorkflowNode(
       [
-        { id: "a", type: "workflow", position: { x: 0, y: 0 }, data: { type: "start", title: "A", config: {} } },
-        { id: "b", type: "workflow", position: { x: 0, y: 0 }, data: { type: "end", title: "B", config: {} } },
+        {
+          id: "a",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { type: "start", title: "A", config: {} },
+        },
+        {
+          id: "b",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { type: "end", title: "B", config: {} },
+        },
       ] as never,
       [
         { id: "e1", source: "a", target: "b" },
@@ -646,8 +788,14 @@ describe("lib/workflows/graph", () => {
 
   test("selectWorkflowRunTarget picks draft or the requested version", () => {
     const versions = [
-      { version_number: 2, graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } },
-      { version_number: 5, graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } } },
+      {
+        version_number: 2,
+        graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+      },
+      {
+        version_number: 5,
+        graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+      },
     ]
     expect(selectWorkflowRunTarget(true, versions)).toEqual({
       source: "draft",
@@ -673,7 +821,9 @@ describe("lib/workflows/graph", () => {
       (preset) => preset.id === "question-optimizer"
     )
     expect(optimizer?.type).toBe("llm")
-    expect(optimizer?.config(((key: string) => key) as never, "start-2")).toEqual({
+    expect(
+      optimizer?.config(((key: string) => key) as never, "start-2")
+    ).toEqual({
       system_prompt: "你是一个问题优化专家。",
       prompt: expect.stringContaining("{{start-2.question}}"),
     })

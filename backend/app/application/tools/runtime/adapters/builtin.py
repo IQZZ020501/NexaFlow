@@ -27,7 +27,6 @@ from app.infra.sandbox.client import (
     WorkflowSandboxError,
     execute_artifact_code,
     execute_skill_artifact,
-    execute_workflow_code,
 )
 from app.ports.execution import ExecutionBusy, ExecutionError, ExecutionOutcomeUnknown
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
@@ -305,27 +304,4 @@ class BuiltinToolAdapter:
                     "size_bytes": link.size_bytes,
                 },
             )
-        if builtin != "inline_python" or context.origin != "workflow":
-            return _failure("unsupported_builtin", "Built-in Tool is unavailable.")
-        try:
-            result = await execute_workflow_code(
-                self.settings,
-                arguments["code"],
-                arguments["inputs"],
-                arguments.get("skills"),
-            )
-        except WorkflowSandboxBusyError as exc:
-            raise ToolAdapterBusy("Python sandbox is busy.") from exc
-        except ExecutionOutcomeUnknown as exc:
-            return _failure("python_execution_failed", str(exc)[:1000], uncertain=True)
-        except (KeyError, TypeError, WorkflowSandboxError):
-            return _failure("python_execution_failed", "Python Tool execution failed.")
-        return ToolRuntimeResult(
-            ok=True,
-            data={"result": result.result},
-            summary="Python Tool completed.",
-            error_code=None,
-            error_message=None,
-            outcome="confirmed",
-            usage={"exit_code": result.exit_code},
-        )
+        return _failure("unsupported_builtin", "Built-in Tool is unavailable.")

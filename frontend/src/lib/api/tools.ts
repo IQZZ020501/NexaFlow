@@ -2,7 +2,7 @@ import { listQuery, request } from "@/lib/api-client"
 import type { User } from "@/lib/api/auth"
 import type { McpOAuthConfiguration } from "@/lib/api/mcp"
 
-export type ToolKind = "builtin" | "python" | "mcp"
+export type ToolKind = "builtin" | "mcp"
 
 export type ToolRef = {
   tool_id: string
@@ -77,16 +77,6 @@ export type ToolSummary = {
   can_manage: boolean
 }
 
-export type ToolDraft = {
-  display_name: string
-  description: string
-  input_schema: Record<string, unknown>
-  output_schema: Record<string, unknown>
-  code: string
-  revision: number
-  updated_at: string
-}
-
 export type ToolDetail = ToolSummary & {
   version_id: string | null
   revision: number | null
@@ -96,41 +86,6 @@ export type ToolDetail = ToolSummary & {
   effect: "pure" | "external_read" | "external_write" | "unknown" | null
   workflow_callable: boolean
   parallel_safe: boolean
-  draft: ToolDraft | null
-}
-
-export type PythonToolPayload = {
-  display_name: string
-  description: string
-  input_schema: Record<string, unknown>
-  output_schema: Record<string, unknown>
-  code: string
-}
-
-export type ToolInvocation = {
-  id: string
-  tool_id: string
-  tool_version_id: string
-  status:
-    | "queued"
-    | "awaiting_approval"
-    | "approved"
-    | "running"
-    | "succeeded"
-    | "failed"
-    | "rejected"
-    | "uncertain"
-    | "cancelled"
-  attempts: number
-  result_data: unknown
-  result_summary: string
-  outcome: "confirmed" | "uncertain" | null
-  error_code: string | null
-  error_message: string | null
-  usage: Record<string, unknown>
-  created_at: string
-  started_at: string | null
-  finished_at: string | null
 }
 
 export type ToolPermission = {
@@ -322,136 +277,6 @@ export function deleteToolSource(
   sourceId: string
 ) {
   return request<void>(toolSourcesPath(workspaceId, `/${sourceId}`), {
-    method: "DELETE",
-    token,
-  })
-}
-
-/**
- * Creates a Python tool in a workspace.
- *
- * @param payload - The Python tool configuration
- * @returns Details of the created tool
- */
-export function createPythonTool(
-  token: string,
-  workspaceId: string,
-  payload: PythonToolPayload
-) {
-  return request<ToolDetail>(toolsPath(workspaceId, "/python"), {
-    method: "POST",
-    token,
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
- * Updates a Python tool draft using an expected revision.
- *
- * @param toolId - The identifier of the Python tool to update
- * @param payload - The draft data and revision expected by the update
- * @returns The updated Python tool draft
- */
-export function updatePythonToolDraft(
-  token: string,
-  workspaceId: string,
-  toolId: string,
-  payload: PythonToolPayload & { expected_revision: number }
-) {
-  return request<ToolDraft>(toolsPath(workspaceId, `/${toolId}/draft`), {
-    method: "PUT",
-    token,
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
- * Starts a test invocation of a Python tool.
- *
- * @param argumentsValue - Arguments supplied to the tool invocation
- * @returns The resulting tool invocation
- */
-export function testPythonTool(
-  token: string,
-  workspaceId: string,
-  toolId: string,
-  argumentsValue: Record<string, unknown>
-) {
-  return request<ToolInvocation>(toolsPath(workspaceId, `/${toolId}/tests`), {
-    method: "POST",
-    token,
-    body: JSON.stringify({ arguments: argumentsValue }),
-  })
-}
-
-/**
- * Retrieves the result of a Python tool test invocation.
- *
- * @param toolId - The identifier of the Python tool
- * @param invocationId - The identifier of the test invocation
- * @returns The test invocation details
- */
-export function getPythonToolTest(
-  token: string,
-  workspaceId: string,
-  toolId: string,
-  invocationId: string
-) {
-  return request<ToolInvocation>(
-    toolsPath(workspaceId, `/${toolId}/tests/${invocationId}`),
-    { token }
-  )
-}
-
-/**
- * Publishes a Python tool.
- *
- * @param toolId - The identifier of the Python tool to publish
- * @returns The published tool details
- */
-export function publishPythonTool(
-  token: string,
-  workspaceId: string,
-  toolId: string
-) {
-  return request<ToolDetail>(toolsPath(workspaceId, `/${toolId}/publish`), {
-    method: "POST",
-    token,
-  })
-}
-
-/**
- * Enables or disables a Python tool.
- *
- * @param toolId - The identifier of the Python tool
- * @param enabled - Whether the tool should be enabled
- * @returns The updated tool details
- */
-export function setPythonToolEnabled(
-  token: string,
-  workspaceId: string,
-  toolId: string,
-  enabled: boolean
-) {
-  return request<ToolDetail>(
-    toolsPath(workspaceId, `/${toolId}/${enabled ? "enable" : "disable"}`),
-    { method: "POST", token }
-  )
-}
-
-/**
- * Archives a Python tool.
- *
- * @param token - Authentication token for the request
- * @param workspaceId - Workspace containing the tool
- * @param toolId - Identifier of the tool to archive
- */
-export function archivePythonTool(
-  token: string,
-  workspaceId: string,
-  toolId: string
-) {
-  return request<void>(toolsPath(workspaceId, `/${toolId}`), {
     method: "DELETE",
     token,
   })

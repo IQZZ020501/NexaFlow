@@ -120,9 +120,9 @@ describe("workflow API", () => {
             type: "workflow",
             position: { x: 240, y: 0 },
             data: {
-              type: "code",
+              type: "variable",
               title: "Legacy code",
-              config: { code: "result = inputs", inputs: {} },
+              config: { value: "{{start.question}}" },
             },
           },
         ],
@@ -135,7 +135,7 @@ describe("workflow API", () => {
       JSON.parse(requestBody).graph.nodes.map(
         (node: { data: { type: string } }) => node.data.type
       )
-    ).toEqual(["mcp", "code"])
+    ).toEqual(["mcp", "variable"])
     expect(updated.graph.nodes.map((node) => node.data.type)).toEqual(["tool"])
   })
 

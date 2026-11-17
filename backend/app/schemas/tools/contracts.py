@@ -3,11 +3,11 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from app.schemas.identity.contracts import UserResponse
 
-ToolKind = Literal["builtin", "python", "mcp"]
+ToolKind = Literal["builtin", "mcp"]
 _ToolId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=36),
@@ -71,16 +71,6 @@ class ToolSummaryResponse(_PublicToolResponse):
     can_manage: bool
 
 
-class ToolDraftResponse(_PublicToolResponse):
-    display_name: str
-    description: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
-    code: str
-    revision: int
-    updated_at: datetime
-
-
 class ToolDetailResponse(ToolSummaryResponse):
     version_id: str | None
     revision: int | None
@@ -90,55 +80,6 @@ class ToolDetailResponse(ToolSummaryResponse):
     effect: Literal["pure", "external_read", "external_write", "unknown"] | None
     workflow_callable: bool
     parallel_safe: bool
-    draft: ToolDraftResponse | None = None
-
-
-class PythonToolCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    display_name: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=4000)
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
-    code: str = Field(min_length=1, max_length=8192)
-
-
-class PythonToolDraftUpdateRequest(PythonToolCreateRequest):
-    expected_revision: int = Field(ge=1)
-
-
-class ToolTestRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    arguments: dict[str, Any] = Field(default_factory=dict)
-
-
-class ToolInvocationResponse(_PublicToolResponse):
-    id: str
-    tool_id: str
-    tool_version_id: str
-    status: Literal[
-        "queued",
-        "awaiting_approval",
-        "approved",
-        "running",
-        "succeeded",
-        "failed",
-        "rejected",
-        "uncertain",
-        "cancelled",
-    ]
-    attempts: int
-    resource_wait: dict[str, Any] = Field(default_factory=dict)
-    result_data: Any = None
-    result_summary: str
-    outcome: Literal["confirmed", "uncertain"] | None
-    error_code: str | None
-    error_message: str | None
-    usage: dict[str, Any]
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
 
 
 class ToolPermissionUpsertRequest(BaseModel):
@@ -159,11 +100,7 @@ class ToolPermissionResponse(_PublicToolResponse):
 
 
 __all__ = [
-    "PythonToolCreateRequest",
-    "PythonToolDraftUpdateRequest",
     "ToolDetailResponse",
-    "ToolDraftResponse",
-    "ToolInvocationResponse",
     "ToolPermissionResponse",
     "ToolPermissionUpsertRequest",
     "ToolPolicyUpdateRequest",
@@ -171,5 +108,4 @@ __all__ = [
     "ToolSourceDetailResponse",
     "ToolSourceSummaryResponse",
     "ToolSummaryResponse",
-    "ToolTestRequest",
 ]

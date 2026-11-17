@@ -5771,7 +5771,6 @@ async def assert_tool_service_paths(
     from app.entities.tools import (
         ApplicationToolBinding,
         McpServer,
-        ToolDraft,
         ToolInvocation,
         ToolSource,
     )
@@ -5842,26 +5841,6 @@ async def assert_tool_service_paths(
             )
             is None
         )
-
-        # list_tool_drafts (431-436)
-        draft = ToolDraft(
-            workspace_id=workspace_id,
-            tool_id=mcp_tool.id,
-            display_name="Draft",
-            description="",
-            input_schema={},
-            output_schema=None,
-            execution_spec={},
-            revision=1,
-            updated_by_user_id=admin_user_id,
-        )
-        await tool_repository.save_tool_draft(db, draft)
-        drafts = await tool_repository.list_tool_drafts(db, workspace_id)
-        assert any(item.id == draft.id for item in drafts)
-
-        # list_tool_policies (518-523)
-        policies = await tool_repository.list_tool_policies(db, workspace_id)
-        assert any(item.tool_id == mcp_tool.id for item in policies)
 
         # update_tool_policy_if_revision guard (537)
         policy = await tool_repository.get_tool_policy(db, workspace_id, mcp_tool.id)

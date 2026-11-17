@@ -80,7 +80,9 @@ export function withArtifactDownloadLinksInContent(content: string) {
 
   let value = content
   for (const rawUrl of urls) {
-    const url = rawUrl.match(/\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/)?.[0]
+    const url = rawUrl.match(
+      /\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/
+    )?.[0]
     if (url)
       value = replaceArtifactReferences(value, url, artifactLink(filename, url))
   }
@@ -90,8 +92,6 @@ export function withArtifactDownloadLinksInContent(content: string) {
 export function builtinToolDisplayName(functionName: string, t: TFunction) {
   if (functionName === "search_knowledge") return t("知识库检索")
   if (functionName === "bash") return t("命令行")
-  if (functionName === "inline_python") return t("Python 代码")
-  if (functionName === "current_time") return t("当前时间")
   if (functionName === "create_artifact") return t("创建文件")
   if (functionName === "documents_skill") return t("生成 Word")
   if (functionName === "pdf_skill") return t("生成 PDF")
@@ -267,10 +267,6 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
   if (tool.function_name === "bash") {
     return t("在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。")
   }
-  if (tool.function_name === "inline_python") {
-    return t("在工作流沙箱中运行 Python 代码。")
-  }
-  if (tool.function_name === "current_time") return t("返回当前时间。")
   if (tool.function_name === "create_artifact") {
     return t(
       "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"

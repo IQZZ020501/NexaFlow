@@ -304,7 +304,11 @@ async def get_workspace_analytics_inventory(
                 ToolOrm.status,
                 func.count().label("total"),
             )
-            .where(ToolOrm.workspace_id == workspace_id)
+            .where(
+                ToolOrm.workspace_id == workspace_id,
+                ToolOrm.kind.in_(("builtin", "mcp")),
+                ToolOrm.function_name != "inline_python",
+            )
             .group_by(ToolOrm.kind, ToolOrm.status)
         )
     ).all()
@@ -315,7 +319,6 @@ async def get_workspace_analytics_inventory(
             tools,
             total=tools.total + total,
             mcp=tools.mcp + (total if row.kind == "mcp" else 0),
-            python=tools.python + (total if row.kind == "python" else 0),
             builtin=tools.builtin + (total if row.kind == "builtin" else 0),
             active=tools.active + (total if row.status == "active" else 0),
         )

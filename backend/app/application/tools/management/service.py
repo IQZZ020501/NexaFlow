@@ -1,16 +1,11 @@
-"""Unified Tool catalog, Python lifecycle, test, and grant use cases."""
+"""Unified Tool catalog and grant use cases."""
 
-from datetime import timedelta
-from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.tools.runtime.contracts import ToolInvocationContext
-from app.application.tools.runtime.service import queue_tool_invocation
 from app.domain.tools.access.permissions import (
     list_tool_permissions,
-    require_managed_tool,
     require_tool_manage,
     revoke_tool_permission,
     upsert_tool_permission,
@@ -32,31 +27,16 @@ from app.domain.tools.mcp.service import (
     set_mcp_server_enabled,
     set_mcp_tool_policy,
 )
-from app.domain.tools.python.service import (
-    archive_python_tool,
-    build_python_test_snapshot,
-    create_python_tool,
-    publish_python_tool,
-    set_python_tool_enabled,
-    update_python_tool_draft,
-)
 from app.domain.tools.runtime import (
     effective_tool_access_sources,
-    validate_tool_arguments,
 )
-from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
-from app.entities.tools import McpServer, ToolDraft, ToolInvocation, ToolSource
+from app.entities.tools import McpServer, ToolSource
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.tools import repository as tool_repository
-from app.infra.tools.dispatch import enqueue_tool_invocation
 from app.schemas.identity.contracts import user_to_response
 from app.schemas.tools.contracts import (
-    PythonToolCreateRequest,
-    PythonToolDraftUpdateRequest,
     ToolDetailResponse,
-    ToolDraftResponse,
-    ToolInvocationResponse,
     ToolPermissionResponse,
     ToolSourceDetailResponse,
     ToolSummaryResponse,
@@ -247,94 +227,6 @@ async def delete_source(
     await delete_mcp_server(db, server, actor, workspace_role)
 
 
-async def create_python(
-    db: AsyncSession,
-    workspace_id: str,
-    payload: PythonToolCreateRequest,
-    actor: User,
-    workspace_role: str | None,
-) -> ToolDetailResponse:
-    tool, _draft = await create_python_tool(
-        db,
-        workspace_id,
-        actor,
-        workspace_role,
-        **payload.model_dump(),
-    )
-    return await get_tool(db, workspace_id, tool.id, actor, workspace_role)
-
-
-async def update_python_draft(
-    db: AsyncSession,
-    workspace_id: str,
-    tool_id: str,
-    payload: PythonToolDraftUpdateRequest,
-    actor: User,
-    workspace_role: str | None,
-) -> ToolDraftResponse:
-    draft = await update_python_tool_draft(
-        db,
-        workspace_id,
-        tool_id,
-        actor,
-        workspace_role,
-        **payload.model_dump(),
-    )
-    return _draft_response(draft)
-
-
-async def publish_python(
-    db: AsyncSession,
-    workspace_id: str,
-    tool_id: str,
-    actor: User,
-    workspace_role: str | None,
-) -> ToolDetailResponse:
-    await publish_python_tool(
-        db,
-        workspace_id,
-        tool_id,
-        actor,
-        workspace_role,
-    )
-    return await get_tool(db, workspace_id, tool_id, actor, workspace_role)
-
-
-async def set_python_enabled(
-    db: AsyncSession,
-    workspace_id: str,
-    tool_id: str,
-    enabled: bool,
-    actor: User,
-    workspace_role: str | None,
-) -> ToolDetailResponse:
-    await set_python_tool_enabled(
-        db,
-        workspace_id,
-        tool_id,
-        enabled,
-        actor,
-        workspace_role,
-    )
-    return await get_tool(db, workspace_id, tool_id, actor, workspace_role)
-
-
-async def delete_python(
-    db: AsyncSession,
-    workspace_id: str,
-    tool_id: str,
-    actor: User,
-    workspace_role: str | None,
-) -> None:
-    await archive_python_tool(
-        db,
-        workspace_id,
-        tool_id,
-        actor,
-        workspace_role,
-    )
-
-
 async def update_policy(
     db: AsyncSession,
     workspace_id: str,
@@ -373,77 +265,6 @@ async def update_policy(
     )
     await db.commit()
     return await get_tool(db, workspace_id, tool_id, actor, workspace_role)
-
-
-async def queue_python_test(
-    db: AsyncSession,
-    workspace_id: str,
-    tool_id: str,
-    arguments: dict[str, Any],
-    actor: User,
-    workspace_role: str | None,
-    settings: Settings,
-) -> ToolInvocationResponse:
-    snapshot = await build_python_test_snapshot(
-        db,
-        workspace_id,
-        tool_id,
-        actor,
-        workspace_role,
-    )
-    try:
-        validate_tool_arguments(snapshot, arguments)
-    except ValueError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "Tool arguments are invalid.",
-        ) from exc
-    invocation_id = new_id()
-    invocation = await queue_tool_invocation(
-        db,
-        snapshot,
-        arguments,
-        ToolInvocationContext(
-            workspace_id=workspace_id,
-            origin="test",
-            root_run_id=None,
-            run_id=None,
-            invocation_id=invocation_id,
-            execution_user_id=actor.id,
-            access_source="console",
-            deadline_at=utc_now() + timedelta(seconds=settings.agent_run_timeout_seconds),
-            idempotency_key=f"tool-test:{invocation_id}",
-        ),
-    )
-    await db.commit()
-    await enqueue_tool_invocation(invocation.id, settings)
-    return _invocation_response(invocation)
-
-
-async def get_python_test(
-    db: AsyncSession,
-    workspace_id: str,
-    tool_id: str,
-    invocation_id: str,
-    actor: User,
-    workspace_role: str | None,
-) -> ToolInvocationResponse:
-    await require_managed_tool(
-        db,
-        workspace_id,
-        tool_id,
-        actor,
-        workspace_role,
-        lock=False,
-    )
-    invocation = await tool_repository.get_tool_invocation(
-        db,
-        workspace_id,
-        invocation_id,
-    )
-    if invocation is None or invocation.origin != "test" or invocation.tool_id != tool_id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool test not found.")
-    return _invocation_response(invocation)
 
 
 async def list_permissions(
@@ -516,7 +337,7 @@ async def revoke_permission(
 
 
 def _summary_response(item: ToolCatalogItem) -> ToolSummaryResponse:
-    definition = item.version or (item.draft if item.access.can_manage else None)
+    definition = item.version
     return ToolSummaryResponse(
         id=item.tool.id,
         workspace_id=item.tool.workspace_id,
@@ -561,7 +382,6 @@ def _detail_response(detail: ToolCatalogDetail) -> ToolDetailResponse:
             tool=detail.tool,
             source=detail.source,
             version=detail.version,
-            draft=detail.draft,
             policy=detail.policy,
             access=detail.access,
             permission=detail.permission,
@@ -579,57 +399,13 @@ def _detail_response(detail: ToolCatalogDetail) -> ToolDetailResponse:
         effect=policy.effect if policy else None,
         workflow_callable=policy.workflow_callable if policy else False,
         parallel_safe=policy.parallel_safe if policy else False,
-        draft=(
-            _draft_response(detail.draft)
-            if detail.access.can_manage and detail.draft is not None
-            else None
-        ),
-    )
-
-
-def _draft_response(draft: ToolDraft) -> ToolDraftResponse:
-    code = draft.execution_spec.get("code")
-    return ToolDraftResponse(
-        display_name=draft.display_name,
-        description=draft.description,
-        input_schema=draft.input_schema,
-        output_schema=draft.output_schema,
-        code=code if isinstance(code, str) else "",
-        revision=draft.revision,
-        updated_at=draft.updated_at,
-    )
-
-
-def _invocation_response(invocation: ToolInvocation) -> ToolInvocationResponse:
-    return ToolInvocationResponse(
-        id=invocation.id,
-        tool_id=invocation.tool_id,
-        tool_version_id=invocation.tool_version_id,
-        status=invocation.status,
-        attempts=invocation.attempts,
-        result_data=invocation.result_data,
-        result_summary=invocation.result_summary,
-        outcome=invocation.outcome,
-        error_code=invocation.error_code,
-        error_message=invocation.error_message,
-        usage=invocation.usage,
-        created_at=invocation.created_at,
-        started_at=invocation.started_at,
-        finished_at=invocation.finished_at,
     )
 
 
 __all__ = [
-    "create_python",
-    "delete_python",
-    "get_python_test",
     "get_tool",
     "list_permissions",
     "list_tools",
-    "publish_python",
-    "queue_python_test",
     "revoke_permission",
-    "set_python_enabled",
-    "update_python_draft",
     "upsert_permission",
 ]

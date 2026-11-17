@@ -25,7 +25,6 @@ from app.domain.tools.access.bindings import (
     resolve_tool_refs_for_actor,
     sync_application_tool_bindings,
 )
-from app.domain.tools.catalog.service import build_inline_python_tool
 from app.domain.tools.mcp.service import (
     effective_mcp_tool_policy_mode,
     get_mcp_tool_policy,
@@ -226,13 +225,9 @@ async def prepare_workflow_resources(
             for item in resolved
         }
 
-    inline_tool, inline_version, _inline_policy = build_inline_python_tool(
-        agent.workspace_id
-    )
     canonical = canonicalize_workflow_graph(
         parsed,
         legacy_tools,
-        ToolRef(inline_tool.id, inline_version.id),
     )
     _knowledge_base_ids, references = canonical_workflow_resource_references(canonical)
     if binding_application_id is None:

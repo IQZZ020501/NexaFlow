@@ -124,7 +124,7 @@ async def seed_retained_tool_invocation(
         tool = next(
             item
             for item in await tools_repository.list_tools(db, workspace_id)
-            if item.stable_key == "current_time"
+            if item.stable_key == "skill_documents"
         )
         assert tool.current_version_id is not None
         await tools_repository.save_tool_invocation(
@@ -319,7 +319,7 @@ async def seed_tool_grant(workspace_id: str, user_id: str, actor_id: str) -> Non
         tool = next(
             item
             for item in await tools_repository.list_tools(db, workspace_id)
-            if item.stable_key == "current_time"
+            if item.stable_key == "skill_documents"
         )
         await permission_repository.create_resource_permission(
             db,

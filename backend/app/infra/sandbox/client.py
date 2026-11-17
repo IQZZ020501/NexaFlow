@@ -16,8 +16,6 @@ from app.ports.execution import (
     execution_scope,
 )
 
-RESULT_MARKER = "__NEXAFLOW_RESULT__="
-MAX_RESPONSE_BYTES = 128 * 1024
 MAX_ARTIFACT_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 
@@ -28,14 +26,6 @@ class WorkflowSandboxError(RuntimeError):
 
 class WorkflowSandboxBusyError(WorkflowSandboxError):
     pass
-
-
-@dataclass(frozen=True)
-class WorkflowSandboxResult:
-    result: Any
-    stdout: str
-    stderr: str
-    exit_code: int
 
 
 @dataclass(frozen=True)
@@ -71,20 +61,6 @@ def _error_line(reason: str) -> str:
     return reason.strip()
 
 
-def _program(user_code: str) -> str:
-    encoded = json.dumps(user_code, ensure_ascii=False)
-    marker = json.dumps(RESULT_MARKER)
-    return (
-        "import json, sys\n"
-        "inputs = json.loads(sys.stdin.read())\n"
-        f"exec(compile({encoded}, '<workflow-code-node>', 'exec'), globals())\n"
-        "if 'result' not in globals():\n"
-        "    raise RuntimeError(\"code node must assign a JSON-serializable 'result'\")\n"
-        f"print({marker} + json.dumps({{'result': result}}, ensure_ascii=False, "
-        "separators=(',', ':')))\n"
-    )
-
-
 def _artifact_program(user_code: str) -> str:
     encoded = json.dumps(user_code, ensure_ascii=False)
     return (
@@ -99,7 +75,7 @@ async def _exchange(
     settings: Settings,
     request: dict[str, Any],
     max_response_bytes: int,
-    timeout_seconds: float | None = None,
+    timeout_seconds: float,
 ) -> dict[str, Any]:
     try:
         scope = execution_scope.get()
@@ -108,11 +84,7 @@ async def _exchange(
         return await build_execution_platform(settings).execute(
             request,
             max_output_bytes=max_response_bytes,
-            timeout_seconds=(
-                timeout_seconds
-                if timeout_seconds is not None
-                else settings.workflow_sandbox_timeout_seconds + 1
-            ),
+            timeout_seconds=timeout_seconds,
         )
     except ExecutionBusy as exc:
         raise WorkflowSandboxBusyError("Code sandbox capacity is exhausted.") from exc
@@ -133,47 +105,6 @@ def _execution_fields(response: dict[str, Any]) -> tuple[str, str, int]:
         reason = _error_line(str(error or stderr or "Code execution failed."))
         raise WorkflowSandboxError(reason[:1000])
     return stdout, stderr, exit_code
-
-
-async def execute_workflow_code(
-    settings: Settings,
-    code: str,
-    inputs: dict[str, Any],
-    skills: list[str] | None = None,
-) -> WorkflowSandboxResult:
-    budget = settings.workflow_sandbox_timeout_seconds
-    request = {
-        "code": _program(code),
-        "stdin": json.dumps(inputs, ensure_ascii=False, separators=(",", ":")),
-        "limits": {"timeout_ms": round(budget * 1000)},
-    }
-    if skills is not None:
-        request["skills"] = skills
-
-    response = await _exchange(
-        settings,
-        request,
-        MAX_RESPONSE_BYTES,
-        budget,
-    )
-    stdout, stderr, exit_code = _execution_fields(response)
-    marker_index = stdout.rfind(RESULT_MARKER)
-    if marker_index < 0:
-        raise WorkflowSandboxError("Code node did not return a result.")
-    result_line = stdout[marker_index + len(RESULT_MARKER) :].strip()
-    try:
-        payload = json.loads(result_line)
-    except json.JSONDecodeError as exc:
-        raise WorkflowSandboxError("Code node returned invalid JSON.") from exc
-    if not isinstance(payload, dict) or "result" not in payload:
-        raise WorkflowSandboxError("Code node returned invalid JSON.")
-    logs = stdout[:marker_index].rstrip("\n")
-    return WorkflowSandboxResult(
-        result=payload["result"],
-        stdout=logs,
-        stderr=stderr,
-        exit_code=exit_code,
-    )
 
 
 async def execute_artifact_code(

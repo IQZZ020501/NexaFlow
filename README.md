@@ -27,8 +27,8 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 | 应用构建与发布 | 统一管理 Agent 和工作流，保留草稿与不可变发布版本，提供访问页面、独立 API Key 和接口文档。 |
 | Agent 运行时 | 支持流式回答、对话记忆、上下文压缩、运行中追加输入、工具审批和模型用量记录；通过 Celery、租约、checkpoint 与事件恢复执行。新建 Run 默认具备在隔离环境中执行 bash 的能力。 |
 | 知识库与 RAG | 支持文档与 QA 导入、智能层级分段、规范化 Markdown 预览、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/可选重排、引用和检索评测。 |
-| 可视化工作流 | React Flow 画布支持模型、知识检索、分类、条件、表单、变量、工具、Python 代码与已发布 Agent 等节点，提供草稿调试、版本管理和节点执行记录。 |
-| MCP 与统一工具 | 内置、Python、MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
+| 可视化工作流 | React Flow 画布支持模型、知识检索、分类、条件、表单、变量、工具与已发布 Agent 等节点，提供草稿调试、版本管理和节点执行记录。 |
+| MCP 与统一工具 | 内置与 MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
 | Skills | 导入 `SKILL.md` 或 ZIP 技能包，按需加载指令、参考文件和 Python/JavaScript 脚本；固定版本绑定到 Agent，脚本依赖安装需逐次审批。 |
 | 文件与图片生成 | 内置 Word、PDF、Excel、PPTX 文件渲染工具，可按需接入生图模型；HTML、PDF、DOCX、XLSX、PPTX 在聊天右侧预览，查看文件时可以继续对话。 |
 | 模型接入 | 当前提供 22 个供应商目录项，包括 OpenAI、Anthropic、Bedrock、Azure OpenAI、Gemini、DeepSeek、阿里云百炼、Kimi、Ollama、vLLM 和自定义 OpenAI 兼容服务；支持对话、视觉、向量、重排和生图模型，具体类型取决于供应商。 |
@@ -39,7 +39,7 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 - **知识库上传**：接受 DOCX、MD、MARKDOWN、PDF、TXT、PPTX、XLSX、XLS、HTML、CSV、JSON、XML、ZIP。PDF 提取已有文本层，不做 OCR；扫描件需要先转成可提取文本的文档。QA 模式需主动选择，支持带问题/答案表头的 XLSX 和 UTF-8 CSV。
 - **文件预览**：支持 HTML/HTM、PDF、DOCX、XLSX、PPTX；旧版 DOC、XLS、PPT 仅提供下载。生成文件单个不超过 5 MiB，保存和下载链接有效期最长 24 小时。复杂 Office 排版、图表和动画以下载后在原生应用中的效果为准。
 - **应用访问**：已发布应用的访问页面仍要求登录并属于相应工作空间；其他系统通过应用专属 API Key 接入。
-- **代码执行**：bash、Python 工具、Skill 脚本和文件渲染依赖独立 OpenSandbox 执行环境；服务不可用时执行失败，不回退到业务宿主机。
+- **代码执行**：bash、Skill 脚本和文件渲染依赖独立 OpenSandbox 执行环境；服务不可用时执行失败，不回退到业务宿主机。
 
 ## 技术架构
 
@@ -71,7 +71,7 @@ flowchart LR
 | 前端 | Next.js 16、React 19、TypeScript、Bun、shadcn/ui、Tailwind CSS、React Flow |
 | API | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic |
 | 异步执行 | Celery、Redis、PostgreSQL checkpoint 与事件 |
-| 工具与 Skills | builtin / Python / MCP 统一目录、不可变版本、授权、策略、调用账本与按需加载的技能包 |
+| 工具与 Skills | builtin / MCP 统一目录、不可变版本、授权、策略、调用账本与按需加载的技能包 |
 | 检索 | PostgreSQL（文档、分段与评测）+ Qdrant（文档向量）、`pg_search` 0.25.2（Jieba/BM25）、RRF、可选 reranker |
 | 部署 | 单机 Docker Compose、PostgreSQL 17 + `pg_search`、OpenSandbox；可选 Nginx、独立 Kata 执行主机，定制镜像以 digest 固定 |
 
@@ -150,7 +150,7 @@ docker compose down
 
 1. **登录并进入工作空间**：部署使用 Compose 中的管理员账号与 `admin-password` 登录；本地开发使用私有根 `.env` 的引导账号。首次登录修改密码，再选择或创建工作空间。
 2. **接入模型**：在「模型」页添加对话模型并检查连接；需要知识检索时再接入向量模型，需要图片生成时再接入生图模型。
-3. **准备知识与工具**：按任务需要创建知识库、上传文档并等待向量化完成；在「工具」页配置 MCP、Python 或导入 Skills，并为使用者授予相应权限。
+3. **准备知识与工具**：按任务需要创建知识库、上传文档并等待向量化完成；在「工具」页配置 MCP 或导入 Skills，并为使用者授予相应权限。
 4. **创建并调试**：在「应用」页创建 Agent，选择模型、填写系统提示词并按需关联知识库、工具与 Skills，在右侧调试区验证。需要固定执行流程时，创建工作流并在画布中连接节点。
 5. **发布与交付**：发布后从「概览」获取访问链接或 API 文档。生成的文件可以直接下载；支持的格式可点击文件卡片，在右侧预览并继续对话。
 
@@ -259,7 +259,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 在独立 OpenSandbox 内运行；command/cwd 是执行镜像路径，不能读取业务宿主目录。仅注入该集成的环境值，出站域名须由部署 allowlist 批准。
-- Python Tool、Python Code、文件渲染与 Skill 脚本通过统一 execution port 执行；业务 Worker 无 Docker socket、namespace 特权或本地运行器回退。
+- bash、文件渲染与 Skill 脚本通过统一 execution port 执行；业务 Worker 无 Docker socket、namespace 特权或本地运行器回退。
 - HTML 与 Office/PDF 预览在不透明源的 sandbox iframe 中运行；渲染器使用本地静态资源，不向第三方预览服务发送文件或下载凭据。
 - 默认单机执行平面使用普通 Docker + `dns+nft`、持久化元数据与不可变镜像 digest；网络策略不满足要求时失败关闭。Kata 是可选的 VM 隔离方案，普通 Docker 测试不能替代 VM 隔离验收。
 - 不要提交根目录 `.env`、模型凭据或其他真实密钥。
@@ -302,7 +302,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 
 ### Skills 与工具
 
-工具页统一提供 Skills、MCP 和 Python 入口；内置 Skills 可生成 Word、PDF、Excel 和 PPTX，也可新建或导入工作区技能包。
+工具页统一提供 Skills 和 MCP 入口；内置 Skills 可生成 Word、PDF、Excel 和 PPTX，也可新建或导入工作区技能包。
 
 ![工具目录：四个内置文件生成 Skills 与工作区 Skills 入口](docs/assets/tools-skills.png)
 

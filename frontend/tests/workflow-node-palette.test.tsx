@@ -10,14 +10,14 @@ import { fireEvent, renderPage, screen } from "./helpers/dom"
 const tool: ToolDetail = {
   id: "tool-1",
   workspace_id: "ws-1",
-  kind: "python",
+  kind: "mcp",
   function_name: "lookup",
   display_name: "Lookup",
   description: "Lookup data",
   current_version_id: "version-1",
   status: "active",
   availability: "available",
-  source: { id: "source-1", name: "Mine", kind: "python", transport: null },
+  source: { id: "source-1", name: "Mine", kind: "mcp", transport: null },
   created_by_user_id: "u-1",
   permission: "owner",
   can_view: true,
@@ -31,7 +31,6 @@ const tool: ToolDetail = {
   effect: "pure",
   workflow_callable: true,
   parallel_safe: false,
-  draft: null,
 }
 
 const agent: Agent & { current_published_version_id: string | null } = {
@@ -83,7 +82,22 @@ describe("WorkflowNodePalette", () => {
     const added: Array<{ type: string; config?: Record<string, unknown> }> = []
     renderPage(
       <WorkflowNodePalette
-        tools={[tool]}
+        tools={[
+          tool,
+          {
+            ...tool,
+            id: "retired-python",
+            kind: "python" as ToolDetail["kind"],
+            display_name: "Retired Python",
+          },
+          {
+            ...tool,
+            id: "retired-inline",
+            kind: "builtin",
+            function_name: "inline_python",
+            display_name: "Retired inline Python",
+          },
+        ]}
         agents={[agent]}
         graph={{ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }}
         onAdd={(type, _title, config) => added.push({ type, config })}
@@ -91,6 +105,7 @@ describe("WorkflowNodePalette", () => {
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "添加节点" }))
+    expect(screen.queryByRole("button", { name: "Python 代码" })).toBeNull()
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "基础节点",
       "工具",
@@ -100,6 +115,7 @@ describe("WorkflowNodePalette", () => {
       button: 0,
       ctrlKey: false,
     })
+    expect(screen.queryByRole("button", { name: /Retired/ })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Lookup" }))
     expect(added.at(-1)).toEqual({
       type: "tool",

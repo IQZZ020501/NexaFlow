@@ -431,6 +431,8 @@ async def _validate_live_state(
     invocation: ToolInvocation,
     snapshot: ToolSnapshot,
 ) -> tuple[ToolRuntimeResult | None, Any]:
+    if snapshot.kind == "python" or snapshot.function_name == "inline_python":
+        return _failure("tool_disabled", "Tool is disabled."), None
     tool = await tool_repository.get_tool(db, invocation.workspace_id, snapshot.tool_id)
     if tool is None or tool.status != "active":
         return _failure("tool_disabled", "Tool is disabled."), None
@@ -446,17 +448,12 @@ async def _validate_live_state(
         invocation.workspace_id,
         snapshot.version_id,
     )
-    is_python_test = (
-        invocation.origin == "test"
-        and snapshot.kind == "python"
-        and tool.created_by_user_id is not None
-    )
     if (
         version is None
         or tool.source_id != source.id
         or tool.kind != snapshot.kind
         or tool.function_name != snapshot.function_name
-        or (not is_python_test and tool.current_version_id != version.id)
+        or tool.current_version_id != version.id
         or version.tool_id != tool.id
         or version.definition_hash != snapshot.definition_hash
         or version.display_name != snapshot.display_name
@@ -467,16 +464,7 @@ async def _validate_live_state(
     ):
         return _failure("tool_definition_changed", "Tool definition changed."), None
     policy = await tool_repository.get_tool_policy(db, invocation.workspace_id, tool.id)
-    if is_python_test:
-        policy_matches = (
-            snapshot.approval == TOOL_APPROVAL_AUTO
-            and snapshot.effect == "pure"
-            and snapshot.allowed_access_sources == ("console",)
-            and snapshot.workflow_callable
-            and not snapshot.parallel_safe
-        )
-    else:
-        policy_matches = (
+    policy_matches = (
             policy is not None
             and policy.id == snapshot.policy_id
             and policy.revision == snapshot.policy_revision
@@ -488,7 +476,7 @@ async def _validate_live_state(
             == effective_tool_access_sources(snapshot.allowed_access_sources)
             and policy.workflow_callable == snapshot.workflow_callable
             and policy.parallel_safe == snapshot.parallel_safe
-        )
+    )
     if not policy_matches:
         return _failure("tool_policy_changed", "Tool policy changed."), None
     if snapshot.approval == TOOL_APPROVAL_DISABLED:

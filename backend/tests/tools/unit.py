@@ -95,7 +95,6 @@ def test_tool_summary_projects_effective_public_access_and_mcp_policy() -> None:
                 name="Built-in",
             ),
             version=version,
-            draft=None,
             policy=policy,
             access=ToolAccess(can_view=True, can_use=True, can_manage=False),
             permission=None,
@@ -742,11 +741,11 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
         None,
     )
     assert system_python_authorization.access == ToolAccess(
-        can_view=True,
-        can_use=True,
+        can_view=False,
+        can_use=False,
         can_manage=False,
     )
-    assert system_python_authorization.permission == "use"
+    assert system_python_authorization.permission is None
 
     outside_workspace = evaluate_tool_authorization(
         builtin,
@@ -764,7 +763,7 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
     global_admin = User(id="global-admin-1", is_global_admin=True)
     private_tool = Tool(
         id="private-1",
-        kind="python",
+        kind="mcp",
         status="disabled",
         availability="unavailable",
         created_by_user_id="owner-1",
@@ -812,7 +811,7 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
     assert inactive_authorization.access == ToolAccess(False, False, False)
     assert inactive_authorization.permission is None
 
-def test_python_tool_schema_validation_closes_objects() -> None:
+def test_tool_schema_validation_closes_objects() -> None:
     from app.entities.tools import validate_tool_json_schema
 
     schema = {
@@ -841,9 +840,9 @@ def test_python_tool_schema_validation_closes_objects() -> None:
             validate_tool_json_schema(invalid)
         except ValueError:
             continue
-        raise AssertionError(f"Unsafe Python Tool schema accepted: {invalid}")
+        raise AssertionError(f"Unsafe Tool schema accepted: {invalid}")
 
-def test_python_tool_schema_validation_enforces_limits() -> None:
+def test_tool_schema_validation_enforces_limits() -> None:
     from app.entities.tools import (
         MAX_TOOL_ARRAY_ITEMS,
         MAX_TOOL_SCHEMA_BYTES,
@@ -927,9 +926,9 @@ def test_python_tool_schema_validation_enforces_limits() -> None:
             validate_tool_json_schema(schema)
         except ValueError:
             continue
-        raise AssertionError(f"Over-broad Python Tool schema accepted: {schema}")
+        raise AssertionError(f"Over-broad Tool schema accepted: {schema}")
 
-def test_python_tool_schema_rejects_defs_depth_bypass() -> None:
+def test_tool_schema_rejects_defs_depth_bypass() -> None:
     from app.entities.tools import (
         MAX_TOOL_SCHEMA_DEPTH,
         validate_tool_json_schema,
@@ -948,7 +947,7 @@ def test_python_tool_schema_rejects_defs_depth_bypass() -> None:
         return
     raise AssertionError("$defs bypassed the Tool schema depth limit.")
 
-def test_python_tool_schema_rejects_legacy_definitions_property_bypass() -> None:
+def test_tool_schema_rejects_legacy_definitions_property_bypass() -> None:
     from app.entities.tools import (
         MAX_TOOL_SCHEMA_PROPERTIES,
         validate_tool_json_schema,
@@ -972,21 +971,6 @@ def test_python_tool_schema_rejects_legacy_definitions_property_bypass() -> None
         return
     raise AssertionError("definitions bypassed the Tool schema property limit.")
 
-def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
-    from app.entities.tools import (
-        MAX_PYTHON_TOOL_CODE_BYTES,
-        validate_python_tool_code,
-    )
-
-    boundary = "x" * MAX_PYTHON_TOOL_CODE_BYTES
-    assert validate_python_tool_code(boundary) == boundary
-
-    for code in (boundary + "x", "\u754c" * (MAX_PYTHON_TOOL_CODE_BYTES // 3 + 1)):
-        try:
-            validate_python_tool_code(code)
-        except ValueError:
-            continue
-        raise AssertionError("Oversized Python Tool code was accepted.")
 
 def test_artifact_tool_accepts_sandbox_sized_content() -> None:
     from app.domain.tools.catalog.service import build_artifact_tool
@@ -1186,7 +1170,6 @@ def test_execution_tools_preserve_uncertain_outcomes() -> None:
         (dependencies, "execute_skill_dependency_install", {"builtin": "skill_dependency_install"}, {}),
         (builtin, "execute_artifact_code", {"builtin": "artifact"}, {"filename": "report.pdf", "content": "pass"}),
         (builtin, "execute_skill_artifact", {"builtin": "skill", "skill": "documents"}, {"filename": "report.docx"}),
-        (builtin, "execute_workflow_code", {"builtin": "inline_python"}, {"code": "pass", "inputs": {}}),
     ):
         with patch.object(module, function, AsyncMock(side_effect=ExecutionOutcomeUnknown("reply lost"))):
             result = asyncio.run(adapter.invoke(
@@ -1268,11 +1251,10 @@ def main() -> None:
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_grant_rules()
-    test_python_tool_schema_validation_closes_objects()
-    test_python_tool_schema_validation_enforces_limits()
-    test_python_tool_schema_rejects_defs_depth_bypass()
-    test_python_tool_schema_rejects_legacy_definitions_property_bypass()
-    test_python_tool_code_is_limited_to_eight_kibibytes()
+    test_tool_schema_validation_closes_objects()
+    test_tool_schema_validation_enforces_limits()
+    test_tool_schema_rejects_defs_depth_bypass()
+    test_tool_schema_rejects_legacy_definitions_property_bypass()
     test_artifact_tool_accepts_sandbox_sized_content()
     test_documents_skill_formal_legal_contract_is_versioned()
     test_builtin_skill_guides_are_frozen_and_read_only()

@@ -130,6 +130,7 @@ jobs:
       - name: Run Tool persistence and ownership tests
         run: |
           uv run python -m tests.tools.tools
+          uv run python -m tests.tools.retirement
           uv run python -m tests.tools.personal
 
       - name: Run Skill package and invocation tests

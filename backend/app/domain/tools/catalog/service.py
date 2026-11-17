@@ -23,7 +23,6 @@ from app.entities.identity.user import User
 from app.entities.tools import (
     Tool,
     ToolAccess,
-    ToolDraft,
     ToolPolicy,
     ToolSource,
     ToolVersion,
@@ -301,19 +300,10 @@ async def reconcile_mcp_discovery(
 
 
 @dataclass(frozen=True)
-class WorkspaceSystemCatalog:
-    sources: tuple[ToolSource, ToolSource]
-    tool: Tool
-    version: ToolVersion
-    policy: ToolPolicy
-
-
-@dataclass(frozen=True)
 class ToolCatalogItem:
     tool: Tool
     source: ToolSource
     version: ToolVersion | None
-    draft: ToolDraft | None
     policy: ToolPolicy | None
     access: ToolAccess
     permission: ToolPermissionLabel | None
@@ -324,7 +314,6 @@ class ToolCatalogDetail:
     tool: Tool
     source: ToolSource
     version: ToolVersion | None
-    draft: ToolDraft | None
     policy: ToolPolicy | None
     authorization: ToolAuthorization
 
@@ -423,7 +412,7 @@ async def list_tool_catalog(
         excluded_builtin_function_names=INTERNAL_BUILTIN_FUNCTION_NAMES,
     )
     items: list[ToolCatalogItem] = []
-    for tool, source, version, draft, policy, grant in rows:
+    for tool, source, version, policy, grant in rows:
         authorization = evaluate_tool_authorization(
             tool,
             actor,
@@ -435,7 +424,6 @@ async def list_tool_catalog(
                 tool=tool,
                 source=source,
                 version=version,
-                draft=draft,
                 policy=policy,
                 access=authorization.access,
                 permission=authorization.permission,
@@ -461,7 +449,7 @@ async def get_tool_catalog_detail(
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found.")
-    tool, source, version, draft, policy, grant = row
+    tool, source, version, policy, grant = row
     authorization = require_tool_view(
         evaluate_tool_authorization(tool, actor, workspace_role, grant)
     )
@@ -469,217 +457,8 @@ async def get_tool_catalog_detail(
         tool=tool,
         source=source,
         version=version,
-        draft=draft,
         policy=policy,
         authorization=authorization,
-    )
-
-
-# Runs in the Workflow sandbox, which cannot import app modules, so the fixed
-# offset mirrors APP_TIMEZONE (Asia/Shanghai, no DST) from entities.defaults.
-CURRENT_TIME_TOOL_CODE = (
-    "from datetime import datetime, timedelta, timezone\n"
-    "result = {'iso8601': datetime.now(timezone(timedelta(hours=8))).isoformat()}\n"
-)
-
-
-def build_workspace_system_catalog(
-    workspace_id: str,
-    created_at: datetime | None = None,
-) -> WorkspaceSystemCatalog:
-    timestamp = created_at or utc_now()
-    builtin_source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
-    python_source_id = stable_catalog_id(f"source:{workspace_id}:python")
-    # The id key predates the Python move; ids are opaque hashes and renaming
-    # the key would cascade a primary-key rewrite across tool tables.
-    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:current_time")
-    input_schema = {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    }
-    output_schema = {
-        "type": "object",
-        "properties": {
-            "iso8601": {"type": "string", "maxLength": 64},
-        },
-        "required": ["iso8601"],
-        "additionalProperties": False,
-    }
-    execution_spec = {"code": CURRENT_TIME_TOOL_CODE}
-    definition_hash = canonical_definition_hash(
-        {
-            "name": "current_time",
-            "description": "Return the current time.",
-            "input_schema": input_schema,
-            "output_schema": output_schema,
-            "execution_spec": execution_spec,
-        }
-    )
-    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
-    return WorkspaceSystemCatalog(
-        sources=(
-            ToolSource(
-                id=builtin_source_id,
-                workspace_id=workspace_id,
-                kind="builtin",
-                name="Built-in",
-                created_at=timestamp,
-                updated_at=timestamp,
-            ),
-            ToolSource(
-                id=python_source_id,
-                workspace_id=workspace_id,
-                kind="python",
-                name="Python",
-                created_at=timestamp,
-                updated_at=timestamp,
-            ),
-        ),
-        tool=Tool(
-            id=tool_id,
-            workspace_id=workspace_id,
-            source_id=python_source_id,
-            kind="python",
-            stable_key="current_time",
-            function_name="current_time",
-            current_version_id=version_id,
-            status="active",
-            availability="available",
-            created_at=timestamp,
-            updated_at=timestamp,
-        ),
-        version=ToolVersion(
-            id=version_id,
-            workspace_id=workspace_id,
-            tool_id=tool_id,
-            revision=1,
-            display_name="Current time",
-            description="Return the current time.",
-            input_schema=input_schema,
-            output_schema=output_schema,
-            execution_spec=execution_spec,
-            definition_hash=definition_hash,
-            created_at=timestamp,
-        ),
-        policy=ToolPolicy(
-            id=stable_catalog_id(f"policy:{tool_id}"),
-            workspace_id=workspace_id,
-            tool_id=tool_id,
-            tool_version_id=version_id,
-            definition_hash=definition_hash,
-            revision=1,
-            approval="auto",
-            effect="pure",
-            allowed_access_sources=["console", "public", "api"],
-            workflow_callable=True,
-            parallel_safe=False,
-            created_at=timestamp,
-            updated_at=timestamp,
-        ),
-    )
-
-
-def build_inline_python_tool(
-    workspace_id: str,
-    created_at: datetime | None = None,
-) -> tuple[Tool, ToolVersion, ToolPolicy]:
-    timestamp = created_at or utc_now()
-    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
-    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:inline_python")
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "code": {"type": "string", "maxLength": 8192},
-            "inputs": {"type": "object"},
-            "skills": {
-                "type": "array",
-                "items": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
-                },
-                "maxItems": 8,
-                "uniqueItems": True,
-                "description": (
-                    "Optional managed Skills to stage for this run. Each Skill "
-                    "must be installed by the Worker."
-                ),
-            },
-        },
-        "required": ["code", "inputs"],
-        "additionalProperties": False,
-    }
-    output_schema = {
-        "type": "object",
-        "properties": {"result": {}},
-        "required": ["result"],
-        "additionalProperties": False,
-    }
-    execution_spec = {
-        "builtin": "inline_python",
-        "workflow_only": True,
-        "direct_only": True,
-    }
-    definition_hash = canonical_definition_hash(
-        {
-            "name": "inline_python",
-            "description": (
-                "Run inline Python in the Workflow sandbox. Optional managed "
-                "Skills are staged read-only and may install their requirements "
-                "through the Worker public egress proxy."
-            ),
-            "input_schema": input_schema,
-            "output_schema": output_schema,
-            "execution_spec": execution_spec,
-        }
-    )
-    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
-    return (
-        Tool(
-            id=tool_id,
-            workspace_id=workspace_id,
-            source_id=source_id,
-            kind="builtin",
-            stable_key="inline_python",
-            function_name="inline_python",
-            current_version_id=version_id,
-            status="active",
-            availability="available",
-            created_at=timestamp,
-            updated_at=timestamp,
-        ),
-        ToolVersion(
-            id=version_id,
-            workspace_id=workspace_id,
-            tool_id=tool_id,
-            revision=1,
-            display_name="Python code",
-            description=(
-                "Run inline Python in the Workflow sandbox. Optional managed "
-                "Skills are staged read-only and may install their requirements "
-                "through the Worker public egress proxy."
-            ),
-            input_schema=input_schema,
-            output_schema=output_schema,
-            execution_spec=execution_spec,
-            definition_hash=definition_hash,
-            created_at=timestamp,
-        ),
-        ToolPolicy(
-            id=stable_catalog_id(f"policy:{tool_id}"),
-            workspace_id=workspace_id,
-            tool_id=tool_id,
-            tool_version_id=version_id,
-            definition_hash=definition_hash,
-            revision=1,
-            approval="auto",
-            effect="pure",
-            allowed_access_sources=["console", "public", "api"],
-            workflow_callable=True,
-            parallel_safe=False,
-            created_at=timestamp,
-            updated_at=timestamp,
-        ),
     )
 
 
@@ -1250,10 +1029,14 @@ async def ensure_workspace_system_catalog(
 ) -> None:
     from app.infra.db.repositories.tools import repository
 
-    catalog = build_workspace_system_catalog(workspace_id)
-    for source in catalog.sources:
-        if await repository.get_tool_source(db, workspace_id, source.id) is None:
-            await repository.save_tool_source(db, source)
+    source = ToolSource(
+        id=stable_catalog_id(f"source:{workspace_id}:builtin"),
+        workspace_id=workspace_id,
+        kind="builtin",
+        name="Built-in",
+    )
+    if await repository.get_tool_source(db, workspace_id, source.id) is None:
+        await repository.save_tool_source(db, source)
 
     async def ensure_tool(
         desired_tool: Tool,
@@ -1275,8 +1058,6 @@ async def ensure_workspace_system_catalog(
             tool.current_version_id = desired_version.id
             await repository.save_tool(db, tool)
 
-    await ensure_tool(catalog.tool, catalog.version, catalog.policy)
-    await ensure_tool(*build_inline_python_tool(workspace_id))
     await ensure_tool(*build_skill_script_tool(workspace_id))
     await ensure_tool(*build_shell_tool(workspace_id))
     await ensure_tool(*build_skill_dependency_installer_tool(workspace_id))

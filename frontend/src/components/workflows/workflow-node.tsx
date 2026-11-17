@@ -7,7 +7,6 @@ import {
   BracesIcon,
   BotIcon,
   BrainCircuitIcon,
-  Code2Icon,
   DatabaseIcon,
   FileTextIcon,
   FlagIcon,
@@ -113,7 +112,6 @@ export const NODE_ICONS: Record<
   tool: WrenchIcon,
   agent: BotIcon,
   mcp: WrenchIcon,
-  code: Code2Icon,
 }
 
 const STATUS_STYLES = {
@@ -159,7 +157,6 @@ const NODE_ACCENTS: Record<WorkflowNodeType, string> = {
   tool: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   agent: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   mcp: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  code: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
 }
 
 const KNOWLEDGE_OUTPUT_FIELDS: Array<{
@@ -192,7 +189,6 @@ const OUTPUT_FIELD_LABELS: Partial<
   tool: { result: "工具结果" },
   agent: { result: "执行结果" },
   mcp: { result: "工具结果" },
-  code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" },
   "reranker-node": { result_list: "重排结果列表", result: "重排结果" },
   "form-node": { form_data: "表单数据", result: "返回内容" },
   "document-extract-node": { content: "文档内容" },
@@ -298,7 +294,6 @@ const KNOWLEDGE_SEARCH_MODES: Array<{
   { value: "keywords", label: "关键词检索" },
   { value: "blend", label: "混合检索" },
 ]
-
 
 const CONDITION_COMPARE_OPTIONS: Array<{
   value: string
@@ -531,12 +526,6 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
       )
     case "mcp":
       return previewValue(config.tool_name) || t("选择只读 MCP 工具")
-    case "code": {
-      const inputs = config.inputs
-      const count =
-        inputs && typeof inputs === "object" ? Object.keys(inputs).length : 0
-      return `${t("代码输入")} · ${count}`
-    }
   }
 }
 
@@ -954,7 +943,7 @@ function NumberStepper({
     <div className="grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem] overflow-hidden rounded-lg border border-input bg-transparent shadow-xs max-sm:h-10 max-sm:w-40 max-sm:grid-cols-[minmax(0,1fr)_5rem] dark:bg-input/30">
       <input
         id={id}
-        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none max-sm:text-base focus-visible:bg-accent/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none focus-visible:bg-accent/50 max-sm:text-base [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         type="number"
         min={min}
         max={max}
@@ -1131,7 +1120,7 @@ function LlmSettingsDialog({
                 },
               })
             }
-            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
               reasoningContentEnabled ? "bg-primary" : "bg-muted-foreground/40"
             }`}
           >
@@ -1736,7 +1725,9 @@ function NodeConfigFields({
     )
   const availableWorkflowTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       tool.can_use &&
+      tool.function_name !== "inline_python" &&
       tool.status === "active" &&
       tool.availability === "available" &&
       Boolean(tool.current_version_id) &&
@@ -2140,7 +2131,7 @@ function NodeConfigFields({
                       mcp_servers: config.mcp_enable ? [] : selectedMcpRefs,
                     })
                   }
-                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
                     config.mcp_enable ? "bg-primary" : "bg-muted-foreground/40"
                   }`}
                 >
@@ -2194,7 +2185,7 @@ function NodeConfigFields({
               aria-label={t("返回内容")}
               disabled={readOnly}
               onClick={() => updateConfig({ is_result: !isResult })}
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
                 isResult ? "bg-primary" : "bg-muted-foreground/40"
               }`}
             >
@@ -2302,7 +2293,7 @@ function NodeConfigFields({
               aria-label={t("返回内容")}
               disabled={readOnly}
               onClick={() => updateConfig({ is_result: !isResult })}
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
                 isResult ? "bg-primary" : "bg-muted-foreground/40"
               }`}
             >
@@ -3143,29 +3134,6 @@ function NodeConfigFields({
           />
         </>
       ) : null}
-      {node.type === "code" ? (
-        <>
-          <JsonEditor
-            id={`${nodeId}-code-inputs`}
-            label={t("代码输入")}
-            value={config.inputs ?? {}}
-            readOnly={readOnly}
-            onChange={(inputs) => updateConfig({ inputs })}
-            t={t}
-          />
-          <TextEditor
-            id={`${nodeId}-code-body`}
-            label={t("Python 代码")}
-            value={config.code ?? ""}
-            readOnly={readOnly}
-            rows={10}
-            onChange={(code) => updateConfig({ code })}
-            node={node}
-            nodeId={nodeId}
-            t={t}
-          />
-        </>
-      ) : null}
     </div>
   )
 }
@@ -3412,7 +3380,6 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         "llm",
         "condition",
         "reply-node",
-        "code",
         "document-extract-node",
         "form-node",
       ].includes(node.type) ? (
@@ -3479,9 +3446,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         </div>
       ) : null}
       {expanded &&
-      (node.type === "code" ||
-        node.type === "document-extract-node" ||
-        node.type === "form-node") ? (
+      (node.type === "document-extract-node" || node.type === "form-node") ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
           {outputFields.map((field) => (
             <OutputFieldRow
@@ -3645,7 +3610,6 @@ function outputFieldNames(node: WorkflowNodeData) {
     variable: ["value"],
     agent: ["result"],
     mcp: ["result"],
-    code: ["result", "stdout", "stderr"],
   }
   return fields[node.type] ?? []
 }

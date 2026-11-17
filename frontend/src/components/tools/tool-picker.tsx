@@ -45,18 +45,13 @@ type ToolPickerProps = {
   onChange: (value: ToolRef[]) => void
 }
 
-const toolKinds = [
-  "builtin",
-  "mcp",
-  "python",
-] as const satisfies readonly ToolKind[]
-type ToolCategory = "all" | ToolKind
+const toolKinds = ["builtin", "mcp"] as const satisfies readonly ToolKind[]
+type ToolCategory = "all" | (typeof toolKinds)[number]
 
 const toolCategoryLabels = {
   all: "全部工具",
   builtin: "内置工具",
   mcp: "MCP 工具",
-  python: "Python",
 } as const
 
 /**
@@ -139,6 +134,7 @@ export function ToolPicker({
   const query = search.trim().toLowerCase()
   const usableTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       tool.can_use &&
       tool.current_version_id &&
       tool.status === "active" &&
@@ -166,6 +162,7 @@ export function ToolPicker({
     return (
       (!tool || isRegularTool(tool.function_name)) &&
       (!tool ||
+        !toolKinds.includes(tool.kind) ||
         !tool.can_use ||
         !tool.current_version_id ||
         tool.status !== "active" ||

@@ -28,7 +28,6 @@ WorkflowNodeType = Literal[
     "tool",
     "agent",
     "mcp",
-    "code",
 ]
 
 
@@ -433,11 +432,6 @@ class McpNodeConfig(BaseModel):
     server_id: str = Field(min_length=1, max_length=36)
     tool_name: str = Field(min_length=1, max_length=255)
     arguments: dict[str, Any] = Field(default_factory=dict, max_length=100)
-
-
-class CodeNodeConfig(BaseModel):
-    code: str = Field(min_length=1, max_length=8000)
-    inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
 class WorkflowDefinitionResponse(BaseModel):

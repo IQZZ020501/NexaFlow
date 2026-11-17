@@ -9,12 +9,18 @@ history and must be republished to pick up the new definition.
 """
 
 from collections.abc import Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
 
 from alembic import op
+from app.domain.tools.catalog.service import (
+    canonical_definition_hash,
+    stable_catalog_id,
+)
+from app.entities.defaults import utc_now
+from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
 revision: str = "202609110001"
 down_revision: str | None = "202609100001"
@@ -35,8 +41,6 @@ def _catalog_tables(
 
 def _apply(bind: sa.Connection) -> None:
     """Reconcile every workspace's Current time Tool to the Python definition."""
-    from app.domain.tools.catalog.service import build_workspace_system_catalog
-
     tools, versions, policies, bindings = _catalog_tables(bind)
     timestamp = datetime.now(UTC)
     workspace_ids = bind.execute(
@@ -200,3 +204,115 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     _revert(op.get_bind())
+
+
+# Frozen definitions required to replay this historical migration.
+CURRENT_TIME_TOOL_CODE = (
+    "from datetime import datetime, timedelta, timezone\n"
+    "result = {'iso8601': datetime.now(timezone(timedelta(hours=8))).isoformat()}\n"
+)
+
+
+@dataclass(frozen=True)
+class WorkspaceSystemCatalog:
+    sources: tuple[ToolSource, ToolSource]
+    tool: Tool
+    version: ToolVersion
+    policy: ToolPolicy
+
+
+def build_workspace_system_catalog(
+    workspace_id: str,
+    created_at: datetime | None = None,
+) -> WorkspaceSystemCatalog:
+    timestamp = created_at or utc_now()
+    builtin_source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    python_source_id = stable_catalog_id(f"source:{workspace_id}:python")
+    # The id key predates the Python move; ids are opaque hashes and renaming
+    # the key would cascade a primary-key rewrite across tool tables.
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:current_time")
+    input_schema = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "iso8601": {"type": "string", "maxLength": 64},
+        },
+        "required": ["iso8601"],
+        "additionalProperties": False,
+    }
+    execution_spec = {"code": CURRENT_TIME_TOOL_CODE}
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "current_time",
+            "description": "Return the current time.",
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return WorkspaceSystemCatalog(
+        sources=(
+            ToolSource(
+                id=builtin_source_id,
+                workspace_id=workspace_id,
+                kind="builtin",
+                name="Built-in",
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+            ToolSource(
+                id=python_source_id,
+                workspace_id=workspace_id,
+                kind="python",
+                name="Python",
+                created_at=timestamp,
+                updated_at=timestamp,
+            ),
+        ),
+        tool=Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=python_source_id,
+            kind="python",
+            stable_key="current_time",
+            function_name="current_time",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        version=ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Current time",
+            description="Return the current time.",
+            input_schema=input_schema,
+            output_schema=output_schema,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        policy=ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=["console", "public", "api"],
+            workflow_callable=True,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )

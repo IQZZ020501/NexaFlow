@@ -17,14 +17,14 @@ import {
 const usable: ToolSummary = {
   id: "tool-a",
   workspace_id: "ws-1",
-  kind: "python",
+  kind: "mcp",
   function_name: "lookup",
   display_name: "Lookup account",
   description: "Find an account by email",
   current_version_id: "version-2",
   status: "active",
   availability: "available",
-  source: { id: "source-1", name: "Finance", kind: "python", transport: null },
+  source: { id: "source-1", name: "Finance", kind: "mcp", transport: null },
   created_by_user_id: "u-1",
   permission: "use",
   can_view: true,
@@ -110,8 +110,8 @@ describe("ToolPicker extra", () => {
     const options = within(dialog).getAllByRole("checkbox")
     expect(options).toHaveLength(2)
     const [first, second] = options
-    expect(first?.getAttribute("aria-label")).toBe("Weekly report")
-    expect(second?.getAttribute("aria-label")).toBe("Lookup account")
+    expect(first?.getAttribute("aria-label")).toBe("Lookup account")
+    expect(second?.getAttribute("aria-label")).toBe("Weekly report")
 
     const search = within(dialog).getByRole("searchbox")
     search.focus()
@@ -138,7 +138,7 @@ describe("ToolPicker extra", () => {
 
     fireEvent.keyDown(second, { key: "Enter" })
     expect(changes.at(-1)).toEqual([
-      { tool_id: "tool-a", version_id: "version-2" },
+      { tool_id: "tool-b", version_id: "version-1" },
     ])
   })
 

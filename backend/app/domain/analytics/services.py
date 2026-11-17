@@ -467,7 +467,6 @@ def _inventory_response(
         tools=WorkspaceAnalyticsInventoryTools(
             total=inventory.tools.total,
             mcp=inventory.tools.mcp,
-            python=inventory.tools.python,
             builtin=inventory.tools.builtin,
             active=inventory.tools.active,
         ),

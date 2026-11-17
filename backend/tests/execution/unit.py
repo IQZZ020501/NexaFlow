@@ -1402,39 +1402,6 @@ async def assert_stdio_dispatch():
         platform.execute.side_effect = None
 
 
-async def assert_workflow_port():
-    platform = SimpleNamespace(
-        execute=AsyncMock(
-            return_value={
-                "ok": True,
-                "exit_code": 0,
-                "stdout": 'log\n__NEXAFLOW_RESULT__={"result":{"value":3}}',
-                "stderr": "",
-            }
-        )
-    )
-    with patch.object(client, "build_execution_platform", return_value=platform):
-        result = await client.execute_workflow_code(
-            settings(), "result = inputs", {"value": 3}
-        )
-        assert result.result == {"value": 3} and result.stdout == "log"
-        assert json.loads(platform.execute.call_args.args[0]["stdin"]) == {"value": 3}
-        platform.execute.side_effect = ExecutionError("offline")
-        try:
-            await client.execute_workflow_code(settings(), "result = 1", {})
-        except client.WorkflowSandboxError:
-            pass
-        else:
-            raise AssertionError("Offline platform executed on the host")
-        platform.execute.side_effect = ExecutionOutcomeUnknown("reply lost")
-        try:
-            await client.execute_workflow_code(settings(), "result = 1", {})
-        except ExecutionOutcomeUnknown:
-            pass
-        else:
-            raise AssertionError("Sandbox client discarded the uncertain outcome")
-
-
 async def assert_execution_response_contracts():
     content = b"artifact"
     response = {
@@ -1494,27 +1461,9 @@ async def assert_execution_response_contracts():
         else:
             raise AssertionError("Exhausted sandbox capacity was not reported as busy")
         platform.execute.side_effect = None
-        for stdout in (
-            "no marker",
-            client.RESULT_MARKER + "bad",
-            client.RESULT_MARKER + "[]",
-        ):
-            platform.execute.return_value = {
-                "ok": True,
-                "exit_code": 0,
-                "stdout": stdout,
-            }
-            try:
-                await client.execute_workflow_code(
-                    settings(), "pass", {}, ["documents"]
-                )
-            except client.WorkflowSandboxError:
-                pass
-            else:
-                raise AssertionError("Invalid workflow result accepted")
         platform.execute.side_effect = ValueError("provider malformed JSON")
         try:
-            await client.execute_workflow_code(settings(), "pass", {})
+            await client.execute_artifact_code(settings(), "pass", "txt", "result.txt", [])
         except client.WorkflowSandboxError:
             pass
         else:
@@ -1742,7 +1691,6 @@ def main():
         assert_conversation_files_stage_once_per_guest,
         assert_lost_mcp_owner_never_stages_secrets_or_starts_bridge,
         assert_stdio_dispatch,
-        assert_workflow_port,
         assert_execution_response_contracts,
         assert_network_enforcement,
         assert_egress_reconciliation_keeps_the_workspace,

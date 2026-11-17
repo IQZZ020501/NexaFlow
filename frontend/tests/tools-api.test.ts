@@ -1,24 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import {
-  archivePythonTool,
   createMcpSource,
-  createPythonTool,
   deleteToolSource,
-  getPythonToolTest,
   getTool,
   listAllToolPermissions,
   listAllTools,
   listToolPermissions,
   listTools,
-  publishPythonTool,
   refreshToolSource,
   revokeToolPermission,
-  setPythonToolEnabled,
   setToolPermission,
   setToolSourceEnabled,
-  testPythonTool,
-  updatePythonToolDraft,
   updateToolPolicy,
 } from "@/lib/api/tools"
 
@@ -89,11 +82,7 @@ describe("unified Tool API", () => {
       )
     }) as typeof fetch
 
-    const permissions = await listAllToolPermissions(
-      "token",
-      "ws-1",
-      "tool-1"
-    )
+    const permissions = await listAllToolPermissions("token", "ws-1", "tool-1")
 
     expect(permissions).toHaveLength(201)
     expect(requestedOffsets).toEqual(["0", "200"])
@@ -135,47 +124,19 @@ describe("unified Tool API", () => {
     ).toBe(true)
   })
 
-  test("pins Python lifecycle, policy, and permissions to tool ids", async () => {
+  test("pins MCP policy and permissions to tool ids", async () => {
     const requests = captureRequests()
-    const draft = {
-      display_name: "Formatter",
-      description: "Formats text",
-      input_schema: { type: "object" },
-      output_schema: { type: "object" },
-      code: "result = inputs",
-    }
-
-    await createPythonTool("token", "ws-1", draft)
-    await updatePythonToolDraft("token", "ws-1", "tool-1", {
-      ...draft,
-      expected_revision: 3,
-    })
-    await testPythonTool("token", "ws-1", "tool-1", { text: "hello" })
-    await getPythonToolTest("token", "ws-1", "tool-1", "invocation-1")
-    await publishPythonTool("token", "ws-1", "tool-1")
-    await setPythonToolEnabled("token", "ws-1", "tool-1", false)
     await updateToolPolicy("token", "ws-1", "tool-1", "read_only")
     await listToolPermissions("token", "ws-1", "tool-1")
     await setToolPermission("token", "ws-1", "tool-1", "user-2", "use")
     await revokeToolPermission("token", "ws-1", "tool-1", "user-2")
-    await archivePythonTool("token", "ws-1", "tool-1")
-
     expect(requests.map(({ url, method }) => [method, url])).toEqual([
-      ["POST", "/api/v1/workspaces/ws-1/tools/python"],
-      ["PUT", "/api/v1/workspaces/ws-1/tools/tool-1/draft"],
-      ["POST", "/api/v1/workspaces/ws-1/tools/tool-1/tests"],
-      ["GET", "/api/v1/workspaces/ws-1/tools/tool-1/tests/invocation-1"],
-      ["POST", "/api/v1/workspaces/ws-1/tools/tool-1/publish"],
-      ["POST", "/api/v1/workspaces/ws-1/tools/tool-1/disable"],
       ["PUT", "/api/v1/workspaces/ws-1/tools/tool-1/policy"],
       ["GET", "/api/v1/workspaces/ws-1/tools/tool-1/permissions"],
       ["PUT", "/api/v1/workspaces/ws-1/tools/tool-1/permissions/user-2"],
       ["DELETE", "/api/v1/workspaces/ws-1/tools/tool-1/permissions/user-2"],
-      ["DELETE", "/api/v1/workspaces/ws-1/tools/tool-1"],
     ])
-    expect(requests[1]?.body).toEqual({ ...draft, expected_revision: 3 })
-    expect(requests[2]?.body).toEqual({ arguments: { text: "hello" } })
-    expect(requests[6]?.body).toEqual({ mode: "read_only" })
-    expect(requests[8]?.body).toEqual({ permission: "use" })
+    expect(requests[0]?.body).toEqual({ mode: "read_only" })
+    expect(requests[2]?.body).toEqual({ permission: "use" })
   })
 })

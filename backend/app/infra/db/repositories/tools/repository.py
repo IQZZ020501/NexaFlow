@@ -14,7 +14,6 @@ from app.domain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
 )
 from app.domain.tools.models import Tool as ToolOrm
-from app.domain.tools.models import ToolDraft as ToolDraftOrm
 from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.domain.tools.models import ToolPolicy as ToolPolicyOrm
 from app.domain.tools.models import ToolSource as ToolSourceOrm
@@ -33,7 +32,6 @@ from app.entities.identity.user import User
 from app.entities.tools import (
     ApplicationToolBinding,
     Tool,
-    ToolDraft,
     ToolInvocation,
     ToolPolicy,
     ToolRef,
@@ -47,7 +45,6 @@ ToolCatalogRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
-    ToolDraft | None,
     ToolPolicy | None,
     ResourcePermission | None,
 ]
@@ -55,7 +52,6 @@ ToolCatalogDetailRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
-    ToolDraft | None,
     ToolPolicy | None,
     ResourcePermission | None,
 ]
@@ -71,8 +67,6 @@ ApplicationToolSnapshotRow = tuple[
     str | None,
     ResourcePermission | None,
 ]
-
-
 
 
 from app.infra.db.repositories.tools.bindings import (
@@ -110,11 +104,6 @@ from app.infra.db.repositories.tools.catalog import (
     save_tool_source,
     save_tool_version,
     update_tool_policy_if_revision,
-)
-from app.infra.db.repositories.tools.drafts import (
-    get_tool_draft,
-    list_tool_drafts,
-    save_tool_draft,
 )
 from app.infra.db.repositories.tools.invocations import (
     _tool_invocation_effect,

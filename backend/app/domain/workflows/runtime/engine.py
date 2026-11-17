@@ -14,7 +14,6 @@ from pydantic import BaseModel, ValidationError
 
 from app.schemas.workflows.contracts import (
     ClassifierNodeConfig,
-    CodeNodeConfig,
     ConditionNodeConfig,
     DocumentExtractNodeConfig,
     EndNodeConfig,
@@ -87,7 +86,6 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "tool": ToolNodeConfig,
     "agent": WorkflowAgentNodeConfig,
     "mcp": McpNodeConfig,
-    "code": CodeNodeConfig,
 }
 
 REFERENCE_PATTERN = re.compile(

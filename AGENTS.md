@@ -322,7 +322,7 @@ not trigger unrelated cleanup.
   override `[data-*]` variables in `frontend/src/app/globals.css`; keep a new
   axis on its own variables so two settings cannot silently replace each other.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
-  service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
+  service. `job.py` accepts bounded JSON jobs for artifact
   rendering, pinned Python/JavaScript Skill scripts, bash commands and stdio MCP; it adds
   program/file/output/time limits inside the platform's container/VM boundary.
   The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
@@ -331,7 +331,7 @@ not trigger unrelated cleanup.
   never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
   authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
   native TTL cleanup. `execution_sessions` persists Run guests, staged packages
-  and dependency locks. Python, renderers, Workflow code and Skills share that
+  and dependency locks. Renderers and Skill scripts share that
   guest; short holders check Run ownership, fence old workers and stop stale
   processes before takeover. TTL follows the Run deadline plus 60 seconds;
   terminal/cancelled Runs close guests and Beat reconciles cleanup and orphans.
@@ -355,7 +355,8 @@ not trigger unrelated cleanup.
   guides live under `sandbox/skills`. Their selectable Tools accept only `{}`
   and return version-pinned instructions; Agent bash performs file operations
   through the existing execution port and artifact ledger. They are not
-  Workflow-callable; Workflow file generation uses Python Code nodes. Helpers
+  Workflow-callable; Workflows use authorized MCP Tools or Agent nodes for file work.
+  Standalone Python Tools and Python Code nodes are removed. Helpers
   inspect packages, preview Office files and validate importable Skill drafts.
   Do not impose fixed PPT layouts or palettes. The old PPT layout/PPTD/WASM
   implementation is removed; DOCX/PDF/XLSX renderers only serve frozen legacy

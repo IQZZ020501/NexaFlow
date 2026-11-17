@@ -132,7 +132,7 @@ function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
   return {
     id: "tool-1",
     workspace_id: WS,
-    kind: "python",
+    kind: "mcp",
     function_name: "lookup",
     display_name: "Lookup",
     description: "Lookup data",
@@ -142,7 +142,7 @@ function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
     source: {
       id: "source-1",
       name: "Mine",
-      kind: "python",
+      kind: "mcp",
       transport: null,
     },
     created_by_user_id: "u-1",
@@ -158,7 +158,6 @@ function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
     effect: "pure",
     workflow_callable: true,
     parallel_safe: true,
-    draft: null,
     ...overrides,
   }
 }

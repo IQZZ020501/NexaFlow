@@ -81,7 +81,7 @@ function workflowToolDisabledReason(tool: ToolDetail): TranslationKey | null {
 }
 
 /**
- * Provides a popover for adding workflow nodes, tools, Python code, and agents.
+ * Provides a popover for adding workflow nodes, tools and agents.
  *
  * @param tools - Tools available for selection
  * @param agents - Agents available for selection
@@ -113,6 +113,7 @@ export function WorkflowNodePalette({
   const query = search.trim().toLowerCase()
   const visibleTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       tool.can_view &&
       tool.function_name !== "inline_python" &&
       tool.function_name !== "create_artifact" &&
@@ -121,11 +122,6 @@ export function WorkflowNodePalette({
           .toLowerCase()
           .includes(query))
   )
-  const inlinePythonMatches =
-    !query ||
-    `${t("Python 代码")} ${t("在工作流沙箱中运行 Python 代码。")}`
-      .toLowerCase()
-      .includes(query)
   const availableAgents = agents.filter(
     (agent) =>
       agent.app_type === "agent" &&
@@ -137,7 +133,6 @@ export function WorkflowNodePalette({
   )
   const startNodeId =
     graph.nodes.find((node) => node.data.type === "start")?.id ?? "start"
-  const InlinePythonIcon = NODE_ICONS.code
 
   function add(
     type: WorkflowNodeType,
@@ -318,28 +313,8 @@ export function WorkflowNodePalette({
                   <LoaderCircleIcon className="size-4 animate-spin" />
                   {t("正在加载工具")}
                 </div>
-              ) : inlinePythonMatches || visibleTools.length ? (
+              ) : visibleTools.length ? (
                 <div className="space-y-2">
-                  {inlinePythonMatches ? (
-                    <button
-                      type="button"
-                      aria-label={t("Python 代码")}
-                      className="flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted"
-                      onClick={() => add("code")}
-                    >
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                        <InlinePythonIcon className="size-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {t("Python 代码")}
-                        </span>
-                        <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
-                          {t("在工作流沙箱中运行 Python 代码。")}
-                        </span>
-                      </span>
-                    </button>
-                  ) : null}
                   {visibleTools.map((tool) => {
                     const disabledReason = workflowToolDisabledReason(tool)
                     return (

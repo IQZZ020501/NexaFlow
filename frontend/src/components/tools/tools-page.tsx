@@ -2,10 +2,7 @@
 
 import * as React from "react"
 import {
-  ArchiveIcon,
-  BracesIcon,
   ChevronRightIcon,
-  Code2Icon,
   EyeIcon,
   FolderInputIcon,
   LoaderCircleIcon,
@@ -36,7 +33,6 @@ import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
 import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
-import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { SkillDialog } from "@/components/tools/skill-dialog"
 import {
   listAllAgentSkills,
@@ -80,13 +76,11 @@ import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { languageLocales } from "@/i18n"
 import {
-  archivePythonTool,
   deleteToolSource,
   getTool,
   listAllTools,
   listAllToolSources,
   refreshToolSource,
-  setPythonToolEnabled,
   setToolSourceEnabled,
   updateToolPolicy,
   type ToolDetail,
@@ -111,7 +105,6 @@ import { cn } from "@/lib/utils"
 const catalogTabs = [
   { kind: "builtin", label: "Skills" },
   { kind: "mcp", label: "MCP" },
-  { kind: "python", label: "Python" },
 ] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
 
 type ToolSortKey = "updated_at" | "created_at" | "name"
@@ -146,7 +139,6 @@ function sortToolResources<
  * @returns The icon component for the tool kind
  */
 function kindIcon(kind: ToolKind) {
-  if (kind === "python") return Code2Icon
   if (kind === "mcp") return NetworkIcon
   return SparklesIcon
 }
@@ -169,10 +161,10 @@ function toolIsAvailable(tool: ToolSummary) {
  * Provides the display label for a tool kind.
  *
  * @param kind - The tool kind to label
- * @returns `Python`, `MCP`, or `内置` for the corresponding tool kind
+ * @returns `MCP` or `内置` for the corresponding tool kind
  */
 function kindLabel(kind: ToolKind) {
-  return kind === "python" ? "Python" : kind === "mcp" ? "MCP" : "内置"
+  return kind === "mcp" ? "MCP" : "内置"
 }
 
 /**
@@ -221,13 +213,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [busyId, setBusyId] = React.useState<string | null>(null)
-  const [pythonDialog, setPythonDialog] = React.useState<{
-    open: boolean
-    tool: ToolSummary | null
-  }>({ open: false, tool: null })
   const [mcpDialogOpen, setMcpDialogOpen] = React.useState(false)
-  const [oauthSource, setOAuthSource] = React.useState<ToolSourceDetail | null>(null)
-  const [taskSource, setTaskSource] = React.useState<ToolSourceDetail | null>(null)
+  const [oauthSource, setOAuthSource] = React.useState<ToolSourceDetail | null>(
+    null
+  )
+  const [taskSource, setTaskSource] = React.useState<ToolSourceDetail | null>(
+    null
+  )
   const [skillDialogOpen, setSkillDialogOpen] = React.useState(false)
   const [workspaceSkills, setWorkspaceSkills] = React.useState<AgentSkill[]>([])
   const [editingSkill, setEditingSkill] = React.useState<
@@ -309,6 +301,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
 
   const catalogTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       isRegularTool(tool.function_name) &&
       (!initialKind || tool.kind === activeKind)
   )
@@ -420,49 +413,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   }
 
   async function openDetail(tool: ToolSummary) {
-    if (tool.kind === "python" && tool.created_by_user_id) {
-      setPythonDialog({ open: true, tool })
-      return
-    }
     setDetailTarget(tool)
     setDetailTool(null)
     await loadDetail(tool)
-  }
-
-  async function togglePythonTool(tool: ToolSummary) {
-    if (busyId) return
-    if (tool.kind !== "python") return
-    const enabled = tool.status === "disabled"
-    if (
-      !enabled &&
-      !(await confirmAction({
-        description: t(
-          "禁用工具“{name}”？已绑定的 Agent 和 Workflow 将无法调用它。",
-          {
-            name: displayToolName(tool),
-          }
-        ),
-        confirmLabel: t("禁用"),
-        destructive: true,
-      }))
-    ) {
-      return
-    }
-    setBusyId(tool.id)
-    try {
-      const updated = await setPythonToolEnabled(
-        accessToken,
-        workspaceId,
-        tool.id,
-        enabled
-      )
-      upsertTool(updated)
-      message("success", enabled ? t("工具已启用") : t("工具已禁用"))
-    } catch (nextError) {
-      message("error", getErrorMessage(nextError, t))
-    } finally {
-      setBusyId(null)
-    }
   }
 
   async function setMcpPolicy(
@@ -547,31 +500,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       )
       await load()
       message("success", enabled ? t("工具来源已启用") : t("工具来源已禁用"))
-    } catch (nextError) {
-      message("error", getErrorMessage(nextError, t))
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function archiveTool(tool: ToolSummary) {
-    if (busyId || tool.kind !== "python") return
-    if (
-      !(await confirmAction({
-        description: t("归档工具“{name}”？此操作会使所有已绑定版本不可用。", {
-          name: displayToolName(tool),
-        }),
-        confirmLabel: t("归档"),
-        destructive: true,
-      }))
-    ) {
-      return
-    }
-    setBusyId(tool.id)
-    try {
-      await archivePythonTool(accessToken, workspaceId, tool.id)
-      setTools((current) => current.filter((item) => item.id !== tool.id))
-      message("success", t("工具已归档"))
     } catch (nextError) {
       message("error", getErrorMessage(nextError, t))
     } finally {
@@ -710,19 +638,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   <FolderInputIcon />
                   {t("移动到文件夹")}
                 </DropdownMenuItem>
-                {tool.kind === "python" ? (
-                  <DropdownMenuItem
-                    onSelect={() => setPythonDialog({ open: true, tool })}
-                  >
-                    <BracesIcon />
-                    {t("编辑")}
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onSelect={() => void openDetail(tool)}>
-                    <EyeIcon />
-                    {t("查看详情")}
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem onSelect={() => void openDetail(tool)}>
+                  <EyeIcon />
+                  {t("查看详情")}
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setPermissionTool(tool)}>
                   <ShieldCheckIcon />
                   {t("授权")}
@@ -775,34 +694,17 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                       </>
                     )}
                   </>
-                ) : tool.kind === "python" &&
-                  (tool.status === "active" || tool.status === "disabled") ? (
-                  <DropdownMenuItem
-                    disabled={Boolean(busyId)}
-                    onSelect={() => void togglePythonTool(tool)}
-                  >
-                    <PowerIcon />
-                    {tool.status === "active" ? t("禁用") : t("启用")}
-                  </DropdownMenuItem>
                 ) : null}
-                {tool.kind === "python" || (tool.kind === "mcp" && source) ? (
+                {tool.kind === "mcp" && source ? (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       variant="destructive"
                       disabled={Boolean(busyId)}
-                      onSelect={() =>
-                        tool.kind === "python"
-                          ? void archiveTool(tool)
-                          : source && void removeSource(source)
-                      }
+                      onSelect={() => void removeSource(source)}
                     >
-                      {tool.kind === "python" ? (
-                        <ArchiveIcon />
-                      ) : (
-                        <Trash2Icon />
-                      )}
-                      {tool.kind === "python" ? t("归档") : t("删除来源")}
+                      <Trash2Icon />
+                      {t("删除来源")}
                     </DropdownMenuItem>
                   </>
                 ) : null}
@@ -835,9 +737,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("工具")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t(
-              "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。"
-            )}
+            {t("管理自己的 MCP 与 Skills；共享给你的资源可按授权使用。")}
           </p>
         </div>
         <DropdownMenu>
@@ -848,12 +748,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem
-              onSelect={() => setPythonDialog({ open: true, tool: null })}
-            >
-              <Code2Icon />
-              {t("Python 工具")}
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMcpDialogOpen(true)}>
               <NetworkIcon />
               {t("MCP Server")}
@@ -932,7 +826,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 <div
                   role="group"
                   aria-label={t("工具")}
-                  className="grid w-fit shrink-0 grid-cols-3 rounded-md bg-muted p-0.5 max-sm:w-full"
+                  className="grid w-fit shrink-0 grid-cols-2 gap-0.5 rounded-lg bg-muted/70 p-0.5 max-sm:w-full sm:h-[var(--theme-control-large-height)]"
                 >
                   {catalogTabs.map((tab) => {
                     const isActive = activeKind === tab.kind
@@ -942,10 +836,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         key={tab.kind}
                         type="button"
                         aria-pressed={isActive}
-                        className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-11 ${
+                        className={`inline-flex min-w-18 items-center justify-center rounded-md px-3 text-sm font-medium whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background motion-reduce:transition-none max-sm:h-11 ${
                           isActive
                             ? "bg-background text-foreground shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
+                            : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
                         }`}
                         onClick={() => setActiveKind(tab.kind)}
                       >
@@ -1037,8 +931,22 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         <CardMoreMenu
                           label={t("管理来源 {name}", { name: source.name })}
                         >
-                          {source.mcp_server_id && source.transport !== "stdio" ? <DropdownMenuItem onSelect={() => setOAuthSource(source)}>{t("OAuth 连接")}</DropdownMenuItem> : null}
-                          {source.mcp_server_id && source.transport !== "stdio" ? <DropdownMenuItem onSelect={() => setTaskSource(source)}>{t("长任务契约")}</DropdownMenuItem> : null}
+                          {source.mcp_server_id &&
+                          source.transport !== "stdio" ? (
+                            <DropdownMenuItem
+                              onSelect={() => setOAuthSource(source)}
+                            >
+                              {t("OAuth 连接")}
+                            </DropdownMenuItem>
+                          ) : null}
+                          {source.mcp_server_id &&
+                          source.transport !== "stdio" ? (
+                            <DropdownMenuItem
+                              onSelect={() => setTaskSource(source)}
+                            >
+                              {t("长任务契约")}
+                            </DropdownMenuItem>
+                          ) : null}
                           <DropdownMenuItem
                             disabled={Boolean(busyId)}
                             onSelect={() => void refreshSource(source)}
@@ -1308,9 +1216,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </span>
             <p className="mt-4 font-medium">{t("还没有工具")}</p>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              {t(
-                "添加 Python 工具或连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。"
-              )}
+              {t("连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。")}
             </p>
           </div>
         ) : filteredTools.length === 0 ? (
@@ -1367,20 +1273,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         }}
       />
 
-      <PythonToolDialog
-        open={pythonDialog.open}
-        onOpenChange={(open) =>
-          setPythonDialog((current) => ({ ...current, open }))
-        }
-        token={accessToken}
-        workspaceId={workspaceId}
-        tool={pythonDialog.tool}
-        onChanged={upsertTool}
-        onArchived={(toolId) =>
-          setTools((current) => current.filter((tool) => tool.id !== toolId))
-        }
-        onMessage={message}
-      />
       <McpSourceDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
@@ -1395,8 +1287,26 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         }}
         onError={(value) => message("error", value)}
       />
-      {oauthSource?.mcp_server_id ? <McpOAuthDialog key={oauthSource.id} token={accessToken} workspaceId={workspaceId} serverId={oauthSource.mcp_server_id} onClose={() => setOAuthSource(null)} onChanged={() => void load()} /> : null}
-      {taskSource?.mcp_server_id ? <McpLongTasksDialog key={taskSource.id} token={accessToken} workspaceId={workspaceId} serverId={taskSource.mcp_server_id} onClose={() => setTaskSource(null)} onChanged={() => void load()} /> : null}
+      {oauthSource?.mcp_server_id ? (
+        <McpOAuthDialog
+          key={oauthSource.id}
+          token={accessToken}
+          workspaceId={workspaceId}
+          serverId={oauthSource.mcp_server_id}
+          onClose={() => setOAuthSource(null)}
+          onChanged={() => void load()}
+        />
+      ) : null}
+      {taskSource?.mcp_server_id ? (
+        <McpLongTasksDialog
+          key={taskSource.id}
+          token={accessToken}
+          workspaceId={workspaceId}
+          serverId={taskSource.mcp_server_id}
+          onClose={() => setTaskSource(null)}
+          onChanged={() => void load()}
+        />
+      ) : null}
       <SkillDialog
         key={`${workspaceId}:${editingSkill?.id ?? "new"}:${skillDialogOpen}`}
         open={skillDialogOpen}

@@ -22,7 +22,10 @@ const canvasSource = readFileSync(
   "utf8"
 )
 const paletteSource = readFileSync(
-  join(import.meta.dir, "../src/components/workflows/workflow-node-palette.tsx"),
+  join(
+    import.meta.dir,
+    "../src/components/workflows/workflow-node-palette.tsx"
+  ),
   "utf8"
 )
 const detailSource = readFileSync(
@@ -169,9 +172,7 @@ test("confirmed workflow discards restore persisted graph and app settings", () 
 
 test("output fields use translated labels and confirm successful copies", () => {
   expect(source).toContain('variable: { value: "变量值" }')
-  expect(source).toContain(
-    'code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" }'
-  )
+  expect(source).not.toContain('code: { result: "执行结果"')
   expect(source).toContain(
     "displayValue={outputFieldLabel(node.type, field, t)}"
   )
@@ -180,31 +181,20 @@ test("output fields use translated labels and confirm successful copies", () => 
   expect(source).toContain('notify("success", t("已复制"))')
 })
 
-test("code, document, and form nodes place outputs after their settings", () => {
-  const codeConfig = source.slice(
-    source.indexOf('{node.type === "code" ? ('),
-    source.indexOf("export function WorkflowNodeCard")
-  )
+test("document and form nodes place outputs after their settings", () => {
   const card = source.slice(
     source.indexOf("export function WorkflowNodeCard"),
     source.indexOf("function OutputFieldRow")
   )
 
-  expect(codeConfig.indexOf("-code-inputs")).toBeLessThan(
-    codeConfig.indexOf("-code-body")
-  )
   expectStringArray(card, [
     "knowledge",
     "llm",
     "condition",
     "reply-node",
-    "code",
     "document-extract-node",
     "form-node",
   ])
-  expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
-    card.lastIndexOf('node.type === "code"')
-  )
   expect(card.indexOf("<NodeConfigFields")).toBeLessThan(
     card.lastIndexOf('node.type === "document-extract-node"')
   )
@@ -213,7 +203,7 @@ test("code, document, and form nodes place outputs after their settings", () => 
   )
 })
 
-test("Tool and Agent nodes keep pinned bindings while legacy editors remain available", () => {
+test("Tool and Agent nodes keep pinned bindings while MCP editors remain available", () => {
   const toolConfig = source.slice(
     source.indexOf("function ToolArgumentsFields"),
     source.indexOf("function NodeConfigFields")
@@ -236,7 +226,7 @@ test("Tool and Agent nodes keep pinned bindings while legacy editors remain avai
   expect(nodeConfig).toContain("id={`${nodeId}-agent-input`}")
   expect(nodeConfig).toContain("agent_version_id")
   expect(nodeConfig).toContain('node.type === "mcp"')
-  expect(nodeConfig).toContain('node.type === "code"')
+  expect(nodeConfig).not.toContain('node.type === "code"')
   expect(nodeConfig).toContain('tool.approval === "auto"')
   expectStringArray(card, [
     "llm",
@@ -512,18 +502,14 @@ test("LLM outputs use translated labels at the bottom of its settings", () => {
   expect(nodeConfigFields.indexOf("{LLM_OUTPUT_FIELDS.map")).toBeGreaterThan(
     nodeConfigFields.indexOf('t("返回内容")')
   )
-  expectStringArray(
-    source,
-    [
-      "knowledge",
-      "llm",
-      "condition",
-      "reply-node",
-      "code",
-      "document-extract-node",
-      "form-node",
-    ]
-  )
+  expectStringArray(source, [
+    "knowledge",
+    "llm",
+    "condition",
+    "reply-node",
+    "document-extract-node",
+    "form-node",
+  ])
 })
 
 test("knowledge search mode uses the anchored app dropdown", () => {

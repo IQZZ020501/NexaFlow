@@ -1,69 +1,84 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
-  "技能创建": "Skill Creator",
-  "生成可导入的技能包；不自动发布或授权。": "Create an importable Skill package without publishing or granting permissions.",
-  "长任务契约": "Long task contract",
-  "仅为支持请求身份、状态、结果和取消的连接器启用。普通 MCP 调用保持原有行为。": "Enable only for connectors that support request identity, status, results, and cancellation. Ordinary MCP calls keep their existing behavior.",
-  "状态和结果操作必须只读，取消必须幂等。此工具的授权同时允许管理它提交的同一任务。保存后需重新审核工具策略。": "Status and result operations must be read only; cancellation must be idempotent. Authorizing this tool also allows managing the same job it submits. Review the tool policy again after saving.",
-  "提交任务工具": "Submit tool",
-  "状态查询工具": "Status tool",
-  "结果读取工具": "Result tool",
-  "取消任务工具": "Cancel tool",
+  技能创建: "Skill Creator",
+  "生成可导入的技能包；不自动发布或授权。":
+    "Create an importable Skill package without publishing or granting permissions.",
+  长任务契约: "Long task contract",
+  "仅为支持请求身份、状态、结果和取消的连接器启用。普通 MCP 调用保持原有行为。":
+    "Enable only for connectors that support request identity, status, results, and cancellation. Ordinary MCP calls keep their existing behavior.",
+  "状态和结果操作必须只读，取消必须幂等。此工具的授权同时允许管理它提交的同一任务。保存后需重新审核工具策略。":
+    "Status and result operations must be read only; cancellation must be idempotent. Authorizing this tool also allows managing the same job it submits. Review the tool policy again after saving.",
+  提交任务工具: "Submit tool",
+  状态查询工具: "Status tool",
+  结果读取工具: "Result tool",
+  取消任务工具: "Cancel tool",
   "查询间隔（秒）": "Polling interval (seconds)",
-  "恢复普通调用": "Restore ordinary calls",
-  "保存契约": "Save contract",
-  "保存后请在来源菜单完成 OAuth 授权，再发现可用工具。": "After saving, complete OAuth authorization from the source menu to discover its tools.",
+  恢复普通调用: "Restore ordinary calls",
+  保存契约: "Save contract",
+  "保存后请在来源菜单完成 OAuth 授权，再发现可用工具。":
+    "After saving, complete OAuth authorization from the source menu to discover its tools.",
   "OAuth 连接": "OAuth connection",
-  "授权地址": "Authorization endpoint",
-  "令牌地址": "Token endpoint",
-  "撤销地址": "Revocation endpoint",
+  授权地址: "Authorization endpoint",
+  令牌地址: "Token endpoint",
+  撤销地址: "Revocation endpoint",
   "客户端 ID": "Client ID",
-  "客户端认证": "Client authentication",
+  客户端认证: "Client authentication",
   "公开客户端（PKCE）": "Public client (PKCE)",
   "客户端密钥（Basic）": "Client secret (Basic)",
   "客户端密钥（POST）": "Client secret (POST)",
-  "客户端密钥": "Client secret",
-  "密钥加密保存；断开连接后需要重新填写。": "The secret is encrypted. Enter it again after disconnecting.",
+  客户端密钥: "Client secret",
+  "密钥加密保存；断开连接后需要重新填写。":
+    "The secret is encrypted. Enter it again after disconnecting.",
   "授权范围（空格分隔）": "Scopes (separated by spaces)",
-  "使用已注册的 OAuth 客户端，填写服务提供方的授权、令牌与撤销地址。连接会使用 PKCE。": "Use a registered OAuth client and enter the provider’s authorization, token, and revocation endpoints. The connection uses PKCE.",
-  "授权由连接创建者管理。获准使用此来源的工具会使用这份连接。": "The connection creator manages authorization. Tools granted access to this source use this connection.",
-  "已连接": "Connected",
-  "正在刷新授权": "Refreshing authorization",
-  "需要重新授权": "Reauthorization required",
-  "保存配置": "Save configuration",
-  "前往授权": "Authorize",
-  "断开连接": "Disconnect",
-  "授权未完成，请返回工具页面重新连接。": "Authorization did not complete. Return to Tools and reconnect.",
+  "使用已注册的 OAuth 客户端，填写服务提供方的授权、令牌与撤销地址。连接会使用 PKCE。":
+    "Use a registered OAuth client and enter the provider’s authorization, token, and revocation endpoints. The connection uses PKCE.",
+  "授权由连接创建者管理。获准使用此来源的工具会使用这份连接。":
+    "The connection creator manages authorization. Tools granted access to this source use this connection.",
+  已连接: "Connected",
+  正在刷新授权: "Refreshing authorization",
+  需要重新授权: "Reauthorization required",
+  保存配置: "Save configuration",
+  前往授权: "Authorize",
+  断开连接: "Disconnect",
+  "授权未完成，请返回工具页面重新连接。":
+    "Authorization did not complete. Return to Tools and reconnect.",
   "授权已完成，工具已刷新。": "Authorized. Tools have been refreshed.",
-  "授权已完成，但工具发现失败。请返回工具页面刷新工具。": "Authorized, but tool discovery failed. Return to Tools to refresh the tools.",
-  "正在完成授权": "Completing authorization",
-  "返回工具": "Return to Tools",
+  "授权已完成，但工具发现失败。请返回工具页面刷新工具。":
+    "Authorized, but tool discovery failed. Return to Tools to refresh the tools.",
+  正在完成授权: "Completing authorization",
+  返回工具: "Return to Tools",
   已删除: "Deleted",
   下载: "Download",
-  "项目文件": "Project files",
-  "项目名称": "Project name",
-  "新建项目": "New project",
-  "还没有项目": "No projects yet",
-  "全部项目": "All projects",
-  "删除项目": "Delete project",
-  "选择项目": "Select project",
-  "未绑定项目": "No project",
+  项目文件: "Project files",
+  项目名称: "Project name",
+  新建项目: "New project",
+  还没有项目: "No projects yet",
+  全部项目: "All projects",
+  删除项目: "Delete project",
+  选择项目: "Select project",
+  未绑定项目: "No project",
   "当前项目：{name}": "Project: {name}",
   "项目修订：{revision}": "Project revision: {revision}",
-  "项目相对路径": "Relative project path",
-  "文件用途": "File purpose",
+  项目相对路径: "Relative project path",
+  文件用途: "File purpose",
   "源资料（只读）": "Source (read only)",
-  "工作文件": "Work file",
-  "上传项目文件": "Upload project file",
-  "保存文件版本": "Save file version",
-  "文件版本": "File versions",
-  "私有项目保留源资料、脚本和文件版本，可在新的 Agent 对话中继续使用。": "Private projects keep source materials, scripts, and file versions for use in new Agent conversations.",
-  "源资料只读；工作文件会在命令执行后保存。每个文件最多 5 MiB，项目最多 64 个文件和 64 MiB。": "Source materials are read only. Work files are saved after commands. Each file may be up to 5 MiB; a project may contain up to 64 files and 64 MiB.",
-  "项目版本冲突，请刷新后重试；你的更改未覆盖其他版本。": "Project version conflict. Refresh before retrying; your changes did not overwrite another version.",
-  "删除项目及其全部文件版本？此操作无法撤销。": "Delete this project and all its file versions? This cannot be undone.",
-  "删除此文件？已有版本仍可在历史中下载。": "Delete this file? Existing versions will remain available in its history.",
-  "重命名会保存新版本，旧路径不会在新 Run 中恢复。": "Renaming saves a new version. New Runs will not restore the old path.",
+  工作文件: "Work file",
+  上传项目文件: "Upload project file",
+  保存文件版本: "Save file version",
+  文件版本: "File versions",
+  "私有项目保留源资料、脚本和文件版本，可在新的 Agent 对话中继续使用。":
+    "Private projects keep source materials, scripts, and file versions for use in new Agent conversations.",
+  "源资料只读；工作文件会在命令执行后保存。每个文件最多 5 MiB，项目最多 64 个文件和 64 MiB。":
+    "Source materials are read only. Work files are saved after commands. Each file may be up to 5 MiB; a project may contain up to 64 files and 64 MiB.",
+  "项目版本冲突，请刷新后重试；你的更改未覆盖其他版本。":
+    "Project version conflict. Refresh before retrying; your changes did not overwrite another version.",
+  "删除项目及其全部文件版本？此操作无法撤销。":
+    "Delete this project and all its file versions? This cannot be undone.",
+  "删除此文件？已有版本仍可在历史中下载。":
+    "Delete this file? Existing versions will remain available in its history.",
+  "重命名会保存新版本，旧路径不会在新 Run 中恢复。":
+    "Renaming saves a new version. New Runs will not restore the old path.",
 
   "预览文件：{filename}": "Preview file: {filename}",
   "文件预览：{filename}": "File preview: {filename}",
@@ -406,8 +421,7 @@ export const en = {
   "Agent {agents} · 工作流 {workflows} · 已发布 {published}":
     "Agents {agents} · Workflows {workflows} · Published {published}",
   "文档 {documents} · 片段 {chunks}": "Documents {documents} · Chunks {chunks}",
-  "MCP {mcp} · Python {python} · 内置 {builtin}":
-    "MCP {mcp} · Python {python} · Built-in {builtin}",
+  "MCP {mcp} · 内置 {builtin}": "MCP {mcp} · Built-in {builtin}",
   工具调用: "Tool calls",
   "所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）":
     "Tool execution in the selected period and the busiest tools (existing tools only)",
@@ -759,7 +773,6 @@ export const en = {
     "Manage external APIs, internal services, and tool capabilities apps can call.",
   添加工具: "Add tool",
   还没有工具: "No tools yet",
-  "Python 工具": "Python tool",
   "MCP Server": "MCP Server",
   Skills: "Skills",
   Skill: "Skill",
@@ -782,8 +795,8 @@ export const en = {
   "内置 Skills": "Built-in Skills",
   "我的 Skills": "My Skills",
   "还没有自己的 Skill": "No Skills of your own yet",
-  "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。":
-    "Manage your own MCP connections, Skills, and Python tools. Shared resources follow their granted permissions.",
+  "管理自己的 MCP 与 Skills；共享给你的资源可按授权使用。":
+    "Manage your own MCP connections and Skills. Shared resources follow their granted permissions.",
   "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。":
     "You manage this connection. Shared tools run through it. Saving discovers the available tools.",
   "工作区 Skills": "Workspace Skills",
@@ -793,10 +806,8 @@ export const en = {
   共享给我的: "Shared with me",
   内置工具: "Built-in tools",
   上游未发现该工具: "No longer found upstream",
-  "统一管理 Python、MCP 与内置工具，以及它们的版本和授权。":
-    "Manage Python, MCP, and built-in tools, together with their versions and permissions.",
-  "添加 Python 工具或连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。":
-    "After adding a Python tool or connecting an MCP Server, you can grant Agents and Workflows access.",
+  "连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。":
+    "After connecting an MCP Server, you can grant Agents and Workflows access.",
   "搜索名称、描述或来源": "Search name, description, or source",
   工具加载失败: "Could not load tools",
   正在加载工具: "Loading tools",
@@ -817,8 +828,6 @@ export const en = {
   "已选择 {value} 个工具": "{value} tools selected",
   Python: "Python",
   内置: "Built-in",
-  "在工作流沙箱中运行 Python 代码。":
-    "Run Python code in the Workflow sandbox.",
   "返回当前时间。": "Return the current time.",
   创建文件: "Create file",
   "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。":
@@ -849,71 +858,17 @@ export const en = {
   工具详情: "Tool details",
   "输入 Schema": "Input schema",
   "输出 Schema": "Output schema",
-  输入参数: "Input parameters",
-  输出结果: "Output result",
-  这个工具怎么被调用: "How this tool is called",
-  "在 Agent 中": "In an Agent",
-  在工作流中: "In a Workflow",
-  "Agent 会根据工具描述和输入参数自动生成调用。":
-    "The Agent generates the call from the tool description and input parameters.",
-  "把上游节点的输出连接到下面的输入参数。":
-    "Connect an upstream node's output to the input parameters below.",
-  "Agent 会根据这些参数生成调用；工作流可以把上游结果连接到这里。":
-    "Agents use these parameters to build calls; Workflows can connect upstream results here.",
-  "Python 代码通过 result 返回这些结果给 Agent 或工作流。":
-    "Python returns these values to the Agent or Workflow through result.",
-  "高级 Schema": "Advanced schema",
-  参数名称: "Parameter name",
-  参数类型: "Parameter type",
-  参数说明: "Parameter description",
-  "告诉 Agent 这个参数是什么": "Tell the Agent what this parameter is",
   文本: "Text",
   整数: "Integer",
-  布尔值: "Boolean",
-  数组: "Array",
   "JSON 对象": "JSON object",
-  删除参数: "Delete parameter",
-  添加参数: "Add parameter",
-  "还没有参数；添加一个参数后，Agent 和工作流就知道要传什么。":
-    "No parameters yet. Add one so Agents and Workflows know what to pass.",
-  "当前 Schema 不是简单参数表，请打开高级 Schema 编辑。":
-    "This schema is not a simple parameter table. Open advanced schema editing.",
-  代码约定: "Code contract",
-  "Python 代码示例":
-    '# Read input\nvalue = inputs.get("your_field")\n\n# Return the result\nresult = {"value": value}',
   "只显示已发布的脱敏详情；草稿和代码仅所有者或管理员可见。":
     "Only the sanitized published details are shown. Drafts and code are visible only to owners or admins.",
-  "创建 Python 工具": "Create Python tool",
-  "Python 工具详情": "Python tool details",
-  "编辑草稿、运行测试并发布固定版本。":
-    "Edit the draft, run tests, and publish a pinned version.",
-  "你拥有查看权限；草稿与代码不会显示。":
-    "You have view permission. Drafts and code are hidden.",
-  "从 inputs 读取参数，并将 JSON 结果赋给 result 变量。":
-    "Read parameters from inputs and assign the JSON result to result.",
-  测试参数: "Test arguments",
-  运行测试: "Run test",
-  测试运行中: "Test running",
-  "测试参数必须是 JSON 对象": "Test arguments must be a JSON object",
-  工具测试通过: "Tool test passed",
-  工具测试失败: "Tool test failed",
   保存草稿: "Save draft",
   创建: "Create",
   基础节点: "Basic nodes",
   "暂无可用 Agent": "No Agents available",
-  "Python 工具已创建": "Python tool created",
-  工具草稿已保存: "Tool draft saved",
-  "工具草稿不存在，请重新加载后重试":
-    "Tool draft is unavailable. Reload and try again.",
-  工具已发布: "Tool published",
-  工具已启用: "Tool enabled",
-  工具已禁用: "Tool disabled",
-  工具已归档: "Tool archived",
-  "版本 {value}": "Version {value}",
   "禁用工具“{name}”？已绑定的 Agent 和 Workflow 将无法调用它。":
     "Disable tool “{name}”? Agents and Workflows using it will no longer be able to call it.",
-  "归档工具“{name}”？此操作会使所有已绑定版本不可用。":
-    "Archive tool “{name}”? All pinned versions will become unavailable.",
   工具授权: "Tool permissions",
   工具授权已更新: "Tool permissions updated",
   "查看权限只能查看脱敏详情；使用权限还可将工具绑定到自己的 Agent 或 Workflow。":
@@ -1657,7 +1612,6 @@ export const en = {
   模板转换: "Template",
   变量赋值: "Set variable",
   "MCP 工具节点": "MCP tool",
-  "Python 代码": "Python code",
   DOCX: "DOCX",
   PDF: "PDF",
   PPTX: "PPTX",
@@ -1666,10 +1620,14 @@ export const en = {
   "生成 PDF": "Generate PDF",
   "生成 PPT": "Generate PowerPoint",
   "生成 Excel": "Generate Excel",
-  "加载 Word 文档处理指引，在沙箱中读取、创建或修改 DOCX。": "Load Word instructions to read, create or edit DOCX files in the sandbox.",
-  "加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。": "Load PDF instructions to read, convert or edit PDFs in the sandbox.",
-  "加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。": "Load PowerPoint instructions to freely design or edit decks in the sandbox.",
-  "加载表格处理指引，在沙箱中分析 CSV 或修改 Excel。": "Load spreadsheet instructions to analyze CSV or edit Excel files in the sandbox.",
+  "加载 Word 文档处理指引，在沙箱中读取、创建或修改 DOCX。":
+    "Load Word instructions to read, create or edit DOCX files in the sandbox.",
+  "加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。":
+    "Load PDF instructions to read, convert or edit PDFs in the sandbox.",
+  "加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。":
+    "Load PowerPoint instructions to freely design or edit decks in the sandbox.",
+  "加载表格处理指引，在沙箱中分析 CSV 或修改 Excel。":
+    "Load spreadsheet instructions to analyze CSV or edit Excel files in the sandbox.",
   运行成功: "Succeeded",
   运行失败: "Failed",
   "重排内容必须包含非空文本。": "Rerank content must contain non-empty text.",
@@ -2152,7 +2110,6 @@ export const en = {
   最近使用: "Last used",
   "月度 Token 上限": "Monthly Token limit",
   未知设备: "Unknown device",
-  查看服务状态与后台失败记录: "View service health and background failures",
   查看登录设备并及时撤销异常会话:
     "Review login devices and revoke suspicious sessions",
   正常: "Healthy",

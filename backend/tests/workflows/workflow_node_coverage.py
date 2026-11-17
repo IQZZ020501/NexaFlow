@@ -1279,7 +1279,6 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
 
     from app.application.workflows.nodes.executor import execute_workflow_node
     from app.domain.agents.runtime import AgentExecutionPaused
-    from app.infra.sandbox.client import WorkflowSandboxResult
 
     async def run() -> None:
         fake_tool = SimpleNamespace(
@@ -1375,27 +1374,6 @@ def _legacy_test_nodes_mcp_and_code_and_unsupported() -> None:
             else:
                 raise AssertionError("paused mcp call was accepted")
 
-        # code node
-        code_node = _node(
-            "code",
-            {
-                "code": "result = {'sum': inputs['a'] + inputs['b']}",
-                "inputs": {"a": 1, "b": 2},
-            },
-            node_id="code-1",
-        )
-        with patch(
-            "app.application.workflows.nodes.executor.execute_workflow_code",
-            new=AsyncMock(
-                return_value=WorkflowSandboxResult(
-                    result={"sum": 3}, stdout="ok", stderr="", exit_code=0
-                )
-            ),
-        ):
-            coded = await execute_workflow_node(_node_scope(), code_node, _context())
-        assert coded.outputs == {"result": {"sum": 3}, "stdout": "ok", "stderr": ""}
-        assert coded.inputs == {"a": 1, "b": 2}
-
         # unsupported node type (constructed outside schema validation)
         from app.schemas.workflows.contracts import WorkflowNode as NodeSchema
         from app.schemas.workflows.contracts import WorkflowNodeData
@@ -1457,29 +1435,6 @@ def test_nodes_tool_and_unsupported() -> None:
             assert "denied" in str(exc)
         else:
             raise AssertionError("Workflow Tool error was swallowed.")
-
-        inline = _node(
-            "tool",
-            {
-                "tool": {"tool_id": "tool-1", "version_id": "version-1"},
-                "arguments": {
-                    "code": "result = inputs",
-                    "inputs": {"a": 1},
-                },
-            },
-            node_id="python-1",
-        )
-        inline_runtime = _FakeWorkflowToolRuntime(
-            AgentToolResult(
-                content='{"result":{"a":1}}',
-                summary="done",
-                output={"result": {"a": 1}},
-            )
-        )
-        coded = await execute_workflow_node(
-            _node_scope(tool_runtime=inline_runtime), inline, _context()
-        )
-        assert coded.outputs == {"result": {"a": 1}}
 
         from app.schemas.workflows.contracts import WorkflowNode as NodeSchema
         from app.schemas.workflows.contracts import WorkflowNodeData

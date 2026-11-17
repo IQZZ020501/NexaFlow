@@ -11,7 +11,6 @@ from app.domain.tools.runtime import (
 )
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.schemas.workflows.contracts import (
-    CodeNodeConfig,
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
@@ -57,7 +56,6 @@ def legacy_mcp_references(graph: WorkflowGraph) -> list[tuple[str, str]]:
 def canonicalize_workflow_graph(
     graph: WorkflowGraph,
     legacy_tools: Mapping[tuple[str, str], ToolRef],
-    inline_python: ToolRef | None,
 ) -> WorkflowGraph:
     payload = graph.model_dump(by_alias=True, mode="json")
     for node in payload["nodes"]:
@@ -72,15 +70,6 @@ def canonicalize_workflow_graph(
             node["data"]["config"] = {
                 "tool": _ref_payload(reference),
                 "arguments": parsed.arguments,
-            }
-        elif node_type == "code":
-            parsed = CodeNodeConfig.model_validate(config)
-            if inline_python is None:
-                raise ValueError("Inline Python Tool could not be resolved.")
-            node["data"]["type"] = "tool"
-            node["data"]["config"] = {
-                "tool": _ref_payload(inline_python),
-                "arguments": {"code": parsed.code, "inputs": parsed.inputs},
             }
         elif node_type == "llm":
             parsed = LlmNodeConfig.model_validate(config)
@@ -111,7 +100,6 @@ def canonicalize_workflow_snapshot_graph(
     snapshots: list[ToolSnapshot],
 ) -> WorkflowGraph:
     legacy_tools: dict[tuple[str, str], ToolRef] = {}
-    inline_python: ToolRef | None = None
     for snapshot in snapshots:
         if snapshot.kind == "mcp":
             server_id = snapshot.execution_spec.get("server_id")
@@ -121,9 +109,7 @@ def canonicalize_workflow_snapshot_graph(
                     snapshot.tool_id,
                     snapshot.version_id,
                 )
-        elif snapshot.execution_spec.get("builtin") == "inline_python":
-            inline_python = ToolRef(snapshot.tool_id, snapshot.version_id)
-    return canonicalize_workflow_graph(graph, legacy_tools, inline_python)
+    return canonicalize_workflow_graph(graph, legacy_tools)
 
 
 def workflow_resource_references(

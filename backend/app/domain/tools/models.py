@@ -160,44 +160,6 @@ class Tool(Base):
     )
 
 
-class ToolDraft(Base):
-    __tablename__ = "tool_drafts"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["workspace_id", "tool_id"],
-            ["tools.workspace_id", "tools.id"],
-            name="fk_tool_drafts_tool_workspace",
-            ondelete="CASCADE",
-        ),
-        UniqueConstraint(
-            "workspace_id", "id", name="uq_tool_drafts_workspace_id"
-        ),
-        UniqueConstraint(
-            "workspace_id", "tool_id", name="uq_tool_drafts_tool"
-        ),
-        CheckConstraint("revision >= 1", name="ck_tool_drafts_revision"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    tool_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    input_schema: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    output_schema: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    execution_spec: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    updated_by_user_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, onupdate=utc_now
-    )
-
-
 class ToolVersion(Base):
     __tablename__ = "tool_versions"
     __table_args__ = (

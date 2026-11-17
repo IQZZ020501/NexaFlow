@@ -132,9 +132,7 @@ class Settings:
     # sends it in every request, so production requires TLS unless the
     # operator explicitly opts out for a loopback-only control plane.
     opensandbox_allow_insecure_http: bool = False
-    workflow_sandbox_timeout_seconds: float = 5.0
-    # Rendering and Skill execution get their own budget; the workflow code
-    # budget is not a safe upper bound for a document renderer.
+    # Rendering and Skill execution share a bounded execution budget.
     artifact_sandbox_timeout_seconds: float = 30.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
@@ -247,9 +245,6 @@ class Settings:
                 "OPENSANDBOX_ALLOW_INSECURE_HTTP", ""
             ).strip().lower()
             in {"1", "true", "yes", "on"},
-            workflow_sandbox_timeout_seconds=float(
-                os.getenv("WORKFLOW_SANDBOX_TIMEOUT_SECONDS", "5")
-            ),
             artifact_sandbox_timeout_seconds=float(
                 os.getenv("ARTIFACT_SANDBOX_TIMEOUT_SECONDS", "30")
             ),
@@ -434,10 +429,6 @@ class Settings:
                     "is sent on every request. Set OPENSANDBOX_ALLOW_INSECURE_HTTP=1 only "
                     "for a loopback control plane."
                 )
-        if not 0.1 <= self.workflow_sandbox_timeout_seconds <= 30:
-            raise RuntimeError(
-                "WORKFLOW_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 30."
-            )
         if not 0.1 <= self.artifact_sandbox_timeout_seconds <= 300:
             raise RuntimeError(
                 "ARTIFACT_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 300."

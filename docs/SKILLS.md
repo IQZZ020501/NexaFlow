@@ -131,14 +131,14 @@ MCP 走已授权 Tool，不向脚本注入业务凭据。
 交付，沿用 5 MiB 上限、租户隔离、连续会话恢复与不可变版本。
 
 这些加载器仅供 Agent 使用，`workflow_callable=false`；Workflow 的文件
-生成应使用其已有 Python Code 节点。DOCX/PDF/XLSX 旧 renderer 仍仅用于
+生成可通过已授权 MCP 工具或 Agent 节点完成，独立 Python Tool 与 Python Code 节点已删除。DOCX/PDF/XLSX 旧 renderer 仍仅用于
 已有冻结契约，不作为新 Skill 的创作接口。PPT 旧实现已按要求完全删除。
 生成页图并不等于完成视觉检查，指引要求明确报告实际检查能力与局限。
 
 升级须同时发布业务代码与执行镜像，再应用 `202611170003`：刷新已有工作
 空间的四个文件 Tool、补齐 Skill Creator，将可编辑应用绑定移到新契约，
 保留审批/访问策略及发布、执行历史。新契约只接受 `{}`；历史发布版本需
-重新发布，使用旧输入的 Workflow 需改用 Python 节点。此处提供迁移但不
+重新发布，使用旧输入的 Workflow 需改用已授权 MCP 工具或 Agent 节点。此处提供迁移但不
 自动操作正在运行的数据库或服务。回退须配套恢复业务代码、执行镜像与
 数据库备份；迁移降级不会重建已删除的 PPT 实现。
 
