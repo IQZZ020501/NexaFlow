@@ -22,7 +22,7 @@ from app.domain.tools.catalog.service import (
     tombstone_workspace_mcp_catalog,
 )
 from app.domain.tools.mcp.oauth import queue_disconnect
-from app.domain.workflows.uploads import (
+from app.domain.uploads.service import (
     queue_upload_cleanups,
     run_upload_storage_cleanup,
 )
@@ -537,3 +537,20 @@ async def enqueue_upload_storage_cleanups(
                 exc,
                 cleanup_id=cleanup_id,
             )
+
+
+__all__ = [
+    "WorkspaceContext",
+    "add_workspace_member",
+    "build_workspace_context",
+    "create_workspace",
+    "create_workspace_user",
+    "delete_workspace_permanently",
+    "get_workspace_for_user",
+    "list_workspace_members",
+    "list_workspaces",
+    "remove_workspace_member",
+    "update_workspace",
+    "update_workspace_member_role",
+    "workspace_to_response",
+]

@@ -52,6 +52,17 @@ not trigger unrelated cleanup.
   When adding a new business domain, add a self-contained module directory
   under `app/domain/<feature>/` (entities plus services), expose use cases
   through `app/application/`, and keep HTTP routers thin in `app/api/v1/`.
+- The overall style is a layered modular monolith; see
+  `docs/MODULAR_MONOLITH.md`. HTTP and cross-feature application callers use
+  the interfaces declared in `backend/scripts/module_boundaries.py` and only
+  names in their static `__all__`. Register new application modules and declare
+  allowed dependencies there. Keep application-feature and domain-feature
+  dependency graphs individually acyclic. `agents/integration.py` is the
+  Workflow-facing Agent interface. Shared publication context and temporary
+  uploads belong to `application/publications/` and `application/uploads/`;
+  durable upload cleanup belongs to `domain/uploads/`. Shared definition value
+  operations live in `domain/applications/definitions.py`. Worker composition
+  belongs to `app/bootstrap/`; use cases dispatch Runs through `ports/runs.py`.
 - Apply this dependency direction to new or changed backend code:
   - `api/v1/` routers keep HTTP concerns thin and use `application/`,
     `schemas/`, and `api/deps.py`. Existing direct imports from `entities/` or
@@ -605,8 +616,10 @@ examples.
     in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), trace TestClient
     threads and SQLAlchemy greenlets, and merge with coverage.py; the gate is
     97%. The `agents.evaluation` gate runs through `backend/scripts/agent_eval.py`
-    and the layer guard through `backend/scripts/dependency_matrix.py`
-    (exercised by `tests.infra.architecture`).
+    and the layer/module guard through
+    `uv run python scripts/dependency_matrix.py --check` (also exercised by
+    `tests.infra.architecture`, including analyzer regression fixtures, public
+    interface resolution and application/domain cycle checks).
   - Execution image: `uv run --project sandbox python -m sandbox.tests` and
     `sandbox/run_coverage.sh` measure the job protocol (excluding test code).
     Renderer quality, child-process resource limits, cgroups and VM/network

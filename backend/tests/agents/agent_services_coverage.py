@@ -1922,7 +1922,7 @@ def exercise_tasks() -> None:
             pass
 
         # enqueue_agent_run: eager settings execute the run inline
-        from app.application.runs import dispatch as run_dispatch
+        from app.bootstrap import runs as run_dispatch
 
         eager_settings = test_settings()
         eager_calls: list[tuple] = []

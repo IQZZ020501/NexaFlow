@@ -51,3 +51,9 @@ async def close_cancelled_execution_sessions(db: AsyncSession) -> None:
                 # Beat retries the cleanup intent committed with cancellation.
                 import logging
                 logging.getLogger(__name__).warning("Run sandbox cleanup will be retried", exc_info=True)
+
+
+__all__ = [
+    "cancel_run_tree",
+    "close_cancelled_execution_sessions",
+]

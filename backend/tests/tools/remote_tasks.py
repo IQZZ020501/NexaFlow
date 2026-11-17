@@ -12,7 +12,6 @@ from tests.support import activate_admin, auth_headers, create_active_user, test
 
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.tools.remote_task_cleanup import recover_remote_task_cancellations
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
@@ -28,6 +27,7 @@ from app.infra.db.repositories.tools import remote_tasks as tasks
 from app.infra.db.repositories.tools import repository
 from app.infra.db.session import get_session_factory
 from app.ports.mcp import McpConnection, call_mcp_tool
+from app.ports.tools import ToolInvocationContext
 
 
 async def queue(workspace_id, message, timeout=20):

@@ -4,11 +4,15 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.agents.access.service import (
+from app.application.publications.service import (
     ExternalAccessSource,
-    PublishedAgentContext,
+    PublishedApplicationContext,
     get_published_workflow_context,
     get_workspace_published_workflow_context,
+)
+from app.application.uploads.service import (
+    published_interaction_config,
+    resolve_public_workflow_files,
 )
 from app.application.workflows.runs.service import (
     create_workflow_run,
@@ -19,10 +23,6 @@ from app.application.workflows.runs.service import (
     update_run_feedback,
     workflow_pending_form,
     workflow_run_response,
-)
-from app.application.workflows.uploads.service import (
-    published_interaction_config,
-    resolve_public_workflow_files,
 )
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime import safe_event_value
@@ -206,7 +206,7 @@ async def get_public_workflow_profile(
 
 async def get_workflow_api_documentation(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
 ) -> WorkflowApiDocumentationResponse:
     return WorkflowApiDocumentationResponse(
         workflow_id=context.agent.id,
@@ -242,7 +242,7 @@ async def _external_run(
 
 async def create_external_workflow_run(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     source: ExternalAccessSource,
     consumer_id: str,
     payload: ExternalWorkflowRunCreateRequest,

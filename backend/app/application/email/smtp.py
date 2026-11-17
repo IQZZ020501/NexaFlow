@@ -242,3 +242,10 @@ async def test_smtp_settings(
     )
     await db.commit()
     return {"success": True}
+
+
+__all__ = [
+    "get_smtp_settings",
+    "test_smtp_settings",
+    "update_smtp_settings",
+]

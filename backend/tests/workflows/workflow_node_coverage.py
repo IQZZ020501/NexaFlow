@@ -1853,8 +1853,8 @@ def _upload_file(filename: str, content: bytes = b"hello") -> object:
 def test_workflow_uploads_upload_branches() -> None:
     from fastapi import HTTPException
 
-    import app.application.workflows.uploads.service as uploads_module
-    from app.application.workflows.uploads.service import _upload_files
+    import app.application.uploads.service as uploads_module
+    from app.application.uploads.service import _upload_files
     from app.entities.workflows import WorkflowUpload
     from app.infra.storage.object_storage import EmptyObjectError
     from app.schemas.agents.contracts import AgentInteractionConfig
@@ -1870,7 +1870,7 @@ def test_workflow_uploads_upload_branches() -> None:
 
     def storage_patch(fake: _FakeUploadStorage):
         return patch(
-            "app.application.workflows.uploads.service.create_object_storage",
+            "app.application.uploads.service.create_object_storage",
             return_value=fake,
         )
 
@@ -1891,7 +1891,7 @@ def test_workflow_uploads_upload_branches() -> None:
             {"file_upload": False}
         )
         with patch(
-            "app.application.workflows.uploads.service.create_object_storage"
+            "app.application.uploads.service.create_object_storage"
         ):
             try:
                 await upload(config=disabled)
@@ -1911,7 +1911,7 @@ def test_workflow_uploads_upload_branches() -> None:
 
         # workspace lock missing
         with storage_patch(_FakeUploadStorage()), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=None),
         ):
             try:
@@ -1924,10 +1924,10 @@ def test_workflow_uploads_upload_branches() -> None:
 
         # user lock missing
         with storage_patch(_FakeUploadStorage()), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=None),
         ):
             try:
@@ -1940,13 +1940,13 @@ def test_workflow_uploads_upload_branches() -> None:
 
         # application lock missing
         with storage_patch(_FakeUploadStorage()), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=False),
         ):
@@ -1960,13 +1960,13 @@ def test_workflow_uploads_upload_branches() -> None:
 
         # unsupported upload type
         with storage_patch(_FakeUploadStorage()), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=True),
         ):
@@ -1986,17 +1986,17 @@ def test_workflow_uploads_upload_branches() -> None:
             10,
             create=True,
         ), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=True),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository.create_upload",
+            "app.application.uploads.service.workflow_repository.create_upload",
             new=AsyncMock(side_effect=lambda db_session, item: item),
         ):
             try:
@@ -2015,17 +2015,17 @@ def test_workflow_uploads_upload_branches() -> None:
             8,
             create=True,
         ), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=True),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository.create_upload",
+            "app.application.uploads.service.workflow_repository.create_upload",
             new=AsyncMock(side_effect=lambda db_session, item: item),
         ):
             try:
@@ -2044,13 +2044,13 @@ def test_workflow_uploads_upload_branches() -> None:
         # empty object -> rollback + delete
         fake = _FakeUploadStorage(EmptyObjectError("empty"))
         with storage_patch(fake), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=True),
         ):
@@ -2067,13 +2067,13 @@ def test_workflow_uploads_upload_branches() -> None:
         # unexpected error -> rollback + delete + re-raise
         fake = _FakeUploadStorage(ValueError("disk full"))
         with storage_patch(fake), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=True),
         ):
@@ -2091,17 +2091,17 @@ def test_workflow_uploads_upload_branches() -> None:
             side_effect=lambda db_session, item: item
         )
         with storage_patch(fake), patch(
-            "app.application.workflows.uploads.service.workspace_repository.lock_workspace",
+            "app.application.uploads.service.workspace_repository.lock_workspace",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.user_repository.lock_user",
+            "app.application.uploads.service.user_repository.lock_user",
             new=AsyncMock(return_value=object()),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository."
+            "app.application.uploads.service.workflow_repository."
             "lock_upload_application",
             new=AsyncMock(return_value=True),
         ), patch(
-            "app.application.workflows.uploads.service.workflow_repository.create_upload",
+            "app.application.uploads.service.workflow_repository.create_upload",
             new=create_upload,
         ):
             stored = await upload(
@@ -2127,7 +2127,7 @@ def test_workflow_uploads_resolve_branches() -> None:
     _UPLOAD_SETTINGS = SimpleNamespace(knowledge_storage_dir="/tmp/x")
     from fastapi import HTTPException
 
-    from app.application.workflows.uploads.service import (
+    from app.application.uploads.service import (
         _resolve_agent_file_text,
         _resolve_workflow_files,
     )
@@ -2210,7 +2210,7 @@ def test_workflow_uploads_resolve_branches() -> None:
 
         # upload not found
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=[]),
         ):
             try:
@@ -2226,10 +2226,10 @@ def test_workflow_uploads_resolve_branches() -> None:
         # happy path without extraction
         consume = AsyncMock()
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.queue_upload_cleanups",
+            "app.application.uploads.service.queue_upload_cleanups",
             new=consume,
         ):
             result = await _resolve_workflow_files(
@@ -2250,16 +2250,16 @@ def test_workflow_uploads_resolve_branches() -> None:
         # extraction happy path (three files to exhaust the bounded context)
         three = [make_upload(f"u{index}") for index in range(3)]
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads(three)),
         ), patch(
-            "app.application.workflows.uploads.service.extract_document",
+            "app.application.uploads.service.extract_document",
             new=lambda filename, content_type, path, **kwargs: ("x" * 60000, []),
         ), patch(
-            "app.application.workflows.uploads.service.create_object_storage",
+            "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
         ), patch(
-            "app.application.workflows.uploads.service.queue_upload_cleanups",
+            "app.application.uploads.service.queue_upload_cleanups",
             new=AsyncMock(),
         ):
             result = await _resolve_workflow_files(
@@ -2273,13 +2273,13 @@ def test_workflow_uploads_resolve_branches() -> None:
 
         # extraction failure
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.extract_document",
+            "app.application.uploads.service.extract_document",
             new=Mock(side_effect=KnowledgePipelineError("cannot parse")),
         ), patch(
-            "app.application.workflows.uploads.service.create_object_storage",
+            "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
         ):
             try:
@@ -2308,7 +2308,7 @@ def test_workflow_uploads_resolve_branches() -> None:
         else:
             raise AssertionError("duplicate agent files were accepted")
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=[]),
         ):
             try:
@@ -2320,16 +2320,16 @@ def test_workflow_uploads_resolve_branches() -> None:
             else:
                 raise AssertionError("missing agent upload was accepted")
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.extract_document",
+            "app.application.uploads.service.extract_document",
             new=lambda filename, content_type, path, **kwargs: ("agent text", []),
         ), patch(
-            "app.application.workflows.uploads.service.create_object_storage",
+            "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
         ), patch(
-            "app.application.workflows.uploads.service.queue_upload_cleanups",
+            "app.application.uploads.service.queue_upload_cleanups",
             new=AsyncMock(),
         ):
             text, attachments = await _resolve_agent_file_text(
@@ -2345,13 +2345,13 @@ def test_workflow_uploads_resolve_branches() -> None:
             }
         ]
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
-            "app.application.workflows.uploads.service.extract_document",
+            "app.application.uploads.service.extract_document",
             new=Mock(side_effect=KnowledgePipelineError("cannot parse")),
         ), patch(
-            "app.application.workflows.uploads.service.create_object_storage",
+            "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
         ):
             try:
@@ -2366,7 +2366,7 @@ def test_workflow_uploads_resolve_branches() -> None:
 
         # agent upload policy validation: image category not allowed for agents
         with patch(
-            "app.application.workflows.uploads.service.workflow_repository.list_uploads",
+            "app.application.uploads.service.workflow_repository.list_uploads",
             new=AsyncMock(return_value=uploads([make_upload("img", category="image")])),
         ):
             try:
@@ -2383,7 +2383,7 @@ def test_workflow_uploads_resolve_branches() -> None:
 
 
 def test_workflow_uploads_workspace_wrappers() -> None:
-    from app.application.workflows.uploads.service import (
+    from app.application.uploads.service import (
         resolve_workspace_agent_files,
         resolve_workspace_workflow_files,
         upload_workspace_agent_files,
@@ -2414,13 +2414,13 @@ def test_workflow_uploads_workspace_wrappers() -> None:
 
     async def run() -> None:
         with patch(
-            "app.application.workflows.uploads.service.get_workflow_agent",
+            "app.application.uploads.service.get_workflow_agent",
             new=AsyncMock(return_value=agent),
         ), patch(
-            "app.application.workflows.uploads.service.require_agent_view",
+            "app.application.uploads.service.require_agent_view",
             new=AsyncMock(),
         ), patch(
-            "app.application.workflows.uploads.service._upload_files",
+            "app.application.uploads.service._upload_files",
             new=AsyncMock(return_value=[upload_item]),
         ):
             responses = await upload_workspace_workflow_files(
@@ -2431,13 +2431,13 @@ def test_workflow_uploads_workspace_wrappers() -> None:
         assert responses[0].filename == "notes.txt"
 
         with patch(
-            "app.application.workflows.uploads.service.get_agent",
+            "app.application.uploads.service.get_agent",
             new=AsyncMock(return_value=agent),
         ), patch(
-            "app.application.workflows.uploads.service.require_agent_view",
+            "app.application.uploads.service.require_agent_view",
             new=AsyncMock(),
         ), patch(
-            "app.application.workflows.uploads.service._upload_files",
+            "app.application.uploads.service._upload_files",
             new=AsyncMock(return_value=[upload_item]),
         ):
             responses = await upload_workspace_agent_files(
@@ -2448,13 +2448,13 @@ def test_workflow_uploads_workspace_wrappers() -> None:
         assert responses[0].filename == "notes.txt"
 
         with patch(
-            "app.application.workflows.uploads.service.get_workflow_agent",
+            "app.application.uploads.service.get_workflow_agent",
             new=AsyncMock(return_value=agent),
         ), patch(
-            "app.application.workflows.uploads.service.require_agent_view",
+            "app.application.uploads.service.require_agent_view",
             new=AsyncMock(),
         ), patch(
-            "app.application.workflows.uploads.service._resolve_workflow_files",
+            "app.application.uploads.service._resolve_workflow_files",
             new=AsyncMock(return_value=[{"id": "u1", "name": "notes.txt"}]),
         ):
             resolved = await resolve_workspace_workflow_files(
@@ -2466,13 +2466,13 @@ def test_workflow_uploads_workspace_wrappers() -> None:
         assert resolved == [{"id": "u1", "name": "notes.txt"}]
 
         with patch(
-            "app.application.workflows.uploads.service.get_agent",
+            "app.application.uploads.service.get_agent",
             new=AsyncMock(return_value=agent),
         ), patch(
-            "app.application.workflows.uploads.service.require_agent_view",
+            "app.application.uploads.service.require_agent_view",
             new=AsyncMock(),
         ), patch(
-            "app.application.workflows.uploads.service._resolve_agent_file_text",
+            "app.application.uploads.service._resolve_agent_file_text",
             new=AsyncMock(
                 return_value=(
                     "--- notes.txt ---\nhello",
@@ -3722,11 +3722,11 @@ def test_public_and_api_workflow_access_end_to_end() -> None:
         assert failed_detail.json()["error"] == "Workflow run failed."
 
         # expired upload cleanup flow
-        from app.domain.workflows.models import WorkflowUpload
-        from app.domain.workflows.uploads import (
+        from app.domain.uploads.service import (
             prepare_due_upload_cleanups,
             run_upload_storage_cleanup,
         )
+        from app.domain.workflows.models import WorkflowUpload
         from app.entities.defaults import utc_now
         from app.infra.db.session import get_session_factory
         from app.infra.storage.object_storage import create_object_storage

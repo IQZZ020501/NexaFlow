@@ -43,6 +43,8 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 
 ## 技术架构
 
+项目采用[分层模块化单体](docs/MODULAR_MONOLITH.md)：业务模块通过明确的公开用例接口协作，共用数据库与事务；API、后台任务和 Agent 执行进程使用同一套后端代码与版本。
+
 ```mermaid
 flowchart LR
     Browser[Browser] --> Web[Next.js frontend]

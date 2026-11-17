@@ -15,16 +15,17 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
        → runs/executor.py（租约执行、checkpoint、工具账本与终态/恢复）
        → runs/memory.py + children.py + snapshots.py（记忆压缩、子运行续延与执行快照）
        → tools/builder.py + runtime.py（ToolSnapshot → StructuredTool / durable Tool 运行时桥）
-       → access/service.py（发布上下文、凭据、限流与外部投影）
+       → access/service.py（凭据、限流与外部投影）
+       → application/publications/service.py（共享发布访问校验）
        → domain/agents/service.py + models.py（CRUD/绑定/发布编排与 ORM）
        → domain/agents/access/{permissions,publications}.py（权限规则、发布快照）
        → domain/agents/runtime/（LangGraph 状态图执行内核）
        → ports/*（llm/vector_store/mcp/execution 契约）+ adapters/*（供应商实现）
-       → application/tools/runtime/contracts.py（provider-neutral Tool 契约）
+       → ports/tools.py（provider-neutral Tool 契约）
 共享：application/tools/runtime/service.py + application/tools/runtime/adapters/（统一 Tool 运行时）
       infra/agents/live_stream.py（实时增量 Redis Stream）
       infra/tools/dispatch.py + mcp_stdio.py（Tool 派发与 MCP stdio 契约）
-      application/runs/dispatch.py（Agent legacy/unified 与 Workflow durable 派发）
+      bootstrap/runs.py（Agent legacy/unified 与 Workflow durable 派发）
       tasks/agents/jobs.py（Celery 任务入口）
       infra/db/repositories/agents/repository.py（持久化仓储）
 ```
@@ -75,12 +76,12 @@ api/v1/agents/routes.py + access.py（工作区 CRUD/监控 + 公开/API 访问�
 ### 共享运行时、任务入口与持久化（Agent/Workflow/测试共用）
 
 - `backend/app/application/tools/runtime/service.py` — durable、provider-neutral 的 Tool 执行：`queue_tool_invocation`/`execute_tool_invocation`、幂等冲突检测、审批等待、busy/conflict 语义、执行前 preflight 与过期调用恢复。
-- `backend/app/application/tools/runtime/contracts.py` — provider-neutral Tool 契约：`ToolAdapter` 协议、`ToolInvocationContext`（含 resource_snapshot/approval_required/deadline_at）、`ToolRuntimeResult` 与 `ToolAdapterBusy`。
-- `backend/app/application/tools/runtime/adapters/` — `ToolAdapter` 实现与工厂：`BuiltinToolAdapter`/`PythonToolAdapter`/`McpToolAdapter`（`builtin.py`/`python_tool.py`/`mcp.py`，含 sandbox/artifact 执行路径），`build_tool_adapter` 在 `adapters/__init__.py`；`image_generation.py` 提供 `generate_image_artifact`，`shell.py` 执行 bash、实时核验 Skill 授权、恢复已批准的依赖并流式登记生成物（均由 builtin 适配器内部分派）。
-- `backend/app/application/tools/management/service.py` — Tool 目录、Python 工具生命周期/测试与 `view/use` 授权用例。
+- `backend/app/ports/tools.py` — provider-neutral Tool 契约：`ToolAdapter` 协议、`ToolInvocationContext`（含 resource_snapshot/approval_required/deadline_at）、`ToolRuntimeResult` 与 `ToolAdapterBusy`。
+- `backend/app/application/tools/runtime/adapters/` — `ToolAdapter` 实现与工厂：`BuiltinToolAdapter`/`McpToolAdapter`（`builtin.py`/`mcp.py`，含 sandbox/artifact 执行路径），`build_tool_adapter` 在 `adapters/__init__.py`；`image_generation.py` 提供 `generate_image_artifact`，`shell.py` 执行 bash、实时核验 Skill 授权、恢复已批准的依赖并流式登记生成物（均由 builtin 适配器内部分派）。
+- `backend/app/application/tools/management/service.py` — Tool 目录、MCP Source 管理与 `view/use` 授权用例。
 - `backend/app/application/runs/lifecycle.py` — `cancel_run_tree`：取消 Run 树并结算被取消的 Tool invocation（Agent/Workflow 共用）。
 - `backend/app/application/runs/feedback.py` — `update_run_feedback`：终态 Run 的反馈写入与清除。
-- `backend/app/application/runs/dispatch.py` — `run_durable_application_run`：按 Run 类型（agent legacy/unified、workflow）分派到对应 durable executor 并协调 Workflow Agent 子运行恢复；同文件提供 `enqueue_agent_run`（按 generation 投递 `agents-legacy`/`agents-v2`）。
+- `backend/app/bootstrap/runs.py` — Worker 组合入口 `run_durable_application_run`：按 Run 类型（agent legacy/unified、workflow）分派到对应 durable executor 并协调 Workflow Agent 子运行恢复；同文件实现 `enqueue_agent_run`，用例统一通过 `app/ports/runs.py` 委托入队（按 generation 投递 `agents-legacy`/`agents-v2`）。
 - `backend/app/infra/agents/live_stream.py` — 按 Run 隔离的 Redis Stream 实时增量（`AgentLiveStreamPublisher`/`AgentLiveStreamReader`，maxlen 4096、TTL 900s、key `nexaflow:agent-live:{run_id}`）。
 - `backend/app/infra/tools/dispatch.py` — `enqueue_tool_invocation`：经 Celery `app.tools.run` 投递 durable ToolInvocation。
 - `backend/app/infra/tools/mcp_stdio.py` — MCP stdio 配置契约与上限校验（command/args/cwd/env/egress_domains 属于执行镜像路径）。
@@ -128,7 +129,7 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - 历史成功 Run 以真实 `user`/`assistant` 角色恢复。上下文在保守 token 预算内直接复用；超预算时用当前注册模型压缩较旧轮次，摘要持久化在最后被覆盖的成功 Run 上，同时保留最近 6 轮。摘要调用失败时回退到截断历史，不阻断当前问题，原始 Run 记录始终保留。
 - `model_usage` 累加 Agent loop 与摘要调用的实际供应商用量，并单列 compaction、cache read/create 与未上报调用数。系统不会为未返回 usage 的供应商猜测计费 token；服务端 prompt cache 的写法仍由各供应商 SDK 决定，不伪造跨供应商通用的 `cache_control`。
 - Run 创建时冻结整次执行时长、模型轮次和工具调用次数三项生效执行预算；`max_knowledge_calls`/`max_knowledge_rounds`/`max_model_tokens` 继续写入快照以兼容历史 Run，但自适应检索与 Agent 执行已不再用它们作为硬门禁。总截止时间只在第一次成功 claim 时写入，worker 重试、租约接管和 checkpoint 恢复不会刷新；人工审批或输入等待时间会显式加回截止时间。每次工具调用仍有独立硬超时，达到最后一轮时不再向模型暴露工具。工具预算耗尽时，所有能力一致撤下工具 schema，允许模型用已有结果完成答案；超预算批次在执行前整批拒绝并返回失败工具结果，随后撤下工具让模型用已有信息收尾，而不是令整个 Run 失败。模型供应商的上下文窗口和单次输出限制仍然生效。
-- HTTP 只提交/观察 Run；Celery Agent worker（`backend/scripts/worker.py --role=agents`，线程池中的所有 Run 共享进程内同一个事件循环；任务入口 `app/tasks/agents/jobs.py`，经 `app/application/runs/dispatch.py` 派发到 `app/application/agents/runs/executor.py`）用数据库租约执行，节点 checkpoint、过程事件游标和工具账本均持久化。答案与推理 delta 不写 PostgreSQL，而是进入按 Run 隔离、限长并带 15 分钟 TTL 的 Redis Stream；API 把 Redis 增量与数据库事件合并为同一 NDJSON。客户端分别用 `after` 和 `live_after` 恢复持久与实时游标，终态数据库快照负责最终校正；Redis 不可用时自动降级为过程事件加完整终态答案。断开 NDJSON 不会取消 Run。
+- HTTP 只提交/观察 Run；Celery Agent worker（`backend/scripts/worker.py --role=agents`，线程池中的所有 Run 共享进程内同一个事件循环；任务入口 `app/tasks/agents/jobs.py`，经 `app/bootstrap/runs.py` 派发到 `app/application/agents/runs/executor.py`）用数据库租约执行，节点 checkpoint、过程事件游标和工具账本均持久化。答案与推理 delta 不写 PostgreSQL，而是进入按 Run 隔离、限长并带 15 分钟 TTL 的 Redis Stream；API 把 Redis 增量与数据库事件合并为同一 NDJSON。客户端分别用 `after` 和 `live_after` 恢复持久与实时游标，终态数据库快照负责最终校正；Redis 不可用时自动降级为过程事件加完整终态答案。断开 NDJSON 不会取消 Run。
 - Run 持久层按职责拆分：`agent_runs` 只保存身份、调用者、谱系、反馈和 trace；`agent_run_states` 保存状态、租约、总截止时间、checkpoint、结果与模型用量；`agent_run_snapshots` 保存创建时冻结的执行配置、预算字段（三项生效 + 三项兼容）、非敏感模型配置指纹和知识资源信息；`agent_run_events` 只追加事件。版本化 Run 若检测到模型端点、凭据版本或请求参数漂移，以及知识权限被撤销，会在执行前失败关闭。所有 Agent/Workflow/测试工具执行统一写入 `tool_invocations`，不再维护第二套工具调用账本。
 - 发布前真实质量门禁使用 `backend/scripts/agent_eval.py` 调用现有工作区 Run API，按答案、工具、来源数量、token、模型调用数和延迟断言；数据集与运行说明见 `docs/AGENT_EVALUATION.md`。报告不保存问题、答案、证据正文或令牌。
 - Agent 草稿保存稳定的 `ToolRef(tool_id, version_id)`；发布版本和 Run 再冻结完整 ToolSnapshot。Tool/Source 禁用、授权撤销、成员失效或策略漂移会在 dispatch 前 fail closed，不静默换到新版本。

@@ -20,7 +20,6 @@ from tests.support import (
     test_client,
 )
 
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
@@ -37,6 +36,7 @@ from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.ports.execution import execution_scope
+from app.ports.tools import ToolInvocationContext
 
 
 async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):

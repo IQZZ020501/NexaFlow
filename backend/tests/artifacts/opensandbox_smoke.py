@@ -15,7 +15,6 @@ from tests.support import settings
 from app.adapters.execution.opensandbox import OpenSandboxExecution
 from app.application.artifacts import service, workspace
 from app.application.tools.runtime.adapters import shell
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
 from app.infra.db.base import Base
@@ -23,6 +22,7 @@ from app.infra.db.repositories.agents import repository as runs
 from app.infra.execution import sessions
 from app.infra.execution.profile import execution_profile
 from app.ports.execution import ExecutionScope, execution_scope
+from app.ports.tools import ToolInvocationContext
 
 
 async def check(runtime):

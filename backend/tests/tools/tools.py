@@ -3443,11 +3443,6 @@ async def assert_tool_policy_revision_compare_and_swap(workspace_id: str) -> Non
 async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
     from datetime import timedelta
 
-    from app.application.tools.runtime.contracts import (
-        ToolAdapterBusy,
-        ToolInvocationContext,
-        ToolRuntimeResult,
-    )
     from app.application.tools.runtime.service import (
         execute_tool_invocation,
         list_recoverable_tool_test_invocation_ids,
@@ -3458,6 +3453,11 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
     from app.infra.config.settings import Settings
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import repository as tool_repository
+    from app.ports.tools import (
+        ToolAdapterBusy,
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
 
     async with get_session_factory()() as db:
         actor = await user_repository.get_active_user_by_username(db, "admin")
@@ -3913,10 +3913,6 @@ async def assert_tool_runtime_edge_branches(
     from datetime import timedelta
     from unittest.mock import patch
 
-    from app.application.tools.runtime.contracts import (
-        ToolInvocationContext,
-        ToolRuntimeResult,
-    )
     from app.application.tools.runtime.service import (
         ToolInvocationBusy,
         ToolInvocationConflict,
@@ -3936,6 +3932,10 @@ async def assert_tool_runtime_edge_branches(
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import mcp as mcp_repository
     from app.infra.db.repositories.tools import repository as tool_repository
+    from app.ports.tools import (
+        ToolInvocationContext,
+        ToolRuntimeResult,
+    )
 
     settings = Settings.from_env(require_bootstrap=False)
 
@@ -4870,7 +4870,6 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from datetime import datetime, timedelta
     from unittest.mock import AsyncMock, patch
 
-    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.application.tools.runtime.service import ToolInvocationBusy
     from app.application.workflows.tools.runtime import (
         WorkflowToolRuntime,
@@ -4889,6 +4888,7 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
     from app.infra.db.repositories.agents import repository as agent_repository
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import repository as tool_repository
+    from app.ports.tools import ToolRuntimeResult
 
 
     settings = Settings.from_env(require_bootstrap=False)
@@ -5269,10 +5269,6 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         McpToolAdapter,
         build_tool_adapter,
     )
-    from app.application.tools.runtime.contracts import (
-        ToolAdapterBusy,
-        ToolInvocationContext,
-    )
     from app.application.tools.runtime.service import validate_tool_output
     from app.domain.tools.catalog.service import build_artifact_tool
     from app.domain.tools.runtime import build_tool_snapshot
@@ -5287,6 +5283,10 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         WorkflowSandboxError,
     )
     from app.ports.mcp import McpCallResult, McpClientError
+    from app.ports.tools import (
+        ToolAdapterBusy,
+        ToolInvocationContext,
+    )
 
     settings = Settings.from_env(require_bootstrap=False)
     context = ToolInvocationContext(

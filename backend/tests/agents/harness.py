@@ -24,7 +24,7 @@ from tests.support import settings as test_settings
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.application.agents.runs.executor import run_durable_agent_run
 from app.application.agents.runs.memory import _run_messages
-from app.application.agents.runs.service import skill_execution_context
+from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agents.models import AgentRunState
 from app.domain.agents.runtime import AgentToolResult, create_agent_tool, run_agent
 from app.domain.agents.runtime.capabilities import CapabilityRegistry

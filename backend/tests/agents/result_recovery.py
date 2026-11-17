@@ -25,7 +25,6 @@ from app.application.agents.tools.builder import (
 )
 from app.application.agents.tools.results import read_run_tool_result
 from app.application.tools.runtime.adapters.mcp import McpToolAdapter
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
@@ -42,6 +41,7 @@ from app.entities.tools import McpServer, ToolSnapshot
 from app.infra.db.base import Base
 from app.infra.db.repositories.tools import invocations
 from app.ports.mcp import MAX_MCP_RESULT_BYTES, McpCallResult
+from app.ports.tools import ToolInvocationContext
 
 
 async def assert_retained_mcp_results() -> None:

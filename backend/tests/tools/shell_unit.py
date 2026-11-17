@@ -14,10 +14,6 @@ from app.application.agents.runs.snapshots import AgentRuntimePolicy
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.tools.runtime.adapters import shell
 from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
-from app.application.tools.runtime.contracts import (
-    ToolAdapterBusy,
-    ToolInvocationContext,
-)
 from app.domain.agent_skills.contracts import (
     agent_skill_definition_hash,
     agent_skill_snapshot_payload,
@@ -31,6 +27,10 @@ from app.ports.execution import (
     ExecutionBusy,
     ExecutionNotStarted,
     ExecutionOutcomeUnknown,
+)
+from app.ports.tools import (
+    ToolAdapterBusy,
+    ToolInvocationContext,
 )
 
 
@@ -143,7 +143,7 @@ async def check():
     with (
         patch.object(shell, "get_session_factory", return_value=database),
         patch.object(shell.runs, "get_agent_run_by_id", AsyncMock(return_value=run)),
-        patch.object(shell, "_installed_dependency_plans", AsyncMock(return_value=[])),
+        patch.object(shell, "installed_dependency_plans", AsyncMock(return_value=[])),
         patch.object(shell, "require_pinned_skill_access", AsyncMock()) as access,
         patch.object(shell, "build_execution_platform", return_value=platform),
         patch.object(shell, "restore_conversation_files", AsyncMock()) as restore,

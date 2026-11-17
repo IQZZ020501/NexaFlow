@@ -13,11 +13,6 @@ from app.application.tools.runtime.adapters._common import (  # noqa: F401
     _is_direct_artifact_content,
     _redirect_legacy_artifact_path,
 )
-from app.application.tools.runtime.contracts import (
-    ToolAdapterBusy,
-    ToolInvocationContext,
-    ToolRuntimeResult,
-)
 from app.domain.artifacts.services import artifact_format_from_filename
 from app.entities.tools import ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
@@ -30,6 +25,11 @@ from app.infra.sandbox.client import (
 )
 from app.ports.execution import ExecutionBusy, ExecutionError, ExecutionOutcomeUnknown
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
+from app.ports.tools import (
+    ToolAdapterBusy,
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 
 
 class BuiltinToolAdapter:

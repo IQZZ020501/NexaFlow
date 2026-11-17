@@ -69,3 +69,9 @@ async def configure(db, workspace_id, server_id, actor, role, payload):
     await repository.save_mcp_server(db, server)
     await db.commit()
     return await configuration(db, workspace_id, server_id, actor, role)
+
+
+__all__ = [
+    "configuration",
+    "configure",
+]

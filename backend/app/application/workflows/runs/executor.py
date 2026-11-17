@@ -9,16 +9,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.application.agent_skills.execution import require_pinned_skill_access
-from app.application.agents.runs.children import (
-    ensure_workflow_agent_child,
-    preflight_workflow_agent_snapshots,
-)
-from app.application.agents.runs.executor import (
+from app.application.agents.integration import (
     RUN_BUSY,
     RUN_FINISHED,
     RUN_LEASED,
-    maintain_agent_run_lease,
+    ensure_workflow_agent_child,
+    preflight_workflow_agent_snapshots,
 )
+from app.application.runs.leases import maintain_agent_run_lease
 from app.application.workflows.nodes.executor import (
     WorkflowNodeScope,
     execute_workflow_node,
@@ -672,7 +670,7 @@ async def _execute_claimed_workflow_run(
             child_id = child.id if child is not None else None
         if child_id is None:
             raise WorkflowEngineError("Workflow Agent child was not persisted.")
-        from app.application.agents.runs.service import enqueue_prepared_agent_run
+        from app.application.agents.integration import enqueue_prepared_agent_run
 
         await enqueue_prepared_agent_run(child_id, settings, unified=True)
         return RUN_FINISHED

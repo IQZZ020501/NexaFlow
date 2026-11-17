@@ -14,8 +14,8 @@ from app.domain.knowledge.service import (
     MAX_DOCUMENT_UPLOAD_BYTES,
     get_default_knowledge_model,
 )
+from app.domain.uploads.service import queue_upload_cleanups
 from app.domain.workflows.definitions.service import get_workflow_agent
-from app.domain.workflows.uploads import queue_upload_cleanups
 from app.entities.agents import Agent
 from app.entities.defaults import new_id
 from app.entities.identity.user import User
@@ -37,7 +37,7 @@ from app.schemas.agents.contracts import AgentInteractionConfig, AgentUploadResp
 from app.schemas.workflows.contracts import WorkflowUploadResponse
 
 if TYPE_CHECKING:
-    from app.application.agents.access.service import PublishedAgentContext
+    from app.application.publications.service import PublishedApplicationContext
 
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 from app.domain.knowledge.documents.parsing import (
@@ -66,7 +66,7 @@ AGENT_ATTACHMENT_CONTEXT_LIMIT = 50_000
 
 
 def published_interaction_config(
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
 ) -> AgentInteractionConfig:
     value = (
         context.publication.interaction_config
@@ -100,7 +100,7 @@ async def _vision_text_extractor(
 
 async def upload_public_workflow_files(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     user_id: str,
     uploads: list[UploadFile],
     settings: Settings,
@@ -161,7 +161,7 @@ async def upload_workspace_workflow_files(
 
 async def upload_public_agent_files(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     user_id: str,
     uploads: list[UploadFile],
     settings: Settings,
@@ -365,7 +365,7 @@ async def _consume_uploads(
 
 async def resolve_public_workflow_files(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     user_id: str,
     file_ids: list[str],
     settings: Settings,
@@ -488,7 +488,7 @@ async def _resolve_workflow_files(
 
 async def resolve_public_agent_files(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     user_id: str,
     file_ids: list[str],
     settings: Settings,
@@ -588,3 +588,16 @@ async def _resolve_agent_file_text(
     ]
     await _consume_uploads(db, ordered)
     return result, attachments
+
+
+__all__ = [
+    "published_interaction_config",
+    "resolve_public_agent_files",
+    "resolve_public_workflow_files",
+    "resolve_workspace_agent_files",
+    "resolve_workspace_workflow_files",
+    "upload_public_agent_files",
+    "upload_public_workflow_files",
+    "upload_workspace_agent_files",
+    "upload_workspace_workflow_files",
+]

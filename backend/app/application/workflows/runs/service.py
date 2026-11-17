@@ -10,17 +10,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agent_skills.execution import require_pinned_skill_access
-from app.application.agents.runs.children import preflight_workflow_agent_snapshots
-from app.application.agents.runs.service import (
-    cancel_run_tree,
+from app.application.agents.integration import (
+    preflight_workflow_agent_snapshots,
     resolve_agent_run_tool_approval,
     tool_invocation_to_response,
-    update_run_feedback,
 )
 from app.application.governance.service import enforce_workspace_run_quota
-from app.application.runs.dispatch import enqueue_agent_run
+from app.application.runs.feedback import update_run_feedback
+from app.application.runs.lifecycle import cancel_run_tree
 from app.application.tools.runtime.service import preflight_tool_snapshot
-from app.application.workflows.uploads.service import resolve_workspace_workflow_files
+from app.application.uploads.service import resolve_workspace_workflow_files
 from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
 from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
 from app.domain.agents.models import (
@@ -61,6 +60,7 @@ from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.session import get_session_factory
 from app.infra.execution.profile import execution_profile
+from app.ports.runs import enqueue_agent_run
 from app.schemas.workflows.contracts import (
     FormNodeConfig,
     WorkflowFormSubmitRequest,

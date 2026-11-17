@@ -28,7 +28,9 @@ from app.application.agents.tools.builder import (
     set_agent_tool_idempotency_key,
 )
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
+from app.application.runs.leases import maintain_agent_run_lease
 from app.application.workspaces.service import build_workspace_context
+from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agents.approval import (
     agent_mcp_requires_approval,
@@ -769,30 +771,6 @@ async def _pause_agent_run_for_tool(
     return paused, requeued
 
 
-async def maintain_agent_run_lease(
-    run_id: str,
-    worker_task_id: str,
-    settings: Settings,
-    lease_lost: asyncio.Event,
-) -> None:
-    while True:
-        await asyncio.sleep(settings.agent_executor_heartbeat_seconds)
-        try:
-            async with get_session_factory()() as db:
-                renewed = await agent_repository.renew_agent_run_lease(
-                    db,
-                    run_id,
-                    worker_task_id,
-                    utc_now()
-                    + timedelta(seconds=settings.agent_executor_lease_seconds),
-                )
-                await db.commit()
-            if not renewed:
-                lease_lost.set()
-                return
-        except Exception:
-            lease_lost.set()
-            return
 
 
 async def _execute_claimed_agent_run(
@@ -861,7 +839,6 @@ async def _execute_claimed_agent_run(
     from app.application.agents.runs.memory import _configured_context_window
     from app.application.agents.runs.service import (
         execution_messages,
-        skill_execution_context,
     )
     from app.domain.agents.runtime.capabilities import CapabilityRegistry
     from app.domain.agents.runtime.context import AgentContextManager

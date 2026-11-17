@@ -7,12 +7,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.application.agent_skills.execution import load_authorized_run_skill
-from app.application.tools.runtime.contracts import (
+from app.infra.sandbox.client import WorkflowSandboxError, _execution_fields
+from app.ports.execution import build_execution_platform
+from app.ports.tools import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.infra.sandbox.client import WorkflowSandboxError, _execution_fields
-from app.ports.execution import build_execution_platform
 
 DependencyManager = Literal["python", "node"]
 MAX_DEPENDENCIES = 16

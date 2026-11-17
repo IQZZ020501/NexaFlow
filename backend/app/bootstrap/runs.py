@@ -13,6 +13,7 @@ from app.infra.queue.celery import publish_task
 
 logger = get_logger(__name__)
 
+
 async def run_durable_application_run(
     run_id: str,
     settings: Settings,
@@ -40,7 +41,6 @@ async def run_durable_application_run(
         child_run_id=run_id,
     )
     return outcome
-
 
 
 async def enqueue_agent_run(

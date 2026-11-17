@@ -274,7 +274,7 @@ class RequestTests(unittest.TestCase):
                 access, "enqueue_prepared_agent_run", AsyncMock()
             ) as external_enqueue,
             patch(
-                "app.application.workflows.uploads.service.resolve_workspace_agent_files",
+                "app.application.uploads.service.resolve_workspace_agent_files",
                 AsyncMock(return_value=("Original attachment text", [])),
             ) as resolve_upload,
         ):

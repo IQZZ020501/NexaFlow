@@ -8,7 +8,6 @@ from app.application.agent_skills.dependencies import (
     skill_environment_id,
 )
 from app.application.agent_skills.execution import load_authorized_run_skill
-from app.application.tools.runtime.contracts import ToolRuntimeResult
 from app.domain.artifacts.services import artifact_format_from_filename
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
@@ -18,9 +17,10 @@ from app.infra.sandbox.client import (
     _execution_fields,
 )
 from app.ports.execution import build_execution_platform
+from app.ports.tools import ToolRuntimeResult
 
 
-async def _installed_dependency_plans(
+async def installed_dependency_plans(
     db, workspace_id: str, run_id: str, version_id: str
 ):
     from app.domain.tools.catalog.service import build_skill_dependency_installer_tool
@@ -89,7 +89,7 @@ async def execute_skill_script(settings, arguments, context):
         arguments["version_id"],
     )
     async with get_session_factory()() as db:
-        installed = await _installed_dependency_plans(
+        installed = await installed_dependency_plans(
             db,
             context.workspace_id,
             context.run_id,
@@ -171,3 +171,10 @@ async def execute_skill_script(settings, arguments, context):
         outcome="confirmed",
         usage={"exit_code": exit_code},
     )
+
+
+__all__ = [
+    "execute_skill_script",
+    "installed_dependency_plans",
+    "restore_skill_dependencies",
+]

@@ -67,3 +67,9 @@ async def send_agent_session_input(
         db, workspace_id, agent_id, run_id, actor, workspace_role
     )
     return await append_session_input(db, run, payload)
+
+
+__all__ = [
+    "append_session_input",
+    "send_agent_session_input",
+]

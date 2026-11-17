@@ -1,7 +1,7 @@
 """Celery entry point shared by durable storage cleanup workflows."""
 
 from app.domain.knowledge.storage.cleanup import run_knowledge_storage_cleanup
-from app.domain.workflows.uploads import run_upload_storage_cleanup
+from app.domain.uploads.service import run_upload_storage_cleanup
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
@@ -51,4 +51,6 @@ def run_storage_cleanup_job(self, cleanup_kind: str, cleanup_id: str) -> None:
         raise self.retry(exc=exc, countdown=60) from exc
 
 
-__all__ = ["run_storage_cleanup_job"]
+__all__ = [
+    "run_storage_cleanup_job",
+]

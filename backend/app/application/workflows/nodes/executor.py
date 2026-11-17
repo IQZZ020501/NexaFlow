@@ -20,13 +20,13 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import StructuredTool
 
-from app.application.agents.runs.service import skill_execution_context
-from app.application.agents.tools.builder import (
+from app.application.agents.integration import (
     build_knowledge_search_tool,
     build_unified_agent_tool,
 )
 from app.application.workflows.nodes.capabilities import workflow_skill_catalog
 from app.application.workflows.tools.runtime import WorkflowToolRuntime
+from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agents.models import AGENT_RUN_SUCCEEDED_STATUS
 from app.domain.agents.runtime.graph import (
     ModelTextStreamFilter,

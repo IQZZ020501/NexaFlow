@@ -81,3 +81,8 @@ async def load_authorized_run_skill(settings, context, version_id: str):
             raise ValueError("Skill is not authorized for this Workflow node.")
         await require_pinned_skill_access(db, context.workspace_id, snapshot)
         return snapshot
+
+
+__all__ = [
+    "require_pinned_skill_access",
+]

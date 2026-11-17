@@ -1,6 +1,4 @@
 import asyncio
-import hashlib
-import json
 import re
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
@@ -12,6 +10,7 @@ from typing import Any
 from jinja2 import Environment, meta
 from pydantic import BaseModel, ValidationError
 
+from app.domain.applications.definitions import graph_hash as graph_hash
 from app.schemas.workflows.contracts import (
     ClassifierNodeConfig,
     ConditionNodeConfig,
@@ -182,12 +181,6 @@ async def _noop_finished(
     state: WorkflowEngineState,
 ) -> None:
     return None
-
-
-def graph_hash(graph: WorkflowGraph | Mapping[str, Any]) -> str:
-    value = graph.model_dump(by_alias=True, mode="json") if isinstance(graph, WorkflowGraph) else graph
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _iter_references(value: Any):

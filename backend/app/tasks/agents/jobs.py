@@ -1,5 +1,5 @@
 from app.application.agents.runs.executor import RUN_BUSY
-from app.application.runs.dispatch import run_durable_application_run
+from app.bootstrap.runs import run_durable_application_run
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger

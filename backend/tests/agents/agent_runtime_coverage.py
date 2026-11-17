@@ -3773,7 +3773,7 @@ async def assert_create_agent_run_paths(
             assert created.status == "succeeded"
 
         # file_ids branch (627, 629)
-        import app.application.workflows.uploads.service as workflow_uploads_module
+        import app.application.uploads.service as workflow_uploads_module
 
         original_resolve = workflow_uploads_module.resolve_workspace_agent_files
         holder.model = RuntimeModelStub([ok_completion("Attached answer.")])
@@ -5445,7 +5445,6 @@ async def assert_agent_tool_runtime_paths(
     import dataclasses as dc
 
     from app.application.agents.tools import runtime as atr
-    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.domain.agents.runtime import (
         AgentExecutionPaused,
         AgentRunnerError,
@@ -5453,6 +5452,7 @@ async def assert_agent_tool_runtime_paths(
         AgentToolUncertain,
     )
     from app.domain.tools.runtime import tool_snapshot_from_payload
+    from app.ports.tools import ToolRuntimeResult
 
     settings = test_settings()
 

@@ -16,7 +16,7 @@ from app.domain.knowledge.storage.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
 )
 from app.domain.knowledge.tasks.runner import list_recoverable_knowledge_task_ids
-from app.domain.workflows.uploads import prepare_due_upload_cleanups
+from app.domain.uploads.service import prepare_due_upload_cleanups
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
@@ -142,4 +142,6 @@ def run_maintenance_job(cadence: str) -> None:
     _run_maintenance_steps(steps, settings)
 
 
-__all__ = ["run_maintenance_job"]
+__all__ = [
+    "run_maintenance_job",
+]

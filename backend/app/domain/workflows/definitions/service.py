@@ -13,6 +13,7 @@ from app.domain.agents.service import (
     get_agent,
     get_agent_model,
 )
+from app.domain.applications.definitions import default_workflow_graph
 from app.domain.knowledge.service import (
     ACTIVE_STATUS as KNOWLEDGE_ACTIVE_STATUS,
 )
@@ -33,7 +34,6 @@ from app.domain.tools.mcp.service import (
     resolve_mcp_tools,
 )
 from app.domain.tools.runtime import tool_snapshot_from_payload
-from app.domain.workflows.definitions.defaults import default_workflow_graph
 from app.domain.workflows.definitions.skills import prepare_workflow_skills
 from app.domain.workflows.resources import (
     build_workflow_resource_snapshot,

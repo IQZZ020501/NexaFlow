@@ -6,10 +6,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.application.tools.runtime.contracts import (
-    ToolInvocationContext,
-    ToolRuntimeResult,
-)
 from app.application.tools.runtime.service import (
     ToolInvocationBusy,
     ToolInvocationConflict,
@@ -34,6 +30,10 @@ from app.entities.runs import AgentRun
 from app.entities.tools import ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
+from app.ports.tools import (
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 
 
 def agent_tool_invocation_identity(

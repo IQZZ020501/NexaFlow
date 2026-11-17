@@ -5,13 +5,12 @@ from datetime import UTC
 
 from app.application.agent_skills.execution import require_pinned_skill_access
 from app.application.agent_skills.scripts import (
-    _installed_dependency_plans,
+    installed_dependency_plans,
     restore_skill_dependencies,
 )
 from app.application.artifacts.service import create_generated_artifact
 from app.application.artifacts.workspace import restore_conversation_files
 from app.application.projects.runtime import restore_project_files, save_project_files
-from app.application.tools.runtime.contracts import ToolRuntimeResult
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agent_skills.paths import skill_mount_name
 from app.domain.agents.models import AGENT_RUN_RUNNING_STATUSES
@@ -20,6 +19,7 @@ from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.session import get_session_factory
 from app.ports.execution import ExecutionError, build_execution_platform
+from app.ports.tools import ToolRuntimeResult
 
 
 async def execute_shell(settings, arguments, context):
@@ -50,7 +50,7 @@ async def execute_shell(settings, arguments, context):
             dependencies.append(
                 (
                     skill,
-                    await _installed_dependency_plans(
+                    await installed_dependency_plans(
                         db, context.workspace_id, context.run_id, skill.version_id
                     ),
                 )

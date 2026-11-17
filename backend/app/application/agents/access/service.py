@@ -28,8 +28,14 @@ from app.application.agents.tools.builder import (
     safe_agent_run_error,
     session_inputs_to_response,
 )
-from app.application.workflows.uploads.service import resolve_public_agent_files
-from app.application.workspaces.service import WorkspaceContext, build_workspace_context
+from app.application.publications.service import (
+    ExternalAccessSource,
+    PublishedApplicationContext,
+    get_published_agent_context,
+    get_published_application_context,
+    get_workspace_published_agent_context,
+)
+from app.application.uploads.service import resolve_public_agent_files
 from app.domain.agents.access.permissions import require_agent_edit, require_agent_ops
 from app.domain.agents.approval import (
     DEFAULT_AGENT_APPROVAL_MODE,
@@ -40,17 +46,12 @@ from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime.callbacks import safe_event_value
 from app.domain.agents.runtime.graph import ModelTextStreamFilter, clean_model_text
 from app.domain.agents.service import (
-    ACTIVE_STATUS,
-    AgentPublication,
-    agent_publication_from_snapshot,
-    agent_publication_from_version,
     get_agent,
 )
 from app.domain.audit.services import record_audit_log
 from app.entities.agents import (
     Agent,
     AgentApiCredential,
-    AgentPublicationVersion,
 )
 from app.entities.defaults import APP_TIMEZONE, utc_now
 from app.entities.identity.user import User
@@ -86,17 +87,6 @@ from app.schemas.agents.contracts import (
     PublicAgentConversationResponse,
     PublicAgentProfileResponse,
 )
-
-ExternalAccessSource = Literal["public", "api"]
-
-
-@dataclass(frozen=True)
-class PublishedAgentContext:
-    agent: Agent
-    publisher: User
-    workspace: WorkspaceContext
-    publication: AgentPublication | None = None
-    publication_version: AgentPublicationVersion | None = None
 
 
 def hash_agent_access_token(token: str) -> str:
@@ -571,123 +561,6 @@ def _copy_external_stream_metadata(
         ).hexdigest()[:32]
 
 
-async def get_published_agent_context(
-    db: AsyncSession,
-    agent_id: str,
-) -> PublishedAgentContext:
-    return await get_published_application_context(db, agent_id, "agent")
-
-
-async def get_published_workflow_context(
-    db: AsyncSession,
-    workflow_id: str,
-) -> PublishedAgentContext:
-    return await get_published_application_context(db, workflow_id, "workflow")
-
-
-async def get_published_application_context(
-    db: AsyncSession,
-    agent_id: str,
-    application_type: Literal["agent", "workflow"],
-) -> PublishedAgentContext:
-    agent = await agent_repository.get_agent_by_id(db, agent_id)
-    if (
-        agent is None
-        or agent.app_type != application_type
-        or agent.status != ACTIVE_STATUS
-        or not agent.published
-        or not agent.published_by_user_id
-        or agent.published_at is None
-    ):
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"Published {application_type} not found.",
-        )
-    publication_version = None
-    publication = None
-    publisher_id = agent.published_by_user_id
-    if application_type == "agent":
-        if agent.current_published_version_id is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
-        publication_version = await agent_repository.get_agent_publication_version(
-            db,
-            agent.workspace_id,
-            agent.current_published_version_id,
-        )
-        if publication_version is None or publication_version.agent_id != agent.id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
-        try:
-            publication = agent_publication_from_version(publication_version)
-        except ValueError as exc:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                "Published agent not found.",
-            ) from exc
-        publisher_id = publication_version.published_by_user_id
-    else:
-        publication = agent_publication_from_snapshot(agent)
-    publisher = await user_repository.get_user_by_id(db, publisher_id)
-    if publisher is None or not publisher.is_active:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"Published {application_type} not found.",
-        )
-    try:
-        workspace = await build_workspace_context(db, publisher, agent.workspace_id)
-    except HTTPException as exc:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"Published {application_type} not found.",
-        ) from exc
-    return PublishedAgentContext(
-        agent=agent,
-        publisher=publisher,
-        workspace=workspace,
-        publication=publication,
-        publication_version=publication_version,
-    )
-
-
-async def get_workspace_published_agent_context(
-    db: AsyncSession,
-    agent_id: str,
-    user: User,
-) -> PublishedAgentContext:
-    return await get_workspace_published_application_context(db, agent_id, user, "agent")
-
-
-async def get_workspace_published_workflow_context(
-    db: AsyncSession,
-    workflow_id: str,
-    user: User,
-) -> PublishedAgentContext:
-    return await get_workspace_published_application_context(
-        db, workflow_id, user, "workflow"
-    )
-
-
-async def get_workspace_published_application_context(
-    db: AsyncSession,
-    agent_id: str,
-    user: User,
-    application_type: Literal["agent", "workflow"],
-) -> PublishedAgentContext:
-    context = await get_published_application_context(db, agent_id, application_type)
-    try:
-        await build_workspace_context(db, user, context.agent.workspace_id)
-    except HTTPException as exc:
-        if exc.status_code in {
-            status.HTTP_403_FORBIDDEN,
-            status.HTTP_404_NOT_FOUND,
-        }:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                f"Published {application_type} not found.",
-            ) from exc
-        raise
-    return context
-
-
 async def get_public_agent_profile(
     db: AsyncSession,
     agent_id: str,
@@ -880,7 +753,7 @@ async def authenticate_agent_api_credential(
     agent_id: str,
     token: str,
     application_type: Literal["agent", "workflow"] = "agent",
-) -> tuple[PublishedAgentContext, AgentApiCredential]:
+) -> tuple[PublishedApplicationContext, AgentApiCredential]:
     if not token.startswith("nxf_"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid API credential.")
     credential = await agent_repository.get_agent_api_credential_by_hash(
@@ -940,7 +813,7 @@ async def _enforce_rate_limit(
 
 async def create_external_agent_run(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     access_source: ExternalAccessSource,
     consumer_id: str,
     goal: str,
@@ -1080,7 +953,7 @@ async def cancel_external_agent_run(
 
 async def regenerate_external_agent_run(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     run_id: str,
     access_source: ExternalAccessSource,
     consumer_id: str,
@@ -1092,7 +965,7 @@ async def regenerate_external_agent_run(
     Regenerate a publicly accessible agent run from its source run.
     
     Parameters:
-        context (PublishedAgentContext): The published agent context used to authorize regeneration.
+        context (PublishedApplicationContext): The published agent context used to authorize regeneration.
         run_id (str): The identifier of the source run.
         access_source (ExternalAccessSource): The access channel for the run.
         consumer_id (str): The external consumer requesting regeneration.
@@ -1301,7 +1174,7 @@ async def delete_public_agent_conversation(
 
 async def stream_external_agent_run(
     db: AsyncSession,
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
     run: AgentRun,
     settings: Settings,
     *,

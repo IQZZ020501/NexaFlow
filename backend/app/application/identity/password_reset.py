@@ -182,3 +182,9 @@ async def confirm_password_reset(
         [delivery_id] if delivery_id is not None else [],
         settings,
     )
+
+
+__all__ = [
+    "confirm_password_reset",
+    "request_password_reset",
+]

@@ -5,8 +5,8 @@ from dataclasses import replace
 import tests.support  # noqa: F401
 from pydantic import ValidationError
 
-from app.application.agents.runs.service import skill_execution_context
 from app.domain.agent_skills.access import evaluate_agent_skill_access
+from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agent_skills.contracts import (
     agent_skill_snapshot_from_payload,
     agent_skill_snapshot_payload,

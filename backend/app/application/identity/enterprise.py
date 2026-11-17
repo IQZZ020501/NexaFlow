@@ -523,3 +523,15 @@ async def complete_login(
     )
     await db.commit()
     return refresh_token, connection.workspace_id, login_state.next_path
+
+
+__all__ = [
+    "EnterpriseLoginRejected",
+    "begin_login",
+    "bind_identity",
+    "complete_login",
+    "list_connections",
+    "list_identities",
+    "list_public_connections",
+    "upsert_connection",
+]

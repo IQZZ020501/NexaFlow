@@ -168,7 +168,7 @@ async def get_authorized_artifact(db, artifact_id, actor):
     """Recheck current membership, publication and conversation ownership per read."""
     from fastapi import HTTPException
 
-    from app.application.agents.access.service import (
+    from app.application.publications.service import (
         get_workspace_published_application_context,
     )
     from app.application.workspaces.service import build_workspace_context
@@ -222,3 +222,11 @@ async def get_run_artifact(db, artifact_id, run):
         ):
             raise HTTPException(404, "Artifact not found.")
     return artifact
+
+
+__all__ = [
+    "create_generated_artifact",
+    "get_authorized_artifact",
+    "get_generated_artifact",
+    "get_run_artifact",
+]

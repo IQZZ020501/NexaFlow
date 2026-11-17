@@ -89,3 +89,11 @@ async def revoke_other_user_sessions(
         db, user.id, current_session_id, utc_now()
     )
     await db.commit()
+
+
+__all__ = [
+    "list_user_sessions",
+    "revoke_all_user_sessions",
+    "revoke_other_user_sessions",
+    "revoke_user_session",
+]

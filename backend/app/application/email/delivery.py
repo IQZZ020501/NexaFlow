@@ -308,3 +308,11 @@ async def dispatch_email_deliveries(
                 exc,
                 delivery_id=delivery_id,
             )
+
+
+__all__ = [
+    "cancel_source_emails",
+    "dispatch_email_deliveries",
+    "identity_email_is_ready",
+    "queue_identity_email",
+]

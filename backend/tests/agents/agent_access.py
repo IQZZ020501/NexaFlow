@@ -50,6 +50,7 @@ from app.application.agents.access.service import (
     sanitize_external_agent_stream,
 )
 from app.application.agents.runs import service as agent_runs
+from app.application.publications import service as publications
 from app.domain.agents.models import (
     Agent as AgentOrm,
 )
@@ -892,7 +893,7 @@ async def assert_direct_access_units(
             agent_repository.mark_agent_api_credential_used = original_mark
 
         # --- create_external_agent_run: publication None → 404 (773-774) ---
-        bare_context = agent_access.PublishedAgentContext(
+        bare_context = publications.PublishedApplicationContext(
             agent=SimpleNamespace(id=agent_id, workspace_id=workspace_id),
             publisher=SimpleNamespace(),
             workspace=SimpleNamespace(),
@@ -906,7 +907,7 @@ async def assert_direct_access_units(
         )
 
         # --- create_external_agent_run: api + file_ids → 422 (776-781) ---
-        publication_context = agent_access.PublishedAgentContext(
+        publication_context = publications.PublishedApplicationContext(
             agent=SimpleNamespace(id=agent_id, workspace_id=workspace_id),
             publisher=SimpleNamespace(),
             workspace=SimpleNamespace(),
@@ -928,12 +929,12 @@ async def assert_direct_access_units(
         # --- get_published_application_context: wrong app_type → 404 (441-449) ---
         await _expect_http(
             404,
-            agent_access.get_published_application_context(db, agent_id, "workflow"),
+            publications.get_published_application_context(db, agent_id, "workflow"),
         )
         # Unknown agent → 404.
         await _expect_http(
             404,
-            agent_access.get_published_application_context(db, "missing-agent", "agent"),
+            publications.get_published_application_context(db, "missing-agent", "agent"),
         )
 
         # --- publisher lookup returns None → 404 (453-457) ---
@@ -946,25 +947,25 @@ async def assert_direct_access_units(
         try:
             await _expect_http(
                 404,
-                agent_access.get_published_application_context(db, agent_id, "agent"),
+                publications.get_published_application_context(db, agent_id, "agent"),
             )
         finally:
             agent_access.user_repository.get_user_by_id = original_get_user
 
         # --- build_workspace_context failure → 404 (459-465) ---
-        original_build = agent_access.build_workspace_context
+        original_build = publications.build_workspace_context
 
         async def broken_build(*_args, **_kwargs):
             raise HTTPException(status_code=403, detail="no access")
 
-        agent_access.build_workspace_context = broken_build
+        publications.build_workspace_context = broken_build
         try:
             await _expect_http(
                 404,
-                agent_access.get_published_application_context(db, agent_id, "agent"),
+                publications.get_published_application_context(db, agent_id, "agent"),
             )
         finally:
-            agent_access.build_workspace_context = original_build
+            publications.build_workspace_context = original_build
 
         # --- publication rebuilt from bindings when snapshot missing (466-475) ---
         row = await db.get(AgentOrm, agent_id)
@@ -976,7 +977,7 @@ async def assert_direct_access_units(
             )
         )
         await db.commit()
-        rebuilt = await agent_access.get_published_application_context(
+        rebuilt = await publications.get_published_application_context(
             db, agent_id, "agent"
         )
         assert rebuilt.publication is not None
@@ -998,16 +999,16 @@ async def assert_direct_access_units(
                 return await original_build(*_args, **_kwargs)
             raise HTTPException(status_code=400, detail="boom")
 
-        agent_access.build_workspace_context = selective_build
+        publications.build_workspace_context = selective_build
         try:
             await _expect_http(
                 400,
-                agent_access.get_workspace_published_application_context(
+                publications.get_workspace_published_application_context(
                     db, agent_id, actor, "agent"
                 ),
             )
         finally:
-            agent_access.build_workspace_context = original_build
+            publications.build_workspace_context = original_build
 
         # --- get_public_agent_profile: publication None → 404 (529-530) ---
         original_workspace_ctx = (
@@ -1015,7 +1016,7 @@ async def assert_direct_access_units(
         )
 
         async def none_publication(*_args, **_kwargs):
-            return agent_access.PublishedAgentContext(
+            return publications.PublishedApplicationContext(
                 agent=SimpleNamespace(id=agent_id),
                 publisher=SimpleNamespace(),
                 workspace=SimpleNamespace(),
@@ -1042,11 +1043,11 @@ async def assert_direct_access_units(
 
         # --- workflow-context delegators (432, 496) ---
         await _expect_http(
-            404, agent_access.get_published_workflow_context(db, agent_id)
+            404, publications.get_published_workflow_context(db, agent_id)
         )
         await _expect_http(
             404,
-            agent_access.get_workspace_published_workflow_context(
+            publications.get_workspace_published_workflow_context(
                 db, agent_id, actor
             ),
         )
@@ -1157,7 +1158,7 @@ async def assert_direct_access_units(
         agent_access.enqueue_prepared_agent_run = noop_enqueue
         agent_runs.enqueue_prepared_agent_run = noop_enqueue
         try:
-            live_context = await agent_access.get_published_application_context(
+            live_context = await publications.get_published_application_context(
                 db, agent_id, "agent"
             )
             locked_agent = await agent_repository.lock_agent(db, agent_id)
@@ -1350,7 +1351,7 @@ async def assert_direct_access_units(
         assert len(monitoring.daily) == 7
 
         # --- get_workspace_published_application_context normal return (520) ---
-        context = await agent_access.get_workspace_published_application_context(
+        context = await publications.get_workspace_published_application_context(
             db, agent_id, actor, "agent"
         )
         assert context.agent.id == agent_id
@@ -1364,16 +1365,16 @@ async def assert_direct_access_units(
                 return await original_build(*_args, **_kwargs)
             raise HTTPException(status_code=403, detail="no access")
 
-        agent_access.build_workspace_context = forbidden_build
+        publications.build_workspace_context = forbidden_build
         try:
             await _expect_http(
                 404,
-                agent_access.get_workspace_published_application_context(
+                publications.get_workspace_published_application_context(
                     db, agent_id, actor, "agent"
                 ),
             )
         finally:
-            agent_access.build_workspace_context = original_build
+            publications.build_workspace_context = original_build
 
         # --- get_public_agent_profile success return (531) ---
         profile = await agent_access.get_public_agent_profile(db, agent_id, actor)

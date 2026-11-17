@@ -56,7 +56,7 @@
 
 - 文档解析/分块与问答导入 → `app/domain/knowledge/documents/`：`parsing.py`（`extract_document`、`clean_text`、`normalize_text`、`split_text`、`build_flat_chunks`、`build_hierarchical_chunks`、`chunk_token_count`、`CHUNK_SIZE`/`CHUNK_OVERLAP`/`EMBED_BATCH_SIZE` 与版本常量，含归档加固与 DOCX 内嵌图片资产）、`qa_import.py`（`QaRow`、`extract_qa_rows`、`validate_qa_rows`，仅支持 CSV/XLSX，行数 5000、问题 2000 字符、答案 20000 字符上限）。端口层没有 `DocumentParser`/`build_document_parser`。
 - 检索实现 → 评分与证据窗口在 `app/domain/knowledge/retrieval.py`（`RankedHit`、`reciprocal_rank_fusion`、`parent_evidence`、`bounded_text_chunks`、`rerank_child_hits`、`apply_rerank_results`），编排在 `app/application/knowledge/retrieval/service.py`（`retrieve_knowledge_base`）；`adapters/rag/retrieval.py` 已删除。
-- 统一工具执行契约 → `app/application/tools/runtime/contracts.py`（`ToolAdapter`、`ToolInvocationContext`、`ToolRuntimeResult`、`ToolAdapterBusy`），基于 `app/entities/tools` 的 `ToolKind`/`ToolSnapshot`/`ToolRef`；实现与工厂在 `app/application/tools/runtime/adapters/`（`builtin.py`/`python_tool.py`/`mcp.py`/`image_generation.py`，`build_tool_adapter(snapshot, settings, server)`）；代码执行走 `app/infra/sandbox`，MCP 工具经 `app/ports/mcp.py` 委托调用，内置工具含产物直读/预检等逻辑。端口层没有 `tool_runtime.py`。
+- 统一工具执行契约 → `app/ports/tools.py`（`ToolAdapter`、`ToolInvocationContext`、`ToolRuntimeResult`、`ToolAdapterBusy`），基于 `app/entities/tools` 的 `ToolKind`/`ToolSnapshot`/`ToolRef`；实现与工厂在 `app/application/tools/runtime/adapters/`（`builtin.py`/`mcp.py`/`image_generation.py`/`shell.py`，`build_tool_adapter(snapshot, settings, server)`）；代码执行经 `app/ports/execution.py` 与 OpenSandbox 适配器，MCP 工具经 `app/ports/mcp.py` 委托调用，内置工具含产物直读/预检等逻辑。端口层没有 `tool_runtime.py`。
 - 模型注册数据访问 → 仓储 `app/infra/db/repositories/models/registry.py`，业务/应用层直接 import（没有 `app/ports/model_registry.py`）。
 
 ## 模型注册相关文件的归属

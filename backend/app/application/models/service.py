@@ -410,3 +410,17 @@ async def delete_registered_model(db: AsyncSession, model: RegisteredModel, acto
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Model is in use.") from exc
+
+
+__all__ = [
+    "create_registered_model",
+    "delete_registered_model",
+    "get_model_credential_form",
+    "get_registered_model",
+    "list_base_models",
+    "list_model_types",
+    "list_provider_catalog",
+    "list_registered_models",
+    "model_to_response",
+    "update_registered_model",
+]

@@ -48,3 +48,8 @@ async def restore_conversation_files(
             ) from exc
         if response.get("ok") is not True:
             raise ExecutionError("Conversation file could not be restored.")
+
+
+__all__ = [
+    "restore_conversation_files",
+]

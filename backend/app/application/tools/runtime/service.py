@@ -8,12 +8,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tools.runtime.adapters import build_tool_adapter
-from app.application.tools.runtime.contracts import (
-    ToolAdapter,
-    ToolAdapterBusy,
-    ToolInvocationContext,
-    ToolRuntimeResult,
-)
 from app.domain.tools.access.permissions import evaluate_tool_authorization
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_AUTO,
@@ -51,6 +45,12 @@ from app.infra.db.repositories.workspaces import (
     resource_permissions as permission_repository,
 )
 from app.infra.db.session import get_session_factory
+from app.ports.tools import (
+    ToolAdapter,
+    ToolAdapterBusy,
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 
 
 class ToolInvocationBusy(RuntimeError):

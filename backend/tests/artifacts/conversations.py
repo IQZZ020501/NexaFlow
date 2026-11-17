@@ -186,7 +186,7 @@ async def check():
                     "app.domain.agents.service.get_agent",
                     AsyncMock(return_value=SimpleNamespace(app_type="agent")),
                 ), patch(
-                    "app.application.agents.access.service.get_workspace_published_application_context",
+                    "app.application.publications.service.get_workspace_published_application_context",
                     AsyncMock(),
                 ) as access:
                     original = await service.get_authorized_artifact(

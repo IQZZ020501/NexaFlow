@@ -2,9 +2,9 @@
 
 from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
 from app.application.tools.runtime.adapters.mcp import McpToolAdapter
-from app.application.tools.runtime.contracts import ToolAdapter
 from app.entities.tools import McpServer, ToolSnapshot
 from app.infra.config.settings import Settings
+from app.ports.tools import ToolAdapter
 
 
 def build_tool_adapter(

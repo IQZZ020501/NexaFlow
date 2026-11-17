@@ -40,3 +40,12 @@ async def disconnect(db, workspace_id, server_id, actor, role):
     await oauth.queue_disconnect(db, server.id)
     await db.commit()
     return await oauth.status(db, server)
+
+
+__all__ = [
+    "authorize",
+    "callback",
+    "configure",
+    "disconnect",
+    "status",
+]

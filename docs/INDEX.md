@@ -4,13 +4,15 @@
 
 ## 架构总览
 
+整体采用[分层模块化单体](MODULAR_MONOLITH.md)。模块职责、公开接口、依赖方向与自动检查方式以该文档及 `backend/scripts/module_boundaries.py` 为准。
+
 ```text
 backend/   FastAPI 后端（Python >=3.11，SQLAlchemy 异步 + Celery）
 frontend/  Next.js 16 App Router + React 19 + TypeScript（Bun，shadcn/ui，src 布局）
 deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
 ```
 
-后端调用链：`api/v1/<feature>/`（薄路由，routes.py）→ `application/<feature>/`（应用服务/业务规则）→ `domain/<feature>/`（领域服务与 ORM 模型）与 `adapters/` + `ports/`（LLM 运行时、RAG、MCP、OpenSandbox 执行平面、企业身份等能力的实现与稳定契约；文档解析在 `domain/knowledge/documents/parsing.py`，统一工具运行时在 `application/tools/runtime/`）→ `infra/`（配置/DB/队列/安全/存储/日志/repositories/沙箱客户端/runtime）。实体与契约按功能拆分：`entities/<feature>/`（纯领域实体 dataclass）、`schemas/<feature>/`（Pydantic 契约）；Celery 后台任务位于 `tasks/<feature>/jobs.py`（共享辅助见 `tasks/runtime.py`）。所有核心资源表带 `workspace_id`，API 以 `/workspaces/{workspace_id}/...` 表达工作空间上下文。模块文档已随目录重构更名：CAPABILITIES.md → ADAPTERS.md、INFRASTRUCTURE.md → INFRA.md（见下表）。
+后端调用链：`api/v1/<feature>/`（薄路由，routes.py）→ `application/<feature>/`（应用服务/业务规则）→ `domain/<feature>/`（领域服务与 ORM 模型）与 `ports/` → `adapters/`（LLM 运行时、RAG、MCP、OpenSandbox 执行平面、企业身份等能力的实现与稳定契约；文档解析在 `domain/knowledge/documents/parsing.py`，统一工具运行时在 `application/tools/runtime/`）→ `infra/`（配置/DB/队列/安全/存储/日志/repositories/沙箱客户端/runtime）。实体与契约按功能拆分：`entities/<feature>/`（纯领域实体 dataclass）、`schemas/<feature>/`（Pydantic 契约）；Celery 后台任务位于 `tasks/<feature>/jobs.py`（共享辅助见 `tasks/runtime.py`）。所有核心资源表带 `workspace_id`，API 以 `/workspaces/{workspace_id}/...` 表达工作空间上下文。模块文档已随目录重构更名：CAPABILITIES.md → ADAPTERS.md、INFRASTRUCTURE.md → INFRA.md（见下表）。
 
 前端：`app/` 路由薄壳委托 `components/` 页面组件（客户端渲染）；`contexts/` 全局状态（语言/主题/会话）；`lib/api/` 按域划分的 API 客户端统一走 `lib/api-client.ts`；`i18n/` 三语词典。
 
@@ -18,6 +20,7 @@ deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
 
 | 文档 | 覆盖范围 |
 | --- | --- |
+| [MODULAR_MONOLITH.md](MODULAR_MONOLITH.md) | 整体架构、业务模块边界、共享职责与架构检查 |
 | [API.md](API.md) | backend/app/api（HTTP 接口层）与 backend/app/schemas（Pydantic 契约） |
 | [APPLICATION.md](APPLICATION.md) | backend/app/application（应用服务层） |
 | [ADAPTERS.md](ADAPTERS.md) | backend/app/ports（稳定契约）与 backend/app/adapters（LLM 运行时 / RAG / MCP / 执行平面 / 企业身份实现） |

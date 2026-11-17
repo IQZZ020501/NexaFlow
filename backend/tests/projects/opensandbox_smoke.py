@@ -15,7 +15,6 @@ from app.application.artifacts import service as artifacts
 from app.application.artifacts import workspace
 from app.application.projects import runtime, service
 from app.application.tools.runtime.adapters import shell
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.entities.projects import AgentProject
@@ -29,6 +28,7 @@ from app.infra.db.repositories.workspaces import repository as workspaces
 from app.infra.execution import sessions
 from app.infra.execution.profile import execution_profile
 from app.ports.execution import ExecutionScope, execution_scope
+from app.ports.tools import ToolInvocationContext
 
 
 async def check(config):

@@ -344,3 +344,13 @@ async def _move_resources(
         folder_id,
     )
     await db.commit()
+
+
+__all__ = [
+    "create_resource_folder",
+    "delete_resource_folder",
+    "list_resource_folders",
+    "move_resource",
+    "move_resources",
+    "update_resource_folder",
+]

@@ -140,12 +140,12 @@ def test_image_generation_is_a_bounded_approval_backed_builtin() -> None:
 
 def test_image_tool_queue_freezes_its_model_configuration() -> None:
     from app.application.tools.runtime.adapters import image_generation
-    from app.application.tools.runtime.contracts import ToolInvocationContext
     from app.application.tools.runtime.service import queue_tool_invocation
     from app.domain.tools.catalog.service import build_image_generation_tool
     from app.domain.tools.runtime import build_tool_snapshot
     from app.entities.tools import ToolSource
     from app.infra.db.repositories.tools import repository as tool_repository
+    from app.ports.tools import ToolInvocationContext
 
     tool, version, policy = build_image_generation_tool("workspace-1")
     snapshot = build_tool_snapshot(
@@ -298,7 +298,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
 def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
     from app.application.agents.runs.snapshots import build_model_runtime_snapshot
     from app.application.tools.runtime.adapters import image_generation
-    from app.application.tools.runtime.contracts import ToolInvocationContext
+    from app.ports.tools import ToolInvocationContext
 
     model = SimpleNamespace(
         id="image-model-1",
@@ -585,7 +585,7 @@ def test_artifact_filename_follows_the_request() -> None:
 def test_image_tool_names_the_image_from_the_model_or_the_prompt() -> None:
     from app.application.agents.runs.snapshots import build_model_runtime_snapshot
     from app.application.tools.runtime.adapters import image_generation
-    from app.application.tools.runtime.contracts import ToolInvocationContext
+    from app.ports.tools import ToolInvocationContext
 
     model = SimpleNamespace(
         id="image-model-1",
@@ -1094,8 +1094,8 @@ def test_mcp_adapter_marks_only_sent_writes_uncertain() -> None:
     from tests.support import settings
 
     from app.application.tools.runtime.adapters import mcp as mcp_adapter
-    from app.application.tools.runtime.contracts import ToolAdapterBusy
     from app.ports.mcp import McpClientError, McpServerBusy
+    from app.ports.tools import ToolAdapterBusy
 
     adapter = mcp_adapter.McpToolAdapter(settings(), SimpleNamespace())
 
@@ -1139,8 +1139,8 @@ def test_skill_runtime_capacity_requeues_instead_of_failing() -> None:
 
     from app.application.agent_skills import dependencies, scripts
     from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
-    from app.application.tools.runtime.contracts import ToolAdapterBusy
     from app.ports.execution import ExecutionBusy
+    from app.ports.tools import ToolAdapterBusy
 
     adapter = BuiltinToolAdapter(settings())
     for module, function, builtin in (

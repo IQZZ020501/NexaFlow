@@ -270,6 +270,7 @@ __all__ = [
     "document_to_response",
     "enqueue_evaluation_run",
     "enqueue_index_knowledge_document",
+    "enqueue_knowledge_storage_cleanup",
     "enqueue_parse_knowledge_document",
     "enqueue_rebuild_knowledge_index",
     "get_evaluation_run",

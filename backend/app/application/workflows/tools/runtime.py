@@ -5,8 +5,7 @@ import hashlib
 from datetime import UTC
 from typing import Any
 
-from app.application.agents.tools.runtime import tool_runtime_result_to_agent_result
-from app.application.tools.runtime.contracts import ToolInvocationContext
+from app.application.agents.integration import tool_runtime_result_to_agent_result
 from app.application.tools.runtime.service import (
     ToolInvocationBusy,
     ToolInvocationConflict,
@@ -21,6 +20,7 @@ from app.entities.tools import ToolSnapshot
 from app.entities.workflows import WorkflowRunDetail
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
+from app.ports.tools import ToolInvocationContext
 from app.schemas.workflows.contracts import LlmNodeConfig
 
 
@@ -178,4 +178,7 @@ class WorkflowToolRuntime:
         return mapped
 
 
-__all__ = ["WorkflowToolRuntime", "workflow_tool_invocation_identity"]
+__all__ = [
+    "WorkflowToolRuntime",
+    "workflow_tool_invocation_identity",
+]

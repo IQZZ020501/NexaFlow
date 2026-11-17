@@ -11,17 +11,17 @@ from app.application.tools.runtime.adapters._common import (  # noqa: F401
     _is_direct_artifact_content,
     _redirect_legacy_artifact_path,
 )
-from app.application.tools.runtime.contracts import (
-    ToolAdapterBusy,
-    ToolInvocationContext,
-    ToolRuntimeResult,
-)
 from app.domain.tools.mcp.service import resolved_mcp_server_connection
 from app.domain.tools.results import prepare_mcp_result
 from app.domain.tools.runtime import TOOL_UNCERTAIN_EFFECTS
 from app.entities.tools import McpServer, ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.ports.mcp import McpClientError, McpServerBusy, call_mcp_tool
+from app.ports.tools import (
+    ToolAdapterBusy,
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 
 
 class McpToolAdapter:

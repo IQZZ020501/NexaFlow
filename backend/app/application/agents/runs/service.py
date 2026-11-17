@@ -5,7 +5,6 @@ surface): preparing, executing, streaming, and listing agent runs.
 """
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from datetime import UTC, timedelta
@@ -24,7 +23,6 @@ from app.application.agents.tools.builder import (
     run_to_response,
 )
 from app.application.governance.service import enforce_workspace_run_quota
-from app.application.tools.runtime.contracts import ToolRuntimeResult
 from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
 from app.domain.agent_skills.service import resolve_application_agent_skill_snapshots
@@ -65,7 +63,6 @@ from app.domain.tools.runtime import (
     tool_snapshot_from_payload,
     tool_snapshot_payload,
 )
-from app.entities.agent_skills import AgentSkillSnapshot
 from app.entities.agents import Agent, AgentPublicationVersion
 from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
@@ -82,27 +79,11 @@ from app.infra.db.repositories.knowledge import repository as knowledge_reposito
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.infra.execution.profile import execution_profile, sandbox_resource_profile
+from app.ports.tools import ToolRuntimeResult
 from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.schemas.agents.contracts import AgentRunResponse, AgentToolCallResponse
 
 AGENT_EVENT_PAGE_SIZE = 200
-
-
-def skill_execution_context(skills: list[AgentSkillSnapshot]) -> str:
-    """Expose only the pinned catalog; load_skill provides full instructions."""
-    if not skills:
-        return ""
-    catalog = [
-        {"name": skill.name, "description": skill.description, "version_id": skill.version_id,
-         "intents": skill.definition.get("intents", [])}
-        for skill in skills
-    ]
-    return (
-        "Available Skills (authorized pinned versions):\n"
-        + json.dumps(catalog, ensure_ascii=False)
-        + "\nBefore using a Skill, call load_skill with its version_id to read its full instructions. "
-          "Skills guide tasks; their executable capabilities are separate tools.\n"
-    )
 
 
 def _require_agent_run_application(agent: Agent) -> None:
@@ -126,7 +107,7 @@ async def enqueue_prepared_agent_run(
     *,
     unified: bool = True,
 ) -> None:
-    from app.application.runs.dispatch import enqueue_agent_run
+    from app.ports.runs import enqueue_agent_run
 
     await enqueue_agent_run(
         run_id,
@@ -307,8 +288,6 @@ async def cancel_agent_run(
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None
     return run_to_response(current, trace_id=current.trace_id)
-
-
 
 
 async def get_agent_run_entity(
@@ -608,8 +587,6 @@ async def regenerate_agent_run_from_source(
     current = await agent_repository.get_agent_run_by_id(db, regenerated.id)
     assert current is not None
     return current
-
-
 
 
 async def regenerate_agent_run(
@@ -1580,7 +1557,7 @@ async def create_agent_run(
     attachment_context = ""
     attachments: list[dict[str, Any]] = []
     if file_ids:
-        from app.application.workflows.uploads.service import (
+        from app.application.uploads.service import (
             resolve_workspace_agent_files,
         )
 

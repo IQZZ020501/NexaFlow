@@ -11,7 +11,7 @@ from app.application.email.delivery import (
 )
 from app.domain.audit.services import record_audit_log
 from app.domain.tools.mcp.service import delete_owned_mcp_servers_for_user
-from app.domain.workflows.uploads import queue_upload_cleanups
+from app.domain.uploads.service import queue_upload_cleanups
 from app.entities.defaults import utc_now
 from app.entities.identity.user import RefreshSession, User
 from app.entities.teams.models import Team, TeamMembership
@@ -709,3 +709,18 @@ async def find_user_by_identity(db: AsyncSession, username: str, email: str) -> 
         status.HTTP_409_CONFLICT,
         "Username and email must identify the same user.",
     )
+
+
+__all__ = [
+    "authenticate_user",
+    "change_password",
+    "change_user_password",
+    "create_user",
+    "delete_user_permanently",
+    "get_me",
+    "get_user",
+    "list_users",
+    "refresh_access_token",
+    "revoke_refresh_token",
+    "update_user",
+]
