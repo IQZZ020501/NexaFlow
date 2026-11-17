@@ -1247,6 +1247,7 @@ def assert_tool_routing_context_is_explicit() -> None:
     )
     run = SimpleNamespace(
         instructions="Use available sources.",
+        application_snapshot={},
         goal="What is the release process?",
         attachment_context="",
     )
@@ -3251,6 +3252,7 @@ def assert_external_agent_access() -> None:
                 "conversation_id",
                 "file_ids",
                 "approval_mode",
+                "request_id",
             }
             public_schema_ref = openapi_payload["paths"][
                 "/api/v1/public/agents/{agent_id}/runs"

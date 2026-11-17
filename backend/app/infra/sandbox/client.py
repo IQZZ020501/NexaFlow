@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.infra.config.settings import Settings
@@ -48,6 +48,7 @@ class ArtifactSandboxResult:
     stdout: str
     stderr: str
     exit_code: int
+    inspection: dict = field(default_factory=dict)
 
 _ERROR_LINE_PATTERN = re.compile(
     r"(?:ModuleNotFoundError|ImportError|NameError|SyntaxError|"
@@ -263,4 +264,5 @@ def _artifact_result(
         stdout=stdout,
         stderr=stderr,
         exit_code=exit_code,
+        inspection=artifact.get("inspection", {}),
     )

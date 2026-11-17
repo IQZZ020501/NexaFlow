@@ -2,12 +2,14 @@
 
 import asyncio
 import base64
+import hashlib
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import tests.support  # noqa: F401
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from tests.support import settings
@@ -164,6 +166,51 @@ async def check():
                     content=b"updated",
                 )
                 assert current_version.artifact_id != latest.artifact_id
+                assert current_version.previous_artifact_id == latest.artifact_id
+                assert latest.previous_artifact_id == old.artifact_id
+                assert (
+                    current_version.content_hash
+                    == hashlib.sha256(b"updated").hexdigest()
+                )
+                assert nested.relative_path == "nested/page.html"
+                assert nested.previous_artifact_id is None
+                # Retained bytes outlive bearer links, but every stable read
+                # rechecks the caller and current publication access.
+                assert (
+                    await service.get_generated_artifact(
+                        db, settings(), old.download_url.rsplit("/", 1)[-1]
+                    )
+                    is None
+                )
+                with patch(
+                    "app.domain.agents.service.get_agent",
+                    AsyncMock(return_value=SimpleNamespace(app_type="agent")),
+                ), patch(
+                    "app.application.agents.access.service.get_workspace_published_application_context",
+                    AsyncMock(),
+                ) as access:
+                    original = await service.get_authorized_artifact(
+                        db, old.artifact_id, SimpleNamespace(id="user")
+                    )
+                    assert original.content == b"<h1>old</h1>"
+                    access.assert_awaited_once()
+                    try:
+                        await service.get_authorized_artifact(
+                            db, old.artifact_id, SimpleNamespace(id="other")
+                        )
+                    except HTTPException as exc:
+                        assert exc.status_code == 404
+                    else:
+                        raise AssertionError("Another caller read a retained artifact")
+                    access.side_effect = HTTPException(403, "Access revoked")
+                    try:
+                        await service.get_authorized_artifact(
+                            db, old.artifact_id, SimpleNamespace(id="user")
+                        )
+                    except HTTPException as exc:
+                        assert exc.status_code == 403
+                    else:
+                        raise AssertionError("Revoked access read a retained artifact")
                 assert (
                     await db.get(ArtifactRow, latest.artifact_id)
                 ).content == b"<h1>latest</h1>"

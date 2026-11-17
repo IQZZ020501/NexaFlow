@@ -435,6 +435,7 @@ class ToolInvocation:
     status: str = "queued"
     attempts: int = 0
     max_attempts: int = 3
+    resource_wait: dict[str, Any] = field(default_factory=dict)
     approved_by_user_id: str | None = None
     approved_at: datetime | None = None
     worker_task_id: str | None = None
@@ -458,6 +459,8 @@ class McpServer:
     workspace_id: str = ""
     name: str = ""
     transport: str = "streamable_http"
+    auth_mode: str = "bearer"
+    long_task_contracts: dict = field(default_factory=dict)
     network_policy: str = "public_only"
     url: str | None = None
     stdio_command: str | None = None

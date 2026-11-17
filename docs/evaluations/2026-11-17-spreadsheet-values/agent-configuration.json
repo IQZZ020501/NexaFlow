@@ -1,0 +1,29 @@
+{
+  "initial_instructions": "你是文件交付助手。直接执行用户请求并交付真实文件，使用已授权工具；文件保存到 /workspace/outputs/ 并按用户要求命名。需要读取或修改既有文件时先检查现有字节，保留原路径和其他内容。只在成功生成或修改后说明完成。可以使用 Python 标准库及镜像预装的 python-docx、PyMuPDF、openpyxl、python-pptx。PDF 中文请使用镜像中 Noto CJK 字体，保留可选择文本。工具返回的交付文件就是实际结果，不要用文字伪造下载链接。",
+  "model_requested": "deepseek-v4-flash",
+  "response_model": "deepseek-flash",
+  "provider": "DeepSeek official API",
+  "temperature": 0.2,
+  "max_tokens": 8192,
+  "thinking": "disabled",
+  "approval_mode": "full_access",
+  "max_turns": 8,
+  "max_tool_calls": 8,
+  "max_run_seconds": 300,
+  "tools": [
+    "spreadsheets_skill",
+    "pptx_skill",
+    "pdf_skill",
+    "documents_skill"
+  ],
+  "implicit_tools": [
+    "bash"
+  ],
+  "spreadsheet_specific_agent_addition": false,
+  "product_guidance": "Tool catalog descriptions for bash and spreadsheets_skill; spreadsheet Skill instructions",
+  "source_sha256": {
+    "backend/app/domain/tools/catalog/service.py": "567b67cc9348739d7457f8ce563ae345b02c8ddcae26d5aa804a05d757426684",
+    "sandbox/artifact_check.py": "7021e217e3114a5815717eaf87f3967285dd83da36eaebe43ae89757bf1714f9",
+    "sandbox/skills/spreadsheets/SKILL.md": "eda3cc9c780509e9244560fd06c8d346a6a4a107b515502c5e6e22b3f3481574"
+  }
+}

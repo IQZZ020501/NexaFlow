@@ -111,6 +111,7 @@ class BuiltinToolAdapter:
                 "python_artifact": "python_artifact_failed",
                 "skill": "skill_failed",
             }[builtin]
+            artifact_inspection = {}
             try:
                 filename = arguments["filename"]
                 artifact_format = artifact_format_from_filename(filename)
@@ -132,6 +133,7 @@ class BuiltinToolAdapter:
                     artifact_content = artifact.content
                     artifact_stdout = artifact.stdout
                     artifact_exit_code = artifact.exit_code
+                    artifact_inspection = artifact.inspection
                 else:
                     supplied_format = arguments.get("format")
                     if (
@@ -196,6 +198,7 @@ class BuiltinToolAdapter:
                         artifact_content = artifact.content
                         artifact_stdout = artifact.stdout
                         artifact_exit_code = artifact.exit_code
+                        artifact_inspection = artifact.inspection
             except WorkflowSandboxBusyError as exc:
                 raise ToolAdapterBusy("File runtime is busy.") from exc
             except ExecutionOutcomeUnknown as exc:
@@ -220,6 +223,8 @@ class BuiltinToolAdapter:
                         artifact_format=artifact_format,
                         filename=filename,
                         content=artifact_content,
+                        invocation_id=context.invocation_id,
+                        inspection=artifact_inspection,
                     )
                     await db.commit()
             except ValueError as exc:
@@ -228,6 +233,10 @@ class BuiltinToolAdapter:
                 "artifact_id": link.artifact_id,
                 "format": link.format,
                 "filename": link.filename,
+                "relative_path": link.relative_path,
+                "content_hash": link.content_hash,
+                "previous_artifact_id": link.previous_artifact_id,
+                "inspection": link.inspection,
                 "download_url": link.download_url,
                 "expires_at": link.expires_at.isoformat(),
                 "size_bytes": link.size_bytes,
@@ -241,8 +250,24 @@ class BuiltinToolAdapter:
                 if isinstance(snapshot.output_schema, dict)
                 else {}
             )
+            if (
+                snapshot.output_schema
+                and snapshot.output_schema.get("additionalProperties") is False
+            ):
+                result_data = {
+                    key: value
+                    for key, value in result_data.items()
+                    if key in output_properties
+                }
             if isinstance(output_properties, dict) and "artifacts" in output_properties:
                 artifact_data["mime_type"] = link.media_type
+                item_schema = output_properties["artifacts"].get("items", {})
+                if item_schema.get("additionalProperties") is False:
+                    artifact_data = {
+                        key: value
+                        for key, value in artifact_data.items()
+                        if key in item_schema.get("properties", {})
+                    }
                 result_data["artifacts"] = [artifact_data]
             return ToolRuntimeResult(
                 ok=True,

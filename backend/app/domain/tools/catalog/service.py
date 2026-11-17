@@ -30,6 +30,16 @@ from app.entities.tools import (
 
 CATALOG_ID_NAMESPACE = UUID("2df58f89-2f5c-4e2b-9545-d50fb806a6db")
 
+_SPREADSHEET_VALUE_GUIDANCE = (
+    "For XLSX deliverables, follow the user's choice of stored values or formulas. "
+    "When numeric amounts, totals or directly readable values are required, calculate "
+    "them first and write actual numbers, not formula strings. Reopen the saved file "
+    "with openpyxl data_only=True and verify those cells before delivery. openpyxl "
+    "and the renderer do not calculate formulas. Preserve formulas when requested; "
+    "inspection.details.uncached_formulas reports cells without a readable cached result. "
+    "Review inspection warnings and correct any mismatch with the user's requirements."
+)
+
 
 BUILTIN_SKILL_DEFINITIONS = (
     (
@@ -75,7 +85,8 @@ BUILTIN_SKILL_DEFINITIONS = (
         "spreadsheets",
         "spreadsheets_skill",
         "Spreadsheets Skill",
-        "Create a formatted XLSX workbook from structured sheet data using the Spreadsheets Skill renderer.",
+        "Create a formatted XLSX workbook from structured sheet data using the Spreadsheets Skill renderer. "
+        + _SPREADSHEET_VALUE_GUIDANCE,
     ),
 )
 
@@ -1022,7 +1033,7 @@ def normalize_mcp_definition(definition: dict[str, Any]) -> dict[str, Any]:
         ),
         annotations=definition.get("annotations"),
     )
-    return {
+    normalized = {
         "name": tool.name,
         "description": tool.description or "",
         "input_schema": tool.input_schema,
@@ -1034,6 +1045,9 @@ def normalize_mcp_definition(definition: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
     }
+    if definition.get("long_task"):
+        normalized["long_task"] = definition["long_task"]
+    return normalized
 
 
 def mcp_function_name_candidates(server_id: str, tool_name: str) -> tuple[str, ...]:
@@ -1151,6 +1165,7 @@ async def reconcile_mcp_discovery(
                         "server_id": server.id,
                         "tool_name": tool_name,
                         "annotations": definition["annotations"],
+                        **({"long_task": definition["long_task"]} if definition.get("long_task") else {}),
                     },
                     definition_hash=definition_hash,
                     created_by_user_id=locked_source.created_by_user_id,
@@ -1651,7 +1666,8 @@ def build_shell_tool(workspace_id: str, created_at: datetime | None = None) -> t
         "Files written there, including self-contained HTML pages, are automatically exported "
         "in artifacts[] with a filename and download_url. Use that URL to deliver the file. "
         "Files and installed Skill packages persist between calls; background processes are stopped after each command. "
-        "Exit status and timeouts are returned as results. Output is limited to 30 KiB."
+        "Exit status and timeouts are returned as results. Output is limited to 30 KiB. "
+        + _SPREADSHEET_VALUE_GUIDANCE
     )
     schema = {"type": "object", "properties": {
         "command": {"type": "string", "minLength": 1, "maxLength": 32768},
@@ -1828,6 +1844,10 @@ def build_artifact_tool(
         "type": "object",
         "properties": {
             "artifact_id": {"type": "string", "maxLength": 36},
+            "relative_path": {"type": ["string", "null"], "maxLength": 512},
+            "content_hash": {"type": ["string", "null"], "maxLength": 64},
+            "previous_artifact_id": {"type": ["string", "null"], "maxLength": 36},
+            "inspection": {"type": "object"},
             "format": {"type": "string", "maxLength": 32},
             "filename": {"type": "string", "maxLength": 120},
             "download_url": {"type": "string", "maxLength": 4096},
@@ -1840,6 +1860,13 @@ def build_artifact_tool(
                     "type": "object",
                     "properties": {
                         "artifact_id": {"type": "string", "maxLength": 36},
+                        "relative_path": {"type": ["string", "null"], "maxLength": 512},
+                        "content_hash": {"type": ["string", "null"], "maxLength": 64},
+                        "previous_artifact_id": {
+                            "type": ["string", "null"],
+                            "maxLength": 36,
+                        },
+                        "inspection": {"type": "object"},
                         "format": {"type": "string", "maxLength": 32},
                         "filename": {"type": "string", "maxLength": 120},
                         "mime_type": {"type": "string", "maxLength": 120},

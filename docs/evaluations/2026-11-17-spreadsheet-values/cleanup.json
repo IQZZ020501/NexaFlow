@@ -1,0 +1,13 @@
+{
+  "own_sandboxes_cleanup": true,
+  "worker_stopped": true,
+  "api_stopped": true,
+  "control_stopped": true,
+  "nexaflow-spreadsheet-values-redis-20261117_removed": true,
+  "nexaflow-spreadsheet-values-db-20261117_removed": true,
+  "business_schema_before": "202611160002",
+  "business_schema_after": "202611160002",
+  "business_model_unchanged": true,
+  "independent_execution_image_removed": true,
+  "private_verification_directory_removed": true
+}

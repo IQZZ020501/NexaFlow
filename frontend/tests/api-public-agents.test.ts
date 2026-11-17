@@ -99,6 +99,37 @@ const conversations = {
 }
 
 describe("public agent API", () => {
+  test("retries a lost create response with the same request identity", async () => {
+    const bodies: string[] = []
+    withFetch((_url, init) => {
+      bodies.push(String(init?.body))
+      if (bodies.length === 1)
+        throw new TypeError("Connection closed after acceptance")
+      return jsonResponse({ id: "accepted-run" })
+    })
+    const accepted = await createPublicAgentRun(
+      "agent-1",
+      "token-1",
+      "research"
+    )
+    expect(accepted.id).toBe("accepted-run")
+    expect(bodies.length).toBe(2)
+    expect(bodies[0]).toBe(bodies[1])
+    expect(JSON.parse(bodies[0]!).request_id).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  test("does not retry a rejected request identity", async () => {
+    let attempts = 0
+    withFetch(() => {
+      attempts++
+      return jsonResponse({ detail: "Conflicting request" }, 409)
+    })
+    await expect(
+      createPublicAgentRun("agent-1", "token-1", "changed")
+    ).rejects.toBeInstanceOf(ApiError)
+    expect(attempts).toBe(1)
+  })
+
   test("deletes a public agent conversation", async () => {
     const requests = capture()
 
@@ -177,10 +208,12 @@ describe("public agent API", () => {
       ["POST", "/api/v1/public/agents/agent-1/runs"],
     ])
     expect(requests[0]?.body).toEqual({
+      request_id: expect.any(String),
       goal: "research",
       approval_mode: "always_ask",
     })
     expect(requests[1]?.body).toEqual({
+      request_id: expect.any(String),
       goal: "continue research",
       conversation_id: "conv-1",
       file_ids: ["file-1"],
@@ -266,7 +299,10 @@ describe("public agent API", () => {
         "/api/v1/public/agents/agent-1/runs/run-1/tool-calls/call-1/reject",
       ],
     ])
-    expect(requests[2]?.body).toEqual({ goal: "edited question" })
+    expect(requests[2]?.body).toEqual({
+      goal: "edited question",
+      request_id: expect.any(String),
+    })
     expect(requests[3]?.body).toEqual({ value: "positive" })
     expect(requests[4]?.body).toEqual({ value: null })
   })

@@ -353,6 +353,8 @@ def external_progress_events(
                 stage=(
                     "preparing"
                     if summary == "agent.preparing_tool_call"
+                    else "waiting_resources"
+                    if summary == "agent.waiting_execution_resources"
                     else event_status
                 ),
                 turn=turn,
@@ -538,7 +540,7 @@ async def sanitize_external_agent_stream(
             }
             _copy_external_stream_metadata(event, sanitized)
             yield sanitized
-        elif event_type in {"run", "complete", "error"} and isinstance(
+        elif event_type in {"run", "recovering", "complete", "error"} and isinstance(
             event.get("run"), dict
         ):
             if event_type in {"complete", "error"}:
@@ -946,7 +948,29 @@ async def create_external_agent_run(
     conversation_id: str | None = None,
     file_ids: list[str] | None = None,
     approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
+    request_id: str | None = None,
 ) -> ExternalAgentRunResponse:
+    from app.application.agents.runs.requests import replay_run_request
+
+    previous, fingerprint = await replay_run_request(
+        db,
+        context.agent.workspace_id,
+        context.agent.id,
+        context.publisher,
+        access_source,
+        consumer_id,
+        request_id,
+        {
+            "goal": goal,
+            "conversation_id": conversation_id,
+            "file_ids": file_ids or [],
+            "approval_mode": DEFAULT_AGENT_APPROVAL_MODE
+            if access_source == "api"
+            else approval_mode,
+        },
+    )
+    if previous is not None:
+        return external_run_to_response(previous)
     await _enforce_rate_limit(settings, context.agent.id, access_source, consumer_id)
     if context.publication is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
@@ -981,6 +1005,8 @@ async def create_external_agent_run(
         attachments=attachments,
         settings=settings,
         approval_mode=approval_mode,
+        request_id=request_id,
+        request_hash=fingerprint,
     )
     await enqueue_prepared_agent_run(
         run.id,
@@ -1060,6 +1086,7 @@ async def regenerate_external_agent_run(
     consumer_id: str,
     settings: Settings,
     goal: str | None = None,
+    request_id: str | None = None,
 ) -> ExternalAgentRunResponse:
     """
     Regenerate a publicly accessible agent run from its source run.
@@ -1089,6 +1116,7 @@ async def regenerate_external_agent_run(
         context.publisher,
         settings,
         goal=goal,
+        request_id=request_id,
     )
     return external_run_to_response(regenerated)
 

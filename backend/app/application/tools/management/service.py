@@ -105,6 +105,8 @@ def _source_response(
     server: McpServerResponse,
 ) -> ToolSourceDetailResponse:
     return ToolSourceDetailResponse(
+        mcp_server_id=server.id,
+        auth_mode=getattr(server, "auth_mode", "bearer"),
         id=source.id,
         workspace_id=source.workspace_id,
         name=source.name,

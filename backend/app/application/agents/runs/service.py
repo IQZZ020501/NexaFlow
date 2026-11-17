@@ -8,7 +8,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from copy import deepcopy
-from datetime import timedelta
+from datetime import UTC, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -81,7 +81,7 @@ from app.infra.db.repositories.agents import repository as agent_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
-from app.infra.execution.profile import execution_profile
+from app.infra.execution.profile import execution_profile, sandbox_resource_profile
 from app.schemas.agent_skills.contracts import AgentSkillDefinition
 from app.schemas.agents.contracts import AgentRunResponse, AgentToolCallResponse
 
@@ -194,6 +194,17 @@ def execution_messages(
             ),
         },
     ]
+    if run.application_snapshot.get("project"):
+        messages[0]["content"] += (
+            "\nThis conversation has a private persistent project. Read-only source files "
+            "are under /project/sources; editable scripts and source work files belong "
+            "under /workspace/project. List those directories to discover their files. "
+            "After each bash command, work files are versioned only if project_saved is true. "
+            "Report project_error and preserve project_conflicts when a version conflict "
+            "prevents saving; never claim an unsaved edit is persistent. Dependency caches "
+            "and running processes are not retained. Deliver final files through "
+            "/workspace/outputs as usual.\n"
+        )
     if context_messages:
         messages.extend(context_messages)
     attachment_context = run.attachment_context
@@ -405,7 +416,14 @@ async def validate_regeneration_source(
         if {
             key: value
             for key, value in source.application_snapshot.items()
-            if key not in {"attachments", "approval_mode", "execution_profile"}
+            if key
+            not in {
+                "attachments",
+                "approval_mode",
+                "execution_profile",
+                "sandbox_requirements",
+                "project",
+            }
         } != {
             "schema_version": version.schema_version,
             "configuration": version.configuration_snapshot,
@@ -509,6 +527,7 @@ async def regenerate_agent_run_from_source(
     *,
     origin: str = "agent",
     goal: str | None = None,
+    request_id: str | None = None,
 ) -> AgentRun:
     """
     Create and enqueue a new agent run from a completed source run.
@@ -523,6 +542,20 @@ async def regenerate_agent_run_from_source(
     Raises:
     	HTTPException: If the conversation already has an active run or the source fails regeneration validation.
     """
+    from app.application.agents.runs.requests import replay_run_request
+
+    previous, fingerprint = await replay_run_request(
+        db,
+        source.workspace_id,
+        source.agent_id,
+        actor,
+        source.access_source,
+        source.consumer_id,
+        request_id,
+        {"regenerated_from_run_id": source.id, "goal": goal},
+    )
+    if previous is not None:
+        return previous
     await validate_regeneration_source(db, source, origin=origin)
     if goal is not None:
         goal = goal.strip()
@@ -546,8 +579,20 @@ async def regenerate_agent_run_from_source(
                 "Only the latest message can be edited.",
             )
     regenerated = build_regenerated_agent_run(source, actor, goal, settings)
+    regenerated.request_id = request_id
+    regenerated.request_hash = fingerprint
+    if source.application_snapshot.get("project"):
+        from app.application.projects.service import project_run_snapshot
+
+        regenerated.application_snapshot["project"] = await project_run_snapshot(
+            db, source.workspace_id, source.application_snapshot["project"]["id"], actor.id
+        )
     try:
         regenerated = await agent_repository.create_agent_run(db, regenerated)
+        if regenerated.application_snapshot.get("project"):
+            from app.application.projects.service import initialize_project_run
+
+            await initialize_project_run(db, regenerated)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -576,6 +621,7 @@ async def regenerate_agent_run(
     workspace_role: str | None,
     settings: Settings,
     goal: str | None = None,
+    request_id: str | None = None,
 ) -> AgentRunResponse:
     """
     Regenerate an agent run from a completed source run.
@@ -606,6 +652,7 @@ async def regenerate_agent_run(
         actor,
         settings,
         goal=goal,
+        request_id=request_id,
     )
     return run_to_response(regenerated, trace_id=regenerated.trace_id)
 
@@ -1005,6 +1052,9 @@ async def prepare_agent_run(
     authorized_by_parent: bool = False,
     settings: Settings | None = None,
     approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
+    request_id: str | None = None,
+    request_hash: str | None = None,
+    project_id: str | None = None,
 ) -> tuple[AgentRun, Any]:
     """
     Prepare a queued agent run using the selected agent configuration, resources, model, tools, and conversation.
@@ -1239,6 +1289,23 @@ async def prepare_agent_run(
             "This conversation already has an active run.",
         )
     runtime_policy = AgentRuntimePolicy.from_settings(settings, shell=any(item.execution_spec.get("builtin") == "shell" for item in tool_snapshots))
+    from app.infra.db.repositories.tools import mcp as mcp_repository
+
+    needs_stdio = False
+    for server_id in {
+        tool.execution_spec.get("server_id")
+        for tool in tool_snapshots
+        if tool.kind == "mcp"
+    }:
+        server = await mcp_repository.get_mcp_server_by_id(db, server_id)
+        needs_stdio = needs_stdio or bool(server and server.transport == "stdio")
+    resource_profiles = [
+        sandbox_resource_profile(
+            [tool_snapshot_payload(item) for item in tool_snapshots], skill_snapshots
+        )
+    ]
+    if needs_stdio:
+        resource_profiles.append("standard")
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,
@@ -1263,13 +1330,20 @@ async def prepare_agent_run(
             "resources": resource_snapshot,
             "attachments": attachments or [],
             "approval_mode": approval_mode,
+            "sandbox_requirements": {
+                "schema_version": 1,
+                "profiles": resource_profiles,
+                "max_stdio_hosts": 1 if needs_stdio else 0,
+            },
             "execution_profile": execution_profile(
                 settings or Settings.from_env(require_bootstrap=False)
             ),
         },
         application_snapshot_hash=snapshot_hash,
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
-        skill_snapshots=[agent_skill_snapshot_payload(item) for item in skill_snapshots],
+        skill_snapshots=[
+            agent_skill_snapshot_payload(item) for item in skill_snapshots
+        ],
         model_id=model.id,
         model_name=model.name,
         max_runtime_seconds=runtime_policy.max_runtime_seconds,
@@ -1291,9 +1365,21 @@ async def prepare_agent_run(
         context_summary="",
         model_usage={},
     )
+    run.request_id = request_id
+    run.request_hash = request_hash
+    if project_id:
+        if access_source != "console" or authorized_by_parent:
+            raise ValueError("Private projects require a direct console Run.")
+        from app.application.projects.service import project_run_snapshot
+
+        run.application_snapshot["project"] = await project_run_snapshot(db, workspace_id, project_id, actor.id)
     if persist:
         try:
             run = await agent_repository.create_agent_run(db, run)
+            if project_id:
+                from app.application.projects.service import initialize_project_run
+
+                await initialize_project_run(db, run)
             await db.commit()
             run = await agent_repository.refresh_agent_run(db, run)
         except IntegrityError as exc:
@@ -1330,6 +1416,7 @@ async def stream_agent_run(
     live_cursor = live_after
     terminal_statuses = {"succeeded", "failed", "cancelled"}
     current = run
+    recovery_notified = False
     reader = AgentLiveStreamReader(settings, run.id)
     loop = asyncio.get_running_loop()
     next_database_poll = 0.0
@@ -1357,45 +1444,27 @@ async def stream_agent_run(
                 if current is None:
                     return
                 lease_expires = current.lease_expires_at
-                if (
+                expired = (
                     current.status not in terminal_statuses
                     and lease_expires is not None
-                ):
-                    now = utc_now()
-                    if lease_expires.tzinfo is None:
-                        now = now.replace(tzinfo=None)
-                    if lease_expires <= now:
-                        # The executor holding this run has lost its lease
-                        # (crashed or hung) and nothing has marked the run
-                        # terminal. Drain any live events still buffered so a
-                        # merely lagging heartbeat does not false-positive;
-                        # otherwise end the stream with an explicit error
-                        # instead of long-polling forever.
-                        live_events = await reader.read(live_cursor, 1)
-                        if live_events:
-                            for live_sequence, event in live_events:
-                                live_cursor = live_sequence
-                                if event.get("type") in LIVE_EVENT_TYPES:
-                                    yield {
-                                        **event,
-                                        "live_sequence": live_cursor,
-                                    }
-                        else:
-                            failed = run_to_response(
-                                current,
-                                trace_id=current.trace_id,
-                            ).model_dump(mode="json")
-                            failed["status"] = "failed"
-                            failed["last_error"] = (
-                                "Agent executor lost its lease; "
-                                "the run was interrupted."
-                            )
-                            yield {
-                                "type": "error",
-                                "sequence": cursor,
-                                "run": failed,
-                            }
-                            return
+                    and (
+                        lease_expires.replace(tzinfo=UTC)
+                        if lease_expires.tzinfo is None
+                        else lease_expires
+                    )
+                    <= utc_now()
+                )
+                if expired and not recovery_notified:
+                    # A transport observes durable state. Lease recovery alone
+                    # cannot declare a business failure or stop observation.
+                    yield {
+                        "type": "recovering",
+                        "sequence": cursor,
+                        "run": run_to_response(
+                            current, trace_id=current.trace_id
+                        ).model_dump(mode="json"),
+                    }
+                recovery_notified = expired
                 next_database_poll = loop.time() + settings.agent_event_poll_seconds
                 for row in rows:
                     assert row.id is not None
@@ -1466,7 +1535,32 @@ async def create_agent_run(
     conversation_id: str | None = None,
     file_ids: list[str] | None = None,
     approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
+    request_id: str | None = None,
+    project_id: str | None = None,
 ) -> Any:
+    from app.application.agents.runs.requests import replay_run_request
+
+    previous, fingerprint = await replay_run_request(
+        db,
+        workspace_id,
+        agent_id,
+        actor,
+        "console",
+        actor.id,
+        request_id,
+        {
+            "goal": goal,
+            "conversation_id": conversation_id,
+            "file_ids": file_ids or [],
+            "approval_mode": approval_mode,
+            **({"project_id": project_id} if project_id else {}),
+        },
+    )
+    if previous is not None:
+        return run_to_response(previous, trace_id=previous.trace_id)
+    from app.application.projects.service import resolve_conversation_project
+
+    project_id = await resolve_conversation_project(db, workspace_id, agent_id, actor.id, conversation_id, project_id)
     attachment_context = ""
     attachments: list[dict[str, Any]] = []
     if file_ids:
@@ -1495,6 +1589,9 @@ async def create_agent_run(
         attachments=attachments,
         settings=settings,
         approval_mode=approval_mode,
+        request_id=request_id,
+        request_hash=fingerprint,
+        project_id=project_id,
     )
     await enqueue_prepared_agent_run(
         run.id,

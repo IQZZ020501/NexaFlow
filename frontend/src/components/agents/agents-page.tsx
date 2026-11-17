@@ -1,8 +1,10 @@
 "use client"
 
 import * as React from "react"
+import { isStaleRunSnapshot } from "@/lib/run-state"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import {
   BotIcon,
@@ -240,6 +242,7 @@ export function isAgentListLoading(
 }
 
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
+  if (isStaleRunSnapshot(pendingRun, liveRun)) return pendingRun
   const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
     liveRun.status
   )
@@ -282,7 +285,7 @@ export function mergeAgentRunStreamEvent(
   streamEvent: AgentRunStreamEvent,
   placeholderId?: string
 ): AgentRun[] {
-  if (streamEvent.type === "run") {
+  if (streamEvent.type === "run" || streamEvent.type === "recovering") {
     return mergeAgentRunSnapshot(runs, streamEvent.run, placeholderId)
   }
   if (streamEvent.type === "process") {
@@ -671,6 +674,9 @@ export function AgentsPage({
   const [toolCatalog, setToolCatalog] =
     React.useState<ToolCatalogState>(EMPTY_TOOL_CATALOG)
   const [runs, setRuns] = React.useState<AgentRun[]>([])
+  const [projectChoice, setProjectChoice] = React.useState<{ key: string; id: string | null } | null>(null)
+  const projectChoiceKey = `${selectedWorkspaceId}:${selectedAgentId}`
+  const selectedProjectId = projectChoice?.key === projectChoiceKey ? projectChoice.id : null
   const [toolCallsByRun, setToolCallsByRun] = React.useState<
     Record<string, AgentToolCall[]>
   >({})
@@ -1399,8 +1405,7 @@ export function AgentsPage({
         image_model_id:
           form.imageModelId ||
           models.find(
-            (model) =>
-              model.model_type === "IMAGE" && model.status === "active"
+            (model) => model.model_type === "IMAGE" && model.status === "active"
           )?.id ||
           null,
         instructions: form.instructions,
@@ -1749,6 +1754,7 @@ export function AgentsPage({
       agent_id: selectedAgent.id,
       requested_by_user_id: me?.user.id ?? "",
       conversation_id: conversationId,
+      project_id: runs.length ? runs[0].project_id : selectedProjectId,
       goal: nextQuestion,
       attachments: agentFiles.map(runAttachmentFromFile),
       model_id: selectedAgent.model_id,
@@ -1837,7 +1843,8 @@ export function AgentsPage({
         askAbortController.signal,
         conversationId,
         uploaded.map((item) => item.id),
-        approvalMode
+        approvalMode,
+        runs.length ? runs[0].project_id : selectedProjectId
       )
       setAgentFiles([])
     } catch (error) {
@@ -2056,6 +2063,7 @@ export function AgentsPage({
     activeConversationIdRef.current = conversationId
     askAbortController?.abort()
     setRuns([])
+    setProjectChoice(null)
     setToolCallsByRun({})
     setQuestion("")
     setAgentFiles([])
@@ -2191,6 +2199,8 @@ export function AgentsPage({
             question={question}
             setQuestion={setQuestion}
             approvalMode={approvalMode}
+            projectId={selectedProjectId}
+            onProjectChange={(id) => setProjectChoice({ key: projectChoiceKey, id })}
             onApprovalModeChange={setApprovalMode}
             files={agentFiles}
             setFiles={setAgentFiles}
@@ -2252,6 +2262,8 @@ export function AgentsPage({
             {t("编排业务流程、知识库和模型能力，构建可运行的 AI 应用。")}
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <Button asChild variant="outline"><Link href="/app/projects">{t("项目文件")}</Link></Button>
         <Button
           type="button"
           onClick={openCreateDialog}
@@ -2260,6 +2272,7 @@ export function AgentsPage({
           <PlusIcon data-icon="inline-start" />
           {t("新建应用")}
         </Button>
+        </div>
       </div>
       {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
 

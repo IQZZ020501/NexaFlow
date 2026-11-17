@@ -887,13 +887,29 @@ async def _execute_claimed_agent_run(
         async with get_session_factory()() as db:
             await require_pinned_skill_access(db, run.workspace_id, snapshot)
 
+    from app.application.agents.runs.history import (
+        conversation_references,
+        read_conversation_history,
+    )
     from app.application.agents.tools.results import read_run_tool_result
 
     async def result_reader(result_id: str, offset: int, limit: int):
         return await read_run_tool_result(run, result_id, offset, limit)
 
+    async def history_reader(source_run_id, field, offset, limit, result_id):
+        return await read_conversation_history(
+            run, source_run_id, field, offset, limit, result_id
+        )
+
+    async def reference_source():
+        return await conversation_references(run)
+
     registry = CapabilityRegistry(
-        extensions, scope.skill_snapshots, authorize_skill, result_reader=result_reader
+        extensions,
+        scope.skill_snapshots,
+        authorize_skill,
+        result_reader=result_reader,
+        history_reader=history_reader,
     )
     chat_model = build_chat_model(settings, scope.model)
 
@@ -907,6 +923,7 @@ async def _execute_claimed_agent_run(
             chat_model, _configured_context_window(scope.model, chat_model)
         ),
         session_inputs,
+        reference_source,
     )
     tools = registry.tools
     base_messages = execution_messages(

@@ -178,6 +178,9 @@ def test_celery_registers_one_task_per_job_type() -> None:
     assert registered == {
         "app.agents.run",
         "app.email.send",
+        "app.mcp.revoke",
+        "app.mcp.cancel_tasks",
+        "app.execution.wake",
         "app.knowledge.run_task",
         "app.maintenance.run",
         "app.storage.cleanup",

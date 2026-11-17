@@ -53,6 +53,11 @@ async def get_active_artifact(
     return mapping.to_entity(GeneratedArtifact, row) if row is not None else None
 
 
+async def get_artifact(db: AsyncSession, artifact_id: str) -> GeneratedArtifact | None:
+    row = await db.get(GeneratedArtifactOrm, artifact_id)
+    return mapping.to_entity(GeneratedArtifact, row) if row is not None else None
+
+
 async def delete_expired_artifacts(db: AsyncSession, now: datetime) -> None:
     await db.execute(
         delete(GeneratedArtifactOrm).where(

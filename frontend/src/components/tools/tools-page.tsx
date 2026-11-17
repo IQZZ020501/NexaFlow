@@ -34,6 +34,8 @@ import { ResourceFolderTree } from "@/components/resource-folders/resource-folde
 import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
+import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
+import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
 import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
 import { SkillDialog } from "@/components/tools/skill-dialog"
 import {
@@ -224,6 +226,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     tool: ToolSummary | null
   }>({ open: false, tool: null })
   const [mcpDialogOpen, setMcpDialogOpen] = React.useState(false)
+  const [oauthSource, setOAuthSource] = React.useState<ToolSourceDetail | null>(null)
+  const [taskSource, setTaskSource] = React.useState<ToolSourceDetail | null>(null)
   const [skillDialogOpen, setSkillDialogOpen] = React.useState(false)
   const [workspaceSkills, setWorkspaceSkills] = React.useState<AgentSkill[]>([])
   const [editingSkill, setEditingSkill] = React.useState<
@@ -1033,6 +1037,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         <CardMoreMenu
                           label={t("管理来源 {name}", { name: source.name })}
                         >
+                          {source.mcp_server_id && source.transport !== "stdio" ? <DropdownMenuItem onSelect={() => setOAuthSource(source)}>{t("OAuth 连接")}</DropdownMenuItem> : null}
+                          {source.mcp_server_id && source.transport !== "stdio" ? <DropdownMenuItem onSelect={() => setTaskSource(source)}>{t("长任务契约")}</DropdownMenuItem> : null}
                           <DropdownMenuItem
                             disabled={Boolean(busyId)}
                             onSelect={() => void refreshSource(source)}
@@ -1389,6 +1395,8 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         }}
         onError={(value) => message("error", value)}
       />
+      {oauthSource?.mcp_server_id ? <McpOAuthDialog key={oauthSource.id} token={accessToken} workspaceId={workspaceId} serverId={oauthSource.mcp_server_id} onClose={() => setOAuthSource(null)} onChanged={() => void load()} /> : null}
+      {taskSource?.mcp_server_id ? <McpLongTasksDialog key={taskSource.id} token={accessToken} workspaceId={workspaceId} serverId={taskSource.mcp_server_id} onClose={() => setTaskSource(null)} onChanged={() => void load()} /> : null}
       <SkillDialog
         key={`${workspaceId}:${editingSkill?.id ?? "new"}:${skillDialogOpen}`}
         open={skillDialogOpen}

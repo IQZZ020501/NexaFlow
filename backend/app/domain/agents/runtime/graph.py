@@ -27,6 +27,7 @@ from app.domain.agents.runtime.session import AgentSession
 from app.domain.agents.runtime.state import AgentState, PendingToolCall
 from app.domain.agents.runtime.tools import (
     AgentExecutionPaused,
+    AgentToolBusy,
     AgentToolResult,
     agent_tool_metadata,
     is_parallel_safe,
@@ -800,6 +801,21 @@ async def execute_tool_call(
                     and prepared.metadata.get("policy_mode") != "read_only"
                 ),
             )
+        except AgentToolBusy as exc:
+            if exc.resource_wait:
+                event = callback.tool_event(
+                    turn=turn,
+                    tool_name=prepared.call["name"],
+                    call_id=prepared.call["id"],
+                    metadata=prepared.metadata,
+                    input_value=input_value,
+                )
+                event.update(
+                    summary="agent.waiting_execution_resources",
+                    output={"resource_wait": exc.resource_wait},
+                )
+                await callback.process(event)
+            raise
         except AgentExecutionPaused:
             raise
         except Exception:

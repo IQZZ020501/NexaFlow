@@ -1,12 +1,17 @@
 from typing import Annotated
 from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_settings
-from app.application.artifacts.service import get_generated_artifact
+from app.api.deps import get_settings, require_password_changed
+from app.application.artifacts.service import (
+    get_authorized_artifact,
+    get_generated_artifact,
+)
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
 from app.schemas.artifacts import ArtifactDownloadRequest
@@ -23,13 +28,28 @@ async def _download_response(
     if artifact is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact not found.")
 
+    return artifact_response(artifact)
+
+
+def artifact_response(artifact) -> Response:
     headers = {
+        "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
         "Content-Disposition": (
             "attachment; filename*=UTF-8''" + quote(artifact.filename, safe="")
         ),
     }
+    try:
+        headers["X-NexaFlow-Artifact-ID"] = str(UUID(artifact.id))
+        if artifact.run_id:
+            headers["X-NexaFlow-Run-ID"] = str(UUID(artifact.run_id))
+    except ValueError:
+        pass
+    if artifact.content_hash:
+        headers["ETag"] = f'"{artifact.content_hash}"'
+    if artifact.inspection.get("status") == "passed":
+        headers["X-NexaFlow-File-Check"] = artifact.inspection["validator"]
     if artifact.format == "html":
         headers["Content-Security-Policy"] = (
             "sandbox; default-src 'none'; style-src 'unsafe-inline'; "
@@ -41,6 +61,15 @@ async def _download_response(
         media_type=artifact.media_type,
         headers=headers,
     )
+
+
+@router.get("/{artifact_id}/content", response_class=Response)
+async def download_authorized_artifact(
+    artifact_id: str,
+    user: Annotated[User, Depends(require_password_changed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    return artifact_response(await get_authorized_artifact(db, artifact_id, user))
 
 
 @router.post("/download", response_class=Response)

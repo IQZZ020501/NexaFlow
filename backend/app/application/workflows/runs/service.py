@@ -22,6 +22,7 @@ from app.domain.agents.models import (
     queued_agent_run_status,
 )
 from app.domain.agents.service import ACTIVE_STATUS, get_agent_model
+from app.domain.tools.execution import sandbox_requirements
 from app.domain.tools.runtime import (
     tool_snapshot_from_payload,
     tool_snapshot_payload,
@@ -548,6 +549,7 @@ async def create_workflow_run(
             "graph_hash": graph_hash(parsed),
             "resources": resource_snapshot,
             "execution_profile": execution_profile(settings),
+            "sandbox_requirements": await sandbox_requirements(db, [tool_snapshot_payload(item) for item in tool_snapshots], []),
         },
         tool_snapshots=[tool_snapshot_payload(item) for item in tool_snapshots],
         # WorkflowRunDetail carries the draft/published source. The shared Run

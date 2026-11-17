@@ -354,6 +354,14 @@ class AgentApiCredential(Base):
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "agent_id",
+            "access_source",
+            "consumer_id",
+            "request_id",
+            name="uq_agent_runs_request",
+        ),
         ForeignKeyConstraint(
             ["workspace_id", "agent_id"],
             ["agents.workspace_id", "agents.id"],
@@ -462,6 +470,8 @@ class AgentRun(Base):
         index=True,
     )
     depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     goal: Mapped[str] = mapped_column(Text, nullable=False)
     attachment_context: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""

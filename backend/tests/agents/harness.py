@@ -551,16 +551,15 @@ async def assert_follow_up_queue():
             }
         ],
     } in emitted
-    history = _run_messages(
-        AgentRun(
-            status="succeeded",
-            goal="Start",
-            result=result.content,
-            checkpoint={"harness": result.harness},
-        )
+    history_run = AgentRun(
+        status="succeeded",
+        goal="Start",
+        result=result.content,
+        checkpoint={"harness": result.harness},
     )
+    history = _run_messages(history_run)
     assert [item["content"] for item in history] == [
-        "Start",
+        f"Historical source run_id: {history_run.id}\nStart",
         "First answer",
         "Then summarize",
         "Final summary",
@@ -763,7 +762,7 @@ async def assert_durable_session_memory(run_id):
             limit=7,
         )
         assert history and [item["content"] for item in _run_messages(history[-1])] == [
-            "Start",
+            f"Historical source run_id: {history[-1].id}\nStart",
             "Completed.",
             "Use Chinese",
             "Then summarize",

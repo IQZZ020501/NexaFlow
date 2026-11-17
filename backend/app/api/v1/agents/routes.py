@@ -458,6 +458,8 @@ async def create_workspace_agent_run(
         conversation_id=payload.conversation_id,
         file_ids=payload.file_ids,
         approval_mode=payload.approval_mode,
+        request_id=payload.request_id,
+        project_id=payload.project_id,
     )
 
 
@@ -533,6 +535,7 @@ async def regenerate_workspace_agent_run(
         context.membership_role,
         settings,
         payload.goal if payload else None,
+        request_id=payload.request_id if payload else None,
     )
 
 

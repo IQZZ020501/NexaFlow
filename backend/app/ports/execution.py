@@ -24,6 +24,17 @@ class ExecutionOutcomeUnknown(ExecutionError):
 class ExecutionBusy(ExecutionNotStarted):
     """Sandbox capacity is exhausted; the same request may be retried later."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str = "environment_owned",
+        resources: dict | None = None,
+    ):
+        super().__init__(message)
+        self.reason = reason
+        self.resources = resources or {}
+
 
 @dataclass
 class ExecutionAttempt:
@@ -61,12 +72,20 @@ class ExecutionPlatform(Protocol):
 
     async def reclaim_sessions(self) -> None: ...
 
-    def mcp_host(self, config: dict, domains: list[str], owner_key: str) -> AbstractAsyncContextManager[ExecutionBridge]: ...
+    def mcp_host(
+        self, config: dict, domains: list[str], owner_key: str
+    ) -> AbstractAsyncContextManager[ExecutionBridge]: ...
 
-    async def read_session_file(self, workspace_id: str, run_id: str, path: str, max_bytes: int) -> bytes: ...
+    async def read_session_file(
+        self, workspace_id: str, run_id: str, path: str, max_bytes: int
+    ) -> bytes: ...
 
 
 def build_execution_platform(settings: "Settings") -> ExecutionPlatform:
+    if settings.opensandbox_hosts:
+        from app.adapters.execution.placement import PlacedExecution
+
+        return PlacedExecution(settings)
     from app.adapters.execution.opensandbox import OpenSandboxExecution
 
     return OpenSandboxExecution(settings)

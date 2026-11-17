@@ -3261,9 +3261,7 @@ describe("AgentsPage run flows", () => {
       screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
-    fireEvent.click(
-      await screen.findByRole("button", { name: "启用完全访问" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "启用完全访问" }))
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
@@ -3712,7 +3710,10 @@ describe("AgentsPage run flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
 
     await screen.findByText("Edited answer")
-    expect(regenerateBody).toEqual({ goal: "Edited second question" })
+    expect(regenerateBody).toEqual({
+      goal: "Edited second question",
+      request_id: expect.any(String),
+    })
     expect(screen.getByText("First question")).toBeTruthy()
   })
 

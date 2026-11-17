@@ -27,6 +27,8 @@ class ToolInvocationContext:
     # relies on the workspace fallback (its single active image model).
     image_model_id: str | None = None
     approval_required: bool | None = None
+    worker_task_id: str | None = None
+    run_worker_task_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(

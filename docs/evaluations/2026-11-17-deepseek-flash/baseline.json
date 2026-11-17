@@ -1,0 +1,626 @@
+{
+  "schema_version": 2,
+  "gate": "failed",
+  "summary": {
+    "passed": 4,
+    "total": 5,
+    "pass_rate": 0.8,
+    "minimum_pass_rate": 1.0,
+    "required_failures": [
+      "csv-to-xlsx#1"
+    ]
+  },
+  "results": [
+    {
+      "case_id": "csv-to-xlsx",
+      "category": "file-data",
+      "sample": 1,
+      "required": true,
+      "passed": false,
+      "failures": [
+        "turn:1:file:1:cell:3",
+        "turn:1:file:1:cell:4",
+        "turn:1:file:1:cell:5",
+        "turn:2:file:1:cell:2",
+        "turn:2:file:1:cell:3",
+        "turn:2:file:1:cell:4",
+        "turn:3:file:1:cell:3",
+        "turn:3:file:1:cell:4",
+        "turn:3:file:1:cell:5"
+      ],
+      "run_id": "78c14738-6847-4ce0-a260-c9c8e770ce67",
+      "turns": [
+        {
+          "run_id": "9a75fdb2-8bfc-4996-9c37-6d8a33d240b6",
+          "duration_ms": 16642,
+          "model_usage": {
+            "model_calls": 3,
+            "reported_model_calls": 3,
+            "input_tokens": 9851,
+            "output_tokens": 1067,
+            "total_tokens": 10918
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "d261c9d2-abca-4dd5-ab42-83f1e5cc137f",
+              "sha256": "6fa759316974888ead1b249bd5f5d17139417c4c62e254a76603aa06955923ea",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        },
+        {
+          "run_id": "6834ac1f-18fe-40a7-9fc6-3ac26ca87186",
+          "duration_ms": 14337,
+          "model_usage": {
+            "model_calls": 3,
+            "reported_model_calls": 3,
+            "input_tokens": 12113,
+            "output_tokens": 704,
+            "total_tokens": 12817
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "1fd11b76-a09d-486f-b790-8e4ba19ea868",
+              "sha256": "49f2c6020fde591a8f1b9cdd5b34818ff1161f3d68dfab7b8a615b3cef5b0029",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        },
+        {
+          "run_id": "78c14738-6847-4ce0-a260-c9c8e770ce67",
+          "duration_ms": 14726,
+          "model_usage": {
+            "model_calls": 3,
+            "reported_model_calls": 3,
+            "input_tokens": 13364,
+            "output_tokens": 741,
+            "total_tokens": 14105
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "500d89b7-7bc5-4af5-8419-bd0e6f47d4f1",
+              "sha256": "fe1ef778690a3ddf7c8ef694cc2ebf577974e36f23ec8df7a02bf7f1b033fc5e",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "chinese-docx",
+      "category": "file-report",
+      "sample": 1,
+      "required": true,
+      "passed": true,
+      "failures": [],
+      "run_id": "445b81cb-b72c-4ac0-ad06-b200a6da8ca9",
+      "turns": [
+        {
+          "run_id": "445b81cb-b72c-4ac0-ad06-b200a6da8ca9",
+          "duration_ms": 11212,
+          "model_usage": {
+            "model_calls": 2,
+            "reported_model_calls": 2,
+            "input_tokens": 6852,
+            "output_tokens": 626,
+            "total_tokens": 7478
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "41bd58e4-5daf-4e8c-aeca-38e87d16e1fb",
+              "sha256": "9876d2e9455c3912e938739c8bb74dba7ede8b63e78f7ec58d1bc7720fc89f52",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "chinese-pdf",
+      "category": "file-report",
+      "sample": 1,
+      "required": true,
+      "passed": true,
+      "failures": [],
+      "run_id": "81024c6b-dfb6-4532-a1c1-3b6fa1086c5b",
+      "turns": [
+        {
+          "run_id": "81024c6b-dfb6-4532-a1c1-3b6fa1086c5b",
+          "duration_ms": 9458,
+          "model_usage": {
+            "model_calls": 2,
+            "reported_model_calls": 2,
+            "input_tokens": 6573,
+            "output_tokens": 364,
+            "total_tokens": 6937
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "3e6b1c25-b612-4eaf-b060-0b6daeb84894",
+              "sha256": "955bc007bb6c8acaa038b0404f0b34b987057c1808c25dda32fdc88d3113ab16",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "source-to-pptx",
+      "category": "file-presentation",
+      "sample": 1,
+      "required": true,
+      "passed": true,
+      "failures": [],
+      "run_id": "fbed2326-1215-49dd-b15d-77a383e23e6e",
+      "turns": [
+        {
+          "run_id": "fbed2326-1215-49dd-b15d-77a383e23e6e",
+          "duration_ms": 25904,
+          "model_usage": {
+            "model_calls": 4,
+            "reported_model_calls": 4,
+            "input_tokens": 16764,
+            "output_tokens": 3571,
+            "total_tokens": 20335
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "5090bb9c-c1aa-473c-9694-c10f4ad93897",
+              "sha256": "265f98a8e201858b0bb526873325845e03d56f530d55198f2a6f5268d632b524",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "edit-a-b-a",
+      "category": "file-history",
+      "sample": 1,
+      "required": true,
+      "passed": true,
+      "failures": [],
+      "run_id": "eeb71a0b-cb23-44a4-83d8-4f477f5f8ed1",
+      "turns": [
+        {
+          "run_id": "d129500b-1478-49fb-a41b-215f84a25a1f",
+          "duration_ms": 9177,
+          "model_usage": {
+            "model_calls": 2,
+            "reported_model_calls": 2,
+            "input_tokens": 6768,
+            "output_tokens": 481,
+            "total_tokens": 7249
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "24715eb9-162c-42d7-bdd0-b88ca3ea295c",
+              "sha256": "3767f4673fb903f27d024fc1d06f2d5a57852a5ecd48d94eb9958238293a07b9",
+              "inspection_passed": true,
+              "readable": true
+            },
+            {
+              "artifact_id": "eada2ea4-6e5f-49c0-b6c6-573bc665eeab",
+              "sha256": "20c85390a242325302caac2c4279187b40e69a66e64238af1253b32924ce23e1",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        },
+        {
+          "run_id": "ea542a70-ea74-4780-a08b-57015bc5258e",
+          "duration_ms": 15109,
+          "model_usage": {
+            "model_calls": 3,
+            "reported_model_calls": 3,
+            "input_tokens": 11183,
+            "output_tokens": 349,
+            "total_tokens": 11532
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "3bd472cf-0d97-45f2-a7cd-0ca87fbb2927",
+              "sha256": "e95d48a8b04eb08fb4d9a8b7d63599d01628564350397b8e937b0599695ab62c",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        },
+        {
+          "run_id": "eeb71a0b-cb23-44a4-83d8-4f477f5f8ed1",
+          "duration_ms": 15018,
+          "model_usage": {
+            "model_calls": 3,
+            "reported_model_calls": 3,
+            "input_tokens": 12059,
+            "output_tokens": 421,
+            "total_tokens": 12480
+          },
+          "execution_manifest": {
+            "schema_version": 1,
+            "application_hash": "e61d301283c193026ed94c4c73e9eac279de22b6a465b637ae731d9580a29406",
+            "model": {
+              "id": "47acfc6a-5537-4447-8d98-f2dc9e6acf2b",
+              "name": "DeepSeek Flash baseline",
+              "provider": "deepseek",
+              "fingerprint": "37337818f255969577ea0e846060a2c1ab1503dc0a8400d86b61cb6f5e385334"
+            },
+            "tools": [
+              {
+                "tool_id": "0df5ada8-5b89-560c-a085-0054e1305ffa",
+                "version_id": "62aa2233-ed96-5958-87f9-ab33d52bec71",
+                "definition_hash": "b209da294f2975d96a6d8bb15621f5afa6466054fbe037d44053ca2fd6936050"
+              },
+              {
+                "tool_id": "1e48eb30-6783-574f-8079-8b5d8553523a",
+                "version_id": "eebcd9af-1e26-51b7-8cb4-d1ff13c42856",
+                "definition_hash": "1e8a83c054d59d7e0b73edf4245c203905ea411488f77b0491051ff7af549684"
+              },
+              {
+                "tool_id": "a98866f9-4cdb-537f-94b1-fe587e71c38a",
+                "version_id": "430fe05a-754f-59c3-9d50-2d6744d5204a",
+                "definition_hash": "6e110df7836fa4ee30abf49e7fa5f1bbd1bb0597e48c8f201c3120e94cf5757d"
+              },
+              {
+                "tool_id": "ebc5775d-a0b3-5283-885a-5ade9d43a45d",
+                "version_id": "798daf06-37f4-5de7-936d-722c5671f475",
+                "definition_hash": "36eed560e7967bfabc62c33560e8887918557bdb9927574e756ab298a8dc88b4"
+              },
+              {
+                "tool_id": "b9b22242-de13-526f-a59b-9835c8a7b22f",
+                "version_id": "74a1f2b5-418e-5af2-8f37-0a1a4c3f2d81",
+                "definition_hash": "8108df0fdaeaa63760cbec9a6482fbba1198d773ecfc2c829fe843811d37332f"
+              }
+            ],
+            "skills": [],
+            "execution_fingerprint": "e1618070d10c187df9eef6aa53fdcbf9ed96ddb7a30bb64eda761f13cde8f95e"
+          },
+          "files": [
+            {
+              "artifact_id": "2eade1c4-8389-4ef3-bf12-020ba7e17f86",
+              "sha256": "2b30ac72034ac23ef50a63d50d4f882e389aff86149e78fc6c4206440d4d2272",
+              "inspection_passed": true,
+              "readable": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "baseline": {
+    "date": "2026-11-17",
+    "provider": "DeepSeek official API",
+    "requested_model": "deepseek-v4-flash",
+    "temperature": 0.2,
+    "max_output_tokens_per_call": 8192,
+    "thinking": "disabled",
+    "approval_mode": "full_access",
+    "environment": "isolated PostgreSQL/Redis; ordinary Docker OpenSandbox; no external tools",
+    "budget_currency": "CNY",
+    "budget_upper_bound": 5,
+    "tool_names": [
+      "spreadsheets_skill",
+      "pptx_skill",
+      "pdf_skill",
+      "documents_skill"
+    ]
+  }
+}

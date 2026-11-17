@@ -8,13 +8,60 @@ from sqlalchemy.exc import IntegrityError
 
 from app.entities.defaults import utc_now
 from app.entities.execution import ExecutionSession
+from app.infra.db.repositories.execution import placements
 from app.infra.db.repositories.execution import sessions as repository
 from app.infra.db.session import get_session_factory
+from app.infra.execution.placement import host_fingerprint, require_host
 from app.infra.execution.profile import execution_profile, require_execution_profile
 from app.ports.execution import ExecutionBusy, ExecutionNotStarted
 
 
 class SessionStore:
+    async def admit(self, settings, session, scope, reserve, *, intent=None):
+        """Serialize admission and persist intent before any external creation."""
+        async with get_session_factory()() as db:
+            await repository.lock_capacity(
+                db,
+                "nexaflow:execution-placement"
+                if settings.opensandbox_hosts
+                else settings.opensandbox_url,
+            )
+            if session is not None:
+                info = await repository.run_for_execution(
+                    db, scope.workspace_id, scope.run_id
+                )
+                if (
+                    not info
+                    or info[0].deadline_at <= utc_now()
+                    or (
+                        scope.worker_task_id is not None
+                        and info[0].worker_task_id != scope.worker_task_id
+                    )
+                ):
+                    raise ExecutionBusy("Run execution lease was lost.")
+            token, reservation = await reserve(
+                await repository.capacity_records(db, utc_now())
+            )
+            if session is not None:
+                saved = await repository.update_owned(
+                    db,
+                    session,
+                    session.holder,
+                    capacity_token=token,
+                    capacity_reservation=reservation,
+                    creation_pending=True,
+                )
+                if not saved:
+                    raise ExecutionBusy("Run sandbox lease was lost.")
+            elif intent is not None:
+                await placements.create(db, intent)
+            await db.commit()
+        if session is not None:
+            session.capacity_token = token
+            session.capacity_reservation = reservation
+            session.creation_pending = True
+        return token
+
     async def acquire(self, settings, scope, timeout, *, purpose="run", owner_key=""):
         now = utc_now()
         holder = uuid4().hex
@@ -41,7 +88,10 @@ class SessionStore:
                 and repository.aware(session.holder_expires_at) <= now
             )
             if session and session.state == "closing":
-                raise ExecutionBusy("Previous Run sandbox cleanup is pending.")
+                raise ExecutionBusy(
+                    "Previous Run sandbox cleanup is pending.",
+                    reason="environment_cleanup",
+                )
             reset = bool(
                 session is None
                 and await repository.previous_session(
@@ -56,7 +106,10 @@ class SessionStore:
             ):
                 await repository.mark_closing(db, session.id)
                 await db.commit()
-                raise ExecutionBusy("Expired Run sandbox cleanup is pending.")
+                raise ExecutionBusy(
+                    "Expired Run sandbox cleanup is pending.",
+                    reason="environment_cleanup",
+                )
             # Covers startup; the command watchdog keeps a much shorter lease.
             until = now + timedelta(seconds=60)
             expires = run.deadline_at + timedelta(seconds=60)
@@ -64,6 +117,8 @@ class SessionStore:
                 session = ExecutionSession(
                     workspace_id=scope.workspace_id,
                     run_id=scope.run_id,
+                    host_id=settings.opensandbox_host_id,
+                    host_fingerprint=host_fingerprint(settings),
                     purpose=purpose,
                     owner_key=owner_key,
                     image=settings.opensandbox_image,
@@ -77,6 +132,15 @@ class SessionStore:
                     if run.access_source in {"public", "api"}
                     else None,
                 )
+                if run.reservation_profiles:
+                    session.capacity_reservation = {
+                        "id": hashlib.sha256(
+                            f"{scope.workspace_id}:{scope.run_id}".encode()
+                        ).hexdigest()[:32],
+                        "profiles": list(run.reservation_profiles),
+                        "member": "run" if purpose == "run" else "mcp",
+                        "owner": session.id,
+                    }
                 try:
                     await repository.create(db, session)
                 except IntegrityError as exc:
@@ -85,6 +149,7 @@ class SessionStore:
                         "Run sandbox creation is already in progress."
                     ) from exc
             else:
+                require_host(settings, session)
                 if not await repository.claim(db, session.id, holder, until, now):
                     raise ExecutionBusy("Run sandbox is owned by another command.")
                 session.holder = holder
@@ -94,7 +159,9 @@ class SessionStore:
             await db.commit()
             return session, run, reset, stale
 
-    async def acquire_existing(self, settings, scope, timeout, *, purpose="run", owner_key=""):
+    async def acquire_existing(
+        self, settings, scope, timeout, *, purpose="run", owner_key=""
+    ):
         """Claim an existing live session without ever creating one.
 
         A read must not bring a guest into existence: a missing session means
@@ -121,11 +188,13 @@ class SessionStore:
             )
             if session is None:
                 raise ExecutionNotStarted("Run sandbox no longer exists.")
+            require_host(settings, session)
             if session.state == "closing":
                 raise ExecutionBusy("Previous Run sandbox cleanup is pending.")
-            if session.expires_at is not None and repository.aware(
-                session.expires_at
-            ) <= now:
+            if (
+                session.expires_at is not None
+                and repository.aware(session.expires_at) <= now
+            ):
                 raise ExecutionNotStarted("Run sandbox expired.")
             if (
                 session.profile_fingerprint
@@ -223,14 +292,43 @@ class SessionStore:
             await repository.mark_closed(db, session.id)
             await db.commit()
 
-    async def for_run(self, workspace_id, run_id):
+    async def for_run(self, workspace_id, run_id, host_id=None):
         async with get_session_factory()() as db:
-            return await repository.for_run(db, workspace_id, run_id)
+            records = await repository.for_run(db, workspace_id, run_id)
+            return [
+                record
+                for record in records
+                if host_id is None or record.host_id == host_id
+            ]
 
-    async def reclaimable(self):
+    async def reclaimable(self, host_id=None):
         async with get_session_factory()() as db:
-            return await repository.reclaimable(db, utc_now())
+            records = await repository.reclaimable(db, utc_now())
+            return [
+                record
+                for record in records
+                if host_id is None or record.host_id == host_id
+            ]
 
-    async def tracked(self):
+    async def tracked(self, host_id=None):
         async with get_session_factory()() as db:
-            return await repository.tracked_sessions(db)
+            return await repository.tracked_sessions(db, host_id)
+
+    async def release_admission(self, identity):
+        async with get_session_factory()() as db:
+            await placements.release(db, identity)
+            await db.commit()
+
+    async def due_admissions(self, host_id):
+        from app.infra.execution.placement import PlacementStore
+
+        return await PlacementStore().release_due(host_id)
+
+    async def reservation_held(self, identity):
+        async with get_session_factory()() as db:
+            placement = await placements.get(db, identity)
+            return bool(
+                placement
+                and not placement.released
+                and repository.aware(placement.expires_at) > utc_now()
+            )

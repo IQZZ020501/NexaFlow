@@ -133,6 +133,7 @@ from app.infra.security.secrets import encrypt_secret
 from app.infra.storage import object_storage
 from app.infra.tools import mcp_stdio
 from app.ports import mcp as ports_mcp
+from app.ports.mcp import MAX_MCP_STORED_RESULT_BYTES
 from app.schemas.models.contracts import (
     RegisteredModelCreateRequest,
     RegisteredModelUpdateRequest,
@@ -571,10 +572,10 @@ class _YieldingParent(BaseChatModel):
         return ChatResult(generations=[])
 
     def _stream(self, *args, **kwargs):
-        yield SimpleNamespace(text="chunk")
+        yield ChatGenerationChunk(message=AIMessageChunk(content="chunk"))
 
     async def _astream(self, *args, **kwargs):
-        yield SimpleNamespace(text="chunk")
+        yield ChatGenerationChunk(message=AIMessageChunk(content="chunk"))
 
 
 class _YieldingMixinModel(_ProviderErrorChatMixin, _YieldingParent):
@@ -1770,7 +1771,7 @@ def test_call_mcp_tool() -> None:
         assert fake_client.call_tool.call_args.kwargs.get("meta") is None
 
         fake_client.call_tool.return_value = SimpleNamespace(
-            structured_content={"data": "x" * (MAX_MCP_RESULT_BYTES + 100)},
+            structured_content={"data": "x" * (MAX_MCP_STORED_RESULT_BYTES + 100)},
             content=[],
             is_error=False,
         )
@@ -1786,7 +1787,9 @@ def test_call_mcp_tool() -> None:
             )
         # The call already ran, so an oversized result is cut rather than failed.
         assert not result.is_error and result.structured_content is None
-        assert result.meta == {"nexaflow/truncated": True}
+        assert result.meta["nexaflow/truncated"] is True
+        assert result.meta["nexaflow/full_result_available"] is False
+        assert result.meta["nexaflow/result_bytes"] > MAX_MCP_STORED_RESULT_BYTES
         assert len(json.dumps(result.payload()).encode()) <= MAX_MCP_RESULT_BYTES
 
         fake_client.call_tool.return_value = SimpleNamespace(
@@ -3575,6 +3578,7 @@ def test_refresh_mcp_server() -> None:
 
     with patch.object(
         tools_services, "discover_mcp_tools", new=AsyncMock(return_value=McpDiscovery(tools=[_mcp_tool_dict("new-tool")]))
+    ), patch.object(mcp_repo, "get_mcp_server_by_id", new=AsyncMock(return_value=server)
     ), patch.object(mcp_repo, "save_mcp_server", new=AsyncMock()), patch.object(
         mcp_repo, "refresh_mcp_server", new=AsyncMock(return_value=server)
     ), patch.object(

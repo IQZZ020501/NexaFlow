@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import uuid4
 
 from redis.asyncio import Redis
@@ -22,7 +22,7 @@ from app.ports.execution import ExecutionBusy, ExecutionNotStarted
 
 logger = logging.getLogger(__name__)
 
-ACQUIRE_WAIT_SECONDS = 5.0
+ACQUIRE_WAIT_SECONDS = 0.0
 ACQUIRE_POLL_SECONDS = 0.2
 
 # Each slot is scored by its sandbox's native expiry, so a slot that a crashed
@@ -33,13 +33,13 @@ ACQUIRE_POLL_SECONDS = 0.2
 _ACQUIRE = """
 for i=1,3 do redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', ARGV[1]) end
 if tonumber(ARGV[2]) > 0 and redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then
-  return 0
+  return -1
 end
 if ARGV[8] == '1' and redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[6]) then
-  return 0
+  return -2
 end
 if ARGV[9] == '1' and redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[7]) then
-  return 0
+  return -3
 end
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
 if redis.call('PTTL', KEYS[1]) < tonumber(ARGV[5]) then
@@ -79,6 +79,7 @@ class CapacityScope:
 
     consumer_key: str | None = None
     workspace_key: str | None = None
+    reservation: dict = field(default_factory=dict)
 
     @property
     def tracked(self) -> bool:
@@ -95,8 +96,32 @@ class SandboxCapacity:
         self.consumer_limit = settings.opensandbox_max_sandboxes_per_consumer
         self.workspace_limit = settings.opensandbox_max_sandboxes_per_workspace
         self.broker_url = settings.celery_broker_url
+        if (
+            settings.opensandbox_memory_budget_mib < 0
+            or settings.opensandbox_cpu_budget < 0
+        ):
+            raise ValueError("Sandbox resource budgets must not be negative.")
+        self.memory_limit = settings.opensandbox_memory_budget_mib
+        self.cpu_limit = settings.opensandbox_cpu_budget
+        # Pools have a mix of provisional sizes. Reserve their worst-case cost.
+        if self.memory_limit:
+            self.memory_limit = max(
+                0, self.memory_limit - 2048 * settings.opensandbox_warm_pool_size
+            )
+            if not self.memory_limit:
+                raise ValueError("Sandbox memory budget leaves no on-demand capacity.")
+        if self.cpu_limit:
+            self.cpu_limit = max(
+                0, self.cpu_limit - 2 * settings.opensandbox_warm_pool_size
+            )
+            if not self.cpu_limit:
+                raise ValueError("Sandbox CPU budget leaves no on-demand capacity.")
         endpoint = hashlib.sha256(settings.opensandbox_url.encode()).hexdigest()[:16]
         self.key = f"nexaflow:opensandbox:sandboxes:{endpoint}"
+        self.host_id = settings.opensandbox_host_id
+        self.scope_prefix = (
+            "nexaflow:opensandbox:scopes" if settings.opensandbox_hosts else self.key
+        )
 
     def _redis(self) -> Redis:
         return Redis.from_url(
@@ -113,7 +138,12 @@ class SandboxCapacity:
         keeps working without Redis; only a public/API caller, which always
         has a per-consumer bound, still needs accounting.
         """
-        return self.limit > 0 or scope.consumer_key is not None
+        return (
+            self.limit > 0
+            or self.memory_limit > 0
+            or self.cpu_limit > 0
+            or scope.consumer_key is not None
+        )
 
     async def acquire(
         self,
@@ -124,6 +154,10 @@ class SandboxCapacity:
         scope = scope or CapacityScope()
         if not self._tracking_enabled(scope):
             return None
+        if scope.reservation:
+            from app.adapters.execution.reservations import acquire_reservation
+
+            return await acquire_reservation(self, lifetime_seconds, scope)
         token = uuid4().hex
         lifetime_ms = round(lifetime_seconds * 1000)
         deadline = time.monotonic() + ACQUIRE_WAIT_SECONDS
@@ -150,7 +184,7 @@ class SandboxCapacity:
                         self._scope_key("workspace", scope.workspace_key),
                         *arguments,
                     )
-                    if acquired:
+                    if acquired > 0:
                         return token
                     if time.monotonic() >= deadline:
                         log_event(
@@ -163,7 +197,15 @@ class SandboxCapacity:
                             consumer_key=scope.consumer_key or "-",
                             workspace_key=scope.workspace_key or "-",
                         )
-                        raise ExecutionBusy("OpenSandbox capacity is exhausted.")
+                        raise ExecutionBusy(
+                            "OpenSandbox capacity is exhausted.",
+                            reason={
+                                -1: "host_capacity",
+                                -2: "consumer_quota",
+                                -3: "workspace_quota",
+                            }.get(acquired, "host_capacity"),
+                            resources={"guests": 1},
+                        )
                     await asyncio.sleep(ACQUIRE_POLL_SECONDS)
         except (RedisError, OSError) as exc:
             raise ExecutionNotStarted(
@@ -173,8 +215,8 @@ class SandboxCapacity:
     def _scope_key(self, dimension: str, value: str | None) -> str:
         if not value:
             # An absent scope must not share a bucket with a real one.
-            return f"{self.key}:{dimension}:none"
-        return f"{self.key}:{dimension}:{value}"
+            return f"{self.scope_prefix}:{dimension}:none"
+        return f"{self.scope_prefix}:{dimension}:{value}"
 
     async def renew(
         self,
@@ -218,14 +260,42 @@ class SandboxCapacity:
         if token is None:
             return
         scope = scope or CapacityScope()
+        if scope.reservation:
+            from app.adapters.execution.reservations import release_member
+
+            await release_member(self, scope)
+            return
         try:
             async with self._redis() as redis:
-                await redis.zrem(self.key, token)
+                released = await redis.zrem(self.key, token)
                 for dimension, value in (
                     ("consumer", scope.consumer_key),
                     ("workspace", scope.workspace_key),
                 ):
                     if value:
                         await redis.zrem(self._scope_key(dimension, value), token)
+            if released:
+                from app.infra.execution.wakeup import notify_capacity_released
+
+                await notify_capacity_released(self)
         except (RedisError, OSError):
             logger.warning("OpenSandbox capacity slot release deferred to expiry")
+
+    async def discard_waiter(self, reservation_id):
+        if not self.limit and not self.memory_limit and not self.cpu_limit:
+            return
+        try:
+            async with self._redis() as redis:
+                await redis.hdel(f"{self.key}:waiting", reservation_id)
+        except (RedisError, OSError):
+            return
+
+    async def release_reservation(self, reservation_id: str, scope: CapacityScope):
+        from app.adapters.execution.reservations import release_reservation
+
+        await release_reservation(self, reservation_id, scope)
+
+    async def restore(self, records):
+        from app.adapters.execution.reservations import restore_capacity
+
+        await restore_capacity(self, records)

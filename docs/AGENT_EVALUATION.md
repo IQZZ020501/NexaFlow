@@ -2,19 +2,22 @@
 
 Agent 评测分成两层：CI 中的确定性运行时回归，和部署/发布前对真实 Agent 的在线评测。前者阻止执行内核、工具安全和通用能力循环回退；后者验证当前模型、知识、提示词和工具组合的实际质量。
 
+已执行的在线结果见 [2026-11-17 DeepSeek 基线](evaluations/2026-11-17-deepseek-flash/README.md)：首轮 4/5，表格数值约束调整后的定向复测通过；两份不同配置的报告独立保存，不合并为全量通过。
+
 ## CI 门禁
 
 从 `backend/` 运行：
 
 ```bash
 uv run python -m tests.agents.evaluation
+uv run python -m tests.agents.evaluation_files
 ```
 
 该套件不访问数据库、网络或第三方模型，覆盖直接回答、可选工具选择与成功执行、无 manifest 的即时流式回答、知识/MCP/Skill 工具的统一预算、必需用例门禁及未上报 token 拒绝。它已接入 GitHub Actions 和后端覆盖率套件。
 
 ## 在线发布门禁
 
-复制并按具体 Agent 修改 [examples/agent-evaluation.json](examples/agent-evaluation.json)。生产数据集建议至少覆盖 20–50 个稳定用例，并包含以下类别：
+文件交付可从 [examples/agent-delivery-evaluation.json](examples/agent-delivery-evaluation.json) 开始，再加入具体 Agent 的业务用例。该数据集覆盖 CSV→XLSX、中文 DOCX/PDF、PPTX、三轮表格修改与 A→B→A 文件修改；具体模型结果必须来自实际运行报告，样本本身不是成功率证据。生产数据集建议至少覆盖 20–50 个稳定用例，并包含以下类别：
 
 - 关键业务答案和拒答边界；
 - 可选知识检索、没有检索和检索无结果场景；
@@ -30,13 +33,13 @@ uv run python -m scripts.agent_eval \
   --base-url https://nexaflow.example.com \
   --workspace-id WORKSPACE_ID \
   --agent-id AGENT_ID \
-  --dataset ../docs/examples/agent-evaluation.json \
+  --dataset ../docs/examples/agent-delivery-evaluation.json \
   --output /tmp/nexaflow-agent-evaluation.json
 ```
 
 令牌只能通过 `NEXAFLOW_EVAL_TOKEN` 提供，不会写入报告。`base-url`、工作区和 Agent 也可分别通过 `NEXAFLOW_EVAL_BASE_URL`、`NEXAFLOW_EVAL_WORKSPACE_ID`、`NEXAFLOW_EVAL_AGENT_ID` 提供。
 
-退出码：`0` 表示门禁通过，`1` 表示质量门禁未通过，`2` 表示数据集、认证或 API 执行错误。报告只包含用例 ID、分类、样本序号、Agent Run ID 和失败规则，不保存问题、回答、证据正文或访问令牌。
+退出码：`0` 表示门禁通过，`1` 表示质量门禁未通过，`2` 表示数据集、认证或 API 执行错误。报告 schema v2 保存用例标识、逐轮 Run、失败规则、耗时、实际用量、模型/工具/Skill 版本指纹及文件 ID/hash/检查状态，不保存问题、回答、文件正文或访问令牌。没有上报的用量保持缺失。
 
 ## 数据集契约
 
@@ -50,9 +53,14 @@ uv run python -m scripts.agent_eval \
 - `required_tool_names` / `forbidden_tool_names`：成功调用和绝对禁止观察到的工具；
 - `min_sources`：API 返回的最少证据源数量；
 - `max_total_tokens` / `max_model_calls` / `max_duration_ms`：成本与延迟上限。
+- `expect.files`：最多 8 个实际交付文件，每项使用 `path` 指定完整相对路径；支持 `text_contains`、`text_not_contains`、`cells`（例如 `{"Data!B2": 12}`）、`min_pages`（PDF）、`min_slides`（PPTX）。表格断言比较存储值或公式文本，不计算公式；需要金额数值时明确要求 Agent 写入数值。
+- 文件断言默认 `require_inspection=true`，要求当前执行镜像完成文件检查；旧镜像或旧文件缺少记录时不能算通过。`changed=true` 要求相对该用例前一版本的实际字节发生变化，并结合内容断言判断修改是否正确。
+- `follow_ups`：最多 7 轮 `{goal, expect}`，与第一轮共用一个会话，每轮创建独立且幂等的 Run，样本总超时不重置。所有轮次参与门禁，结束后重新下载旧文件验证其不可变性。不同用例/样本使用新会话，避免相互污染。
 - 数据集顶层 `gate.minimum_pass_rate`：总通过率阈值，默认 `1.0`（取值范围 `0 < x <= 1`）。
 
-设置 `max_total_tokens` 时，只要任一模型调用没有报告 usage，该样本就以 `usage:unreported` 失败，门禁不会猜测 token。在线运行遇到人工审批或输入等待会立即结束采样，并以当前 Run 状态参与断言；自动发布门禁使用的 Agent 应只绑定可自动执行的只读工具。
+设置 `max_total_tokens` 时，只要任一模型调用没有报告 usage，该样本就以 `usage:unreported` 失败，门禁不会猜测 token。在线运行遇到人工审批或输入等待会立即结束采样，并以当前 Run 状态参与断言。文件交付 Agent 需要 bash 或对应的固定渲染 Skill，并使用隔离的评测会话及已批准的工具策略；外部副作用不属于这些样本。
+
+文件身份来自成功工具事件，评测器通过当前用户授权下载，校验响应中的产物/Run 身份，再读取实际字节。文本提取限制为 200000 字符，文件为 5 MiB、Office 解压总量为 64 MiB；超限或不可解析以规则失败报告。PDF/Office 可解析不代表排版合格；排版敏感的任务仍需渲染后人工或专用视觉验收。
 
 ## 发布流程建议
 

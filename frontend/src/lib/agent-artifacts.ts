@@ -7,6 +7,8 @@ export type ArtifactEvent = {
 export type PreviewFormat = "html" | "pdf" | "docx" | "xlsx" | "pptx"
 
 export type PreviewArtifact = {
+  artifactId?: string
+  relativePath?: string
   filename: string
   downloadUrl: string
   format: PreviewFormat
@@ -23,6 +25,15 @@ export const PREVIEW_MIME_TYPES: Record<PreviewFormat, string> = {
 }
 
 const ARTIFACT_PATH = /^\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+$/
+
+export function artifactContentUrl(file: Record<string, unknown>) {
+  return typeof file.artifact_id === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      file.artifact_id
+    )
+    ? `/api/v1/artifacts/${file.artifact_id}/content`
+    : null
+}
 const FILE_TOOLS = new Set([
   "create_artifact",
   "documents_skill",
@@ -60,11 +71,16 @@ export function previewArtifactsForEvents(events: readonly ArtifactEvent[]) {
       ) {
         continue
       }
-      // Match download-link behavior: the latest rewrite of a filename wins.
+      const relativePath =
+        typeof file.relative_path === "string" ? file.relative_path : filename
       const extension = filename.split(".").pop()!.toLowerCase()
-      artifacts.set(filename, {
+      artifacts.set(relativePath, {
+        ...(typeof file.artifact_id === "string"
+          ? { artifactId: file.artifact_id }
+          : {}),
+        ...(typeof file.relative_path === "string" ? { relativePath } : {}),
         filename,
-        downloadUrl,
+        downloadUrl: artifactContentUrl(file) ?? downloadUrl,
         format: extension === "htm" ? "html" : (extension as PreviewFormat),
       })
     }

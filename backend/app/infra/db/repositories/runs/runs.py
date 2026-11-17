@@ -74,6 +74,8 @@ _RUN_CORE_FIELDS = (
     "parent_run_id",
     "parent_node_id",
     "regenerated_from_run_id",
+    "request_id",
+    "request_hash",
     "depth",
     "goal",
     "attachment_context",
@@ -316,6 +318,22 @@ async def get_active_agent_run(
     if row is None:
         return None
     return (await _to_agent_run_entities(db, [tuple(row)]))[0]
+
+
+async def get_agent_run_by_request(
+    db, workspace_id, agent_id, access_source, consumer_id, request_id
+):
+    run_id = await db.scalar(
+        select(AgentRun.id).where(
+            AgentRun.workspace_id == workspace_id,
+            AgentRun.agent_id == agent_id,
+            AgentRun.access_source == access_source,
+            AgentRun.consumer_id == consumer_id,
+            AgentRun.request_id == request_id,
+        )
+    )
+    return await get_agent_run_by_id(db, run_id) if run_id else None
+
 
 async def get_agent_run_by_id(
     db: AsyncSession,

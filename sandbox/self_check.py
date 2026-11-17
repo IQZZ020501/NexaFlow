@@ -86,6 +86,7 @@ def check_execution():
             }
         )
         assert result["ok"], result
+        assert result["artifact"]["inspection"]["status"] == "passed", result
         content = base64.b64decode(result["artifact"]["content_base64"])
         assert 0 < len(content) <= MAX_FILE
         assert content.startswith(b"%PDF" if fmt == "pdf" else b"PK")

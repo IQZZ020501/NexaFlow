@@ -1,5 +1,9 @@
 # API 模块（backend/app/api + schemas）
 
+私有项目文件接口及 Run 绑定见 [PROJECT_FILES.md](PROJECT_FILES.md)。
+
+MCP 外部授权及持久任务接口见 [MCP_OAUTH.md](MCP_OAUTH.md) 和 [MCP_TASKS.md](MCP_TASKS.md)。
+
 ## 职责
 
 FastAPI 薄路由层：只做参数解析、认证/授权依赖与响应组装，业务逻辑下沉到 `application`/`domain`（领域实体在 `entities/`，能力契约在 `ports/`，外部实现由 `adapters/` 提供）。除应用根路径的 `/health` 外，所有路由挂在 `/api/v1` 前缀；认证与工作空间上下文依赖集中在 `api/deps.py`。Pydantic 请求/响应契约集中在 `schemas/<feature>/`。
@@ -48,7 +52,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/agents/access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、文档页、会话与安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
 - `backend/app/api/v1/workflows/routes.py` — `/workspaces/{workspace_id}/workflows`（路径参数仍命名为 `{agent_id}`）：Workflow 草稿定义、资源校验、不可变版本、恢复、附件上传、调试运行、表单恢复与节点审计
 - `backend/app/api/v1/workflows/access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、文档页、API 文档、Run 和安全流
-- `backend/app/api/v1/artifacts/routes.py` — `/artifacts`：生成物下载链接签发、下载与预览（响应 `Cache-Control: private, no-store`）
+- `backend/app/api/v1/artifacts/routes.py` — `/artifacts`：生成物 bearer 下载与图片预览，以及 `GET /artifacts/{artifact_id}/content` 的当前用户授权下载（响应 `Cache-Control: private, no-store`）
 - `backend/app/api/v1/agent_skills/routes.py` — `/workspaces/{workspace_id}/agent-skills`：技能包导入检查、CRUD、发布、版本列表与 view/use 授权
 - `backend/app/api/v1/resource_folders/routes.py` — `/workspaces/{workspace_id}/resource-folders`：资源文件夹 CRUD 与资源移动（单条/批量）
 - `backend/app/api/v1/announcements/routes.py` — `/messages`（列表、未读数、SSE `/stream`、全部已读与单条已读）、`/admin/announcements` 与 `/workspaces/{workspace_id}/announcements`
@@ -75,3 +79,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/schemas/models/contracts.py` — LLM 供应商目录（model-types/base-models/credential-form）与已注册模型模型
 - `backend/app/schemas/audit/contracts.py` — 审计日志响应模型；系统日志契约在 `audit/system_logs.py`
 - 其余契约包：`analytics/`、`governance/`、`agent_skills/`、`announcements/`、`artifacts/`、`resource_folders/`，以及 `email/smtp.py`
+
+## Run 请求身份与文件稳定访问
+
+Agent Console、公开聊天与 Agent API 创建请求，以及 Console/公开聊天重新生成请求，支持可选 `request_id`。客户端对同一次请求重用同一个键；内容冲突返回 `409`。授权范围、分页历史读取、`recovering` 流事件与 API 凭据下载路径见 [运行可靠性与资源准入](RUN_RELIABILITY.md)。

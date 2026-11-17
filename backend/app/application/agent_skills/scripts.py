@@ -143,11 +143,17 @@ async def execute_skill_script(settings, arguments, context):
                 artifact_format=artifact.format,
                 filename=filename,
                 content=artifact.content,
+                invocation_id=context.invocation_id,
+                inspection=artifact.inspection,
             )
             await db.commit()
         data["artifacts"] = [
             {
                 "artifact_id": link.artifact_id,
+                "relative_path": link.relative_path,
+                "content_hash": link.content_hash,
+                "previous_artifact_id": link.previous_artifact_id,
+                "inspection": link.inspection,
                 "filename": link.filename,
                 "format": link.format,
                 "download_url": link.download_url,

@@ -48,7 +48,10 @@ async def check(runtime):
             worker_task_id="worker",
             execution_deadline_at=utc_now() + timedelta(seconds=600),
             tool_snapshots=[{"execution_spec": {"builtin": "shell"}}],
-            application_snapshot={"execution_profile": execution_profile(runtime)},
+            application_snapshot={
+                "execution_profile": execution_profile(runtime),
+                "sandbox_requirements": {"schema_version": 1, "profiles": ["standard"], "max_stdio_hosts": 0},
+            },
         )
         second = replace(first, id="second", root_run_id="second", created_at=utc_now())
         separate = replace(
@@ -119,6 +122,8 @@ async def check(runtime):
                 )
                 old_file = original.data["artifacts"][0]
                 new_file = updated.data["artifacts"][0]
+                assert old_file["inspection"]["status"] == "passed"
+                assert new_file["inspection"]["status"] == "passed"
                 assert old_file["artifact_id"] != new_file["artifact_id"]
                 async with factory() as db:
                     for item, expected in (
@@ -129,6 +134,8 @@ async def check(runtime):
                             db, runtime, item["download_url"].rsplit("/", 1)[-1]
                         )
                         assert artifact.content == expected
+                        assert artifact.inspection["sha256"] == artifact.content_hash
+                        assert artifact.invocation_id in {"original", "updated"}
                 unchanged = await command(
                     second, "cat outputs/page.html", "verify-current"
                 )

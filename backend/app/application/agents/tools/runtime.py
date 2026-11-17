@@ -76,7 +76,9 @@ def frozen_agent_image_model_id(run: AgentRun) -> str | None:
     if not isinstance(configuration, dict):
         return None
     image_model_id = configuration.get("image_model_id")
-    return image_model_id if isinstance(image_model_id, str) and image_model_id else None
+    return (
+        image_model_id if isinstance(image_model_id, str) and image_model_id else None
+    )
 
 
 class UnifiedAgentToolRuntime:
@@ -154,9 +156,7 @@ class UnifiedAgentToolRuntime:
 
         if invocation.status == TOOL_INVOCATION_AWAITING_APPROVAL:
             if self.run.depth == 1:
-                raise AgentRunnerError(
-                    "Nested Agent Tool approval is not allowed."
-                )
+                raise AgentRunnerError("Nested Agent Tool approval is not allowed.")
             raise AgentExecutionPaused(
                 invocation_id,
                 "Tool call requires user approval.",
@@ -169,7 +169,7 @@ class UnifiedAgentToolRuntime:
                 run_worker_task_id=self.worker_task_id,
             )
         except ToolInvocationBusy as exc:
-            raise AgentToolBusy(call["id"], str(exc)) from exc
+            raise AgentToolBusy(call["id"], str(exc), exc.resource_wait) from exc
         mapped = tool_runtime_result_to_agent_result(result)
         if mapped.outcome_uncertain:
             if self.run.depth == 1:
@@ -180,16 +180,18 @@ class UnifiedAgentToolRuntime:
             )
         if result.error_code == "approval_required":
             if self.run.depth == 1:
-                raise AgentRunnerError(
-                    "Nested Agent Tool approval is not allowed."
-                )
+                raise AgentRunnerError("Nested Agent Tool approval is not allowed.")
             raise AgentExecutionPaused(
                 invocation_id,
                 "Tool call requires user approval.",
             )
         return mapped
 
-    def _tool_deadline(self, snapshot: ToolSnapshot | None = None, arguments: dict | None = None) -> datetime:
+    def _tool_deadline(
+        self,
+        snapshot: ToolSnapshot | None = None,
+        arguments: dict | None = None,
+    ) -> datetime:
         # Approval and image generation share a deadline; allow time for a
         # person to approve before the image provider's slower response.
         timeout_seconds = (
@@ -202,12 +204,19 @@ class UnifiedAgentToolRuntime:
             command_timeout = (arguments or {}).get("timeout_seconds", 60)
             if type(command_timeout) is int and 1 <= command_timeout <= 300:
                 timeout_seconds = command_timeout + 60
-        deadline = utc_now() + timedelta(
-            seconds=timeout_seconds
-        )
+        deadline = utc_now() + timedelta(seconds=timeout_seconds)
         run_deadline = getattr(self.run, "execution_deadline_at", None)
         if run_deadline is not None and run_deadline.tzinfo is None:
             run_deadline = run_deadline.replace(tzinfo=UTC)
+        if (
+            run_deadline is not None
+            and snapshot is not None
+            and snapshot.execution_spec.get("long_task")
+            and snapshot.kind == "mcp"
+        ):
+            # Polling a durable job uses the already frozen Run budget. Each
+            # individual MCP request retains its short transport timeout.
+            return run_deadline
         if run_deadline is not None:
             return min(deadline, run_deadline)
         if self.run.depth == 1:

@@ -793,6 +793,7 @@ describe("PublicAgentChat regeneration", () => {
 
   test("reports an error when the regenerate request fails", async () => {
     let regenerateCalls = 0
+    const requestBodies: string[] = []
     fetchHandler = agentFetchHandler({
       conversations: { items: [conversation("conv-1", "第一个会话")] },
       history: {
@@ -804,6 +805,7 @@ describe("PublicAgentChat regeneration", () => {
     fetchHandler = (url: string, init?: RequestInit) => {
       if (url.endsWith("/regenerate")) {
         regenerateCalls += 1
+        requestBodies.push(String(init?.body))
         return jsonResponse({ detail: "regenerate boom" }, 500)
       }
       return original(url, init)
@@ -823,7 +825,9 @@ describe("PublicAgentChat regeneration", () => {
     await waitFor(() =>
       expect(screen.getByText("regenerate boom")).toBeTruthy()
     )
-    expect(regenerateCalls).toBe(1)
+    expect(regenerateCalls).toBe(2)
+    expect(requestBodies[0]).toBe(requestBodies[1])
+    expect(JSON.parse(requestBodies[0]).request_id).toEqual(expect.any(String))
     expect(screen.getByText("Original answer")).toBeTruthy()
   })
 

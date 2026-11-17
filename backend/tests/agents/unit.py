@@ -2945,6 +2945,7 @@ def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
     messages = execution_messages(
         SimpleNamespace(
             instructions="Build useful pages.",
+            application_snapshot={},
             goal="Create an interactive page.",
             attachment_context="",
         )

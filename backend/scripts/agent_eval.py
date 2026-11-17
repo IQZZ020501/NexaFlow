@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -24,6 +25,7 @@ from app.domain.agents.evaluation import (
     agent_evaluation_gate,
     evaluate_agent_observation,
 )
+from scripts.agent_eval_files import MAX_FILE, observe_deliverables
 
 TERMINAL_RUN_STATUSES = frozenset(
     {"succeeded", "failed", "cancelled", "awaiting_approval", "awaiting_input"}
@@ -99,6 +101,25 @@ class AgentEvaluationClient:
             raise AgentEvaluationError("The API returned an invalid response object.")
         return value
 
+    def download_artifact(self, artifact_id: str, *, run_id: str) -> tuple[bytes, bool]:
+        if str(uuid.UUID(artifact_id)) != artifact_id:
+            raise AgentEvaluationError("Invalid delivered file identity.")
+        request = Request(
+            f"{self.base_url}/api/v1/artifacts/{artifact_id}/content",
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
+        try:
+            with self.opener.open(request, timeout=self.request_timeout) as response:
+                if response.headers.get("X-NexaFlow-Artifact-ID") != artifact_id or response.headers.get("X-NexaFlow-Run-ID") != run_id:
+                    raise AgentEvaluationError("Delivered file does not belong to the observed Run.")
+                content = response.read(MAX_FILE + 1)
+                if not 0 < len(content) <= MAX_FILE:
+                    raise AgentEvaluationError("Delivered file exceeds evaluation limits.")
+                checked = response.headers.get("X-NexaFlow-File-Check") == "nexaflow-file-check/1"
+                return content, checked
+        except (HTTPError, URLError, TimeoutError) as exc:
+            raise AgentEvaluationError("Delivered file could not be read.") from exc
+
 
 def _parse_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
@@ -168,34 +189,65 @@ def execute_case(
         "/api/v1/workspaces/"
         f"{quote(workspace_id, safe='')}/agents/{quote(agent_id, safe='')}"
     )
-    started = time.monotonic()
-    run = client.request(
-        "POST",
-        f"{root}/runs",
-        {"goal": case.goal, "conversation_id": str(uuid.uuid4())},
-    )
-    run_id = run.get("id")
-    if not isinstance(run_id, str) or not run_id:
-        raise AgentEvaluationError("The create-run response omitted the run id.")
-    deadline = started + timeout_seconds
-    while str(run.get("status") or "") not in TERMINAL_RUN_STATUSES:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            cancelled = client.request(
-                "POST",
-                f"{root}/runs/{quote(run_id, safe='')}/cancel",
-            )
-            run = {**cancelled, "status": "timed_out"}
+    deadline = time.monotonic() + timeout_seconds
+    conversation = str(uuid.uuid4())
+    previous = {}
+    saved_files = []
+    failures = []
+    evidence = []
+    run_id = ""
+    for number, turn in enumerate((case, *case.follow_ups), 1):
+        started = time.monotonic()
+        if started >= deadline:
+            failures.append(f"turn:{number}:timed_out")
             break
-        time.sleep(min(poll_seconds, remaining))
-        run = client.request("GET", f"{root}/runs/{quote(run_id, safe='')}")
-    observation = observation_from_run(
-        run,
-        fallback_seconds=time.monotonic() - started,
-    )
-    return replace(
-        evaluate_agent_observation(case, observation, sample=sample),
-        run_id=run_id,
+        run = client.request(
+            "POST", f"{root}/runs",
+            {"goal": turn.goal, "conversation_id": conversation, "request_id": str(uuid.uuid4())},
+        )
+        run_id = run.get("id")
+        if not isinstance(run_id, str) or not run_id:
+            raise AgentEvaluationError("The create-run response omitted the run id.")
+        while str(run.get("status") or "") not in TERMINAL_RUN_STATUSES:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                cancelled = client.request("POST", f"{root}/runs/{quote(run_id, safe='')}/cancel")
+                run = {**cancelled, "status": "timed_out"}
+                break
+            time.sleep(min(poll_seconds, remaining))
+            run = client.request("GET", f"{root}/runs/{quote(run_id, safe='')}")
+        observation = replace(
+            observation_from_run(run, fallback_seconds=time.monotonic() - started),
+            files=observe_deliverables(client, run, turn.expectation.files, previous),
+        )
+        result = evaluate_agent_observation(turn, observation, sample=sample)
+        prefix = f"turn:{number}:" if case.follow_ups else ""
+        failures.extend(prefix + item for item in result.failures)
+        for file in observation.files:
+            if not file.error:
+                previous[file.path] = file.sha256
+                saved_files.append((run_id, file.artifact_id, file.sha256))
+        evidence.append({
+            "run_id": run_id,
+            "duration_ms": observation.duration_ms,
+            "model_usage": {key: value for key, value in observation.model_usage.items() if key in {"input_tokens", "output_tokens", "total_tokens", "model_calls", "reported_model_calls"} and type(value) in {int, float}},
+            "execution_manifest": run.get("execution_manifest", {}),
+            "files": [{"artifact_id": file.artifact_id, "sha256": file.sha256, "inspection_passed": file.inspection_passed, "readable": not file.error} for file in observation.files],
+        })
+        if run.get("status") != "succeeded":
+            break
+    if case.follow_ups:
+        for index, (source_run_id, artifact_id, digest) in enumerate(saved_files, 1):
+            try:
+                content, _ = client.download_artifact(artifact_id, run_id=source_run_id)
+                if hashlib.sha256(content).hexdigest() != digest:
+                    failures.append(f"previous_file:{index}:changed")
+            except AgentEvaluationError:
+                failures.append(f"previous_file:{index}:unreadable")
+    return AgentEvaluationResult(
+        case_id=case.id, category=case.category, sample=sample,
+        required=case.required, passed=not failures, failures=tuple(failures),
+        run_id=run_id, turns=tuple(evidence),
     )
 
 
@@ -205,7 +257,7 @@ def _report(
 ) -> tuple[bool, dict[str, Any]]:
     passed, summary = agent_evaluation_gate(suite, results)
     return passed, {
-        "schema_version": 1,
+        "schema_version": 2,
         "gate": "passed" if passed else "failed",
         "summary": summary,
         "results": [
@@ -217,6 +269,7 @@ def _report(
                 "passed": result.passed,
                 "failures": list(result.failures),
                 "run_id": result.run_id,
+                "turns": list(result.turns),
             }
             for result in results
         ],

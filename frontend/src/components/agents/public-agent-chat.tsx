@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { isStaleRunSnapshot } from "@/lib/run-state"
 import { useRouter } from "next/navigation"
 import {
   BotIcon,
@@ -113,6 +114,7 @@ import {
 import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
+  executionWaitSummary,
 } from "@/lib/tool-display"
 
 type PublicAgentChatProps = {
@@ -549,6 +551,8 @@ function PublicExecutionProcess({
     if (event.status === "running" && status !== "running") return null
     if (event.type === "analysis" || event.type === "answer") return null
     if (event.stage === "preparing") return null
+    if (event.stage === "waiting_resources" && status === "running")
+      return executionWaitSummary(event.output, t)
     if (status === "running") {
       return t("正在调用 {name}", { name: title(event) })
     }
@@ -641,10 +645,10 @@ export function mergePublicRunEvent(
   event: PublicAgentRunStreamEvent,
   placeholderId: string
 ) {
-  if (event.type === "run") {
+  if (event.type === "run" || event.type === "recovering") {
     const next = runs.map((run) =>
       run.id === placeholderId || run.id === event.run.id
-        ? {
+        ? isStaleRunSnapshot(run, event.run) ? run : {
             ...event.run,
             attachments: event.run.attachments?.length
               ? event.run.attachments
@@ -1291,6 +1295,7 @@ export function PublicAgentChat({
     if (streamControllerRef.current) return
     if (!activeConversationId) return
     let current = true
+    let observer: AbortController | null = null
     listPublicAgentRuns(agentId, activeConversationId, token, {
       limit: 200,
       offset: 0,
@@ -1329,6 +1334,44 @@ export function PublicAgentChat({
             if (run.status === "awaiting_approval") {
               void loadRunToolCalls(run.id)
             }
+            if (
+              !["queued", "running", "awaiting_approval"].includes(run.status)
+            )
+              continue
+            if (streamControllerRef.current) continue
+            const controller = new AbortController()
+            observer = controller
+            streamControllerRef.current = controller
+            activeRunIdRef.current = run.id
+            activePlaceholderIdRef.current = null
+            setIsSending(true)
+            void observePublicAgentRun(
+              agentId,
+              token,
+              run.id,
+              (event) => {
+                if (!current || streamControllerRef.current !== controller)
+                  return
+                setRuns((items) =>
+                  mergePublicRunEvent(items, run.id, event, run.id)
+                )
+                if (event.type === "approval_required")
+                  void loadRunToolCalls(run.id, controller)
+              },
+              controller.signal
+            )
+              .catch((error: unknown) => {
+                if (current && !controller.signal.aborted)
+                  setSendError(getErrorMessage(error, t))
+              })
+              .finally(() => {
+                if (streamControllerRef.current !== controller) return
+                streamControllerRef.current = null
+                activeRunIdRef.current = null
+                activePlaceholderIdRef.current = null
+                setIsSending(false)
+                if (current) void refreshConversations()
+              })
           }
         }
       })
@@ -1340,8 +1383,22 @@ export function PublicAgentChat({
       })
     return () => {
       current = false
+      observer?.abort()
+      if (observer && streamControllerRef.current === observer) {
+        streamControllerRef.current = null
+        activeRunIdRef.current = null
+        setIsSending(false)
+      }
     }
-  }, [activeConversationId, agentId, loadRunToolCalls, sessionReady, t, token])
+  }, [
+    activeConversationId,
+    agentId,
+    loadRunToolCalls,
+    refreshConversations,
+    sessionReady,
+    t,
+    token,
+  ])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -1486,7 +1543,7 @@ export function PublicAgentChat({
       setRuns((current) =>
         current.map((item) =>
           item.id === runId
-            ? {
+            ? isStaleRunSnapshot(item, run) ? item : {
                 ...run,
                 progress:
                   run.progress.length > 0 ? run.progress : item.progress,

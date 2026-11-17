@@ -108,6 +108,7 @@ from app.infra.db.repositories.runs.runs import (
     finalize_agent_run,
     get_active_agent_run,
     get_agent_run_by_id,
+    get_agent_run_by_request,
     pause_agent_run,
     pause_agent_run_for_child,
     pause_agent_run_for_input,
@@ -816,6 +817,32 @@ async def latest_agent_conversation_id(
     )
 
 
+
+
+async def list_conversation_source_runs(db, run, *, offset: int, limit: int):
+    rows = (
+        (
+            await db.execute(
+                select(AgentRun.id, func.substr(AgentRun.goal, 1, 160).label("goal"))
+                .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+                .where(
+                    AgentRun.workspace_id == run.workspace_id,
+                    AgentRun.agent_id == run.agent_id,
+                    AgentRun.access_source == run.access_source,
+                    AgentRun.consumer_id == run.consumer_id,
+                    AgentRun.execution_user_id == run.execution_user_id,
+                    AgentRun.conversation_id == run.conversation_id,
+                    AgentRunState.status == AGENT_RUN_SUCCEEDED_STATUS,
+                )
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(row) for row in rows]
 
 
 async def list_conversation_memory_runs(

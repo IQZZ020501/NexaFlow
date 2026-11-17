@@ -1,4 +1,15 @@
 import type { TFunction } from "@/i18n"
+import { artifactContentUrl } from "@/lib/agent-artifacts"
+
+export function executionWaitSummary(output: unknown, t: TFunction) {
+  const reason = (output as { resource_wait?: { reason?: string } } | null)
+    ?.resource_wait?.reason
+  if (reason === "workspace_quota") return t("等待工作区执行额度")
+  if (reason === "consumer_quota") return t("等待调用方执行额度")
+  if (reason === "environment_cleanup") return t("等待旧执行环境清理")
+  if (reason === "environment_owned") return t("等待执行环境释放")
+  return t("等待执行资源")
+}
 
 type DisplayableTool = {
   function_name: string
@@ -18,7 +29,7 @@ type ToolOutputEvent = {
 }
 
 const ARTIFACT_URL_PATTERN =
-  /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+/g
+  /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/g
 const IMAGE_PREVIEW_LINK_LINE =
   /^[ \t]*(?:[-*+•]|\d+[.)])?[ \t]*(?:[*_]{1,2})?(?:预览链接|预览地址|preview (?:link|url))[ \t]*[：:][ \t]*(?:[*_]{1,2})?[^\r\n]*(?:\r?\n|$)/gim
 const IMAGE_PREVIEW_URL_LINE =
@@ -69,7 +80,7 @@ export function withArtifactDownloadLinksInContent(content: string) {
 
   let value = content
   for (const rawUrl of urls) {
-    const url = rawUrl.match(/\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+/)?.[0]
+    const url = rawUrl.match(/\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/)?.[0]
     if (url)
       value = replaceArtifactReferences(value, url, artifactLink(filename, url))
   }
@@ -132,7 +143,11 @@ export function withArtifactDownloadLinks(
       continue
     const output = event.output as Record<string, unknown>
     const sourceFilename =
-      typeof output.filename === "string" ? output.filename.trim() : ""
+      typeof output.relative_path === "string" && output.relative_path
+        ? output.relative_path
+        : typeof output.filename === "string"
+          ? output.filename.trim()
+          : ""
     const sourceDownloadUrl =
       typeof output.download_url === "string" ? output.download_url.trim() : ""
     const isGeneratedImage = event.tool_name === "generate_image"
@@ -148,7 +163,7 @@ export function withArtifactDownloadLinks(
     const downloadUrl =
       isGeneratedImage && UUID_V4_PATTERN.test(artifactId)
         ? `/api/v1/artifacts/${artifactId}`
-        : sourceDownloadUrl
+        : (artifactContentUrl(output) ?? sourceDownloadUrl)
     filenames.add(sourceFilename)
     linkedUrls.add(sourceDownloadUrl)
     const sourcePreviewUrl =
@@ -206,7 +221,7 @@ export function withArtifactDownloadLinks(
   if (artifacts.length === 1) {
     const { sourceFilename, downloadUrl } = artifacts[0]!
     const artifactUrl =
-      "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+(?![A-Za-z0-9._~-]|/preview)"
+      "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+(?:\\/content)?(?![A-Za-z0-9._~-]|/)"
     value = value.replace(
       new RegExp(
         `\\[[^\\]\\n]*\\]\\s*\\(\\s*${artifactUrl}\\s*\\)|<${artifactUrl}>|\\x60${artifactUrl}\\x60|${artifactUrl}`,

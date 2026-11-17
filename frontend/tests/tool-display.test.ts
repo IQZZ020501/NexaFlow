@@ -15,6 +15,14 @@ const translated = (language: Language) =>
   ((key, values) => translate(language, key, values)) as TFunction
 
 describe("tool display helpers", () => {
+  test("preserves the whole authenticated artifact path when normalizing links", () => {
+    const id = "23291174-58e4-42ad-9656-2ee0aad1328a"
+    const file = {artifact_id: id, filename: "report.html", relative_path: "reports/report.html", download_url: "/api/v1/artifacts/expired"}
+    const result = withArtifactDownloadLinks("[report](/api/v1/artifacts/expired)", [{tool_name: "create_artifact", status: "succeeded", output: file}])
+    expect(result).toBe(`[reports/report.html](/api/v1/artifacts/${id}/content)`)
+    expect(withArtifactDownloadLinksInContent(`filename: report.html\n/api/v1/artifacts/${id}/content`)).toBe(`filename: report.html\n[report.html](/api/v1/artifacts/${id}/content)`)
+  })
+
   test("localizes bash and expands command artifact lists", () => {
     for (const [language, label] of [
       ["zh-Hans", "命令行"],

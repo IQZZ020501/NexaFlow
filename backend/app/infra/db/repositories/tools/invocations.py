@@ -2,7 +2,7 @@
 from dataclasses import fields
 from datetime import datetime
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -264,13 +264,15 @@ async def claim_tool_invocation(
     worker_task_id: str,
     now: datetime,
     lease_expires_at: datetime,
+    *,
+    resume: bool = False,
 ) -> bool:
     result = await db.execute(
         update(ToolInvocationOrm)
         .where(
             ToolInvocationOrm.workspace_id == workspace_id,
             ToolInvocationOrm.id == invocation_id,
-            ToolInvocationOrm.attempts < ToolInvocationOrm.max_attempts,
+            or_(resume, ToolInvocationOrm.attempts < ToolInvocationOrm.max_attempts),
             or_(
                 ToolInvocationOrm.status.in_(TOOL_INVOCATION_CLAIMABLE_STATUSES),
                 and_(
@@ -284,7 +286,7 @@ async def claim_tool_invocation(
         )
         .values(
             status=TOOL_INVOCATION_RUNNING,
-            attempts=ToolInvocationOrm.attempts + 1,
+            attempts=ToolInvocationOrm.attempts + (0 if resume else 1),
             worker_task_id=worker_task_id,
             lease_expires_at=lease_expires_at,
             started_at=func.coalesce(ToolInvocationOrm.started_at, now),
@@ -318,6 +320,7 @@ async def finalize_tool_invocation(
             error_code=result.error_code,
             error_message=result.error_message,
             usage=result.usage,
+            resource_wait={},
             worker_task_id=None,
             lease_expires_at=None,
             finished_at=result.finished_at,
@@ -376,6 +379,8 @@ async def requeue_tool_invocation(
     error_code: str,
     error_message: str,
     now: datetime,
+    *,
+    resource_wait: dict | None = None,
 ) -> bool:
     updated = await db.execute(
         update(ToolInvocationOrm)
@@ -391,6 +396,11 @@ async def requeue_tool_invocation(
             lease_expires_at=None,
             error_code=error_code,
             error_message=error_message,
+            attempts=case(
+                (ToolInvocationOrm.attempts > 0, ToolInvocationOrm.attempts - 1),
+                else_=0,
+            ),
+            resource_wait=resource_wait or {},
             updated_at=now,
         )
         .execution_options(synchronize_session=False)

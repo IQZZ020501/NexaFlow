@@ -4,33 +4,21 @@ Extensions supply capabilities and lifecycle hooks. Installing or executing
 caller-supplied extension code is deliberately not part of this contract.
 """
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import StructuredTool
+from nexaflow_extension_api import AgentExtension, require_api_version
 
 from app.domain.agents.runtime.tools import AgentToolResult
 
 
-@dataclass(frozen=True)
-class AgentExtension:
-    name: str
-    version: str
-    tools: tuple[StructuredTool, ...] = ()
-    context: Callable[[list[BaseMessage]], Awaitable[list[BaseMessage]]] | None = None
-    before_tool: (
-        Callable[[str, dict[str, Any]], Awaitable[AgentToolResult | None]] | None
-    ) = None
-    after_tool: (
-        Callable[[str, dict[str, Any], AgentToolResult], Awaitable[AgentToolResult]]
-        | None
-    ) = None
-
-
 class ExtensionRuntime:
-    def __init__(self, extensions: list[AgentExtension]) -> None:
+    def __init__(
+        self, extensions: list[AgentExtension[BaseMessage, StructuredTool]]
+    ) -> None:
+        for extension in extensions:
+            require_api_version(extension.api_version)
         if len({item.name for item in extensions}) != len(extensions):
             raise ValueError("Duplicate Agent extension names.")
         self.extensions = tuple(extensions)

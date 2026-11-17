@@ -16,7 +16,7 @@ from app.application.tools.runtime.contracts import (
     ToolInvocationContext,
     ToolRuntimeResult,
 )
-from app.domain.tools.mcp.service import mcp_server_connection
+from app.domain.tools.mcp.service import resolved_mcp_server_connection
 from app.domain.tools.results import prepare_mcp_result
 from app.domain.tools.runtime import TOOL_UNCERTAIN_EFFECTS
 from app.entities.tools import McpServer, ToolKind, ToolSnapshot
@@ -41,13 +41,20 @@ class McpToolAdapter:
         if not isinstance(tool_name, str) or not tool_name:
             return _failure("invalid_mcp_tool", "MCP Tool is unavailable.")
         try:
-            result = await call_mcp_tool(
-                mcp_server_connection(self.server, self.settings),
-                self.settings,
-                tool_name,
-                arguments,
-                idempotency_key=context.idempotency_key,
-            )
+            if snapshot.execution_spec.get("long_task"):
+                from app.application.tools.remote_tasks import execute_remote_task
+
+                result = await execute_remote_task(
+                    snapshot, arguments, context, self.settings
+                )
+            else:
+                result = await call_mcp_tool(
+                    await resolved_mcp_server_connection(self.server, self.settings),
+                    self.settings,
+                    tool_name,
+                    arguments,
+                    idempotency_key=context.idempotency_key,
+                )
         except McpServerBusy as exc:
             raise ToolAdapterBusy("MCP server host is busy.") from exc
         except McpClientError as exc:
@@ -63,12 +70,16 @@ class McpToolAdapter:
                 usage={},
             )
         is_error = result.is_error
-        data, full_result = prepare_mcp_result(result.payload(), context.idempotency_key)
+        data, full_result = prepare_mcp_result(
+            result.payload(), context.idempotency_key
+        )
         return ToolRuntimeResult(
             ok=not is_error,
             data=data,
             full_result=full_result,
-            summary="MCP Tool completed." if not is_error else "MCP Tool returned an error.",
+            summary="MCP Tool completed."
+            if not is_error
+            else "MCP Tool returned an error.",
             error_code="mcp_tool_error" if is_error else None,
             error_message="MCP Tool returned an error." if is_error else None,
             outcome="confirmed",

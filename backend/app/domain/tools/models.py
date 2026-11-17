@@ -464,6 +464,9 @@ class ToolInvocation(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    resource_wait: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     approved_by_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -536,6 +539,8 @@ class McpServer(Base):
         ForeignKey("workspaces.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    auth_mode: Mapped[str] = mapped_column(String(12), nullable=False, default="bearer", server_default="bearer")
+    long_task_contracts: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
     transport: Mapped[str] = mapped_column(
         String(30),
         nullable=False,

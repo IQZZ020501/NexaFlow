@@ -303,6 +303,36 @@ test("selects only platform HTML files from successful file tools, including bun
   ])
 })
 
+test("keeps same-named paths separate and old versions immutable with stable identities", () => {
+  const ids = [
+    "23291174-58e4-42ad-9656-2ee0aad1328a",
+    "1995b1ae-864c-478e-8736-8be80bc99c56",
+    "d570e6ec-c271-431b-8f58-b39a95fca211",
+  ]
+  const files = ids.map((artifact_id, index) => ({
+    tool_name: "bash",
+    status: "succeeded",
+    output: {
+      artifacts: [
+        {
+          artifact_id,
+          filename: "report.html",
+          relative_path: index === 1 ? "b/report.html" : "a/report.html",
+          download_url: `/api/v1/artifacts/expired-${index}`,
+        },
+      ],
+    },
+  }))
+  const original = previewArtifactsForEvents([files[0]!])
+  const latest = previewArtifactsForEvents(files)
+  expect(latest.map((file) => file.relativePath)).toEqual([
+    "a/report.html",
+    "b/report.html",
+  ])
+  expect(latest[0]?.downloadUrl).toBe(`/api/v1/artifacts/${ids[2]}/content`)
+  expect(original[0]?.downloadUrl).toBe(`/api/v1/artifacts/${ids[0]}/content`)
+})
+
 test("rejects external, ambiguous, or non-download URLs even when labeled HTML", () => {
   for (const url of [
     "https://evil.test/api/v1/artifacts/token",

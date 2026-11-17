@@ -34,6 +34,7 @@ import {
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import { ProjectSelector } from "@/components/projects/project-selector"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -59,6 +60,7 @@ import {
 import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
+  executionWaitSummary,
 } from "@/lib/tool-display"
 import { isRegularTool } from "@/lib/tool-visibility"
 import { getErrorMessage } from "@/lib/errors"
@@ -104,6 +106,8 @@ type AgentDetailWorkspaceProps = {
   question: string
   setQuestion: React.Dispatch<React.SetStateAction<string>>
   approvalMode: AgentApprovalMode
+  projectId?: string | null
+  onProjectChange?: (id: string | null) => void
   onApprovalModeChange: (value: AgentApprovalMode) => void
   files: File[]
   setFiles: React.Dispatch<React.SetStateAction<File[]>>
@@ -185,6 +189,8 @@ function processSummary(
   if (event.summary === "agent.preparing_tool_call")
     return t("正在准备工具调用")
   if (event.summary === "agent.tools_selected") return t("已完成分析")
+  if (event.summary === "agent.waiting_execution_resources")
+    return executionWaitSummary(event.output, t)
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready" && run.status === "failed")
@@ -977,6 +983,8 @@ export function AgentDetailWorkspace({
   question,
   setQuestion,
   approvalMode,
+  projectId,
+  onProjectChange,
   onApprovalModeChange,
   files,
   setFiles,
@@ -1649,6 +1657,7 @@ export function AgentDetailWorkspace({
                             >
                               <PlusIcon />
                             </Button>
+                            {onProjectChange ? <ProjectSelector token={token} workspaceId={workspaceId} value={runs.length ? runs[0].project_id : projectId} boundName={runs[0]?.project_name} disabled={runs.length > 0 || isAsking || isRunsLoading} onChange={onProjectChange} /> : null}
                             <AgentApprovalModeMenu
                               value={approvalMode}
                               onChange={onApprovalModeChange}

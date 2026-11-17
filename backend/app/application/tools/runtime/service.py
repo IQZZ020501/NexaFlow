@@ -1,6 +1,7 @@
 """Durable, provider-neutral Tool execution."""
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -43,6 +44,7 @@ from app.entities.tools import ToolInvocation, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.tools import mcp as mcp_repository
+from app.infra.db.repositories.tools import remote_tasks as remote_task_repository
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.db.repositories.workspaces import (
@@ -52,7 +54,9 @@ from app.infra.db.session import get_session_factory
 
 
 class ToolInvocationBusy(RuntimeError):
-    pass
+    def __init__(self, message: str, resource_wait: dict | None = None) -> None:
+        super().__init__(message)
+        self.resource_wait = resource_wait or {}
 
 
 class ToolInvocationConflict(ValueError):
@@ -89,6 +93,9 @@ async def queue_tool_invocation(
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),
         "deadline_at": context.deadline_at.isoformat(),
+        "execution_timeout_seconds": max(
+            0.001, (context.deadline_at - utc_now()).total_seconds()
+        ),
         "resource_snapshot": resource_snapshot,
         "approval_required": (
             context.approval_required
@@ -157,16 +164,67 @@ async def execute_tool_invocation(
             return await _fail_pending(
                 db,
                 invocation,
-                _failure("invalid_tool_snapshot", "Tool invocation snapshot is invalid."),
+                _failure(
+                    "invalid_tool_snapshot", "Tool invocation snapshot is invalid."
+                ),
             )
         now = utc_now()
+        resumable_remote_task = False
+        if snapshot.kind == "mcp" and snapshot.execution_spec.get("long_task"):
+            resumable_remote_task = (
+                await remote_task_repository.get(db, invocation.id) is not None
+            )
+        if invocation.resource_wait:
+            wait_deadline = datetime.fromisoformat(
+                invocation.resource_wait["deadline_at"]
+            )
+            if now >= wait_deadline:
+                return await _fail_pending(
+                    db,
+                    invocation,
+                    _failure(
+                        "tool_resource_wait_expired",
+                        "Waiting for execution resources timed out.",
+                    ),
+                )
+            retry_at = datetime.fromisoformat(
+                invocation.resource_wait["next_attempt_at"]
+            )
+            if now < retry_at:
+                raise ToolInvocationBusy(
+                    "Waiting for execution resources.", invocation.resource_wait
+                )
+            timeout_seconds = invocation.policy_snapshot.get(
+                "execution_timeout_seconds", settings.agent_tool_timeout_seconds
+            )
+            deadline = now + timedelta(seconds=timeout_seconds)
+            if invocation.run_id:
+                from app.infra.db.repositories.agents import repository as runs
+
+                run = await runs.get_agent_run_by_id(db, invocation.run_id)
+                if run and run.execution_deadline_at:
+                    run_deadline = run.execution_deadline_at
+                    deadline = min(
+                        deadline,
+                        run_deadline.replace(tzinfo=UTC)
+                        if run_deadline.tzinfo is None
+                        else run_deadline,
+                    )
+            invocation.policy_snapshot = {
+                **invocation.policy_snapshot,
+                "deadline_at": deadline.isoformat(),
+            }
+            await tool_repository.refresh_tool_invocation_deadline(
+                db, invocation.workspace_id, invocation.id, deadline
+            )
+            snapshot, context = _load_invocation_contract(invocation)
         if invocation.status == TOOL_INVOCATION_RUNNING:
             lease_expires_at = invocation.lease_expires_at
             if lease_expires_at is not None and lease_expires_at.tzinfo is None:
                 lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
             if lease_expires_at is not None and lease_expires_at >= now:
                 raise ToolInvocationBusy("Tool invocation is owned by another worker.")
-            if snapshot.effect in TOOL_UNCERTAIN_EFFECTS:
+            if snapshot.effect in TOOL_UNCERTAIN_EFFECTS and not resumable_remote_task:
                 return await _fail_pending(
                     db,
                     invocation,
@@ -176,7 +234,10 @@ async def execute_tool_invocation(
                         uncertain=True,
                     ),
                 )
-            if invocation.attempts >= invocation.max_attempts:
+            if (
+                invocation.attempts >= invocation.max_attempts
+                and not resumable_remote_task
+            ):
                 return await _fail_pending(
                     db,
                     invocation,
@@ -210,6 +271,7 @@ async def execute_tool_invocation(
             worker_task_id,
             now,
             now + timedelta(seconds=settings.agent_executor_lease_seconds),
+            **({"resume": True} if resumable_remote_task else {}),
         )
         await db.commit()
         if not claimed:
@@ -225,6 +287,11 @@ async def execute_tool_invocation(
                 return _stored_result(current)
             raise ToolInvocationBusy("Tool invocation is owned by another worker.")
         selected_adapter = adapter or build_tool_adapter(snapshot, settings, mcp_server)
+        context = replace(
+            context,
+            worker_task_id=worker_task_id,
+            run_worker_task_id=run_worker_task_id,
+        )
 
     result = _failure("tool_adapter_mismatch", "Tool provider is unavailable.")
     if selected_adapter.kind == snapshot.kind:
@@ -232,7 +299,10 @@ async def execute_tool_invocation(
         from app.ports.execution import ExecutionScope, execution_scope
 
         scope = ExecutionScope(
-            context.workspace_id, context.invocation_id, context.run_id, run_worker_task_id
+            context.workspace_id,
+            context.invocation_id,
+            context.run_id,
+            run_worker_task_id,
         )
         try:
             async with asyncio.timeout(remaining):
@@ -245,35 +315,77 @@ async def execute_tool_invocation(
                     )
                 finally:
                     execution_scope.reset(scope_token)
-        except ToolAdapterBusy:
-            if invocation.attempts + 1 < invocation.max_attempts:
+        except ToolAdapterBusy as exc:
+            if not scope.attempt.unconfirmed:
                 async with get_session_factory()() as db:
+                    now = utc_now()
+                    wait = dict(invocation.resource_wait)
+                    if not wait:
+                        wait_deadline = now + timedelta(seconds=300)
+                        if invocation.run_id:
+                            from app.infra.db.repositories.agents import (
+                                repository as runs,
+                            )
+
+                            run = await runs.get_agent_run_by_id(db, invocation.run_id)
+                            if run and run.execution_deadline_at:
+                                end = run.execution_deadline_at
+                                wait_deadline = min(
+                                    wait_deadline,
+                                    end.replace(tzinfo=UTC)
+                                    if end.tzinfo is None
+                                    else end,
+                                )
+                        wait = {
+                            "schema_version": 1,
+                            "queued_at": now.isoformat(),
+                            "deadline_at": wait_deadline.isoformat(),
+                        }
+                    cause = exc.__cause__ or exc
+                    while cause.__cause__ is not None and not hasattr(cause, "reason"):
+                        cause = cause.__cause__
+                    wait.update(
+                        reason=getattr(cause, "reason", "provider_busy"),
+                        resources=getattr(cause, "resources", {}),
+                        next_attempt_at=(
+                            now
+                            + timedelta(
+                                seconds=settings.agent_executor_heartbeat_seconds
+                            )
+                        ).isoformat(),
+                    )
                     await tool_repository.requeue_tool_invocation(
                         db,
                         invocation.workspace_id,
                         invocation.id,
                         worker_task_id,
-                        "tool_provider_busy",
-                        "Tool provider is busy.",
-                        utc_now(),
+                        "tool_resource_wait",
+                        "Waiting for execution resources.",
+                        now,
+                        resource_wait=wait,
                     )
                     await db.commit()
-                raise ToolInvocationBusy("Tool provider is busy.")
+                raise ToolInvocationBusy(
+                    "Waiting for execution resources.", wait
+                ) from exc
             result = _failure(
-                "tool_attempts_exhausted",
-                "Tool invocation attempts were exhausted.",
+                "tool_outcome_uncertain",
+                "Tool invocation outcome is uncertain after dispatch.",
+                uncertain=True,
             )
         except TimeoutError:
             result = _failure(
                 "tool_deadline_exceeded",
                 "Tool invocation deadline expired.",
-                uncertain=scope.attempt.unconfirmed or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=scope.attempt.unconfirmed
+                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
         except Exception:
             result = _failure(
                 "tool_execution_failed",
                 "Tool execution failed.",
-                uncertain=scope.attempt.unconfirmed or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=scope.attempt.unconfirmed
+                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
 
     if result.ok:
@@ -292,7 +404,8 @@ async def execute_tool_invocation(
             return _failure(
                 "tool_result_not_persisted",
                 "Tool result could not be persisted.",
-                uncertain=result.outcome == "uncertain" or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=result.outcome == "uncertain"
+                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
         _apply_result(stored, result)
         saved = await tool_repository.finalize_tool_invocation(
@@ -307,7 +420,8 @@ async def execute_tool_invocation(
             return _failure(
                 "tool_result_not_persisted",
                 "Tool result could not be persisted.",
-                uncertain=result.outcome == "uncertain" or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                uncertain=result.outcome == "uncertain"
+                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
             )
     return result
 
@@ -383,15 +497,24 @@ async def _validate_live_state(
         snapshot.allowed_access_sources,
         invocation.access_source,
     ):
-        return _failure("tool_access_source_denied", "Tool access source is denied."), None
+        return _failure(
+            "tool_access_source_denied", "Tool access source is denied."
+        ), None
     if invocation.access_source == "api" and (
         snapshot.approval != TOOL_APPROVAL_AUTO
         or snapshot.effect not in TOOL_SAFE_EXTERNAL_EFFECTS
     ):
-        return _failure("tool_access_source_denied", "Tool access source is denied."), None
+        return _failure(
+            "tool_access_source_denied", "Tool access source is denied."
+        ), None
     if invocation.origin == "workflow" and not snapshot.workflow_callable:
-        return _failure("tool_not_workflow_callable", "Tool cannot run in a Workflow."), None
-    if snapshot.execution_spec.get("workflow_only") is True and invocation.origin != "workflow":
+        return _failure(
+            "tool_not_workflow_callable", "Tool cannot run in a Workflow."
+        ), None
+    if (
+        snapshot.execution_spec.get("workflow_only") is True
+        and invocation.origin != "workflow"
+    ):
         return _failure("tool_not_agent_callable", "Tool cannot run in an Agent."), None
 
     actor = await user_repository.get_user_by_id(db, snapshot.bound_by_user_id)
@@ -449,8 +572,10 @@ async def _validate_live_state(
         if execution_user is not None
         else None
     )
-    if execution_user is None or not execution_user.is_active or (
-        not execution_user.is_global_admin and execution_membership is None
+    if (
+        execution_user is None
+        or not execution_user.is_active
+        or (not execution_user.is_global_admin and execution_membership is None)
     ):
         return _failure(
             "tool_execution_access_revoked",
@@ -476,9 +601,11 @@ async def _validate_live_state(
 async def list_recoverable_tool_test_invocation_ids() -> list[str]:
     async with get_session_factory()() as db:
         now = utc_now()
-        invocation_ids = await tool_repository.list_recoverable_tool_test_invocation_ids(
-            db,
-            now,
+        invocation_ids = (
+            await tool_repository.list_recoverable_tool_test_invocation_ids(
+                db,
+                now,
+            )
         )
         await db.commit()
         return invocation_ids
@@ -528,7 +655,9 @@ async def _fail_pending(
 def _load_invocation_contract(
     invocation: ToolInvocation,
 ) -> tuple[ToolSnapshot, ToolInvocationContext]:
-    snapshot = tool_snapshot_from_payload(invocation.policy_snapshot.get("tool_snapshot"))
+    snapshot = tool_snapshot_from_payload(
+        invocation.policy_snapshot.get("tool_snapshot")
+    )
     deadline_value = invocation.policy_snapshot.get("deadline_at")
     if not isinstance(deadline_value, str):
         raise ValueError("Tool invocation deadline is invalid.")
@@ -551,9 +680,7 @@ def _load_invocation_contract(
         resource_snapshot=resource_snapshot,
         approval_required=(
             invocation.policy_snapshot.get("approval_required")
-            if isinstance(
-                invocation.policy_snapshot.get("approval_required"), bool
-            )
+            if isinstance(invocation.policy_snapshot.get("approval_required"), bool)
             else None
         ),
     )
@@ -606,7 +733,9 @@ def _apply_result(invocation: ToolInvocation, result: ToolRuntimeResult) -> None
     invocation.result_summary = result.summary[:1000]
     invocation.outcome = result.outcome
     invocation.error_code = result.error_code
-    invocation.error_message = result.error_message[:1000] if result.error_message else None
+    invocation.error_message = (
+        result.error_message[:1000] if result.error_message else None
+    )
     invocation.usage = result.usage
     invocation.finished_at = utc_now()
     invocation.updated_at = invocation.finished_at

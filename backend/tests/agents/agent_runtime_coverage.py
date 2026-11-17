@@ -6530,11 +6530,11 @@ async def assert_cancel_stops_claimed_run(
     assert events[-1]["run"]["status"] == "cancelled"
 
 
-async def assert_orphaned_stream_ends_with_error(
+async def assert_orphaned_stream_observes_recovery(
     workspace_id: str,
     agent_id: str,
 ) -> None:
-    """A run whose executor lease expired must end the stream with an error."""
+    """An expired executor lease keeps observing until durable recovery finishes."""
     from sqlalchemy import update
 
     from app.domain.agents.models import AgentRunState
@@ -6574,10 +6574,35 @@ async def assert_orphaned_stream_ends_with_error(
             settings,
         ):
             events.append(event)
-    assert [event["type"] for event in events] == ["run", "error"], events
-    error_event = events[-1]
-    assert error_event["run"]["status"] == "failed"
-    assert "lost its lease" in error_event["run"]["last_error"]
+            if event["type"] == "recovering":
+                assert event["run"]["status"] == "running"
+                async with get_session_factory()() as recovery_db:
+                    now = utc_now()
+                    claimed = await agent_repository.claim_agent_run(
+                        recovery_db,
+                        run_id,
+                        "recovery-worker",
+                        now,
+                        now + timedelta(seconds=60),
+                        generation="unified",
+                    )
+                    assert claimed is not None
+                    assert await agent_repository.finalize_agent_run(
+                        recovery_db,
+                        run_id,
+                        "recovery-worker",
+                        status="succeeded",
+                        result="recovered",
+                        events=[],
+                        last_error=None,
+                        finished_at=now,
+                    )
+                    await recovery_db.commit()
+    assert [event["type"] for event in events] == ["run", "recovering", "complete"], (
+        events
+    )
+    assert events[-1]["run"]["status"] == "succeeded"
+    assert events[-1]["run"]["result"] == "recovered"
 
 
 def main() -> None:
@@ -6639,7 +6664,7 @@ def main() -> None:
                 assert_stream_paths(workspace_id, resources["agent_id"])
             )
             asyncio.run(
-                assert_orphaned_stream_ends_with_error(
+                assert_orphaned_stream_observes_recovery(
                     workspace_id,
                     resources["agent_id"],
                 )

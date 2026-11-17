@@ -1,5 +1,6 @@
 import { listQuery, request } from "@/lib/api-client"
 import type { User } from "@/lib/api/auth"
+import type { McpOAuthConfiguration } from "@/lib/api/mcp"
 
 export type ToolKind = "builtin" | "python" | "mcp"
 
@@ -16,6 +17,8 @@ export type ToolSourceSummary = {
 }
 
 export type ToolSourceDetail = ToolSourceSummary & {
+  mcp_server_id?: string | null
+  auth_mode?: "bearer" | "oauth"
   workspace_id: string
   status: "active" | "disabled" | string
   url: string | null
@@ -37,6 +40,7 @@ export type McpSourceCreatePayload =
       transport: "streamable_http" | "sse"
       url: string
       bearer_token?: string
+      oauth?: McpOAuthConfiguration
     }
   | {
       name: string

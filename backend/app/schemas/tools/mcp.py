@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.tools.oauth import McpOAuthConfiguration
+
 
 class McpToolResponse(BaseModel):
     name: str
@@ -20,6 +22,7 @@ class McpServerResponse(BaseModel):
     workspace_id: str
     name: str
     transport: Literal["streamable_http", "sse", "stdio"]
+    auth_mode: Literal["bearer", "oauth"] = "bearer"
     url: str | None
     stdio_command: str | None
     tools: list[McpToolResponse]
@@ -50,9 +53,14 @@ class McpServerCreateRequest(BaseModel):
     url: str | None = Field(default=None, max_length=2000)
     stdio_config: McpStdioConfigRequest | None = None
     bearer_token: str | None = Field(default=None, max_length=8000)
+    oauth: McpOAuthConfiguration | None = None
 
     @model_validator(mode="after")
     def validate_transport_fields(self) -> "McpServerCreateRequest":
+        if self.oauth is not None and (
+            self.transport == "stdio" or self.bearer_token is not None
+        ):
+            raise ValueError("OAuth requires an HTTP transport without a bearer token.")
         if self.transport == "stdio":
             if (
                 self.stdio_config is None

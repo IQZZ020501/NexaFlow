@@ -1201,7 +1201,7 @@ def test_mcp_adapter_marks_only_sent_writes_uncertain() -> None:
     async def invoke(failure, effect):
         snapshot = SimpleNamespace(effect=effect, execution_spec={"tool_name": "write"})
         with (
-            patch.object(mcp_adapter, "mcp_server_connection"),
+            patch.object(mcp_adapter, "resolved_mcp_server_connection"),
             patch.object(mcp_adapter, "call_mcp_tool", AsyncMock(side_effect=failure)),
         ):
             return await adapter.invoke(

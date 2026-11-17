@@ -76,6 +76,17 @@ class FakeSessionStore:
 
     records = {}
 
+    async def admit(self, settings, record, scope, reserve, *, intent=None):
+        token, reservation = await reserve([])
+        if record is not None:
+            await self.publish(
+                record,
+                capacity_token=token,
+                capacity_reservation=reservation,
+                creation_pending=True,
+            )
+        return token
+
     async def acquire(self, settings, scope, timeout, **kwargs):
         key = (
             scope.workspace_id,
@@ -138,7 +149,16 @@ class FakeSessionStore:
     async def closed(self, record):
         self.row(record).state = "closed"
 
-    async def for_run(self, workspace_id, run_id):
+    async def reservation_held(self, identity):
+        return False
+
+    async def release_admission(self, identity):
+        pass
+
+    async def due_admissions(self, host_id):
+        return []
+
+    async def for_run(self, workspace_id, run_id, host_id=None):
         return [
             deepcopy(row)
             for row in self.records.values()
@@ -188,6 +208,40 @@ class FakeRedis:
             raise self.failure
         keys = keys_and_args[:_numkeys]
         args = keys_and_args[_numkeys:]
+        from app.adapters.execution.reservations import (
+            _RELEASE,
+            _RELEASE_MEMBER,
+            _RESERVE,
+            _RESTORE,
+        )
+
+        if script is _RESTORE:
+            for item in json.loads(args[1]):
+                for key in (keys[0], item["workspace"], item["consumer"]):
+                    if key:
+                        self.slots.setdefault(key, {})[item["token"]] = item["expiry"]
+            return 1
+        if script is _RESERVE:
+            now, expiry, _ttl, identity, member = args[:5]
+            count = len(json.loads(args[6]))
+            held = [self._expire(key, now) for key in keys[:3]]
+            if all(f"{identity}:{i + 1}" in held[0] for i in range(count)):
+                return 1 if member == "run" else count
+            for index, limit in enumerate(args[7:10]):
+                if limit and len(held[index]) + count > limit:
+                    return -(index + 1)
+            for bucket in held:
+                for index in range(count):
+                    bucket[f"{identity}:{index + 1}"] = expiry
+            type(self).host_key = keys[0]
+            return 1 if member == "run" else count
+        if script is _RELEASE_MEMBER:
+            return 1
+        if script is _RELEASE:
+            for key in keys[:3]:
+                for index in range(2):
+                    self.slots.setdefault(key, {}).pop(f"{args[0]}:{index + 1}", None)
+            return 1
         if script is capacity._ACQUIRE:
             (
                 now,
@@ -205,11 +259,11 @@ class FakeRedis:
             consumer = self._expire(keys[1], now)
             workspace = self._expire(keys[2], now)
             if limit > 0 and len(host) >= limit:
-                return 0
+                return -1
             if track_consumer == "1" and len(consumer) >= consumer_limit:
-                return 0
+                return -2
             if track_workspace == "1" and len(workspace) >= workspace_limit:
-                return 0
+                return -3
             host[token] = expiry
             if track_consumer == "1":
                 consumer[token] = expiry
@@ -224,6 +278,9 @@ class FakeRedis:
         if self.failure is not None:
             raise self.failure
         self.slots.setdefault(key, {}).pop(token, None)
+
+    async def hdel(self, key, field):
+        return 0
 
 
 class Files:
@@ -791,6 +848,54 @@ async def assert_failed_cleanup_keeps_capacity():
     platform.capacity.release.assert_not_awaited()
 
 
+async def assert_wrapped_creation_failure_keeps_durable_capacity():
+    # The SDK wraps timeouts and may fail to clean up a guest before returning.
+    # A generic create error therefore cannot confirm that capacity is free.
+    scope = ExecutionScope("create-unknown", "call", "create-unknown-run")
+    platform = adapter.OpenSandboxExecution(runtime_settings())
+    platform.capacity.acquire = AsyncMock(return_value="unknown-slot")
+    platform.capacity.release = AsyncMock()
+    token = execution_scope.set(scope)
+    try:
+        with patch.object(
+            adapter.Sandbox,
+            "create",
+            AsyncMock(side_effect=RuntimeError("SDK wrapped timeout")),
+        ) as create:
+            try:
+                await platform.execute(
+                    {"execution_session": "agent_run"},
+                    timeout_seconds=5,
+                    max_output_bytes=1000,
+                )
+            except ExecutionNotStarted:
+                pass
+            else:
+                raise AssertionError("A failed create was accepted")
+            row = FakeSessionStore.records[
+                (scope.workspace_id, scope.run_id, "run", "")
+            ]
+            assert row.creation_pending and row.capacity_token == "unknown-slot"
+            try:
+                await platform.execute(
+                    {"execution_session": "agent_run"},
+                    timeout_seconds=5,
+                    max_output_bytes=1000,
+                )
+            except ExecutionBusy as exc:
+                assert exc.reason == "environment_cleanup"
+            else:
+                raise AssertionError(
+                    "A second guest was created after an unconfirmed create"
+                )
+            create.assert_awaited_once()
+            await platform.close_session(scope.workspace_id, scope.run_id)
+            assert row.state != "closed"
+            platform.capacity.release.assert_not_awaited()
+    finally:
+        execution_scope.reset(token)
+
+
 async def assert_export_reads_never_replace_a_missing_guest():
     for failure in ("missing-id", "missing-guest", "cached-missing", "transient"):
         platform = adapter.OpenSandboxExecution(runtime_settings())
@@ -1155,6 +1260,10 @@ async def assert_conversation_files_stage_once_per_guest():
         "execution_session": "agent_run",
         "restore_files": {"nested/page.html": base64.b64encode(b"original").decode()},
     }
+    async def imported(*args, **kwargs):
+        assert not execution_scope.get().attempt.unconfirmed, "Private file import became a model side effect"
+        return SimpleNamespace(error=None, exit_code=0)
+    guest.commands.run.side_effect = imported
     try:
         with patch.object(adapter.Sandbox, "create", AsyncMock(return_value=guest)):
             for _ in range(2):
@@ -1168,6 +1277,17 @@ async def assert_conversation_files_stage_once_per_guest():
             await platform.close_session("restore-workspace", "restore-run")
             await platform.execute(request, timeout_seconds=10, max_output_bytes=4096)
             assert guest.commands.run.await_count == 2
+            project = {"execution_session": "agent_run", "restore_project_files": {"project_id": "project", "role": "source", "files": {"data.csv": base64.b64encode(b"original").decode()}}}
+            await platform.execute(project, timeout_seconds=10, max_output_bytes=4096)
+            await platform.execute(project, timeout_seconds=10, max_output_bytes=4096)
+            assert guest.commands.run.await_count == 3
+            invalid = {"execution_session": "agent_run", "restore_project_files": {"project_id": "project", "role": "source", "files": {1: "content"}}}
+            try:
+                await platform.execute(invalid, timeout_seconds=10, max_output_bytes=4096)
+            except ExecutionNotStarted:
+                pass
+            else:
+                raise AssertionError("Invalid project restoration was dispatched")
             await platform.close_session("restore-workspace", "restore-run")
     finally:
         execution_scope.reset(scope)
@@ -1610,6 +1730,7 @@ def main():
         assert_capacity_bounds_live_sandboxes,
         assert_dependency_cache_and_missing_guest,
         assert_failed_cleanup_keeps_capacity,
+        assert_wrapped_creation_failure_keeps_durable_capacity,
         assert_export_reads_never_replace_a_missing_guest,
         assert_dispatched_timeout_is_uncertain,
         assert_execution_deadline_covers_dispatch_and_cleanup,

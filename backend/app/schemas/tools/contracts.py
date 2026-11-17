@@ -33,6 +33,8 @@ class ToolSourceSummaryResponse(_PublicToolResponse):
 
 
 class ToolSourceDetailResponse(ToolSourceSummaryResponse):
+    mcp_server_id: str | None = None
+    auth_mode: Literal["bearer", "oauth"] = "bearer"
     workspace_id: str
     status: str
     url: str | None
@@ -127,6 +129,7 @@ class ToolInvocationResponse(_PublicToolResponse):
         "cancelled",
     ]
     attempts: int
+    resource_wait: dict[str, Any] = Field(default_factory=dict)
     result_data: Any = None
     result_summary: str
     outcome: Literal["confirmed", "uncertain"] | None

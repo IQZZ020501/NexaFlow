@@ -130,6 +130,10 @@ async def check():
     link = SimpleNamespace(
         artifact_id="artifact",
         filename="result.txt",
+        relative_path="nested/result.txt",
+        content_hash=hashlib.sha256(content).hexdigest(),
+        previous_artifact_id=None,
+        inspection={},
         format="txt",
         download_url="/api/v1/artifacts/token",
         size_bytes=len(content),
@@ -238,6 +242,10 @@ async def check_html_export_for_chat_sources():
     link = SimpleNamespace(
         artifact_id="html-artifact",
         filename="page.html",
+        relative_path="page.html",
+        content_hash=hashlib.sha256(content).hexdigest(),
+        previous_artifact_id=None,
+        inspection={},
         format="html",
         download_url="/api/v1/artifacts/html-artifact",
         size_bytes=len(content),

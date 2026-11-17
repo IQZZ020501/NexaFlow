@@ -141,7 +141,7 @@ docker compose down
 
 容量值在 Compose 的 `x-backend-environment.OPENSANDBOX_MAX_SANDBOXES` 中修改。默认预热池关闭，空闲时不保留执行沙箱。后台 Worker 仍按任务自动伸缩；低配环境避免同时导入大量文档，仅启动成功不能证明峰值内存足够。
 
-执行档位由 `backend/app/adapters/execution/resources.py` 定义：small 为 1 vCPU / 512 MiB，standard 为 1 vCPU / 1 GiB，heavy 为 2 vCPU / 2 GiB。bash、Skill 与文件渲染会申请 heavy；这是每台沙箱的限额，不代表始终占满。4 台 heavy 接近上限时，仅执行沙箱就可能使用约 8 GiB，此外还有业务进程、数据库、向量索引、网络侧车和宿主机。
+执行档位由 `backend/app/adapters/execution/resources.py` 定义：small 为 1 vCPU / 512 MiB，standard 为 1 vCPU / 1 GiB，heavy 为 2 vCPU / 2 GiB。普通 bash/脚本 Skill 为 standard，文件渲染、固定文档 Skill 和依赖安装能力为 heavy；Run 按冻结能力集取足够的档位，这是每台沙箱的限额，不代表始终占满。4 台 heavy 接近上限时，仅执行沙箱就可能使用约 8 GiB，此外还有业务进程、数据库、向量索引、网络侧车和宿主机。
 
 一个 Run 可能同时持有代码执行沙箱和独立 stdio MCP 宿主，上限设为 `1` 时不能组合使用这两类能力；完整组合使用至少保留 `2` 个槽位。大知识库会增加 PostgreSQL/Qdrant 的存储、索引和查询需求，向量容量需按数据量另算，参见 [Qdrant 官方容量说明](https://qdrant.tech/documentation/capacity-planning/)。合并容器简化的是部署和进程管理，不会消除业务进程的 CPU/内存开销。
 
@@ -162,7 +162,7 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
   `DATABASE_URL`、`ENVIRONMENT`、`LOG_LEVEL`、`KNOWLEDGE_STORAGE_DIR`、
   `CELERY_BROKER_URL`、`PUBLIC_APP_URL`、
   `MCP_ALLOW_PRIVATE_NETWORKS`、`CORS_ORIGINS`。部署镜像和网站端口直接编辑 `x-images` / `x-settings.web-port`；`NEXAFLOW_APP_IMAGE` 和 `NEXAFLOW_PORT` 不再控制部署 Compose。`NEXAFLOW_POSTGRES_IMAGE` 仅用于本地开发的数据库镜像覆盖。
-- 执行容量：共享后端配置的 `OPENSANDBOX_MAX_SANDBOXES` 限制所有 Worker 同时存活的沙箱总数，当前单机 Compose 设置为 `4`。代码默认 `0` 表示不限制，但 `production` 要求正数。按执行主机的承载能力设置；槽位记录在 Redis（`CELERY_BROKER_URL`）中，按沙箱的原生过期时间自动失效。满载时最多等待 5 秒，仍无空位的工具调用回到队列，由 Run 稍后重试，不会被判为失败；Redis 不可用时不创建沙箱。
+- 执行容量：共享后端配置的 `OPENSANDBOX_MAX_SANDBOXES` 限制所有 Worker 同时存活的沙箱总数，当前单机 Compose 设置为 `4`。代码默认 `0` 表示不限制，但 `production` 要求正数。按执行主机的承载能力设置；槽位记录在 Redis（`CELERY_BROKER_URL`）中，按沙箱的原生过期时间自动失效。满载时立即交回 Worker，ToolInvocation 保存最多 300 秒且不超过 Run deadline 的资源等待，确认未派发的等待不消耗执行尝试。包含 stdio MCP 的新 Agent Run 在第一次需要环境时原子预留代码与 MCP 两份预算，同一 Run 最多一个 stdio 宿主；实际 guest 按需创建。准入按工作空间轮转、空间内到达顺序执行，仍由 heartbeat/Beat 重试唤起。Redis 不可用时不创建沙箱。高级可选 `OPENSANDBOX_MEMORY_BUDGET_MIB` / `OPENSANDBOX_CPU_BUDGET` 默认 `0`（不启用加权预算），设置后扣除预热池的保守成本；数量、内存、CPU、workspace 和 consumer 额度必须同时满足。详见 [可靠性与准入契约](RUN_RELIABILITY.md)。
 - 兼容既有部署的高级运行策略：`MCP_REQUEST_TIMEOUT_SECONDS`、
   `MODEL_REQUEST_TIMEOUT_SECONDS`、`AGENT_TOOL_TIMEOUT_SECONDS`、
   `AGENT_RUN_TIMEOUT_SECONDS`、`AGENT_MAX_TURNS`、`AGENT_MAX_TOOL_CALLS`、

@@ -7,7 +7,7 @@ Run from ``backend/`` with:
 
 import asyncio
 import random
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 from datetime import UTC, datetime
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -133,6 +133,7 @@ EXPECTED_COLUMNS = {
         "status",
         "attempts",
         "max_attempts",
+        "resource_wait",
         "approved_by_user_id",
         "approved_at",
         "worker_task_id",
@@ -3560,7 +3561,7 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
         queue_tool_invocation,
     )
     from app.domain.tools.runtime import build_tool_snapshot
-    from app.entities.defaults import utc_now
+    from app.entities.defaults import new_id, utc_now
     from app.infra.config.settings import Settings
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import repository as tool_repository
@@ -3799,32 +3800,92 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
 
     class BusyAdapter:
         kind = "python"
+        calls = 0
 
         async def invoke(self, snapshot, arguments, context):
+            self.calls += 1
             raise ToolAdapterBusy("busy")
 
-    for attempt in range(2):
+    busy_adapter = BusyAdapter()
+    wait_settings = replace(settings, agent_executor_heartbeat_seconds=0)
+    first_wait_deadline = None
+    for attempt in range(5):
         try:
             await execute_tool_invocation(
                 busy_invocation.id,
-                settings,
+                wait_settings,
                 worker_task_id=f"busy-worker-{attempt}",
-                adapter=BusyAdapter(),
+                adapter=busy_adapter,
             )
         except Exception as exc:
             from app.application.tools.runtime.service import ToolInvocationBusy
 
             assert isinstance(exc, ToolInvocationBusy)
+            first_wait_deadline = (
+                first_wait_deadline or exc.resource_wait["deadline_at"]
+            )
+            assert exc.resource_wait["deadline_at"] == first_wait_deadline
         else:
-            raise AssertionError("A busy provider must requeue before the last attempt.")
-    exhausted = await execute_tool_invocation(
-        busy_invocation.id,
-        settings,
-        worker_task_id="busy-worker-2",
-        adapter=BusyAdapter(),
+            raise AssertionError(
+                "Waiting for capacity must not exhaust execution attempts."
+            )
+    async with get_session_factory()() as db:
+        waiting = await tool_repository.get_tool_invocation_by_id(
+            db, busy_invocation.id
+        )
+        assert waiting.status == "queued"
+        assert waiting.attempts == 0
+        assert busy_adapter.calls == 5
+        expired = replace(
+            waiting,
+            id=new_id(),
+            invocation_id="expired-resource-wait",
+            idempotency_key=f"expired-resource-wait:{workspace_id}",
+            resource_wait={
+                **waiting.resource_wait,
+                "deadline_at": (utc_now() - timedelta(seconds=1)).isoformat(),
+            },
+        )
+        await tool_repository.create_or_get_tool_invocation(db, expired)
+        await db.commit()
+    expired_result = await execute_tool_invocation(
+        expired.id, settings, worker_task_id="expired-wait-worker", adapter=busy_adapter
     )
-    assert exhausted.ok is False
-    assert exhausted.error_code == "tool_attempts_exhausted"
+    assert not expired_result.ok
+    assert expired_result.error_code == "tool_resource_wait_expired"
+    assert busy_adapter.calls == 5
+    async with get_session_factory()() as db:
+        dispatched = replace(
+            waiting,
+            id=new_id(),
+            invocation_id="busy-after-dispatch",
+            idempotency_key=f"busy-after-dispatch:{workspace_id}",
+            resource_wait={},
+        )
+        await tool_repository.create_or_get_tool_invocation(db, dispatched)
+        await db.commit()
+
+    class BusyAfterDispatch:
+        kind = "python"
+
+        async def invoke(self, snapshot, arguments, context):
+            from app.ports.execution import execution_scope
+
+            execution_scope.get().attempt.unconfirmed = True
+            raise ToolAdapterBusy("Connection lost after dispatch")
+
+    uncertain_busy = await execute_tool_invocation(
+        dispatched.id,
+        settings,
+        worker_task_id="dispatched-busy-worker",
+        adapter=BusyAfterDispatch(),
+    )
+    assert uncertain_busy.error_code == "tool_outcome_uncertain"
+    assert uncertain_busy.outcome == "uncertain"
+    async with get_session_factory()() as db:
+        dispatched = await tool_repository.get_tool_invocation_by_id(db, dispatched.id)
+        assert dispatched.attempts == 1
+        assert not dispatched.resource_wait
     async with get_session_factory()() as db:
         # RUN-008: a pure tool whose worker crashed BEFORE provider dispatch
         # (lease expired, attempts below max) is safely retried after the
@@ -3860,8 +3921,8 @@ async def assert_tool_runtime_is_durable(workspace_id: str) -> None:
             busy_invocation.id,
         )
         assert stored_busy is not None
-        assert stored_busy.status == "failed"
-        assert stored_busy.attempts == stored_busy.max_attempts == 3
+        assert stored_busy.status == "queued"
+        assert stored_busy.attempts == 0
 
         drift_context = ToolInvocationContext(
             **{
@@ -6848,6 +6909,7 @@ def test_tool_tasks_are_registered() -> None:
 
 
 def main() -> None:
+    from tests.tools.catalog_upgrade import test_existing_file_catalog_upgrade
     from tests.tools.personal import (
         test_personal_configuration,
         test_personal_name_migration,
@@ -6862,6 +6924,7 @@ def main() -> None:
     test_documents_reference_migration_targets_current_catalog()
     test_builtin_image_migration_refreshes_stale_versions()
     test_open_kimi_ppt_migration_refreshes_stale_versions()
+    test_existing_file_catalog_upgrade()
     test_pptx_argument_normalization_keeps_model_theme()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()

@@ -39,7 +39,13 @@ async def check():
         status="running_v2",
         worker_task_id="worker-1",
         execution_deadline_at=utc_now() + timedelta(seconds=900),
-        application_snapshot={"execution_profile": execution_profile(config)},
+        application_snapshot={
+            "execution_profile": execution_profile(config),
+            "sandbox_requirements": {
+                "schema_version": 1,
+                "profiles": ["standard", "standard"],
+            },
+        },
     )
     async with factory() as db:
         await runs.create_agent_run(db, run)
@@ -56,6 +62,19 @@ async def check():
                 raise AssertionError("Read created a missing session")
             assert await store.for_run(scope.workspace_id, scope.run_id) == []
             first, _, reset, _ = await store.acquire(config, scope, 10)
+            assert first.capacity_reservation["profiles"] == ["standard", "standard"]
+            assert first.capacity_reservation["member"] == "run"
+            admitted_records = []
+
+            async def reserve(records):
+                admitted_records.extend(records)
+                return (
+                    f"{first.capacity_reservation['id']}:1",
+                    first.capacity_reservation,
+                )
+
+            await store.admit(config, first, scope, reserve)
+            assert not admitted_records and first.creation_pending
             assert (
                 not reset
                 and first.expires_at
@@ -71,6 +90,7 @@ async def check():
                 first,
                 sandbox_id="guest",
                 state="ready",
+                creation_pending=False,
                 environments={"python": {"environment_hash": "hash"}},
             )
             await store.release(first)
