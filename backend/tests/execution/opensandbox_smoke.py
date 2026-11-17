@@ -36,7 +36,6 @@ from app.infra.db.repositories.agents import repository as runs
 from app.infra.execution import sessions
 from app.infra.execution.network import DENIED_NETWORKS
 from app.infra.execution.profile import execution_profile
-from app.infra.sandbox.client import execute_workflow_code
 from app.infra.tools.mcp_stdio import parse_mcp_stdio_config
 from app.ports.execution import (
     ExecutionBusy,
@@ -489,10 +488,6 @@ async def run_checks(runtime) -> None:
         )
     )
     try:
-        result = await execute_workflow_code(
-            runtime, "result = inputs['value'] + 1", {"value": 2}
-        )
-        assert result.result == 3, result
         platform = OpenSandboxExecution(runtime)
         for path, code in (
             (

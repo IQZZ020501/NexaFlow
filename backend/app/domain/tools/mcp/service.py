@@ -36,6 +36,7 @@ from app.domain.tools.catalog.service import (
     reconcile_mcp_discovery,
     tombstone_mcp_server_catalog,
 )
+from app.domain.tools.mcp.task_contract import apply_task_contracts
 from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.entities.tools import McpServer, McpToolPolicy, ToolPolicy, ToolSource
@@ -59,6 +60,7 @@ from app.infra.tools.mcp_stdio import (
 from app.ports.mcp import (
     McpClientError,
     McpConnection,
+    McpDiscovery,
     McpTransport,
     discover_mcp_tools,
     normalize_mcp_url,
@@ -92,7 +94,9 @@ def mcp_tool_definition_hash(definition: McpTool) -> str:
         ),
     }
     return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
     ).hexdigest()
 
 
@@ -149,6 +153,7 @@ def mcp_server_to_response(
         workspace_id=server.workspace_id,
         name=server.name,
         transport=server.transport,
+        auth_mode=getattr(server, "auth_mode", "bearer"),
         url=server.url,
         stdio_command=server.stdio_command,
         tools=tools,
@@ -165,7 +170,9 @@ def mcp_server_to_response(
 def bearer_token(server: McpServer, settings: Settings) -> str | None:
     if server.bearer_token_ciphertext is None:
         return None
-    return decrypt_secret(server.bearer_token_ciphertext, application_secret_key(settings))
+    return decrypt_secret(
+        server.bearer_token_ciphertext, application_secret_key(settings)
+    )
 
 
 def stdio_config(server: McpServer, settings: Settings) -> McpStdioConfig | None:
@@ -185,18 +192,36 @@ def stdio_config(server: McpServer, settings: Settings) -> McpStdioConfig | None
 def mcp_server_connection(
     server: McpServer,
     settings: Settings,
+    *,
+    oauth_token: str | None = None,
 ) -> McpConnection:
+    if getattr(server, "auth_mode", "bearer") == "oauth" and not oauth_token:
+        raise McpClientError(
+            "MCP OAuth requires an authenticated connection.", request_sent=False
+        )
     return McpConnection(
         workspace_id=server.workspace_id,
         transport=cast(McpTransport, server.transport),
         url=server.url,
-        bearer_token=bearer_token(server, settings),
+        bearer_token=oauth_token
+        if getattr(server, "auth_mode", "bearer") == "oauth"
+        else bearer_token(server, settings),
         stdio_config=stdio_config(server, settings),
         network_policy=cast(
             Literal["public_only", "deployment"],
             server.network_policy,
         ),
     )
+
+
+async def resolved_mcp_server_connection(server, settings):
+    if getattr(server, "auth_mode", "bearer") == "oauth":
+        from app.domain.tools.mcp.oauth import access_token
+
+        return mcp_server_connection(
+            server, settings, oauth_token=await access_token(server, settings)
+        )
+    return mcp_server_connection(server, settings)
 
 
 def _is_workspace_admin(actor: User, workspace_role: str | None) -> bool:
@@ -309,13 +334,12 @@ async def create_mcp_server(
         server = McpServer(
             workspace_id=workspace_id,
             name=normalize_name(payload.name),
+            auth_mode="oauth" if payload.oauth else "bearer",
             transport=payload.transport,
             network_policy="deployment" if is_admin else "public_only",
             url=url,
             stdio_command=(
-                direct_stdio_config.command
-                if direct_stdio_config is not None
-                else None
+                direct_stdio_config.command if direct_stdio_config is not None else None
             ),
             stdio_config_ciphertext=(
                 encrypt_secret(
@@ -334,25 +358,34 @@ async def create_mcp_server(
                 token, application_secret_key(settings)
             )
             server.bearer_token_hint = secret_hint(token)
-        discovery = await discover_mcp_tools(
-            McpConnection(
-                workspace_id=workspace_id,
-                transport=cast(McpTransport, server.transport),
-                url=server.url,
-                bearer_token=token,
-                stdio_config=direct_stdio_config,
-                network_policy=cast(
-                    Literal["public_only", "deployment"],
-                    server.network_policy,
+        discovery = (
+            McpDiscovery(tools=[])
+            if payload.oauth
+            else await discover_mcp_tools(
+                McpConnection(
+                    workspace_id=workspace_id,
+                    transport=cast(McpTransport, server.transport),
+                    url=server.url,
+                    bearer_token=token,
+                    stdio_config=direct_stdio_config,
+                    network_policy=cast(
+                        Literal["public_only", "deployment"],
+                        server.network_policy,
+                    ),
                 ),
-            ),
-            settings,
+                settings,
+            )
         )
     except (McpClientError, McpStdioConfigError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     try:
         server = await mcp_repository.create_mcp_server(db, server)
+        tools = apply_task_contracts(discovery.tools, {})
+        if payload.oauth:
+            from app.domain.tools.mcp.oauth import configure
+
+            await configure(db, server, payload.oauth, settings)
         source = await tools_repository.save_tool_source(
             db,
             ToolSource(
@@ -364,8 +397,8 @@ async def create_mcp_server(
                 created_by_user_id=actor.id,
             ),
         )
-        await reconcile_mcp_discovery(db, server, source, discovery.tools)
-        server.tools = discovery.tools
+        await reconcile_mcp_discovery(db, server, source, tools)
+        server.tools = tools
         await mcp_repository.save_mcp_server(db, server)
         record_audit_log(
             db,
@@ -403,7 +436,7 @@ async def refresh_mcp_server(
     source = await _require_mcp_source_manager(db, server, actor, workspace_role)
     try:
         discovery = await discover_mcp_tools(
-            mcp_server_connection(server, settings),
+            await resolved_mcp_server_connection(server, settings),
             settings,
         )
     except McpClientError as exc:
@@ -412,8 +445,19 @@ async def refresh_mcp_server(
         await db.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    await reconcile_mcp_discovery(db, server, source, discovery.tools)
-    server.tools = discovery.tools
+    from app.infra.db.repositories.workspaces import repository as workspace_repository
+
+    await workspace_repository.lock_workspace(db, server.workspace_id)
+    current = await mcp_repository.get_mcp_server_by_id(db, server.id)
+    if current is None:
+        raise HTTPException(404, "MCP source is unavailable.")
+    server = current
+    try:
+        tools = apply_task_contracts(discovery.tools, getattr(server, "long_task_contracts", {}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await reconcile_mcp_discovery(db, server, source, tools)
+    server.tools = tools
     server.last_error = None
     record_audit_log(
         db,
@@ -457,6 +501,9 @@ async def _delete_mcp_server_records(
         workspace_id=server.workspace_id,
     )
     await tombstone_mcp_server_catalog(db, server.workspace_id, server.id)
+    from app.domain.tools.mcp.oauth import queue_disconnect
+
+    await queue_disconnect(db, server.id)
     await mcp_repository.delete_mcp_server(db, server)
 
 
@@ -568,10 +615,7 @@ async def resolve_mcp_tools(
                     application_id,
                     leaf.tool.id,
                 )
-                if (
-                    binding is None
-                    or binding.tool_version_id != leaf.version.id
-                ):
+                if binding is None or binding.tool_version_id != leaf.version.id:
                     raise HTTPException(status.HTTP_404_NOT_FOUND, "Tool not found.")
                 authorization_actor = await user_repository.get_user_by_id(
                     db,
@@ -686,7 +730,7 @@ async def set_mcp_tool_policy(
         approval = "each_call"
         effect = "unknown"
         allowed_access_sources = ["console", "public"]
-        workflow_callable = False
+        workflow_callable = True
         parallel_safe = False
 
     policy = leaf.policy

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 
 from app.domain.agents.models import (
     AGENT_RUN_ACTIVE_STATUSES,
@@ -10,8 +10,10 @@ from app.domain.agents.models import (
     AgentRunState,
 )
 from app.domain.execution.models import ExecutionSession as Row
+from app.domain.tools.execution import sandbox_requirements
 from app.entities.execution import ExecutionRun, ExecutionSession
 from app.infra.db.mapping import to_entity, to_orm
+from app.infra.execution.profile import sandbox_resource_profile
 
 
 def aware(value: datetime) -> datetime:
@@ -39,26 +41,19 @@ async def run_for_execution(db, workspace_id, run_id):
         or state.execution_deadline_at is None
     ):
         return None
+    requirements = snapshot.application_snapshot.get("sandbox_requirements")
+    if not isinstance(requirements, dict) or not requirements.get("profiles"):
+        requirements = await sandbox_requirements(
+            db, snapshot.tool_snapshots, snapshot.skill_snapshots, snapshot.mcp_tools
+        )
     return (
         ExecutionRun(
             aware(state.execution_deadline_at),
             state.worker_task_id,
             run.access_source,
             run.consumer_id,
-            "heavy"
-            if any(
-                tool.get("execution_spec", {}).get("builtin")
-                in {"artifact", "python_artifact", "skill", "skill_dependency_install"}
-                for tool in snapshot.tool_snapshots
-            )
-            else "standard"
-            if snapshot.skill_snapshots
-            or any(
-                tool.get("execution_spec", {}).get("builtin")
-                in {"shell", "skill_script"}
-                for tool in snapshot.tool_snapshots
-            )
-            else "small",
+            sandbox_resource_profile(snapshot.tool_snapshots, snapshot.skill_snapshots),
+            tuple(requirements["profiles"]),
         ),
         snapshot.application_snapshot.get("execution_profile"),
     )
@@ -82,6 +77,37 @@ async def live_session(db, workspace_id, run_id, purpose, owner_key):
 async def create(db, session):
     db.add(to_orm(Row, session))
     await db.flush()
+
+
+async def lock_capacity(db, host_key):
+    # One host-level transaction covers Redis admission and the durable create
+    # intent. No OpenSandbox I/O happens under this lock.
+    if db.bind.dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:host, 0))"),
+            {"host": host_key},
+        )
+
+
+async def capacity_records(db, now):
+    rows = (
+        await db.scalars(
+            select(Row).where(
+                Row.state != "closed",
+                Row.expires_at > now,
+                or_(
+                    Row.capacity_token.is_not(None),
+                    Row.sandbox_id.is_not(None),
+                    Row.creation_pending.is_(True),
+                ),
+            )
+        )
+    ).all()
+    from app.infra.db.repositories.execution import placements
+
+    return [to_entity(ExecutionSession, row) for row in rows] + [
+        placements.capacity_record(item) for item in await placements.active(db, now)
+    ]
 
 
 async def claim(db, session_id, holder, until, now):
@@ -192,11 +218,14 @@ async def reclaimable(db, now):
     return [to_entity(ExecutionSession, row) for row in rows]
 
 
-async def tracked_sessions(db):
+async def tracked_sessions(db, host_id=None):
     return dict(
         (
             await db.execute(
-                select(Row.id, Row.sandbox_id).where(Row.state != "closed")
+                select(Row.id, Row.sandbox_id).where(
+                    Row.state != "closed",
+                    *([Row.host_id == host_id] if host_id else []),
+                )
             )
         ).all()
     )

@@ -278,15 +278,15 @@ export function LoginScreen({
   return (
     <>
       <main className="grid min-h-dvh bg-background lg:grid-cols-[minmax(0,1.1fr)_minmax(28rem,0.9fr)]">
-        <section className="relative hidden min-h-dvh overflow-hidden border-r bg-white lg:block dark:bg-black">
+        <section className="relative hidden min-h-dvh items-center justify-center overflow-hidden border-r bg-white p-10 lg:flex xl:p-16 dark:bg-black">
           <Image
-            src="/NexaFlow-log.png"
+            src="/NexaFlow-logo.svg"
             alt="NexaFlow"
-            width={1536}
-            height={1024}
+            width={642}
+            height={228}
             priority
             sizes="(min-width: 1024px) 55vw, 0px"
-            className="absolute inset-0 h-full w-full object-cover dark:invert"
+            className="h-auto w-full object-contain dark:invert"
           />
         </section>
         <section
@@ -294,15 +294,15 @@ export function LoginScreen({
           className="flex min-h-dvh items-start justify-center px-6 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:items-center sm:px-10 lg:px-14 xl:px-20"
         >
           <div className="w-full max-w-sm">
-            <div className="mb-8 overflow-hidden lg:hidden">
+            <div className="mb-8 lg:hidden">
               <Image
-                src="/NexaFlow-log.png"
+                src="/NexaFlow-logo.svg"
                 alt="NexaFlow"
-                width={1536}
-                height={1024}
+                width={642}
+                height={228}
                 priority
-                sizes="(max-width: 639px) calc(100vw - 3rem), 24rem"
-                className="mx-auto -my-10 h-auto w-[135%] max-w-none sm:-my-8 sm:w-full sm:max-w-80 dark:invert"
+                sizes="256px"
+                className="mx-auto h-auto w-full max-w-64 dark:invert"
               />
             </div>
             <div className="mb-8 space-y-2">

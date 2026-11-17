@@ -47,7 +47,7 @@ import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
 import type { AgentSkill, AgentSkillRef } from "@/lib/api/agent-skills"
-import { toolDisplayName } from "@/lib/tool-display"
+import { toolBindingGroups } from "@/lib/tool-groups"
 import { isRegularTool } from "@/lib/tool-visibility"
 
 import type { AgentFormState } from "./agents-page"
@@ -147,10 +147,7 @@ export function AgentConfigFields({
     const tool = tools.find((item) => item.id === reference.tool_id)
     return !tool || isRegularTool(tool.function_name)
   })
-  const selectedToolNames = regularToolRefs.map((reference) => {
-    const tool = tools.find((item) => item.id === reference.tool_id)
-    return tool ? toolDisplayName(tool, t) : reference.tool_id
-  })
+  const selectedToolGroups = toolBindingGroups(regularToolRefs, tools, t)
   const imageTool = tools.find(
     (tool) => tool.function_name === "generate_image"
   )
@@ -656,7 +653,7 @@ export function AgentConfigFields({
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium">{t("工具")}</span>
                   <span className="block text-xs text-muted-foreground">
-                    {t("{value} 个工具", { value: regularToolRefs.length })}
+                    {t("{value} 个工具", { value: selectedToolGroups.length })}
                   </span>
                 </span>
                 <ChevronRightIcon
@@ -684,15 +681,15 @@ export function AgentConfigFields({
                     )}
                   </p>
                 ) : null}
-                {selectedToolNames.length > 0 ? (
+                {selectedToolGroups.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {selectedToolNames.map((name, index) => (
+                    {selectedToolGroups.map((group) => (
                       <Badge
-                        key={`${regularToolRefs[index]?.tool_id}:${regularToolRefs[index]?.version_id}`}
+                        key={group.id}
                         variant="secondary"
                         className="font-normal"
                       >
-                        {name}
+                        {group.name}
                       </Badge>
                     ))}
                   </div>

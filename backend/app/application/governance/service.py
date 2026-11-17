@@ -320,3 +320,12 @@ async def enforce_workspace_run_quota(
     used = await governance_repository.daily_run_count(db, workspace_id, day_start)
     if used >= governance.daily_run_limit:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Workspace daily run quota exceeded.")
+
+
+__all__ = [
+    "enforce_workspace_run_quota",
+    "get_admin_health",
+    "get_workspace_governance",
+    "get_workspace_inventory",
+    "update_workspace_governance",
+]

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -44,6 +45,10 @@ class GeneratedArtifact(Base):
     format: Mapped[str] = mapped_column(String(32), nullable=False)
     filename: Mapped[str] = mapped_column(String(120), nullable=False)
     relative_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    previous_artifact_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    invocation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    inspection: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     media_type: Mapped[str] = mapped_column(String(120), nullable=False)
     # Run files follow conversation retention; standalone downloads expire in 24h.
     content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

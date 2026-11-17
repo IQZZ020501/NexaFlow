@@ -108,6 +108,7 @@ from app.infra.db.repositories.runs.runs import (
     finalize_agent_run,
     get_active_agent_run,
     get_agent_run_by_id,
+    get_agent_run_by_request,
     pause_agent_run,
     pause_agent_run_for_child,
     pause_agent_run_for_input,
@@ -772,6 +773,8 @@ async def delete_consumer_conversation(
     Returns ``(deleted, active)``. Active runs are left intact so a worker
     cannot continue writing into a conversation while it is being removed.
     """
+    if await lock_agent(db, agent_id) is None:
+        return False, False
     scope = (
         AgentRun.agent_id == agent_id,
         AgentRun.access_source == access_source,
@@ -789,10 +792,18 @@ async def delete_consumer_conversation(
     )
     if active is not None:
         return False, True
+    from app.infra.db.repositories.projects import repository as file_trees
+
+    await file_trees.delete_conversation_files(db, select(AgentRun.id).where(*scope))
     await db.execute(
         delete(GeneratedArtifact).where(
             GeneratedArtifact.run_id.in_(select(AgentRun.id).where(*scope))
         )
+    )
+    await db.execute(
+        update(AgentRun)
+        .where(AgentRun.regenerated_from_run_id.in_(select(AgentRun.id).where(*scope)))
+        .values(regenerated_from_run_id=None)
     )
     result = await db.execute(delete(AgentRun).where(*scope))
     return bool(result.rowcount), False
@@ -816,6 +827,32 @@ async def latest_agent_conversation_id(
     )
 
 
+
+
+async def list_conversation_source_runs(db, run, *, offset: int, limit: int):
+    rows = (
+        (
+            await db.execute(
+                select(AgentRun.id, func.substr(AgentRun.goal, 1, 160).label("goal"))
+                .join(AgentRunState, AgentRunState.run_id == AgentRun.id)
+                .where(
+                    AgentRun.workspace_id == run.workspace_id,
+                    AgentRun.agent_id == run.agent_id,
+                    AgentRun.access_source == run.access_source,
+                    AgentRun.consumer_id == run.consumer_id,
+                    AgentRun.execution_user_id == run.execution_user_id,
+                    AgentRun.conversation_id == run.conversation_id,
+                    AgentRunState.status == AGENT_RUN_SUCCEEDED_STATUS,
+                )
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(row) for row in rows]
 
 
 async def list_conversation_memory_runs(
@@ -1503,6 +1540,20 @@ async def delete_agent_graph(
     agent_id: str,
     resource_type: str,
 ) -> None:
+    from app.infra.db.repositories.projects import repository as file_trees
+
+    await file_trees.delete_conversation_files(
+        db, select(AgentRun.id).where(AgentRun.agent_id == agent_id)
+    )
+    await db.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.regenerated_from_run_id.in_(
+                select(AgentRun.id).where(AgentRun.agent_id == agent_id)
+            )
+        )
+        .values(regenerated_from_run_id=None)
+    )
     await db.execute(
         delete(GeneratedArtifact).where(
             GeneratedArtifact.workspace_id == workspace_id,

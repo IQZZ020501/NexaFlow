@@ -18,6 +18,8 @@ class ObjectStorage(Protocol):
         key: str,
         chunks: AsyncIterable[bytes],
         max_bytes: int | None,
+        *,
+        allow_empty: bool = False,
     ) -> int: ...
 
     def put_bytes(self, key: str, content: bytes) -> int: ...
@@ -58,6 +60,8 @@ class LocalObjectStorage:
         key: str,
         chunks: AsyncIterable[bytes],
         max_bytes: int | None,
+        *,
+        allow_empty: bool = False,
     ) -> int:
         target = self.path(key)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +76,7 @@ class LocalObjectStorage:
         except Exception:
             target.unlink(missing_ok=True)
             raise
-        if size == 0:
+        if size == 0 and not allow_empty:
             target.unlink(missing_ok=True)
             raise EmptyObjectError("Object is empty.")
         return size

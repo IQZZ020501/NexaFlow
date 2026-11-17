@@ -121,10 +121,19 @@ export function KnowledgeHitTest({
 }: KnowledgeHitTestProps) {
   const { t } = useLanguage()
   const [queryText, setQueryText] = React.useState("")
-  const [queryLimit, setQueryLimit] = React.useState(5)
+  const [queryLimit, setQueryLimit] = React.useState("5")
   const [searchMode, setSearchMode] =
     React.useState<KnowledgeSearchMode>("blend")
-  const [minSimilarity, setMinSimilarity] = React.useState(0.6)
+  const [minSimilarity, setMinSimilarity] = React.useState("0.6")
+  const limit = Number(queryLimit)
+  const similarity = Number(minSimilarity)
+  const invalidLimit =
+    !queryLimit.trim() || !Number.isInteger(limit) || limit < 1 || limit > 20
+  const invalidSimilarity =
+    !minSimilarity.trim() ||
+    !Number.isFinite(similarity) ||
+    similarity < 0 ||
+    similarity > 1
   const [result, setResult] =
     React.useState<KnowledgeQueryInspectResult | null>(null)
   const [isQuerying, setIsQuerying] = React.useState(false)
@@ -143,7 +152,7 @@ export function KnowledgeHitTest({
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const query = queryText.trim()
-    if (!query) return
+    if (!query || invalidLimit || invalidSimilarity) return
 
     setSelectedHit(null)
     setIsQuerying(true)
@@ -154,18 +163,18 @@ export function KnowledgeHitTest({
         knowledgeBaseId,
         {
           query,
-          limit: queryLimit,
+          limit,
           search_mode: searchMode,
-          similarity: minSimilarity,
+          similarity,
         }
       )
       setResult(nextResult)
       onTested({
         query,
         result: nextResult,
-        limit: queryLimit,
+        limit,
         searchMode,
-        similarity: minSimilarity,
+        similarity,
       })
     } catch (error) {
       setResult(null)
@@ -185,7 +194,11 @@ export function KnowledgeHitTest({
           {t("使用当前知识库的向量索引和权威切片状态验证召回结果")}
         </p>
 
-        <form className="mt-3" onSubmit={(event) => void handleSubmit(event)}>
+        <form
+          className="mt-3"
+          noValidate
+          onSubmit={(event) => void handleSubmit(event)}
+        >
           <label className="text-sm font-medium" htmlFor="query-text">
             {t("查询内容")}
           </label>
@@ -224,14 +237,23 @@ export function KnowledgeHitTest({
                 type="number"
                 min={0}
                 max={1}
-                step={0.05}
+                step="any"
                 value={minSimilarity}
-                onChange={(event) =>
-                  setMinSimilarity(
-                    Math.min(1, Math.max(0, Number(event.target.value) || 0))
-                  )
+                aria-invalid={invalidSimilarity}
+                aria-describedby={
+                  invalidSimilarity ? "query-similarity-error" : undefined
                 }
+                onChange={(event) => setMinSimilarity(event.target.value)}
               />
+              {invalidSimilarity ? (
+                <span
+                  id="query-similarity-error"
+                  role="alert"
+                  className="text-xs text-destructive"
+                >
+                  {t("相似度必须是 0 到 1 之间的数字")}
+                </span>
+              ) : null}
             </label>
             <label
               className="grid gap-1 text-sm font-medium"
@@ -244,18 +266,32 @@ export function KnowledgeHitTest({
                 min={1}
                 max={20}
                 value={queryLimit}
-                onChange={(event) =>
-                  setQueryLimit(
-                    Math.min(20, Math.max(1, Number(event.target.value) || 1))
-                  )
+                aria-invalid={invalidLimit}
+                aria-describedby={
+                  invalidLimit ? "query-limit-error" : undefined
                 }
+                onChange={(event) => setQueryLimit(event.target.value)}
               />
+              {invalidLimit ? (
+                <span
+                  id="query-limit-error"
+                  role="alert"
+                  className="text-xs text-destructive"
+                >
+                  {t("返回数量必须是 1 到 20 之间的整数")}
+                </span>
+              ) : null}
             </label>
           </div>
           <Button
             type="submit"
             className="mt-3"
-            disabled={!queryText.trim() || isQuerying}
+            disabled={
+              !queryText.trim() ||
+              isQuerying ||
+              invalidLimit ||
+              invalidSimilarity
+            }
           >
             {isQuerying ? (
               <LoaderCircleIcon
@@ -273,7 +309,7 @@ export function KnowledgeHitTest({
       {trace ? (
         <section className="mt-4 rounded-lg border bg-background p-4">
           <h2 className="text-sm font-semibold">{t("检索追踪")}</h2>
-          <div className="mt-3 grid gap-2 text-sm [&>span]:min-w-0 [&>span]:break-words sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3 [&>span]:min-w-0 [&>span]:break-words">
             <span>
               {t("{label}：{value}", {
                 label: t("追踪 ID"),

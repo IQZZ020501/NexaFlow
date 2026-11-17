@@ -35,6 +35,7 @@ from app.entities.agent_skills import (
     AgentSkillSnapshot,
     AgentSkillVersion,
 )
+from app.entities.defaults import new_id
 from app.entities.identity.user import User
 from app.entities.tools import ToolRef
 from app.entities.workspaces.resource_permissions import ResourcePermission
@@ -310,6 +311,34 @@ async def update_agent_skill(
         ) from exc
     skill = await repository.refresh_agent_skill(db, skill)
     return _response(AgentSkillDetail(skill, detail.access, detail.current_version))
+
+
+async def delete_agent_skill(
+    db: AsyncSession,
+    workspace_id: str,
+    skill_id: str,
+    actor: User,
+    workspace_role: str | None,
+) -> None:
+    detail = await _detail(db, workspace_id, skill_id, actor, workspace_role, lock=True)
+    require_agent_skill_manage(detail.access)
+    skill = detail.skill
+    original_name = skill.name
+    # Keep immutable versions and execution references, and release the owner's name.
+    skill.status = "archived"
+    skill.name = f"deleted-{skill.id}-{new_id()}"
+    await repository.save_agent_skill(db, skill)
+    record_audit_log(
+        db,
+        actor,
+        "agent_skill.delete",
+        AGENT_SKILL_RESOURCE_TYPE,
+        skill.id,
+        original_name,
+        {},
+        workspace_id=workspace_id,
+    )
+    await db.commit()
 
 
 async def _validate_definition_resources(
@@ -647,6 +676,7 @@ async def revoke_agent_skill_permission(
 
 __all__ = [
     "create_agent_skill",
+    "delete_agent_skill",
     "get_agent_skill",
     "list_agent_skill_permissions",
     "list_agent_skill_ref_map",

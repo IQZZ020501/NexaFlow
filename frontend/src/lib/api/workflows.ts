@@ -1,6 +1,7 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
-import type { Agent } from "@/lib/api/agents"
+import type { Agent, AgentToolCall } from "@/lib/api/agents"
+import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -22,7 +23,6 @@ export type WorkflowNodeType =
   | "tool"
   | "agent"
   | "mcp"
-  | "code"
 
 export type WorkflowNodeData = Record<string, unknown> & {
   type: WorkflowNodeType
@@ -39,6 +39,7 @@ export type WorkflowNodeData = Record<string, unknown> & {
   knowledgeBases?: KnowledgeBase[]
   mcpServers?: McpServer[]
   tools?: ToolDetail[]
+  skills?: AgentSkill[]
   agents?: Agent[]
   nodes?: WorkflowNode[]
   edges?: WorkflowEdge[]
@@ -96,6 +97,7 @@ export type WorkflowRunStatus =
   | "running"
   | "awaiting_input"
   | "awaiting_child"
+  | "awaiting_approval"
   | "succeeded"
   | "failed"
   | "cancelled"
@@ -148,6 +150,7 @@ export type WorkflowRun = {
   finished_at: string | null
   created_at: string
   updated_at: string
+  tool_calls?: AgentToolCall[]
   pending_form: WorkflowPendingForm | null
   feedback?: "positive" | "negative" | null
   feedback_updated_at?: string | null
@@ -164,6 +167,7 @@ export type WorkflowNodeExecution = {
     | "running"
     | "awaiting_input"
     | "awaiting_child"
+    | "awaiting_approval"
     | "succeeded"
     | "failed"
     | "skipped"
@@ -207,7 +211,8 @@ export type WorkflowRunStreamEvent =
       duration_ms: number
     }
   | {
-      type: "complete" | "error" | "workflow_input_required"
+      type:
+        "complete" | "error" | "workflow_input_required" | "approval_required"
       sequence: number
       run: WorkflowRun
     }
@@ -221,6 +226,27 @@ export type WorkflowRunStreamEvent =
  */
 function workflowPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/workflows${suffix}`
+}
+
+export function resolveWorkflowToolApproval(
+  token: string,
+  workspaceId: string,
+  workflowId: string,
+  runId: string,
+  callId: string,
+  approve: boolean
+) {
+  return request<WorkflowRun>(
+    workflowPath(
+      workspaceId,
+      `/${workflowId}/runs/${runId}/tool-calls/${encodeURIComponent(callId)}/approval`
+    ),
+    {
+      token,
+      method: "POST",
+      body: JSON.stringify({ approve }),
+    }
+  )
 }
 
 /**
@@ -541,6 +567,17 @@ export function observeWorkflowRun(
         }
       ),
     onEvent,
-    { signal, after, errorLabel: "Workflow stream" }
+    {
+      signal,
+      after,
+      errorLabel: "Workflow stream",
+      isTerminal: (event) =>
+        [
+          "complete",
+          "error",
+          "workflow_input_required",
+          "approval_required",
+        ].includes(event.type),
+    }
   )
 }

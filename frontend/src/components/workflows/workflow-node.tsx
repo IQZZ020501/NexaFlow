@@ -7,7 +7,6 @@ import {
   BracesIcon,
   BotIcon,
   BrainCircuitIcon,
-  Code2Icon,
   DatabaseIcon,
   FileTextIcon,
   FlagIcon,
@@ -40,6 +39,8 @@ import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
+import type { AgentSkill, AgentSkillRef } from "@/lib/api/agent-skills"
+import { WorkflowCapabilityPicker } from "@/components/workflows/workflow-capability-picker"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -51,6 +52,7 @@ import type {
 } from "@/lib/api/workflows"
 import { copyText } from "@/lib/clipboard"
 import { toolDisplayName } from "@/lib/tool-display"
+import { workflowToolDisabledReason } from "@/lib/tool-groups"
 import { cn } from "@/lib/utils"
 import {
   WORKFLOW_START_FIELDS,
@@ -113,13 +115,13 @@ export const NODE_ICONS: Record<
   tool: WrenchIcon,
   agent: BotIcon,
   mcp: WrenchIcon,
-  code: Code2Icon,
 }
 
 const STATUS_STYLES = {
   running: "border-sky-500 ring-2 ring-sky-500/20",
   awaiting_input: "border-amber-500 ring-2 ring-amber-500/20",
   awaiting_child: "border-sky-500 ring-2 ring-sky-500/20",
+  awaiting_approval: "border-amber-500 ring-2 ring-amber-500/20",
   succeeded: "",
   failed: "border-destructive ring-2 ring-destructive/15",
   skipped: "border-muted-foreground/30 opacity-60",
@@ -129,6 +131,7 @@ const STATUS_LABELS = {
   running: "运行中",
   awaiting_input: "等待填写表单",
   awaiting_child: "等待执行",
+  awaiting_approval: "等待工具调用确认",
   succeeded: "运行成功",
   failed: "运行失败",
   skipped: "已跳过",
@@ -138,6 +141,7 @@ const STATUS_ICONS = {
   running: LoaderCircleIcon,
   awaiting_input: ClipboardListIcon,
   awaiting_child: BotIcon,
+  awaiting_approval: CircleAlertIcon,
   succeeded: CheckCircle2Icon,
   failed: CircleAlertIcon,
   skipped: CircleDotDashedIcon,
@@ -159,7 +163,6 @@ const NODE_ACCENTS: Record<WorkflowNodeType, string> = {
   tool: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   agent: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   mcp: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  code: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
 }
 
 const KNOWLEDGE_OUTPUT_FIELDS: Array<{
@@ -192,7 +195,6 @@ const OUTPUT_FIELD_LABELS: Partial<
   tool: { result: "工具结果" },
   agent: { result: "执行结果" },
   mcp: { result: "工具结果" },
-  code: { result: "执行结果", stdout: "标准输出", stderr: "错误输出" },
   "reranker-node": { result_list: "重排结果列表", result: "重排结果" },
   "form-node": { form_data: "表单数据", result: "返回内容" },
   "document-extract-node": { content: "文档内容" },
@@ -298,7 +300,6 @@ const KNOWLEDGE_SEARCH_MODES: Array<{
   { value: "keywords", label: "关键词检索" },
   { value: "blend", label: "混合检索" },
 ]
-
 
 const CONDITION_COMPARE_OPTIONS: Array<{
   value: string
@@ -518,7 +519,9 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
       const tool = node.tools?.find((item) => item.id === reference?.tool_id)
       return tool
         ? toolDisplayName(tool, t)
-        : previewValue(reference?.tool_id) || t("未配置")
+        : config.mcp_source_id
+          ? t("选择 MCP 操作")
+          : previewValue(reference?.tool_id) || t("未配置")
     }
     case "agent":
       return (
@@ -531,12 +534,6 @@ function configSummary(node: WorkflowNodeData, t: TFunction) {
       )
     case "mcp":
       return previewValue(config.tool_name) || t("选择只读 MCP 工具")
-    case "code": {
-      const inputs = config.inputs
-      const count =
-        inputs && typeof inputs === "object" ? Object.keys(inputs).length : 0
-      return `${t("代码输入")} · ${count}`
-    }
   }
 }
 
@@ -954,7 +951,7 @@ function NumberStepper({
     <div className="grid h-8 w-20 grid-cols-[minmax(0,1fr)_1.25rem] overflow-hidden rounded-lg border border-input bg-transparent shadow-xs max-sm:h-10 max-sm:w-40 max-sm:grid-cols-[minmax(0,1fr)_5rem] dark:bg-input/30">
       <input
         id={id}
-        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none max-sm:text-base focus-visible:bg-accent/50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="min-w-0 appearance-none bg-transparent px-1 text-center text-xs outline-none focus-visible:bg-accent/50 max-sm:text-base [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         type="number"
         min={min}
         max={max}
@@ -1131,7 +1128,7 @@ function LlmSettingsDialog({
                 },
               })
             }
-            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
               reasoningContentEnabled ? "bg-primary" : "bg-muted-foreground/40"
             }`}
           >
@@ -1630,6 +1627,7 @@ function NodeConfigFields({
   knowledgeBases,
   mcpServers,
   tools,
+  skills,
   agents,
   readOnly,
   onUpdate,
@@ -1642,6 +1640,7 @@ function NodeConfigFields({
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
   tools: ToolDetail[]
+  skills: AgentSkill[]
   agents: Agent[]
   readOnly: boolean
   onUpdate: (data: WorkflowNodeData) => void
@@ -1734,20 +1733,14 @@ function NodeConfigFields({
           label: `${server.name} / ${tool.name}`,
         }))
     )
-  const availableWorkflowTools = tools.filter(
-    (tool) =>
-      tool.can_use &&
-      tool.status === "active" &&
-      tool.availability === "available" &&
-      Boolean(tool.current_version_id) &&
-      tool.approval === "auto" &&
-      tool.workflow_callable
-  )
-  const availableLlmTools = availableWorkflowTools.filter(
-    (tool) =>
-      tool.function_name !== "inline_python" &&
-      tool.function_name !== "create_artifact"
-  )
+  const legacyMcpGroups = mcpServers
+    .filter((server) => server.status === "active")
+    .map((server) => ({
+      id: server.id,
+      name: server.name,
+      tools: availableMcp.filter((tool) => tool.server_id === server.id),
+    }))
+    .filter((group) => group.tools.length)
   const selectedToolRefs = Array.isArray(config.tools)
     ? config.tools.flatMap((item) => {
         if (!item || typeof item !== "object") return []
@@ -1763,23 +1756,15 @@ function NodeConfigFields({
           : []
       })
     : []
-  const unavailableSelectedToolRefs = selectedToolRefs.filter(
-    (reference) =>
-      !availableLlmTools.some((tool) => tool.id === reference.tool_id)
-  )
-  const toolSelected = (toolId: string) =>
-    selectedToolRefs.some((item) => item.tool_id === toolId)
-  const toggleToolReference = (tool: ToolDetail, checked: boolean) => {
-    if (!tool.current_version_id) return
-    updateConfig({
-      tools: checked
-        ? [
-            ...selectedToolRefs.filter((item) => item.tool_id !== tool.id),
-            { tool_id: tool.id, version_id: tool.current_version_id },
-          ]
-        : selectedToolRefs.filter((item) => item.tool_id !== tool.id),
-    })
-  }
+  const selectedSkillRefs: AgentSkillRef[] = Array.isArray(config.skills)
+    ? config.skills.filter(
+        (item): item is AgentSkillRef =>
+          Boolean(item) &&
+          typeof item === "object" &&
+          typeof item.skill_id === "string" &&
+          typeof item.version_id === "string"
+      )
+    : []
   const directToolReference =
     config.tool && typeof config.tool === "object"
       ? (config.tool as Partial<ToolRef>)
@@ -1787,12 +1772,24 @@ function NodeConfigFields({
   const selectedDirectTool = directToolReference
     ? tools.find((tool) => tool.id === directToolReference.tool_id)
     : undefined
+  const directMcpSourceId =
+    typeof config.mcp_source_id === "string"
+      ? config.mcp_source_id
+      : selectedDirectTool?.kind === "mcp"
+        ? selectedDirectTool.source.id
+        : undefined
+  const directMcpTools = tools.filter(
+    (tool) =>
+      tool.kind === "mcp" &&
+      tool.source.id === directMcpSourceId &&
+      tool.can_view
+  )
   const directToolWithMatchingSchema =
     selectedDirectTool?.version_id === directToolReference?.version_id
       ? selectedDirectTool
       : undefined
   const directToolUnavailable = Boolean(
-    directToolReference &&
+    directToolReference?.tool_id &&
     (!selectedDirectTool ||
       !selectedDirectTool.can_use ||
       selectedDirectTool.status !== "active" ||
@@ -1825,19 +1822,29 @@ function NodeConfigFields({
         item.server_id === reference.server_id &&
         item.tool_name === reference.tool_name
     )
-  const toggleMcpReference = (
-    reference: { server_id: string; tool_name: string },
+  const toggleMcpGroup = (
+    group: (typeof legacyMcpGroups)[number],
     checked: boolean
-  ) =>
+  ) => {
+    const remaining = selectedMcpRefs.filter(
+      (reference) =>
+        !group.tools.some(
+          (tool) =>
+            tool.server_id === reference.server_id &&
+            tool.tool_name === reference.tool_name
+        )
+    )
     updateConfig({
       mcp_servers: checked
-        ? [...selectedMcpRefs, reference]
-        : selectedMcpRefs.filter(
-            (item) =>
-              item.server_id !== reference.server_id ||
-              item.tool_name !== reference.tool_name
-          ),
+        ? [
+            ...selectedMcpRefs,
+            ...group.tools
+              .filter((tool) => !mcpSelected(tool))
+              .map(({ server_id, tool_name }) => ({ server_id, tool_name })),
+          ]
+        : remaining,
     })
+  }
   const isResult = config.is_result !== false
   const dialogueType = String(config.dialogue_type ?? "NODE")
   const selectedModelId = String(config.model_id ?? agent.model_id ?? "")
@@ -2057,72 +2064,14 @@ function NodeConfigFields({
               }
             />
           </div>
-          <fieldset className="grid gap-1.5 text-xs font-medium">
-            <legend>{t("工具")}</legend>
-            <div className="grid max-h-36 gap-2 overflow-y-auto rounded-md border bg-background p-2">
-              {availableLlmTools.length ||
-              unavailableSelectedToolRefs.length ? (
-                <>
-                  {availableLlmTools.map((tool) => {
-                    const checked = toolSelected(tool.id)
-                    return (
-                      <label
-                        key={tool.id}
-                        className="flex items-center gap-2 text-xs font-normal"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={
-                            readOnly ||
-                            (!checked && selectedToolRefs.length >= 20)
-                          }
-                          onChange={(event) =>
-                            toggleToolReference(tool, event.target.checked)
-                          }
-                        />
-                        <span className="min-w-0 truncate">
-                          {toolDisplayName(tool, t)}
-                        </span>
-                      </label>
-                    )
-                  })}
-                  {unavailableSelectedToolRefs.map((reference) => {
-                    const tool = tools.find(
-                      (item) => item.id === reference.tool_id
-                    )
-                    return (
-                      <label
-                        key={`${reference.tool_id}:${reference.version_id}`}
-                        className="flex items-center gap-2 text-xs font-normal text-muted-foreground"
-                      >
-                        <input
-                          type="checkbox"
-                          checked
-                          disabled={readOnly}
-                          onChange={() =>
-                            updateConfig({
-                              tools: selectedToolRefs.filter(
-                                (item) => item.tool_id !== reference.tool_id
-                              ),
-                            })
-                          }
-                        />
-                        <span className="min-w-0 truncate">
-                          {tool ? toolDisplayName(tool, t) : reference.tool_id}{" "}
-                          {`(${t("不可用")})`}
-                        </span>
-                      </label>
-                    )
-                  })}
-                </>
-              ) : (
-                <span className="font-normal text-muted-foreground">
-                  {t("暂无可用工具")}
-                </span>
-              )}
-            </div>
-          </fieldset>
+          <WorkflowCapabilityPicker
+            tools={tools}
+            skills={skills}
+            value={{ tools: selectedToolRefs, skills: selectedSkillRefs }}
+            readOnly={readOnly}
+            onChange={(value) => updateConfig(value)}
+            t={t}
+          />
           {"mcp_enable" in config || "mcp_servers" in config ? (
             <>
               <div className="flex items-center justify-between gap-2 text-xs font-medium">
@@ -2140,7 +2089,7 @@ function NodeConfigFields({
                       mcp_servers: config.mcp_enable ? [] : selectedMcpRefs,
                     })
                   }
-                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
                     config.mcp_enable ? "bg-primary" : "bg-muted-foreground/40"
                   }`}
                 >
@@ -2157,23 +2106,64 @@ function NodeConfigFields({
                 <fieldset className="grid gap-1.5 text-xs font-medium">
                   <legend>{t("MCP 工具（可多选）")}</legend>
                   <div className="grid max-h-32 gap-2 overflow-y-auto rounded-md border bg-background p-2">
-                    {availableMcp.length ? (
-                      availableMcp.map((item) => (
-                        <label
-                          key={`${item.server_id}:${item.tool_name}`}
-                          className="flex items-center gap-2 text-xs font-normal"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={mcpSelected(item)}
-                            disabled={readOnly}
-                            onChange={(event) =>
-                              toggleMcpReference(item, event.target.checked)
-                            }
-                          />
-                          <span className="min-w-0 truncate">{item.label}</span>
-                        </label>
-                      ))
+                    {legacyMcpGroups.length ? (
+                      legacyMcpGroups.map((group) => {
+                        const checked = group.tools.every(mcpSelected)
+                        const partial =
+                          !checked && group.tools.some(mcpSelected)
+                        const exceedsLimit =
+                          selectedMcpRefs.length +
+                            group.tools.filter((tool) => !mcpSelected(tool))
+                              .length >
+                          20
+                        return (
+                          <div
+                            key={group.id}
+                            className="flex items-center gap-2"
+                          >
+                            <label
+                              className="flex min-w-0 flex-1 items-center gap-2 text-xs font-normal"
+                              title={
+                                exceedsLimit
+                                  ? t("选择此服务将超过 20 个工具上限")
+                                  : undefined
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                aria-checked={partial ? "mixed" : checked}
+                                ref={(element) => {
+                                  if (element) element.indeterminate = partial
+                                }}
+                                disabled={
+                                  readOnly || (!checked && exceedsLimit)
+                                }
+                                onChange={(event) =>
+                                  toggleMcpGroup(group, event.target.checked)
+                                }
+                              />
+                              <span className="min-w-0 truncate">
+                                {group.name}
+                              </span>
+                            </label>
+                            {partial && exceedsLimit ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={readOnly}
+                                aria-label={t("移除工具 {name}", {
+                                  name: group.name,
+                                })}
+                                onClick={() => toggleMcpGroup(group, false)}
+                              >
+                                <XIcon className="size-3" />
+                              </Button>
+                            ) : null}
+                          </div>
+                        )
+                      })
                     ) : (
                       <span className="font-normal text-muted-foreground">
                         {t("暂无可用 MCP 工具")}
@@ -2194,7 +2184,7 @@ function NodeConfigFields({
               aria-label={t("返回内容")}
               disabled={readOnly}
               onClick={() => updateConfig({ is_result: !isResult })}
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
                 isResult ? "bg-primary" : "bg-muted-foreground/40"
               }`}
             >
@@ -2302,7 +2292,7 @@ function NodeConfigFields({
               aria-label={t("返回内容")}
               disabled={readOnly}
               onClick={() => updateConfig({ is_result: !isResult })}
-              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none max-sm:w-12 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-12 ${
                 isResult ? "bg-primary" : "bg-muted-foreground/40"
               }`}
             >
@@ -2991,13 +2981,77 @@ function NodeConfigFields({
       ) : null}
       {node.type === "tool" ? (
         <>
+          {directMcpSourceId ? (
+            <fieldset className="grid gap-1.5 text-xs font-medium">
+              <legend>{t("MCP 操作")}</legend>
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between"
+                    disabled={readOnly}
+                  >
+                    <span className="min-w-0 truncate">
+                      {selectedDirectTool
+                        ? toolDisplayName(selectedDirectTool, t)
+                        : t("选择 MCP 操作")}
+                    </span>
+                    <ChevronDownIcon className="size-4 shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto"
+                >
+                  {directMcpTools.map((tool) => {
+                    const reason = workflowToolDisabledReason(tool)
+                    return (
+                      <DropdownMenuItem
+                        key={tool.id}
+                        disabled={Boolean(reason)}
+                        title={reason ? t(reason) : undefined}
+                        onSelect={() => {
+                          if (
+                            reason ||
+                            !tool.current_version_id ||
+                            tool.id === selectedDirectTool?.id
+                          )
+                            return
+                          updateConfig({
+                            tool: {
+                              tool_id: tool.id,
+                              version_id: tool.current_version_id,
+                            },
+                            arguments: {},
+                          })
+                        }}
+                      >
+                        <span className="min-w-0 truncate">
+                          {toolDisplayName(tool, t)}
+                        </span>
+                        {reason ? (
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {t(reason)}
+                          </span>
+                        ) : null}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </fieldset>
+          ) : null}
           <label className="grid gap-1.5 text-xs font-medium">
             {t("工具")}
             <Input
               value={
                 (selectedDirectTool
-                  ? toolDisplayName(selectedDirectTool, t)
+                  ? selectedDirectTool.kind === "mcp"
+                    ? selectedDirectTool.source.name
+                    : toolDisplayName(selectedDirectTool, t)
                   : undefined) ??
+                directMcpTools[0]?.source.name ??
                 directToolReference?.tool_id ??
                 ""
               }
@@ -3143,29 +3197,6 @@ function NodeConfigFields({
           />
         </>
       ) : null}
-      {node.type === "code" ? (
-        <>
-          <JsonEditor
-            id={`${nodeId}-code-inputs`}
-            label={t("代码输入")}
-            value={config.inputs ?? {}}
-            readOnly={readOnly}
-            onChange={(inputs) => updateConfig({ inputs })}
-            t={t}
-          />
-          <TextEditor
-            id={`${nodeId}-code-body`}
-            label={t("Python 代码")}
-            value={config.code ?? ""}
-            readOnly={readOnly}
-            rows={10}
-            onChange={(code) => updateConfig({ code })}
-            node={node}
-            nodeId={nodeId}
-            t={t}
-          />
-        </>
-      ) : null}
     </div>
   )
 }
@@ -3305,7 +3336,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
                 "mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium",
                 status === "running" &&
                   "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
-                status === "awaiting_input" &&
+                ["awaiting_input", "awaiting_approval"].includes(status) &&
                   "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
                 status === "awaiting_child" &&
                   "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
@@ -3412,7 +3443,6 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         "llm",
         "condition",
         "reply-node",
-        "code",
         "document-extract-node",
         "form-node",
       ].includes(node.type) ? (
@@ -3471,6 +3501,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
             knowledgeBases={node.knowledgeBases}
             mcpServers={node.mcpServers}
             tools={node.tools}
+            skills={node.skills ?? []}
             agents={node.agents}
             readOnly={Boolean(node.readOnly)}
             onUpdate={onUpdate}
@@ -3479,9 +3510,7 @@ export function WorkflowNodeCard({ data, selected, id }: NodeProps) {
         </div>
       ) : null}
       {expanded &&
-      (node.type === "code" ||
-        node.type === "document-extract-node" ||
-        node.type === "form-node") ? (
+      (node.type === "document-extract-node" || node.type === "form-node") ? (
         <div className="mt-2 space-y-1.5 border-t border-border/70 pt-2">
           {outputFields.map((field) => (
             <OutputFieldRow
@@ -3645,7 +3674,6 @@ function outputFieldNames(node: WorkflowNodeData) {
     variable: ["value"],
     agent: ["result"],
     mcp: ["result"],
-    code: ["result", "stdout", "stderr"],
   }
   return fields[node.type] ?? []
 }

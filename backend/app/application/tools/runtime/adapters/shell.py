@@ -5,12 +5,12 @@ from datetime import UTC
 
 from app.application.agent_skills.execution import require_pinned_skill_access
 from app.application.agent_skills.scripts import (
-    _installed_dependency_plans,
+    installed_dependency_plans,
     restore_skill_dependencies,
 )
 from app.application.artifacts.service import create_generated_artifact
 from app.application.artifacts.workspace import restore_conversation_files
-from app.application.tools.runtime.contracts import ToolRuntimeResult
+from app.application.projects.runtime import restore_project_files, save_project_files
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agent_skills.paths import skill_mount_name
 from app.domain.agents.models import AGENT_RUN_RUNNING_STATUSES
@@ -19,10 +19,11 @@ from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.session import get_session_factory
 from app.ports.execution import ExecutionError, build_execution_platform
+from app.ports.tools import ToolRuntimeResult
 
 
 async def execute_shell(settings, arguments, context):
-    if not context.run_id or context.origin != "agent":
+    if not context.run_id or context.origin not in {"agent", "workflow"}:
         raise ValueError("Command execution requires an authorized Agent Run.")
     mounts = {}
     dependencies = []
@@ -37,6 +38,10 @@ async def execute_shell(settings, arguments, context):
         ):
             raise ValueError("Command execution requires an active authorized Run.")
         for payload in run.skill_snapshots:
+            if context.origin == "workflow" and payload.get(
+                "version_id"
+            ) not in context.resource_snapshot.get("skill_version_ids", []):
+                continue
             skill = agent_skill_snapshot_from_payload(payload)
             await require_pinned_skill_access(db, context.workspace_id, skill)
             mounts[skill_mount_name(skill.name, skill.version_id)] = (
@@ -45,7 +50,7 @@ async def execute_shell(settings, arguments, context):
             dependencies.append(
                 (
                     skill,
-                    await _installed_dependency_plans(
+                    await installed_dependency_plans(
                         db, context.workspace_id, context.run_id, skill.version_id
                     ),
                 )
@@ -69,10 +74,11 @@ async def execute_shell(settings, arguments, context):
             or reset
         )
     await restore_conversation_files(run, platform, timeout_seconds=seconds + 10)
+    project = await restore_project_files(run, platform, timeout_seconds=seconds + 10)
     response = await platform.execute(
         {
             "execution_session": "agent_run",
-            "command": {"command": arguments["command"], "timeout_seconds": seconds},
+            "command": {"command": arguments["command"], "timeout_seconds": seconds, **({"project": True} if project else {})},
             "skill_mounts": mounts,
         },
         timeout_seconds=seconds + 10,
@@ -122,6 +128,8 @@ async def execute_shell(settings, arguments, context):
                     filename=filename,
                     relative_path=item["relative_path"],
                     content=content,
+                    invocation_id=context.invocation_id,
+                    inspection=item.get("inspection"),
                 )
                 await db.commit()
         except ValueError as exc:
@@ -131,6 +139,10 @@ async def execute_shell(settings, arguments, context):
             {
                 "artifact_id": link.artifact_id,
                 "filename": link.filename,
+                "relative_path": link.relative_path,
+                "content_hash": link.content_hash,
+                "previous_artifact_id": link.previous_artifact_id,
+                "inspection": link.inspection,
                 "format": link.format,
                 "download_url": link.download_url,
                 "size_bytes": link.size_bytes,
@@ -151,6 +163,9 @@ async def execute_shell(settings, arguments, context):
     }
     if reset:
         data["workspace_reset"] = True
+    if project:
+        locks = {skill.version_id: [{"manager": plan.manager, "packages": list(plan.packages), "environment_hash": digest} for plan, digest in installed] for skill, installed in dependencies if installed}
+        data.update(await save_project_files(settings, run, context, platform, response, locks))
     data.update(artifacts=artifacts, warnings=warnings[:16])
     return ToolRuntimeResult(
         ok=True,

@@ -1,3 +1,8 @@
+import {
+  agentUploadPath,
+  isAgentUploadFile,
+  isTextOnlyUpload,
+} from "@/lib/agent-upload"
 import { FileTextIcon, ImageIcon, PaperclipIcon, XIcon } from "lucide-react"
 import type { TFunction } from "@/i18n"
 
@@ -10,7 +15,7 @@ export type RunAttachment = {
 
 export function runAttachmentFromFile(file: File): RunAttachment {
   return {
-    filename: file.name,
+    filename: agentUploadPath(file),
     content_type: file.type || "application/octet-stream",
     size_bytes: file.size,
     category: file.type.startsWith("image/") ? "image" : "document",
@@ -26,11 +31,8 @@ export function transferredFiles(dataTransfer: DataTransfer) {
     .filter((file): file is File => file !== null)
 }
 
-export function appendAttachmentFiles(
-  current: File[],
-  added: ArrayLike<File>
-) {
-  return [...current, ...Array.from(added)]
+export function appendAttachmentFiles(current: File[], added: ArrayLike<File>) {
+  return [...current, ...Array.from(added).filter(isAgentUploadFile)]
 }
 
 export function RunAttachmentCards({
@@ -50,6 +52,7 @@ export function RunAttachmentCards({
       {
         filename,
         category: value.category === "image" ? "image" : "document",
+        textOnly: isTextOnlyUpload(filename, Number(value.size_bytes)),
       } as const,
     ]
   })
@@ -63,7 +66,7 @@ export function RunAttachmentCards({
           <li
             key={`${file.filename}-${index}`}
             title={file.filename}
-            className="flex min-w-0 max-w-[min(22rem,78vw)] items-center gap-2.5 rounded-2xl rounded-br-md border border-border/70 bg-muted/45 py-2.5 pr-4 pl-2.5 text-left shadow-xs"
+            className="flex max-w-[min(22rem,78vw)] min-w-0 items-center gap-2.5 rounded-2xl rounded-br-md border border-border/70 bg-muted/45 py-2.5 pr-4 pl-2.5 text-left shadow-xs"
           >
             <span
               className={`flex size-9 shrink-0 items-center justify-center rounded-xl ${
@@ -75,11 +78,17 @@ export function RunAttachmentCards({
               <Icon className="size-4.5" />
             </span>
             <span className="min-w-0 pr-1">
-              <span className="block truncate text-sm font-medium leading-5 text-foreground">
+              <span className="block truncate text-sm leading-5 font-medium text-foreground">
                 {file.filename}
               </span>
               <span className="mt-px block text-[11px] leading-4 text-muted-foreground">
-                {t(file.category === "image" ? "图片" : "文档")}
+                {t(
+                  file.textOnly
+                    ? "仅文本摘录（原文件超过 5 MiB）"
+                    : file.category === "image"
+                      ? "图片"
+                      : "文档"
+                )}
               </span>
             </span>
           </li>
@@ -108,20 +117,29 @@ export function AgentAttachmentList({
   if (!files.length) return null
 
   return (
-    <ul className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto px-3 pb-1 pr-24">
+    <ul className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto px-3 pr-24 pb-1">
       {files.map((file, index) => (
         <li
           key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-          title={file.name}
+          title={
+            isTextOnlyUpload(agentUploadPath(file), file.size)
+              ? `${agentUploadPath(file)} · ${t("仅文本摘录（原文件超过 5 MiB）")}`
+              : agentUploadPath(file)
+          }
           className="flex max-w-48 items-center gap-1 rounded-md bg-muted py-0.5 pr-0.5 pl-2 text-xs text-muted-foreground"
         >
           <PaperclipIcon className="size-3" />
-          <span className="truncate">{file.name}</span>
+          <span className="truncate">
+            {agentUploadPath(file)}
+            {isTextOnlyUpload(agentUploadPath(file), file.size)
+              ? ` · ${t("仅文本摘录（原文件超过 5 MiB）")}`
+              : ""}
+          </span>
           <button
             type="button"
-            className="flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:size-6"
-            aria-label={t("移除 {value}", { value: file.name })}
-            title={t("移除 {value}", { value: file.name })}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:size-6"
+            aria-label={t("移除 {value}", { value: agentUploadPath(file) })}
+            title={t("移除 {value}", { value: agentUploadPath(file) })}
             onClick={() => onRemove(index)}
           >
             <XIcon className="size-3" />

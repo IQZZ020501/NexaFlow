@@ -1,5 +1,7 @@
 "use client"
 
+import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
+
 import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
@@ -13,7 +15,6 @@ import {
   LoaderCircleIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
-  PlusIcon,
   ChartNoAxesColumnIcon,
   LayoutDashboardIcon,
   PanelLeftCloseIcon,
@@ -24,7 +25,6 @@ import {
   ScrollTextIcon,
   SendIcon,
   SettingsIcon,
-  ShieldAlertIcon,
   Trash2Icon,
   Undo2Icon,
   UsersIcon,
@@ -34,6 +34,8 @@ import {
 import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import { useAgentFileDrop } from "@/components/agents/use-agent-file-drop"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -53,12 +55,9 @@ import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
 import { splitAgentSessionEvents } from "@/lib/agent-session-handoff"
 import {
-  AGENT_FILE_UPLOAD_SETTING,
-  acceptedUploadExtensions,
-} from "@/lib/interaction-config"
-import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
+  executionWaitSummary,
 } from "@/lib/tool-display"
 import { isRegularTool } from "@/lib/tool-visibility"
 import { getErrorMessage } from "@/lib/errors"
@@ -185,6 +184,8 @@ function processSummary(
   if (event.summary === "agent.preparing_tool_call")
     return t("正在准备工具调用")
   if (event.summary === "agent.tools_selected") return t("已完成分析")
+  if (event.summary === "agent.waiting_execution_resources")
+    return executionWaitSummary(event.output, t)
   if (event.summary === "agent.tool_running")
     return t("正在调用 {name}", { name: processToolName(event, t) })
   if (event.summary === "agent.answer_ready" && run.status === "failed")
@@ -471,74 +472,6 @@ export function collapsedProcessStatusKey(
   return hasActiveToolCall ? "执行过程" : null
 }
 
-function InlineToolApproval({
-  runId,
-  call,
-  resolvingCallId,
-  onDecision,
-  t,
-}: {
-  runId: string
-  call: AgentToolCall
-  resolvingCallId: string | null
-  onDecision: (callId: string, decision: "approve" | "reject") => void
-  t: TFunction
-}) {
-  const isUncertain = call.status === "uncertain"
-  const isResolving = resolvingCallId === `${runId}:${call.call_id}`
-
-  return (
-    <section className="overflow-hidden rounded-lg border border-amber-600/30 bg-background/80">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400">
-          <ShieldAlertIcon className="size-3.5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-foreground">
-            {t(isUncertain ? "工具执行结果不确定" : "工具调用需要确认")}
-          </p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {call.tool_name}
-            {call.server_name ? ` @ ${call.server_name}` : ""}
-          </p>
-        </div>
-        <div className="ml-auto flex shrink-0 gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            disabled={isResolving}
-            onClick={() => onDecision(call.call_id, "reject")}
-          >
-            {isResolving ? <LoaderCircleIcon className="animate-spin" /> : null}
-            {t(isUncertain ? "不重试并继续" : "拒绝")}
-          </Button>
-          {!isUncertain ? (
-            <Button
-              type="button"
-              size="xs"
-              disabled={isResolving}
-              onClick={() => onDecision(call.call_id, "approve")}
-            >
-              {isResolving ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : null}
-              {t("批准并执行")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {call.last_error ? (
-        <p className="border-t px-3 py-2 text-xs leading-5 text-muted-foreground">
-          {call.last_error}
-        </p>
-      ) : null}
-      <pre className="max-h-28 overflow-auto border-t bg-muted/20 px-3 py-2 font-mono text-[11px] leading-4 break-words whitespace-pre-wrap">
-        {JSON.stringify(call.arguments, null, 2)}
-      </pre>
-    </section>
-  )
-}
 
 function PendingToolEvent({
   call,
@@ -1015,10 +948,15 @@ export function AgentDetailWorkspace({
   )
   const hasArtifactPreview = !!artifactPreview.selection
   const previewScrollRef = React.useRef<HTMLDivElement>(null)
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const shouldFollowPreviewRef = React.useRef(true)
   const tabStripRef = React.useRef<HTMLElement>(null)
   const activeTabRef = React.useRef<HTMLButtonElement | null>(null)
+  const fileDrop = useAgentFileDrop(
+    `${workspaceId}:${agent.id}:${activeView}:${runs[0]?.conversation_id ?? ""}`,
+    isDirty || isAsking || isRunsLoading || agent.status !== "active",
+    (dropped) => setFiles((current) => appendAttachmentFiles(current, dropped)),
+    () => notify("error", t("文件夹读取失败，请重试"))
+  )
 
   React.useEffect(() => {
     const scrollContainer = previewScrollRef.current
@@ -1199,6 +1137,7 @@ export function AgentDetailWorkspace({
                 title={t("新建对话")}
                 onClick={() => {
                   artifactPreview.close()
+                  fileDrop.cancel()
                   onNewConversation()
                 }}
               >
@@ -1527,7 +1466,12 @@ export function AgentDetailWorkspace({
                     <div className="shrink-0 border-t bg-background p-2 sm:p-4">
                       <form
                         className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                        aria-busy={fileDrop.isReadingFiles}
                         onSubmit={(event) => {
+                          if (fileDrop.isReadingFiles) {
+                            event.preventDefault()
+                            return
+                          }
                           shouldFollowPreviewRef.current = true
                           onAsk(event)
                         }}
@@ -1536,46 +1480,8 @@ export function AgentDetailWorkspace({
                             event.preventDefault()
                           }
                         }}
-                        onDrop={(event) => {
-                          const dropped = transferredFiles(event.dataTransfer)
-                          if (!dropped.length) return
-                          event.preventDefault()
-                          if (
-                            isDirty ||
-                            isAsking ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          ) {
-                            return
-                          }
-                          setFiles((current) =>
-                            appendAttachmentFiles(current, dropped)
-                          )
-                        }}
+                        onDrop={fileDrop.onDrop}
                       >
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          className="sr-only"
-                          multiple
-                          accept={acceptedUploadExtensions(
-                            AGENT_FILE_UPLOAD_SETTING.file_upload_type
-                          )}
-                          disabled={
-                            isDirty ||
-                            isAsking ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          }
-                          onChange={(event) => {
-                            const selected = Array.from(
-                              event.target.files ?? []
-                            )
-                            setFiles((current) =>
-                              appendAttachmentFiles(current, selected)
-                            )
-                          }}
-                        />
                         <textarea
                           value={question}
                           onChange={(event) => setQuestion(event.target.value)}
@@ -1628,27 +1534,21 @@ export function AgentDetailWorkspace({
                         />
                         <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
                           <div className="flex min-w-0 items-center gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              className="rounded-md text-muted-foreground hover:text-foreground"
-                              aria-label={t("添加附件")}
-                              title={t("添加附件")}
+                            <AgentFilePicker
                               disabled={
                                 isDirty ||
                                 isAsking ||
                                 isRunsLoading ||
+                                fileDrop.isReadingFiles ||
                                 agent.status !== "active"
                               }
-                              onClick={() => {
-                                if (!fileInputRef.current) return
-                                fileInputRef.current.value = ""
-                                fileInputRef.current.click()
-                              }}
-                            >
-                              <PlusIcon />
-                            </Button>
+                              onFiles={(selected) =>
+                                setFiles((current) =>
+                                  appendAttachmentFiles(current, selected)
+                                )
+                              }
+                              t={t}
+                            />
                             <AgentApprovalModeMenu
                               value={approvalMode}
                               onChange={onApprovalModeChange}
@@ -1669,6 +1569,7 @@ export function AgentDetailWorkspace({
                                 !isAsking &&
                                 (isDirty ||
                                   isRunsLoading ||
+                                  fileDrop.isReadingFiles ||
                                   agent.status !== "active")
                               }
                               onStop={onCancelAsk}

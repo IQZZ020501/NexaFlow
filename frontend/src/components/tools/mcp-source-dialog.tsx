@@ -43,6 +43,7 @@ import {
   type ToolSourceDetail,
 } from "@/lib/api/tools"
 import { getErrorMessage } from "@/lib/errors"
+import { EMPTY_MCP_OAUTH, McpOAuthFields } from "@/components/tools/mcp-oauth"
 
 const TEXTAREA_CLASS =
   "min-h-24 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -124,7 +125,14 @@ export function McpConnectionDialog({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (privateUrlBlocked) return
-    const payload = buildMcpServerCreatePayload(form)
+    const payload = buildMcpServerCreatePayload(
+      form.oauth
+        ? {
+            ...form,
+            oauth: { ...form.oauth, scopes: form.oauth.scopes.filter(Boolean) },
+          }
+        : form
+    )
     if (!payload) return
     setIsSaving(true)
     try {
@@ -150,9 +158,11 @@ export function McpConnectionDialog({
         <DialogHeader>
           <DialogTitle>{t("添加 MCP Server")}</DialogTitle>
           <DialogDescription>
-            {t(
-              "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。"
-            )}
+            {form.oauth
+              ? t("保存后请在来源菜单完成 OAuth 授权，再发现可用工具。")
+              : t(
+                  "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。"
+                )}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit}>
@@ -320,26 +330,59 @@ export function McpConnectionDialog({
                   </FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="tool-source-mcp-token">
-                    {t("Bearer Token（可选）")}
+                  <FieldLabel htmlFor="tool-source-mcp-auth">
+                    {t("认证方式")}
                   </FieldLabel>
-                  <Input
-                    id="tool-source-mcp-token"
-                    type="password"
-                    value={form.bearerToken}
+                  <select
+                    id="tool-source-mcp-auth"
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    value={form.oauth ? "oauth" : "bearer"}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
-                        bearerToken: event.target.value,
+                        bearerToken: "",
+                        oauth:
+                          event.target.value === "oauth"
+                            ? EMPTY_MCP_OAUTH
+                            : undefined,
                       }))
                     }
-                    autoComplete="new-password"
-                    maxLength={8000}
-                  />
-                  <FieldDescription>
-                    {t("Token 会加密保存，之后不会返回明文。")}
-                  </FieldDescription>
+                  >
+                    <option value="bearer">{t("Bearer Token（可选）")}</option>
+                    <option value="oauth">{t("OAuth 连接")}</option>
+                  </select>
                 </Field>
+                {form.oauth ? (
+                  <McpOAuthFields
+                    value={form.oauth}
+                    onChange={(oauth) =>
+                      setForm((current) => ({ ...current, oauth }))
+                    }
+                    disabled={isSaving}
+                  />
+                ) : (
+                  <Field>
+                    <FieldLabel htmlFor="tool-source-mcp-token">
+                      {t("Bearer Token（可选）")}
+                    </FieldLabel>
+                    <Input
+                      id="tool-source-mcp-token"
+                      type="password"
+                      value={form.bearerToken}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          bearerToken: event.target.value,
+                        }))
+                      }
+                      autoComplete="new-password"
+                      maxLength={8000}
+                    />
+                    <FieldDescription>
+                      {t("Token 会加密保存，之后不会返回明文。")}
+                    </FieldDescription>
+                  </Field>
+                )}
               </>
             )}
           </FieldGroup>
@@ -360,7 +403,11 @@ export function McpConnectionDialog({
               }
             >
               {isSaving ? <LoaderCircleIcon className="animate-spin" /> : null}
-              {isSaving ? t("连接并发现中") : t("添加 MCP Server")}
+              {isSaving
+                ? form.oauth
+                  ? t("保存中")
+                  : t("连接并发现中")
+                : t("添加 MCP Server")}
             </Button>
           </DialogFooter>
         </form>

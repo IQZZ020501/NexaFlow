@@ -22,6 +22,15 @@ import tempfile
 import time
 from pathlib import Path, PurePosixPath
 
+try:
+    from .artifact_check import inspect_artifact
+except ImportError:
+    import importlib.util
+    _check_spec = importlib.util.spec_from_file_location("nexaflow_artifact_check", Path(__file__).with_name("artifact_check.py"))
+    _check_module = importlib.util.module_from_spec(_check_spec)
+    _check_spec.loader.exec_module(_check_module)
+    inspect_artifact = _check_module.inspect_artifact
+
 MAX_INPUT = 8 * 1024 * 1024
 MAX_LOG = 128 * 1024
 MAX_FILE = 5 * 1024 * 1024
@@ -36,9 +45,9 @@ STORAGE_CHECK_SECONDS = 1.0
 BUILTIN_SKILLS = {
     "documents": "docx",
     "pdf": "pdf",
-    "pptx": "pptx",
     "spreadsheets": "xlsx",
 }
+BUNDLED_SKILLS = frozenset({*BUILTIN_SKILLS, "pptx", "skill-creator"})
 SKILLS_DIR = Path(__file__).parent / "skills"
 PACKAGE_DIR = Path("/tmp/nexaflow-skill")
 SESSION_DIR = Path("/tmp/nexaflow-session")
@@ -64,7 +73,6 @@ def _use_address_space_limit(request):
     shell = request.get("shell")
     return (
         "mcp" not in request
-        and request.get("skill") != "pptx"
         and not str(request.get("script", "")).endswith(".js")
         and not (isinstance(shell, dict) and shell.get("manager") == "node")
     )
@@ -232,13 +240,18 @@ def child(request):
 
 
 def execute(request):
-    if "command" in request or "restore_files" in request:
+    if "command" in request or "restore_files" in request or "restore_project_files" in request:
         import importlib.util
         spec = importlib.util.spec_from_file_location("nexaflow_command", Path(__file__).with_name("command.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         if "restore_files" in request:
             return module.restore_files(request["restore_files"])
+        if "restore_project_files" in request:
+            project = request["restore_project_files"]
+            if not isinstance(project, dict) or project.get("role") not in {"source", "work"}:
+                raise ValueError("Invalid project file restoration.")
+            return module.restore_files(project["files"], project_role=project["role"])
         return module.execute(request["command"], python_binary=sys.executable)
     max_log = 2 * 1024 * 1024 if "mcp" in request else MAX_LOG
     seconds = request.get("limits", {}).get("timeout_ms", 5000) / 1000
@@ -254,7 +267,7 @@ def execute(request):
         raise ValueError("Invalid built-in Skill.")
     selected = request.get("skills", [])
     if not isinstance(selected, list) or any(
-        name not in BUILTIN_SKILLS for name in selected
+        name not in BUNDLED_SKILLS for name in selected
     ):
         raise ValueError("Unavailable runtime Skill.")
     if artifact and (
@@ -297,13 +310,11 @@ def execute(request):
             "HOME": temporary,
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "OMP_NUM_THREADS": "1",
             "NEXAFLOW_OUTPUT_PATH": str(output),
             "NEXAFLOW_SKILLS_DIR": str(SKILLS_DIR),
         }
-        if skill == "pptx":
-            node_binary = shutil.which("node")
-            if node_binary is not None:
-                env["NEXAFLOW_NODE_BINARY"] = node_binary
         # Only version-pinned package files arrive here, never host paths.
         bundle_files = request.get("files", {})
         if not isinstance(bundle_files, dict) or len(bundle_files) > 64:
@@ -541,11 +552,16 @@ def execute(request):
                 content = stream.read(MAX_FILE + 1)
             if not 0 < len(content) <= MAX_FILE:
                 raise ValueError("Artifact exceeds 5 MiB.")
+            inspection = inspect_artifact(artifact["filename"], content)
+            if inspection["status"] != "passed":
+                response.update(ok=False, exit_code=1, stderr=f"File inspection failed: {inspection['error']}")
+                return response
             response["artifact"] = {
                 **artifact,
                 "size_bytes": len(content),
                 "sha256": hashlib.sha256(content).hexdigest(),
                 "content_base64": base64.b64encode(content).decode(),
+                "inspection": inspection,
             }
         return response
 

@@ -95,7 +95,6 @@ def test_tool_summary_projects_effective_public_access_and_mcp_policy() -> None:
                 name="Built-in",
             ),
             version=version,
-            draft=None,
             policy=policy,
             access=ToolAccess(can_view=True, can_use=True, can_manage=False),
             permission=None,
@@ -141,12 +140,12 @@ def test_image_generation_is_a_bounded_approval_backed_builtin() -> None:
 
 def test_image_tool_queue_freezes_its_model_configuration() -> None:
     from app.application.tools.runtime.adapters import image_generation
-    from app.application.tools.runtime.contracts import ToolInvocationContext
     from app.application.tools.runtime.service import queue_tool_invocation
     from app.domain.tools.catalog.service import build_image_generation_tool
     from app.domain.tools.runtime import build_tool_snapshot
     from app.entities.tools import ToolSource
     from app.infra.db.repositories.tools import repository as tool_repository
+    from app.ports.tools import ToolInvocationContext
 
     tool, version, policy = build_image_generation_tool("workspace-1")
     snapshot = build_tool_snapshot(
@@ -299,7 +298,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
 def test_image_tool_scopes_model_and_stores_one_artifact() -> None:
     from app.application.agents.runs.snapshots import build_model_runtime_snapshot
     from app.application.tools.runtime.adapters import image_generation
-    from app.application.tools.runtime.contracts import ToolInvocationContext
+    from app.ports.tools import ToolInvocationContext
 
     model = SimpleNamespace(
         id="image-model-1",
@@ -586,7 +585,7 @@ def test_artifact_filename_follows_the_request() -> None:
 def test_image_tool_names_the_image_from_the_model_or_the_prompt() -> None:
     from app.application.agents.runs.snapshots import build_model_runtime_snapshot
     from app.application.tools.runtime.adapters import image_generation
-    from app.application.tools.runtime.contracts import ToolInvocationContext
+    from app.ports.tools import ToolInvocationContext
 
     model = SimpleNamespace(
         id="image-model-1",
@@ -742,11 +741,11 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
         None,
     )
     assert system_python_authorization.access == ToolAccess(
-        can_view=True,
-        can_use=True,
+        can_view=False,
+        can_use=False,
         can_manage=False,
     )
-    assert system_python_authorization.permission == "use"
+    assert system_python_authorization.permission is None
 
     outside_workspace = evaluate_tool_authorization(
         builtin,
@@ -764,7 +763,7 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
     global_admin = User(id="global-admin-1", is_global_admin=True)
     private_tool = Tool(
         id="private-1",
-        kind="python",
+        kind="mcp",
         status="disabled",
         availability="unavailable",
         created_by_user_id="owner-1",
@@ -812,7 +811,7 @@ def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
     assert inactive_authorization.access == ToolAccess(False, False, False)
     assert inactive_authorization.permission is None
 
-def test_python_tool_schema_validation_closes_objects() -> None:
+def test_tool_schema_validation_closes_objects() -> None:
     from app.entities.tools import validate_tool_json_schema
 
     schema = {
@@ -841,9 +840,9 @@ def test_python_tool_schema_validation_closes_objects() -> None:
             validate_tool_json_schema(invalid)
         except ValueError:
             continue
-        raise AssertionError(f"Unsafe Python Tool schema accepted: {invalid}")
+        raise AssertionError(f"Unsafe Tool schema accepted: {invalid}")
 
-def test_python_tool_schema_validation_enforces_limits() -> None:
+def test_tool_schema_validation_enforces_limits() -> None:
     from app.entities.tools import (
         MAX_TOOL_ARRAY_ITEMS,
         MAX_TOOL_SCHEMA_BYTES,
@@ -927,9 +926,9 @@ def test_python_tool_schema_validation_enforces_limits() -> None:
             validate_tool_json_schema(schema)
         except ValueError:
             continue
-        raise AssertionError(f"Over-broad Python Tool schema accepted: {schema}")
+        raise AssertionError(f"Over-broad Tool schema accepted: {schema}")
 
-def test_python_tool_schema_rejects_defs_depth_bypass() -> None:
+def test_tool_schema_rejects_defs_depth_bypass() -> None:
     from app.entities.tools import (
         MAX_TOOL_SCHEMA_DEPTH,
         validate_tool_json_schema,
@@ -948,7 +947,7 @@ def test_python_tool_schema_rejects_defs_depth_bypass() -> None:
         return
     raise AssertionError("$defs bypassed the Tool schema depth limit.")
 
-def test_python_tool_schema_rejects_legacy_definitions_property_bypass() -> None:
+def test_tool_schema_rejects_legacy_definitions_property_bypass() -> None:
     from app.entities.tools import (
         MAX_TOOL_SCHEMA_PROPERTIES,
         validate_tool_json_schema,
@@ -972,21 +971,6 @@ def test_python_tool_schema_rejects_legacy_definitions_property_bypass() -> None
         return
     raise AssertionError("definitions bypassed the Tool schema property limit.")
 
-def test_python_tool_code_is_limited_to_eight_kibibytes() -> None:
-    from app.entities.tools import (
-        MAX_PYTHON_TOOL_CODE_BYTES,
-        validate_python_tool_code,
-    )
-
-    boundary = "x" * MAX_PYTHON_TOOL_CODE_BYTES
-    assert validate_python_tool_code(boundary) == boundary
-
-    for code in (boundary + "x", "\u754c" * (MAX_PYTHON_TOOL_CODE_BYTES // 3 + 1)):
-        try:
-            validate_python_tool_code(code)
-        except ValueError:
-            continue
-        raise AssertionError("Oversized Python Tool code was accepted.")
 
 def test_artifact_tool_accepts_sandbox_sized_content() -> None:
     from app.domain.tools.catalog.service import build_artifact_tool
@@ -999,15 +983,10 @@ def test_documents_skill_formal_legal_contract_is_versioned() -> None:
 
     tool, version, _policy = build_skill_artifact_tool("workspace-1", "documents")
     rebuilt = build_skill_artifact_tool("workspace-1", "documents")[1]
-    assert version.input_schema["properties"]["style"]["type"] == "string"
-    assert version.input_schema["properties"]["style"]["enum"] == [
-        "report",
-        "formal_legal",
-    ]
-    assert "default" not in version.input_schema["properties"]["style"]
-    assert "formal_legal" in version.description
-    assert "`> `" in version.description
-    assert "`---`" in version.description
+    assert version.input_schema["properties"] == {}
+    assert version.execution_spec["builtin"] == "skill_guide"
+    assert "python-docx" in version.execution_spec["instructions"]
+    assert "styles" in version.execution_spec["instructions"]
     assert tool.current_version_id == version.id == rebuilt.id
     assert version.definition_hash == rebuilt.definition_hash
 
@@ -1042,128 +1021,50 @@ def test_documents_skill_reference_input_uses_bounded_large_payload_limit() -> N
     assert tool_input_size_limit(ordinary_snapshot) == MAX_TOOL_INPUT_BYTES
 
 
-def test_pptx_skill_exposes_pptd_design_animation_and_media_contract() -> None:
-    import asyncio
-    from types import SimpleNamespace
+def test_builtin_skill_guides_are_frozen_and_read_only() -> None:
+    from tests.support import settings
 
-    from app.domain.agents.runtime import AgentToolResult, create_agent_tool
-    from app.domain.tools.catalog.service import build_skill_artifact_tool
+    from app.application.tools.runtime.adapters import builtin
+    from app.domain.tools.catalog import service as catalog
     from app.domain.tools.runtime import (
-        MAX_PPTX_TOOL_INPUT_BYTES,
         normalize_tool_arguments,
-        tool_input_size_limit,
         validate_tool_arguments,
     )
 
-    _tool, version, _policy = build_skill_artifact_tool("workspace-1", "pptx")
-    presentation = version.input_schema["properties"]["presentation"]
-    properties = presentation["properties"]
-    assert len(properties["design_system"]["enum"]) == 30
-    assert (
-        len(
-            properties["slides"]["items"]["properties"]["animations"]["items"][
-                "properties"
-            ]["effect"]["enum"]
+    adapter = builtin.BuiltinToolAdapter(settings())
+    for name, *_ in catalog.BUILTIN_SKILL_DEFINITIONS:
+        _tool, version, policy = catalog.build_skill_artifact_tool("workspace-1", name)
+        snapshot = SimpleNamespace(
+            function_name=_tool.function_name, input_schema=version.input_schema,
+            execution_spec=version.execution_spec,
         )
-        == 22
-    )
-    assert "open-kimi-ppt" in version.description
-    snapshot = SimpleNamespace(
-        function_name="pptx_skill", input_schema=version.input_schema
-    )
-    assert tool_input_size_limit(snapshot) == MAX_PPTX_TOOL_INPUT_BYTES
-
-    arguments = normalize_tool_arguments(
-        "pptx_skill",
-        version.input_schema,
-        {
-            "filename": "modern.pptx",
-            "scenario": "tech-engineering",
-            "design_system": "blue-flame-brand",
-            "slides": [
-                {
-                    "page_type": "cover",
-                    "elements": [
-                        {
-                            "elementId": "title",
-                            "elementType": "text",
-                            "bounds": [80, 180, 800, 100],
-                            "content": {"style": "$title", "text": "PPTD"},
-                        }
-                    ],
-                    "animations": [
-                        {
-                            "elementId": "title",
-                            "effect": "zoom-in",
-                            "trigger": "onClick",
-                        }
-                    ],
-                }
-            ],
-            "title": "Modern deck",
-        },
-    )
-    validate_tool_arguments(snapshot, arguments)
-    assert arguments["presentation"]["scenario"] == "tech-engineering"
-    assert "scenario" not in arguments
-
-    legacy_arguments = normalize_tool_arguments(
-        "pptx_skill",
-        version.input_schema,
-        {
-            "filename": "legal-reading.pptx",
-            "presentation": {
-                "title": "读懂法律条文",
-                "cover_title_size": 46,
-                "design_system": "deep-blue-atlas",
-                "scenario": "education-training",
-                "page_transition": "fade",
-                "slides": [
-                    {
-                        "page_type": "final",
-                        "layout": "quote",
-                        "title": "结语",
-                        "quote": "定位最小单位 · 核对适用条件 · 写清规范依据",
-                    }
-                ],
-            },
-        },
-    )
-    validate_tool_arguments(snapshot, legacy_arguments)
-    normalized_presentation = legacy_arguments["presentation"]
-    assert normalized_presentation["theme"]["cover_title_size"] == 46
-    assert "cover_title_size" not in normalized_presentation
-    assert "scenario" not in normalized_presentation
-    assert "design_system" not in normalized_presentation
-    assert "page_transition" not in normalized_presentation
-    assert "page_type" not in normalized_presentation["slides"][0]
-
-    async def execute(_arguments: str) -> AgentToolResult:
-        raise AssertionError("invalid PPTX arguments must not execute")
-
-    invalid_arguments = {
-        "filename": "invalid.pptx",
-        "presentation": {
-            "title": "Invalid",
-            "slides": [{"layout": "quote", "quote": "Missing title"}],
-        },
-    }
-    try:
-        validate_tool_arguments(snapshot, invalid_arguments)
-    except ValueError as exc:
-        assert "'title' is a required property" in str(exc)
-    else:
-        raise AssertionError("invalid durable PPTX arguments were accepted")
-
-    tool = create_agent_tool(
-        name="pptx_skill",
-        description="PPTX",
-        parameters=version.input_schema,
-        execute=execute,
-    )
-    invalid = asyncio.run(tool.ainvoke(invalid_arguments))
-    assert invalid.is_error is True
-    assert "'title' is a required property" in invalid.content
+        assert version.input_schema == {"type": "object", "properties": {}, "additionalProperties": False}
+        assert version.execution_spec["builtin"] == "skill_guide"
+        assert version.execution_spec["skill"] == name
+        assert len(version.execution_spec["instructions"].encode()) <= 16_000
+        assert policy.workflow_callable is True
+        validate_tool_arguments(snapshot, {})
+        assert normalize_tool_arguments(_tool.function_name, version.input_schema, {"arguments": "{}"}) == {}
+        for invalid in ({"filename": "old.pptx"}, {"code": "print(1)"}, {"workbook": {}}):
+            try:
+                validate_tool_arguments(snapshot, invalid)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("Skill guide accepted file generation arguments")
+        with patch.object(builtin, "execute_skill_artifact", AsyncMock()) as execute:
+            result = asyncio.run(adapter.invoke(snapshot, {}, SimpleNamespace()))
+            execute.assert_not_called()
+        assert result.ok and result.data == {"skill": name, "instructions": version.execution_spec["instructions"]}
+        snapshot.execution_spec = {"builtin": "skill_guide", "skill": name, "instructions": "Frozen guide"}
+        assert asyncio.run(adapter.invoke(snapshot, {}, SimpleNamespace())).data["instructions"] == "Frozen guide"
+        with patch.object(catalog, "skill_instructions", return_value="Updated guide"):
+            _next_tool, next_version, _next_policy = catalog.build_skill_artifact_tool("workspace-1", name)
+        assert next_version.id != version.id and next_version.definition_hash != version.definition_hash
+    for spec in ({"builtin": "skill_guide"}, {"builtin": "skill_guide", "skill": "../secret", "instructions": "x"},
+                 {"builtin": "skill_guide", "skill": "pdf", "instructions": "x" * 16001}):
+        result = asyncio.run(adapter.invoke(SimpleNamespace(execution_spec=spec), {}, SimpleNamespace()))
+        assert not result.ok and result.error_code == "skill_guide_invalid"
 
 
 def test_normalize_mcp_url() -> None:
@@ -1193,15 +1094,15 @@ def test_mcp_adapter_marks_only_sent_writes_uncertain() -> None:
     from tests.support import settings
 
     from app.application.tools.runtime.adapters import mcp as mcp_adapter
-    from app.application.tools.runtime.contracts import ToolAdapterBusy
     from app.ports.mcp import McpClientError, McpServerBusy
+    from app.ports.tools import ToolAdapterBusy
 
     adapter = mcp_adapter.McpToolAdapter(settings(), SimpleNamespace())
 
     async def invoke(failure, effect):
         snapshot = SimpleNamespace(effect=effect, execution_spec={"tool_name": "write"})
         with (
-            patch.object(mcp_adapter, "mcp_server_connection"),
+            patch.object(mcp_adapter, "resolved_mcp_server_connection"),
             patch.object(mcp_adapter, "call_mcp_tool", AsyncMock(side_effect=failure)),
         ):
             return await adapter.invoke(
@@ -1238,8 +1139,8 @@ def test_skill_runtime_capacity_requeues_instead_of_failing() -> None:
 
     from app.application.agent_skills import dependencies, scripts
     from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
-    from app.application.tools.runtime.contracts import ToolAdapterBusy
     from app.ports.execution import ExecutionBusy
+    from app.ports.tools import ToolAdapterBusy
 
     adapter = BuiltinToolAdapter(settings())
     for module, function, builtin in (
@@ -1269,7 +1170,6 @@ def test_execution_tools_preserve_uncertain_outcomes() -> None:
         (dependencies, "execute_skill_dependency_install", {"builtin": "skill_dependency_install"}, {}),
         (builtin, "execute_artifact_code", {"builtin": "artifact"}, {"filename": "report.pdf", "content": "pass"}),
         (builtin, "execute_skill_artifact", {"builtin": "skill", "skill": "documents"}, {"filename": "report.docx"}),
-        (builtin, "execute_workflow_code", {"builtin": "inline_python"}, {"code": "pass", "inputs": {}}),
     ):
         with patch.object(module, function, AsyncMock(side_effect=ExecutionOutcomeUnknown("reply lost"))):
             result = asyncio.run(adapter.invoke(
@@ -1351,14 +1251,13 @@ def main() -> None:
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
     test_tool_authorization_applies_builtin_and_grant_rules()
-    test_python_tool_schema_validation_closes_objects()
-    test_python_tool_schema_validation_enforces_limits()
-    test_python_tool_schema_rejects_defs_depth_bypass()
-    test_python_tool_schema_rejects_legacy_definitions_property_bypass()
-    test_python_tool_code_is_limited_to_eight_kibibytes()
+    test_tool_schema_validation_closes_objects()
+    test_tool_schema_validation_enforces_limits()
+    test_tool_schema_rejects_defs_depth_bypass()
+    test_tool_schema_rejects_legacy_definitions_property_bypass()
     test_artifact_tool_accepts_sandbox_sized_content()
     test_documents_skill_formal_legal_contract_is_versioned()
-    test_pptx_skill_exposes_pptd_design_animation_and_media_contract()
+    test_builtin_skill_guides_are_frozen_and_read_only()
     test_normalize_mcp_url()
     test_mcp_adapter_marks_only_sent_writes_uncertain()
     test_skill_runtime_capacity_requeues_instead_of_failing()

@@ -2,10 +2,6 @@
 
 import * as React from "react"
 import {
-  ArchiveIcon,
-  BracesIcon,
-  ChevronRightIcon,
-  Code2Icon,
   EyeIcon,
   FolderInputIcon,
   LoaderCircleIcon,
@@ -34,9 +30,11 @@ import { ResourceFolderTree } from "@/components/resource-folders/resource-folde
 import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
-import { PythonToolDialog } from "@/components/tools/python-tool-dialog"
+import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
+import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
 import { SkillDialog } from "@/components/tools/skill-dialog"
 import {
+  deleteAgentSkill,
   listAllAgentSkills,
   updateAgentSkill,
   type AgentSkill,
@@ -78,13 +76,11 @@ import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { languageLocales } from "@/i18n"
 import {
-  archivePythonTool,
   deleteToolSource,
   getTool,
   listAllTools,
   listAllToolSources,
   refreshToolSource,
-  setPythonToolEnabled,
   setToolSourceEnabled,
   updateToolPolicy,
   type ToolDetail,
@@ -103,13 +99,13 @@ import {
   toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
+import { groupTools } from "@/lib/tool-groups"
 import { isRegularTool } from "@/lib/tool-visibility"
 import { cn } from "@/lib/utils"
 
 const catalogTabs = [
   { kind: "builtin", label: "Skills" },
   { kind: "mcp", label: "MCP" },
-  { kind: "python", label: "Python" },
 ] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
 
 type ToolSortKey = "updated_at" | "created_at" | "name"
@@ -144,7 +140,6 @@ function sortToolResources<
  * @returns The icon component for the tool kind
  */
 function kindIcon(kind: ToolKind) {
-  if (kind === "python") return Code2Icon
   if (kind === "mcp") return NetworkIcon
   return SparklesIcon
 }
@@ -167,10 +162,10 @@ function toolIsAvailable(tool: ToolSummary) {
  * Provides the display label for a tool kind.
  *
  * @param kind - The tool kind to label
- * @returns `Python`, `MCP`, or `内置` for the corresponding tool kind
+ * @returns `MCP` or `内置` for the corresponding tool kind
  */
 function kindLabel(kind: ToolKind) {
-  return kind === "python" ? "Python" : kind === "mcp" ? "MCP" : "内置"
+  return kind === "mcp" ? "MCP" : "内置"
 }
 
 /**
@@ -219,13 +214,16 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [busyId, setBusyId] = React.useState<string | null>(null)
-  const [pythonDialog, setPythonDialog] = React.useState<{
-    open: boolean
-    tool: ToolSummary | null
-  }>({ open: false, tool: null })
   const [mcpDialogOpen, setMcpDialogOpen] = React.useState(false)
+  const [oauthSource, setOAuthSource] = React.useState<ToolSourceDetail | null>(
+    null
+  )
+  const [taskSource, setTaskSource] = React.useState<ToolSourceDetail | null>(
+    null
+  )
   const [skillDialogOpen, setSkillDialogOpen] = React.useState(false)
   const [workspaceSkills, setWorkspaceSkills] = React.useState<AgentSkill[]>([])
+  const deletedSkillIds = React.useRef(new Set<string>())
   const [editingSkill, setEditingSkill] = React.useState<
     AgentSkill | undefined
   >()
@@ -236,7 +234,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const [selectedToolIds, setSelectedToolIds] = React.useState<string[]>([])
   const [isBatchManaging, setIsBatchManaging] = React.useState(false)
   const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
-  const [expandedSourceIds, setExpandedSourceIds] = React.useState<string[]>([])
+  const [managedSourceId, setManagedSourceId] = React.useState<string | null>(
+    null
+  )
   const [detailTarget, setDetailTarget] = React.useState<ToolSummary | null>(
     null
   )
@@ -272,7 +272,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       if (requestId !== requestRef.current) return
       setTools(nextTools)
       setSources(nextSources)
-      setWorkspaceSkills(nextSkills)
+      setWorkspaceSkills(
+        nextSkills.filter((skill) => !deletedSkillIds.current.has(skill.id))
+      )
     } catch (nextError) {
       if (requestId !== requestRef.current) return
       setTools([])
@@ -305,6 +307,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
 
   const catalogTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       isRegularTool(tool.function_name) &&
       (!initialKind || tool.kind === activeKind)
   )
@@ -345,42 +348,62 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const builtinTools = filteredTools.filter(
     (tool) => tool.kind === "builtin" && !isBuiltinSkillTool(tool.function_name)
   )
-  const filteredSources = sortToolResources(
-    catalogSources.filter(
-      (source) =>
-        !query ||
-        `${source.name} ${source.url ?? ""} ${source.stdio_command ?? ""} ${source.transport ?? ""}`
-          .toLowerCase()
-          .includes(query)
-    ),
+  const sourceGroups = groupTools(
+    catalogTools.filter(
+      (tool) =>
+        tool.kind === "mcp" &&
+        resourceFolders.isInSelectedFolder(tool.folder_id)
+    )
+  ).map((group) => ({ source: group.tools[0]!.source, tools: group.tools }))
+  for (const source of catalogSources) {
+    if (
+      !sourceGroups.some((group) => group.source.id === source.id) &&
+      !catalogTools.some((tool) => tool.source.id === source.id) &&
+      resourceFolders.selectedFolderId === null
+    ) {
+      sourceGroups.push({ source, tools: [] })
+    }
+  }
+  const mcpGroups = sortToolResources(
+    sourceGroups
+      .filter(
+        ({ source, tools: sourceTools }) =>
+          !query ||
+          source.name.toLowerCase().includes(query) ||
+          sourceTools.some((tool) =>
+            `${displayToolName(tool)} ${displayToolDescription(tool)}`
+              .toLowerCase()
+              .includes(query)
+          )
+      )
+      .map((group) => ({
+        ...group,
+        created_at: group.tools
+          .map((tool) => tool.created_at ?? "")
+          .sort()
+          .at(-1),
+        updated_at: group.tools
+          .map((tool) => tool.updated_at ?? "")
+          .sort()
+          .at(-1),
+        ...sources.find((source) => source.id === group.source.id),
+        name: group.source.name,
+      })),
     toolSortKey,
     locale,
-    (source) => source.name
+    (group) => group.source.name
   )
-  // An MCP server can publish dozens of tools, so they stay folded into their
-  // source until the user asks for them. Searching unfolds every group so a
-  // name match is never buried.
-  const mcpGroups = filteredSources.map((source) => ({
-    source,
-    tools: filteredTools.filter(
-      (tool) => tool.kind === "mcp" && tool.source.id === source.id
-    ),
-  }))
-  const foldedToolIds = new Set(
-    mcpGroups.flatMap((group) => group.tools.map((tool) => tool.id))
+  const flatTools = filteredTools.filter((tool) => tool.kind !== "mcp")
+  const managedTools = tools.filter(
+    (tool) =>
+      tool.kind === "mcp" &&
+      tool.source.id === managedSourceId &&
+      tool.can_manage
   )
-  const flatTools = filteredTools.filter((tool) => !foldedToolIds.has(tool.id))
-  // Batch management needs every manageable tool on screen, so it unfolds the
-  // groups (and locks their toggles) while it is active.
-  const isSourceExpanded = (sourceId: string) =>
-    isBatchManaging || Boolean(query) || expandedSourceIds.includes(sourceId)
-  function toggleSourceExpanded(source: ToolSourceDetail) {
-    setExpandedSourceIds((current) =>
-      current.includes(source.id)
-        ? current.filter((id) => id !== source.id)
-        : [...current, source.id]
-    )
-  }
+  const managedSourceName =
+    managedTools[0]?.source.name ??
+    sources.find((source) => source.id === managedSourceId)?.name ??
+    ""
   const movableToolIds = filteredTools
     .filter((tool) => tool.can_manage && tool.kind !== "builtin")
     .map((tool) => tool.id)
@@ -416,49 +439,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   }
 
   async function openDetail(tool: ToolSummary) {
-    if (tool.kind === "python" && tool.created_by_user_id) {
-      setPythonDialog({ open: true, tool })
-      return
-    }
     setDetailTarget(tool)
     setDetailTool(null)
     await loadDetail(tool)
-  }
-
-  async function togglePythonTool(tool: ToolSummary) {
-    if (busyId) return
-    if (tool.kind !== "python") return
-    const enabled = tool.status === "disabled"
-    if (
-      !enabled &&
-      !(await confirmAction({
-        description: t(
-          "禁用工具“{name}”？已绑定的 Agent 和 Workflow 将无法调用它。",
-          {
-            name: displayToolName(tool),
-          }
-        ),
-        confirmLabel: t("禁用"),
-        destructive: true,
-      }))
-    ) {
-      return
-    }
-    setBusyId(tool.id)
-    try {
-      const updated = await setPythonToolEnabled(
-        accessToken,
-        workspaceId,
-        tool.id,
-        enabled
-      )
-      upsertTool(updated)
-      message("success", enabled ? t("工具已启用") : t("工具已禁用"))
-    } catch (nextError) {
-      message("error", getErrorMessage(nextError, t))
-    } finally {
-      setBusyId(null)
-    }
   }
 
   async function setMcpPolicy(
@@ -550,26 +533,33 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     }
   }
 
-  async function archiveTool(tool: ToolSummary) {
-    if (busyId || tool.kind !== "python") return
+  async function removeSkill(skill: AgentSkill) {
+    if (busyId || !skill.can_manage) return
     if (
       !(await confirmAction({
-        description: t("归档工具“{name}”？此操作会使所有已绑定版本不可用。", {
-          name: displayToolName(tool),
-        }),
-        confirmLabel: t("归档"),
+        description: t(
+          "删除 Skill“{name}”？删除后无法再调用，历史版本和执行记录会保留。",
+          { name: skill.name }
+        ),
+        confirmLabel: t("删除"),
         destructive: true,
       }))
-    ) {
+    )
       return
-    }
-    setBusyId(tool.id)
+    setBusyId(skill.id)
     try {
-      await archivePythonTool(accessToken, workspaceId, tool.id)
-      setTools((current) => current.filter((item) => item.id !== tool.id))
-      message("success", t("工具已归档"))
-    } catch (nextError) {
-      message("error", getErrorMessage(nextError, t))
+      await deleteAgentSkill(accessToken, workspaceId, skill.id)
+      deletedSkillIds.current.add(skill.id)
+      setWorkspaceSkills((current) =>
+        current.filter((item) => item.id !== skill.id)
+      )
+      if (editingSkill?.id === skill.id) {
+        setSkillDialogOpen(false)
+        setEditingSkill(undefined)
+      }
+      message("success", t("Skill 已删除"))
+    } catch (cause) {
+      message("error", getErrorMessage(cause, t))
     } finally {
       setBusyId(null)
     }
@@ -595,6 +585,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         current.filter((item) => item.source.id !== source.id)
       )
       setSources((current) => current.filter((item) => item.id !== source.id))
+      setManagedSourceId((current) => (current === source.id ? null : current))
       message("success", t("工具来源已删除"))
     } catch (nextError) {
       message("error", getErrorMessage(nextError, t))
@@ -609,10 +600,93 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     ? builtinSkillMarkdown(detailFunctionName)
     : null
 
+  function renderToolManagementMenu(tool: ToolSummary) {
+    const source = sources.find((item) => item.id === tool.source.id)
+    return (
+      <CardMoreMenu
+        label={t("管理工具 {name}", {
+          name: displayToolName(tool),
+        })}
+      >
+        <DropdownMenuItem onSelect={() => setMoveToolTarget(tool)}>
+          <FolderInputIcon />
+          {t("移动到文件夹")}
+        </DropdownMenuItem>
+        {tool.kind === "builtin" ? (
+          <DropdownMenuItem onSelect={() => void openDetail(tool)}>
+            <EyeIcon />
+            {t("查看详情")}
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem onSelect={() => setPermissionTool(tool)}>
+          <ShieldCheckIcon />
+          {t("授权")}
+        </DropdownMenuItem>
+        {tool.kind === "mcp" ? (
+          <DropdownMenuItem
+            disabled={!source || Boolean(busyId)}
+            onSelect={() => source && void refreshSource(source)}
+          >
+            <RefreshCwIcon />
+            {t("刷新工具")}
+          </DropdownMenuItem>
+        ) : null}
+        {tool.kind === "mcp" ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("工具执行策略")}</DropdownMenuLabel>
+            {source?.status === "disabled" ? (
+              <DropdownMenuItem disabled>{t("来源已禁用")}</DropdownMenuItem>
+            ) : (
+              <>
+                <DropdownMenuItem
+                  disabled={Boolean(busyId)}
+                  onSelect={() => void setMcpPolicy(tool, "read_only")}
+                >
+                  <ShieldCheckIcon />
+                  {t("只读自动执行")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={Boolean(busyId)}
+                  onSelect={() => void setMcpPolicy(tool, "approval_required")}
+                >
+                  <ShieldCheckIcon />
+                  {t("每次调用前审批")}
+                </DropdownMenuItem>
+                {tool.status !== "disabled" ? (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={Boolean(busyId)}
+                    onSelect={() => void setMcpPolicy(tool, "disabled")}
+                  >
+                    <PowerIcon />
+                    {t("禁用")}
+                  </DropdownMenuItem>
+                ) : null}
+              </>
+            )}
+          </>
+        ) : null}
+        {tool.kind === "mcp" && source ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={Boolean(busyId)}
+              onSelect={() => void removeSource(source)}
+            >
+              <Trash2Icon />
+              {t("删除来源")}
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </CardMoreMenu>
+    )
+  }
+
   function renderCatalogToolCard(tool: ToolSummary) {
     const Icon = kindIcon(tool.kind)
     const available = toolIsAvailable(tool)
-    const source = sources.find((item) => item.id === tool.source.id)
     const selected = selectedToolIds.includes(tool.id)
 
     return (
@@ -654,26 +728,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                     {t(permissionLabel(tool.permission))}
                   </Badge>
                 ) : null}
-                {tool.kind === "mcp" && tool.policy_mode ? (
-                  <Badge variant="outline">
-                    {t(
-                      tool.policy_mode === "read_only"
-                        ? "只读自动执行"
-                        : tool.policy_mode === "disabled"
-                          ? "工具调用已禁用"
-                          : "每次调用前审批"
-                    )}
-                  </Badge>
-                ) : null}
-                {tool.kind === "mcp" &&
-                tool.availability === "unavailable" &&
-                tool.status === "active" &&
-                source?.status === "active" ? (
-                  <Badge variant="outline">{t("上游未发现该工具")}</Badge>
-                ) : null}
-                {source?.status === "disabled" ? (
-                  <Badge variant="outline">{t("来源已禁用")}</Badge>
-                ) : null}
               </div>
             </div>
           </div>
@@ -697,112 +751,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   }
                 />
               ) : null}
-              <CardMoreMenu
-                label={t("管理工具 {name}", {
-                  name: displayToolName(tool),
-                })}
-              >
-                <DropdownMenuItem onSelect={() => setMoveToolTarget(tool)}>
-                  <FolderInputIcon />
-                  {t("移动到文件夹")}
-                </DropdownMenuItem>
-                {tool.kind === "python" ? (
-                  <DropdownMenuItem
-                    onSelect={() => setPythonDialog({ open: true, tool })}
-                  >
-                    <BracesIcon />
-                    {t("编辑")}
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onSelect={() => void openDetail(tool)}>
-                    <EyeIcon />
-                    {t("查看详情")}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onSelect={() => setPermissionTool(tool)}>
-                  <ShieldCheckIcon />
-                  {t("授权")}
-                </DropdownMenuItem>
-                {tool.kind === "mcp" ? (
-                  <DropdownMenuItem
-                    disabled={!source || Boolean(busyId)}
-                    onSelect={() => source && void refreshSource(source)}
-                  >
-                    <RefreshCwIcon />
-                    {t("刷新工具")}
-                  </DropdownMenuItem>
-                ) : null}
-                {tool.kind === "mcp" ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>{t("工具执行策略")}</DropdownMenuLabel>
-                    {source?.status === "disabled" ? (
-                      <DropdownMenuItem disabled>
-                        {t("来源已禁用")}
-                      </DropdownMenuItem>
-                    ) : (
-                      <>
-                        <DropdownMenuItem
-                          disabled={Boolean(busyId)}
-                          onSelect={() => void setMcpPolicy(tool, "read_only")}
-                        >
-                          <ShieldCheckIcon />
-                          {t("只读自动执行")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={Boolean(busyId)}
-                          onSelect={() =>
-                            void setMcpPolicy(tool, "approval_required")
-                          }
-                        >
-                          <ShieldCheckIcon />
-                          {t("每次调用前审批")}
-                        </DropdownMenuItem>
-                        {tool.status !== "disabled" ? (
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={Boolean(busyId)}
-                            onSelect={() => void setMcpPolicy(tool, "disabled")}
-                          >
-                            <PowerIcon />
-                            {t("禁用")}
-                          </DropdownMenuItem>
-                        ) : null}
-                      </>
-                    )}
-                  </>
-                ) : tool.kind === "python" &&
-                  (tool.status === "active" || tool.status === "disabled") ? (
-                  <DropdownMenuItem
-                    disabled={Boolean(busyId)}
-                    onSelect={() => void togglePythonTool(tool)}
-                  >
-                    <PowerIcon />
-                    {tool.status === "active" ? t("禁用") : t("启用")}
-                  </DropdownMenuItem>
-                ) : null}
-                {tool.kind === "python" || (tool.kind === "mcp" && source) ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      disabled={Boolean(busyId)}
-                      onSelect={() =>
-                        tool.kind === "python"
-                          ? void archiveTool(tool)
-                          : source && void removeSource(source)
-                      }
-                    >
-                      {tool.kind === "python" ? (
-                        <ArchiveIcon />
-                      ) : (
-                        <Trash2Icon />
-                      )}
-                      {tool.kind === "python" ? t("归档") : t("删除来源")}
-                    </DropdownMenuItem>
-                  </>
-                ) : null}
-              </CardMoreMenu>
+              {renderToolManagementMenu(tool)}
             </ResourceCardActions>
           ) : null}
         </ResourceCardHeader>
@@ -831,9 +780,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("工具")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t(
-              "管理自己的 MCP、Skills 与 Python 工具；共享给你的资源可按授权使用。"
-            )}
+            {t("管理自己的 MCP 与 Skills；共享给你的资源可按授权使用。")}
           </p>
         </div>
         <DropdownMenu>
@@ -844,12 +791,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem
-              onSelect={() => setPythonDialog({ open: true, tool: null })}
-            >
-              <Code2Icon />
-              {t("Python 工具")}
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setMcpDialogOpen(true)}>
               <NetworkIcon />
               {t("MCP Server")}
@@ -928,7 +869,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 <div
                   role="group"
                   aria-label={t("工具")}
-                  className="grid w-fit shrink-0 grid-cols-3 rounded-md bg-muted p-0.5 max-sm:w-full"
+                  className="grid w-fit shrink-0 grid-cols-2 gap-0.5 rounded-lg bg-muted/70 p-0.5 max-sm:w-full sm:h-[var(--theme-control-large-height)]"
                 >
                   {catalogTabs.map((tab) => {
                     const isActive = activeKind === tab.kind
@@ -938,10 +879,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         key={tab.kind}
                         type="button"
                         aria-pressed={isActive}
-                        className={`h-8 min-w-16 rounded-sm px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:h-11 ${
+                        className={`inline-flex min-w-18 items-center justify-center rounded-md px-3 text-sm font-medium whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background motion-reduce:transition-none max-sm:h-11 ${
                           isActive
                             ? "bg-background text-foreground shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
+                            : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
                         }`}
                         onClick={() => setActiveKind(tab.kind)}
                       >
@@ -955,134 +896,160 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           ) : null}
         </div>
 
-        {!isLoading && !error && filteredSources.length ? (
+        {!isLoading && !error && mcpGroups.length ? (
           <section aria-labelledby="tool-source-group">
             <div className="mb-3 flex items-center gap-2">
               <h2 id="tool-source-group" className="text-sm font-semibold">
-                {t("MCP Server")}
+                {t("MCP 工具")}
               </h2>
-              <Badge variant="secondary">{filteredSources.length}</Badge>
+              <Badge variant="secondary">{mcpGroups.length}</Badge>
             </div>
-            <div className="space-y-3">
+            <div className={resourceCardGridClass}>
               {mcpGroups.map(({ source, tools: sourceTools }) => {
-                const active = source.status === "active"
-                const expanded = isSourceExpanded(source.id)
+                const detail = sources.find((item) => item.id === source.id)
+                const manageableTools = sourceTools.filter(
+                  (tool) => tool.can_manage
+                )
+                const selected =
+                  manageableTools.length > 0 &&
+                  manageableTools.every((tool) =>
+                    selectedToolIds.includes(tool.id)
+                  )
                 return (
-                  <div
+                  <ResourceCard
                     key={source.id}
-                    data-slot="mcp-source-group"
-                    className="overflow-hidden rounded-xl border bg-card shadow-xs"
+                    as="article"
+                    aria-label={source.name}
+                    selected={selected}
                   >
-                    <div className="flex items-start gap-3 p-3">
-                      <button
-                        type="button"
-                        aria-expanded={expanded}
-                        aria-controls={`mcp-source-tools-${source.id}`}
-                        disabled={isBatchManaging}
-                        aria-label={t(
-                          expanded
-                            ? "收起 {name} 的工具"
-                            : "展开 {name} 的工具",
-                          { name: source.name }
-                        )}
-                        className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => toggleSourceExpanded(source)}
-                      >
-                        <ChevronRightIcon
-                          className={cn(
-                            "size-4 shrink-0 text-muted-foreground transition-transform",
-                            expanded && "rotate-90"
-                          )}
-                        />
-                        <ResourceCardIcon tone="violet">
+                    <ResourceCardHeader>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <ResourceCardIcon tone="sky">
                           <NetworkIcon className="size-5" />
                         </ResourceCardIcon>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-sm font-semibold">
-                              {source.name}
-                            </span>
-                            <Badge variant={active ? "secondary" : "outline"}>
-                              {t(active ? "已启用" : "已停用")}
-                            </Badge>
-                            <Badge variant="outline">
-                              {t(transportLabel(source.transport))}
-                            </Badge>
-                            <Badge variant="outline">
-                              {t("{value} 个工具", {
-                                value: source.tool_count,
-                              })}
-                            </Badge>
-                          </span>
-                          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                            <span className="truncate">
-                              {source.transport === "stdio"
-                                ? t("stdio 命令：{command}", {
-                                    command: source.stdio_command ?? "-",
-                                  })
-                                : source.url}
-                            </span>
-                            <span className="shrink-0">·</span>
-                            <span className="shrink-0">
-                              {formatDateTime(source.updated_at, locale)}
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                      <ResourceCardActions>
-                        <CardMoreMenu
-                          label={t("管理来源 {name}", { name: source.name })}
-                        >
-                          <DropdownMenuItem
-                            disabled={Boolean(busyId)}
-                            onSelect={() => void refreshSource(source)}
-                          >
-                            <RefreshCwIcon />
-                            {t("刷新工具")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={Boolean(busyId)}
-                            onSelect={() => void toggleSource(source)}
-                          >
-                            <PowerIcon />
-                            {active ? t("禁用") : t("启用")}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={Boolean(busyId)}
-                            onSelect={() => void removeSource(source)}
-                          >
-                            <Trash2Icon />
-                            {t("删除来源")}
-                          </DropdownMenuItem>
-                        </CardMoreMenu>
-                      </ResourceCardActions>
-                    </div>
-                    {source.last_error ? (
-                      <p className="line-clamp-2 border-t px-3 py-2 text-xs leading-5 text-destructive">
-                        {source.last_error}
-                      </p>
-                    ) : null}
-                    {expanded ? (
-                      <div
-                        id={`mcp-source-tools-${source.id}`}
-                        className="border-t bg-muted/20 p-3"
-                      >
-                        {sourceTools.length ? (
-                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                            {sourceTools.map((tool) =>
-                              renderCatalogToolCard(tool)
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            {t("没有匹配的工具")}
+                        <div className="min-w-0">
+                          <ResourceCardTitle as="h3">
+                            {source.name}
+                          </ResourceCardTitle>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {t("MCP 工具")}
                           </p>
-                        )}
+                        </div>
+                      </div>
+                      <ResourceCardActions>
+                        {isBatchManaging && manageableTools.length ? (
+                          <input
+                            type="checkbox"
+                            className="size-4 shrink-0 accent-primary"
+                            aria-label={t("选择 {value}", {
+                              value: source.name,
+                            })}
+                            checked={selected}
+                            ref={(element) => {
+                              if (element)
+                                element.indeterminate =
+                                  !selected &&
+                                  manageableTools.some((tool) =>
+                                    selectedToolIds.includes(tool.id)
+                                  )
+                            }}
+                            onChange={(event) =>
+                              setSelectedToolIds((current) => {
+                                const ids = new Set(
+                                  manageableTools.map((tool) => tool.id)
+                                )
+                                return event.target.checked
+                                  ? [...new Set([...current, ...ids])]
+                                  : current.filter((id) => !ids.has(id))
+                              })
+                            }
+                          />
+                        ) : null}
+                        {detail || manageableTools.length ? (
+                          <CardMoreMenu
+                            label={t("管理来源 {name}", { name: source.name })}
+                          >
+                            {manageableTools.length ? (
+                              <DropdownMenuItem
+                                onSelect={() => setManagedSourceId(source.id)}
+                              >
+                                <WrenchIcon />
+                                {t("管理工具")}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {detail?.mcp_server_id &&
+                            detail.transport !== "stdio" ? (
+                              <>
+                                <DropdownMenuItem
+                                  onSelect={() => setOAuthSource(detail)}
+                                >
+                                  {t("OAuth 连接")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() => setTaskSource(detail)}
+                                >
+                                  {t("长任务契约")}
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                            {detail ? (
+                              <>
+                                <DropdownMenuItem
+                                  disabled={Boolean(busyId)}
+                                  onSelect={() => void refreshSource(detail)}
+                                >
+                                  <RefreshCwIcon />
+                                  {t("刷新工具")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={Boolean(busyId)}
+                                  onSelect={() => void toggleSource(detail)}
+                                >
+                                  <PowerIcon />
+                                  {detail.status === "active"
+                                    ? t("禁用")
+                                    : t("启用")}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  disabled={Boolean(busyId)}
+                                  onSelect={() => void removeSource(detail)}
+                                >
+                                  <Trash2Icon />
+                                  {t("删除来源")}
+                                </DropdownMenuItem>
+                              </>
+                            ) : null}
+                          </CardMoreMenu>
+                        ) : null}
+                      </ResourceCardActions>
+                    </ResourceCardHeader>
+                    {detail ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant={
+                            detail.status === "active" ? "secondary" : "outline"
+                          }
+                        >
+                          {detail.status === "active"
+                            ? t("可用")
+                            : t("来源已禁用")}
+                        </Badge>
+                        <Badge variant="outline">
+                          {t(transportLabel(detail.transport))}
+                        </Badge>
+                        <Badge variant="outline">
+                          {t("{value} 个工具", { value: detail.tool_count })}
+                        </Badge>
                       </div>
                     ) : null}
-                  </div>
+                    {detail?.last_error ? (
+                      <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive [overflow-wrap:anywhere]">
+                        {getErrorMessage(new Error(detail.last_error), t)}
+                      </p>
+                    ) : null}
+                  </ResourceCard>
                 )
               })}
             </div>
@@ -1204,11 +1171,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                     id="workspace-skills-heading"
                     className="text-sm font-semibold"
                   >
-                    {t("我的 Skills")}
+                    {t("自定义 Skills")}
                   </h2>
-                  <Badge variant="secondary">{workspaceSkills.length}</Badge>
+                  <Badge variant="secondary">
+                    {filteredWorkspaceSkills.length}
+                  </Badge>
                 </div>
-                {workspaceSkills.length ? (
+                {filteredWorkspaceSkills.length ? (
                   <div className={resourceCardGridClass}>
                     {filteredWorkspaceSkills.map((skill) => (
                       <ResourceCard
@@ -1218,7 +1187,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                       >
                         <Button
                           variant="ghost"
-                          className="h-auto max-w-full justify-start px-0 py-0 text-sm font-semibold"
+                          className="h-auto max-w-full min-w-0 justify-start px-0 py-0 text-left text-sm font-semibold [overflow-wrap:anywhere] break-words whitespace-normal"
                           onClick={() => {
                             setEditingSkill(skill)
                             setSkillDialogOpen(true)
@@ -1226,10 +1195,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         >
                           {skill.name}
                         </Button>
-                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                        <p
+                          title={skill.description}
+                          className="mt-1 line-clamp-2 text-sm break-words text-muted-foreground"
+                        >
                           {skill.description}
                         </p>
-                        <div className="mt-auto flex items-center gap-2 pt-3">
+                        <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
                           {!skill.can_manage ? (
                             <Badge variant="outline">{t("共享给我的")}</Badge>
                           ) : null}
@@ -1240,6 +1212,17 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                 ? `${t("已发布版本")} ${skill.current_version_number}`
                                 : t("草稿")}
                           </Badge>
+                          {skill.can_manage ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busyId !== null}
+                              onClick={() => void removeSkill(skill)}
+                            >
+                              <Trash2Icon />
+                              {t("删除")}
+                            </Button>
+                          ) : null}
                           {skill.can_manage ? (
                             <Button
                               variant="outline"
@@ -1278,7 +1261,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   </div>
                 ) : (
                   <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
-                    <p className="font-medium">{t("还没有自己的 Skill")}</p>
+                    <p className="font-medium">
+                      {workspaceSkills.length
+                        ? t("没有匹配的 Skill")
+                        : t("还没有可用的 Skill")}
+                    </p>
                     <p className="mt-1 max-w-md text-sm text-muted-foreground">
                       {t("从添加工具新建或导入 Skill。")}
                     </p>
@@ -1302,12 +1289,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </span>
             <p className="mt-4 font-medium">{t("还没有工具")}</p>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              {t(
-                "添加 Python 工具或连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。"
-              )}
+              {t("连接 MCP Server 后，可授权给 Agent 与 Workflow 使用。")}
             </p>
           </div>
-        ) : filteredTools.length === 0 ? (
+        ) : filteredTools.length === 0 && mcpGroups.length === 0 ? (
           <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
             {t("没有匹配的工具")}
           </div>
@@ -1317,6 +1302,53 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           </div>
         )}
       </ResourceFolderLayout>
+
+      <Dialog
+        open={managedSourceId !== null}
+        onOpenChange={(open) => !open && setManagedSourceId(null)}
+      >
+        <DialogContent className="flex max-h-[80svh] flex-col overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="break-words">
+              {t("管理 {name} 的工具", { name: managedSourceName })}
+            </DialogTitle>
+            <DialogDescription>
+              {t("按工具管理权限与执行策略。")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 divide-y overflow-y-auto">
+            {managedTools.map((tool) => (
+              <div
+                key={tool.id}
+                className="flex flex-wrap items-center gap-2 py-3"
+              >
+                <span className="min-w-0 flex-1 basis-32 truncate text-sm font-medium">
+                  {displayToolName(tool)}
+                </span>
+                <Badge variant="outline">
+                  {toolIsAvailable(tool) ? t("可用") : t("不可用")}
+                </Badge>
+                {tool.policy_mode ? (
+                  <Badge variant="outline">
+                    {t(
+                      tool.policy_mode === "read_only"
+                        ? "只读自动执行"
+                        : tool.policy_mode === "disabled"
+                          ? "工具调用已禁用"
+                          : "每次调用前审批"
+                    )}
+                  </Badge>
+                ) : null}
+                {tool.availability === "unavailable" &&
+                tool.status === "active" ? (
+                  <Badge variant="outline">{t("上游未发现该工具")}</Badge>
+                ) : null}
+                {renderToolManagementMenu(tool)}
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ResourceFolderPickerDialog
         open={isBatchMoveOpen}
@@ -1361,20 +1393,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         }}
       />
 
-      <PythonToolDialog
-        open={pythonDialog.open}
-        onOpenChange={(open) =>
-          setPythonDialog((current) => ({ ...current, open }))
-        }
-        token={accessToken}
-        workspaceId={workspaceId}
-        tool={pythonDialog.tool}
-        onChanged={upsertTool}
-        onArchived={(toolId) =>
-          setTools((current) => current.filter((tool) => tool.id !== toolId))
-        }
-        onMessage={message}
-      />
       <McpSourceDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
@@ -1389,6 +1407,26 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         }}
         onError={(value) => message("error", value)}
       />
+      {oauthSource?.mcp_server_id ? (
+        <McpOAuthDialog
+          key={oauthSource.id}
+          token={accessToken}
+          workspaceId={workspaceId}
+          serverId={oauthSource.mcp_server_id}
+          onClose={() => setOAuthSource(null)}
+          onChanged={() => void load()}
+        />
+      ) : null}
+      {taskSource?.mcp_server_id ? (
+        <McpLongTasksDialog
+          key={taskSource.id}
+          token={accessToken}
+          workspaceId={workspaceId}
+          serverId={taskSource.mcp_server_id}
+          onClose={() => setTaskSource(null)}
+          onChanged={() => void load()}
+        />
+      ) : null}
       <SkillDialog
         key={`${workspaceId}:${editingSkill?.id ?? "new"}:${skillDialogOpen}`}
         open={skillDialogOpen}
@@ -1422,13 +1460,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       >
         <DialogContent
           className={cn(
-            "max-h-[calc(100svh-2rem)] w-[calc(100%-2rem)] overflow-y-auto",
-            skillMarkdown ? "sm:max-w-3xl" : "sm:max-w-2xl"
+            "flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden p-0",
+            skillMarkdown ? "max-w-4xl" : "max-w-2xl"
           )}
         >
           <IconButton
             label={t("关闭")}
-            className="absolute top-3 right-3 z-20 bg-background/90 shadow-sm backdrop-blur"
+            className="absolute top-4 right-4 z-20 text-muted-foreground hover:text-foreground sm:top-5 sm:right-5"
             onClick={() => {
               setDetailTarget(null)
               setDetailTool(null)
@@ -1437,7 +1475,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           >
             <XIcon />
           </IconButton>
-          <DialogHeader className="pr-10">
+          <DialogHeader className="min-w-0 shrink-0 border-b bg-muted/20 px-5 py-5 pr-16 sm:px-8 sm:py-6 sm:pr-20">
             {skillMarkdown ? (
               <div className="flex items-start gap-3">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted/70">
@@ -1446,18 +1484,18 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                     className="size-6"
                   />
                 </span>
-                <div className="min-w-0">
-                  <DialogTitle>
+                <div className="min-w-0 flex-1">
+                  <DialogTitle className="text-lg leading-7">
                     {detailTool
                       ? displayToolName(detailTool)
                       : detailTarget
                         ? displayToolName(detailTarget)
                         : t("工具详情")}{" "}
-                    <span className="font-normal text-muted-foreground">
+                    <span className="text-sm font-normal text-muted-foreground">
                       {t("Skill")}
                     </span>
                   </DialogTitle>
-                  <DialogDescription className="mt-1">
+                  <DialogDescription className="mt-1 leading-6 [overflow-wrap:anywhere]">
                     {detailTool
                       ? displayToolDescription(detailTool)
                       : detailTarget
@@ -1485,67 +1523,76 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
               </>
             )}
           </DialogHeader>
-          {isDetailLoading ? (
-            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-              <LoaderCircleIcon className="size-4 animate-spin" />
-              {t("正在加载")}
-            </div>
-          ) : detailError && detailTarget ? (
-            <div
-              role="alert"
-              className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center"
-            >
-              <p className="font-medium">{t("工具加载失败")}</p>
-              <p className="max-w-sm text-xs text-muted-foreground">
-                {detailError}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void loadDetail(detailTarget)}
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-5 py-6 sm:px-8 sm:py-8">
+            {isDetailLoading ? (
+              <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <LoaderCircleIcon className="size-4 animate-spin" />
+                {t("正在加载")}
+              </div>
+            ) : detailError && detailTarget ? (
+              <div
+                role="alert"
+                className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-muted/20 p-6 text-center"
               >
-                <RefreshCwIcon />
-                {t("重试")}
-              </Button>
-            </div>
-          ) : detailTool && skillMarkdown ? (
-            <div className="rounded-xl border bg-muted/20 p-4">
-              <MarkdownContent content={skillMarkdown} />
-            </div>
-          ) : detailTool ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Badge>{t(kindLabel(detailTool.kind))}</Badge>
-                <Badge variant="outline">
-                  {toolSourceDisplayName(detailTool.source, t)}
-                </Badge>
-                <Badge variant="outline">
-                  {detailTool.permission
-                    ? t(permissionLabel(detailTool.permission))
-                    : t("无权限")}
-                </Badge>
-              </div>
-              <div>
-                <h3 className="mb-2 text-sm font-medium">{t("输入 Schema")}</h3>
-                <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
-                  {JSON.stringify(detailTool.input_schema ?? {}, null, 2)}
-                </pre>
-              </div>
-              <div>
-                <h3 className="mb-2 text-sm font-medium">{t("输出 Schema")}</h3>
-                <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
-                  {JSON.stringify(detailTool.output_schema ?? {}, null, 2)}
-                </pre>
-              </div>
-              {!detailTool.can_manage ? (
-                <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
-                  {t(
-                    "只显示已发布的脱敏详情；草稿和代码仅所有者或管理员可见。"
-                  )}
+                <p className="font-medium">{t("工具加载失败")}</p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                  {detailError}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadDetail(detailTarget)}
+                >
+                  <RefreshCwIcon />
+                  {t("重试")}
+                </Button>
+              </div>
+            ) : detailTool && skillMarkdown ? (
+              <article className="mx-auto max-w-[76ch] min-w-0">
+                <MarkdownContent
+                  content={skillMarkdown}
+                  className="leading-7 [overflow-wrap:anywhere] [&_h1]:mb-5 [&_h1]:text-xl [&_h1]:leading-8 [&_h2]:mt-8 [&_h2]:text-base [&_h2]:leading-7 [&_h2:first-child]:mt-0 [&_h3]:mt-6 [&_li]:my-1.5 [&_p]:my-3"
+                />
+              </article>
+            ) : detailTool ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Badge>{t(kindLabel(detailTool.kind))}</Badge>
+                  <Badge variant="outline">
+                    {toolSourceDisplayName(detailTool.source, t)}
+                  </Badge>
+                  <Badge variant="outline">
+                    {detailTool.permission
+                      ? t(permissionLabel(detailTool.permission))
+                      : t("无权限")}
+                  </Badge>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-medium">
+                    {t("输入 Schema")}
+                  </h3>
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                    {JSON.stringify(detailTool.input_schema ?? {}, null, 2)}
+                  </pre>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-medium">
+                    {t("输出 Schema")}
+                  </h3>
+                  <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs">
+                    {JSON.stringify(detailTool.output_schema ?? {}, null, 2)}
+                  </pre>
+                </div>
+                {!detailTool.can_manage ? (
+                  <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
+                    {t(
+                      "只显示已发布的脱敏详情；草稿和代码仅所有者或管理员可见。"
+                    )}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </DialogContent>
       </Dialog>
       {confirmDialog}

@@ -56,7 +56,6 @@ class WorkspaceAnalyticsInventoryKnowledge:
 class WorkspaceAnalyticsInventoryTools:
     total: int = 0
     mcp: int = 0
-    python: int = 0
     builtin: int = 0
     active: int = 0
 

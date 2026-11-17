@@ -20,6 +20,7 @@ import {
   documentStatusDotClassName,
   documentStatusLabel,
   formatBytes,
+  taskDurationLabel,
   taskStatusDotClassName,
   taskStatusLabel,
   taskTypeLabel,
@@ -229,7 +230,7 @@ describe("KnowledgeBaseDialogs", () => {
 
     const dialog = screen.getByRole("dialog")
     expect(
-      within(dialog).getByText("配置知识库名称、描述和默认数据源。")
+      within(dialog).getByText("配置知识库名称、描述和检索模型。")
     ).toBeTruthy()
 
     fireEvent.change(within(dialog).getByLabelText("知识库名称"), {
@@ -890,6 +891,42 @@ describe("knowledge status helpers", () => {
     expect(formatBytes(1024)).toBe("1.0 KB")
     expect(formatBytes(2048)).toBe("2.0 KB")
     expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB")
+  })
+
+  test("formats task durations in all three languages", () => {
+    const task = {
+      status: "succeeded",
+      started_at: "2026-01-01T00:00:00Z",
+      finished_at: "2026-01-01T01:23:45Z",
+    }
+    expect(taskDurationLabel(task, 0, t)).toBe("1 小时 23 分")
+    expect(
+      taskDurationLabel(task, 0, (key, values) =>
+        translate("zh-Hant", key, values)
+      )
+    ).toBe("1 小時 23 分")
+    expect(
+      taskDurationLabel(task, 0, (key, values) => translate("en", key, values))
+    ).toBe("1 h 23 min")
+  })
+
+  test("handles stopping, queued retries and incomplete task timestamps", () => {
+    const now = Date.parse("2026-01-01T00:00:12Z")
+    const task = {
+      status: "cancelling",
+      started_at: "2026-01-01T00:00:00Z",
+      finished_at: null,
+    }
+    expect(taskDurationLabel(task, now, t)).toBe("12 秒")
+    expect(taskDurationLabel({ ...task, status: "queued" }, now, t)).toBe("—")
+    expect(taskDurationLabel({ ...task, status: "failed" }, now, t)).toBe("—")
+    expect(taskDurationLabel({ ...task, started_at: null }, now, t)).toBe("—")
+    expect(taskDurationLabel({ ...task, started_at: "invalid" }, now, t)).toBe(
+      "—"
+    )
+    expect(taskDurationLabel({ ...task, finished_at: "invalid" }, now, t)).toBe(
+      "—"
+    )
   })
 
   test("renders status badges for known and unknown statuses", () => {

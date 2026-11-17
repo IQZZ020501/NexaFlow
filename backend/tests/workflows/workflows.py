@@ -12,7 +12,7 @@ import tests.support
 from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 from app.domain.agents.runtime.tools import AgentToolResult
-from app.domain.workflows.definitions.defaults import default_workflow_graph
+from app.domain.applications.definitions import default_workflow_graph
 from app.domain.workflows.runtime.engine import (
     NodeExecutionContext,
     NodeResult,
@@ -1527,7 +1527,7 @@ def test_interaction_config_migration_upgrades_prerequisites() -> None:
 
 
 def assert_upload_cleanup_removes_object(upload_id: str) -> None:
-    from app.domain.workflows.uploads import (
+    from app.domain.uploads.service import (
         prepare_due_upload_cleanups,
         run_upload_storage_cleanup,
     )
@@ -2328,12 +2328,16 @@ class _FakeWorkflowToolRuntime:
 
 def _llm_scope(**overrides) -> SimpleNamespace:
     scope = SimpleNamespace(
-        run=SimpleNamespace(agent_id="workflow-1", model_id="model-1"),
+        run=SimpleNamespace(
+            agent_id="workflow-1", model_id="model-1", access_source="console"
+        ),
         settings=None,
         models={"model-1": SimpleNamespace(provider_type="openai_compatible")},
         node_histories={},
         tool_runtime=_FakeWorkflowToolRuntime(),
         output_delta=None,
+        llm_states={},
+        save_llm_state=None,
     )
     for key, value in overrides.items():
         setattr(scope, key, value)
@@ -2881,8 +2885,8 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
         # ------------------------------------------------------------------
         from tests.support import settings as make_settings
 
+        from app.application.agents import integration as agent_integration
         from app.application.agents.runs import children as acr
-        from app.application.agents.runs import service as app_agent_runs
         from app.application.agents.runs.children import (
             _child_goal,
             _fail_expired_waiting_parent,
@@ -3484,7 +3488,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             return None
 
         workflow_executor.maintain_agent_run_lease = noop_maintain
-        original_run_enqueue = app_agent_runs.enqueue_prepared_agent_run
+        original_run_enqueue = agent_integration.enqueue_prepared_agent_run
         enqueued_children: list[str] = []
 
         async def record_enqueue(run_id, _settings, **_kwargs) -> None:
@@ -3523,7 +3527,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             fallback_run_id = extra_runs["fallback"]
             await reset_to_running(fallback_run_id, "worker-child-a")
             workflow_executor.ensure_workflow_agent_child = ensure_then_raise
-            app_agent_runs.enqueue_prepared_agent_run = record_enqueue
+            agent_integration.enqueue_prepared_agent_run = record_enqueue
             try:
                 outcome = await run_durable_workflow_run(
                     fallback_run_id,
@@ -3533,7 +3537,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                 )
             finally:
                 workflow_executor.ensure_workflow_agent_child = real_ensure
-                app_agent_runs.enqueue_prepared_agent_run = original_run_enqueue
+                agent_integration.enqueue_prepared_agent_run = original_run_enqueue
             assert outcome == "finished"
             if len(enqueued_children) != 1:
                 async with get_session_factory()() as db:
@@ -3625,7 +3629,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
             real_run_id = extra_runs["real"]
             await reset_to_running(real_run_id, "worker-child-d")
             enqueued_children.clear()
-            app_agent_runs.enqueue_prepared_agent_run = record_enqueue
+            agent_integration.enqueue_prepared_agent_run = record_enqueue
             try:
                 outcome = await run_durable_workflow_run(
                     real_run_id,
@@ -3634,7 +3638,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                     generation="unified",
                 )
             finally:
-                app_agent_runs.enqueue_prepared_agent_run = original_run_enqueue
+                agent_integration.enqueue_prepared_agent_run = original_run_enqueue
             assert outcome == "finished"
             async with get_session_factory()() as db:
                 real_children = await agent_repository.list_agent_child_runs(
@@ -3656,7 +3660,7 @@ def test_workflow_agent_node_runs_one_durable_pinned_child() -> None:
                 )
         finally:
             workflow_executor.maintain_agent_run_lease = original_maintain
-            app_agent_runs.enqueue_prepared_agent_run = original_run_enqueue
+            agent_integration.enqueue_prepared_agent_run = original_run_enqueue
 
         # Tidy up leftover active runs so later suites never observe them.
         async with get_session_factory()() as db:

@@ -6,7 +6,8 @@ from typing import Annotated, Any, Literal
 from jinja2 import Environment, TemplateSyntaxError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.schemas.agents.contracts import AgentInteractionConfig
+from app.schemas.agent_skills.contracts import AgentSkillRefSchema
+from app.schemas.agents.contracts import AgentInteractionConfig, AgentToolCallResponse
 from app.schemas.tools.contracts import ToolRefSchema
 
 JINJA_ENV = Environment()
@@ -28,7 +29,6 @@ WorkflowNodeType = Literal[
     "tool",
     "agent",
     "mcp",
-    "code",
 ]
 
 
@@ -114,12 +114,17 @@ class LlmNodeConfig(BaseModel):
     mcp_enable: bool = False
     mcp_servers: list[LlmMcpServer] = Field(default_factory=list, max_length=20)
     tools: list[ToolRefSchema] = Field(default_factory=list, max_length=20)
+    skills: list[AgentSkillRefSchema] = Field(default_factory=list, max_length=4)
+    # Rebuilt from selected Skills by resource preparation, never trusted from clients.
+    capability_tools: list[ToolRefSchema] = Field(default_factory=list, max_length=100)
     is_result: bool = True
 
     @model_validator(mode="after")
     def validate_tools(self) -> "LlmNodeConfig":
         if len({item.tool_id for item in self.tools}) != len(self.tools):
             raise ValueError("LLM Tool references must be unique.")
+        if len({item.skill_id for item in self.skills}) != len(self.skills):
+            raise ValueError("LLM Skill references must be unique.")
         return self
 
 
@@ -435,11 +440,6 @@ class McpNodeConfig(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict, max_length=100)
 
 
-class CodeNodeConfig(BaseModel):
-    code: str = Field(min_length=1, max_length=8000)
-    inputs: dict[str, Any] = Field(default_factory=dict, max_length=100)
-
-
 class WorkflowDefinitionResponse(BaseModel):
     id: str
     workspace_id: str
@@ -519,6 +519,7 @@ class WorkflowNodeExecutionResponse(BaseModel):
         "running",
         "awaiting_input",
         "awaiting_child",
+        "awaiting_approval",
         "succeeded",
         "failed",
         "skipped",
@@ -531,6 +532,11 @@ class WorkflowNodeExecutionResponse(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     duration_ms: int | None
+
+
+class WorkflowToolApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    approve: bool
 
 
 class WorkflowRunResponse(BaseModel):
@@ -558,6 +564,7 @@ class WorkflowRunResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     pending_form: WorkflowPendingForm | None = None
+    tool_calls: list[AgentToolCallResponse] = Field(default_factory=list)
     feedback: Literal["positive", "negative"] | None = None
     feedback_updated_at: datetime | None = None
 
@@ -612,6 +619,7 @@ class ExternalWorkflowProgressEventResponse(BaseModel):
         "running",
         "awaiting_input",
         "awaiting_child",
+        "awaiting_approval",
         "succeeded",
         "failed",
         "skipped",
@@ -636,6 +644,7 @@ class ExternalWorkflowRunResponse(BaseModel):
     finished_at: datetime | None
     updated_at: datetime
     pending_form: WorkflowPendingForm | None = None
+    tool_calls: list[AgentToolCallResponse] = Field(default_factory=list)
     feedback: Literal["positive", "negative"] | None = None
     feedback_updated_at: datetime | None = None
 

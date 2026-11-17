@@ -2,10 +2,9 @@
 
 from app.application.tools.runtime.adapters.builtin import BuiltinToolAdapter
 from app.application.tools.runtime.adapters.mcp import McpToolAdapter
-from app.application.tools.runtime.adapters.python_tool import PythonToolAdapter
-from app.application.tools.runtime.contracts import ToolAdapter
 from app.entities.tools import McpServer, ToolSnapshot
 from app.infra.config.settings import Settings
+from app.ports.tools import ToolAdapter
 
 
 def build_tool_adapter(
@@ -15,8 +14,6 @@ def build_tool_adapter(
 ) -> ToolAdapter:
     if snapshot.kind == "builtin":
         return BuiltinToolAdapter(settings)
-    if snapshot.kind == "python":
-        return PythonToolAdapter(settings)
     if snapshot.kind == "mcp" and server is not None:
         return McpToolAdapter(settings, server)
     raise ValueError("Tool provider is unavailable.")
@@ -25,6 +22,5 @@ def build_tool_adapter(
 __all__ = [
     "BuiltinToolAdapter",
     "McpToolAdapter",
-    "PythonToolAdapter",
     "build_tool_adapter",
 ]

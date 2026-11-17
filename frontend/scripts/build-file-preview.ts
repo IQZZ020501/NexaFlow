@@ -46,7 +46,13 @@ for (const directory of ["cmaps", "standard_fonts", "wasm"]) {
   })
 }
 // Preserve the licenses shipped with the distributed viewer dependencies.
-for (const name of ["docx-preview", "exceljs", "pdfjs-dist", "pptx-preview"]) {
+for (const name of [
+  "docx-preview",
+  "exceljs",
+  "jszip",
+  "pdfjs-dist",
+  "pptx-preview",
+]) {
   const files = new Bun.Glob("{LICENSE*,LICENCE*}")
   for await (const license of files.scan(
     path.join(root, "node_modules", name)

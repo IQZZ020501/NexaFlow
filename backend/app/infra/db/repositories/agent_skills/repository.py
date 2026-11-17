@@ -42,6 +42,7 @@ async def list_agent_skill_rows(
         )
         .where(
             AgentSkillOrm.workspace_id == workspace_id,
+            AgentSkillOrm.status != "archived",
             or_(AgentSkillOrm.created_by_user_id == actor_id, grant.id.is_not(None)),
         )
     )
@@ -66,6 +67,7 @@ async def get_agent_skill(
         select(AgentSkillOrm).where(
             AgentSkillOrm.workspace_id == workspace_id,
             AgentSkillOrm.id == skill_id,
+            AgentSkillOrm.status != "archived",
         )
     )
     return to_entity(AgentSkill, row) if row is not None else None
@@ -79,6 +81,7 @@ async def lock_agent_skill(
         .where(
             AgentSkillOrm.workspace_id == workspace_id,
             AgentSkillOrm.id == skill_id,
+            AgentSkillOrm.status != "archived",
         )
         .with_for_update()
     )

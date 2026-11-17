@@ -5,13 +5,17 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from app.domain.agent_skills.contracts import (
+    agent_skill_snapshot_from_payload,
+    agent_skill_snapshot_payload,
+)
 from app.domain.tools.runtime import (
     tool_snapshot_from_payload,
     tool_snapshot_payload,
 )
+from app.entities.agent_skills import AgentSkillSnapshot
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.schemas.workflows.contracts import (
-    CodeNodeConfig,
     KnowledgeNodeConfig,
     LlmNodeConfig,
     McpNodeConfig,
@@ -57,7 +61,6 @@ def legacy_mcp_references(graph: WorkflowGraph) -> list[tuple[str, str]]:
 def canonicalize_workflow_graph(
     graph: WorkflowGraph,
     legacy_tools: Mapping[tuple[str, str], ToolRef],
-    inline_python: ToolRef | None,
 ) -> WorkflowGraph:
     payload = graph.model_dump(by_alias=True, mode="json")
     for node in payload["nodes"]:
@@ -72,15 +75,6 @@ def canonicalize_workflow_graph(
             node["data"]["config"] = {
                 "tool": _ref_payload(reference),
                 "arguments": parsed.arguments,
-            }
-        elif node_type == "code":
-            parsed = CodeNodeConfig.model_validate(config)
-            if inline_python is None:
-                raise ValueError("Inline Python Tool could not be resolved.")
-            node["data"]["type"] = "tool"
-            node["data"]["config"] = {
-                "tool": _ref_payload(inline_python),
-                "arguments": {"code": parsed.code, "inputs": parsed.inputs},
             }
         elif node_type == "llm":
             parsed = LlmNodeConfig.model_validate(config)
@@ -111,7 +105,6 @@ def canonicalize_workflow_snapshot_graph(
     snapshots: list[ToolSnapshot],
 ) -> WorkflowGraph:
     legacy_tools: dict[tuple[str, str], ToolRef] = {}
-    inline_python: ToolRef | None = None
     for snapshot in snapshots:
         if snapshot.kind == "mcp":
             server_id = snapshot.execution_spec.get("server_id")
@@ -121,9 +114,7 @@ def canonicalize_workflow_snapshot_graph(
                     snapshot.tool_id,
                     snapshot.version_id,
                 )
-        elif snapshot.execution_spec.get("builtin") == "inline_python":
-            inline_python = ToolRef(snapshot.tool_id, snapshot.version_id)
-    return canonicalize_workflow_graph(graph, legacy_tools, inline_python)
+    return canonicalize_workflow_graph(graph, legacy_tools)
 
 
 def workflow_resource_references(
@@ -142,14 +133,42 @@ def workflow_resource_references(
             item = ToolNodeConfig.model_validate(node.data.config).tool
             tool_references.append(ToolRef(item.tool_id, item.version_id))
         elif node.data.type == "llm":
+            parsed = LlmNodeConfig.model_validate(node.data.config)
             tool_references.extend(
                 ToolRef(item.tool_id, item.version_id)
-                for item in LlmNodeConfig.model_validate(node.data.config).tools
+                for item in [*parsed.tools, *parsed.capability_tools]
             )
     return (
         list(dict.fromkeys(knowledge_base_ids)),
         _unique_tool_refs(tool_references),
     )
+
+
+def workflow_skill_references(graph: WorkflowGraph) -> list[tuple[str, str]]:
+    references: dict[str, str] = {}
+    for node in graph.nodes:
+        if node.data.type != "llm":
+            continue
+        for item in LlmNodeConfig.model_validate(node.data.config).skills:
+            if references.setdefault(item.skill_id, item.version_id) != item.version_id:
+                raise ValueError("Workflow references multiple versions of one Skill.")
+    return sorted(references.items())
+
+
+def load_workflow_skill_snapshots(
+    graph: WorkflowGraph, snapshot: dict[str, Any], expected_hash: str
+) -> list[AgentSkillSnapshot]:
+    if workflow_resource_hash(snapshot) != expected_hash:
+        raise ValueError("Workflow resource snapshot is invalid.")
+    raw = snapshot.get("skills", [])
+    if not isinstance(raw, list):
+        raise ValueError("Workflow Skill snapshot is invalid.")
+    skills = [agent_skill_snapshot_from_payload(item) for item in raw]
+    if sorted(
+        (item.skill_id, item.version_id) for item in skills
+    ) != workflow_skill_references(graph):
+        raise ValueError("Workflow Skill snapshot does not match its graph.")
+    return skills
 
 
 def workflow_agent_references(graph: WorkflowGraph) -> list[tuple[str, str]]:
@@ -192,6 +211,7 @@ def build_workflow_resource_snapshot(
     knowledge_base_ids: list[str],
     tools: list[ToolSnapshot],
     agents: list[dict[str, Any]] | None = None,
+    skills: list[AgentSkillSnapshot] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": WORKFLOW_RESOURCE_SCHEMA_VERSION,
@@ -203,6 +223,11 @@ def build_workflow_resource_snapshot(
         "agents": sorted(
             agents or [],
             key=lambda item: (str(item.get("agent_id")), str(item.get("version_id"))),
+        ),
+        **(
+            {"skills": [agent_skill_snapshot_payload(item) for item in skills]}
+            if skills
+            else {}
         ),
     }
 
@@ -231,6 +256,19 @@ def load_workflow_resource_snapshot(
     ):
         raise ValueError("Workflow resource snapshot is invalid.")
     knowledge_base_ids, references = workflow_resource_references(graph)
+    skills = load_workflow_skill_snapshots(graph, snapshot, expected_hash)
+    knowledge_base_ids = list(
+        dict.fromkeys(
+            [
+                *knowledge_base_ids,
+                *(
+                    key
+                    for skill in skills
+                    for key in skill.definition.get("knowledge_base_ids", [])
+                ),
+            ]
+        )
+    )
     if snapshot.get("knowledge_base_ids") != sorted(set(knowledge_base_ids)):
         raise ValueError("Workflow resource snapshot does not match its graph.")
     raw_tools = snapshot.get("tools")
@@ -284,9 +322,11 @@ __all__ = [
     "legacy_mcp_references",
     "load_workflow_agent_snapshots",
     "load_workflow_resource_snapshot",
+    "load_workflow_skill_snapshots",
     "select_tool_snapshots",
     "workflow_agent_references",
     "workflow_agent_version_references",
     "workflow_resource_hash",
     "workflow_resource_references",
+    "workflow_skill_references",
 ]

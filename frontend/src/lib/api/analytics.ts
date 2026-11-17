@@ -46,7 +46,6 @@ export type WorkspaceAnalytics = {
     tools: {
       total: number
       mcp: number
-      python: number
       builtin: number
       active: number
     }

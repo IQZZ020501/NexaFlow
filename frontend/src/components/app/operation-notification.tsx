@@ -38,7 +38,7 @@ export function OperationNotification({
     >
       <div
         className={cn(
-          "flex items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm shadow-lg",
+          "flex items-start gap-3 rounded-lg border bg-background px-3 py-2 text-sm shadow-lg",
           notification.kind === "success"
             ? "border-emerald-300 text-emerald-700 dark:border-emerald-500/50 dark:text-emerald-300"
             : notification.kind === "error"
@@ -46,8 +46,15 @@ export function OperationNotification({
               : "border-sky-300 text-sky-700 dark:border-sky-500/50 dark:text-sky-300"
         )}
       >
-        <Icon className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{notification.message}</span>
+        <Icon className="mt-1 size-4 shrink-0" />
+        <div className="min-w-0 flex-1">
+          {notification.kind === "error" ? (
+            <p className="font-medium">{t("操作失败")}</p>
+          ) : null}
+          <p className="max-h-[40dvh] overflow-y-auto [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+            {notification.message}
+          </p>
+        </div>
         <Button
           type="button"
           variant="ghost"

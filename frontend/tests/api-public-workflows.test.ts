@@ -13,6 +13,7 @@ import {
   listPublicWorkflowRuns,
   observePublicWorkflowRun,
   regeneratePublicWorkflowRun,
+  resolvePublicWorkflowToolApproval,
   setPublicWorkflowRunFeedback,
   submitPublicWorkflowForm,
   uploadPublicWorkflowFiles,
@@ -98,6 +99,59 @@ const conversations = {
 }
 
 describe("public workflow API", () => {
+  test("submits a consumer-scoped approval decision", async () => {
+    let requested = ""
+    let body = ""
+    let authorization: string | null = null
+    withFetch((url, init) => {
+      requested = url
+      body = String(init?.body)
+      authorization = new Headers(init?.headers).get("Authorization")
+      return jsonResponse({ id: "run-1", status: "queued" })
+    })
+    const run = await resolvePublicWorkflowToolApproval(
+      "wf-1",
+      "token",
+      "run-1",
+      "node:direct",
+      false
+    )
+    expect(requested).toBe(
+      "/api/v1/public/workflows/wf-1/runs/run-1/tool-calls/node%3Adirect/approval"
+    )
+    expect(JSON.parse(body)).toEqual({ approve: false })
+    expect(authorization as string | null).toBe("Bearer token")
+    expect(run.status).toBe("queued")
+  })
+
+  for (const type of [
+    "approval_required",
+    "workflow_input_required",
+  ] as const) {
+    test(`stops observation while awaiting ${type}`, async () => {
+      let calls = 0
+      const received: string[] = []
+      globalThis.setTimeout = ((callback: () => void) => {
+        queueMicrotask(callback)
+        return 1
+      }) as typeof setTimeout
+      withFetch(() =>
+        ndjsonResponse([
+          {
+            type: ++calls === 1 ? type : "complete",
+            sequence: calls,
+            run: { id: "run-1" },
+          },
+        ])
+      )
+      await observePublicWorkflowRun("wf-1", "token", "run-1", (event) =>
+        received.push(event.type)
+      )
+      expect(received).toEqual([type])
+      expect(calls).toBe(1)
+    })
+  }
+
   test("lists and deletes a public workflow conversation", async () => {
     const requests = capture()
 

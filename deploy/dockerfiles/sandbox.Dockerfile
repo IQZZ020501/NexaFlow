@@ -21,6 +21,9 @@ RUN apt-get update \
         fonts-noto-cjk \
         libstdc++6 \
         libatomic1 \
+        libreoffice-impress \
+        libreoffice-writer \
+        libreoffice-calc \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 65532 nexaflow \
     && useradd --uid 65532 --gid 65532 --no-create-home nexaflow
@@ -31,7 +34,7 @@ COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
-COPY sandbox/job.py sandbox/command.py sandbox/mcp_bridge.py sandbox/self_check.py ./
+COPY sandbox/job.py sandbox/command.py sandbox/artifact_check.py sandbox/mcp_bridge.py sandbox/self_check.py ./
 COPY sandbox/renderer_checks ./renderer_checks
 COPY sandbox/skills ./skills
 RUN chmod -R a+rX,a-w /opt/nexaflow

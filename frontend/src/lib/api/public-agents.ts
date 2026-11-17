@@ -1,3 +1,5 @@
+import { agentUploadForm } from "@/lib/agent-upload"
+import { requestRun } from "@/lib/api/run-request"
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type {
@@ -51,6 +53,7 @@ export type ExternalAgentProgressEvent = {
     | "reviewing"
     | "completed"
     | "preparing"
+    | "waiting_resources"
     | "running"
     | "succeeded"
     | "failed"
@@ -98,7 +101,10 @@ type PublicAgentStreamCursor = {
 }
 
 export type PublicAgentRunStreamEvent =
-  | (PublicAgentStreamCursor & { type: "run"; run: ExternalAgentRun })
+  | (PublicAgentStreamCursor & {
+      type: "run" | "recovering"
+      run: ExternalAgentRun
+    })
   | (PublicAgentStreamCursor & {
       type: "answer_delta"
       delta: string
@@ -258,19 +264,20 @@ export function createPublicAgentRun(
   conversationId?: string | null,
   signal?: AbortSignal,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "always_ask"
+  approvalMode: AgentApprovalMode = "always_ask",
+  requestId?: string
 ) {
-  return request<ExternalAgentRun>(publicAgentPath(agentId, "/runs"), {
-    method: "POST",
-    body: JSON.stringify({
+  return requestRun<ExternalAgentRun>(
+    publicAgentPath(agentId, "/runs"),
+    {
       goal,
+      request_id: requestId,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
       approval_mode: approvalMode,
-    }),
-    signal,
-    token,
-  })
+    },
+    { token, signal }
+  )
 }
 
 /**
@@ -286,8 +293,7 @@ export function uploadPublicAgentFiles(
   token: string,
   files: File[]
 ) {
-  const body = new FormData()
-  files.forEach((file) => body.append("files", file))
+  const body = agentUploadForm(files)
   return request<AgentUpload[]>(publicAgentPath(agentId, "/uploads"), {
     method: "POST",
     body,
@@ -334,15 +340,13 @@ export function regeneratePublicAgentRun(
   agentId: string,
   token: string,
   runId: string,
-  goal?: string
+  goal?: string,
+  requestId?: string
 ) {
-  return request<ExternalAgentRun>(
+  return requestRun<ExternalAgentRun>(
     publicAgentPath(agentId, `/runs/${runId}/regenerate`),
-    {
-      method: "POST",
-      token,
-      body: goal === undefined ? undefined : JSON.stringify({ goal }),
-    }
+    { ...(goal === undefined ? {} : { goal }), request_id: requestId },
+    { token }
   )
 }
 

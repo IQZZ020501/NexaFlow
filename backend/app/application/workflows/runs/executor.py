@@ -8,22 +8,25 @@ from dataclasses import replace as dataclass_replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.application.agents.runs.children import (
-    ensure_workflow_agent_child,
-    preflight_workflow_agent_snapshots,
-)
-from app.application.agents.runs.executor import (
+from app.application.agent_skills.execution import require_pinned_skill_access
+from app.application.agents.integration import (
     RUN_BUSY,
     RUN_FINISHED,
     RUN_LEASED,
-    maintain_agent_run_lease,
+    ensure_workflow_agent_child,
+    preflight_workflow_agent_snapshots,
 )
+from app.application.runs.leases import maintain_agent_run_lease
 from app.application.workflows.nodes.executor import (
     WorkflowNodeScope,
     execute_workflow_node,
 )
-from app.application.workflows.tools.runtime import WorkflowToolRuntime
+from app.application.workflows.tools.runtime import (
+    WorkflowToolApprovalRequired,
+    WorkflowToolRuntime,
+)
 from app.application.workspaces.service import build_workspace_context
+from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
 from app.domain.agents.models import (
     AGENT_RUN_FAILED_STATUS,
     AGENT_RUN_RUNNING_STATUS,
@@ -45,9 +48,12 @@ from app.domain.tools.runtime import tool_snapshot_payload
 from app.domain.workflows.resources import (
     load_workflow_agent_snapshots,
     load_workflow_resource_snapshot,
+    load_workflow_skill_snapshots,
 )
 from app.domain.workflows.runtime.engine import (
+    NodeResult,
     NodeTransition,
+    WorkflowApprovalRequired,
     WorkflowChildRequired,
     WorkflowEngine,
     WorkflowEngineError,
@@ -201,6 +207,11 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
                 detail.resource_snapshot,
                 detail.resource_hash,
             )
+            skills = load_workflow_skill_snapshots(
+                graph, detail.resource_snapshot, detail.resource_hash
+            )
+            for skill in skills:
+                await require_pinned_skill_access(db, run.workspace_id, skill)
             agent_snapshots = load_workflow_agent_snapshots(
                 graph,
                 detail.resource_snapshot,
@@ -221,6 +232,8 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             knowledge_base_ids != run.knowledge_base_ids
             or [tool_snapshot_payload(item) for item in tool_snapshots]
             != run.tool_snapshots
+            or [agent_skill_snapshot_payload(item) for item in skills]
+            != run.skill_snapshots
         ):
             raise WorkflowEngineError("Workflow run snapshot is inconsistent.")
         model_ids = {run.model_id}
@@ -352,6 +365,26 @@ async def _execute_claimed_workflow_run(
     }
     started_at: dict[str, datetime] = {}
     persistence_lock = asyncio.Lock()
+    llm_states = dict(checkpoint.get("workflow_llm", {}))
+
+    async def save_llm_state(node_id, payload):
+        async with persistence_lock:
+            async with get_session_factory()() as db:
+                current_run = await agent_repository.get_agent_run_by_id(db, run.id)
+                if (
+                    current_run is None
+                    or not await agent_repository.save_agent_run_checkpoint(
+                        db,
+                        run.id,
+                        worker_task_id,
+                        {**current_run.checkpoint, "workflow_llm": llm_states},
+                        "workflow",
+                    )
+                ):
+                    lease_lost.set()
+                    raise WorkflowEngineError("Workflow run lease was lost.")
+                await db.commit()
+
     usage_total = merge_usage(
         empty_usage(),
         checkpoint.get("model_usage", run.model_usage),
@@ -364,6 +397,8 @@ async def _execute_claimed_workflow_run(
     node_scope = dataclass_replace(
         node_scope,
         form_submissions=form_submissions,
+        llm_states=llm_states,
+        save_llm_state=save_llm_state,
     )
     node_errors: dict[str, Exception] = {}
     pending_child_ids: dict[str, str] = {}
@@ -384,6 +419,8 @@ async def _execute_claimed_workflow_run(
                     node_id=node.id,
                 )
             return result
+        except WorkflowToolApprovalRequired as exc:
+            return NodeResult(approval_request={"call_id": exc.call_id})
         except Exception as exc:
             node_errors[node.id] = exc
             raise RuntimeError(_safe_node_error(exc)) from exc
@@ -463,6 +500,10 @@ async def _execute_claimed_workflow_run(
                     "workflow_engine": current.to_dict(),
                     "model_usage": usage_total,
                 }
+                if transition.status.value == "succeeded":
+                    llm_states.pop(transition.node.id, None)
+                if llm_states:
+                    checkpoint_payload["workflow_llm"] = llm_states
                 if (
                     transition.node.data.type == "form-node"
                     and transition.status.value == "succeeded"
@@ -568,6 +609,30 @@ async def _execute_claimed_workflow_run(
             on_node_finished=on_finished,
             workflow_globals=workflow_globals,
         )
+    except WorkflowApprovalRequired:
+        async with get_session_factory()() as db:
+            paused = await agent_repository.pause_agent_run(
+                db, run.id, worker_task_id, "approval_required"
+            )
+            if paused:
+                current_run = await agent_repository.get_agent_run_by_id(db, run.id)
+                current_detail = await workflow_repository.get_run_detail(db, run.id)
+                if current_run is None or current_detail is None:
+                    raise WorkflowEngineError("Paused workflow run state is missing.")
+                from app.application.workflows.runs.service import workflow_run_response
+
+                response = await workflow_run_response(db, current_run, current_detail)
+                await agent_repository.append_agent_run_event(
+                    db,
+                    run.workspace_id,
+                    run.id,
+                    {
+                        "type": "approval_required",
+                        "run": response.model_dump(mode="json"),
+                    },
+                )
+            await db.commit()
+        return RUN_FINISHED if paused else RUN_BUSY
     except WorkflowInputRequired:
         async with get_session_factory()() as db:
             paused = await agent_repository.pause_agent_run_for_input(
@@ -605,7 +670,7 @@ async def _execute_claimed_workflow_run(
             child_id = child.id if child is not None else None
         if child_id is None:
             raise WorkflowEngineError("Workflow Agent child was not persisted.")
-        from app.application.agents.runs.service import enqueue_prepared_agent_run
+        from app.application.agents.integration import enqueue_prepared_agent_run
 
         await enqueue_prepared_agent_run(child_id, settings, unified=True)
         return RUN_FINISHED

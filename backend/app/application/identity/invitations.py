@@ -358,3 +358,12 @@ async def accept_workspace_invitation(
         raise HTTPException(status.HTTP_409_CONFLICT, "Username or email already exists.") from exc
     await dispatch_email_deliveries(delivery_ids, settings)
     return await user_to_response_with_scopes(db, user)
+
+
+__all__ = [
+    "accept_workspace_invitation",
+    "create_workspace_invitation",
+    "delete_workspace_invitation",
+    "list_workspace_invitations",
+    "revoke_workspace_invitation",
+]

@@ -14,25 +14,7 @@ from app.entities.tools import Tool, ToolPolicy, ToolSnapshot, ToolSource, ToolV
 MAX_TOOL_INPUT_BYTES = 512 * 1024
 # Documents Skill reference DOCX input is bounded separately from ordinary tools.
 MAX_DOCUMENT_TOOL_INPUT_BYTES = 8 * 1024 * 1024
-# PPTD decks may carry bounded inline media; the sandbox request has the same cap.
-MAX_PPTX_TOOL_INPUT_BYTES = 8 * 1024 * 1024
 MAX_TOOL_RESULT_BYTES = 32 * 1024
-PPTX_THEME_COMPATIBILITY_FIELDS = (
-    "background_color",
-    "text_color",
-    "accent_color",
-    "panel_color",
-    "muted_text_color",
-    "rule_color",
-    "font_family",
-    "heading_font_family",
-    "cover_title_size",
-    "slide_title_size",
-    "body_size",
-    "panel_radius",
-    "cover_accent_width",
-    "title_alignment",
-)
 TOOL_APPROVAL_AUTO = "auto"
 TOOL_APPROVAL_DISABLED = "disabled"
 TOOL_APPROVAL_EACH_CALL = "each_call"
@@ -149,15 +131,6 @@ def tool_input_size_limit(snapshot: ToolSnapshot) -> int:
         and "reference_docx_base64" in properties
     ):
         return MAX_DOCUMENT_TOOL_INPUT_BYTES
-    presentation = (
-        properties.get("presentation") if isinstance(properties, dict) else None
-    )
-    if (
-        snapshot.function_name == "pptx_skill"
-        and isinstance(presentation, dict)
-        and "media" in presentation.get("properties", {})
-    ):
-        return MAX_PPTX_TOOL_INPUT_BYTES
     return MAX_TOOL_INPUT_BYTES
 
 
@@ -166,7 +139,7 @@ def normalize_tool_arguments(
     input_schema: dict[str, Any],
     arguments: Any,
 ) -> Any:
-    """Accept the two legacy envelopes still emitted by some chat models."""
+    """Accept a serialized arguments envelope emitted by some chat models."""
     if not isinstance(arguments, dict):
         return arguments
     properties = input_schema.get("properties")
@@ -182,100 +155,6 @@ def normalize_tool_arguments(
         if isinstance(wrapped, dict):
             normalized = dict(wrapped)
 
-    if function_name != "pptx_skill" or not (
-        isinstance(properties, dict) and "presentation" in properties
-    ):
-        return normalized
-
-    presentation = normalized.get("presentation")
-    if isinstance(presentation, str):
-        try:
-            parsed = json.loads(presentation)
-        except (json.JSONDecodeError, TypeError):
-            parsed = None
-        if isinstance(parsed, dict):
-            presentation = parsed
-    if isinstance(presentation, dict):
-        presentation = dict(presentation)
-    elif "presentation" not in normalized:
-        presentation = {}
-    else:
-        presentation = None
-
-    if "filename" not in normalized and "file_name" in normalized:
-        normalized["filename"] = normalized["file_name"]
-    normalized.pop("file_name", None)
-
-    aliases = {
-        "file_title": "title",
-        "file_subtitle": "subtitle",
-    }
-    if presentation is not None:
-        for source, target in aliases.items():
-            if source in presentation:
-                if target not in presentation:
-                    presentation[target] = presentation[source]
-                presentation.pop(source, None)
-    for source, target in aliases.items():
-        if source in normalized:
-            if presentation is not None and target not in presentation:
-                presentation[target] = normalized[source]
-            normalized.pop(source, None)
-
-    for field in (
-        "title",
-        "subtitle",
-        "slides",
-        "template",
-        "brand",
-        "theme",
-        "footer",
-        "scenario",
-        "design_system",
-        "page_transition",
-        "media",
-    ):
-        if field in normalized:
-            if presentation is not None and field not in presentation:
-                presentation[field] = normalized[field]
-            normalized.pop(field, None)
-
-    if presentation is not None:
-        theme_fields = {
-            field: presentation.pop(field)
-            for field in PPTX_THEME_COMPATIBILITY_FIELDS
-            if field in presentation
-        }
-        if theme_fields:
-            theme = presentation.get("theme")
-            if theme is None:
-                theme = {}
-            if isinstance(theme, dict):
-                presentation["theme"] = {**theme_fields, **theme}
-
-        slides = presentation.get("slides")
-        legacy_slides = (
-            isinstance(slides, list)
-            and bool(slides)
-            and all(
-                isinstance(slide, dict)
-                and "layout" in slide
-                and "elements" not in slide
-                for slide in slides
-            )
-        )
-        if legacy_slides:
-            # A truncated free-form PPTD call may be retried with the compact
-            # compatibility layout. Remove modern-only presentation hints that
-            # the frozen legacy renderer cannot consume, without changing slide
-            # content or silently accepting a mixed elements/layout deck.
-            for field in ("scenario", "design_system", "page_transition"):
-                presentation.pop(field, None)
-            presentation["slides"] = [
-                {key: value for key, value in slide.items() if key != "page_type"}
-                for slide in slides
-            ]
-        normalized["presentation"] = presentation
     return normalized
 
 
@@ -379,7 +258,6 @@ def schema_validation_error_detail(error: ValidationError) -> tuple[str, str]:
 
 __all__ = [
     "MAX_DOCUMENT_TOOL_INPUT_BYTES",
-    "MAX_PPTX_TOOL_INPUT_BYTES",
     "MAX_TOOL_INPUT_BYTES",
     "MAX_TOOL_RESULT_BYTES",
     "TOOL_APPROVAL_AUTO",

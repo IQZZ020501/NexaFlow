@@ -123,7 +123,7 @@ def main() -> None:
     role_name, concurrency, celery_arguments = parse_worker_arguments(sys.argv[1:])
     role = worker_role(role_name)
     settings = Settings.from_env(require_bootstrap=False)
-    if not settings.opensandbox_api_key:
+    if not settings.opensandbox_api_key and not settings.opensandbox_hosts:
         raise SystemExit(
             "OPENSANDBOX_API_KEY is required; no host execution fallback is available."
         )

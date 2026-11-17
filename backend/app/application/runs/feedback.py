@@ -54,3 +54,8 @@ async def update_run_feedback(
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     assert current is not None
     return current
+
+
+__all__ = [
+    "update_run_feedback",
+]

@@ -62,12 +62,18 @@ jobs:
         run: |
           uv run python -m tests.agents.unit
           uv run python -m tests.agents.harness
+          uv run python -m tests.agents.extensions
+          uv run python -m tests.agents.reliability
           uv run python -m tests.agent_skills.unit
           uv run python -m tests.execution.unit
           uv run python -m tests.execution.probe_unit
           uv run python -m tests.execution.sessions
+          uv run python -m tests.execution.wakeup
           uv run python -m tests.tools.shell_unit
           uv run python -m tests.artifacts.conversations
+          uv run python -m tests.artifacts.quality
+          uv run python -m tests.projects.api
+          uv run python -m tests.projects.runtime
           uv run python -m tests.knowledge.unit
           uv run python -m tests.tools.unit
           uv run python -m tests.workflows.unit
@@ -75,8 +81,19 @@ jobs:
           uv run python -m tests.platform.unit
           uv run python -m tests.infra.unit
 
+      - name: Validate sandbox resource admission in Redis
+        env:
+          NEXAFLOW_TEST_REDIS_URL: redis://localhost:6379/15
+        run: |
+          uv run python -m tests.execution.reservations
+          uv run python -m tests.execution.placement
+          uv run python -m tests.execution.admissions
+          uv run python -m tests.execution.load
+
       - name: Run Agent evaluation gate
-        run: uv run python -m tests.agents.evaluation
+        run: |
+          uv run python -m tests.agents.evaluation
+          uv run python -m tests.agents.evaluation_files
 
       - name: Run logger tests
         run: uv run python -m tests.infra.logger
@@ -113,6 +130,7 @@ jobs:
       - name: Run Tool persistence and ownership tests
         run: |
           uv run python -m tests.tools.tools
+          uv run python -m tests.tools.retirement
           uv run python -m tests.tools.personal
 
       - name: Run Skill package and invocation tests
@@ -122,7 +140,9 @@ jobs:
         run: uv run python -m tests.infra.mcp_transports
 
       - name: Run workflow tests
-        run: uv run python -m tests.workflows.workflows
+        run: |
+          uv run python -m tests.workflows.workflows
+          uv run python -m tests.workflows.capabilities
 
       - name: Run OpenSandbox execution image checks
         working-directory: .
@@ -138,6 +158,10 @@ jobs:
 
       - name: Run architecture guard
         run: uv run python -m tests.infra.architecture
+      - name: Run MCP OAuth regression
+        run: uv run python -m tests.tools.oauth
+      - name: Run remote MCP task regression
+        run: uv run python -m tests.tools.remote_tasks
 
       - name: Run main smoke tests
         run: uv run python -m tests.smoke.test_main

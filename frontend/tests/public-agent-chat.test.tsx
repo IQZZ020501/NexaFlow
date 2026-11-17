@@ -1663,6 +1663,51 @@ describe("PublicWorkflowChat", () => {
 })
 
 describe("PublicAgentChat", () => {
+  test.each(["queued", "running", "awaiting_approval"] as const)(
+    "resumes a %s history Run without creating another Run",
+    async (status) => {
+      const requests: string[] = []
+      fetchHandler = agentFetchHandler(
+        {
+          conversations: { items: [conversation("conv-1", "恢复会话")] },
+          history: { items: [run({ id: "existing-run", status, result: "" })] },
+          streamResponses: [
+            () =>
+              ndjsonResponse([
+                {
+                  type: "recovering",
+                  run: run({
+                    id: "existing-run",
+                    status: "running",
+                    result: "",
+                  }),
+                },
+                {
+                  type: "complete",
+                  run: run({ id: "existing-run", result: "恢复后的回答" }),
+                },
+              ]),
+          ],
+        },
+        requests
+      )
+      renderPage(
+        <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+      )
+      expect(await screen.findByText("恢复后的回答")).toBeTruthy()
+      expect(
+        requests.some((request) =>
+          request.includes("/runs/existing-run/stream")
+        )
+      ).toBe(true)
+      expect(
+        requests.some(
+          (request) => request.startsWith("POST ") && request.endsWith("/runs")
+        )
+      ).toBe(false)
+    }
+  )
+
   test("shows the loading state while the profile loads", () => {
     fetchHandler = () => new Promise<Response>(() => {})
 
@@ -2056,7 +2101,10 @@ describe("PublicAgentChat", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
 
     await screen.findByText("Edited answer")
-    expect(regenerateBody).toEqual({ goal: "Edited second question" })
+    expect(regenerateBody).toEqual({
+      goal: "Edited second question",
+      request_id: expect.any(String),
+    })
     expect(screen.getAllByText("First question").length).toBeGreaterThan(0)
   })
 
@@ -2417,6 +2465,7 @@ describe("PublicAgentChat", () => {
 
     // The create request carried the goal and conversation.
     expect(createBodies[0]).toEqual({
+      request_id: expect.any(String),
       goal: "什么是 NexaFlow？",
       conversation_id: "conv-1",
       approval_mode: "always_ask",
@@ -2508,6 +2557,7 @@ describe("PublicAgentChat", () => {
 
     expect(await screen.findByText("新会话回答")).toBeTruthy()
     expect(createBodies[0]).toEqual({
+      request_id: expect.any(String),
       goal: "开始吧",
       approval_mode: "full_access",
     })
@@ -2797,6 +2847,9 @@ describe("PublicAgentChat", () => {
   test("approves a tool call and resumes observing the run", async () => {
     const requests: string[] = []
     let approved = false
+    let approvalStream: ReadableStreamDefaultController<Uint8Array> | null = null
+    const encoder = new TextEncoder()
+    const pushEvent = (event: object) => approvalStream?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
     fetchHandler = agentFetchHandler(
       {
         conversations: { items: [] },
@@ -2805,7 +2858,7 @@ describe("PublicAgentChat", () => {
         history: () =>
           jsonResponse({
             items: [
-              run({ id: "run-1", status: "awaiting_approval", result: "" }),
+              run({ id: "run-1", status: approved ? "succeeded" : "awaiting_approval", result: approved ? "批准后的回答" : "" }),
               run({ id: "run-2", status: "succeeded", result: "并行回答" }),
             ],
             total: 2,
@@ -2818,8 +2871,9 @@ describe("PublicAgentChat", () => {
             201
           ),
         streamResponses: [
-          () =>
-            ndjsonResponse([
+          () => new Response(new ReadableStream({ start(controller) {
+            approvalStream = controller
+            for (const event of [
               {
                 type: "run",
                 sequence: 0,
@@ -2839,38 +2893,20 @@ describe("PublicAgentChat", () => {
                 call_id: "call-1",
                 reason: "需要确认",
               },
-              {
-                type: "complete",
-                sequence: 1,
-                run: run({ status: "awaiting_approval", result: "" }),
-              },
-            ]),
-          () =>
-            ndjsonResponse([
-              {
-                type: "approval_required",
-                call_id: "call-1",
-                reason: "再次确认",
-              },
-              {
-                type: "answer_delta",
-                delta: "批准后的回答",
-                stream_epoch: "w1",
-                live_sequence: "1-0",
-              },
-              {
-                type: "complete",
-                sequence: 2,
-                run: run({ status: "succeeded", result: "批准后的回答" }),
-              },
-            ]),
+            ]) pushEvent(event)
+          } })),
         ],
         toolCalls: () => jsonResponse(approved ? [] : [TOOL_CALL]),
         resolveRun: () => {
           approved = true
           const { promise, resolve } = Promise.withResolvers<Response>()
           setTimeout(
-            () => resolve(jsonResponse(run({ status: "running", result: "" }))),
+            () => {
+              resolve(jsonResponse(run({ status: "running", result: "" })))
+              pushEvent({ type: "answer_delta", delta: "批准后的回答", stream_epoch: "w1", live_sequence: "1-0" })
+              pushEvent({ type: "complete", sequence: 2, run: run({ status: "succeeded", result: "批准后的回答" }) })
+              approvalStream?.close()
+            },
             30
           )
           return promise
@@ -3820,7 +3856,7 @@ describe("PublicAgentChat", () => {
       dataTransfer: { files: [dropped], types: ["Files"] },
     })
     fireEvent.drop(form, { dataTransfer: { files: [dropped] } })
-    expect(screen.getByText("dropped.webp")).toBeTruthy()
+    await screen.findByText("dropped.webp")
 
     const fileInput = document.querySelector(
       'input[type="file"]'

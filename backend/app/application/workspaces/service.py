@@ -21,7 +21,8 @@ from app.domain.tools.catalog.service import (
     ensure_workspace_system_catalog,
     tombstone_workspace_mcp_catalog,
 )
-from app.domain.workflows.uploads import (
+from app.domain.tools.mcp.oauth import queue_disconnect
+from app.domain.uploads.service import (
     queue_upload_cleanups,
     run_upload_storage_cleanup,
 )
@@ -492,6 +493,8 @@ async def delete_workspace_permanently(
     )
     await agent_repository.delete_workspace_agent_graph(db, workspace.id)
     await tombstone_workspace_mcp_catalog(db, workspace.id)
+    for server in await mcp_repository.list_mcp_servers(db, workspace.id):
+        await queue_disconnect(db, server.id)
     await mcp_repository.delete_workspace_mcp_servers(db, workspace.id)
     await model_registry.delete_registered_models_in_workspace(db, workspace.id)
     await workspace_repository.delete_workspace_graph(db, workspace.id)
@@ -534,3 +537,20 @@ async def enqueue_upload_storage_cleanups(
                 exc,
                 cleanup_id=cleanup_id,
             )
+
+
+__all__ = [
+    "WorkspaceContext",
+    "add_workspace_member",
+    "build_workspace_context",
+    "create_workspace",
+    "create_workspace_user",
+    "delete_workspace_permanently",
+    "get_workspace_for_user",
+    "list_workspace_members",
+    "list_workspaces",
+    "remove_workspace_member",
+    "update_workspace",
+    "update_workspace_member_role",
+    "workspace_to_response",
+]

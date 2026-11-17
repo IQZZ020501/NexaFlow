@@ -28,7 +28,7 @@ def free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def start_http_server(transport: str) -> tuple[subprocess.Popen[bytes], str]:
+def start_http_server(transport: str, *, long_tasks: bool = False) -> tuple[subprocess.Popen[bytes], str]:
     port = free_port()
     process = subprocess.Popen(
         [
@@ -41,6 +41,7 @@ def start_http_server(transport: str) -> tuple[subprocess.Popen[bytes], str]:
             str(port),
             "--token",
             TOKEN,
+            *(["--long-tasks"] if long_tasks else []),
         ],
         cwd=BACKEND_DIR,
         stdin=subprocess.DEVNULL,

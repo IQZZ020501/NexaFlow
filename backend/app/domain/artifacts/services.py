@@ -1,3 +1,5 @@
+import hashlib
+import json
 import mimetypes
 import re
 from io import BytesIO
@@ -134,7 +136,16 @@ def validate_generated_artifact(
     if required_members is not None:
         try:
             with ZipFile(BytesIO(content)) as archive:
-                if not required_members.issubset(archive.namelist()):
+                members = archive.infolist()
+                if (
+                    len(members) > 4096
+                    or sum(item.file_size for item in members) > 64 * 1024 * 1024
+                    or any(item.file_size > 32 * 1024 * 1024 for item in members)
+                    or any(item.flag_bits & 1 for item in members)
+                ):
+                    raise ValueError("Generated Office document exceeds inspection limits or is encrypted.")
+                names = [item.filename for item in members]
+                if len(names) != len(set(names)) or not required_members.issubset(names):
                     raise ValueError(
                         f"Generated {artifact_format.upper()} is missing "
                         "its document structure."
@@ -154,3 +165,34 @@ def validate_generated_artifact(
         or mimetypes.guess_type(filename, strict=False)[0]
         or "application/octet-stream"
     )
+
+
+def validate_artifact_inspection(inspection: dict | None, artifact_format: str, content: bytes) -> dict:
+    """Bind the trusted guest's bounded inspection to the bytes being stored.
+
+    Old images/records have no report. Absence must not be represented as a
+    successful parser check, and evaluators can require a current report.
+    """
+    if inspection is None or inspection == {}:
+        return {}
+    if not isinstance(inspection, dict):
+        raise ValueError("Artifact inspection is invalid.")
+    try:
+        size = len(json.dumps(inspection, allow_nan=False).encode("utf-8"))
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Artifact inspection is invalid.") from exc
+    if (
+        size > 32 * 1024
+        or inspection.get("schema_version") != 1
+        or inspection.get("status") != "passed"
+        or inspection.get("validator") != "nexaflow-file-check/1"
+        or inspection.get("format") != artifact_format
+        or inspection.get("sha256") != hashlib.sha256(content).hexdigest()
+        or not isinstance(inspection.get("checks"), list)
+        or not all(isinstance(item, str) for item in inspection["checks"])
+        or not isinstance(inspection.get("details"), dict)
+        or not isinstance(inspection.get("warnings"), list)
+        or not all(isinstance(item, str) for item in inspection["warnings"])
+    ):
+        raise ValueError("Artifact inspection does not match the delivered file.")
+    return inspection

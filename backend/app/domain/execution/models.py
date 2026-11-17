@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, Index, String, column
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Index, String, column
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.entities.defaults import new_id, utc_now
@@ -33,6 +33,12 @@ class ExecutionSession(Base):
     # No FK: deletion must leave cleanup intent until the external guest is gone.
     workspace_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    host_id: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="local", server_default="local", index=True
+    )
+    host_fingerprint: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="", server_default=""
+    )
     purpose: Mapped[str] = mapped_column(String(16), nullable=False, default="run")
     owner_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     sandbox_id: Mapped[str | None] = mapped_column(
@@ -47,6 +53,12 @@ class ExecutionSession(Base):
     environments: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     capacity_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     consumer_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    capacity_reservation: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    creation_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     holder: Mapped[str | None] = mapped_column(String(64), nullable=True)
     holder_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -62,4 +74,25 @@ class ExecutionSession(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class ExecutionPlacement(Base):
+    __tablename__ = "execution_placements"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Opaque IDs keep reservations and cleanup intent after account/Run deletion.
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    host_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    host_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    profile_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    profiles: Mapped[list] = mapped_column(JSON, nullable=False)
+    consumer_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    released: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
     )

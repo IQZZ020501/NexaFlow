@@ -1,6 +1,4 @@
 import asyncio
-import hashlib
-import json
 import re
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
@@ -12,9 +10,9 @@ from typing import Any
 from jinja2 import Environment, meta
 from pydantic import BaseModel, ValidationError
 
+from app.domain.applications.definitions import graph_hash as graph_hash
 from app.schemas.workflows.contracts import (
     ClassifierNodeConfig,
-    CodeNodeConfig,
     ConditionNodeConfig,
     DocumentExtractNodeConfig,
     EndNodeConfig,
@@ -56,6 +54,10 @@ class WorkflowChildRequired(RuntimeError):
         self.request = request
 
 
+class WorkflowApprovalRequired(RuntimeError):
+    pass
+
+
 class EdgeState(StrEnum):
     UNKNOWN = "unknown"
     TAKEN = "taken"
@@ -66,6 +68,7 @@ class NodeState(StrEnum):
     PENDING = "pending"
     AWAITING_INPUT = "awaiting_input"
     AWAITING_CHILD = "awaiting_child"
+    AWAITING_APPROVAL = "awaiting_approval"
     SUCCEEDED = "succeeded"
     SKIPPED = "skipped"
     FAILED = "failed"
@@ -87,7 +90,6 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "tool": ToolNodeConfig,
     "agent": WorkflowAgentNodeConfig,
     "mcp": McpNodeConfig,
-    "code": CodeNodeConfig,
 }
 
 REFERENCE_PATTERN = re.compile(
@@ -117,6 +119,7 @@ class NodeResult:
     model_usage: dict[str, Any] = field(default_factory=dict)
     interrupt: dict[str, Any] | None = None
     child_request: dict[str, Any] | None = None
+    approval_request: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -178,12 +181,6 @@ async def _noop_finished(
     state: WorkflowEngineState,
 ) -> None:
     return None
-
-
-def graph_hash(graph: WorkflowGraph | Mapping[str, Any]) -> str:
-    value = graph.model_dump(by_alias=True, mode="json") if isinstance(graph, WorkflowGraph) else graph
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _iter_references(value: Any):
@@ -481,6 +478,7 @@ class WorkflowEngine:
             first_error: WorkflowEngineError | None = None
             pending_form: dict[str, Any] | None = None
             pending_child: dict[str, Any] | None = None
+            pending_approval = False
             for node, result in zip(ready, results, strict=True):
                 sequence = current.step_count + 1
                 if isinstance(result, BaseException):
@@ -504,6 +502,19 @@ class WorkflowEngine:
                         message,
                         node_id=node.id,
                     )
+                    continue
+
+                if result.approval_request is not None:
+                    await on_node_finished(
+                        NodeTransition(
+                            node=node,
+                            status=NodeState.AWAITING_APPROVAL,
+                            sequence=sequence,
+                            result=result,
+                        ),
+                        current,
+                    )
+                    pending_approval = True
                     continue
 
                 if result.interrupt is not None:
@@ -591,6 +602,8 @@ class WorkflowEngine:
                 )
             if first_error:
                 raise first_error
+            if pending_approval:
+                raise WorkflowApprovalRequired("Workflow Tool approval is required.")
             if pending_form is not None:
                 raise WorkflowInputRequired(pending_form)
             if pending_child is not None:

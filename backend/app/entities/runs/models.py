@@ -26,6 +26,8 @@ class AgentRun:
     parent_run_id: str | None = None
     parent_node_id: str | None = None
     regenerated_from_run_id: str | None = None
+    request_id: str | None = None
+    request_hash: str | None = None
     depth: int = 0
     goal: str = ""
     session_inputs: list[dict[str, Any]] = field(default_factory=list)

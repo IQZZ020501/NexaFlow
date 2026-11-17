@@ -14,7 +14,6 @@ from app.domain.tools.models import (
     ApplicationToolBinding as ApplicationToolBindingOrm,
 )
 from app.domain.tools.models import Tool as ToolOrm
-from app.domain.tools.models import ToolDraft as ToolDraftOrm
 from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.domain.tools.models import ToolPolicy as ToolPolicyOrm
 from app.domain.tools.models import ToolSource as ToolSourceOrm
@@ -33,7 +32,6 @@ from app.entities.identity.user import User
 from app.entities.tools import (
     ApplicationToolBinding,
     Tool,
-    ToolDraft,
     ToolInvocation,
     ToolPolicy,
     ToolRef,
@@ -42,12 +40,12 @@ from app.entities.tools import (
 )
 from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.infra.db.mapping import save, to_entity
+from app.infra.db.repositories.tools.inventory import tool_catalog_conditions
 
 ToolCatalogRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
-    ToolDraft | None,
     ToolPolicy | None,
     ResourcePermission | None,
 ]
@@ -55,7 +53,6 @@ ToolCatalogDetailRow = tuple[
     Tool,
     ToolSource,
     ToolVersion | None,
-    ToolDraft | None,
     ToolPolicy | None,
     ResourcePermission | None,
 ]
@@ -71,7 +68,6 @@ ApplicationToolSnapshotRow = tuple[
     str | None,
     ResourcePermission | None,
 ]
-
 
 
 async def get_tool_source(
@@ -260,7 +256,7 @@ async def list_tool_catalog_rows(
 ) -> list[ToolCatalogRow]:
     grant = ResourcePermissionOrm
     statement = (
-        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, ToolDraftOrm, ToolPolicyOrm, grant)
+        select(ToolOrm, ToolSourceOrm, ToolVersionOrm, ToolPolicyOrm, grant)
         .join(
             ToolSourceOrm,
             and_(
@@ -274,13 +270,6 @@ async def list_tool_catalog_rows(
                 ToolVersionOrm.workspace_id == ToolOrm.workspace_id,
                 ToolVersionOrm.tool_id == ToolOrm.id,
                 ToolVersionOrm.id == ToolOrm.current_version_id,
-            ),
-        )
-        .outerjoin(
-            ToolDraftOrm,
-            and_(
-                ToolDraftOrm.workspace_id == ToolOrm.workspace_id,
-                ToolDraftOrm.tool_id == ToolOrm.id,
             ),
         )
         .outerjoin(
@@ -300,18 +289,14 @@ async def list_tool_catalog_rows(
             ),
         )
         .where(
-            ToolOrm.workspace_id == workspace_id,
-            ToolOrm.status != "archived",
+            # Image generation remains available to the separate model settings.
+            *tool_catalog_conditions(workspace_id, include_model_tools=True),
         )
     )
     if not include_all:
         statement = statement.where(
             or_(
                 ToolOrm.kind == "builtin",
-                and_(
-                    ToolOrm.kind == "python",
-                    ToolOrm.created_by_user_id.is_(None),
-                ),
                 ToolOrm.created_by_user_id == actor_id,
                 grant.id.is_not(None),
             )
@@ -334,13 +319,12 @@ async def list_tool_catalog_rows(
             to_entity(Tool, tool),
             to_entity(ToolSource, source),
             to_entity(ToolVersion, version) if version is not None else None,
-            to_entity(ToolDraft, draft) if draft is not None else None,
             to_entity(ToolPolicy, policy) if policy is not None else None,
             to_entity(ResourcePermission, permission)
             if permission is not None
             else None,
         )
-        for tool, source, version, draft, policy, permission in rows.all()
+        for tool, source, version, policy, permission in rows.all()
     ]
 
 async def get_tool_catalog_detail_row(
@@ -356,7 +340,6 @@ async def get_tool_catalog_detail_row(
                 ToolOrm,
                 ToolSourceOrm,
                 ToolVersionOrm,
-                ToolDraftOrm,
                 ToolPolicyOrm,
                 grant,
             )
@@ -373,13 +356,6 @@ async def get_tool_catalog_detail_row(
                     ToolVersionOrm.workspace_id == ToolOrm.workspace_id,
                     ToolVersionOrm.tool_id == ToolOrm.id,
                     ToolVersionOrm.id == ToolOrm.current_version_id,
-                ),
-            )
-            .outerjoin(
-                ToolDraftOrm,
-                and_(
-                    ToolDraftOrm.workspace_id == ToolOrm.workspace_id,
-                    ToolDraftOrm.tool_id == ToolOrm.id,
                 ),
             )
             .outerjoin(
@@ -402,17 +378,17 @@ async def get_tool_catalog_detail_row(
                 ToolOrm.workspace_id == workspace_id,
                 ToolOrm.id == tool_id,
                 ToolOrm.status != "archived",
+                ToolOrm.kind != "python",
             )
         )
     ).one_or_none()
     if row is None:
         return None
-    tool, source, version, draft, policy, permission = row
+    tool, source, version, policy, permission = row
     return (
         to_entity(Tool, tool),
         to_entity(ToolSource, source),
         to_entity(ToolVersion, version) if version is not None else None,
-        to_entity(ToolDraft, draft) if draft is not None else None,
         to_entity(ToolPolicy, policy) if policy is not None else None,
         to_entity(ResourcePermission, permission)
         if permission is not None

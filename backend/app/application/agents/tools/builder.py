@@ -31,9 +31,9 @@ from app.domain.tools.catalog.service import (
 from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
-    mcp_server_connection,
     mcp_tool_definition_hash,
     resolve_mcp_tools,
+    resolved_mcp_server_connection,
 )
 from app.domain.tools.results import prepare_mcp_result
 from app.entities.identity.user import User
@@ -454,6 +454,25 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
         ),
         sources=knowledge_sources_from_events(run.events),
         model_usage=run.model_usage,
+        execution_manifest={
+            "schema_version": 1,
+            "application_hash": run.application_snapshot_hash,
+            "model": {
+                "id": run.model_id,
+                "name": run.model_name,
+                "provider": run.model_runtime_snapshot.get("provider_type", ""),
+                "fingerprint": run.model_runtime_snapshot.get("fingerprint", ""),
+            },
+            "tools": [
+                {key: item.get(key, "") for key in ("tool_id", "version_id", "definition_hash")}
+                for item in run.tool_snapshots
+            ],
+            "skills": [
+                {key: item.get(key, "") for key in ("skill_id", "version_id", "definition_hash")}
+                for item in run.skill_snapshots
+            ],
+            "execution_fingerprint": run.application_snapshot.get("execution_profile", {}).get("fingerprint", ""),
+        },
         grounding_status=run.grounding_status,
         grounding_meta=run.grounding_meta,
         feedback=run.feedback,
@@ -780,6 +799,8 @@ def build_mcp_agent_tool(
                     is_error=True,
                 )
             current_tool = current_tools[0]
+            if definition.name in getattr(current_tool.server, "long_task_contracts", {}):
+                return AgentToolResult(content="This MCP tool now requires the durable task contract. Start a new Run with the current tool version.", summary="MCP long-task tool requires a current Run snapshot.", is_error=True)
             if mcp_tool_definition_hash(current_tool.definition) != mcp_tool_definition_hash(
                 definition
             ):
@@ -790,7 +811,7 @@ def build_mcp_agent_tool(
                 )
             try:
                 call_args = (
-                    mcp_server_connection(current_tool.server, settings),
+                    await resolved_mcp_server_connection(current_tool.server, settings),
                     settings,
                     current_tool.definition.name,
                     payload,

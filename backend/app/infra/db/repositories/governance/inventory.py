@@ -26,6 +26,7 @@ from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
 from app.domain.tools.models import Tool as ToolOrm
 from app.domain.workflows.models import WorkflowDefinition as WorkflowDefinitionOrm
+from app.infra.db.repositories.tools.inventory import tool_catalog_conditions
 from app.infra.observability.system_log import SystemLog
 
 
@@ -100,7 +101,7 @@ async def workspace_inventory_counts(
         "agents_total": await _count(db, AgentOrm, workspace_id),
         "knowledge_bases_total": await _count(db, KnowledgeBaseOrm, workspace_id),
         "models_total": await _count(db, RegisteredModel, workspace_id),
-        "tools_total": await _count(db, ToolOrm, workspace_id),
+        "tools_total": await _count(db, ToolOrm, workspace_id, *tool_catalog_conditions(workspace_id)),
         "workflows_total": await _count(db, WorkflowDefinitionOrm, workspace_id),
         "active_runs": await _count(
             db,

@@ -1,4 +1,5 @@
 import type { McpSourceCreatePayload, McpTransport } from "@/lib/api/tools"
+import type { McpOAuthConfiguration } from "@/lib/api/mcp"
 
 export type McpForm = {
   name: string
@@ -6,6 +7,7 @@ export type McpForm = {
   url: string
   bearerToken: string
   stdioConfig: string
+  oauth?: McpOAuthConfiguration
 }
 
 export const EMPTY_MCP_FORM: McpForm = {
@@ -135,7 +137,8 @@ export function parseStdioConfig(
   if (
     !command ||
     command.length > 1000 ||
-    (!command.startsWith("/") && !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(command)) ||
+    (!command.startsWith("/") &&
+      !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(command)) ||
     !Array.isArray(args) ||
     args.length > 64 ||
     args.some(
@@ -195,10 +198,21 @@ export function buildMcpServerCreatePayload(
   const url = form.url.trim()
   if (!url) return null
   const bearerToken = form.bearerToken.trim()
+  if (
+    form.oauth &&
+    (!form.oauth.client_id.trim() ||
+      !form.oauth.authorization_endpoint.trim() ||
+      !form.oauth.token_endpoint.trim() ||
+      !form.oauth.revocation_endpoint.trim() ||
+      (form.oauth.client_auth_method !== "none" && !form.oauth.client_secret))
+  )
+    return null
   return {
     name,
     transport: form.transport,
     url,
-    bearer_token: bearerToken || undefined,
+    ...(form.oauth
+      ? { oauth: form.oauth }
+      : { bearer_token: bearerToken || undefined }),
   }
 }

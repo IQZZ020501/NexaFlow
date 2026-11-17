@@ -33,7 +33,9 @@ def build_bindable_tool_snapshot(
     bound_by_user_id: str,
 ) -> ToolSnapshot:
     if (
-        tool.status != "active"
+        tool.kind == "python"
+        or tool.function_name == "inline_python"
+        or tool.status != "active"
         or tool.availability != "available"
         or source.status != "active"
         or tool.source_id != source.id

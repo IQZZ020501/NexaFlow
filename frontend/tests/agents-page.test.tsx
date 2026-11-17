@@ -132,7 +132,7 @@ function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
   return {
     id: "tool-1",
     workspace_id: WS,
-    kind: "python",
+    kind: "mcp",
     function_name: "lookup",
     display_name: "Lookup",
     description: "Lookup data",
@@ -142,7 +142,7 @@ function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
     source: {
       id: "source-1",
       name: "Mine",
-      kind: "python",
+      kind: "mcp",
       transport: null,
     },
     created_by_user_id: "u-1",
@@ -158,7 +158,6 @@ function makeTool(overrides: Partial<ToolDetail> = {}): ToolDetail {
     effect: "pure",
     workflow_callable: true,
     parallel_safe: true,
-    draft: null,
     ...overrides,
   }
 }
@@ -3261,9 +3260,7 @@ describe("AgentsPage run flows", () => {
       screen.getByRole("button", { name: "执行权限：请求批准" })
     )
     fireEvent.click(await screen.findByRole("menuitem", { name: /完全访问/ }))
-    fireEvent.click(
-      await screen.findByRole("button", { name: "启用完全访问" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "启用完全访问" }))
     fireEvent.change(textarea, { target: { value: "Analyze this report" } })
     fireEvent.click(screen.getByLabelText("发送问题"))
 
@@ -3297,7 +3294,7 @@ describe("AgentsPage run flows", () => {
       dataTransfer: { files: [dropped], types: ["Files"] },
     })
     fireEvent.drop(form, { dataTransfer: { files: [dropped] } })
-    expect(screen.getByText("dropped.webp")).toBeTruthy()
+    await screen.findByText("dropped.webp")
 
     const fileInput = document.querySelector(
       'input[type="file"]'
@@ -3712,7 +3709,10 @@ describe("AgentsPage run flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新发送" }))
 
     await screen.findByText("Edited answer")
-    expect(regenerateBody).toEqual({ goal: "Edited second question" })
+    expect(regenerateBody).toEqual({
+      goal: "Edited second question",
+      request_id: expect.any(String),
+    })
     expect(screen.getByText("First question")).toBeTruthy()
   })
 

@@ -54,7 +54,7 @@ from app.application.agents.tools.builder import (
     run_to_response,
     safe_agent_error,
 )
-from app.application.workflows.uploads.service import (
+from app.application.uploads.service import (
     resolve_workspace_agent_files,
     upload_public_agent_files,
     upload_workspace_agent_files,

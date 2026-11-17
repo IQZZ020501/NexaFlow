@@ -74,5 +74,15 @@ async def load_authorized_run_skill(settings, context, version_id: str):
         )
         if snapshot is None:
             raise ValueError("Skill is not in the run's pinned catalog.")
+        if (
+            context.origin == "workflow"
+            and version_id not in context.resource_snapshot.get("skill_version_ids", [])
+        ):
+            raise ValueError("Skill is not authorized for this Workflow node.")
         await require_pinned_skill_access(db, context.workspace_id, snapshot)
         return snapshot
+
+
+__all__ = [
+    "require_pinned_skill_access",
+]

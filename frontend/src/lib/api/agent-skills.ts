@@ -44,6 +44,13 @@ function skillsPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/agent-skills${suffix}`
 }
 
+export function deleteAgentSkill(token: string, workspaceId: string, skillId: string) {
+  return request<void>(skillsPath(workspaceId, `/${skillId}`), {
+    token,
+    method: "DELETE",
+  })
+}
+
 export type SkillDraft = {
   name: string
   description: string

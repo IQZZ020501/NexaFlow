@@ -16,6 +16,7 @@ import { IconButton } from "@/components/ui/icon-button"
 import { MarkdownCodeBlock } from "@/components/knowledge/markdown-code-block"
 import { cn } from "@/lib/utils"
 import { useLanguage } from "@/contexts/language-provider"
+import { useOptionalSession } from "@/contexts/session-context"
 import { requestBlob } from "@/lib/api-client"
 
 type MarkdownContentProps = {
@@ -180,6 +181,7 @@ export function ArtifactDownloadLink({
   const [failed, setFailed] = React.useState(false)
   const filename = suppliedFilename || markdownText(children) || "download"
   const token = href.slice("/api/v1/artifacts/".length)
+  const session = useOptionalSession()
 
   async function handleDownload(event: React.MouseEvent<HTMLAnchorElement>) {
     event.preventDefault()
@@ -187,11 +189,16 @@ export function ArtifactDownloadLink({
     setIsDownloading(true)
     setFailed(false)
     try {
-      const blob = await requestBlob("/api/v1/artifacts/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      })
+      const stable = /^\/api\/v1\/artifacts\/[a-f0-9-]+\/content$/i.test(href)
+      const blob = await requestBlob(
+        stable ? href : "/api/v1/artifacts/download",
+        {
+          ...(stable ? { token: session?.token ?? undefined } : {}),
+          method: stable ? "GET" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: stable ? undefined : JSON.stringify({ token }),
+        }
+      )
       const objectUrl = URL.createObjectURL(blob)
       const anchor = document.createElement("a")
       anchor.href = objectUrl

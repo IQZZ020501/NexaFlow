@@ -16,7 +16,7 @@ from app.domain.knowledge.storage.cleanup import (
     list_due_knowledge_storage_cleanup_ids,
 )
 from app.domain.knowledge.tasks.runner import list_recoverable_knowledge_task_ids
-from app.domain.workflows.uploads import prepare_due_upload_cleanups
+from app.domain.uploads.service import prepare_due_upload_cleanups
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger
@@ -24,6 +24,7 @@ from app.infra.queue.celery import celery_app
 from app.tasks.agents.jobs import run_agent_job
 from app.tasks.email.jobs import run_email_delivery_job
 from app.tasks.knowledge.jobs import run_knowledge_task_job
+from app.tasks.mcp.jobs import recover_mcp_revocations_job, recover_mcp_tasks_job
 from app.tasks.runtime import configure_task_worker, run_task_async
 from app.tasks.storage.jobs import run_storage_cleanup_job
 from app.tasks.tools.jobs import run_tool_invocation_job
@@ -74,6 +75,11 @@ def _cleanup_expired_artifacts(_settings: Settings) -> None:
     run_task_async(cleanup_expired_generated_artifacts())
 
 
+def _recover_mcp_revocations(_settings: Settings) -> None:
+    recover_mcp_revocations_job.apply_async()
+    recover_mcp_tasks_job.apply_async()
+
+
 def _reclaim_execution_sessions(settings: Settings) -> None:
     from app.ports.execution import build_execution_platform
     run_task_async(build_execution_platform(settings).reclaim_sessions())
@@ -97,6 +103,7 @@ FREQUENT_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("recover_legacy_agent_runs", _recover_legacy_agent_runs),
     ("recover_tool_invocations", _recover_tool_invocations),
     ("recover_email_deliveries", _recover_email_deliveries),
+    ("recover_mcp_revocations", _recover_mcp_revocations),
 )
 MINUTELY_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("reclaim_execution_sessions", _reclaim_execution_sessions),
@@ -135,4 +142,6 @@ def run_maintenance_job(cadence: str) -> None:
     _run_maintenance_steps(steps, settings)
 
 
-__all__ = ["run_maintenance_job"]
+__all__ = [
+    "run_maintenance_job",
+]

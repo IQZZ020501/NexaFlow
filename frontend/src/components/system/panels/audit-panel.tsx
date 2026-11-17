@@ -98,8 +98,8 @@ export function AuditPanel({
       aria-labelledby="system-tab-audit"
       className="grid min-w-0 gap-4 lg:h-full lg:min-h-0 lg:overflow-hidden lg:pr-1"
     >
-      <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:h-full lg:min-h-0">
-        <CardHeader className="flex-row flex-wrap items-end justify-between gap-4 px-4">
+      <Card className="min-w-0 gap-0 overflow-hidden border-border/70 py-0 shadow-sm lg:h-full lg:min-h-0">
+        <CardHeader className="flex-row flex-wrap items-end justify-between gap-4 border-b px-4 py-4 sm:px-4">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
               <HistoryIcon className="size-4" />
@@ -138,20 +138,20 @@ export function AuditPanel({
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="min-w-0 px-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
+        <CardContent className="min-w-0 px-0 sm:px-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
           {isAuditLoading ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>
           ) : auditLogs.length ? (
             <>
-              {/* phones: card list instead of the 1700px grid */}
+              {/* phones: stacked rows instead of the 1700px grid */}
               {isPhoneListLayout ? (
-                <ul className="flex flex-col gap-2">
+                <ul className="flex flex-col divide-y">
                 {auditLogs.map((log) => (
                   <li
                     key={log.id}
-                    className="rounded-xl border bg-background p-3 shadow-xs"
+                    className="bg-background px-4 py-4"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span
@@ -187,14 +187,14 @@ export function AuditPanel({
                 role="region"
                 aria-label={t("审计日志")}
                 tabIndex={0}
-                className="hidden min-w-0 overflow-auto rounded-lg border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:block lg:min-h-0 lg:flex-1"
+                className="hidden min-w-0 overflow-auto bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:block lg:min-h-0 lg:flex-1"
               >
                 <div
                   role="table"
                   aria-label={t("审计日志")}
                   className="w-max min-w-[1700px] text-sm"
                 >
-                  <div className="grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] border-b bg-muted/40 px-4 py-3 font-semibold text-muted-foreground">
+                  <div className="sticky top-0 z-10 grid grid-cols-[180px_150px_160px_220px_minmax(950px,max-content)] border-b bg-muted px-4 py-3 font-semibold text-muted-foreground">
                     <span role="columnheader">{t("时间")}</span>
                     <span role="columnheader">{t("操作者")}</span>
                     <span role="columnheader">{t("动作")}</span>
@@ -240,21 +240,23 @@ export function AuditPanel({
               </div>
             </>
           ) : (
-            <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed bg-muted/20">
+            <div className="flex min-h-28 items-center justify-center bg-muted/20 px-4">
               <p className="text-sm text-muted-foreground">
                 {t("暂无审计日志")}
               </p>
             </div>
           )}
-          <SystemPagination
-            page={page}
-            pageSize={pageSize}
-            itemCount={auditLogs.length}
-            total={total}
-            hasNext={hasMore}
-            onPageChange={onPageChange}
-            onPageSizeChange={onPageSizeChange}
-          />
+          <div className="shrink-0 px-4 pb-4">
+            <SystemPagination
+              page={page}
+              pageSize={pageSize}
+              itemCount={auditLogs.length}
+              total={total}
+              hasNext={hasMore}
+              onPageChange={onPageChange}
+              onPageSizeChange={onPageSizeChange}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -207,7 +207,8 @@ async def _open_remote_client(
                     else {}
                 )
                 if bridge is not None:
-                    if not normalized_url.startswith(f"{settings.opensandbox_url.rstrip('/')}/v1/sandboxes/"):
+                    origins = [host.url for host in settings.opensandbox_hosts] if settings.opensandbox_hosts else [settings.opensandbox_url]
+                    if not any(normalized_url.startswith(f"{origin.rstrip('/')}/v1/sandboxes/") for origin in origins):
                         raise McpClientError("Invalid control-plane proxy endpoint.", request_sent=False)
                     headers = bridge.headers
                 if connection.transport == "streamable_http":

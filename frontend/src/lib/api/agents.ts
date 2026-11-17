@@ -1,3 +1,5 @@
+import { agentUploadForm } from "@/lib/agent-upload"
+import { requestRun } from "@/lib/api/run-request"
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
 import type { User } from "@/lib/api/auth"
@@ -199,7 +201,7 @@ export type AgentToolCall = {
 }
 
 export type AgentRunStreamEvent =
-  | { type: "run"; sequence: number; run: AgentRun }
+  | { type: "run" | "recovering"; sequence: number; run: AgentRun }
   | { type: "process"; sequence: number; event: AgentRunEvent }
   | {
       type: "reasoning_delta"
@@ -595,19 +597,20 @@ export function createAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "always_ask"
+  approvalMode: AgentApprovalMode = "always_ask",
+  requestId?: string
 ) {
-  return request<AgentRun>(agentsPath(workspaceId, `/${agentId}/runs`), {
-    method: "POST",
-    token,
-    body: JSON.stringify({
+  return requestRun<AgentRun>(
+    agentsPath(workspaceId, `/${agentId}/runs`),
+    {
       goal,
+      request_id: requestId,
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
       approval_mode: approvalMode,
-    }),
-    signal,
-  })
+    },
+    { token, signal }
+  )
 }
 
 export function uploadAgentFiles(
@@ -616,8 +619,7 @@ export function uploadAgentFiles(
   agentId: string,
   files: File[]
 ) {
-  const body = new FormData()
-  files.forEach((file) => body.append("files", file))
+  const body = agentUploadForm(files)
   return request<AgentUpload[]>(
     agentsPath(workspaceId, `/${agentId}/uploads`),
     {
@@ -660,15 +662,13 @@ export function regenerateAgentRun(
   workspaceId: string,
   agentId: string,
   runId: string,
-  goal?: string
+  goal?: string,
+  requestId?: string
 ) {
-  return request<AgentRun>(
+  return requestRun<AgentRun>(
     agentsPath(workspaceId, `/${agentId}/runs/${runId}/regenerate`),
-    {
-      method: "POST",
-      token,
-      body: goal === undefined ? undefined : JSON.stringify({ goal }),
-    }
+    { ...(goal === undefined ? {} : { goal }), request_id: requestId },
+    { token }
   )
 }
 

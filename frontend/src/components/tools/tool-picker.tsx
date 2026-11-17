@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   LoaderCircleIcon,
+  NetworkIcon,
   RefreshCwIcon,
   SearchIcon,
   WrenchIcon,
@@ -29,11 +30,14 @@ import {
   type ToolSummary,
 } from "@/lib/api/tools"
 import { getErrorMessage } from "@/lib/errors"
+import { toolDisplayDescription } from "@/lib/tool-display"
 import {
-  toolDisplayDescription,
-  toolDisplayName,
-  toolSourceDisplayName,
-} from "@/lib/tool-display"
+  groupTools,
+  selectToolGroup,
+  toolBindingGroups,
+  toolGroupName,
+  type ToolGroup,
+} from "@/lib/tool-groups"
 import { isRegularTool } from "@/lib/tool-visibility"
 
 type ToolPickerProps = {
@@ -45,30 +49,14 @@ type ToolPickerProps = {
   onChange: (value: ToolRef[]) => void
 }
 
-const toolKinds = [
-  "builtin",
-  "mcp",
-  "python",
-] as const satisfies readonly ToolKind[]
-type ToolCategory = "all" | ToolKind
+const toolKinds = ["builtin", "mcp"] as const satisfies readonly ToolKind[]
+type ToolCategory = "all" | (typeof toolKinds)[number]
 
 const toolCategoryLabels = {
   all: "全部工具",
   builtin: "内置工具",
   mcp: "MCP 工具",
-  python: "Python",
 } as const
-
-/**
- * Determines whether two tool references identify the same tool version.
- *
- * @param left - The first tool reference.
- * @param right - The second tool reference.
- * @returns `true` if both references have the same tool and version identifiers, `false` otherwise.
- */
-function sameTool(left: ToolRef, right: ToolRef) {
-  return left.tool_id === right.tool_id && left.version_id === right.version_id
-}
 
 /**
  * Provides a dialog for selecting, removing, and upgrading workspace tools.
@@ -139,67 +127,81 @@ export function ToolPicker({
   const query = search.trim().toLowerCase()
   const usableTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       tool.can_use &&
       tool.current_version_id &&
       tool.status === "active" &&
       tool.availability === "available" &&
       tool.function_name !== "inline_python" &&
       tool.function_name !== "create_artifact" &&
-      isRegularTool(tool.function_name) &&
-      (!query ||
-        `${toolDisplayName(tool, t)} ${toolDisplayDescription(tool, t)} ${toolSourceDisplayName(tool.source, t)} ${t(toolCategoryLabels[tool.kind])}`
-          .toLowerCase()
-          .includes(query))
+      isRegularTool(tool.function_name)
+  )
+  const catalogGroups = groupTools(usableTools)
+  const matchingGroups = catalogGroups.filter(
+    (group) =>
+      !query ||
+      `${toolGroupName(group, t)} ${group.tools[0]!.kind === "mcp" ? t("MCP 工具") : toolDisplayDescription(group.tools[0]!, t)}`
+        .toLowerCase()
+        .includes(query)
   )
   const groups = toolKinds
     .map((kind) => ({
       kind,
-      tools: usableTools.filter(
-        (tool) =>
-          tool.kind === kind && (category === "all" || category === kind)
+      entries: matchingGroups.filter(
+        (group) =>
+          group.tools[0]!.kind === kind &&
+          (category === "all" || category === kind)
       ),
     }))
-    .filter((group) => group.tools.length > 0)
-  const visibleTools = groups.flatMap((group) => group.tools)
+    .filter((group) => group.entries.length > 0)
+  const visibleTools = groups.flatMap((group) => group.entries)
   const unavailableBindings = value.filter((reference) => {
     const tool = catalogById.get(reference.tool_id)
     return (
       (!tool || isRegularTool(tool.function_name)) &&
       (!tool ||
+        !toolKinds.includes(tool.kind) ||
         !tool.can_use ||
         !tool.current_version_id ||
         tool.status !== "active" ||
         tool.availability !== "available")
     )
   })
+  const unavailableGroups = toolBindingGroups(unavailableBindings, tools, t)
+  const availableGroupIds = new Set(catalogGroups.map((group) => group.id))
   const visibleUnavailableBindings =
-    category === "all" ? unavailableBindings : []
+    category === "all"
+      ? unavailableGroups.filter((group) => !availableGroupIds.has(group.id))
+      : []
+  const selectedGroups = new Map(
+    toolBindingGroups(value, tools, t).map((group) => [group.id, group])
+  )
 
-  function remove(reference: ToolRef) {
-    onChange(value.filter((item) => !sameTool(item, reference)))
-  }
-
-  function toggle(tool: ToolSummary) {
-    const current = selected.get(tool.id)
-    if (current) {
-      remove(current)
-      return
-    }
-    if (!tool.current_version_id) return
-    onChange([
-      ...value,
-      { tool_id: tool.id, version_id: tool.current_version_id },
-    ])
-  }
-
-  function upgrade(tool: ToolSummary) {
-    if (!tool.current_version_id) return
-    onChange(
-      value.map((item) =>
-        item.tool_id === tool.id
-          ? { tool_id: tool.id, version_id: tool.current_version_id as string }
-          : item
+  function toggle(group: ToolGroup) {
+    const allSelected = group.tools.every((tool) => selected.has(tool.id))
+    if (allSelected) {
+      const ids = new Set(
+        selectedGroups
+          .get(group.id)
+          ?.references.map((reference) => reference.tool_id)
       )
+      onChange(value.filter((reference) => !ids.has(reference.tool_id)))
+    } else {
+      onChange(selectToolGroup(value, group.tools, true))
+    }
+  }
+
+  function upgrade(group: ToolGroup) {
+    const currentVersions = new Map(
+      group.tools.map((tool) => [tool.id, tool.current_version_id])
+    )
+    onChange(
+      value.map((item) => {
+        const versionId = currentVersions.get(item.tool_id)
+        return versionId
+          ? { tool_id: item.tool_id, version_id: versionId }
+          : item
+      })
     )
   }
 
@@ -276,8 +278,10 @@ export function ToolPicker({
                   {t(toolCategoryLabels[kind])}
                   <span aria-hidden="true" className="text-[11px] opacity-65">
                     {kind === "all"
-                      ? usableTools.length
-                      : usableTools.filter((tool) => tool.kind === kind).length}
+                      ? catalogGroups.length
+                      : catalogGroups.filter(
+                          (group) => group.tools[0]!.kind === kind
+                        ).length}
                   </span>
                 </button>
               ))}
@@ -311,11 +315,11 @@ export function ToolPicker({
                   {t("已选但不可用")}
                 </h3>
               ) : null}
-              {visibleUnavailableBindings.map((reference) => {
-                const tool = catalogById.get(reference.tool_id)
+              {visibleUnavailableBindings.map((group) => {
+                const tool = catalogById.get(group.references[0]!.tool_id)
                 return (
                   <div
-                    key={`${reference.tool_id}:${reference.version_id}`}
+                    key={group.id}
                     className="flex items-center gap-3 rounded-xl border border-dashed bg-muted/20 p-3.5 opacity-80"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -326,7 +330,7 @@ export function ToolPicker({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">
-                        {tool ? toolDisplayName(tool, t) : reference.tool_id}
+                        {group.name}
                       </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         {t("工具已不可用或授权已撤销")}
@@ -337,16 +341,21 @@ export function ToolPicker({
                       variant="ghost"
                       size="icon-sm"
                       aria-label={t("移除工具 {name}", {
-                        name: tool
-                          ? toolDisplayName(tool, t)
-                          : reference.tool_id,
+                        name: group.name,
                       })}
                       title={t("移除工具 {name}", {
-                        name: tool
-                          ? toolDisplayName(tool, t)
-                          : reference.tool_id,
+                        name: group.name,
                       })}
-                      onClick={() => remove(reference)}
+                      onClick={() => {
+                        const ids = new Set(
+                          group.references.map((reference) => reference.tool_id)
+                        )
+                        onChange(
+                          value.filter(
+                            (reference) => !ids.has(reference.tool_id)
+                          )
+                        )
+                      }}
                     >
                       <XIcon />
                     </Button>
@@ -362,19 +371,30 @@ export function ToolPicker({
                 >
                   <h3 className="flex items-center gap-2 px-1 pt-2 text-xs font-medium text-muted-foreground">
                     {t(toolCategoryLabels[group.kind])}
-                    <span className="tabular-nums">{group.tools.length}</span>
+                    <span className="tabular-nums">{group.entries.length}</span>
                   </h3>
-                  {group.tools.map((tool) => {
-                    const index = visibleTools.indexOf(tool)
-                    const reference = selected.get(tool.id)
-                    const checked = Boolean(reference)
-                    const hasNewVersion = Boolean(
-                      reference &&
-                      reference.version_id !== tool.current_version_id
+                  {group.entries.map((entry) => {
+                    const tool = entry.tools[0]!
+                    const name = toolGroupName(entry, t)
+                    const index = visibleTools.indexOf(entry)
+                    const checked = entry.tools.every((item) =>
+                      selected.has(item.id)
                     )
+                    const partiallySelected =
+                      !checked && selectedGroups.has(entry.id)
+                    const hasUnavailableBindings = unavailableGroups.some(
+                      (group) => group.id === entry.id
+                    )
+                    const hasNewVersion = entry.tools.some((item) => {
+                      const reference = selected.get(item.id)
+                      return (
+                        reference &&
+                        reference.version_id !== item.current_version_id
+                      )
+                    })
                     return (
                       <div
-                        key={tool.id}
+                        key={entry.id}
                         className={`group flex items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow] focus-within:ring-2 focus-within:ring-ring ${
                           checked
                             ? "border-foreground/20 bg-muted/70 shadow-xs"
@@ -387,22 +407,25 @@ export function ToolPicker({
                           ) {
                             return
                           }
-                          toggle(tool)
+                          toggle(entry)
                         }}
                       >
                         <input
                           ref={(element) => {
                             optionRefs.current[index] = element
+                            if (element)
+                              element.indeterminate = partiallySelected
                           }}
                           type="checkbox"
                           className="mt-1 size-5 shrink-0 accent-foreground"
-                          aria-label={toolDisplayName(tool, t)}
+                          aria-label={name}
+                          aria-checked={partiallySelected ? "mixed" : checked}
                           checked={checked}
-                          onChange={() => toggle(tool)}
+                          onChange={() => toggle(entry)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter") {
                               event.preventDefault()
-                              toggle(tool)
+                              toggle(entry)
                               return
                             }
                             if (
@@ -428,17 +451,20 @@ export function ToolPicker({
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700 dark:text-sky-400">
                           <BuiltinToolIcon
                             functionName={tool.function_name}
+                            fallback={
+                              tool.kind === "mcp" ? NetworkIcon : undefined
+                            }
                             className="size-4"
                           />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex flex-wrap items-center gap-1.5">
                             <span className="truncate text-sm font-medium">
-                              {toolDisplayName(tool, t)}
+                              {name}
                             </span>
                             {tool.kind !== "builtin" ? (
                               <Badge variant="outline" className="text-[10px]">
-                                {toolSourceDisplayName(tool.source, t)}
+                                {t("MCP 工具")}
                               </Badge>
                             ) : null}
                             {hasNewVersion ? (
@@ -450,7 +476,13 @@ export function ToolPicker({
                               </Badge>
                             ) : null}
                           </span>
-                          {toolDisplayDescription(tool, t) ? (
+                          {hasUnavailableBindings ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {t("工具已不可用或授权已撤销")}
+                            </span>
+                          ) : null}
+                          {tool.kind === "builtin" &&
+                          toolDisplayDescription(tool, t) ? (
                             <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
                               {toolDisplayDescription(tool, t)}
                             </span>
@@ -463,7 +495,7 @@ export function ToolPicker({
                               className="mt-1 h-auto p-0 text-xs"
                               onClick={(event) => {
                                 event.stopPropagation()
-                                upgrade(tool)
+                                upgrade(entry)
                               }}
                             >
                               {t("升级到当前版本")}
@@ -488,10 +520,14 @@ export function ToolPicker({
         <DialogFooter className="shrink-0 flex-col border-t bg-muted/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p className="text-xs text-muted-foreground">
             {t("已选择 {value} 个工具", {
-              value: value.filter((reference) => {
-                const tool = catalogById.get(reference.tool_id)
-                return !tool || isRegularTool(tool.function_name)
-              }).length,
+              value: toolBindingGroups(
+                value.filter((reference) => {
+                  const tool = catalogById.get(reference.tool_id)
+                  return !tool || isRegularTool(tool.function_name)
+                }),
+                tools,
+                t
+              ).length,
             })}
           </p>
           <Button

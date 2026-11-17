@@ -362,12 +362,17 @@ def test_agent_tool_binding_requires_current_available_policy() -> None:
     from app.domain.tools.access.bindings import build_bindable_tool_snapshot
     from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 
-    source = ToolSource(id="source-1", workspace_id="ws-1", kind="python")
+    source = ToolSource(
+        id="source-1",
+        workspace_id="ws-1",
+        kind="mcp",
+        mcp_server_id="server-1",
+    )
     tool = Tool(
         id="tool-1",
         workspace_id="ws-1",
         source_id=source.id,
-        kind="python",
+        kind="mcp",
         function_name="lookup",
         current_version_id="version-1",
     )
@@ -378,7 +383,7 @@ def test_agent_tool_binding_requires_current_available_policy() -> None:
         display_name="Lookup",
         input_schema={"type": "object", "additionalProperties": False},
         output_schema={"type": "object", "additionalProperties": False},
-        execution_spec={"code": "result = {}"},
+        execution_spec={"server_id": "server-1", "tool_name": "lookup"},
         definition_hash="hash-1",
     )
     policy = ToolPolicy(
@@ -478,8 +483,8 @@ def test_tool_contracts_deep_freeze_nested_json() -> None:
     from copy import copy, deepcopy
     from operator import setitem
 
-    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.entities.tools import ToolSnapshot, validate_tool_json_schema
+    from app.ports.tools import ToolRuntimeResult
 
     input_schema = {
         "type": "object",
@@ -624,12 +629,12 @@ def test_freeze_json_rejects_non_json_values() -> None:
 def test_tool_adapter_contract_is_provider_neutral() -> None:
     from datetime import datetime
 
-    from app.application.tools.runtime.contracts import (
+    from app.entities.tools import ToolSnapshot
+    from app.ports.tools import (
         ToolAdapter,
         ToolInvocationContext,
         ToolRuntimeResult,
     )
-    from app.entities.tools import ToolSnapshot
 
     snapshot = ToolSnapshot(
         schema_version=1,
@@ -805,7 +810,7 @@ def test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope() -> No
         agent_tool_invocation_identity,
         tool_runtime_result_to_agent_result,
     )
-    from app.application.tools.runtime.contracts import ToolRuntimeResult
+    from app.ports.tools import ToolRuntimeResult
 
     invocation_id, idempotency_key = agent_tool_invocation_identity(
         "run-1",
@@ -2945,6 +2950,7 @@ def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
     messages = execution_messages(
         SimpleNamespace(
             instructions="Build useful pages.",
+            application_snapshot={},
             goal="Create an interactive page.",
             attachment_context="",
         )

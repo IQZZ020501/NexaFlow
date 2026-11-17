@@ -11,9 +11,15 @@ from unittest.mock import AsyncMock, patch
 from zipfile import ZipFile
 
 from tests.models.llm import model_payload, model_test_server
-from tests.support import activate_user, auth_headers, settings, test_client
+from tests.support import (
+    activate_admin,
+    activate_user,
+    auth_headers,
+    create_active_user,
+    settings,
+    test_client,
+)
 
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
@@ -30,6 +36,7 @@ from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.ports.execution import execution_scope
+from app.ports.tools import ToolInvocationContext
 
 
 async def assert_script_ledger(run_id, workspace_id, actor_id, version_id):
@@ -481,9 +488,177 @@ def test_agent_skill_lifecycle() -> None:
 
         asyncio.run(assert_no_implicit_tool_without_skill())
 
+        skill_url = f"/api/v1/workspaces/{workspace_id}/agent-skills/{skill['id']}"
+        removed = client.delete(skill_url, headers=auth_headers(token))
+        assert removed.status_code == 204, removed.text
+        assert client.get(skill_url, headers=auth_headers(token)).status_code == 404
+        assert (
+            client.patch(
+                skill_url, headers=auth_headers(token), json={"status": "active"}
+            ).status_code
+            == 404
+        )
+        assert client.delete(skill_url, headers=auth_headers(token)).status_code == 404
+        assert (
+            client.get(
+                f"/api/v1/workspaces/{workspace_id}/agent-skills",
+                headers=auth_headers(token),
+            ).json()
+            == []
+        )
+
+        async def assert_skill_history_retained():
+            async with get_session_factory()() as db:
+                assert (
+                    await skills.get_agent_skill(db, workspace_id, skill["id"]) is None
+                )
+                version = await skills.get_agent_skill_version(
+                    db, workspace_id, published.json()["id"]
+                )
+                assert version is not None and version.name == "Research Skill"
+                run = await runs.get_agent_run_by_id(db, prepared.json()["id"])
+                assert (
+                    run is not None
+                    and run.skill_snapshots[0]["version_id"] == version.id
+                )
+
+        asyncio.run(assert_skill_history_retained())
+        blocked = client.post(
+            f"/api/v1/workspaces/{workspace_id}/agents/{agent.json()['id']}/runs",
+            headers=auth_headers(token),
+            json={"goal": "Deleted Skill must not run"},
+        )
+        assert blocked.status_code == 409, blocked.text
+
+
+def test_skill_deletion_is_owner_only_and_releases_the_name() -> None:
+    with test_client() as client:
+        admin_token, workspace_id = activate_admin(client)
+        owner_id, owner_token = create_active_user(client, admin_token, "skill-owner")
+        grantee_id, grantee_token = create_active_user(
+            client, admin_token, "skill-grantee"
+        )
+        for user_id in (owner_id, grantee_id):
+            added = client.post(
+                f"/api/v1/workspaces/{workspace_id}/members",
+                headers=auth_headers(admin_token),
+                json={"user_id": user_id, "role": "member"},
+            )
+            assert added.status_code == 201, added.text
+        catalog_url = f"/api/v1/workspaces/{workspace_id}/agent-skills"
+        payload = {
+            "name": "QA Skill",
+            "description": "QA checks",
+            "definition": {"instructions": "Check the result."},
+        }
+        created = client.post(
+            catalog_url, headers=auth_headers(owner_token), json=payload
+        )
+        assert created.status_code == 201, created.text
+        skill_url = f"{catalog_url}/{created.json()['id']}"
+        granted = client.put(
+            f"{skill_url}/permissions/{grantee_id}",
+            headers=auth_headers(owner_token),
+            json={"permission": "use"},
+        )
+        assert granted.status_code == 200, granted.text
+        other_workspace = client.post(
+            "/api/v1/workspaces",
+            headers=auth_headers(admin_token),
+            json={"name": "Other Skill Workspace", "admin_user_id": owner_id},
+        )
+        assert other_workspace.status_code == 201, other_workspace.text
+        cross_tenant = client.delete(
+            f"/api/v1/workspaces/{other_workspace.json()['workspace']['id']}/agent-skills/{created.json()['id']}",
+            headers=auth_headers(owner_token),
+        )
+        assert cross_tenant.status_code == 404, cross_tenant.text
+        assert (
+            client.delete(skill_url, headers=auth_headers(admin_token)).status_code
+            == 404
+        )
+        assert (
+            client.delete(skill_url, headers=auth_headers(grantee_token)).status_code
+            == 403
+        )
+        disabled = client.patch(
+            skill_url, headers=auth_headers(owner_token), json={"status": "disabled"}
+        )
+        assert disabled.status_code == 200, disabled.text
+        assert (
+            client.delete(skill_url, headers=auth_headers(owner_token)).status_code
+            == 204
+        )
+        assert client.get(catalog_url, headers=auth_headers(grantee_token)).json() == []
+        recreated = client.post(
+            catalog_url, headers=auth_headers(owner_token), json=payload
+        )
+        assert recreated.status_code == 201, recreated.text
+        assert recreated.json()["id"] != created.json()["id"]
+
+
+def test_skill_deletion_migration_preserves_existing_rows() -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+    from io import StringIO
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine
+
+    path = (
+        Path(__file__).parents[2]
+        / "alembic/versions/202611170006_agent_skill_deletion.py"
+    )
+    spec = spec_from_file_location("agent_skill_deletion_migration", path)
+    assert spec is not None and spec.loader is not None
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    sql = StringIO()
+    migration.op = Operations(
+        MigrationContext.configure(
+            dialect_name="postgresql", opts={"as_sql": True, "output_buffer": sql}
+        )
+    )
+    migration.upgrade()
+    assert (
+        "ALTER TABLE agent_skills DROP CONSTRAINT ck_agent_skills_status"
+        in sql.getvalue()
+    )
+    assert "status IN ('active', 'disabled', 'archived')" in sql.getvalue()
+    with create_engine("sqlite:///:memory:").begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE agent_skills (id TEXT PRIMARY KEY, status TEXT NOT NULL, CONSTRAINT ck_agent_skills_status CHECK (status IN ('active', 'disabled')))"
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO agent_skills VALUES ('draft', 'disabled'), ('published', 'active')"
+        )
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+        connection.exec_driver_sql(
+            "INSERT INTO agent_skills VALUES ('removed', 'archived')"
+        )
+        assert connection.exec_driver_sql(
+            "SELECT id, status FROM agent_skills ORDER BY id"
+        ).all() == [
+            ("draft", "disabled"),
+            ("published", "active"),
+            ("removed", "archived"),
+        ]
+        try:
+            migration.downgrade()
+        except RuntimeError as exc:
+            assert "immutable history" in str(exc)
+        else:
+            raise AssertionError("Downgrade must not restore deleted Skills")
+        connection.exec_driver_sql("DELETE FROM agent_skills WHERE id = 'removed'")
+        migration.downgrade()
+
 
 def main() -> None:
     test_agent_skill_lifecycle()
+    test_skill_deletion_is_owner_only_and_releases_the_name()
+    test_skill_deletion_migration_preserves_existing_rows()
     print("AGENT_SKILLS_API_OK")
 
 

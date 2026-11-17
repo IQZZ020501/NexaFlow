@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   KeyRoundIcon,
+  ClockIcon,
   LoaderCircleIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -11,6 +12,8 @@ import {
 } from "lucide-react"
 
 import { McpConnectionDialog } from "@/components/tools/mcp-source-dialog"
+import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
+import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
@@ -50,6 +53,8 @@ export function McpToolsPage() {
   const [isLoading, setIsLoading] = React.useState(false)
   const [busyServerId, setBusyServerId] = React.useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = React.useState(false)
+  const [oauthServer, setOAuthServer] = React.useState<McpServer | null>(null)
+  const [taskServer, setTaskServer] = React.useState<McpServer | null>(null)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
   const canManage = Boolean(workspaceRole || me?.user.is_global_admin)
@@ -308,6 +313,10 @@ export function McpToolsPage() {
                 </div>
                 {canManage ? (
                   <div className="flex shrink-0 gap-1">
+                    {server.transport !== "stdio" ? <>
+                      <Button variant="ghost" size="icon" title={t("OAuth 连接")} aria-label={t("OAuth 连接")} onClick={() => setOAuthServer(server)}><KeyRoundIcon /></Button>
+                      <Button variant="ghost" size="icon" title={t("长任务契约")} aria-label={t("长任务契约")} onClick={() => setTaskServer(server)}><ClockIcon /></Button>
+                    </> : null}
                     <Button
                       type="button"
                       variant="ghost"
@@ -434,6 +443,8 @@ export function McpToolsPage() {
         }}
         onError={(message) => notify("error", message)}
       />
+      {oauthServer && token && selectedWorkspaceId ? <McpOAuthDialog key={oauthServer.id} token={token} workspaceId={selectedWorkspaceId} serverId={oauthServer.id} onClose={() => setOAuthServer(null)} onChanged={() => void loadServers()} /> : null}
+      {taskServer && token && selectedWorkspaceId ? <McpLongTasksDialog key={taskServer.id} token={token} workspaceId={selectedWorkspaceId} serverId={taskServer.id} onClose={() => setTaskServer(null)} onChanged={() => void loadServers()} /> : null}
       {confirmDialog}
     </>
   )

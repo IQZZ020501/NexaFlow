@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { FileTextIcon } from "lucide-react"
+import { ChevronRightIcon, FileTextIcon } from "lucide-react"
 import { Popover as PopoverPrimitive } from "radix-ui"
 import type { Components } from "react-markdown"
 
@@ -246,11 +246,21 @@ export function AgentSourceReferences({
   if (!sources?.length) return null
 
   return (
-    <div className="mt-3 flex flex-wrap gap-2" aria-label={t("回答来源")}>
-      {sources.map((source) => (
-        <AgentSourceReference key={source.source_ref} source={source} t={t} />
-      ))}
-    </div>
+    <details className="group/sources mt-3" aria-label={t("回答来源")}>
+      <summary className="flex w-fit max-w-full cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+        <FileTextIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        <span>{t("回答来源（{count}）", { count: sources.length })}</span>
+        <ChevronRightIcon
+          className="size-3.5 shrink-0 transition-transform group-open/sources:rotate-90 motion-reduce:transition-none"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {sources.map((source) => (
+          <AgentSourceReference key={source.source_ref} source={source} t={t} />
+        ))}
+      </div>
+    </details>
   )
 }
 

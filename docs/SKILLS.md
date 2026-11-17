@@ -70,6 +70,23 @@ skill/version 引用，Run 冻结快照及非敏感执行镜像/网络指纹。�
 `search_tools`/`activate_tools` 渐进选择。激活不能越过授权目录。
 活跃工具与已加载 Skills 随 checkpoint 保存和恢复。
 
+## 工作流使用
+
+工作流 LLM 节点「工具」右侧的「＋」可以添加 MCP 服务和已发布的工作空间
+Skill。MCP 按服务展示，保存时绑定其中有使用权限的子工具；同一 Skill 在
+一个工作流中统一绑定指定发布版本。节点只可加载和执行自己选择的 Skill，不能使用同一工作流其他
+节点的 Skill。发布、排队和执行时仍检查绑定者权限及版本哈希。
+
+节点按需加载 `load_skill`，脚本通过 `run_skill_script` 在 Run 的沙箱中执行，
+文件通过统一产物服务交付；内置文档处理指南可以使用同一沙箱的 bash。
+需要逐次审批的 MCP 或依赖安装会暂停工作流，调试面板与分享页都可批准或
+拒绝；恢复沿用保存的模型调用和账本身份，已执行的脚本不会重复运行。
+多个节点同时请求审批时，全部决定后才恢复。API 消费者不能执行需要交互
+审批的工具；依赖安装器也不会向 API 模型开放。
+
+已有安装升级需应用迁移 `202611170005`，再重新发布引用了旧策略的工作流。
+迁移保留审批模式、访问来源和已有授权，停用工具保持停用。
+
 ## 包内脚本
 
 脚本在外部 OpenSandbox 运行，接收 stdin 上的 JSON 对象。Python 可导入
@@ -105,30 +122,49 @@ Agent Run 的私有 OpenSandbox 会话，并由后续脚本复用。Worker 恢�
 脚本本身始终无外网。固定 renderer 依赖仍须预装到 digest 固定的执行镜像。
 MCP 走已授权 Tool，不向脚本注入业务凭据。
 
-## 固定文件渲染 Tools
+## 内置文件工作流与 Skill Creator
 
-`sandbox/skills/{documents,pdf,pptx,spreadsheets}` 是 NexaFlow 维护的固定渲染器
-（PPTX 包含经适配的 MIT 开源组件），预装于执行镜像，并非上传后即可自动
-注册的第三方包。它们继续在
-Agent/Workflow 工具选择器中提供同一输入契约：
+`sandbox/skills/{documents,pdf,pptx,spreadsheets,skill-creator}` 存放项目维护的
+指引与辅助脚本。五个可选内置 Tool 均以 `{}` 加载完整指引，随后由 Agent
+通过已授权的 bash 在 Run 私有沙箱读写文件；不再要求固定 Markdown、
+结构化工作表或 PPT 构图输入。加载本身不执行程序、不生成文件或授予能力。
 
-- `documents_skill`：DOCX 文件名与 Markdown，可继承参考 DOCX 格式。
-- `pdf_skill`：PDF 文件名与 Markdown。
-- `pptx_skill`：PPTX 文件名与演示场景、30 套命名设计系统、960×540
-  自由画布元素、讲者备注和 22 种可编排动画。新请求通过适配后的
-  open-kimi-ppt PPTD/WASM 离线导出；旧的结构化布局请求继续兼容。
-  图片只接受有总量限制的内联本地媒体，固定 Skill 不访问网络。
-- `spreadsheets_skill`：XLSX 文件名与结构化工作表/行。
+- `documents_skill`：python-docx 创建与定点修改，检查原文样式、章节、
+  表格、图像、页眉页脚与相关 OOXML；可用 LibreOffice Writer 生成预览。
+- `pdf_skill`：PyMuPDF 读取、渲染、合并、拆分、旋转、表单与明确请求的
+  内容编辑；没有 Aside 专用接口，不预装 OCR。
+- `pptx_skill`：python-pptx 自由设计与定点修改，保留原主题、母版、
+  图表、嵌入工作簿、图像和备注。构图、字体和配色由任务决定。
+  提供有界结构盘点和 LibreOffice Impress 预览辅助脚本；
+  旧 layout、PPTD/WASM 与固定构图引擎已删除。
+- `spreadsheets_skill`：pandas 分析、openpyxl 编辑 CSV/XLSX/XLSM；
+  保留公式和有关元数据，避免 DataFrame 导出覆盖原工作簿。
+  LibreOffice Calc 可在副本中重算；未重算的缓存值不得宣称验证通过。
+- `skill_creator`：生成可导入的 SKILL.md/ZIP，并检查项目导入限制。
+  不写宿主账户目录，不自动发布、绑定或授权新 Skill。
 
-调用方只能传内容/数据，不能替换 renderer 代码。这四项功能和 Workflow
-Python Code 均通过同一 execution port 进入 OpenSandbox。
+每份完整指引随 ToolVersion 参与定义哈希并冻结，业务镜像只携带 Markdown，
+辅助代码和锁定依赖预装在执行镜像。文件通过现有 bash 出口自动持久化和
+交付，沿用 5 MiB 上限、租户隔离、连续会话恢复与不可变版本。
+
+这些加载器仅供 Agent 使用，`workflow_callable=false`；Workflow 的文件
+生成可通过已授权 MCP 工具或 Agent 节点完成，独立 Python Tool 与 Python Code 节点已删除。DOCX/PDF/XLSX 旧 renderer 仍仅用于
+已有冻结契约，不作为新 Skill 的创作接口。PPT 旧实现已按要求完全删除。
+生成页图并不等于完成视觉检查，指引要求明确报告实际检查能力与局限。
+
+升级须同时发布业务代码与执行镜像，再应用 `202611170003`：刷新已有工作
+空间的四个文件 Tool、补齐 Skill Creator，将可编辑应用绑定移到新契约，
+保留审批/访问策略及发布、执行历史。新契约只接受 `{}`；历史发布版本需
+重新发布，使用旧输入的 Workflow 需改用已授权 MCP 工具或 Agent 节点。升级使用现有迁移入口。回退须配套恢复业务代码、执行镜像与
+数据库备份；迁移降级不会重建已删除的 PPT 实现。
 
 ## 执行边界与检查
 
-生产采用独立 Linux/Kata 主机、`dns+nft` 默认拒绝、无业务挂载/环境继承、
+默认单机部署使用普通 Docker + `dns+nft`；需要 VM 隔离时选择独立 Linux/Kata
+主机并单独验证。两种部署都要求默认拒绝出网、无业务挂载/环境继承、
 cgroup/process 限制、任务 UID 65532、显式 destroy 与原生 TTL。工作空间
 Skill 的安装与脚本在同一个 Run 私有 sandbox 中串行执行；Run 终态销毁，
-Worker 丢失时由原生 TTL 回收。普通 Docker 只用于显式开发检查。包内只读
+Worker 丢失时由原生 TTL 回收。普通 Docker 与宿主共享内核。包内只读
 权限和程序限制是纵深防御，不能替代整个容器/VM 隔离边界。详情见
 [OpenSandbox 部署](../deploy/opensandbox/README.md)。
 

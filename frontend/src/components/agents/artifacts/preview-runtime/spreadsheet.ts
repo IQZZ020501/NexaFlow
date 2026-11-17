@@ -1,5 +1,6 @@
 import ExcelJS, { type CellValue } from "exceljs"
-import type { Viewer } from "../preview-protocol"
+import JSZip from "jszip"
+import { validateOfficeArchive, type Viewer } from "../preview-protocol"
 
 const MAX_ROWS = 500
 const MAX_COLUMNS = 50
@@ -26,10 +27,24 @@ export async function openSpreadsheet(
   bytes: ArrayBuffer,
   emptyLabel: string
 ): Promise<Viewer> {
+  validateOfficeArchive(bytes)
+  // This viewer displays cells only. ExcelJS's drawing parser rejects valid
+  // default-namespace drawings from openpyxl, so omit non-cell assets from a
+  // preview-only copy before loading. Never rewrite the downloadable workbook.
+  const archive = await JSZip.loadAsync(bytes)
+  // Keep VML drawings: ExcelJS still needs them to reconcile cell comments.
+  for (const drawing of archive.file(/^xl\/drawings\/.*\.xml(?:\.rels)?$/))
+    archive.remove(drawing.name)
+  for (const directory of ["xl/charts", "xl/media"]) archive.remove(directory)
+  const previewBytes = await archive.generateAsync({
+    type: "arraybuffer",
+    compression: "DEFLATE",
+  })
   const workbook = new ExcelJS.Workbook()
   // ExcelJS's browser loader accepts ArrayBuffer; its declarations call this Buffer.
   await workbook.xlsx.load(
-    bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]
+    previewBytes as unknown as Parameters<typeof workbook.xlsx.load>[0],
+    { ignoreNodes: ["drawing", "picture"] }
   )
   const sheets = workbook.worksheets.filter(
     (sheet) => sheet.state === "visible"

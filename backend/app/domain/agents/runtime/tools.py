@@ -1,50 +1,21 @@
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 from jsonschema import validators
 from jsonschema.exceptions import SchemaError
 from langchain_core.tools import StructuredTool
+from nexaflow_extension_api import (  # noqa: F401 - compatibility exports
+    AgentExecutionPaused,
+    AgentToolBusy,
+    AgentToolResult,
+    AgentToolUncertain,
+)
 
 from app.domain.tools.runtime import (
     normalize_tool_arguments,
     schema_validation_error_detail,
 )
-
-
-@dataclass(frozen=True)
-class AgentToolResult:
-    content: str
-    summary: str
-    output: Any = None
-    is_error: bool = False
-    outcome_uncertain: bool = False
-    evidence_ids: frozenset[str] = frozenset()
-    full_result: str | None = None
-
-
-class AgentExecutionPaused(Exception):
-    """The durable executor must persist state before continuing this call."""
-
-    def __init__(self, call_id: str, reason: str) -> None:
-        super().__init__(reason)
-        self.call_id = call_id
-        self.reason = reason
-
-
-class AgentToolUncertain(AgentExecutionPaused):
-    """A side effect may have happened but its result was not durably recorded."""
-
-    def __init__(self, call_id: str, reason: str) -> None:
-        super().__init__(call_id, reason)
-
-
-class AgentToolBusy(AgentExecutionPaused):
-    """Another worker currently owns the tool-call lease."""
-
-    def __init__(self, call_id: str, reason: str) -> None:
-        super().__init__(call_id, reason)
 
 
 def create_agent_tool(

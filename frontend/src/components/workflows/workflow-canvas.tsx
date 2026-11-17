@@ -24,6 +24,7 @@ import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import type { TFunction } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
+import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { AgentFormState } from "@/components/agents/agents-page"
 import { InteractionConfigFields } from "@/components/agents/interaction-config-fields"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
@@ -49,6 +50,7 @@ import {
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
+  availableWorkflowNodePosition,
   canvasPositionLeftOf,
   draggedCanvasPosition,
   nonOverlappingCanvasPosition,
@@ -98,6 +100,7 @@ type WorkflowCanvasProps = {
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
   tools: ToolDetail[]
+  skills?: AgentSkill[]
   agents: Agent[]
   runtimeStatuses: Record<string, WorkflowNodeExecution["status"]>
   readOnly: boolean
@@ -182,23 +185,27 @@ function CanvasInner(props: WorkflowCanvasProps) {
       config?: Record<string, unknown>
     ) => {
       if (props.readOnly) return
-      if (
-        ["start", "end"].includes(type) &&
-        nodes.some((node) => node.data.type === type)
-      ) {
-        return
-      }
-      const node = createWorkflowNode(
-        type,
-        title,
-        nodes.length,
-        config,
-        startNodeId
-      )
-      if (position) node.position = position
-      setNodes((current) => [...current, node])
+      setNodes((current) => {
+        if (
+          ["start", "end"].includes(type) &&
+          current.some((node) => node.data.type === type)
+        )
+          return current
+        const node = createWorkflowNode(
+          type,
+          title,
+          current.length,
+          config,
+          startNodeId
+        )
+        node.position = availableWorkflowNodePosition(
+          position ?? node.position,
+          current
+        )
+        return [...current, node]
+      })
     },
-    [nodes, props.readOnly, props.t, startNodeId]
+    [props.readOnly, props.t, startNodeId]
   )
 
   const flowPaneRef = React.useRef<HTMLDivElement | null>(null)
@@ -399,7 +406,13 @@ function CanvasInner(props: WorkflowCanvasProps) {
       )
       copy.position = { x: source.position.x + 300, y: source.position.y + 80 }
       copy.data.config = structuredClone(source.data.config)
-      setNodes((current) => [...current, copy])
+      setNodes((current) => [
+        ...current,
+        {
+          ...copy,
+          position: availableWorkflowNodePosition(copy.position, current),
+        },
+      ])
     },
     [nodes, props.readOnly, t]
   )
@@ -471,6 +484,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
           knowledgeBases: props.knowledgeBases,
           mcpServers: props.mcpServers,
           tools: props.tools,
+          skills: props.skills ?? [],
           agents: props.agents,
           nodes,
           edges,
@@ -485,6 +499,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
       props.agents,
       props.knowledgeBases,
       props.mcpServers,
+      props.skills,
       props.models,
       props.readOnly,
       props.runtimeStatuses,

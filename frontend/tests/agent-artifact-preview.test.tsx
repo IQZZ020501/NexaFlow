@@ -235,6 +235,53 @@ test("renders worksheet values as text, uses cached formulas, switches sheets an
   expect(container.childElementCount).toBe(0)
 })
 
+test("previews openpyxl workbooks containing charts without modifying the source bytes", async () => {
+  // openpyxl uses the valid default spreadsheetDrawing namespace; ExcelJS's
+  // drawing parser expects the literal xdr: prefix and otherwise fails to load.
+  const bytes = await Bun.file(
+    new URL("./fixtures/openpyxl-chart.xlsx", import.meta.url)
+  ).arrayBuffer()
+  const original = bytes.slice(0)
+  validateOfficeArchive(bytes)
+  const container = document.createElement("div")
+  const viewer = await openSpreadsheet(container, bytes, "Empty")
+  viewer.render({ page: 1, sheet: 0, zoom: 1 })
+  expect(viewer.metadata.sheets).toEqual(["Summary"])
+  expect(container.querySelectorAll("tbody tr")).toHaveLength(3)
+  expect(container.querySelector("tbody tr:nth-child(2) td")?.textContent).toBe(
+    "00123"
+  )
+  expect(
+    container.querySelector("tbody tr:nth-child(2) td:nth-of-type(2)")
+      ?.textContent
+  ).toBe("7")
+  expect(new Uint8Array(bytes)).toEqual(new Uint8Array(original))
+  viewer.destroy()
+})
+
+test("previews cell values in workbooks with images and comments", async () => {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet("Notes")
+  sheet.getCell("A1").value = "00123"
+  sheet.getCell("A1").note = "Source comment"
+  sheet.getCell("B1").value = { formula: "1+2", result: 3 }
+  const imageId = workbook.addImage({
+    base64:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDVkAAAAASUVORK5CYII=",
+    extension: "png",
+  })
+  sheet.addImage(imageId, "D1:E2")
+  const bytes = new Uint8Array(await workbook.xlsx.writeBuffer()).buffer
+  const container = document.createElement("div")
+  const viewer = await openSpreadsheet(container, bytes, "Empty")
+  viewer.render({ page: 1, sheet: 0, zoom: 1 })
+  expect(container.querySelector("tbody tr td")?.textContent).toBe("00123")
+  expect(
+    container.querySelector("tbody tr td:nth-of-type(2)")?.textContent
+  ).toBe("3")
+  viewer.destroy()
+})
+
 const file = {
   filename: "page.html",
   download_url: "/api/v1/artifacts/signed-token",
@@ -301,6 +348,36 @@ test("selects only platform HTML files from successful file tools, including bun
       format: "html",
     },
   ])
+})
+
+test("keeps same-named paths separate and old versions immutable with stable identities", () => {
+  const ids = [
+    "23291174-58e4-42ad-9656-2ee0aad1328a",
+    "1995b1ae-864c-478e-8736-8be80bc99c56",
+    "d570e6ec-c271-431b-8f58-b39a95fca211",
+  ]
+  const files = ids.map((artifact_id, index) => ({
+    tool_name: "bash",
+    status: "succeeded",
+    output: {
+      artifacts: [
+        {
+          artifact_id,
+          filename: "report.html",
+          relative_path: index === 1 ? "b/report.html" : "a/report.html",
+          download_url: `/api/v1/artifacts/expired-${index}`,
+        },
+      ],
+    },
+  }))
+  const original = previewArtifactsForEvents([files[0]!])
+  const latest = previewArtifactsForEvents(files)
+  expect(latest.map((file) => file.relativePath)).toEqual([
+    "a/report.html",
+    "b/report.html",
+  ])
+  expect(latest[0]?.downloadUrl).toBe(`/api/v1/artifacts/${ids[2]}/content`)
+  expect(original[0]?.downloadUrl).toBe(`/api/v1/artifacts/${ids[0]}/content`)
 })
 
 test("rejects external, ambiguous, or non-download URLs even when labeled HTML", () => {

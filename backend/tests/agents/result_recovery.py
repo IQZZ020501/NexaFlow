@@ -25,7 +25,6 @@ from app.application.agents.tools.builder import (
 )
 from app.application.agents.tools.results import read_run_tool_result
 from app.application.tools.runtime.adapters.mcp import McpToolAdapter
-from app.application.tools.runtime.contracts import ToolInvocationContext
 from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
@@ -42,6 +41,7 @@ from app.entities.tools import McpServer, ToolSnapshot
 from app.infra.db.base import Base
 from app.infra.db.repositories.tools import invocations
 from app.ports.mcp import MAX_MCP_RESULT_BYTES, McpCallResult
+from app.ports.tools import ToolInvocationContext
 
 
 async def assert_retained_mcp_results() -> None:
@@ -113,7 +113,7 @@ async def assert_retained_mcp_results() -> None:
                 "app.application.tools.runtime.service._validate_live_state",
                 AsyncMock(return_value=(None, None)),
             ),
-            patch("app.application.tools.runtime.adapters.mcp.mcp_server_connection"),
+            patch("app.application.tools.runtime.adapters.mcp.resolved_mcp_server_connection"),
             patch("app.application.tools.runtime.adapters.mcp.call_mcp_tool", port),
         ):
             async with factory() as db:
@@ -347,7 +347,7 @@ async def _assert_legacy_result(
             "app.application.agents.tools.builder.resolve_mcp_tools",
             AsyncMock(return_value=[tool]),
         ),
-        patch("app.application.agents.tools.builder.mcp_server_connection"),
+        patch("app.application.agents.tools.builder.resolved_mcp_server_connection"),
         patch("app.application.agents.tools.builder.call_mcp_tool", port),
     ):
         set_agent_tool_idempotency_key("legacy-result")

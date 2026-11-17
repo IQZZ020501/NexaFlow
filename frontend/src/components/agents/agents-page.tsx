@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { isStaleRunSnapshot } from "@/lib/run-state"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import dynamic from "next/dynamic"
 import { useParams, useRouter } from "next/navigation"
@@ -240,6 +241,7 @@ export function isAgentListLoading(
 }
 
 export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
+  if (isStaleRunSnapshot(pendingRun, liveRun)) return pendingRun
   const keepLiveAnswer = ["queued", "running", "awaiting_approval"].includes(
     liveRun.status
   )
@@ -282,7 +284,7 @@ export function mergeAgentRunStreamEvent(
   streamEvent: AgentRunStreamEvent,
   placeholderId?: string
 ): AgentRun[] {
-  if (streamEvent.type === "run") {
+  if (streamEvent.type === "run" || streamEvent.type === "recovering") {
     return mergeAgentRunSnapshot(runs, streamEvent.run, placeholderId)
   }
   if (streamEvent.type === "process") {
@@ -1399,8 +1401,7 @@ export function AgentsPage({
         image_model_id:
           form.imageModelId ||
           models.find(
-            (model) =>
-              model.model_type === "IMAGE" && model.status === "active"
+            (model) => model.model_type === "IMAGE" && model.status === "active"
           )?.id ||
           null,
         instructions: form.instructions,
@@ -2151,6 +2152,7 @@ export function AgentsPage({
             knowledgeBases={knowledgeBases}
             mcpServers={mcpServers}
             tools={tools}
+            skills={agentSkills}
             agents={workflowAgents}
             isToolsLoading={isToolsLoading}
             toolsError={toolsError}
@@ -2252,6 +2254,7 @@ export function AgentsPage({
             {t("编排业务流程、知识库和模型能力，构建可运行的 AI 应用。")}
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
           onClick={openCreateDialog}
@@ -2260,6 +2263,7 @@ export function AgentsPage({
           <PlusIcon data-icon="inline-start" />
           {t("新建应用")}
         </Button>
+        </div>
       </div>
       {isAgentListBusy ? <TopLoadingBar progress={35} /> : null}
 

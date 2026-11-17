@@ -6,3 +6,8 @@ def inspect_import(filename: str, content: bytes) -> AgentSkillCreateRequest:
     return AgentSkillCreateRequest.model_validate(
         inspect_skill_package(filename, content)
     )
+
+
+__all__ = [
+    "inspect_import",
+]

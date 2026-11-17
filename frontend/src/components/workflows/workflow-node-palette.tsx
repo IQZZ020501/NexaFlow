@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   LoaderCircleIcon,
+  NetworkIcon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -15,15 +16,19 @@ import { Button } from "@/components/ui/button"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
-import type { TFunction, TranslationKey } from "@/i18n"
+import type { TFunction } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
 import type { ToolDetail } from "@/lib/api/tools"
 import type { WorkflowGraph, WorkflowNodeType } from "@/lib/api/workflows"
 import {
   toolDisplayDescription,
-  toolDisplayName,
   toolSourceDisplayName,
 } from "@/lib/tool-display"
+import {
+  groupTools,
+  toolGroupName,
+  workflowToolDisabledReason,
+} from "@/lib/tool-groups"
 import {
   WORKFLOW_BASIC_NODE_TYPES,
   WORKFLOW_NODE_PRESETS,
@@ -60,28 +65,7 @@ function publishedVersionId(agent: Agent) {
 }
 
 /**
- * Determines why a tool cannot be added to a workflow.
- *
- * @param tool - The tool whose workflow availability is evaluated
- * @returns The localized reason the tool is disabled, or `null` when the tool can be added
- */
-function workflowToolDisabledReason(tool: ToolDetail): TranslationKey | null {
-  if (!tool.can_use) return "没有使用权限"
-  if (
-    tool.status !== "active" ||
-    tool.availability !== "available" ||
-    !tool.current_version_id
-  ) {
-    return "工具当前不可用"
-  }
-  if (!tool.workflow_callable) return "不支持工作流调用"
-  if (tool.approval === "each_call") return "需要逐次审批"
-  if (tool.approval !== "auto") return "工具调用已禁用"
-  return null
-}
-
-/**
- * Provides a popover for adding workflow nodes, tools, Python code, and agents.
+ * Provides a popover for adding workflow nodes, tools and agents.
  *
  * @param tools - Tools available for selection
  * @param agents - Agents available for selection
@@ -113,19 +97,23 @@ export function WorkflowNodePalette({
   const query = search.trim().toLowerCase()
   const visibleTools = tools.filter(
     (tool) =>
+      (tool.kind === "builtin" || tool.kind === "mcp") &&
       tool.can_view &&
       tool.function_name !== "inline_python" &&
-      tool.function_name !== "create_artifact" &&
-      (!query ||
-        `${toolDisplayName(tool, t)} ${toolDisplayDescription(tool, t)} ${toolSourceDisplayName(tool.source, t)}`
-          .toLowerCase()
-          .includes(query))
+      ![
+        "create_artifact",
+        "bash",
+        "run_skill_script",
+        "install_skill_dependencies",
+      ].includes(tool.function_name)
   )
-  const inlinePythonMatches =
-    !query ||
-    `${t("Python 代码")} ${t("在工作流沙箱中运行 Python 代码。")}`
-      .toLowerCase()
-      .includes(query)
+  const visibleGroups = groupTools(visibleTools).filter(
+    (group) =>
+      !query ||
+      `${toolGroupName(group, t)} ${group.tools[0]!.kind === "mcp" ? t("MCP 工具") : toolDisplayDescription(group.tools[0]!, t)}`
+        .toLowerCase()
+        .includes(query)
+  )
   const availableAgents = agents.filter(
     (agent) =>
       agent.app_type === "agent" &&
@@ -137,7 +125,6 @@ export function WorkflowNodePalette({
   )
   const startNodeId =
     graph.nodes.find((node) => node.data.type === "start")?.id ?? "start"
-  const InlinePythonIcon = NODE_ICONS.code
 
   function add(
     type: WorkflowNodeType,
@@ -313,75 +300,83 @@ export function WorkflowNodePalette({
                   ) : null}
                 </div>
               ) : null}
-              {isToolsLoading && !visibleTools.length ? (
+              {isToolsLoading && !visibleGroups.length ? (
                 <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
                   <LoaderCircleIcon className="size-4 animate-spin" />
                   {t("正在加载工具")}
                 </div>
-              ) : inlinePythonMatches || visibleTools.length ? (
+              ) : visibleGroups.length ? (
                 <div className="space-y-2">
-                  {inlinePythonMatches ? (
-                    <button
-                      type="button"
-                      aria-label={t("Python 代码")}
-                      className="flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted"
-                      onClick={() => add("code")}
-                    >
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                        <InlinePythonIcon className="size-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">
-                          {t("Python 代码")}
-                        </span>
-                        <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
-                          {t("在工作流沙箱中运行 Python 代码。")}
-                        </span>
-                      </span>
-                    </button>
-                  ) : null}
-                  {visibleTools.map((tool) => {
-                    const disabledReason = workflowToolDisabledReason(tool)
+                  {visibleGroups.map((group) => {
+                    const tool = group.tools[0]!
+                    const isMcp = tool.kind === "mcp"
+                    const name = toolGroupName(group, t)
+                    const disabledReason = group.tools.some(
+                      (item) => !workflowToolDisabledReason(item)
+                    )
+                      ? null
+                      : workflowToolDisabledReason(tool)
                     return (
                       <button
-                        key={tool.id}
+                        key={group.id}
                         type="button"
-                        aria-label={toolDisplayName(tool, t)}
+                        aria-label={name}
                         title={disabledReason ? t(disabledReason) : undefined}
                         disabled={Boolean(disabledReason)}
                         className="flex w-full items-start gap-3 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                         onClick={() => {
-                          if (disabledReason || !tool.current_version_id) return
-                          add("tool", toolDisplayName(tool, t), {
-                            tool: {
-                              tool_id: tool.id,
-                              version_id: tool.current_version_id,
-                            },
-                            arguments: {},
-                          })
+                          if (disabledReason) return
+                          add(
+                            "tool",
+                            name,
+                            isMcp
+                              ? {
+                                  mcp_source_id: tool.source.id,
+                                  tool: { tool_id: "", version_id: "" },
+                                  arguments: {},
+                                }
+                              : {
+                                  tool: {
+                                    tool_id: tool.id,
+                                    version_id: tool.current_version_id,
+                                  },
+                                  arguments: {},
+                                }
+                          )
                         }}
                       >
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
                           <BuiltinToolIcon
                             functionName={tool.function_name}
+                            fallback={isMcp ? NetworkIcon : undefined}
                             className="size-4"
                           />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
                             <span className="truncate text-sm font-medium">
-                              {toolDisplayName(tool, t)}
+                              {name}
                             </span>
                             <Badge
                               variant="outline"
                               className="shrink-0 text-[10px]"
                             >
-                              {toolSourceDisplayName(tool.source, t)}
+                              {isMcp
+                                ? t("MCP 工具")
+                                : toolSourceDisplayName(tool.source, t)}
                             </Badge>
                           </span>
-                          {toolDisplayDescription(tool, t) ? (
+                          {!isMcp && toolDisplayDescription(tool, t) ? (
                             <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-foreground">
                               {toolDisplayDescription(tool, t)}
+                            </span>
+                          ) : null}
+                          {!disabledReason &&
+                          group.tools.some(
+                            (item) => item.approval === "each_call"
+                          ) ? (
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              {t("需要逐次审批")}
                             </span>
                           ) : null}
                           {disabledReason ? (

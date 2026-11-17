@@ -12,11 +12,12 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_settings, require_password_changed
+from app.api.v1.artifacts.routes import artifact_response
 from app.application.agents import (
     authenticate_agent_api_credential,
     cancel_external_agent_run,
@@ -35,8 +36,9 @@ from app.application.agents import (
     stream_external_agent_run,
     upload_public_agent_files,
 )
-from app.application.agents.access.service import PublishedAgentContext
 from app.application.agents.runs.session import append_session_input
+from app.application.artifacts.service import get_run_artifact
+from app.application.publications.service import PublishedApplicationContext
 from app.entities.agents import AgentApiCredential
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
@@ -121,7 +123,7 @@ async def public_agent_profile(
 
 
 def _agent_api_documentation(
-    context: PublishedAgentContext,
+    context: PublishedApplicationContext,
 ) -> AgentApiDocumentationResponse:
     if context.publication is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Published agent not found.")
@@ -234,6 +236,7 @@ async def create_public_agent_run(
         payload.conversation_id,
         payload.file_ids,
         payload.approval_mode,
+        request_id=payload.request_id,
     )
 
 
@@ -296,6 +299,7 @@ async def regenerate_public_agent_run(
         user.id,
         settings,
         payload.goal if payload else None,
+        request_id=payload.request_id if payload else None,
     )
 
 
@@ -461,7 +465,7 @@ async def _api_context(
     db: AsyncSession,
     agent_id: str,
     credentials: HTTPAuthorizationCredentials | None,
-) -> tuple[PublishedAgentContext, AgentApiCredential]:
+) -> tuple[PublishedApplicationContext, AgentApiCredential]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API credential required.")
     return await authenticate_agent_api_credential(
@@ -504,6 +508,7 @@ async def create_api_agent_run(
         payload.goal,
         settings,
         payload.conversation_id,
+        request_id=payload.request_id,
     )
 
 
@@ -521,6 +526,23 @@ async def get_api_agent_run(
         db, agent_id, run_id, "api", credential.id
     )
     return external_run_to_response(run)
+
+
+@api_router.get(
+    "/runs/{run_id}/artifacts/{artifact_id}/content", response_class=Response
+)
+async def download_api_agent_artifact(
+    agent_id: str,
+    run_id: str,
+    artifact_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_api_key_scheme)
+    ],
+) -> Response:
+    _, credential = await _api_context(db, agent_id, credentials)
+    run = await get_external_agent_run(db, agent_id, run_id, "api", credential.id)
+    return artifact_response(await get_run_artifact(db, artifact_id, run))
 
 
 @api_router.get("/runs/{run_id}/stream", response_class=StreamingResponse)

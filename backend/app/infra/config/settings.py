@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
+from app.infra.config.execution_hosts import SandboxHost, host_settings, parse_hosts
+
 ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
 
@@ -113,10 +115,14 @@ class Settings:
     agent_external_consumer_runs_per_minute: int = 10
     opensandbox_url: str = "http://127.0.0.1:8088"
     opensandbox_api_key: str = ""
+    opensandbox_hosts: tuple[SandboxHost, ...] = ()
+    opensandbox_host_id: str = "local"
     opensandbox_image: str = "nexaflow/execution:local"
     opensandbox_egress_domains: tuple[str, ...] = ()
     # Live sandboxes allowed across all workers; 0 leaves creation unbounded.
     opensandbox_max_sandboxes: int = 0
+    opensandbox_memory_budget_mib: int = 0
+    opensandbox_cpu_budget: int = 0
     opensandbox_warm_pool_size: int = 0
     opensandbox_max_sandboxes_per_consumer: int = 2
     # Console Runs share the same per-consumer bound as public/API Runs so a
@@ -126,9 +132,7 @@ class Settings:
     # sends it in every request, so production requires TLS unless the
     # operator explicitly opts out for a loopback-only control plane.
     opensandbox_allow_insecure_http: bool = False
-    workflow_sandbox_timeout_seconds: float = 5.0
-    # Rendering and Skill execution get their own budget; the workflow code
-    # budget is not a safe upper bound for a document renderer.
+    # Rendering and Skill execution share a bounded execution budget.
     artifact_sandbox_timeout_seconds: float = 30.0
     jwt_expires_minutes: int = 1440
     refresh_token_expires_days: int = 30
@@ -216,6 +220,7 @@ class Settings:
                 "OPENSANDBOX_URL", "http://127.0.0.1:8088"
             ).rstrip("/"),
             opensandbox_api_key=os.getenv("OPENSANDBOX_API_KEY", ""),
+            opensandbox_hosts=parse_hosts(os.getenv("OPENSANDBOX_HOSTS", "")),
             opensandbox_image=os.getenv(
                 "OPENSANDBOX_IMAGE", "nexaflow/execution:local"
             ),
@@ -228,6 +233,10 @@ class Settings:
                 os.getenv("OPENSANDBOX_MAX_SANDBOXES", "0")
             ),
             opensandbox_warm_pool_size=int(os.getenv("OPENSANDBOX_WARM_POOL_SIZE", "0")),
+            opensandbox_memory_budget_mib=int(
+                os.getenv("OPENSANDBOX_MEMORY_BUDGET_MIB", "0")
+            ),
+            opensandbox_cpu_budget=int(os.getenv("OPENSANDBOX_CPU_BUDGET", "0")),
             opensandbox_max_sandboxes_per_consumer=int(os.getenv("OPENSANDBOX_MAX_SANDBOXES_PER_CONSUMER", "2")),
             opensandbox_max_sandboxes_per_workspace=int(
                 os.getenv("OPENSANDBOX_MAX_SANDBOXES_PER_WORKSPACE", "2")
@@ -236,9 +245,6 @@ class Settings:
                 "OPENSANDBOX_ALLOW_INSECURE_HTTP", ""
             ).strip().lower()
             in {"1", "true", "yes", "on"},
-            workflow_sandbox_timeout_seconds=float(
-                os.getenv("WORKFLOW_SANDBOX_TIMEOUT_SECONDS", "5")
-            ),
             artifact_sandbox_timeout_seconds=float(
                 os.getenv("ARTIFACT_SANDBOX_TIMEOUT_SECONDS", "30")
             ),
@@ -253,6 +259,22 @@ class Settings:
         return settings
 
     def validate(self, require_bootstrap: bool = True) -> None:
+        if self.opensandbox_hosts:
+            identifiers = [host.id for host in self.opensandbox_hosts]
+            origins = [host.url.rstrip("/") for host in self.opensandbox_hosts]
+            if (
+                len(set(identifiers)) != len(identifiers)
+                or len(set(origins)) != len(origins)
+                or any(not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", name) for name in identifiers)
+                or self.opensandbox_warm_pool_size
+            ):
+                raise RuntimeError("Execution hosts require unique stable IDs/origins and a disabled warm pool.")
+            for selected in host_settings(self):
+                if not selected.opensandbox_api_key or type(selected.opensandbox_max_sandboxes) is not int or selected.opensandbox_max_sandboxes <= 0:
+                    raise RuntimeError("Each execution host requires credentials and a positive capacity.")
+                from dataclasses import replace
+
+                replace(selected, opensandbox_hosts=()).validate(require_bootstrap=require_bootstrap)
         required = {
             "BOOTSTRAP_ADMIN_USERNAME": self.bootstrap_admin_username,
             "BOOTSTRAP_ADMIN_EMAIL": self.bootstrap_admin_email,
@@ -377,6 +399,10 @@ class Settings:
             ) from exc
         if self.opensandbox_max_sandboxes < 0:
             raise RuntimeError("OPENSANDBOX_MAX_SANDBOXES must not be negative.")
+        if self.opensandbox_memory_budget_mib < 0 or self.opensandbox_cpu_budget < 0:
+            raise RuntimeError(
+                "OpenSandbox memory and CPU budgets must not be negative."
+            )
         if self.opensandbox_warm_pool_size < 0 or (self.opensandbox_max_sandboxes and self.opensandbox_warm_pool_size >= self.opensandbox_max_sandboxes):
             raise RuntimeError("OPENSANDBOX_WARM_POOL_SIZE must be nonnegative and leave capacity for active sandboxes.")
         if self.opensandbox_warm_pool_size and not self.opensandbox_max_sandboxes:
@@ -403,10 +429,6 @@ class Settings:
                     "is sent on every request. Set OPENSANDBOX_ALLOW_INSECURE_HTTP=1 only "
                     "for a loopback control plane."
                 )
-        if not 0.1 <= self.workflow_sandbox_timeout_seconds <= 30:
-            raise RuntimeError(
-                "WORKFLOW_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 30."
-            )
         if not 0.1 <= self.artifact_sandbox_timeout_seconds <= 300:
             raise RuntimeError(
                 "ARTIFACT_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 300."

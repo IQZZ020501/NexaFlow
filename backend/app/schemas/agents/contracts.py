@@ -175,6 +175,9 @@ AgentApprovalMode = Literal["always_ask", "ask_risky", "full_access"]
 
 
 class AgentRunCreateRequest(BaseModel):
+    request_id: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
     file_ids: list[str] = Field(default_factory=list)
@@ -186,6 +189,9 @@ class AgentRunCreateRequest(BaseModel):
 
 
 class AgentRunRegenerateRequest(BaseModel):
+    request_id: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
     goal: str | None = Field(default=None, min_length=1, max_length=4000)
 
 
@@ -219,6 +225,9 @@ class RunFeedbackRequest(BaseModel):
 
 
 class ExternalAgentRunCreateRequest(BaseModel):
+    request_id: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
+    )
     goal: str = Field(min_length=1, max_length=4000)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
 
@@ -303,6 +312,7 @@ class AgentRunResponse(BaseModel):
         exclude_if=lambda value: not value,
     )
     model_usage: dict[str, Any] = Field(default_factory=dict)
+    execution_manifest: dict[str, Any] = Field(default_factory=dict)
     grounding_status: str = Field(default="not_started", deprecated=True)
     grounding_meta: dict[str, Any] = Field(default_factory=dict, deprecated=True)
     feedback: Literal["positive", "negative"] | None = None
@@ -397,6 +407,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
         "reviewing",
         "completed",
         "preparing",
+        "waiting_resources",
         "running",
         "succeeded",
         "failed",

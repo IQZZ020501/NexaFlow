@@ -2,9 +2,9 @@
 
 ## 职责
 
-技术基础设施：配置加载、异步数据库会话与仓库层（ORM↔实体映射 + 按特性划分的 repositories 数据访问层）、原始 SQL 脚本、Alembic 数据库迁移链、安全（密码/JWT、密钥加解密与部署密钥持久化、Redis 限流）、日志体系（`log_error`/`log_event` 与内外部错误分类）、Celery 应用与任务分发、对象存储、Python 沙箱客户端、运行时工具、Agent 实时流、MCP stdio 处理、SMTP 发送与引导数据播种。
+技术基础设施：配置加载、异步数据库会话与仓库层（ORM↔实体映射 + 按特性划分的 repositories 数据访问层）、原始 SQL 脚本、Alembic 数据库迁移链、安全（密码/JWT、密钥加解密与部署密钥持久化、Redis 限流）、日志体系（`log_error`/`log_event` 与内外部错误分类）、Celery 应用与任务分发、对象存储、执行平面客户端、运行时工具、Agent 实时流、MCP stdio 处理、SMTP 发送与引导数据播种。
 
-分层约定：业务领域代码通过 `app/ports/` 中稳定契约访问能力；本模块（`app/infra`）提供其基础设施实现与跨层工具，不反向依赖业务模块。
+分层约定：业务领域代码通过 `app/ports/` 的稳定契约访问外部能力；本模块提供配置、会话、存储等基础设施与跨层工具。仓储按既有规则导入领域 ORM 和状态常量，负责 ORM↔实体映射；应用流程编排留在 `application/`。
 
 ## 目录总览
 
@@ -58,7 +58,7 @@
 
 ### app/infra/sandbox/
 
-- `backend/app/infra/sandbox/client.py` — Workflow/Artifact 语义与结果校验：通过 `app/ports/execution.py` 委托外部 OpenSandbox，保持 `execute_workflow_code`/`execute_artifact_code`/`execute_skill_artifact` 契约；无 Unix socket 或宿主进程回退。Workflow 代码节点与文档/Skill 渲染各用一份预算（`WORKFLOW_SANDBOX_TIMEOUT_SECONDS` 与 `ARTIFACT_SANDBOX_TIMEOUT_SECONDS`），内外层使用同一个值，避免内层先超时造成的“随机失败”。
+- `backend/app/infra/sandbox/client.py` — 历史 Artifact 渲染契约与结果校验：`execute_artifact_code` / `execute_skill_artifact` 经 `app/ports/execution.py` 委托 OpenSandbox，保留冻结 DOCX/PDF/XLSX 契约；新文件任务通过 bash 或 Skill 脚本执行。没有 Workflow Code 节点或宿主执行回退。
 - `backend/app/infra/execution/` — 公网域名语法/私网 deny 列表、非敏感执行配置指纹；生命周期在 `adapters/execution/opensandbox.py`，运行器在独立执行镜像。`sessions.py::SessionStore.acquire_existing` 只认领既有会话、绝不新建，用于产物读取这类只读路径。
 
 ### app/infra/runtime/
@@ -88,7 +88,7 @@
 ## Alembic 迁移链
 
 - `backend/alembic/env.py` — Alembic 迁移环境：导入 ORM 模型注册到 `Base.metadata`，覆盖 `app.domain` 各特性模型（agent/tool/knowledge/workflow/platform/identity-enterprise/email/audit/artifacts/resource_folders/agent_skills/announcements 与 `app.domain.models.registered.RegisteredModel`）及 `app.infra.observability.system_log.SystemLog`；从 Settings 读 `DATABASE_URL`，支持在线/离线迁移。
-- 迁移版本（`backend/alembic/versions/*.py`，时间戳编号，单链演进）：从 `202607040001_identity_workspace_foundation`（users / workspaces / teams 初始表）到 `202609250001_platform_secrets`，先后覆盖租户约束与系统/审计日志、知识库文档分块流水线与 BM25 检索、模型注册与凭据、Agent 发布/公开访问/四表 Run 存储/会话记忆、统一 Tool 持久化与 Workflow 基础、MCP 传输与网络策略、生成 Artifact 与资源文件夹、企业身份、治理与邀请、技能与内建工具、上海时区、视觉模型、公告、文档引用模板、Agent 运行时治理、当前时间工具、知识调用预算与查询模式移除、技能控制面与依赖安装、PPT/图片生成技能、用户引用解耦、部署密钥持久化等演进。`202609250001` 建 `platform_secrets`（`app.domain.platform.models.PlatformSecret`）；downgrade 在仍有密钥行时拒绝执行。
+- `backend/alembic/versions/` 保存单链历史迁移，包含建表、数据转换、旧功能清理、权限及运行时契约升级。新空库和已有安装都通过完整链升级，不能按文件数量或已移除功能判断迁移无用。当前头与历史用 `uv run python -m alembic heads` / `uv run python -m alembic history` 查看（在 `backend/` 运行），不在文档固定一个会过期的 head。部署密钥行一旦创建即持续使用；相关 downgrade 会拒绝删除仍有密钥的存储。
 - 根配置：`backend/alembic.ini`（`script_location = alembic`、`prepend_sys_path = .`）与 `backend/Makefile` 目标 `dev`/`migrate`/`worker`/`coverage`。
 
 ## 相关测试

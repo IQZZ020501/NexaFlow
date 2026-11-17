@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
 
 
 class BearerAuth:
@@ -45,6 +45,7 @@ def main() -> None:
     parser.add_argument("--token", default="")
     parser.add_argument("--pid-file")
     parser.add_argument("--startup-delay", type=float, default=0)
+    parser.add_argument("--long-tasks", action="store_true")
     args = parser.parse_args()
 
     if args.pid_file:
@@ -70,6 +71,71 @@ def main() -> None:
     async def wait(seconds: float) -> str:
         await asyncio.sleep(seconds)
         return "done"
+
+    if args.long_tasks:
+        jobs: dict[str, dict] = {}
+        metrics = {"submits": 0, "cancels": 0, "results": 0}
+
+        def receipt(job):
+            return {
+                "request_id": job["request_id"],
+                "task_id": job["task_id"],
+                "status": job["status"],
+            }
+
+        @server.tool()
+        def job_submit(message: str, ctx: Context) -> dict[str, object]:
+            key = (ctx.request_context.meta or {}).get("nexaflow/idempotencyKey")
+            if not key:
+                raise ValueError("A stable request identity is required")
+            metrics["submits"] += 1
+            job = jobs.setdefault(
+                key,
+                {
+                    "request_id": key,
+                    "task_id": "job-" + str(len(jobs) + 1),
+                    "status": "running",
+                    "message": message,
+                    "polls": 0,
+                },
+            )
+            return receipt(job)
+
+        def lookup(request_id, task_id):
+            job = jobs[request_id]
+            if task_id is not None and job["task_id"] != task_id:
+                raise ValueError("Wrong task identity")
+            return job
+
+        @server.tool()
+        def job_status(request_id: str, task_id: str | None) -> dict[str, object]:
+            job = lookup(request_id, task_id)
+            job["polls"] += 1
+            if (
+                job["status"] == "running"
+                and job["message"] != "forever"
+                and job["polls"] >= 2
+            ):
+                job["status"] = "succeeded"
+            return receipt(job)
+
+        @server.tool()
+        def job_result(request_id: str, task_id: str | None) -> dict[str, object]:
+            metrics["results"] += 1
+            job = lookup(request_id, task_id)
+            return receipt(job) | {"result": job["message"]}
+
+        @server.tool()
+        def job_cancel(request_id: str, task_id: str | None) -> dict[str, object]:
+            metrics["cancels"] += 1
+            job = lookup(request_id, task_id)
+            if job["status"] == "running":
+                job["status"] = "cancelled"
+            return receipt(job)
+
+        @server.tool()
+        def job_metrics() -> dict[str, object]:
+            return metrics | {"jobs": len(jobs)}
 
     if args.transport == "stdio":
         server.run("stdio")

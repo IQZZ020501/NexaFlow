@@ -13,6 +13,10 @@ class GeneratedArtifact:
     format: str = "html"
     filename: str = ""
     relative_path: str | None = None
+    content_hash: str | None = None
+    previous_artifact_id: str | None = None
+    invocation_id: str | None = None
+    inspection: dict = field(default_factory=dict)
     media_type: str = "text/html; charset=utf-8"
     content: bytes = b""
     size_bytes: int = 0

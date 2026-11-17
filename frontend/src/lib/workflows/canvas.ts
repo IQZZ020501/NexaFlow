@@ -12,6 +12,32 @@ type CanvasSize = { width: number; height: number }
 export type CanvasRect = CanvasPosition & CanvasSize
 const CANVAS_CARD_GAP = 24
 
+/** Keeps new, unmeasured nodes in a clear horizontal lane, including expanded editors. */
+export function availableWorkflowNodePosition(
+  position: CanvasPosition,
+  nodes: WorkflowNode[]
+) {
+  const rects = workflowNodeRects(nodes).map((rect) => ({
+    ...rect,
+    width: Math.max(rect.width, 320),
+  }))
+  const isClear = (x: number) =>
+    rects.every(
+      (rect) =>
+        x + 320 + CANVAS_CARD_GAP <= rect.x ||
+        x >= rect.x + rect.width + CANVAS_CARD_GAP
+    )
+  if (isClear(position.x)) return position
+  const x = rects
+    .flatMap((rect) => [
+      rect.x - 320 - CANVAS_CARD_GAP,
+      rect.x + rect.width + CANVAS_CARD_GAP,
+    ])
+    .filter(isClear)
+    .sort((a, b) => Math.abs(a - position.x) - Math.abs(b - position.x))[0]
+  return { x: x ?? position.x, y: position.y }
+}
+
 /**
  * Computes a canvas position after applying pointer movement from the drag start.
  *

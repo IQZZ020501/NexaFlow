@@ -35,7 +35,6 @@ const TONE_TILE = {
 const TOOL_KIND_LABELS: Record<string, TranslationKey> = {
   builtin: "内置工具",
   mcp: "MCP 工具",
-  python: "Python",
 }
 
 /**
@@ -74,11 +73,11 @@ function StatTile({
         </span>
       ) : null}
       <div className="min-w-0">
-        <p className="truncate text-xs text-muted-foreground">{label}</p>
+        <p className="break-words text-xs text-muted-foreground">{label}</p>
         <p className="mt-0.5 text-lg font-semibold tabular-nums">{value}</p>
         {detail ? (
           <p
-            className="mt-0.5 truncate text-xs text-muted-foreground"
+            className="mt-0.5 break-words text-xs text-muted-foreground"
             title={detail}
           >
             {detail}
@@ -110,7 +109,8 @@ export function AnalyticsInventoryPanel({
       <CardHeader className="px-5">
         <CardTitle>{t("资产概览")}</CardTitle>
         <CardDescription>
-          {t("工作空间内的应用、知识、工具与模型规模")}
+          {t("统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。")}
+          {" "}{t("工具按内置工具（含内置 Skills）和 MCP 子工具计数，仅统计当前工具目录中的资源。")}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid min-w-0 grid-cols-1 gap-3 px-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -143,9 +143,8 @@ export function AnalyticsInventoryPanel({
           tone="amber"
           label={t("工具")}
           value={count(inventory.tools.total)}
-          detail={t("MCP {mcp} · Python {python} · 内置 {builtin}", {
+          detail={t("MCP {mcp} · 内置 {builtin}", {
             mcp: count(inventory.tools.mcp),
-            python: count(inventory.tools.python),
             builtin: count(inventory.tools.builtin),
           })}
         />
@@ -184,7 +183,9 @@ export function AnalyticsToolUsagePanel({
       <CardHeader className="px-5">
         <CardTitle>{t("工具调用")}</CardTitle>
         <CardDescription>
-          {t("所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）")}
+          {t(
+            "所选周期内的工具执行情况与调用最多的工具（仅统计当前存在的工具）"
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex min-w-0 flex-col gap-4 px-5">

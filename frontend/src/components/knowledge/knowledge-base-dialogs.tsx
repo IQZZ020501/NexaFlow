@@ -115,7 +115,7 @@ export function KnowledgeBaseDialogs({
           <DialogHeader>
             <DialogTitle>{t("新建知识库")}</DialogTitle>
             <DialogDescription>
-              {t("配置知识库名称、描述和默认数据源。")}
+              {t("配置知识库名称、描述和检索模型。")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreate}>
@@ -126,6 +126,7 @@ export function KnowledgeBaseDialogs({
                 </FieldLabel>
                 <Input
                   id="knowledge-base-name"
+                  maxLength={120}
                   value={form.name}
                   onChange={(event) =>
                     setForm((current) => ({
@@ -142,6 +143,7 @@ export function KnowledgeBaseDialogs({
                 </FieldLabel>
                 <textarea
                   id="knowledge-base-description"
+                  maxLength={2000}
                   className="min-h-24 w-full rounded-lg border bg-background px-3 py-2 text-sm"
                   value={form.description}
                   onChange={(event) =>
@@ -184,7 +186,11 @@ export function KnowledgeBaseDialogs({
               >
                 {t("取消")}
               </Button>
-              <Button type="submit" disabled={isSaving} aria-busy={isSaving}>
+              <Button
+                type="submit"
+                disabled={isSaving || !form.name.trim()}
+                aria-busy={isSaving}
+              >
                 {isSaving ? (
                   <LoaderCircleIcon
                     data-icon="inline-start"
@@ -214,6 +220,7 @@ export function KnowledgeBaseDialogs({
                   </FieldLabel>
                   <Input
                     id="knowledge-base-edit-name"
+                    maxLength={120}
                     value={editForm.name}
                     onChange={(event) =>
                       setEditForm((current) =>
@@ -231,6 +238,7 @@ export function KnowledgeBaseDialogs({
                   </FieldLabel>
                   <textarea
                     id="knowledge-base-edit-description"
+                    maxLength={2000}
                     className="min-h-24 w-full rounded-lg border bg-background px-3 py-2 text-sm"
                     value={editForm.description}
                     onChange={(event) =>
@@ -279,7 +287,11 @@ export function KnowledgeBaseDialogs({
                 >
                   {t("取消")}
                 </Button>
-                <Button type="submit" disabled={isSaving} aria-busy={isSaving}>
+                <Button
+                  type="submit"
+                  disabled={isSaving || !editForm.name.trim()}
+                  aria-busy={isSaving}
+                >
                   {isSaving ? (
                     <LoaderCircleIcon
                       data-icon="inline-start"

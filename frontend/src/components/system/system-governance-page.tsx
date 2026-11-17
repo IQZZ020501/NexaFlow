@@ -456,14 +456,11 @@ function OperationsPanel() {
               <ActivityIcon className="size-4" />
               {t("系统运行")}
             </CardTitle>
-            <CardDescription>
-              <span className="block">{t("查看服务状态与后台失败记录")}</span>
-              <span className="mt-1 block text-xs">
-                {t("每 30 秒自动刷新")} · {t("最后检查")}：
-                {health
-                  ? formatDateTime(health.checked_at, languageLocales[language])
-                  : t("未知")}
-              </span>
+            <CardDescription className="text-xs">
+              {t("每 30 秒自动刷新")} · {t("最后检查")}：
+              {health
+                ? formatDateTime(health.checked_at, languageLocales[language])
+                : t("未知")}
             </CardDescription>
           </div>
           <Button
@@ -823,6 +820,8 @@ function GovernancePanel() {
               {t(
                 "系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略"
               )}
+              {" "}{t("统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。")}
+              {" "}{t("工具按内置工具（含内置 Skills）和 MCP 子工具计数，仅统计当前工具目录中的资源。")}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">

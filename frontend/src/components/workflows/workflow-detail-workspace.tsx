@@ -68,6 +68,8 @@ import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-for
 import type { TFunction } from "@/i18n"
 import type { AgentDetailView } from "@/lib/agent-views"
 import { compareLiveStreamIds, type Agent } from "@/lib/api/agents"
+import type { AgentSkill } from "@/lib/api/agent-skills"
+import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
 import type { RegisteredModel } from "@/lib/api/llm"
 import type { McpServer } from "@/lib/api/mcp"
@@ -79,6 +81,7 @@ import {
   listWorkflowRuns,
   listWorkflowVersions,
   observeWorkflowRun,
+  resolveWorkflowToolApproval,
   regenerateWorkflowRun,
   publishWorkflow,
   restoreWorkflowVersion,
@@ -126,6 +129,7 @@ type WorkflowDetailWorkspaceProps = {
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
   tools?: ToolDetail[]
+  skills?: AgentSkill[]
   agents?: Agent[]
   isToolsLoading?: boolean
   toolsError?: string | null
@@ -153,6 +157,7 @@ function runStatusLabel(run: WorkflowRun, t: TFunction) {
   if (run.status === "running") return t("运行中")
   if (run.status === "awaiting_input") return t("等待填写表单")
   if (run.status === "awaiting_child") return t("等待执行")
+  if (run.status === "awaiting_approval") return t("等待工具调用确认")
   if (run.status === "succeeded") return t("运行成功")
   if (run.status === "cancelled") return t("运行已取消")
   return t("运行失败")
@@ -208,6 +213,7 @@ export function WorkflowDetailWorkspace({
   knowledgeBases,
   mcpServers,
   tools = [],
+  skills = [],
   agents = [],
   isToolsLoading = false,
   toolsError = null,
@@ -245,6 +251,9 @@ export function WorkflowDetailWorkspace({
   const [isPublishing, setIsPublishing] = React.useState(false)
   const [isRunning, setIsRunning] = React.useState(false)
   const [isSubmittingForm, setIsSubmittingForm] = React.useState(false)
+  const [resolvingCallId, setResolvingCallId] = React.useState<string | null>(
+    null
+  )
   const [regeneratingRunId, setRegeneratingRunId] = React.useState<
     string | null
   >(null)
@@ -639,6 +648,30 @@ export function WorkflowDetailWorkspace({
       reportError(error)
     } finally {
       setIsRunning(false)
+    }
+  }
+
+  async function handleToolDecision(
+    callId: string,
+    decision: "approve" | "reject"
+  ) {
+    if (!currentRun || resolvingCallId) return
+    setResolvingCallId(`${currentRun.id}:${callId}`)
+    try {
+      const run = await resolveWorkflowToolApproval(
+        token,
+        workspaceId,
+        agent.id,
+        currentRun.id,
+        callId,
+        decision === "approve"
+      )
+      setCurrentRun(run)
+      if (run.status !== "awaiting_approval") observeRun(run)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setResolvingCallId(null)
     }
   }
 
@@ -1116,6 +1149,7 @@ export function WorkflowDetailWorkspace({
                 knowledgeBases={knowledgeBases}
                 mcpServers={mcpServers}
                 tools={tools}
+                skills={skills}
                 agents={agents}
                 runtimeStatuses={runtimeStatuses}
                 readOnly={!agent.can_edit}
@@ -1254,6 +1288,25 @@ export function WorkflowDetailWorkspace({
                                 </span>
                               </div>
 
+                              {currentRun.status === "awaiting_approval"
+                                ? (currentRun.tool_calls ?? [])
+                                    .filter((call) =>
+                                      [
+                                        "awaiting_approval",
+                                        "uncertain",
+                                      ].includes(call.status)
+                                    )
+                                    .map((call) => (
+                                      <InlineToolApproval
+                                        key={call.call_id}
+                                        runId={currentRun.id}
+                                        call={call}
+                                        resolvingCallId={resolvingCallId}
+                                        onDecision={handleToolDecision}
+                                        t={t}
+                                      />
+                                    ))
+                                : null}
                               {currentRun.status === "awaiting_input" &&
                               currentRun.pending_form ? (
                                 <WorkflowRuntimeForm
@@ -1276,7 +1329,8 @@ export function WorkflowDetailWorkspace({
                                 </section>
                               ) : null}
 
-                              {currentRun.last_error ? (
+                              {currentRun.last_error &&
+                              currentRun.status !== "awaiting_approval" ? (
                                 <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
                                   {workflowErrorMessage(
                                     currentRun.last_error,
@@ -1379,6 +1433,7 @@ export function WorkflowDetailWorkspace({
                         ) : null}
                         <textarea
                           id="workflow-run-question"
+                          enterKeyHint="send"
                           rows={3}
                           maxLength={4000}
                           aria-label={
@@ -1408,7 +1463,8 @@ export function WorkflowDetailWorkspace({
                           onKeyDown={(event) => {
                             if (
                               event.key === "Enter" &&
-                              (event.metaKey || event.ctrlKey)
+                              !event.shiftKey &&
+                              !event.nativeEvent.isComposing
                             ) {
                               event.preventDefault()
                               event.currentTarget.form?.requestSubmit()

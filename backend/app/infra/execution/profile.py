@@ -7,6 +7,13 @@ import json
 from app.infra.config.settings import Settings
 
 
+def sandbox_resource_profile(tools, skills) -> str:
+    builtins = {tool.get("execution_spec", {}).get("builtin") for tool in tools}
+    if builtins & {"artifact", "python_artifact", "skill", "skill_dependency_install"}:
+        return "heavy"
+    return "standard" if skills or builtins & {"shell", "skill_script"} else "small"
+
+
 def execution_profile(settings: Settings) -> dict:
     payload = {
         "schema_version": 1,
@@ -14,6 +21,21 @@ def execution_profile(settings: Settings) -> dict:
         "image": settings.opensandbox_image,
         "egress_domains": sorted(settings.opensandbox_egress_domains),
     }
+    if settings.opensandbox_hosts:
+        payload["schema_version"] = 2
+        payload["hosts"] = sorted(
+            [
+                {
+                    "id": host.id,
+                    "url": host.url,
+                    "max_sandboxes": host.max_sandboxes,
+                    "memory_budget_mib": host.memory_budget_mib,
+                    "cpu_budget": host.cpu_budget,
+                }
+                for host in settings.opensandbox_hosts
+            ],
+            key=lambda host: host["id"],
+        )
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

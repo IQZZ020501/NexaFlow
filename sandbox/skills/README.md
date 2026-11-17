@@ -1,24 +1,31 @@
-# NexaFlow Skills
+# NexaFlow built-in Skills
 
-Each child directory is a Skill bundle. An executable artifact Skill contains
-`SKILL.md` frontmatter with `entrypoint` and `artifact-format`, plus the named
-Python entrypoint below `scripts/`. These fixed renderers and their locked
-dependencies are baked into the OpenSandbox execution image. Calls accept JSON
-content/data only, never a replacement program or runtime requirements install.
+These project-authored guides are maintained for the actual NexaFlow runtime;
+they are not verbatim copies of third-party proprietary Skill files.
 
-The built-in bundles below are NexaFlow-authored renderers:
+- `documents`: read/create/revise DOCX, preserving the source and previewing pages.
+- `pdf`: PyMuPDF page operations, forms, extraction and rendering.
+- `pptx`: free-form python-pptx design and targeted revisions of editable decks.
+- `spreadsheets`: pandas analysis and openpyxl workbook preservation.
+- `skill-creator`: author and validate importable workspace Skill packages.
 
-- `documents` — Word and Google Docs-targeted DOCX workflows
-- `pdf` — PDF creation, inspection, and rendering workflows
-- `pptx` — new PowerPoint decks with templates, brand themes, icons, and tables
-- `spreadsheets` — spreadsheet creation and analysis guidance
+Each selectable Tool accepts `{}` and loads the full version-pinned SKILL.md.
+The model then uses already-authorized bash in the Run-private OpenSandbox guest.
+Skill loading itself does not execute code or grant new permissions. The business
+image contains only these Markdown guides; helper scripts and locked Python/Office
+dependencies belong to the execution image.
 
-They are intentionally small and project-specific; they are not copies of an
-upstream Skill distribution.
+PPTX helpers inventory existing packages and render previews. DOCX uses the same
+Office preview support. Skill Creator validates package structure and limits;
+it does not install/publish a Skill or guarantee script safety. Conversion and
+structural validation do not constitute visual review or prove full format fidelity.
 
-To add a platform renderer, add its bundle here and register a fixed published
-Tool contract, then rebuild/version the execution image. There is no host Skills
-directory or local Worker runner. Workspace-uploaded SKILL.md/ZIP packages are a
-separate versioned control-plane feature with lazy loading and ledger-backed
-scripts; see [Skills](../../docs/SKILLS.md) and
-[OpenSandbox deployment](../../deploy/opensandbox/README.md).
+The old PPT fixed layout, composition, PPTD/WASM and compatibility implementations
+have been removed. The three remaining render.py files serve only existing
+DOCX/PDF/XLSX frozen legacy contracts. New calls use direct Python workflows;
+Workflows use authorized MCP Tools or Agent nodes for file work. Standalone Python
+Tools and Python Code nodes have been removed.
+
+See [Skills](../../docs/SKILLS.md) for permissions, package imports, migration and
+delivery, and [OpenSandbox deployment](../../deploy/opensandbox/README.md) for the
+execution boundary.

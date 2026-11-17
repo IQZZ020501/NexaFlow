@@ -23,6 +23,7 @@ from app.application.workflows.definitions.service import (
     list_workflow_versions,
     publish_workflow_definition,
     regenerate_workflow_run,
+    resolve_workflow_tool_approval,
     restore_workflow_version,
     set_workflow_run_feedback,
     stream_workflow_run,
@@ -39,6 +40,7 @@ from app.schemas.workflows.contracts import (
     WorkflowNodeExecutionListResponse,
     WorkflowRunCreateRequest,
     WorkflowRunResponse,
+    WorkflowToolApprovalRequest,
     WorkflowUploadResponse,
     WorkflowValidationRequest,
     WorkflowValidationResponse,
@@ -51,6 +53,29 @@ router = APIRouter(
     prefix="/workspaces/{workspace_id}/workflows",
     tags=["workflows"],
 )
+
+
+@router.post("/{agent_id}/runs/{run_id}/tool-calls/{call_id}/approval")
+async def resolve_workspace_workflow_tool_approval(
+    agent_id: str,
+    run_id: str,
+    call_id: str,
+    payload: WorkflowToolApprovalRequest,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> WorkflowRunResponse:
+    return await resolve_workflow_tool_approval(
+        db,
+        context.workspace.id,
+        agent_id,
+        run_id,
+        call_id,
+        context.user,
+        context.membership_role,
+        settings,
+        approve=payload.approve,
+    )
 
 
 @router.get("/{agent_id}/definition", response_model=WorkflowDefinitionResponse)

@@ -1,4 +1,5 @@
 import type { TFunction, TranslationKey } from "@/i18n"
+import type { KnowledgeTask } from "@/lib/api/knowledge"
 
 /**
  * Resolves a document status to its translated display label.
@@ -89,6 +90,36 @@ export function taskStatusLabel(status: string, t: TFunction) {
 
   const labelKey = labels[status]
   return labelKey ? t(labelKey) : status
+}
+
+/** Formats the current execution attempt, keeping terminal durations fixed. */
+export function taskDurationLabel(
+  task: Pick<KnowledgeTask, "status" | "started_at" | "finished_at">,
+  now: number,
+  t: TFunction
+) {
+  if (!task.started_at || task.status === "queued") return "—"
+
+  const startedAt = Date.parse(task.started_at)
+  const finishedAt = task.finished_at
+    ? Date.parse(task.finished_at)
+    : task.status === "running" || task.status === "cancelling"
+      ? now
+      : NaN
+  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt)) return "—"
+
+  const seconds = Math.max(0, Math.floor((finishedAt - startedAt) / 1000))
+  if (seconds < 60) return t("{value} 秒", { value: seconds })
+  if (seconds < 3600) {
+    return t("{minutes} 分 {seconds} 秒", {
+      minutes: Math.floor(seconds / 60),
+      seconds: seconds % 60,
+    })
+  }
+  return t("{hours} 小时 {minutes} 分", {
+    hours: Math.floor(seconds / 3600),
+    minutes: Math.floor((seconds % 3600) / 60),
+  })
 }
 
 /**

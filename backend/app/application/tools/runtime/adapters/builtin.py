@@ -13,11 +13,6 @@ from app.application.tools.runtime.adapters._common import (  # noqa: F401
     _is_direct_artifact_content,
     _redirect_legacy_artifact_path,
 )
-from app.application.tools.runtime.contracts import (
-    ToolAdapterBusy,
-    ToolInvocationContext,
-    ToolRuntimeResult,
-)
 from app.domain.artifacts.services import artifact_format_from_filename
 from app.entities.tools import ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
@@ -27,10 +22,14 @@ from app.infra.sandbox.client import (
     WorkflowSandboxError,
     execute_artifact_code,
     execute_skill_artifact,
-    execute_workflow_code,
 )
 from app.ports.execution import ExecutionBusy, ExecutionError, ExecutionOutcomeUnknown
 from app.ports.llm import ModelProviderError, ModelProviderStatusError
+from app.ports.tools import (
+    ToolAdapterBusy,
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 
 
 class BuiltinToolAdapter:
@@ -46,6 +45,30 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "skill_guide":
+            from app.domain.tools.catalog.guides import BUILTIN_GUIDE_NAMES
+
+            skill = snapshot.execution_spec.get("skill")
+            instructions = snapshot.execution_spec.get("instructions")
+            if (
+                not isinstance(skill, str)
+                or skill not in BUILTIN_GUIDE_NAMES
+                or not isinstance(instructions, str)
+                or not instructions.strip()
+                or len(instructions.encode("utf-8")) > 16_000
+            ):
+                return _failure(
+                    "skill_guide_invalid", "Skill instructions are unavailable."
+                )
+            return ToolRuntimeResult(
+                ok=True,
+                data={"skill": skill, "instructions": instructions},
+                summary="Skill loaded. Follow its instructions using authorized bash.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
         if builtin == "shell":
             from app.application.tools.runtime.adapters.shell import execute_shell
             try:
@@ -111,6 +134,7 @@ class BuiltinToolAdapter:
                 "python_artifact": "python_artifact_failed",
                 "skill": "skill_failed",
             }[builtin]
+            artifact_inspection = {}
             try:
                 filename = arguments["filename"]
                 artifact_format = artifact_format_from_filename(filename)
@@ -132,6 +156,7 @@ class BuiltinToolAdapter:
                     artifact_content = artifact.content
                     artifact_stdout = artifact.stdout
                     artifact_exit_code = artifact.exit_code
+                    artifact_inspection = artifact.inspection
                 else:
                     supplied_format = arguments.get("format")
                     if (
@@ -196,6 +221,7 @@ class BuiltinToolAdapter:
                         artifact_content = artifact.content
                         artifact_stdout = artifact.stdout
                         artifact_exit_code = artifact.exit_code
+                        artifact_inspection = artifact.inspection
             except WorkflowSandboxBusyError as exc:
                 raise ToolAdapterBusy("File runtime is busy.") from exc
             except ExecutionOutcomeUnknown as exc:
@@ -220,6 +246,8 @@ class BuiltinToolAdapter:
                         artifact_format=artifact_format,
                         filename=filename,
                         content=artifact_content,
+                        invocation_id=context.invocation_id,
+                        inspection=artifact_inspection,
                     )
                     await db.commit()
             except ValueError as exc:
@@ -228,6 +256,10 @@ class BuiltinToolAdapter:
                 "artifact_id": link.artifact_id,
                 "format": link.format,
                 "filename": link.filename,
+                "relative_path": link.relative_path,
+                "content_hash": link.content_hash,
+                "previous_artifact_id": link.previous_artifact_id,
+                "inspection": link.inspection,
                 "download_url": link.download_url,
                 "expires_at": link.expires_at.isoformat(),
                 "size_bytes": link.size_bytes,
@@ -241,8 +273,24 @@ class BuiltinToolAdapter:
                 if isinstance(snapshot.output_schema, dict)
                 else {}
             )
+            if (
+                snapshot.output_schema
+                and snapshot.output_schema.get("additionalProperties") is False
+            ):
+                result_data = {
+                    key: value
+                    for key, value in result_data.items()
+                    if key in output_properties
+                }
             if isinstance(output_properties, dict) and "artifacts" in output_properties:
                 artifact_data["mime_type"] = link.media_type
+                item_schema = output_properties["artifacts"].get("items", {})
+                if item_schema.get("additionalProperties") is False:
+                    artifact_data = {
+                        key: value
+                        for key, value in artifact_data.items()
+                        if key in item_schema.get("properties", {})
+                    }
                 result_data["artifacts"] = [artifact_data]
             return ToolRuntimeResult(
                 ok=True,
@@ -256,27 +304,4 @@ class BuiltinToolAdapter:
                     "size_bytes": link.size_bytes,
                 },
             )
-        if builtin != "inline_python" or context.origin != "workflow":
-            return _failure("unsupported_builtin", "Built-in Tool is unavailable.")
-        try:
-            result = await execute_workflow_code(
-                self.settings,
-                arguments["code"],
-                arguments["inputs"],
-                arguments.get("skills"),
-            )
-        except WorkflowSandboxBusyError as exc:
-            raise ToolAdapterBusy("Python sandbox is busy.") from exc
-        except ExecutionOutcomeUnknown as exc:
-            return _failure("python_execution_failed", str(exc)[:1000], uncertain=True)
-        except (KeyError, TypeError, WorkflowSandboxError):
-            return _failure("python_execution_failed", "Python Tool execution failed.")
-        return ToolRuntimeResult(
-            ok=True,
-            data={"result": result.result},
-            summary="Python Tool completed.",
-            error_code=None,
-            error_message=None,
-            outcome="confirmed",
-            usage={"exit_code": result.exit_code},
-        )
+        return _failure("unsupported_builtin", "Built-in Tool is unavailable.")

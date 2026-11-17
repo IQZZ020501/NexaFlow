@@ -2,7 +2,7 @@
 
 ## 架构
 
-Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`src/app/` 路由薄壳委托给 `src/components/` 巨型页面组件；`src/contexts/` 提供语言/主题/会话/消息中心全局状态；`src/lib/api/` 按域划分的 API 客户端统一走 `src/lib/api-client.ts` 的 fetch 封装（dev 下 `/api` 由 Next rewrite 代理到 FastAPI）；`src/i18n/` 以中文文案为键的三语词典；系统管理（dashboard 路由组）与平台工作区（platform 路由组）共享 SessionGate/TopBar，Workflow 画布路由组（`(platform)/workflow`）只用 SessionGate 并全屏渲染。技术栈：React 19 + Tailwind v4 + shadcn/ui（radix-nova）、`@xyflow/react`（Workflow 画布）、`recharts`（数据大屏）、`shiki`/`beautiful-mermaid`（Markdown/Mermaid 渲染）、Bun 脚本。
+Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`src/app/` 路由薄壳委托给 `src/components/` 中按功能拆分的页面组件；`src/contexts/` 提供语言/主题/会话/消息中心全局状态；`src/lib/api/` 按域划分的 API 客户端统一走 `src/lib/api-client.ts` 的 fetch 封装（dev 下 `/api` 由 Next rewrite 代理到 FastAPI）；`src/i18n/` 以中文文案为键的三语词典；系统管理（dashboard 路由组）与平台工作区（platform 路由组）共享 SessionGate/TopBar，Workflow 画布路由组（`(platform)/workflow`）只用 SessionGate 并全屏渲染。技术栈：React 19 + Tailwind v4 + shadcn/ui（radix-nova）、`@xyflow/react`（Workflow 画布）、`recharts`（数据大屏）、`shiki`/`beautiful-mermaid`（Markdown/Mermaid 渲染）、Bun 脚本。
 
 ## 文件清单
 
@@ -43,7 +43,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/app/(platform)/app/knowledge/[id]/upload/layout.tsx` — 上传向导共享状态 Provider
 - `frontend/src/app/(platform)/app/knowledge/[id]/upload/segment/page.tsx` — 上传向导「分段预览」步骤（server 解析路由状态）
 - `frontend/src/app/(platform)/app/knowledge/[id]/documents/[docId]/page.tsx` — 文档详情页
-- `frontend/src/app/(platform)/app/tools/page.tsx` — 统一工具中心：builtin/Python/MCP 目录、来源与授权管理
+- `frontend/src/app/(platform)/app/tools/page.tsx` — 统一工具中心：内置工具、Skills、MCP 目录、来源与授权管理
 - `frontend/src/app/(platform)/app/apps/page.tsx` — Agent 应用列表页
 - `frontend/src/app/(platform)/app/apps/[id]/page.tsx` — Agent 详情页（兼容旧 `?view=` 查询参数）
 - `frontend/src/app/(platform)/app/apps/[id]/[view]/page.tsx` — Agent/Workflow 详情规范路由（`overview` 重定向到规范路径）
@@ -101,8 +101,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/llm/llm-page.tsx` — 模型管理页：注册模型 CRUD、凭据、目录浏览
 
 **tools/**（工具功能）
-- `frontend/src/components/tools/tools-page.tsx` — 生产工具中心：Skills/MCP/Python 目录页签（内置工具、内置 Skills、工作区 Skills、MCP Server 分组）、跨页加载、详情、来源状态、策略与授权入口
-- `frontend/src/components/tools/python-tool-dialog.tsx` — Python Tool 草稿、schema、沙箱测试、发布与版本状态
+- `frontend/src/components/tools/tools-page.tsx` — 生产工具中心：Skills/MCP 目录页签（内置工具、内置 Skills、工作区 Skills、MCP Server 分组）、跨页加载、详情、来源状态、策略与授权入口
 - `frontend/src/components/tools/mcp-source-dialog.tsx`、`mcp-form.ts` — MCP Source 创建：普通成员公网 HTTP/SSE，管理员额外支持 stdio/私网
 - `frontend/src/components/tools/skill-dialog.tsx` — Agent Skill 导入检查、版本与发布
 - `frontend/src/components/tools/builtin-tool-icon.tsx` — 内置工具/Skill 图标映射
@@ -124,6 +123,9 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/resource-folders/resource-folder-tree.tsx`、`resource-folder-layout.tsx`、`resource-folder-panel.tsx` — 文件夹树与面板
 - `frontend/src/components/resource-folders/resource-folder-picker-dialog.tsx`、`resource-bulk-move-bar.tsx` — 归入文件夹与批量移动
 - `frontend/src/components/resource-folders/use-resource-folders.ts` — 知识库/应用/模型/工具共用的文件夹状态 hook
+
+**Agent 对话文件**
+- `frontend/src/components/agents/agent-file-picker.tsx` — 控制台与公开对话共用的文件/文件夹上传入口，`frontend/src/lib/agent-upload.ts` 保留相对路径并读取拖入的目录；文件持久化见 [对话文件](PROJECT_FILES.md)。
 
 **apps/**（公开应用对话分派）
 - `frontend/src/components/apps/public-application-chat.tsx` — `/chat/[id]` 的分派器：按应用类型渲染公开 Agent 或 Workflow 对话
@@ -197,7 +199,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/lib/notifications.ts` — AppNotification 类型
 - `frontend/src/lib/password.ts` — 新密码校验
 - `frontend/src/lib/chunk-overlap.ts` — 分段重叠文本检测
-- `frontend/src/lib/constants.ts` — 默认密码、状态/审计标签键映射
+- `frontend/src/lib/constants.ts` — 状态/审计标签键映射
 - `frontend/src/lib/display.ts` — 展示格式化工具
 - `frontend/src/lib/theme-options.ts` — 外观轴选项与判别函数：调色板（10 个）、字体、圆角、密度、侧边栏、布局、内容宽度 + `isTheme*` 校验
 - `frontend/src/lib/tool-display.ts`、`tool-visibility.ts`、`builtin-skill-docs.ts` — 工具展示名/可见性与内置 Skill 文档
@@ -214,7 +216,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/lib/api/run-stream.ts` — 登录态与公开 Run 共用的 NDJSON 双游标重连器
 - `frontend/src/lib/api/llm.ts` — 模型 API：目录、注册模型 CRUD、凭据
 - `frontend/src/lib/api/mcp.ts` — MCP Server API：三种传输契约、CRUD、刷新、工具列表与执行策略
-- `frontend/src/lib/api/tools.ts` — 统一 Tool/Source API：目录、Python 生命周期、固定版本、策略、授权与测试 Invocation
+- `frontend/src/lib/api/tools.ts` — 统一 Tool/Source API：目录、固定版本、策略、授权与测试 Invocation
 - `frontend/src/lib/api/workflows.ts` — Workflow 草稿、发布版本、Tool/Agent 资源快照、运行与节点审计
 - `frontend/src/lib/api/public-workflows.ts` — 已发布 Workflow 的公开/API 会话与运行流
 - `frontend/src/lib/api/system.ts` — 系统管理 API：工作空间/团队/用户/审计/运行健康/治理/邀请/会话

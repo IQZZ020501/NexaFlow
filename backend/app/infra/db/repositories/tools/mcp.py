@@ -90,7 +90,7 @@ async def list_mcp_servers_by_creator(
 
 
 async def get_mcp_server_by_id(db: AsyncSession, server_id: str) -> McpServer | None:
-    row = await db.get(McpServerOrm, server_id)
+    row = await db.get(McpServerOrm, server_id, populate_existing=True)
     return to_entity(McpServer, row) if row is not None else None
 
 

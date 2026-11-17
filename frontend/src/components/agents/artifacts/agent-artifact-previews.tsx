@@ -10,6 +10,7 @@ import { ArtifactDownloadLink } from "@/components/knowledge/markdown-content"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { useLanguage } from "@/contexts/language-provider"
+import { useOptionalSession } from "@/contexts/session-context"
 import {
   previewArtifactsForEvents,
   htmlPreviewDocument,
@@ -30,6 +31,8 @@ type PreviewState =
 
 function ArtifactPreviewBody({ artifact }: { artifact: PreviewArtifact }) {
   const { t } = useLanguage()
+  const session = useOptionalSession()
+  const sessionToken = session?.token
   const [state, setState] = React.useState<PreviewState>({ status: "loading" })
   const [attempt, setAttempt] = React.useState(0)
   const fail = React.useCallback(() => setState({ status: "failed" }), [])
@@ -42,15 +45,24 @@ function ArtifactPreviewBody({ artifact }: { artifact: PreviewArtifact }) {
     }, 30_000)
     async function load() {
       try {
-        const blob = await requestBlob("/api/v1/artifacts/download", {
-          method: "POST",
-          credentials: "omit",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: artifact.downloadUrl.slice("/api/v1/artifacts/".length),
-          }),
-          signal: controller.signal,
-        })
+        const stable = artifact.downloadUrl.endsWith("/content")
+        const blob = await requestBlob(
+          stable ? artifact.downloadUrl : "/api/v1/artifacts/download",
+          {
+            method: stable ? "GET" : "POST",
+            token: stable ? (sessionToken ?? undefined) : undefined,
+            credentials: "omit",
+            headers: { "Content-Type": "application/json" },
+            body: stable
+              ? undefined
+              : JSON.stringify({
+                  token: artifact.downloadUrl.slice(
+                    "/api/v1/artifacts/".length
+                  ),
+                }),
+            signal: controller.signal,
+          }
+        )
         if (
           !blob.size ||
           blob.size > MAX_PREVIEW_BYTES ||
@@ -82,7 +94,7 @@ function ArtifactPreviewBody({ artifact }: { artifact: PreviewArtifact }) {
       window.clearTimeout(timeout)
       controller.abort()
     }
-  }, [artifact.downloadUrl, artifact.format, attempt])
+  }, [artifact.downloadUrl, artifact.format, attempt, sessionToken])
 
   if (state.status === "html")
     return (
@@ -202,7 +214,7 @@ export function AgentArtifactPreviews({
                 className={`shrink-0 text-2xl ${getDocumentFileIconColor(artifact.filename)}`}
               />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {artifact.filename}
+                {artifact.relativePath ?? artifact.filename}
               </span>
               <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                 <EyeIcon className="size-3.5" />

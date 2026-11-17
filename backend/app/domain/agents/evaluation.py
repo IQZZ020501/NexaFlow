@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.domain.agents.evaluation_files import (
+    EvaluationFileExpectation,
+    EvaluationFileObservation,
+    evaluate_files,
+    file_expectations,
+)
+
 
 def _strings(value: Any, field_name: str) -> tuple[str, ...]:
     if value is None:
@@ -47,6 +54,7 @@ class AgentEvaluationExpectation:
     max_total_tokens: int | None = None
     max_model_calls: int | None = None
     max_duration_ms: int | None = None
+    files: tuple[EvaluationFileExpectation, ...] = ()
 
     @classmethod
     def from_dict(cls, value: Any) -> AgentEvaluationExpectation:
@@ -63,6 +71,7 @@ class AgentEvaluationExpectation:
         ):
             raise ValueError("expect.min_sources must be a non-negative integer.")
         return cls(
+            files=file_expectations(value.get("files")),
             status=status.strip(),
             answer_contains=_strings(
                 value.get("answer_contains"),
@@ -104,6 +113,7 @@ class AgentEvaluationCase:
     expectation: AgentEvaluationExpectation
     samples: int = 1
     required: bool = True
+    follow_ups: tuple[AgentEvaluationCase, ...] = ()
 
     @classmethod
     def from_dict(cls, value: Any) -> AgentEvaluationCase:
@@ -121,6 +131,11 @@ class AgentEvaluationCase:
         required = value.get("required", True)
         if not isinstance(required, bool):
             raise ValueError(f"Evaluation case {case_id!r} required must be boolean.")
+        follow_ups = value.get("follow_ups", [])
+        if not isinstance(follow_ups, list) or len(follow_ups) > 7 or any(
+            not isinstance(item, dict) or "follow_ups" in item or "samples" in item for item in follow_ups
+        ):
+            raise ValueError("follow_ups must contain at most 7 single-turn objects.")
         return cls(
             id=case_id.strip(),
             goal=goal.strip(),
@@ -128,6 +143,7 @@ class AgentEvaluationCase:
             expectation=AgentEvaluationExpectation.from_dict(value.get("expect", {})),
             samples=_positive_int(value.get("samples"), "samples", 1) or 1,
             required=required,
+            follow_ups=tuple(cls.from_dict({**item, "id": f"{case_id}:{index}", "required": required, "category": category}) for index, item in enumerate(follow_ups, 2)),
         )
 
 
@@ -169,6 +185,7 @@ class AgentEvaluationObservation:
     source_count: int = 0
     model_usage: dict[str, Any] = field(default_factory=dict)
     duration_ms: int = 0
+    files: tuple[EvaluationFileObservation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -180,6 +197,7 @@ class AgentEvaluationResult:
     passed: bool
     failures: tuple[str, ...]
     run_id: str = ""
+    turns: tuple[dict[str, Any], ...] = ()
 
 
 def evaluate_agent_observation(
@@ -190,6 +208,7 @@ def evaluate_agent_observation(
 ) -> AgentEvaluationResult:
     expected = case.expectation
     failures: list[str] = []
+    failures.extend(evaluate_files(expected.files, observation.files))
     if observation.status != expected.status:
         failures.append(f"status:{observation.status}")
     for index, text in enumerate(expected.answer_contains, start=1):

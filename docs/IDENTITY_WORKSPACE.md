@@ -2,7 +2,7 @@
 
 ## 职责
 
-身份与租户地基：`app/domain/platform/models.py` 提供 User/RefreshSession/Workspace/WorkspaceMembership/Team/TeamMembership/ResourcePermission/SmtpSettings/WorkspaceGovernance/WorkspaceInvitation 共享 ORM 实体；`domain/{teams,audit}` 承载团队与审计领域；`domain/identity/enterprise` 承载企业身份连接/身份与登录态 ORM；ResourceFolder 与治理（governance）为工作区级资源；另有 builtin/Python/MCP 统一 Tool 目录、版本、策略、授权、绑定和调用账本领域模型。身份与工作区应用服务负责登录、token、用户/成员/邀请/密码重置管理，资源文件夹与系统日志、治理入口位于其上的 application 与 api 层；所有核心资源使用 `workspace_id` 隔离。
+身份与租户地基：`app/domain/platform/models.py` 提供 User/RefreshSession/Workspace/WorkspaceMembership/Team/TeamMembership/ResourcePermission/SmtpSettings/WorkspaceGovernance/WorkspaceInvitation 共享 ORM 实体；`domain/{teams,audit}` 承载团队与审计领域；`domain/identity/enterprise` 承载企业身份连接/身份与登录态 ORM；ResourceFolder 与治理（governance）为工作区级资源；另有 builtin/MCP 统一 Tool 目录、版本、策略、授权、绑定和调用账本领域模型。身份与工作区应用服务负责登录、token、用户/成员/邀请/密码重置管理，资源文件夹与系统日志、治理入口位于其上的 application 与 api 层；所有核心资源使用 `workspace_id` 隔离。
 
 ## 分层关系
 
@@ -35,10 +35,9 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 #### Tool 目录域（app/domain/tools/）
 
 - `backend/app/domain/tools/models.py` — ORM：ToolSource、Tool、ToolDraft、ToolVersion、ToolPolicy、ApplicationToolBinding、ToolInvocation、McpServer、McpToolPolicy
-- `backend/app/domain/tools/catalog/service.py` — builtin/Python/MCP 统一目录构造（`build_workspace_system_catalog`、inline Python/artifact/skill artifact 构造）、stable catalog id、定义 hash、MCP function 命名与目录条目模型
+- `backend/app/domain/tools/catalog/service.py` — builtin/MCP 目录与内置 Skill 指南构造（`ensure_workspace_system_catalog`）、stable catalog id、定义 hash、MCP function 命名与目录条目模型
 - `backend/app/domain/tools/mcp/service.py` — MCP Source 生命周期：传输配置解析（bearer/stdio）、server 连接与发现对账、legacy MCP 策略模式兼容
-- `backend/app/domain/tools/python/service.py` — Python Tool 草稿、测试快照、发布、启停、归档与函数名规则
-- `backend/app/domain/tools/access/permissions.py` — owner/admin/`view`/`use` 授权计算（`ToolAuthorization`、`evaluate_tool_authorization`）与 view/use/manage 断言、权限值校验
+- `backend/app/domain/tools/access/permissions.py` — 创建者及显式 `view`/`use` 授权计算（管理员治理仅适用于系统 builtin）（`ToolAuthorization`、`evaluate_tool_authorization`）与 view/use/manage 断言、权限值校验
 - `backend/app/domain/tools/access/bindings.py` — Agent/Workflow 固定 Tool/Version 绑定快照构建（binder 身份保持）
 - `backend/app/domain/tools/runtime.py` — ToolSnapshot 序列化与载荷还原、参数 schema 校验/归一化、参数 hash、effect/approval 与运行终态约束
 - 纯领域对象（FrozenJson 容器、ToolRef、ToolSnapshot、ToolAccess、Tool 授权枚举等）在 `backend/app/entities/tools/models.py`，供 runtime/bindings/permissions 共用；上层用例编排在 `app/application/tools/{runtime,management}/service.py`，其 API 入口在 `app/api/v1/tools/{routes,sources,mcp}.py`（详见 API 文档），仓储在 `app/infra/db/repositories/tools/{repository,mcp,catalog,bindings,invocations,drafts}.py`
@@ -109,16 +108,16 @@ admin/{users,audit,governance,smtp,system_logs}/routes.py
 ## 关键约定
 
 - 系统管理员（`is_global_admin`）是平台级治理者：可创建、管理和审计所有工作空间，并治理跨工作空间的成员、团队、运行与安全策略；工作空间管理员负责本空间成员、全部团队及空间级策略。资源级授权仍按工作空间隔离并记录审计。
-- 角色只有 `admin`/`member` 两级，且**不参与资源可见性**：知识库、Agent、Tool 与 Agent Skill 都按「创建者 + `ResourcePermission` 显式授权」判定（知识库 `view/edit`，Agent `view`，Tool 不可转授的 `view/use`，Agent Skill `view/use`），工作空间管理员与系统管理员都不能看到或管理别人的资源。授权管理（`require_can_manage_permissions`）与归档恢复也只限创建者；例外是工作区公共的 builtin 工具（管理员仍可治理其策略与测试）与 Agent Skill（工作空间/系统管理员可管理他人 Skill）。运行遥测（`/logs`、`/conversation-users`、`/monitoring`）保留管理员只读入口，用于工作区运营。
+- 角色只有 `admin`/`member` 两级，且**不参与资源可见性**：知识库、Agent、Tool 与 Agent Skill 都按「创建者 + `ResourcePermission` 显式授权」判定（知识库和 Agent `view/edit`，Tool 不可转授的 `view/use`，Agent Skill `view/use`），工作空间管理员与系统管理员都不能看到或管理别人的资源。授权管理（`require_can_manage_permissions`）与归档恢复也只限创建者；例外是工作区公共的 builtin 工具（管理员仍可治理其策略与测试）。运行遥测（`/logs`、`/conversation-users`、`/monitoring`）保留管理员只读入口，用于工作区运营。
 - 资源文件夹是「谁的目录谁管」的私有结构：任何成员都可创建目录（根目录，或自己可见的目录下），可见范围只有创建者本人，以及通过 `ResourcePermission` 授权或自己拥有的知识库/应用/工具/模型（`ResourceFolderType = knowledge|application|model|tool`）所揭示的目录链（含祖先）；系统管理员与工作空间管理员都不再看到别人的目录。改名、移动、删除仅限创建者（系统管理员保留平台级兜底）。资源本身仍按 `view/edit` 授权判定；前端把「归入不可见目录」的资源显示在根目录，避免列表丢项。
 - 团队是组织标签：支持成员管理（添加/列表/改角色/移除，需团队管理员或工作空间管理员；团队本身的创建/改名/删除需工作空间管理员），不参与资源授权；团队成员必须是工作区成员。
 - 知识库 owner（`created_by_user_id`）可通过 owner 转移接口变更；资源权限只有创建者本人可管理（工作空间管理员不再代管别人的知识库）。
 - 删除工作区会在同一事务内级联删除知识库、Agent/运行记录、MCP、模型、团队/成员及资源授权；存在 queued/running 知识任务时返回 409。向量集合和对象存储文件由持久清理记录交给 Celery 异步删除，失败后自动重试。
-- 永久删除用户不再被审计/历史引用阻止：Agent 运行与工具调用历史、发布与运行快照、知识内容与各类创作归属把用户 id 作为**不带外键的字符串**保留（见迁移 `202609230001_detach_user_references`，与 `audit_logs.actor_user_id` 一致）。例外：`tools`/`tool_sources`/`tool_versions.created_by_user_id`、`tool_policies.reviewed_by_user_id`、`tool_invocations.approved_by_user_id` 仍是 `FK users.id ON DELETE SET NULL`，因此用户创建的 Python 工具在 owner 注销后会变成无 owner 的工作区级系统工具（`is_system_tool` 成立，所有成员可 `use`）。账号自身的数据（刷新会话、工作区/团队成员、上传文件、该用户创建的 MCP、该用户授权的 Agent Skill 与应用工具绑定）在同一事务内清理，Agent 随之失去这些授权，需由其他成员重新绑定。删除后，发布者是已注销账号的公开 Agent 会在公开入口按「未找到」失败关闭，需由其他成员重新发布。
+- 永久删除用户保留已创作内容、运行与工具调用历史、不可变快照：历史作者 id 按不透明字符串保存，不通过 users 外键阻止删除。账号自身的数据由 `application/identity/service.py::delete_user_permanently` 显式清理，包括刷新会话、工作区/团队成员、上传、用户创建的 MCP Server 和其授权的 Agent Skill / Application Tool 绑定；临时上传先写持久清理意图。Python Tool 已退役，不会在删除创建者后转为公共工具。
 - 敏感写操作（创建/修改/删除）一律 `record_audit_log`。
-- Tool 默认 owner 私有：只有创建者或被授权者能查看、使用和管理；builtin 工具属工作区公共资源（所有成员可用、管理员可治理），MCP 服务器与工具策略治理仍限工作空间管理员。`view` 提供目录/详情读取（凭据类字段无条件脱敏，不因权限等级多返回），`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
-- 普通成员可创建 Python Tool 与公网 HTTP/SSE MCP Source；stdio 和私网地址只允许工作空间管理员。Bearer token、stdio 参数/工作目录/环境值及 egress 域名加密保存且不返回明文；stdio discovery/call 只在独立 OpenSandbox 执行，不具备业务后端进程或宿主目录访问能力。域名请求必须属于部署 allowlist，stdio 配置不能放行私网/metadata。
-- Agent、Workflow 与 Python 测试都固定 Tool/Version 快照并写 `tool_invocations`；builtin/Python/MCP/image_generation 只在 `app/application/tools/runtime/adapters/` 内分流（工厂 `build_tool_adapter`）。
+- Tool 默认 owner 私有：创建者负责配置管理，获授权者按 `view/use` 查看或使用，不能管理配置或转授权；builtin 工具属工作区公共资源（所有成员可用、管理员可治理）。自建 MCP 服务器及其工具策略由创建者管理，管理员无隐式管理权。`view` 提供目录/详情读取（凭据类字段无条件脱敏，不因权限等级多返回），`use` 还允许绑定到自己的 Agent/Workflow；撤销、Source/Tool 禁用、成员失效和策略漂移在 dispatch 前重新校验。
+- 普通成员可创建公网 HTTP/SSE MCP Source；stdio 和私网地址只允许工作空间管理员。Bearer token、stdio 参数/工作目录/环境值及 egress 域名加密保存且不返回明文；stdio discovery/call 只在独立 OpenSandbox 执行，不具备业务后端进程或宿主目录访问能力。域名请求必须属于部署 allowlist，stdio 配置不能放行私网/metadata。
+- Agent、Workflow 与 Tool 测试都固定 Tool/Version 快照并写 `tool_invocations`；builtin/MCP（含内置图片生成、bash 和 Skill 脚本）只在 `app/application/tools/runtime/adapters/` 内分流（工厂 `build_tool_adapter`）。
 
 ## 相关测试
 

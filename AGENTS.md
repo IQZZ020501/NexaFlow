@@ -52,6 +52,17 @@ not trigger unrelated cleanup.
   When adding a new business domain, add a self-contained module directory
   under `app/domain/<feature>/` (entities plus services), expose use cases
   through `app/application/`, and keep HTTP routers thin in `app/api/v1/`.
+- The overall style is a layered modular monolith; see
+  `docs/MODULAR_MONOLITH.md`. HTTP and cross-feature application callers use
+  the interfaces declared in `backend/scripts/module_boundaries.py` and only
+  names in their static `__all__`. Register new application modules and declare
+  allowed dependencies there. Keep application-feature and domain-feature
+  dependency graphs individually acyclic. `agents/integration.py` is the
+  Workflow-facing Agent interface. Shared publication context and temporary
+  uploads belong to `application/publications/` and `application/uploads/`;
+  durable upload cleanup belongs to `domain/uploads/`. Shared definition value
+  operations live in `domain/applications/definitions.py`. Worker composition
+  belongs to `app/bootstrap/`; use cases dispatch Runs through `ports/runs.py`.
 - Apply this dependency direction to new or changed backend code:
   - `api/v1/` routers keep HTTP concerns thin and use `application/`,
     `schemas/`, and `api/deps.py`. Existing direct imports from `entities/` or
@@ -322,16 +333,16 @@ not trigger unrelated cleanup.
   override `[data-*]` variables in `frontend/src/app/globals.css`; keep a new
   axis on its own variables so two settings cannot silently replace each other.
 - `sandbox/` builds the independent OpenSandbox execution image, not a local
-  service. `job.py` accepts bounded JSON jobs for Workflow Python, artifact
+  service. `job.py` accepts bounded JSON jobs for artifact
   rendering, pinned Python/JavaScript Skill scripts, bash commands and stdio MCP; it adds
   program/file/output/time limits inside the platform's container/VM boundary.
   The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
-  python-pptx, Pillow, the adapted offline open-kimi-ppt PPTD/WASM exporter,
-  and the standard library. Business secrets and mounts are
+  python-pptx, pandas, Pillow, MarkItDown, headless LibreOffice Writer/Calc/Impress,
+  Noto CJK fonts and the standard library. Business secrets and mounts are
   never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
   authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
   native TTL cleanup. `execution_sessions` persists Run guests, staged packages
-  and dependency locks. Python, renderers, Workflow code and Skills share that
+  and dependency locks. Renderers and Skill scripts share that
   guest; short holders check Run ownership, fence old workers and stop stale
   processes before takeover. TTL follows the Run deadline plus 60 seconds;
   terminal/cancelled Runs close guests and Beat reconciles cleanup and orphans.
@@ -351,13 +362,16 @@ not trigger unrelated cleanup.
   The SDK Redis warm pool defaults off; its total idle size is deducted from
   host capacity. Public/API consumers can hold at most two guests, including
   stdio hosts. Resource profiles use provisional sizes pending Kata calibration.
-  Fixed `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live under
-  `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
-  format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
-  The PPTX Skill keeps legacy layout calls compatible while new calls use the
-  vendored, MIT-licensed open-kimi-ppt PPTD/WASM exporter offline with bounded
-  inline media and model-selected animations. Fixed Skill Tools accept
-  content/data rather than caller-supplied Python.
+  Built-in `documents`, `pdf`, `pptx`, `spreadsheets` and `skill-creator`
+  guides live under `sandbox/skills`. Their selectable Tools accept only `{}`
+  and return version-pinned instructions; Agent bash performs file operations
+  through the existing execution port and artifact ledger. They are not
+  Workflow-callable; Workflows use authorized MCP Tools or Agent nodes for file work.
+  Standalone Python Tools and Python Code nodes are removed. Helpers
+  inspect packages, preview Office files and validate importable Skill drafts.
+  Do not impose fixed PPT layouts or palettes. The old PPT layout/PPTD/WASM
+  implementation is removed; DOCX/PDF/XLSX renderers only serve frozen legacy
+  contracts. Guides and package contents never grant capabilities or permissions.
   Workspace Skills are immutable schema-v2 SKILL.md/file bundles with lazy
   loading, live ACL checks and unified-ledger script execution. They cannot
   clamp an entire Run's budgets or grant tools themselves. Their scripts may
@@ -583,16 +597,16 @@ examples.
   explicit isolated OpenSandbox test server. Verify effective dns+nft filtering,
   timeout, package isolation and cleanup; production VM isolation must also be
   validated on Linux/Kata, not inferred from a local ordinary-Docker smoke.
-- For the remaining Tools redesign, run
+- For execution-plane compatibility checks, run
   `uv run python -m tests.execution.opensandbox_probe --url "$OPENSANDBOX_URL" --image "$OPENSANDBOX_IMAGE"`
   from `backend/` on an isolated execution host with the control-plane key and
   `OPENSANDBOX_PROBE_REDIS_URL` in its private environment. The probe verifies
   actual Docker runtime, reconnect/renew, proxy streaming, SDK shared pool,
   metadata filtering, filesystem behavior and cleanup. Its explicit
   `--allow-development` mode does not establish Kata/VM isolation. The user
-  deferred the Kata test environment on 2026-10-14; it no longer gates A–F
-  implementation, but production VM and resource calibration remain pending.
-  See `docs/TOOLS_REDESIGN.md` for verified results and remaining measurements.
+  deferred the Kata test environment on 2026-10-14; production VM and resource
+  calibration remain pending. See `deploy/opensandbox/README.md` for the check
+  procedure and `docs/EXECUTION_HOSTS.md` for placement and capacity boundaries.
 - Run full coverage only for coverage work, release/CI validation, or changes
   broad enough to put a repository gate at risk. Do not claim a percentage
   unless it was measured in the current task. The configured gates and commands
@@ -602,8 +616,10 @@ examples.
     in parallel (each with an isolated `KNOWLEDGE_STORAGE_DIR`), trace TestClient
     threads and SQLAlchemy greenlets, and merge with coverage.py; the gate is
     97%. The `agents.evaluation` gate runs through `backend/scripts/agent_eval.py`
-    and the layer guard through `backend/scripts/dependency_matrix.py`
-    (exercised by `tests.infra.architecture`).
+    and the layer/module guard through
+    `uv run python scripts/dependency_matrix.py --check` (also exercised by
+    `tests.infra.architecture`, including analyzer regression fixtures, public
+    interface resolution and application/domain cycle checks).
   - Execution image: `uv run --project sandbox python -m sandbox.tests` and
     `sandbox/run_coverage.sh` measure the job protocol (excluding test code).
     Renderer quality, child-process resource limits, cgroups and VM/network

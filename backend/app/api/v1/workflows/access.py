@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Settings, User, get_db, get_settings, require_password_changed
 from app.application.agents import authenticate_agent_api_credential
-from app.application.agents.access.service import (
-    PublishedAgentContext,
+from app.application.publications.service import (
+    PublishedApplicationContext,
     get_workspace_published_workflow_context,
 )
 from app.application.workflows.definitions.service import (
@@ -31,6 +31,7 @@ from app.application.workflows.definitions.service import (
     list_external_workflow_runs,
     list_public_workflow_conversations,
     regenerate_external_workflow_run,
+    resolve_external_workflow_tool_approval,
     set_external_workflow_run_feedback,
     stream_external_workflow_run,
     submit_external_workflow_form,
@@ -46,6 +47,7 @@ from app.schemas.workflows.contracts import (
     PublicWorkflowProfileResponse,
     WorkflowApiDocumentationResponse,
     WorkflowFormSubmitRequest,
+    WorkflowToolApprovalRequest,
     WorkflowUploadResponse,
 )
 
@@ -55,6 +57,28 @@ public_router = APIRouter(
     prefix="/public/workflows/{workflow_id}", tags=["public-workflows"]
 )
 api_router = APIRouter(prefix="/workflow-api/{workflow_id}", tags=["workflow-api"])
+
+
+@public_router.post("/runs/{run_id}/tool-calls/{call_id}/approval")
+async def resolve_public_workflow_tool_approval(
+    workflow_id: str,
+    run_id: str,
+    call_id: str,
+    payload: WorkflowToolApprovalRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_password_changed)],
+) -> ExternalWorkflowRunResponse:
+    await get_workspace_published_workflow_context(db, workflow_id, user)
+    return await resolve_external_workflow_tool_approval(
+        db,
+        workflow_id,
+        run_id,
+        user,
+        settings,
+        call_id=call_id,
+        approve=payload.approve,
+    )
 
 
 async def _encode_events(events: AsyncIterator[dict]) -> AsyncIterator[bytes]:
@@ -74,7 +98,7 @@ async def _api_context(
     db: AsyncSession,
     workflow_id: str,
     credentials: HTTPAuthorizationCredentials | None,
-) -> tuple[PublishedAgentContext, WorkflowApiCredential]:
+) -> tuple[PublishedApplicationContext, WorkflowApiCredential]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API credential required.")
     return await authenticate_agent_api_credential(

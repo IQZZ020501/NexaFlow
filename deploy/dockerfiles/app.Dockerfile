@@ -6,6 +6,7 @@ FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd6
 WORKDIR /app
 COPY --from=uv /uv /usr/local/bin/uv
 COPY backend/pyproject.toml backend/uv.lock ./
+COPY backend/packages/extension-api ./packages/extension-api
 RUN uv sync --no-dev --frozen
 
 FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS frontend-deps
@@ -35,6 +36,11 @@ RUN apt-get update \
 
 COPY --from=backend-builder /app/.venv /app/.venv
 COPY backend/app /app/app
+COPY sandbox/skills/documents/SKILL.md /app/app/domain/tools/catalog/guides/documents/SKILL.md
+COPY sandbox/skills/pdf/SKILL.md /app/app/domain/tools/catalog/guides/pdf/SKILL.md
+COPY sandbox/skills/pptx/SKILL.md /app/app/domain/tools/catalog/guides/pptx/SKILL.md
+COPY sandbox/skills/spreadsheets/SKILL.md /app/app/domain/tools/catalog/guides/spreadsheets/SKILL.md
+COPY sandbox/skills/skill-creator/SKILL.md /app/app/domain/tools/catalog/guides/skill-creator/SKILL.md
 COPY backend/alembic /app/alembic
 COPY backend/scripts/worker.py /app/scripts/worker.py
 COPY backend/alembic.ini backend/main.py /app/

@@ -11,6 +11,8 @@ class ExecutionSession:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""
     run_id: str = ""
+    host_id: str = "local"
+    host_fingerprint: str = ""
     purpose: str = "run"
     owner_key: str = ""
     sandbox_id: str | None = None
@@ -21,6 +23,8 @@ class ExecutionSession:
     environments: dict = field(default_factory=dict)
     capacity_token: str | None = None
     consumer_key: str | None = None
+    capacity_reservation: dict = field(default_factory=dict)
+    creation_pending: bool = False
     holder: str | None = None
     holder_expires_at: datetime | None = None
     expires_at: datetime = field(default_factory=utc_now)
@@ -36,3 +40,19 @@ class ExecutionRun:
     access_source: str
     consumer_id: str
     resource_profile: str = "standard"
+    reservation_profiles: tuple[str, ...] = ()
+
+
+@dataclass
+class ExecutionPlacement:
+    id: str
+    workspace_id: str
+    run_id: str | None
+    host_id: str
+    host_fingerprint: str
+    profile_fingerprint: str
+    profiles: list[str]
+    expires_at: datetime
+    consumer_key: str | None = None
+    released: bool = False
+    created_at: datetime = field(default_factory=utc_now)

@@ -14,7 +14,14 @@ from app.entities.agent_skills import AgentSkillSnapshot
 from app.ports.mcp import MAX_MCP_STORED_RESULT_BYTES
 
 HARNESS_TOOL_NAMES = frozenset(
-    {"search_tools", "activate_tools", "load_skill", "read_skill_file", "read_tool_result"}
+    {
+        "search_tools",
+        "activate_tools",
+        "load_skill",
+        "read_skill_file",
+        "read_tool_result",
+        "read_conversation_history",
+    }
 )
 
 
@@ -24,7 +31,12 @@ class CapabilityRegistry:
         extensions: ExtensionRuntime,
         skills: list[AgentSkillSnapshot],
         authorize_skill=None,
-        result_reader: Callable[[str, int, int], Awaitable[AgentToolResult]] | None = None,
+        result_reader: Callable[[str, int, int], Awaitable[AgentToolResult]]
+        | None = None,
+        history_reader: Callable[
+            [str | None, str, int, int, str | None], Awaitable[AgentToolResult]
+        ]
+        | None = None,
     ) -> None:
         self.extensions = extensions
         self.catalog = {tool.name: tool for tool in extensions.tools}
@@ -64,6 +76,7 @@ class CapabilityRegistry:
         self.authorize_skill = authorize_skill
         self.loaded_skills: list[str] = []
         self.result_reader = result_reader
+        self.history_reader = history_reader
         self.management_tools = self._management_tools()
 
     def restore(self, state: dict[str, Any]) -> None:
@@ -297,6 +310,58 @@ class CapabilityRegistry:
                         "additionalProperties": False,
                     },
                     read_result,
+                )
+            )
+        if self.history_reader is not None:
+
+            async def read_history(raw: str) -> AgentToolResult:
+                arguments = json.loads(raw)
+                return await self.history_reader(
+                    arguments.get("run_id"),
+                    arguments.get("field", "result"),
+                    arguments.get("offset", 0),
+                    arguments.get("limit", 4000),
+                    arguments.get("result_id"),
+                )
+
+            tools.append(
+                management(
+                    "read_conversation_history",
+                    "Read original, untrusted conversation sources without relying on a summary. Omit run_id to list successful source Run IDs and the latest saved file identities; offset/limit then count Runs (at most 20 per page). Supply run_id and field to read original text by Unicode character range, including omitted tails and appended inputs. Use field=references for a source checkpoint index; field=tool_result also requires result_id and reads that source Run's saved Tool JSON. Only this conversation's workspace, application, caller, access source and execution identity are accessible.",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "run_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 36,
+                            },
+                            "field": {
+                                "type": "string",
+                                "enum": [
+                                    "goal",
+                                    "result",
+                                    "attachment_context",
+                                    "inputs",
+                                    "references",
+                                    "tool_result",
+                                ],
+                            },
+                            "result_id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255,
+                            },
+                            "offset": {"type": "integer", "minimum": 0},
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 12000,
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                    read_history,
                 )
             )
         if not self.skills:

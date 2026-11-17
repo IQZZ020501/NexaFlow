@@ -24,7 +24,7 @@ from tests.support import settings as test_settings
 from app.adapters.llm.runtime import ModelCompletion, ModelToolCall
 from app.application.agents.runs.executor import run_durable_agent_run
 from app.application.agents.runs.memory import _run_messages
-from app.application.agents.runs.service import skill_execution_context
+from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agents.models import AgentRunState
 from app.domain.agents.runtime import AgentToolResult, create_agent_tool, run_agent
 from app.domain.agents.runtime.capabilities import CapabilityRegistry
@@ -551,16 +551,15 @@ async def assert_follow_up_queue():
             }
         ],
     } in emitted
-    history = _run_messages(
-        AgentRun(
-            status="succeeded",
-            goal="Start",
-            result=result.content,
-            checkpoint={"harness": result.harness},
-        )
+    history_run = AgentRun(
+        status="succeeded",
+        goal="Start",
+        result=result.content,
+        checkpoint={"harness": result.harness},
     )
+    history = _run_messages(history_run)
     assert [item["content"] for item in history] == [
-        "Start",
+        f"Historical source run_id: {history_run.id}\nStart",
         "First answer",
         "Then summarize",
         "Final summary",
@@ -763,7 +762,7 @@ async def assert_durable_session_memory(run_id):
             limit=7,
         )
         assert history and [item["content"] for item in _run_messages(history[-1])] == [
-            "Start",
+            f"Historical source run_id: {history[-1].id}\nStart",
             "Completed.",
             "Use Chinese",
             "Then summarize",

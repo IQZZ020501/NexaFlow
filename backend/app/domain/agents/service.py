@@ -23,6 +23,7 @@ from app.domain.agents.access.publications import (
     normalized_interaction_config,
     publication_from_snapshots,
 )
+from app.domain.applications.definitions import default_workflow_graph, graph_hash
 from app.domain.audit.services import record_audit_log
 from app.domain.knowledge.service import (
     get_knowledge_base,
@@ -37,9 +38,7 @@ from app.domain.tools.access.bindings import (
 )
 from app.domain.tools.catalog.service import get_tool_catalog_detail, stable_catalog_id
 from app.domain.tools.mcp.service import resolve_mcp_tools
-from app.domain.workflows.definitions.defaults import default_workflow_graph
-from app.domain.workflows.runtime.engine import graph_hash
-from app.domain.workflows.uploads import queue_upload_cleanups
+from app.domain.uploads.service import queue_upload_cleanups
 from app.entities.agent_skills import AgentSkillRef, AgentSkillSnapshot
 from app.entities.agents import Agent, AgentPublicationVersion
 from app.entities.defaults import utc_now

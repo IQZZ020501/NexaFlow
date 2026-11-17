@@ -23,6 +23,9 @@ async def cancel_run_tree(db: AsyncSession, run_id: str) -> bool:
     if not run_ids:
         return False
     await tool_repository.settle_cancelled_agent_tool_invocations(db, run_ids, now)
+    from app.infra.db.repositories.tools import remote_tasks
+
+    await remote_tasks.cancel_runs(db, run_ids)
     await execution_repository.close_runs(db, run_ids)
     db.info.setdefault("cancelled_execution_runs", set()).update(run_ids)
     return True
@@ -48,3 +51,9 @@ async def close_cancelled_execution_sessions(db: AsyncSession) -> None:
                 # Beat retries the cleanup intent committed with cancellation.
                 import logging
                 logging.getLogger(__name__).warning("Run sandbox cleanup will be retried", exc_info=True)
+
+
+__all__ = [
+    "cancel_run_tree",
+    "close_cancelled_execution_sessions",
+]

@@ -2,24 +2,24 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.agents.runs.snapshots import (
-    build_model_runtime_snapshot,
-    require_model_runtime_snapshot,
-)
 from app.application.artifacts.service import create_generated_artifact
-from app.application.tools.runtime.contracts import (
-    ToolInvocationContext,
-    ToolRuntimeResult,
-)
 from app.domain.artifacts.services import (
     MAX_ARTIFACT_BYTES,
     artifact_filename_from_label,
 )
 from app.domain.models.registered import RegisteredModel
+from app.domain.models.runtime import (
+    build_model_runtime_snapshot,
+    require_model_runtime_snapshot,
+)
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
 from app.infra.db.session import get_session_factory
 from app.ports.llm import ModelProviderError, generate_image
+from app.ports.tools import (
+    ToolInvocationContext,
+    ToolRuntimeResult,
+)
 
 
 def _validate_image_model(model: RegisteredModel, workspace_id: str) -> None:

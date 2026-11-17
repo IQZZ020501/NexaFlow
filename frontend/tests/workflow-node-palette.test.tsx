@@ -10,14 +10,14 @@ import { fireEvent, renderPage, screen } from "./helpers/dom"
 const tool: ToolDetail = {
   id: "tool-1",
   workspace_id: "ws-1",
-  kind: "python",
+  kind: "mcp",
   function_name: "lookup",
-  display_name: "Lookup",
+  display_name: "Mine",
   description: "Lookup data",
   current_version_id: "version-1",
   status: "active",
   availability: "available",
-  source: { id: "source-1", name: "Mine", kind: "python", transport: null },
+  source: { id: "source-1", name: "Mine", kind: "mcp", transport: null },
   created_by_user_id: "u-1",
   permission: "owner",
   can_view: true,
@@ -31,7 +31,6 @@ const tool: ToolDetail = {
   effect: "pure",
   workflow_callable: true,
   parallel_safe: false,
-  draft: null,
 }
 
 const agent: Agent & { current_published_version_id: string | null } = {
@@ -83,7 +82,22 @@ describe("WorkflowNodePalette", () => {
     const added: Array<{ type: string; config?: Record<string, unknown> }> = []
     renderPage(
       <WorkflowNodePalette
-        tools={[tool]}
+        tools={[
+          tool,
+          {
+            ...tool,
+            id: "retired-python",
+            kind: "python" as ToolDetail["kind"],
+            display_name: "Retired Python",
+          },
+          {
+            ...tool,
+            id: "retired-inline",
+            kind: "builtin",
+            function_name: "inline_python",
+            display_name: "Retired inline Python",
+          },
+        ]}
         agents={[agent]}
         graph={{ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }}
         onAdd={(type, _title, config) => added.push({ type, config })}
@@ -91,6 +105,7 @@ describe("WorkflowNodePalette", () => {
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "添加节点" }))
+    expect(screen.queryByRole("button", { name: "Python 代码" })).toBeNull()
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "基础节点",
       "工具",
@@ -100,11 +115,13 @@ describe("WorkflowNodePalette", () => {
       button: 0,
       ctrlKey: false,
     })
-    fireEvent.click(screen.getByRole("button", { name: "Lookup" }))
+    expect(screen.queryByRole("button", { name: /Retired/ })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Mine" }))
     expect(added.at(-1)).toEqual({
       type: "tool",
       config: {
-        tool: { tool_id: "tool-1", version_id: "version-1" },
+        mcp_source_id: "source-1",
+        tool: { tool_id: "", version_id: "" },
         arguments: {},
       },
     })
@@ -127,8 +144,9 @@ describe("WorkflowNodePalette", () => {
 
   test("offers a built-in Skill as a selectable Workflow tool", () => {
     const added: Array<{ type: string; config?: Record<string, unknown> }> = []
-    const skillTool = {
+    const skillTool: ToolDetail = {
       ...tool,
+      kind: "builtin",
       id: "skill-documents",
       function_name: "documents_skill",
       display_name: "Documents Skill",
@@ -197,30 +215,55 @@ describe("WorkflowNodePalette", () => {
             ...tool,
             id: "approval-tool",
             display_name: "Approval tool",
+            source: {
+              ...tool.source,
+              id: "Approval tool",
+              name: "Approval tool",
+            },
             approval: "each_call",
           },
           {
             ...tool,
             id: "disabled-tool",
             display_name: "Disabled tool",
+            source: {
+              ...tool.source,
+              id: "Disabled tool",
+              name: "Disabled tool",
+            },
             approval: "disabled",
           },
           {
             ...tool,
             id: "unavailable-tool",
             display_name: "Unavailable tool",
+            source: {
+              ...tool.source,
+              id: "Unavailable tool",
+              name: "Unavailable tool",
+            },
             availability: "unavailable",
           },
           {
             ...tool,
             id: "forbidden-tool",
             display_name: "Forbidden tool",
+            source: {
+              ...tool.source,
+              id: "Forbidden tool",
+              name: "Forbidden tool",
+            },
             can_use: false,
           },
           {
             ...tool,
             id: "direct-only-tool",
             display_name: "Direct only tool",
+            source: {
+              ...tool.source,
+              id: "Direct only tool",
+              name: "Direct only tool",
+            },
             workflow_callable: false,
           },
         ]}
@@ -244,7 +287,6 @@ describe("WorkflowNodePalette", () => {
       ctrlKey: false,
     })
     for (const name of [
-      "Approval tool",
       "Disabled tool",
       "Unavailable tool",
       "Forbidden tool",
@@ -254,13 +296,21 @@ describe("WorkflowNodePalette", () => {
         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled
       ).toBe(true)
     }
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Approval tool",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
     expect(screen.getByText("需要逐次审批")).toBeTruthy()
     expect(screen.getByText("工具调用已禁用")).toBeTruthy()
     expect(screen.getByText("工具当前不可用")).toBeTruthy()
     expect(screen.getByText("没有使用权限")).toBeTruthy()
     expect(screen.getByText("不支持工作流调用")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Approval tool" }))
-    expect(added).toEqual([])
+    expect(added).toEqual(["tool"])
+    fireEvent.click(screen.getByRole("button", { name: "添加节点" }))
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Agent" }), {
       button: 0,
       ctrlKey: false,
@@ -291,8 +341,50 @@ describe("WorkflowNodePalette", () => {
     })
     expect(screen.getByText("工具加载失败")).toBeTruthy()
     expect(screen.getByText("detail unavailable")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Lookup" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Mine" })).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "重试" }))
     expect(retries).toBe(1)
+  })
+  test("adds one MCP service entry when only a later operation is callable", () => {
+    const added: Array<{
+      type: string
+      title?: string
+      config?: Record<string, unknown>
+    }> = []
+    renderPage(
+      <WorkflowNodePalette
+        tools={[
+          { ...tool, can_use: false, current_version_id: null },
+          { ...tool, id: "allowed", display_name: "Allowed operation" },
+        ]}
+        agents={[]}
+        graph={{ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }}
+        onAdd={(type, title, config) => added.push({ type, title, config })}
+        t={(key, values) => translate("zh-Hans", key, values)}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "添加节点" }))
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "工具" }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    expect(screen.queryByText("Allowed operation")).toBeNull()
+    expect(screen.queryByText("Lookup data")).toBeNull()
+    const service = screen.getByRole("button", {
+      name: "Mine",
+    }) as HTMLButtonElement
+    expect(service.disabled).toBe(false)
+    fireEvent.click(service)
+    expect(added).toEqual([
+      {
+        type: "tool",
+        title: "Mine",
+        config: {
+          mcp_source_id: "source-1",
+          tool: { tool_id: "", version_id: "" },
+          arguments: {},
+        },
+      },
+    ])
   })
 })

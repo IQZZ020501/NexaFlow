@@ -1,5 +1,5 @@
 /* @jsxImportSource react */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import {
   cleanup,
   fireEvent,
@@ -22,6 +22,7 @@ import {
   knowledgeBaseDetailPath,
   parseKnowledgeBaseDetailTab,
 } from "@/lib/knowledge-views"
+import { PHONE_LIST_QUERY } from "@/lib/use-media-query"
 import {
   jsonResponse,
   makeSession,
@@ -86,6 +87,7 @@ mockNextNavigation({
 
 let fetchHandler: FetchHandler = () => jsonResponse([])
 const originalFetch = globalThis.fetch
+const originalMatchMedia = window.matchMedia
 function installFetchStub() {
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
@@ -143,6 +145,8 @@ async function respondToConfirm(label: string) {
 
 afterEach(() => {
   cleanup()
+  setSystemTime()
+  window.matchMedia = originalMatchMedia
   notifications.length = 0
   pushes.length = 0
   replaces.length = 0
@@ -810,6 +814,42 @@ describe("KnowledgeBasePage list view", () => {
     )
   })
 
+  test("does not resurrect a deleted card when an older list snapshot arrives", async () => {
+    let listRequests = 0
+    const late = Promise.withResolvers<Response>()
+    fetchHandler = (url, init) => {
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return ++listRequests === 2
+          ? late.promise
+          : jsonResponse([makeKnowledgeBase()])
+      return jsonResponse([])
+    }
+    const page = renderPage(<KnowledgeBasePage />)
+    await screen.findByText("KB Alpha")
+    openMenu(within(cardElement("KB Alpha")).getByTitle("更多"))
+    fireEvent.click(await screen.findByText("永久删除知识库"))
+    await screen.findByRole("dialog", { name: "确认操作" })
+    session.token = "refreshed-token"
+    page.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <KnowledgeBasePage />
+      </LanguageProvider>
+    )
+    await waitFor(() => expect(listRequests).toBe(2))
+    await respondToConfirm("删除")
+    await waitFor(() =>
+      expect(notifications.some(([, msg]) => msg === "知识库已删除")).toBe(true)
+    )
+    late.resolve(jsonResponse([makeKnowledgeBase()]))
+    await waitFor(() =>
+      expect(Boolean(screen.queryByText("正在加载"))).toBe(false)
+    )
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(Boolean(screen.queryByText("KB Alpha"))).toBe(false)
+  })
+
   test("reports an error when deleting a knowledge base fails", async () => {
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
@@ -857,12 +897,15 @@ describe("KnowledgeBasePage list view", () => {
 
     const dialog = await screen.findByRole("dialog")
     expect(
-      within(dialog).getByText("配置知识库名称、描述和默认数据源。")
+      within(dialog).getByText("配置知识库名称、描述和检索模型。")
     ).toBeTruthy()
 
-    fireEvent.change(within(dialog).getByLabelText("知识库名称"), {
-      target: { value: "New KB" },
-    })
+    const nameInput = within(dialog).getByLabelText("知识库名称") as HTMLInputElement
+    expect(nameInput.maxLength).toBe(120)
+    expect((within(dialog).getByLabelText("描述") as HTMLTextAreaElement).maxLength).toBe(2000)
+    fireEvent.change(nameInput, { target: { value: "   " } })
+    expect((within(dialog).getByRole("button", { name: "新建知识库" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(nameInput, { target: { value: " New KB " } })
     fireEvent.change(within(dialog).getByLabelText("描述"), {
       target: { value: "Fresh docs" },
     })
@@ -2319,6 +2362,91 @@ describe("KnowledgeBasePage documents tab", () => {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage tasks tab", () => {
+  test.each([false, true])(
+    "shows linked documents, unavailable documents and execution time (phone: %s)",
+    async (phone) => {
+      window.matchMedia = (query) => ({
+        matches: phone && query === PHONE_LIST_QUERY,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => false,
+      })
+      const filename = "法律条文第一册及相关司法解释汇编.pdf"
+      const tasks = [
+        makeTask({
+          started_at: "2026-01-01T00:00:00Z",
+          finished_at: "2026-01-01T00:01:23Z",
+        }),
+        makeTask({ id: "missing-task", document_id: "deleted-document" }),
+        makeTask({ id: "detached-task", document_id: null }),
+        makeTask({
+          id: "whole-base-task",
+          task_type: "rebuild_index",
+          document_id: null,
+        }),
+      ]
+      fetchHandler = (url) => {
+        if (url.includes("/models")) return jsonResponse(models)
+        if (url.includes("/knowledge-bases?"))
+          return jsonResponse([makeKnowledgeBase()])
+        if (url.includes("/documents"))
+          return jsonResponse([makeDocument({ filename })])
+        if (url.includes("/tasks")) return jsonResponse(tasks)
+        return jsonResponse([])
+      }
+      routeParams.id = KB_ID
+      const { container } = renderPage(
+        <KnowledgeBasePage initialDetailTab="tasks" />
+      )
+      const view = within(phone ? await screen.findByRole("list") : container)
+      const documentButton = await view.findByRole("button", { name: filename })
+
+      expect(documentButton.getAttribute("title")).toBe(filename)
+      fireEvent.click(documentButton)
+      expect(pushes).toContain(`/app/knowledge/${KB_ID}/documents/doc-1`)
+      expect(view.getByText("整个知识库")).toBeTruthy()
+      expect(view.getAllByText("文档不可用")).toHaveLength(2)
+      expect(view.getByText("1 分 23 秒")).toBeTruthy()
+    }
+  )
+
+  test("updates running duration each second and freezes it on completion", async () => {
+    const now = new Date("2026-01-01T00:00:12Z")
+    setSystemTime(now)
+    let task = makeTask({
+      status: "running",
+      started_at: "2026-01-01T00:00:00Z",
+    })
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents")) return jsonResponse([makeDocument()])
+      if (url.includes("/tasks")) return jsonResponse([task])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage initialDetailTab="tasks" />)
+    await screen.findByText("12 秒")
+
+    setSystemTime(new Date(now.getTime() + 1000))
+    await screen.findByText("13 秒", {}, { timeout: 2000 })
+
+    task = makeTask({
+      started_at: "2026-01-01T00:00:00Z",
+      finished_at: "2026-01-01T00:00:13Z",
+    })
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }))
+    await screen.findByText("成功")
+    setSystemTime(new Date(now.getTime() + 60_000))
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    expect(screen.getByText("13 秒")).toBeTruthy()
+  })
+
   test("polls running task progress without a processing document", async () => {
     let taskFetches = 0
     fetchHandler = (url) => {
@@ -2751,7 +2879,10 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     ).toBe(false)
     const limitInput = screen.getByLabelText("返回数量") as HTMLInputElement
     fireEvent.change(limitInput, { target: { value: "99" } })
-    expect(limitInput.value).toBe("20")
+    expect(limitInput.value).toBe("99")
+    expect(screen.getByText("返回数量必须是 1 到 20 之间的整数")).toBeTruthy()
+    expect((screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(limitInput, { target: { value: "20" } })
     fireEvent.click(screen.getByRole("button", { name: "测试召回" }))
 
     await waitFor(() => {
@@ -2819,9 +2950,10 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(secondCard))
 
-    // Query limit clamps to 1..20.
+    // Invalid input stays visible so it can be corrected explicitly.
     fireEvent.change(limitInput, { target: { value: "0" } })
-    expect(limitInput.value).toBe("1")
+    expect(limitInput.value).toBe("0")
+    expect(screen.getByText("返回数量必须是 1 到 20 之间的整数")).toBeTruthy()
   })
 
   test("does not submit an empty query", async () => {

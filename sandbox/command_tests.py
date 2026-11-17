@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from . import command
+from . import artifact_check, command
 
 
 class CommandTests(unittest.TestCase):
@@ -20,6 +20,7 @@ class CommandTests(unittest.TestCase):
         for name, value in (("WORKSPACE", self.workspace), ("EXPORTS", root / "exports"), ("SESSION", root / "session")):
             self.stack.enter_context(patch.object(command, name, value))
         self.stack.enter_context(patch.object(command, "_child_limits"))
+        self.stack.enter_context(patch.object(artifact_check, "_limits"))
         self.stack.enter_context(patch.object(command, "kill_user_processes"))
         self.stack.enter_context(patch.object(command.os, "geteuid", return_value=0))
         self.stack.enter_context(patch.object(command.os, "chown"))
@@ -72,6 +73,14 @@ class CommandTests(unittest.TestCase):
         third = self.run_command("echo changed > outputs/result.txt; ln -s /etc/passwd outputs/link; ln outputs/result.txt outputs/hardlink")
         self.assertEqual(third["artifacts"], [])
 
+    def test_invalid_file_is_omitted_and_can_be_repaired(self):
+        first = self.run_command("printf '%%PDF-1.7 broken' > outputs/report.pdf; echo ready > outputs/valid.txt")
+        self.assertEqual([item["filename"] for item in first["artifacts"]], ["valid.txt"])
+        self.assertTrue(any("report.pdf" in warning for warning in first["warnings"]))
+        self.assertEqual(first["artifacts"][0]["inspection"]["status"], "passed")
+        fixed = self.run_command("rm outputs/report.pdf; echo corrected > outputs/report.txt")
+        self.assertEqual([item["filename"] for item in fixed["artifacts"]], ["report.txt"])
+
     def test_restore_then_edit_a_file_in_a_new_workspace(self):
         first = self.run_command("printf '<h1>old</h1>' > outputs/page.html")
         saved = Path(first["artifacts"][0]["path"]).read_bytes()
@@ -104,6 +113,46 @@ class CommandTests(unittest.TestCase):
         with self.assertRaises(OSError):
             command.restore_files({"link/page.html": encoded})
         self.assertFalse((outside / "page.html").exists())
+
+    def test_project_snapshot_retries_edits_and_tracks_rename_delete(self):
+        command.restore_files({"script.py": base64.b64encode(b"print(1)").decode()}, project_role="work")
+        def run(text):
+            return command.execute({"command": text, "timeout_seconds": 2, "project": True}, python_binary=sys.executable)
+        first = run("printf 'print(2)' > project/script.py; mkdir -p project/node_modules; echo skip > project/node_modules/cache")
+        self.assertTrue(first["project_snapshot"])
+        self.assertEqual([item["relative_path"] for item in first["project_changes"]], ["script.py"])
+        retry = run(":")
+        self.assertEqual(first["project_changes"][0]["sha256"], retry["project_changes"][0]["sha256"])
+        renamed = run("mv project/script.py project/main.py")
+        self.assertEqual([item["relative_path"] for item in renamed["project_changes"]], ["main.py"])
+        deleted = run("rm project/main.py")
+        self.assertTrue(deleted["project_snapshot"])
+        self.assertEqual(deleted["project_changes"], [])
+        linked = run("ln -s /etc/passwd project/secret.txt")
+        self.assertFalse(linked["project_snapshot"])
+        self.assertIn("links", linked["project_error"])
+
+    def test_project_source_restore_is_separate_and_frozen(self):
+        with patch.object(command, "PROJECT_SOURCE_BASE", self.workspace.parent):
+            encoded = base64.b64encode(b"source").decode()
+            command.restore_files({"data.csv": encoded}, project_role="source")
+            source = self.workspace.parent / "project/sources/data.csv"
+            self.assertEqual(source.read_bytes(), b"source")
+            self.assertEqual(source.stat().st_mode & 0o777, 0o444)
+            self.assertFalse((self.workspace / "project/data.csv").exists())
+            command.restore_files({"data.csv": encoded}, project_role="source")
+            with self.assertRaisesRegex(ValueError, "frozen"):
+                command.restore_files({"data.csv": base64.b64encode(b"different").decode()}, project_role="source")
+
+    def test_project_preserves_empty_files(self):
+        command.restore_files({"pkg/__init__.py": ""}, project_role="work")
+        self.assertEqual((self.workspace / "project/pkg/__init__.py").read_bytes(), b"")
+        snapshot = command.execute({"command": ":", "timeout_seconds": 2, "project": True}, python_binary=sys.executable)
+        self.assertTrue(snapshot["project_snapshot"])
+        self.assertEqual(snapshot["project_changes"][0]["relative_path"], "pkg/__init__.py")
+        self.assertEqual(snapshot["project_changes"][0]["size_bytes"], 0)
+        with self.assertRaises(ValueError):
+            command.restore_files({"empty-output.txt": ""})
 
     def test_export_limits_and_input_validation(self):
         result = self.run_command("for n in {1..10}; do echo file > outputs/$n.txt; done")

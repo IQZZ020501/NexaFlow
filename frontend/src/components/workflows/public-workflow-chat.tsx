@@ -52,6 +52,7 @@ import {
 import { IconButton } from "@/components/ui/icon-button"
 import { MessageTimestamp } from "@/components/agents/message-timestamp"
 import { WorkflowRuntimeForm } from "@/components/workflows/workflow-runtime-form"
+import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import {
@@ -61,6 +62,7 @@ import {
   listPublicWorkflowConversations,
   listPublicWorkflowRuns,
   observePublicWorkflowRun,
+  resolvePublicWorkflowToolApproval,
   regeneratePublicWorkflowRun,
   setPublicWorkflowRunFeedback,
   submitPublicWorkflowForm,
@@ -189,6 +191,7 @@ function PublicWorkflowExecutionProcess({ run }: { run: ExternalWorkflowRun }) {
     if (item.status === "running") return t("运行中")
     if (item.status === "awaiting_input") return t("等待填写表单")
     if (item.status === "awaiting_child") return t("等待执行")
+    if (item.status === "awaiting_approval") return t("等待工具调用确认")
     if (item.status === "failed") {
       return item.error ? workflowErrorMessage(item.error, t) : t("运行失败")
     }
@@ -205,7 +208,14 @@ function PublicWorkflowExecutionProcess({ run }: { run: ExternalWorkflowRun }) {
     if (item.status === "failed") {
       return <CircleAlertIcon className="size-4 text-destructive" />
     }
-    if (["skipped", "awaiting_input", "awaiting_child"].includes(item.status)) {
+    if (
+      [
+        "skipped",
+        "awaiting_input",
+        "awaiting_child",
+        "awaiting_approval",
+      ].includes(item.status)
+    ) {
       return <CircleDotDashedIcon className="size-4 text-muted-foreground" />
     }
     return <CircleCheckIcon className="size-4 text-emerald-600" />
@@ -508,6 +518,9 @@ export function PublicWorkflowChat({
   const [feedbackPendingRunId, setFeedbackPendingRunId] = React.useState<
     string | null
   >(null)
+  const [resolvingCallId, setResolvingCallId] = React.useState<string | null>(
+    null
+  )
   const [submittingFormRunId, setSubmittingFormRunId] = React.useState<
     string | null
   >(null)
@@ -824,6 +837,48 @@ export function PublicWorkflowChat({
     }
   }
 
+  async function handleToolDecision(
+    run: ExternalWorkflowRun,
+    callId: string,
+    decision: "approve" | "reject"
+  ) {
+    if (!token || resolvingCallId) return
+    setResolvingCallId(`${run.id}:${callId}`)
+    setError(null)
+    try {
+      const resumed = await resolvePublicWorkflowToolApproval(
+        workflowId,
+        token,
+        run.id,
+        callId,
+        decision === "approve"
+      )
+      setRuns((current) =>
+        current.map((item) =>
+          item.id === run.id ? { ...resumed, progress: item.progress } : item
+        )
+      )
+      if (resumed.status !== "awaiting_approval") {
+        setRunning(true)
+        const controller = new AbortController()
+        streamRef.current = controller
+        await observePublicWorkflowRun(
+          workflowId,
+          token,
+          run.id,
+          (event) => setRuns((current) => updateRun(current, run.id, event)),
+          controller.signal
+        )
+      }
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === "AbortError"))
+        setError(getErrorMessage(reason, t))
+    } finally {
+      setResolvingCallId(null)
+      setRunning(false)
+    }
+  }
+
   async function handleFormSubmit(
     run: ExternalWorkflowRun,
     data: Record<string, unknown>
@@ -924,8 +979,10 @@ export function PublicWorkflowChat({
     exportingConversationId,
   }
   const visibleRuns = [...runs].reverse()
-  const hasPendingForm = runs.some((run) => run.status === "awaiting_input")
-  const composerDisabled = running || runsLoading || hasPendingForm
+  const hasPendingInput = runs.some((run) =>
+    ["awaiting_input", "awaiting_approval"].includes(run.status)
+  )
+  const composerDisabled = running || runsLoading || hasPendingInput
 
   return (
     <main
@@ -1029,6 +1086,30 @@ export function PublicWorkflowChat({
                         <div className="min-w-0 flex-1">
                           <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
                             <PublicWorkflowExecutionProcess run={run} />
+                            {run.status === "awaiting_approval"
+                              ? (run.tool_calls ?? [])
+                                  .filter((call) =>
+                                    ["awaiting_approval", "uncertain"].includes(
+                                      call.status
+                                    )
+                                  )
+                                  .map((call) => (
+                                    <InlineToolApproval
+                                      key={call.call_id}
+                                      runId={run.id}
+                                      call={call}
+                                      resolvingCallId={resolvingCallId}
+                                      onDecision={(callId, decision) =>
+                                        void handleToolDecision(
+                                          run,
+                                          callId,
+                                          decision
+                                        )
+                                      }
+                                      t={t}
+                                    />
+                                  ))
+                              : null}
                             {run.status === "awaiting_input" &&
                             run.pending_form ? (
                               <WorkflowRuntimeForm

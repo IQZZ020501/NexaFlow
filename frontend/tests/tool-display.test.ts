@@ -15,6 +15,30 @@ const translated = (language: Language) =>
   ((key, values) => translate(language, key, values)) as TFunction
 
 describe("tool display helpers", () => {
+  test("preserves the whole authenticated artifact path when normalizing links", () => {
+    const id = "23291174-58e4-42ad-9656-2ee0aad1328a"
+    const file = {
+      artifact_id: id,
+      filename: "report.html",
+      relative_path: "reports/report.html",
+      download_url: "/api/v1/artifacts/expired",
+    }
+    const result = withArtifactDownloadLinks(
+      "[report](/api/v1/artifacts/expired)",
+      [{ tool_name: "create_artifact", status: "succeeded", output: file }]
+    )
+    expect(result).toBe(
+      `[reports/report.html](/api/v1/artifacts/${id}/content)`
+    )
+    expect(
+      withArtifactDownloadLinksInContent(
+        `filename: report.html\n/api/v1/artifacts/${id}/content`
+      )
+    ).toBe(
+      `filename: report.html\n[report.html](/api/v1/artifacts/${id}/content)`
+    )
+  })
+
   test("localizes bash and expands command artifact lists", () => {
     for (const [language, label] of [
       ["zh-Hans", "命令行"],
@@ -53,26 +77,6 @@ describe("tool display helpers", () => {
     expect(content).toContain("[result.txt](/api/v1/artifacts/shell-token)")
   })
   test("localizes built-in tool display names", () => {
-    expect(
-      toolDisplayName(
-        {
-          function_name: "inline_python",
-          display_name: "Python",
-          description: "Runs code",
-        },
-        t
-      )
-    ).toBe("Python 代码")
-    expect(
-      toolDisplayName(
-        {
-          function_name: "current_time",
-          display_name: "Time",
-          description: "UTC time",
-        },
-        t
-      )
-    ).toBe("当前时间")
     expect(
       toolDisplayName(
         {
@@ -152,26 +156,6 @@ describe("tool display helpers", () => {
     expect(
       toolDisplayDescription(
         {
-          function_name: "inline_python",
-          display_name: "Python",
-          description: "Runs code",
-        },
-        t
-      )
-    ).toBe("在工作流沙箱中运行 Python 代码。")
-    expect(
-      toolDisplayDescription(
-        {
-          function_name: "current_time",
-          display_name: "Time",
-          description: "UTC time",
-        },
-        t
-      )
-    ).toBe("返回当前时间。")
-    expect(
-      toolDisplayDescription(
-        {
           function_name: "create_artifact",
           display_name: "Create document or page",
           description: "Creates a file",
@@ -190,7 +174,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("创建 PDF 文件。")
+    ).toBe("加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。")
     expect(
       toolDisplayDescription(
         {
@@ -200,7 +184,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("创建 PPTX 演示文稿。")
+    ).toBe("加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。")
   })
 
   test("translates the artifact tool in all supported languages", () => {

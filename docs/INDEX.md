@@ -1,36 +1,44 @@
-# NexaFlow 模块文档索引
+# NexaFlow 文档索引
 
-> 每个功能模块一份独立文档，说明模块职责、分层关系与文件清单。
+本目录保留当前系统的使用、架构、模块和运维说明。安装入口见仓库根 [README](../README.md)。
 
-## 架构总览
+## 安装与开发
 
-```text
-backend/   FastAPI 后端（Python >=3.11，SQLAlchemy 异步 + Celery）
-frontend/  Next.js 16 App Router + React 19 + TypeScript（Bun，shadcn/ui，src 布局）
-deploy/    Docker Compose 全栈编排、Dockerfile、Nginx 示例
-```
-
-后端调用链：`api/v1/<feature>/`（薄路由，routes.py）→ `application/<feature>/`（应用服务/业务规则）→ `domain/<feature>/`（领域服务与 ORM 模型）与 `adapters/` + `ports/`（LLM 运行时、RAG、MCP、OpenSandbox 执行平面、企业身份等能力的实现与稳定契约；文档解析在 `domain/knowledge/documents/parsing.py`，统一工具运行时在 `application/tools/runtime/`）→ `infra/`（配置/DB/队列/安全/存储/日志/repositories/沙箱客户端/runtime）。实体与契约按功能拆分：`entities/<feature>/`（纯领域实体 dataclass）、`schemas/<feature>/`（Pydantic 契约）；Celery 后台任务位于 `tasks/<feature>/jobs.py`（共享辅助见 `tasks/runtime.py`）。所有核心资源表带 `workspace_id`，API 以 `/workspaces/{workspace_id}/...` 表达工作空间上下文。模块文档已随目录重构更名：CAPABILITIES.md → ADAPTERS.md、INFRASTRUCTURE.md → INFRA.md（见下表）。
-
-前端：`app/` 路由薄壳委托 `components/` 页面组件（客户端渲染）；`contexts/` 全局状态（语言/主题/会话）；`lib/api/` 按域划分的 API 客户端统一走 `lib/api-client.ts`；`i18n/` 三语词典。
-
-## 文档列表
-
-| 文档 | 覆盖范围 |
+| 文档 | 内容 |
 | --- | --- |
-| [API.md](API.md) | backend/app/api（HTTP 接口层）与 backend/app/schemas（Pydantic 契约） |
-| [APPLICATION.md](APPLICATION.md) | backend/app/application（应用服务层） |
-| [ADAPTERS.md](ADAPTERS.md) | backend/app/ports（稳定契约）与 backend/app/adapters（LLM 运行时 / RAG / MCP / 执行平面 / 企业身份实现） |
-| [KNOWLEDGE.md](KNOWLEDGE.md) | backend/app 知识库全栈：api/v1/knowledge、application/knowledge、domain/knowledge、entities + schemas/knowledge、tasks/knowledge、infra db/repositories + sql（知识库 API、领域、应用服务与 Celery 任务） |
-| [AGENTS_RUNTIME.md](AGENTS_RUNTIME.md) | backend/app/domain/agents + application/agents + api/v1/agents + tasks/agents（Agent 领域与运行时） |
-| [agentic-platform-integration.md](agentic-platform-integration.md) | Agentic 架构分期落地、Skill 控制面、运行时快照与回滚边界 |
-| [AGENT_EVALUATION.md](AGENT_EVALUATION.md) | Agent 确定性 CI 回归与真实环境发布前评测门禁、数据集契约和运行方式 |
-| [IDENTITY_WORKSPACE.md](IDENTITY_WORKSPACE.md) | backend/app/domain/{platform,identity,teams,audit,tools,email,resource_folders} + 对应 application/api/repositories（身份/工作区/团队/审计/工具/资源夹领域） |
-| [INFRA.md](INFRA.md) | backend/app/infra（配置/DB/队列/安全/存储/日志/repositories）+ alembic + backend 根配置 |
-| [FRONTEND.md](FRONTEND.md) | frontend/ 全部（路由/组件/上下文/i18n/lib/测试） |
-| [SKILLS.md](SKILLS.md) | 工作空间 Skill 包（schema v2 控制面、渐进加载、包内脚本与依赖安装、固定渲染器） |
-| [WORKFLOW_DESIGN.md](WORKFLOW_DESIGN.md) | Workflow 确定性图引擎、节点目录、数据模型、执行沙箱与 API |
-| [model-providers.md](model-providers.md) | 模型供应商接入矩阵（22 个目录项、integration 字段与请求路径） |
-| [ENTERPRISE_IDENTITY.md](ENTERPRISE_IDENTITY.md) | 飞书/钉钉/企业微信企业登录配置与安全行为 |
-| [UNIFIED_TOOLS_TEST_PLAN.md](UNIFIED_TOOLS_TEST_PLAN.md) | 统一 Tool 系统有效测试规范（范围、用例、证据与门禁） |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | deploy/、scripts/、仓库根文件 |
+| [部署说明](DEPLOYMENT.md) | 单机 Compose 安装、配置、升级、存储与本地开发 |
+| [后端 README](../backend/README.md) | FastAPI 开发入口、Worker 角色、迁移和检查命令 |
+| [前端 README](../frontend/README.md) | Next.js 开发、API 代理与检查命令 |
+| [OpenSandbox 部署](../deploy/opensandbox/README.md) | 执行镜像、网络边界、可选 Kata 主机和执行平面检查 |
+
+## 整体架构与技术层
+
+项目采用[分层模块化单体](MODULAR_MONOLITH.md)：后端按技术层组织，每层内部按业务模块分包；前端独立使用 Next.js App Router。API、前端、后台 Worker 和 Agent Worker 在默认部署的同一个应用容器内运行，依赖 PostgreSQL、Redis、Qdrant 和 OpenSandbox。
+
+| 文档 | 内容 |
+| --- | --- |
+| [模块化单体](MODULAR_MONOLITH.md) | 模块职责、公开接口、依赖方向与架构检查 |
+| [HTTP API 与契约](API.md) | 认证、工作空间上下文、路由与 Pydantic Schema |
+| [应用服务](APPLICATION.md) | 用例编排、跨模块协作与代码入口 |
+| [能力端口与适配器](ADAPTERS.md) | LLM、MCP、向量库、执行平面和企业身份的契约与实现 |
+| [基础设施](INFRA.md) | 配置、数据库、仓储、队列、安全、存储和 Alembic |
+| [前端](FRONTEND.md) | 路由、功能组件、主题、三语词典、API 客户端与测试 |
+
+## 功能与运行机制
+
+| 文档 | 内容 |
+| --- | --- |
+| [Agent 运行时](AGENTS_RUNTIME.md) | 模型/工具循环、能力目录、持久 Run、事件与上下文 |
+| [工作流](WORKFLOWS.md) | 图校验、节点、固定版本、审批与暂停恢复 |
+| [知识库](KNOWLEDGE.md) | 文档解析、索引、BM25/向量检索与检索评测 |
+| [身份与工作空间](IDENTITY_WORKSPACE.md) | 用户、租户、团队、资源权限与工具目录 |
+| [Skills](SKILLS.md) | 版本化包、渐进加载、脚本、依赖安装与内置指南 |
+| [对话文件](PROJECT_FILES.md) | 文件夹/ZIP 导入、对话工作文件、版本与交付 |
+| [运行可靠性](RUN_RELIABILITY.md) | 请求幂等、文件身份、资源等待、准入与精确引用 |
+| [执行主机](EXECUTION_HOSTS.md) | 可选多主机配置、固定放置、容量与故障边界 |
+| [可信扩展](EXTENSIONS.md) | 扩展 API、生命周期与部署时组合 |
+| [MCP OAuth](MCP_OAUTH.md) | 外部账号连接、授权状态与令牌生命周期 |
+| [MCP 远端任务](MCP_TASKS.md) | 持久任务、轮询、取消与副作用状态 |
+| [模型供应商](model-providers.md) | 仓库内供应商目录、协议与适配路径 |
+| [企业身份](ENTERPRISE_IDENTITY.md) | 飞书、钉钉、企业微信登录配置 |
+| [Agent 评测用法](AGENT_EVALUATION.md) | 确定性回归、在线评测命令、数据集与结果判定 |

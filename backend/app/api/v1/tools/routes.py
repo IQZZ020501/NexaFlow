@@ -1,4 +1,4 @@
-"""Unified Tool catalog and Python Tool endpoints."""
+"""Unified Tool catalog endpoints."""
 
 from typing import Annotated, Any
 
@@ -7,35 +7,22 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from app.api.deps import (
     WorkspaceContext,
     get_db,
-    get_settings,
     get_workspace_context_from_path,
 )
 from app.application.tools import (
-    create_python,
-    delete_python,
-    get_python_test,
     get_tool,
     list_permissions,
     list_tools,
-    publish_python,
-    queue_python_test,
     revoke_permission,
-    set_python_enabled,
     update_policy,
-    update_python_draft,
     upsert_permission,
 )
 from app.schemas.tools.contracts import (
-    PythonToolCreateRequest,
-    PythonToolDraftUpdateRequest,
     ToolDetailResponse,
-    ToolDraftResponse,
-    ToolInvocationResponse,
     ToolPermissionResponse,
     ToolPermissionUpsertRequest,
     ToolPolicyUpdateRequest,
     ToolSummaryResponse,
-    ToolTestRequest,
 )
 
 router = APIRouter(
@@ -61,25 +48,6 @@ async def list_workspace_tools(
     )
 
 
-@router.post(
-    "/python",
-    response_model=ToolDetailResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_workspace_python_tool(
-    payload: PythonToolCreateRequest,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolDetailResponse:
-    return await create_python(
-        db,
-        context.workspace.id,
-        payload,
-        context.user,
-        context.membership_role,
-    )
-
-
 @router.get("/{tool_id}", response_model=ToolDetailResponse)
 async def get_workspace_tool(
     tool_id: str,
@@ -90,113 +58,6 @@ async def get_workspace_tool(
         db,
         context.workspace.id,
         tool_id,
-        context.user,
-        context.membership_role,
-    )
-
-
-@router.put("/{tool_id}/draft", response_model=ToolDraftResponse)
-async def update_workspace_python_tool_draft(
-    tool_id: str,
-    payload: PythonToolDraftUpdateRequest,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolDraftResponse:
-    return await update_python_draft(
-        db,
-        context.workspace.id,
-        tool_id,
-        payload,
-        context.user,
-        context.membership_role,
-    )
-
-
-@router.post(
-    "/{tool_id}/tests",
-    response_model=ToolInvocationResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def test_workspace_python_tool(
-    tool_id: str,
-    payload: ToolTestRequest,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    settings: Annotated[Any, Depends(get_settings)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolInvocationResponse:
-    return await queue_python_test(
-        db,
-        context.workspace.id,
-        tool_id,
-        payload.arguments,
-        context.user,
-        context.membership_role,
-        settings,
-    )
-
-
-@router.get(
-    "/{tool_id}/tests/{invocation_id}",
-    response_model=ToolInvocationResponse,
-)
-async def get_workspace_python_tool_test(
-    tool_id: str,
-    invocation_id: str,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolInvocationResponse:
-    return await get_python_test(
-        db,
-        context.workspace.id,
-        tool_id,
-        invocation_id,
-        context.user,
-        context.membership_role,
-    )
-
-
-@router.post("/{tool_id}/publish", response_model=ToolDetailResponse)
-async def publish_workspace_python_tool(
-    tool_id: str,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolDetailResponse:
-    return await publish_python(
-        db,
-        context.workspace.id,
-        tool_id,
-        context.user,
-        context.membership_role,
-    )
-
-
-@router.post("/{tool_id}/disable", response_model=ToolDetailResponse)
-async def disable_workspace_python_tool(
-    tool_id: str,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolDetailResponse:
-    return await set_python_enabled(
-        db,
-        context.workspace.id,
-        tool_id,
-        False,
-        context.user,
-        context.membership_role,
-    )
-
-
-@router.post("/{tool_id}/enable", response_model=ToolDetailResponse)
-async def enable_workspace_python_tool(
-    tool_id: str,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> ToolDetailResponse:
-    return await set_python_enabled(
-        db,
-        context.workspace.id,
-        tool_id,
-        True,
         context.user,
         context.membership_role,
     )
@@ -278,22 +139,6 @@ async def revoke_workspace_tool_permission(
         context.workspace.id,
         tool_id,
         user_id,
-        context.user,
-        context.membership_role,
-    )
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.delete("/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_workspace_python_tool(
-    tool_id: str,
-    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
-    db: Annotated[Any, Depends(get_db)],
-) -> Response:
-    await delete_python(
-        db,
-        context.workspace.id,
-        tool_id,
         context.user,
         context.membership_role,
     )

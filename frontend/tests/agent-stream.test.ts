@@ -107,6 +107,7 @@ describe("streamAgentRun", () => {
       goal: "question",
       conversation_id: "conversation-1",
       approval_mode: "always_ask",
+      request_id: expect.any(String),
     })
     expect(events.map((event) => event.type)).toEqual([
       "run",

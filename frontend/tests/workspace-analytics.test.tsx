@@ -103,7 +103,7 @@ const analytics: WorkspaceAnalytics = {
       active: 3,
     },
     knowledge: { bases: 2, documents: 12, chunks: 340 },
-    tools: { total: 9, mcp: 3, python: 2, builtin: 4, active: 8 },
+    tools: { total: 7, mcp: 3, builtin: 4, active: 6 },
     models: 5,
   },
   tool_usage: {
@@ -285,9 +285,7 @@ describe("workspace analytics", () => {
       within(inventoryCard).getByText("Agent 2 · 工作流 1 · 已发布 1")
     ).toBeTruthy()
     expect(within(inventoryCard).getByText("文档 12 · 片段 340")).toBeTruthy()
-    expect(
-      within(inventoryCard).getByText("MCP 3 · Python 2 · 内置 4")
-    ).toBeTruthy()
+    expect(within(inventoryCard).getByText("MCP 3 · 内置 4")).toBeTruthy()
 
     const toolUsageCard = screen
       .getByText("工具调用")
@@ -508,6 +506,18 @@ describe("workspace analytics", () => {
     const link = screen.getByRole("link", { name: "数据大屏" })
     expect(link.getAttribute("href")).toBe("/system/analytics")
     expect(link.closest("nav")).toBeTruthy()
+  })
+
+  test("provides every navigation entry in the compact menu", async () => {
+    renderPage(<TopBar />)
+    const menuButton = screen.getByRole("button", { name: "主导航" })
+    expect(menuButton.className).toContain("xl:hidden")
+    expect(menuButton.className).toContain("sm:inline-flex")
+    fireEvent.pointerDown(menuButton)
+    const menu = await screen.findByRole("menu")
+    for (const name of ["应用", "知识库", "模型", "工具", "数据大屏"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeTruthy()
+    }
   })
 
   test("returns to the application home after switching workspaces", async () => {

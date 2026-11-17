@@ -14,8 +14,18 @@ import time
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
+try:
+    from .artifact_check import inspect_artifact
+except ImportError:
+    import importlib.util
+    _check_spec = importlib.util.spec_from_file_location("nexaflow_artifact_check", Path(__file__).with_name("artifact_check.py"))
+    _check_module = importlib.util.module_from_spec(_check_spec)
+    _check_spec.loader.exec_module(_check_module)
+    inspect_artifact = _check_module.inspect_artifact
+
 UID = 65532
 WORKSPACE = Path("/workspace")
+PROJECT_SOURCE_BASE = Path("/")
 EXPORTS = Path("/tmp/nexaflow-exports")
 SESSION = Path("/tmp/nexaflow-session")
 MAX_LOG = 30 * 1024
@@ -25,6 +35,9 @@ MAX_FILE = 5 * 1024 * 1024
 # breaks every other tenant, not just this Run.
 MAX_WORKSPACE_BYTES = 512 * 1024 * 1024
 MAX_WORKSPACE_FILES = 20000
+PROJECT_IGNORED = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", ".nexaflow"})
+MAX_PROJECT_FILES = 64
+MAX_PROJECT_BYTES = 64 * 1024 * 1024
 WORKSPACE_CHECK_SECONDS = 0.2
 # Export directories are read once by the backend right after the command
 # returns. Keep a small window so an in-flight read is never truncated, then
@@ -85,13 +98,15 @@ def _child_limits(seconds):
     os.setuid(UID)
 
 
-def _snapshot(outputs):
+def _snapshot(outputs, *, excluded=frozenset()):
     files = {}
     if outputs.is_symlink() or not outputs.is_dir():
         return files
     for parent, directories, names in os.walk(outputs, followlinks=False):
-        directories[:] = [name for name in directories if not (Path(parent) / name).is_symlink()]
+        directories[:] = [name for name in directories if name not in excluded and not (Path(parent) / name).is_symlink()]
         for name in names:
+            if name in excluded:
+                continue
             path = Path(parent) / name
             info = path.lstat()
             if stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
@@ -139,10 +154,13 @@ def _prune_exports() -> None:
         shutil.rmtree(child, ignore_errors=True)
 
 
-def restore_files(files):
+def restore_files(files, *, project_role=None):
     """Copy authorized saved versions into a guest without following user links."""
     if os.geteuid() != 0:
         raise RuntimeError("File restoration requires the trusted supervisor.")
+    if project_role not in {None, "source", "work"}:
+        raise ValueError("Invalid project file role.")
+    read_only = project_role == "source"
     if not isinstance(files, dict) or len(files) > 64:
         raise ValueError("Invalid conversation files.")
     decoded = {}
@@ -156,7 +174,7 @@ def restore_files(files):
         ):
             raise ValueError("Invalid conversation file path or content.")
         content = base64.b64decode(encoded, validate=True)
-        if not 0 < len(content) <= MAX_FILE:
+        if not (0 if project_role else 1) <= len(content) <= MAX_FILE:
             raise ValueError("Conversation file exceeds 5 MiB.")
         decoded[path] = content
     if sum(map(len, decoded.values())) > MAX_FILE:
@@ -168,11 +186,13 @@ def restore_files(files):
     if _workspace_usage()[0] + sum(map(len, decoded.values())) > MAX_WORKSPACE_BYTES:
         raise ValueError("Conversation files exceed the workspace size limit.")
     for path, content in decoded.items():
-        descriptors = [os.open(WORKSPACE, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
+        root = PROJECT_SOURCE_BASE if read_only else WORKSPACE
+        prefix = ["project", "sources"] if read_only else ["project" if project_role == "work" else "outputs"]
+        descriptors = [os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)]
         try:
-            for name in ["outputs", *path.split("/")[:-1]]:
+            for name in [*prefix, *path.split("/")[:-1]]:
                 try:
-                    os.mkdir(name, mode=0o700, dir_fd=descriptors[-1])
+                    os.mkdir(name, mode=0o755 if read_only else 0o700, dir_fd=descriptors[-1])
                 except FileExistsError:
                     pass
                 descriptor = os.open(
@@ -180,12 +200,14 @@ def restore_files(files):
                     dir_fd=descriptors[-1],
                 )
                 descriptors.append(descriptor)
-                os.fchown(descriptor, UID, UID)
+                os.fchown(descriptor, 0 if read_only else UID, 0 if read_only else UID)
+                if read_only:
+                    os.fchmod(descriptor, 0o755)
             try:
                 descriptor = os.open(
                     path.rsplit("/", 1)[-1],
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                    0o600, dir_fd=descriptors[-1],
+                    0o444 if read_only else 0o600, dir_fd=descriptors[-1],
                 )
             except FileExistsError:
                 # A retried import must preserve an edit already made in this guest.
@@ -195,9 +217,14 @@ def restore_files(files):
                 )
                 if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                     raise ValueError("Invalid existing conversation file.")
+                if read_only:
+                    descriptor = os.open(path.rsplit("/", 1)[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptors[-1])
+                    with os.fdopen(descriptor, "rb") as stream:
+                        if stream.read(MAX_FILE + 1) != content:
+                            raise ValueError("Source project file differs from its frozen version.")
                 continue
             with os.fdopen(descriptor, "wb") as stream:
-                os.fchown(stream.fileno(), UID, UID)
+                os.fchown(stream.fileno(), 0 if read_only else UID, 0 if read_only else UID)
                 stream.write(content)
         finally:
             for descriptor in reversed(descriptors):
@@ -227,7 +254,16 @@ def execute(command, *, python_binary):
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
         raise ValueError("Invalid export directory.")
     before = _snapshot(outputs)
+    project_mode = command.get("project") is True
+    project_root = WORKSPACE / "project"
+    if project_mode:
+        if not project_root.exists():
+            project_root.mkdir(mode=0o700)
+        if project_root.is_symlink() or not project_root.is_dir():
+            raise ValueError("Invalid project directory.")
+        os.chown(project_root, UID, UID)
     env = {"PATH": f"{Path(python_binary).parent}:/usr/local/bin:/usr/bin:/bin", "HOME": str(WORKSPACE), "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1", "NEXAFLOW_OUTPUT_DIR": str(outputs)}
+    env.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
     environments = sorted(path for path in SESSION.glob("[a-f0-9]" * 32) if path.is_dir())
     env["PYTHONPATH"] = os.pathsep.join(str(path / "python") for path in environments)
     env["NODE_PATH"] = os.pathsep.join(str(path / "node/node_modules") for path in environments)
@@ -292,6 +328,7 @@ def execute(command, *, python_binary):
     exported = []
     warnings = []
     pending = []
+    inspection_deadline = time.monotonic() + 8
     for relative, metadata in sorted(after.items()):
         if before.get(relative) == metadata:
             continue
@@ -307,15 +344,67 @@ def execute(command, *, python_binary):
             content = stream.read(MAX_FILE + 1)
         if not 0 < len(content) <= MAX_FILE:
             continue
-        pending.append((relative, content))
+        if time.monotonic() >= inspection_deadline:
+            warnings.append(f"Output omitted: {relative[:255]}: File inspection budget exceeded; export it again.")
+            continue
+        inspection = inspect_artifact(Path(relative).name, content, python_binary=python_binary, timeout_seconds=inspection_deadline - time.monotonic())
+        if inspection["status"] != "passed":
+            warnings.append(f"Output omitted: {relative[:255]}: {inspection['error']}")
+            continue
+        pending.append((relative, content, inspection))
     if pending:
         destination = EXPORTS / uuid4().hex
         destination.mkdir(mode=0o700)
-        for relative, content in pending:
+        for relative, content, inspection in pending:
             target = destination / str(len(exported))
             target.write_bytes(content)
             target.chmod(0o400)
-            exported.append({"path": str(target), "relative_path": relative, "filename": Path(relative).name, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+            exported.append({"path": str(target), "relative_path": relative, "filename": Path(relative).name, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest(), "inspection": inspection})
+    project_changes = []
+    project_error = ""
+    if project_mode:
+        try:
+            after_project = _snapshot(project_root, excluded=PROJECT_IGNORED)
+            if project_root.is_symlink() or not project_root.is_dir():
+                raise ValueError("Project directory was removed or replaced.")
+            if len(after_project) > MAX_PROJECT_FILES or sum(item[0] for item in after_project.values()) > MAX_PROJECT_BYTES:
+                raise ValueError("Project exceeds 64 files or 64 MiB; remove temporary files.")
+            # Reject unsupported paths as a whole snapshot; never mistake a
+            # replaced file or link for a durable deletion.
+            for parent, directories, names in os.walk(project_root, followlinks=False):
+                directories[:] = [name for name in directories if name not in PROJECT_IGNORED]
+                for name in [*directories, *names]:
+                    if name in PROJECT_IGNORED:
+                        continue
+                    info = (Path(parent) / name).lstat()
+                    if not stat.S_ISDIR(info.st_mode) and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
+                        raise ValueError("Project files cannot contain links or special files.")
+            changes = []
+            # Export a complete bounded work tree. Comparing only this command's
+            # before/after loses edits after a rejected or interrupted DB save.
+            # The host compares hashes with the Run's durable version cursor.
+            for relative in sorted(after_project):
+                descriptor = os.open(project_root / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(descriptor, "rb") as stream:
+                    info = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 <= info.st_size <= MAX_FILE:
+                        raise ValueError("Each project file must be a regular file no larger than 5 MiB.")
+                    content = stream.read(MAX_FILE + 1)
+                if not 0 <= len(content) <= MAX_FILE:
+                    raise ValueError("Project file exceeds 5 MiB.")
+                changes.append((relative, content))
+            if changes:
+                if not pending:
+                    destination = EXPORTS / uuid4().hex
+                    destination.mkdir(mode=0o700)
+                for relative, content in changes:
+                    target = destination / str(len(exported) + sum(not item.get("deleted") for item in project_changes))
+                    target.write_bytes(content)
+                    target.chmod(0o400)
+                    project_changes.append({"path": str(target), "relative_path": relative, "deleted": False, "size_bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+        except (OSError, ValueError) as exc:
+            project_changes = []
+            project_error = str(exc)[:300]
     _prune_exports()
     total, files = _workspace_usage()
     if quota_exceeded:
@@ -330,7 +419,8 @@ def execute(command, *, python_binary):
     return {"ok": True, "exit_code": 125 if quota_exceeded else 124 if timed_out else process.returncode,
         "timed_out": timed_out, "quota_exceeded": quota_exceeded,
         "stdout": stdout.text(), "stderr": stderr.text(), "truncated": stdout.total > MAX_LOG // 2 or stderr.total > MAX_LOG // 2,
-        "artifacts": exported, "warnings": warnings[:16]}
+        "artifacts": exported, "warnings": warnings[:16],
+        **({"project_changes": project_changes, "project_snapshot": not project_error, "project_error": project_error} if project_mode else {})}
 
 
 def stop_stale():

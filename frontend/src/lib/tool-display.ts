@@ -1,4 +1,15 @@
 import type { TFunction } from "@/i18n"
+import { artifactContentUrl } from "@/lib/agent-artifacts"
+
+export function executionWaitSummary(output: unknown, t: TFunction) {
+  const reason = (output as { resource_wait?: { reason?: string } } | null)
+    ?.resource_wait?.reason
+  if (reason === "workspace_quota") return t("等待工作区执行额度")
+  if (reason === "consumer_quota") return t("等待调用方执行额度")
+  if (reason === "environment_cleanup") return t("等待旧执行环境清理")
+  if (reason === "environment_owned") return t("等待执行环境释放")
+  return t("等待执行资源")
+}
 
 type DisplayableTool = {
   function_name: string
@@ -18,7 +29,7 @@ type ToolOutputEvent = {
 }
 
 const ARTIFACT_URL_PATTERN =
-  /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+/g
+  /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/g
 const IMAGE_PREVIEW_LINK_LINE =
   /^[ \t]*(?:[-*+•]|\d+[.)])?[ \t]*(?:[*_]{1,2})?(?:预览链接|预览地址|preview (?:link|url))[ \t]*[：:][ \t]*(?:[*_]{1,2})?[^\r\n]*(?:\r?\n|$)/gim
 const IMAGE_PREVIEW_URL_LINE =
@@ -69,7 +80,9 @@ export function withArtifactDownloadLinksInContent(content: string) {
 
   let value = content
   for (const rawUrl of urls) {
-    const url = rawUrl.match(/\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+/)?.[0]
+    const url = rawUrl.match(
+      /\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/
+    )?.[0]
     if (url)
       value = replaceArtifactReferences(value, url, artifactLink(filename, url))
   }
@@ -77,14 +90,14 @@ export function withArtifactDownloadLinksInContent(content: string) {
 }
 
 export function builtinToolDisplayName(functionName: string, t: TFunction) {
+  if (functionName === "search_knowledge") return t("知识库检索")
   if (functionName === "bash") return t("命令行")
-  if (functionName === "inline_python") return t("Python 代码")
-  if (functionName === "current_time") return t("当前时间")
   if (functionName === "create_artifact") return t("创建文件")
   if (functionName === "documents_skill") return t("生成 Word")
   if (functionName === "pdf_skill") return t("生成 PDF")
   if (functionName === "pptx_skill") return t("生成 PPT")
   if (functionName === "spreadsheets_skill") return t("生成 Excel")
+  if (functionName === "skill_creator") return t("技能创建")
   if (functionName === "generate_image") return t("图片生成")
   return null
 }
@@ -131,7 +144,11 @@ export function withArtifactDownloadLinks(
       continue
     const output = event.output as Record<string, unknown>
     const sourceFilename =
-      typeof output.filename === "string" ? output.filename.trim() : ""
+      typeof output.relative_path === "string" && output.relative_path
+        ? output.relative_path
+        : typeof output.filename === "string"
+          ? output.filename.trim()
+          : ""
     const sourceDownloadUrl =
       typeof output.download_url === "string" ? output.download_url.trim() : ""
     const isGeneratedImage = event.tool_name === "generate_image"
@@ -147,7 +164,7 @@ export function withArtifactDownloadLinks(
     const downloadUrl =
       isGeneratedImage && UUID_V4_PATTERN.test(artifactId)
         ? `/api/v1/artifacts/${artifactId}`
-        : sourceDownloadUrl
+        : (artifactContentUrl(output) ?? sourceDownloadUrl)
     filenames.add(sourceFilename)
     linkedUrls.add(sourceDownloadUrl)
     const sourcePreviewUrl =
@@ -205,7 +222,7 @@ export function withArtifactDownloadLinks(
   if (artifacts.length === 1) {
     const { sourceFilename, downloadUrl } = artifacts[0]!
     const artifactUrl =
-      "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+(?![A-Za-z0-9._~-]|/preview)"
+      "(?:https?:\\/\\/[^\\s<>()\\[\\]]+)?\\/api\\/v1\\/artifacts\\/[A-Za-z0-9._~-]+(?:\\/content)?(?![A-Za-z0-9._~-]|/)"
     value = value.replace(
       new RegExp(
         `\\[[^\\]\\n]*\\]\\s*\\(\\s*${artifactUrl}\\s*\\)|<${artifactUrl}>|\\x60${artifactUrl}\\x60|${artifactUrl}`,
@@ -250,26 +267,25 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
   if (tool.function_name === "bash") {
     return t("在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。")
   }
-  if (tool.function_name === "inline_python") {
-    return t("在工作流沙箱中运行 Python 代码。")
-  }
-  if (tool.function_name === "current_time") return t("返回当前时间。")
   if (tool.function_name === "create_artifact") {
     return t(
       "根据文件名和内容创建可下载文件；文本文件直接保存，复杂格式由平台生成。"
     )
   }
   if (tool.function_name === "documents_skill") {
-    return t("创建 DOCX 文件。")
+    return t("加载 Word 文档处理指引，在沙箱中读取、创建或修改 DOCX。")
   }
   if (tool.function_name === "pdf_skill") {
-    return t("创建 PDF 文件。")
+    return t("加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。")
   }
   if (tool.function_name === "pptx_skill") {
-    return t("创建 PPTX 演示文稿。")
+    return t("加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。")
   }
   if (tool.function_name === "spreadsheets_skill") {
-    return t("创建 Excel 工作簿。")
+    return t("加载表格处理指引，在沙箱中分析 CSV 或修改 Excel。")
+  }
+  if (tool.function_name === "skill_creator") {
+    return t("生成可导入的技能包；不自动发布或授权。")
   }
   if (tool.function_name === "generate_image") {
     return t("使用 Agent 选定的生图模型生成图片；每次调用需要确认。")

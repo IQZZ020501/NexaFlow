@@ -111,7 +111,7 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`，Alembic `env.py` 
 - `backend/app/tasks/knowledge/jobs.py` — `app.knowledge.run_task` 执行 parse/index/rebuild_index/evaluate。
 - `backend/app/tasks/storage/jobs.py` — `app.storage.cleanup` 按 `knowledge` / `upload` 类型执行持久化外部存储清理。
 - `backend/app/tasks/maintenance/jobs.py` — `app.maintenance.run` 按 cadence 恢复孤儿任务并重新派发到期的存储清理。
-- Celery app 由 `backend/app/infra/queue/celery.py`（`celery_app`）提供，worker 以 `celery -A app.infra.queue.celery:celery_app` 启动。
+- Celery app 由 `backend/app/infra/queue/celery.py`（`celery_app`）提供，Worker 使用 `backend/scripts/worker.py` 启动；本地命令为 `cd backend && make worker`，角色与唯一 Beat 约束见 [后端 README](../backend/README.md)。
 
 ## 相关测试（`backend/tests/knowledge/`）
 

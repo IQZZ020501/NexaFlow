@@ -47,6 +47,33 @@ describe("api client", () => {
     expect(await request("/users/1", { method: "DELETE" })).toBeUndefined()
   })
 
+  test("retains validation field locations without retaining submitted values", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          detail: [
+            {
+              loc: ["body", "name"],
+              msg: "String should have at most 120 characters",
+              input: "private input",
+            },
+          ],
+        }),
+        { status: 422 }
+      )) as unknown as typeof fetch
+    try {
+      await request("/knowledge-bases")
+      throw new Error("request should fail")
+    } catch (error) {
+      expect((error as ApiError).validationIssues).toEqual([
+        {
+          loc: ["body", "name"],
+          msg: "String should have at most 120 characters",
+        },
+      ])
+    }
+  })
+
   test("preserves plain-text error responses as API errors", async () => {
     globalThis.fetch = (async () =>
       new Response("upstream unavailable", {

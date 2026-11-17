@@ -136,6 +136,7 @@ import {
   documentStatusDotClassName,
   documentStatusLabel,
   formatBytes,
+  taskDurationLabel,
   taskStatusDotClassName,
   taskStatusLabel,
   taskTypeLabel,
@@ -462,9 +463,17 @@ function KnowledgeBasePageContent({
   const [isKnowledgeBasesLoadingMore, setIsKnowledgeBasesLoadingMore] =
     React.useState(false)
   const knowledgeBasesLoadingRef = React.useRef(false)
+  const knowledgeBasesRequestRef = React.useRef(0)
+  const knowledgeBasesOffsetRef = React.useRef(0)
+  const deletedKnowledgeBaseIds = React.useRef(new Set<string>())
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
+  )
+  const [knowledgeTaskNow, setKnowledgeTaskNow] = React.useState(Date.now)
+  const documentsById = React.useMemo(
+    () => new Map(documents.map((document) => [document.id, document])),
+    [documents]
   )
   const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
     string[]
@@ -733,9 +742,14 @@ function KnowledgeBasePageContent({
   )
 
   const loadKnowledgeBases = React.useCallback(async () => {
+    const request = ++knowledgeBasesRequestRef.current
+    knowledgeBasesOffsetRef.current = 0
+    setIsKnowledgeBasesLoadingMore(false)
     if (!selectedWorkspaceId) {
       setKnowledgeBases([])
       setRegisteredModels([])
+      knowledgeBasesLoadingRef.current = false
+      setIsLoading(false)
       return
     }
 
@@ -749,16 +763,24 @@ function KnowledgeBasePageContent({
         }),
         listRegisteredModels(token, selectedWorkspaceId),
       ])
-      setKnowledgeBases(knowledgeBases)
+      if (request !== knowledgeBasesRequestRef.current) return
+      const visible = knowledgeBases.filter(
+        (item) => !deletedKnowledgeBaseIds.current.has(item.id)
+      )
+      knowledgeBasesOffsetRef.current = visible.length
+      setKnowledgeBases(visible)
       setKnowledgeBasesHasMore(knowledgeBases.length === CARD_BATCH_SIZE)
       setRegisteredModels(models)
     } catch (error) {
+      if (request !== knowledgeBasesRequestRef.current) return
       setKnowledgeBases([])
       setRegisteredModels([])
       reportError(error)
     } finally {
-      knowledgeBasesLoadingRef.current = false
-      setIsLoading(false)
+      if (request === knowledgeBasesRequestRef.current) {
+        knowledgeBasesLoadingRef.current = false
+        setIsLoading(false)
+      }
     }
   }, [reportError, selectedWorkspaceId, token])
 
@@ -770,22 +792,39 @@ function KnowledgeBasePageContent({
       return
     }
     knowledgeBasesLoadingRef.current = true
+    const request = knowledgeBasesRequestRef.current
     setIsKnowledgeBasesLoadingMore(true)
     try {
       const batch = await listKnowledgeBases(token, selectedWorkspaceId, {
         limit: CARD_BATCH_SIZE,
-        offset: knowledgeBases.length,
+        offset: knowledgeBasesOffsetRef.current,
       })
-      setKnowledgeBases((current) => [...current, ...batch])
+      if (request !== knowledgeBasesRequestRef.current) return
+      knowledgeBasesOffsetRef.current += batch.filter(
+        (item) => !deletedKnowledgeBaseIds.current.has(item.id)
+      ).length
+      setKnowledgeBases((current) => {
+        const existingIds = new Set(current.map((item) => item.id))
+        return [
+          ...current,
+          ...batch.filter(
+            (item) =>
+              !existingIds.has(item.id) &&
+              !deletedKnowledgeBaseIds.current.has(item.id)
+          ),
+        ]
+      })
       setKnowledgeBasesHasMore(batch.length === CARD_BATCH_SIZE)
     } catch (error) {
+      if (request !== knowledgeBasesRequestRef.current) return
       reportError(error)
     } finally {
-      knowledgeBasesLoadingRef.current = false
-      setIsKnowledgeBasesLoadingMore(false)
+      if (request === knowledgeBasesRequestRef.current) {
+        knowledgeBasesLoadingRef.current = false
+        setIsKnowledgeBasesLoadingMore(false)
+      }
     }
   }, [
-    knowledgeBases.length,
     knowledgeBasesHasMore,
     reportError,
     selectedWorkspaceId,
@@ -843,6 +882,7 @@ function KnowledgeBasePageContent({
           selectedWorkspaceId,
           selectedKnowledgeBaseId
         )
+        setKnowledgeTaskNow(Date.now())
         setKnowledgeTasks(tasks)
         setSelectedKnowledgeTaskIds((current) =>
           current.filter((taskId) =>
@@ -870,6 +910,9 @@ function KnowledgeBasePageContent({
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadKnowledgeBases()
+    return () => {
+      knowledgeBasesRequestRef.current += 1
+    }
   }, [loadKnowledgeBases])
 
   const previousActiveKnowledgeBaseId = React.useRef(activeKnowledgeBaseId)
@@ -922,6 +965,23 @@ function KnowledgeBasePageContent({
   const shouldPollTasks =
     (activeDetailTab === "tasks" && hasProcessingTasks) ||
     activeRebuildIndexTask !== undefined
+  const hasRunningTaskDuration =
+    activeDetailTab === "tasks" &&
+    visibleKnowledgeTasks.some(
+      (task) =>
+        task.started_at &&
+        (task.status === "running" || task.status === "cancelling")
+    )
+
+  React.useEffect(() => {
+    if (!hasRunningTaskDuration) return
+
+    const timer = window.setInterval(
+      () => setKnowledgeTaskNow(Date.now()),
+      1000
+    )
+    return () => window.clearInterval(timer)
+  }, [hasRunningTaskDuration])
 
   React.useEffect(() => {
     if (!hasProcessingDocuments && !shouldPollTasks) {
@@ -1059,7 +1119,7 @@ function KnowledgeBasePageContent({
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedWorkspaceId) {
+    if (!selectedWorkspaceId || !form.name.trim()) {
       return
     }
 
@@ -1068,7 +1128,7 @@ function KnowledgeBasePageContent({
       const knowledgeBase = await createKnowledgeBase(
         token,
         selectedWorkspaceId,
-        form
+        { ...form, name: form.name.trim(), description: form.description.trim() }
       )
       setKnowledgeBases((current) => [
         ...current,
@@ -1086,7 +1146,7 @@ function KnowledgeBasePageContent({
 
   async function handleUpdate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedWorkspaceId || !editForm) {
+    if (!selectedWorkspaceId || !editForm || !editForm.name.trim()) {
       return
     }
 
@@ -1094,8 +1154,8 @@ function KnowledgeBasePageContent({
     try {
       updateKnowledgeBaseInList(
         await updateKnowledgeBase(token, selectedWorkspaceId, editForm.id, {
-          name: editForm.name,
-          description: editForm.description,
+          name: editForm.name.trim(),
+          description: editForm.description.trim(),
           embedding_model_id: editForm.embedding_model_id,
           reranker_model_id: editForm.reranker_model_id,
         })
@@ -1176,6 +1236,12 @@ function KnowledgeBasePageContent({
 
     try {
       await deleteKnowledgeBase(token, selectedWorkspaceId, knowledgeBase.id)
+      deletedKnowledgeBaseIds.current.add(knowledgeBase.id)
+      if (knowledgeBases.some((item) => item.id === knowledgeBase.id))
+        knowledgeBasesOffsetRef.current = Math.max(
+          0,
+          knowledgeBasesOffsetRef.current - 1
+        )
       setKnowledgeBases((current) =>
         current.filter((item) => item.id !== knowledgeBase.id)
       )
@@ -1698,6 +1764,41 @@ function KnowledgeBasePageContent({
     )
   }
 
+  function renderKnowledgeTaskDocument(task: KnowledgeTask) {
+    if (
+      !task.document_id &&
+      (task.task_type === "rebuild_index" || task.task_type === "evaluate")
+    ) {
+      return <span className="text-muted-foreground">{t("整个知识库")}</span>
+    }
+
+    const document = task.document_id
+      ? documentsById.get(task.document_id)
+      : undefined
+    if (!document) {
+      return (
+        <span className="text-muted-foreground">
+          {isDocumentLoading ? "—" : t("文档不可用")}
+        </span>
+      )
+    }
+
+    return (
+      <button
+        type="button"
+        className="block max-w-full truncate text-left outline-none hover:text-primary focus-visible:underline"
+        title={document.filename}
+        onClick={() =>
+          router.push(
+            `/app/knowledge/${task.knowledge_base_id}/documents/${document.id}`
+          )
+        }
+      >
+        {document.filename}
+      </button>
+    )
+  }
+
   function renderKnowledgeTaskActionMenu(task: KnowledgeTask) {
     const isTaskActionDisabled =
       !canEditDocuments || isKnowledgeTaskMutationBusy
@@ -2183,7 +2284,7 @@ function KnowledgeBasePageContent({
 
                               {document.last_error ? (
                                 <p className="mt-2 text-xs break-words text-destructive">
-                                  {document.last_error}
+                                  {getErrorMessage(new Error(document.last_error), t)}
                                 </p>
                               ) : null}
 
@@ -2391,8 +2492,8 @@ function KnowledgeBasePageContent({
                                     )}
                                   </p>
                                   {document.last_error ? (
-                                    <p className="mt-1 truncate text-xs text-destructive">
-                                      {document.last_error}
+                                    <p className="mt-1 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive [overflow-wrap:anywhere]">
+                                      {getErrorMessage(new Error(document.last_error), t)}
                                     </p>
                                   ) : null}
                                 </div>
@@ -2879,6 +2980,14 @@ function KnowledgeBasePageContent({
                                     </span>
                                   </p>
                                   <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                    <div className="flex w-full min-w-0 items-center gap-1">
+                                      <dt className="shrink-0">
+                                        {t("关联文档")}
+                                      </dt>
+                                      <dd className="min-w-0 flex-1 text-foreground">
+                                        {renderKnowledgeTaskDocument(task)}
+                                      </dd>
+                                    </div>
                                     <div className="flex items-center gap-1">
                                       <dt>{t("进度")}</dt>
                                       <dd className="font-semibold text-foreground">
@@ -2890,6 +2999,16 @@ function KnowledgeBasePageContent({
                                       <dt>{t("尝试次数")}</dt>
                                       <dd className="font-semibold text-foreground">
                                         {task.attempts}/{task.max_attempts}
+                                      </dd>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <dt>{t("执行耗时")}</dt>
+                                      <dd className="text-foreground tabular-nums">
+                                        {taskDurationLabel(
+                                          task,
+                                          knowledgeTaskNow,
+                                          t
+                                        )}
                                       </dd>
                                     </div>
                                     <div className="flex w-full items-center gap-1">
@@ -2906,7 +3025,7 @@ function KnowledgeBasePageContent({
                                   </dl>
                                   {task.last_error ? (
                                     <p className="mt-2 text-xs break-words text-destructive">
-                                      {task.last_error}
+                                      {getErrorMessage(new Error(task.last_error), t)}
                                     </p>
                                   ) : null}
                                 </div>
@@ -2924,8 +3043,8 @@ function KnowledgeBasePageContent({
                       )}
                     </ul>
                   ) : null}
-                  <div className="min-w-[920px] max-md:hidden">
-                    <div className="grid grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
+                  <div className="min-w-[1120px] max-md:hidden">
+                    <div className="grid grid-cols-[44px_96px_minmax(180px,1fr)_104px_104px_96px_208px_136px_64px] items-center border-b px-4 py-3 text-sm font-medium text-muted-foreground">
                       <label className="flex items-center justify-center">
                         <input
                           ref={selectAllKnowledgeTasksRef}
@@ -2944,10 +3063,12 @@ function KnowledgeBasePageContent({
                         />
                       </label>
                       <span>{t("类型")}</span>
+                      <span>{t("关联文档")}</span>
                       <span>{t("状态")}</span>
                       <span>{t("进度")}</span>
                       <span>{t("尝试次数")}</span>
                       <span>{t("更新时间 / 错误")}</span>
+                      <span>{t("执行耗时")}</span>
                       <span className="text-center">{t("操作")}</span>
                     </div>
                     {isKnowledgeTaskLoading ? (
@@ -2958,7 +3079,7 @@ function KnowledgeBasePageContent({
                       visibleKnowledgeTasks.map((task) => (
                         <div
                           key={task.id}
-                          className="grid min-h-16 grid-cols-[44px_120px_120px_140px_120px_minmax(220px,1fr)_64px] items-center border-b px-4 py-3 text-sm last:border-b-0"
+                          className="grid min-h-16 grid-cols-[44px_96px_minmax(180px,1fr)_104px_104px_96px_208px_136px_64px] items-center border-b px-4 py-3 text-sm last:border-b-0"
                         >
                           <label className="flex items-center justify-center">
                             <input
@@ -2988,6 +3109,9 @@ function KnowledgeBasePageContent({
                           <span className="font-medium">
                             {taskTypeLabel(task.task_type, t)}
                           </span>
+                          <span className="min-w-0 pr-4">
+                            {renderKnowledgeTaskDocument(task)}
+                          </span>
                           <span className="flex items-center gap-2">
                             <span
                               className={cn(
@@ -3008,10 +3132,13 @@ function KnowledgeBasePageContent({
                               {formatDateTime(task.updated_at, locale)}
                             </span>
                             {task.last_error ? (
-                              <span className="block truncate text-xs text-destructive">
-                                {task.last_error}
+                              <span className="block max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive [overflow-wrap:anywhere]">
+                                {getErrorMessage(new Error(task.last_error), t)}
                               </span>
                             ) : null}
+                          </span>
+                          <span className="tabular-nums">
+                            {taskDurationLabel(task, knowledgeTaskNow, t)}
                           </span>
                           <span className="flex items-center justify-center">
                             {renderKnowledgeTaskActionMenu(task)}
@@ -3366,7 +3493,10 @@ function KnowledgeBasePageContent({
                                   permission={knowledgeBase.permission}
                                 />
                               </div>
-                              <p className="mt-1 truncate text-sm text-muted-foreground">
+                              <p
+                                title={knowledgeBase.description}
+                                className="mt-1 line-clamp-2 text-sm break-words text-muted-foreground"
+                              >
                                 {knowledgeBase.description || t("暂无描述")}
                               </p>
                               <ResourceCardMeta>
@@ -3435,9 +3565,7 @@ function KnowledgeBasePageContent({
                                 {selectable ? (
                                   <DropdownMenuItem
                                     onSelect={() =>
-                                      setMoveKnowledgeBaseTarget(
-                                        knowledgeBase
-                                      )
+                                      setMoveKnowledgeBaseTarget(knowledgeBase)
                                     }
                                   >
                                     <FolderInputIcon />

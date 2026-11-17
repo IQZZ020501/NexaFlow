@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { isStaleRunSnapshot } from "@/lib/run-state"
 import { useRouter } from "next/navigation"
 import {
   BotIcon,
@@ -16,7 +17,6 @@ import {
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
-  PlusIcon,
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
@@ -31,6 +31,8 @@ import {
 } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import { useAgentFileDrop } from "@/components/agents/use-agent-file-drop"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
@@ -107,12 +109,9 @@ import {
 import { latestRunVersions } from "@/lib/run-versions"
 import { useVisualViewportShellStyle } from "@/lib/visual-viewport"
 import {
-  AGENT_FILE_UPLOAD_SETTING,
-  acceptedUploadExtensions,
-} from "@/lib/interaction-config"
-import {
   builtinToolDisplayName,
   withArtifactDownloadLinks,
+  executionWaitSummary,
 } from "@/lib/tool-display"
 
 type PublicAgentChatProps = {
@@ -549,6 +548,8 @@ function PublicExecutionProcess({
     if (event.status === "running" && status !== "running") return null
     if (event.type === "analysis" || event.type === "answer") return null
     if (event.stage === "preparing") return null
+    if (event.stage === "waiting_resources" && status === "running")
+      return executionWaitSummary(event.output, t)
     if (status === "running") {
       return t("正在调用 {name}", { name: title(event) })
     }
@@ -641,10 +642,10 @@ export function mergePublicRunEvent(
   event: PublicAgentRunStreamEvent,
   placeholderId: string
 ) {
-  if (event.type === "run") {
+  if (event.type === "run" || event.type === "recovering") {
     const next = runs.map((run) =>
       run.id === placeholderId || run.id === event.run.id
-        ? {
+        ? isStaleRunSnapshot(run, event.run) ? run : {
             ...event.run,
             attachments: event.run.attachments?.length
               ? event.run.attachments
@@ -1211,11 +1212,19 @@ export function PublicAgentChat({
     mode: "follow_up"
     content: string
   } | null>(null)
-  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
+  const fileDrop = useAgentFileDrop(
+    `${agentId}:${activeConversationId ?? ""}`,
+    isSending || isRunsLoading,
+    (dropped) => {
+      setSendError(null)
+      setFiles((current) => appendAttachmentFiles(current, dropped))
+    },
+    () => setSendError(t("文件夹读取失败，请重试"))
+  )
 
   const loadRunToolCalls = React.useCallback(
     async (runId: string, controller?: AbortController) => {
@@ -1291,6 +1300,7 @@ export function PublicAgentChat({
     if (streamControllerRef.current) return
     if (!activeConversationId) return
     let current = true
+    let observer: AbortController | null = null
     listPublicAgentRuns(agentId, activeConversationId, token, {
       limit: 200,
       offset: 0,
@@ -1329,6 +1339,44 @@ export function PublicAgentChat({
             if (run.status === "awaiting_approval") {
               void loadRunToolCalls(run.id)
             }
+            if (
+              !["queued", "running", "awaiting_approval"].includes(run.status)
+            )
+              continue
+            if (streamControllerRef.current) continue
+            const controller = new AbortController()
+            observer = controller
+            streamControllerRef.current = controller
+            activeRunIdRef.current = run.id
+            activePlaceholderIdRef.current = null
+            setIsSending(true)
+            void observePublicAgentRun(
+              agentId,
+              token,
+              run.id,
+              (event) => {
+                if (!current || streamControllerRef.current !== controller)
+                  return
+                setRuns((items) =>
+                  mergePublicRunEvent(items, run.id, event, run.id)
+                )
+                if (event.type === "approval_required")
+                  void loadRunToolCalls(run.id, controller)
+              },
+              controller.signal
+            )
+              .catch((error: unknown) => {
+                if (current && !controller.signal.aborted)
+                  setSendError(getErrorMessage(error, t))
+              })
+              .finally(() => {
+                if (streamControllerRef.current !== controller) return
+                streamControllerRef.current = null
+                activeRunIdRef.current = null
+                activePlaceholderIdRef.current = null
+                setIsSending(false)
+                if (current) void refreshConversations()
+              })
           }
         }
       })
@@ -1340,8 +1388,22 @@ export function PublicAgentChat({
       })
     return () => {
       current = false
+      observer?.abort()
+      if (observer && streamControllerRef.current === observer) {
+        streamControllerRef.current = null
+        activeRunIdRef.current = null
+        setIsSending(false)
+      }
     }
-  }, [activeConversationId, agentId, loadRunToolCalls, sessionReady, t, token])
+  }, [
+    activeConversationId,
+    agentId,
+    loadRunToolCalls,
+    refreshConversations,
+    sessionReady,
+    t,
+    token,
+  ])
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current
@@ -1486,7 +1548,7 @@ export function PublicAgentChat({
       setRuns((current) =>
         current.map((item) =>
           item.id === runId
-            ? {
+            ? isStaleRunSnapshot(item, run) ? item : {
                 ...run,
                 progress:
                   run.progress.length > 0 ? run.progress : item.progress,
@@ -1916,6 +1978,7 @@ export function PublicAgentChat({
   }
 
   const visibleRuns = [...runs].reverse()
+  const isEmptyConversation = !isRunsLoading && visibleRuns.length === 0
   const historyProps = {
     profile,
     conversations,
@@ -1978,212 +2041,342 @@ export function PublicAgentChat({
             </header>
 
             <div
-              ref={scrollRef}
-              className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+              className={`flex min-h-0 flex-1 flex-col ${isEmptyConversation ? "overflow-y-auto overscroll-contain" : ""}`}
             >
               <div
-                className={`mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 2xl:max-w-6xl ${hasArtifactPreview ? "sm:px-4" : "sm:px-8 sm:py-8"}`}
+                ref={scrollRef}
+                className={
+                  isEmptyConversation
+                    ? "mt-auto shrink-0"
+                    : "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+                }
               >
-                {isRunsLoading ? (
-                  <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-                    {t("正在加载")}
-                  </div>
-                ) : visibleRuns.length === 0 ? (
-                  <div className="flex flex-1 flex-col items-center justify-center text-center">
-                    <span className="flex size-14 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-                      <BotIcon className="size-6" />
-                    </span>
-                    <h2 className="mt-4 text-base font-semibold">
-                      {t("开始新对话")}
-                    </h2>
-                    <p className="mt-2 max-w-md text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
-                      {profile.description ||
-                        t("输入问题，Agent 会为你生成回答。")}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-6 sm:space-y-8">
-                    {visibleRuns.map((run, index) => {
-                      const progressSegments = splitPublicRunProgress(run)
-                      const currentProgress = progressSegments.at(-1) ?? []
-                      const runToolCalls = toolCallsByRun[run.id] ?? []
-                      const visibleCurrentProgress = visiblePublicToolProgress(
-                        currentProgress,
-                        runToolCalls
-                      )
-                      const completedProgress = progressSegments.slice(0, -1)
-                      const hasAnswerHandoffs = completedProgress.length > 0
-                      const sourcesForProgress = (
-                        progress: ExternalAgentProgressEvent[]
-                      ) =>
-                        hasAnswerHandoffs
-                          ? agentSourcesForEvents(run.sources, progress)
-                          : run.sources
-                      let completedProgressIndex = 0
-                      const sessionInputs = (run.session_inputs ?? []).map(
-                        (input) => {
-                          const inputProgress = input.previous_answer
-                            ? (completedProgress[completedProgressIndex++] ??
-                              [])
-                            : []
-                          return {
-                            input,
-                            progress: inputProgress,
-                            sources: sourcesForProgress(inputProgress),
-                          }
-                        }
-                      )
-                      const currentSources = sourcesForProgress(currentProgress)
-                      const pendingFollowUpIds = new Set(
-                        sessionInputs
-                          .filter(
-                            ({ input }) =>
-                              input.status !== "applied" &&
-                              !input.previous_answer
+                <div
+                  className={`mx-auto flex min-h-full w-full max-w-5xl flex-col px-3 py-4 2xl:max-w-6xl ${hasArtifactPreview ? "sm:px-4" : "sm:px-8 sm:py-8"}`}
+                >
+                  {isRunsLoading ? (
+                    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                      <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
+                      {t("正在加载")}
+                    </div>
+                  ) : visibleRuns.length === 0 ? (
+                    <div className="flex flex-1 flex-col items-center justify-center text-center">
+                      <span className="flex size-14 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                        <BotIcon className="size-6" />
+                      </span>
+                      <h2 className="mt-4 text-base font-semibold">
+                        {t("开始新对话")}
+                      </h2>
+                      <p className="mt-2 max-w-md text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
+                        {profile.description ||
+                          t("输入问题，Agent 会为你生成回答。")}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6 sm:space-y-8">
+                      {visibleRuns.map((run, index) => {
+                        const progressSegments = splitPublicRunProgress(run)
+                        const currentProgress = progressSegments.at(-1) ?? []
+                        const runToolCalls = toolCallsByRun[run.id] ?? []
+                        const visibleCurrentProgress =
+                          visiblePublicToolProgress(
+                            currentProgress,
+                            runToolCalls
                           )
-                          .map(({ input }) => input.input_id)
-                      )
-                      const answerStartedAt = currentProgress.findLast(
-                        (event) => event.type === "answer"
-                      )?.created_at
-                      const canEdit =
-                        index === visibleRuns.length - 1 &&
-                        run.status === "succeeded"
-                      const isEditing = editingRunId === run.id
-                      return (
-                        <article key={run.id} className="space-y-4">
-                          <div className="flex items-start justify-end gap-2">
-                            <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
-                              <RunAttachmentCards
-                                attachments={run.attachments}
-                                t={t}
-                              />
-                              {isEditing ? (
-                                <form
-                                  className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
-                                  onSubmit={(event) => {
-                                    event.preventDefault()
-                                    const goal = editDraft.trim()
-                                    if (
-                                      !goal ||
-                                      isSending ||
-                                      isRunsLoading ||
-                                      regeneratingRunId
-                                    ) {
-                                      return
-                                    }
-                                    void handleRegenerateRun(run.id, goal)
-                                  }}
-                                >
-                                  <textarea
-                                    autoFocus
-                                    aria-label={t("编辑消息")}
-                                    className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
-                                    maxLength={4000}
-                                    value={editDraft}
-                                    onChange={(event) =>
-                                      setEditDraft(event.target.value)
-                                    }
-                                  />
-                                  <div className="flex justify-end gap-1">
+                        const completedProgress = progressSegments.slice(0, -1)
+                        const hasAnswerHandoffs = completedProgress.length > 0
+                        const sourcesForProgress = (
+                          progress: ExternalAgentProgressEvent[]
+                        ) =>
+                          hasAnswerHandoffs
+                            ? agentSourcesForEvents(run.sources, progress)
+                            : run.sources
+                        let completedProgressIndex = 0
+                        const sessionInputs = (run.session_inputs ?? []).map(
+                          (input) => {
+                            const inputProgress = input.previous_answer
+                              ? (completedProgress[completedProgressIndex++] ??
+                                [])
+                              : []
+                            return {
+                              input,
+                              progress: inputProgress,
+                              sources: sourcesForProgress(inputProgress),
+                            }
+                          }
+                        )
+                        const currentSources =
+                          sourcesForProgress(currentProgress)
+                        const pendingFollowUpIds = new Set(
+                          sessionInputs
+                            .filter(
+                              ({ input }) =>
+                                input.status !== "applied" &&
+                                !input.previous_answer
+                            )
+                            .map(({ input }) => input.input_id)
+                        )
+                        const answerStartedAt = currentProgress.findLast(
+                          (event) => event.type === "answer"
+                        )?.created_at
+                        const canEdit =
+                          index === visibleRuns.length - 1 &&
+                          run.status === "succeeded"
+                        const isEditing = editingRunId === run.id
+                        return (
+                          <article key={run.id} className="space-y-4">
+                            <div className="flex items-start justify-end gap-2">
+                              <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
+                                <RunAttachmentCards
+                                  attachments={run.attachments}
+                                  t={t}
+                                />
+                                {isEditing ? (
+                                  <form
+                                    className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
+                                    onSubmit={(event) => {
+                                      event.preventDefault()
+                                      const goal = editDraft.trim()
+                                      if (
+                                        !goal ||
+                                        isSending ||
+                                        isRunsLoading ||
+                                        regeneratingRunId
+                                      ) {
+                                        return
+                                      }
+                                      void handleRegenerateRun(run.id, goal)
+                                    }}
+                                  >
+                                    <textarea
+                                      autoFocus
+                                      aria-label={t("编辑消息")}
+                                      className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
+                                      maxLength={4000}
+                                      value={editDraft}
+                                      onChange={(event) =>
+                                        setEditDraft(event.target.value)
+                                      }
+                                    />
+                                    <div className="flex justify-end gap-1">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={regeneratingRunId === run.id}
+                                        onClick={() => {
+                                          setEditingRunId(null)
+                                          setEditDraft("")
+                                        }}
+                                      >
+                                        {t("取消")}
+                                      </Button>
+                                      <Button
+                                        type="submit"
+                                        size="sm"
+                                        disabled={
+                                          !editDraft.trim() ||
+                                          isSending ||
+                                          isRunsLoading ||
+                                          Boolean(regeneratingRunId)
+                                        }
+                                      >
+                                        {regeneratingRunId === run.id ? (
+                                          <LoaderCircleIcon className="animate-spin" />
+                                        ) : (
+                                          <SendIcon />
+                                        )}
+                                        {t("重新发送")}
+                                      </Button>
+                                    </div>
+                                  </form>
+                                ) : (
+                                  <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+                                    {run.question}
+                                  </div>
+                                )}
+                                <div className="flex items-start gap-1">
+                                  <CopyButton t={t} value={run.question} />
+                                  {canEdit && !isEditing ? (
                                     <Button
                                       type="button"
                                       variant="ghost"
-                                      size="sm"
-                                      disabled={regeneratingRunId === run.id}
-                                      onClick={() => {
-                                        setEditingRunId(null)
-                                        setEditDraft("")
-                                      }}
-                                    >
-                                      {t("取消")}
-                                    </Button>
-                                    <Button
-                                      type="submit"
-                                      size="sm"
+                                      size="icon-xs"
+                                      className="text-muted-foreground"
+                                      aria-label={t("编辑消息")}
+                                      title={t("编辑消息")}
                                       disabled={
-                                        !editDraft.trim() ||
                                         isSending ||
                                         isRunsLoading ||
                                         Boolean(regeneratingRunId)
                                       }
+                                      onClick={() => {
+                                        setEditingRunId(run.id)
+                                        setEditDraft(run.question)
+                                      }}
                                     >
-                                      {regeneratingRunId === run.id ? (
-                                        <LoaderCircleIcon className="animate-spin" />
-                                      ) : (
-                                        <SendIcon />
-                                      )}
-                                      {t("重新发送")}
+                                      <PencilIcon />
                                     </Button>
-                                  </div>
-                                </form>
-                              ) : (
-                                <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                                  {run.question}
+                                  ) : null}
                                 </div>
-                              )}
-                              <div className="flex items-start gap-1">
-                                <CopyButton t={t} value={run.question} />
-                                {canEdit && !isEditing ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon-xs"
-                                    className="text-muted-foreground"
-                                    aria-label={t("编辑消息")}
-                                    title={t("编辑消息")}
-                                    disabled={
-                                      isSending ||
-                                      isRunsLoading ||
-                                      Boolean(regeneratingRunId)
-                                    }
-                                    onClick={() => {
-                                      setEditingRunId(run.id)
-                                      setEditDraft(run.question)
-                                    }}
+                              </div>
+                              <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
+                                <UserIcon className="size-3.5" />
+                              </span>
+                            </div>
+                            {sessionInputs
+                              .filter(
+                                ({ input }) =>
+                                  !pendingFollowUpIds.has(input.input_id)
+                              )
+                              .map(({ input, progress, sources }) => (
+                                <React.Fragment key={input.input_id}>
+                                  {input.previous_answer ? (
+                                    <div className="flex items-start gap-3">
+                                      <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+                                        <BotIcon className="size-4" />
+                                      </span>
+                                      <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+                                        <PublicExecutionProcess
+                                          run={run}
+                                          progress={progress}
+                                          completed
+                                        />
+                                        <AgentAnswer
+                                          events={progress}
+                                          content={withArtifactDownloadLinks(
+                                            input.previous_answer,
+                                            progress
+                                          )}
+                                          sources={sources}
+                                          t={t}
+                                          className="text-sm leading-6"
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    <span className="text-xs text-muted-foreground">
+                                      {t("后续任务")}
+                                    </span>
+                                    <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+                                      {input.content}
+                                    </div>
+                                    <CopyButton t={t} value={input.content} />
+                                  </div>
+                                </React.Fragment>
+                              ))}
+                            <div className="flex items-start gap-3">
+                              <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+                                <BotIcon className="size-4" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+                                  <PublicExecutionProcess
+                                    run={run}
+                                    progress={visibleCurrentProgress}
                                   >
-                                    <PencilIcon />
-                                  </Button>
+                                    {unrenderedPublicToolCalls(
+                                      run.progress,
+                                      runToolCalls
+                                    ).map((call) =>
+                                      [
+                                        "awaiting_approval",
+                                        "uncertain",
+                                      ].includes(call.status) ? (
+                                        <PublicToolApproval
+                                          key={call.call_id}
+                                          runId={run.id}
+                                          call={call}
+                                          resolvingCallId={resolvingCallId}
+                                          onDecision={(callId, decision) =>
+                                            handleToolCallDecision(
+                                              run.id,
+                                              callId,
+                                              decision
+                                            )
+                                          }
+                                          t={t}
+                                        />
+                                      ) : (
+                                        <PublicPendingToolCall
+                                          key={call.call_id}
+                                          call={call}
+                                          t={t}
+                                        />
+                                      )
+                                    )}
+                                  </PublicExecutionProcess>
+                                  {run.result ? (
+                                    <AgentAnswer
+                                      events={currentProgress}
+                                      content={withArtifactDownloadLinks(
+                                        run.result,
+                                        currentProgress
+                                      )}
+                                      sources={currentSources}
+                                      t={t}
+                                      className="text-sm leading-6"
+                                    />
+                                  ) : run.status === "failed" ? (
+                                    <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                                      {run.error
+                                        ? getErrorMessage(
+                                            new Error(run.error),
+                                            t
+                                          )
+                                        : t("回答失败，请稍后重试。")}
+                                    </p>
+                                  ) : run.status === "cancelled" ? (
+                                    <p className="text-sm text-muted-foreground">
+                                      {t("运行已取消")}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                {answerStartedAt ||
+                                (run.status === "succeeded" && run.result) ? (
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <MessageTimestamp value={answerStartedAt} />
+                                    {run.status === "succeeded" &&
+                                    run.result ? (
+                                      <RunActionBar
+                                        result={stripAgentSourceLinks(
+                                          run.result
+                                        )}
+                                        feedback={run.feedback}
+                                        regenerateDisabled={
+                                          isSending ||
+                                          isRunsLoading ||
+                                          Boolean(regeneratingRunId)
+                                        }
+                                        regenerating={
+                                          regeneratingRunId === run.id
+                                        }
+                                        feedbackPending={
+                                          feedbackPendingRunId === run.id
+                                        }
+                                        onRegenerate={() =>
+                                          void handleRegenerateRun(run.id)
+                                        }
+                                        onFeedback={(value) =>
+                                          void handleRunFeedback(run.id, value)
+                                        }
+                                        t={t}
+                                      />
+                                    ) : null}
+                                  </div>
                                 ) : null}
                               </div>
                             </div>
-                            <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
-                              <UserIcon className="size-3.5" />
-                            </span>
-                          </div>
-                          {sessionInputs
-                            .filter(
-                              ({ input }) =>
-                                !pendingFollowUpIds.has(input.input_id)
-                            )
-                            .map(({ input, progress, sources }) => (
-                              <React.Fragment key={input.input_id}>
-                                {input.previous_answer ? (
-                                  <div className="flex items-start gap-3">
-                                    <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
-                                      <BotIcon className="size-4" />
-                                    </span>
-                                    <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
-                                      <PublicExecutionProcess
-                                        run={run}
-                                        progress={progress}
-                                        completed
-                                      />
-                                      <AgentAnswer
-                                        events={progress}
-                                        content={withArtifactDownloadLinks(
-                                          input.previous_answer,
-                                          progress
-                                        )}
-                                        sources={sources}
-                                        t={t}
-                                        className="text-sm leading-6"
-                                      />
-                                    </div>
-                                  </div>
-                                ) : null}
-                                <div className="flex flex-col items-end gap-1.5">
+                            {sessionInputs
+                              .filter(({ input }) =>
+                                pendingFollowUpIds.has(input.input_id)
+                              )
+                              .map(({ input }) => (
+                                <div
+                                  key={input.input_id}
+                                  className="flex flex-col items-end gap-1.5"
+                                >
                                   <span className="text-xs text-muted-foreground">
                                     {t("后续任务")}
                                   </span>
@@ -2192,247 +2385,113 @@ export function PublicAgentChat({
                                   </div>
                                   <CopyButton t={t} value={input.content} />
                                 </div>
-                              </React.Fragment>
-                            ))}
-                          <div className="flex items-start gap-3">
-                            <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
-                              <BotIcon className="size-4" />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
-                                <PublicExecutionProcess
-                                  run={run}
-                                  progress={visibleCurrentProgress}
-                                >
-                                  {unrenderedPublicToolCalls(
-                                    run.progress,
-                                    runToolCalls
-                                  ).map((call) =>
-                                    ["awaiting_approval", "uncertain"].includes(
-                                      call.status
-                                    ) ? (
-                                      <PublicToolApproval
-                                        key={call.call_id}
-                                        runId={run.id}
-                                        call={call}
-                                        resolvingCallId={resolvingCallId}
-                                        onDecision={(callId, decision) =>
-                                          handleToolCallDecision(
-                                            run.id,
-                                            callId,
-                                            decision
-                                          )
-                                        }
-                                        t={t}
-                                      />
-                                    ) : (
-                                      <PublicPendingToolCall
-                                        key={call.call_id}
-                                        call={call}
-                                        t={t}
-                                      />
-                                    )
-                                  )}
-                                </PublicExecutionProcess>
-                                {run.result ? (
-                                  <AgentAnswer
-                                    events={currentProgress}
-                                    content={withArtifactDownloadLinks(
-                                      run.result,
-                                      currentProgress
-                                    )}
-                                    sources={currentSources}
-                                    t={t}
-                                    className="text-sm leading-6"
-                                  />
-                                ) : run.status === "failed" ? (
-                                  <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                                    {run.error
-                                      ? getErrorMessage(new Error(run.error), t)
-                                      : t("回答失败，请稍后重试。")}
-                                  </p>
-                                ) : run.status === "cancelled" ? (
-                                  <p className="text-sm text-muted-foreground">
-                                    {t("运行已取消")}
-                                  </p>
-                                ) : null}
-                              </div>
-                              {answerStartedAt ||
-                              (run.status === "succeeded" && run.result) ? (
-                                <div className="flex flex-wrap items-start justify-between gap-2">
-                                  <MessageTimestamp value={answerStartedAt} />
-                                  {run.status === "succeeded" && run.result ? (
-                                    <RunActionBar
-                                      result={stripAgentSourceLinks(run.result)}
-                                      feedback={run.feedback}
-                                      regenerateDisabled={
-                                        isSending ||
-                                        isRunsLoading ||
-                                        Boolean(regeneratingRunId)
-                                      }
-                                      regenerating={
-                                        regeneratingRunId === run.id
-                                      }
-                                      feedbackPending={
-                                        feedbackPendingRunId === run.id
-                                      }
-                                      onRegenerate={() =>
-                                        void handleRegenerateRun(run.id)
-                                      }
-                                      onFeedback={(value) =>
-                                        void handleRunFeedback(run.id, value)
-                                      }
-                                      t={t}
-                                    />
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                          {sessionInputs
-                            .filter(({ input }) =>
-                              pendingFollowUpIds.has(input.input_id)
-                            )
-                            .map(({ input }) => (
-                              <div
-                                key={input.input_id}
-                                className="flex flex-col items-end gap-1.5"
-                              >
-                                <span className="text-xs text-muted-foreground">
-                                  {t("后续任务")}
-                                </span>
-                                <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
-                                  {input.content}
-                                </div>
-                                <CopyButton t={t} value={input.content} />
-                              </div>
-                            ))}
-                        </article>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="shrink-0 border-t bg-background p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
-              {sendError ? (
-                <p
-                  role="alert"
-                  className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
-                >
-                  {sendError}
-                </p>
-              ) : null}
-              <form
-                className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
-                onSubmit={handleAsk}
-                onDragOver={(event) => {
-                  if (event.dataTransfer.types.includes("Files")) {
-                    event.preventDefault()
-                  }
-                }}
-                onDrop={(event) => {
-                  const dropped = transferredFiles(event.dataTransfer)
-                  if (!dropped.length) return
-                  event.preventDefault()
-                  if (isSending) return
-                  setSendError(null)
-                  setFiles((current) => appendAttachmentFiles(current, dropped))
-                }}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="sr-only"
-                  multiple
-                  accept={acceptedUploadExtensions(
-                    AGENT_FILE_UPLOAD_SETTING.file_upload_type
+                              ))}
+                          </article>
+                        )
+                      })}
+                    </div>
                   )}
-                  disabled={isSending}
-                  onChange={(event) => {
-                    const selected = Array.from(event.target.files ?? [])
-                    setSendError(null)
-                    setFiles((current) =>
-                      appendAttachmentFiles(current, selected)
-                    )
+                </div>
+              </div>
+
+              <div
+                className={`shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))] ${isEmptyConversation ? "mb-auto" : "border-t bg-background"}`}
+              >
+                {sendError ? (
+                  <p
+                    role="alert"
+                    className="mx-auto mb-2 max-w-3xl text-xs text-destructive"
+                  >
+                    {sendError}
+                  </p>
+                ) : null}
+                <form
+                  className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                  aria-busy={fileDrop.isReadingFiles}
+                  onSubmit={(event) => {
+                    if (fileDrop.isReadingFiles) event.preventDefault()
+                    else void handleAsk(event)
                   }}
-                />
-                <textarea
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onPaste={(event) => {
-                    if (isSending) return
-                    const pasted = transferredFiles(event.clipboardData)
-                    if (!pasted.length) return
-                    event.preventDefault()
-                    setSendError(null)
-                    setFiles((current) =>
-                      appendAttachmentFiles(current, pasted)
-                    )
-                  }}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
+                  onDragOver={(event) => {
+                    if (event.dataTransfer.types.includes("Files")) {
                       event.preventDefault()
-                      event.currentTarget.form?.requestSubmit()
                     }
                   }}
-                  className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
-                  placeholder={t("请输入问题")}
-                  aria-label={t("请输入问题")}
-                  enterKeyHint="send"
-                  autoComplete="off"
-                  maxLength={4000}
-                  rows={1}
-                />
-                <AgentAttachmentList
-                  files={files}
-                  onRemove={(indexToRemove) =>
-                    setFiles((current) =>
-                      current.filter((_, index) => index !== indexToRemove)
-                    )
-                  }
-                  t={t}
-                />
-                <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
-                  <div className="flex min-w-0 items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="rounded-md text-muted-foreground hover:text-foreground"
-                      aria-label={t("添加附件")}
-                      title={t("添加附件")}
-                      disabled={isSending}
-                      onClick={() => {
-                        if (!fileInputRef.current) return
-                        fileInputRef.current.value = ""
-                        fileInputRef.current.click()
-                      }}
-                    >
-                      <PlusIcon />
-                    </Button>
-                    <AgentApprovalModeMenu
-                      value={approvalMode}
-                      onChange={setApprovalMode}
-                      disabled={isSending}
-                      t={t}
-                    />
+                  onDrop={fileDrop.onDrop}
+                >
+                  <textarea
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    onPaste={(event) => {
+                      if (isSending) return
+                      const pasted = transferredFiles(event.clipboardData)
+                      if (!pasted.length) return
+                      event.preventDefault()
+                      setSendError(null)
+                      setFiles((current) =>
+                        appendAttachmentFiles(current, pasted)
+                      )
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
+                        event.preventDefault()
+                        event.currentTarget.form?.requestSubmit()
+                      }
+                    }}
+                    className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
+                    placeholder={t("请输入问题")}
+                    aria-label={t("请输入问题")}
+                    enterKeyHint="send"
+                    autoComplete="off"
+                    maxLength={4000}
+                    rows={1}
+                  />
+                  <AgentAttachmentList
+                    files={files}
+                    onRemove={(indexToRemove) =>
+                      setFiles((current) =>
+                        current.filter((_, index) => index !== indexToRemove)
+                      )
+                    }
+                    t={t}
+                  />
+                  <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
+                    <div className="flex min-w-0 items-center gap-1">
+                      <AgentFilePicker
+                        disabled={
+                          isSending || isRunsLoading || fileDrop.isReadingFiles
+                        }
+                        onFiles={(selected) => {
+                          setSendError(null)
+                          setFiles((current) =>
+                            appendAttachmentFiles(current, selected)
+                          )
+                        }}
+                        t={t}
+                      />
+                      <AgentApprovalModeMenu
+                        value={approvalMode}
+                        onChange={setApprovalMode}
+                        disabled={isSending}
+                        t={t}
+                      />
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <AgentChatSubmitButton
+                        isRunning={isSending}
+                        hasInput={Boolean(question.trim())}
+                        sendDisabled={fileDrop.isReadingFiles}
+                        onStop={handleCancelAsk}
+                        t={t}
+                      />
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <AgentChatSubmitButton
-                      isRunning={isSending}
-                      hasInput={Boolean(question.trim())}
-                      onStop={handleCancelAsk}
-                      t={t}
-                    />
-                  </div>
-                </div>
-              </form>
+                </form>
+              </div>
             </div>
           </section>
           <AgentArtifactPreviewPanel />

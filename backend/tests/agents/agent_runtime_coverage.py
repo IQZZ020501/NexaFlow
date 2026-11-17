@@ -3773,7 +3773,7 @@ async def assert_create_agent_run_paths(
             assert created.status == "succeeded"
 
         # file_ids branch (627, 629)
-        import app.application.workflows.uploads.service as workflow_uploads_module
+        import app.application.uploads.service as workflow_uploads_module
 
         original_resolve = workflow_uploads_module.resolve_workspace_agent_files
         holder.model = RuntimeModelStub([ok_completion("Attached answer.")])
@@ -3786,8 +3786,8 @@ async def assert_create_agent_run_paths(
                 _workspace_role,
                 file_ids,
                 _settings,
-            ) -> tuple[str, list[dict[str, object]]]:
-                return f"attachment:{','.join(file_ids)}", []
+            ) -> tuple[str, list[dict[str, object]], list[dict]]:
+                return f"attachment:{','.join(file_ids)}", [], []
 
             workflow_uploads_module.resolve_workspace_agent_files = fake_resolve
             try:
@@ -5445,7 +5445,6 @@ async def assert_agent_tool_runtime_paths(
     import dataclasses as dc
 
     from app.application.agents.tools import runtime as atr
-    from app.application.tools.runtime.contracts import ToolRuntimeResult
     from app.domain.agents.runtime import (
         AgentExecutionPaused,
         AgentRunnerError,
@@ -5453,6 +5452,7 @@ async def assert_agent_tool_runtime_paths(
         AgentToolUncertain,
     )
     from app.domain.tools.runtime import tool_snapshot_from_payload
+    from app.ports.tools import ToolRuntimeResult
 
     settings = test_settings()
 
@@ -5771,7 +5771,6 @@ async def assert_tool_service_paths(
     from app.entities.tools import (
         ApplicationToolBinding,
         McpServer,
-        ToolDraft,
         ToolInvocation,
         ToolSource,
     )
@@ -5842,26 +5841,6 @@ async def assert_tool_service_paths(
             )
             is None
         )
-
-        # list_tool_drafts (431-436)
-        draft = ToolDraft(
-            workspace_id=workspace_id,
-            tool_id=mcp_tool.id,
-            display_name="Draft",
-            description="",
-            input_schema={},
-            output_schema=None,
-            execution_spec={},
-            revision=1,
-            updated_by_user_id=admin_user_id,
-        )
-        await tool_repository.save_tool_draft(db, draft)
-        drafts = await tool_repository.list_tool_drafts(db, workspace_id)
-        assert any(item.id == draft.id for item in drafts)
-
-        # list_tool_policies (518-523)
-        policies = await tool_repository.list_tool_policies(db, workspace_id)
-        assert any(item.tool_id == mcp_tool.id for item in policies)
 
         # update_tool_policy_if_revision guard (537)
         policy = await tool_repository.get_tool_policy(db, workspace_id, mcp_tool.id)
@@ -6530,11 +6509,11 @@ async def assert_cancel_stops_claimed_run(
     assert events[-1]["run"]["status"] == "cancelled"
 
 
-async def assert_orphaned_stream_ends_with_error(
+async def assert_orphaned_stream_observes_recovery(
     workspace_id: str,
     agent_id: str,
 ) -> None:
-    """A run whose executor lease expired must end the stream with an error."""
+    """An expired executor lease keeps observing until durable recovery finishes."""
     from sqlalchemy import update
 
     from app.domain.agents.models import AgentRunState
@@ -6574,10 +6553,35 @@ async def assert_orphaned_stream_ends_with_error(
             settings,
         ):
             events.append(event)
-    assert [event["type"] for event in events] == ["run", "error"], events
-    error_event = events[-1]
-    assert error_event["run"]["status"] == "failed"
-    assert "lost its lease" in error_event["run"]["last_error"]
+            if event["type"] == "recovering":
+                assert event["run"]["status"] == "running"
+                async with get_session_factory()() as recovery_db:
+                    now = utc_now()
+                    claimed = await agent_repository.claim_agent_run(
+                        recovery_db,
+                        run_id,
+                        "recovery-worker",
+                        now,
+                        now + timedelta(seconds=60),
+                        generation="unified",
+                    )
+                    assert claimed is not None
+                    assert await agent_repository.finalize_agent_run(
+                        recovery_db,
+                        run_id,
+                        "recovery-worker",
+                        status="succeeded",
+                        result="recovered",
+                        events=[],
+                        last_error=None,
+                        finished_at=now,
+                    )
+                    await recovery_db.commit()
+    assert [event["type"] for event in events] == ["run", "recovering", "complete"], (
+        events
+    )
+    assert events[-1]["run"]["status"] == "succeeded"
+    assert events[-1]["run"]["result"] == "recovered"
 
 
 def main() -> None:
@@ -6639,7 +6643,7 @@ def main() -> None:
                 assert_stream_paths(workspace_id, resources["agent_id"])
             )
             asyncio.run(
-                assert_orphaned_stream_ends_with_error(
+                assert_orphaned_stream_observes_recovery(
                     workspace_id,
                     resources["agent_id"],
                 )

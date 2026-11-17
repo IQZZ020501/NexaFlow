@@ -9,6 +9,13 @@ function tFor(language: Language): TFunction {
 }
 
 describe("API error localization", () => {
+  test("localizes upload errors and identifies fields in server validation errors", () => {
+    expect(getErrorMessage(new ApiError(422, "Document is empty."), tFor("zh-Hans"))).toContain("0 字节")
+    expect(getErrorMessage(new ApiError(422, "validation", [
+      { loc: ["body", "name"], msg: "String should have at most 120 characters" },
+      { loc: ["body", "similarity"], msg: "Input should be less than or equal to 1" },
+    ]), tFor("zh-Hans"))).toBe("名称：最多输入 120 个字符\n相似度：数值必须小于或等于 1")
+  })
   test.each([
     ["zh-Hans", "模型回答被截断，请重试。"],
     ["zh-Hant", "模型回答遭到截斷，請重試。"],

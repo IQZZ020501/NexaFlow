@@ -7,6 +7,12 @@ from datetime import UTC, datetime
 import sqlalchemy as sa
 
 from alembic import op
+from app.domain.tools.catalog.service import (
+    canonical_definition_hash,
+    stable_catalog_id,
+)
+from app.entities.defaults import utc_now
+from app.entities.tools import Tool, ToolPolicy, ToolVersion
 
 revision: str = "202608290001"
 down_revision: str | None = "202608250007"
@@ -17,7 +23,6 @@ depends_on: str | Sequence[str] | None = None
 def _desired(stable_key: str, workspace_id: str):
     from app.domain.tools.catalog.service import (
         build_artifact_tool,
-        build_inline_python_tool,
     )
 
     if stable_key in {"artifact", "python_artifact"}:
@@ -113,3 +118,107 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     _switch(downgrade=True)
+
+
+# Frozen definition required to replay this historical migration.
+def build_inline_python_tool(
+    workspace_id: str,
+    created_at: datetime | None = None,
+) -> tuple[Tool, ToolVersion, ToolPolicy]:
+    timestamp = created_at or utc_now()
+    source_id = stable_catalog_id(f"source:{workspace_id}:builtin")
+    tool_id = stable_catalog_id(f"tool:{workspace_id}:builtin:inline_python")
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "maxLength": 8192},
+            "inputs": {"type": "object"},
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                },
+                "maxItems": 8,
+                "uniqueItems": True,
+                "description": (
+                    "Optional managed Skills to stage for this run. Each Skill "
+                    "must be installed by the Worker."
+                ),
+            },
+        },
+        "required": ["code", "inputs"],
+        "additionalProperties": False,
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {"result": {}},
+        "required": ["result"],
+        "additionalProperties": False,
+    }
+    execution_spec = {
+        "builtin": "inline_python",
+        "workflow_only": True,
+        "direct_only": True,
+    }
+    definition_hash = canonical_definition_hash(
+        {
+            "name": "inline_python",
+            "description": (
+                "Run inline Python in the Workflow sandbox. Optional managed "
+                "Skills are staged read-only and may install their requirements "
+                "through the Worker public egress proxy."
+            ),
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "execution_spec": execution_spec,
+        }
+    )
+    version_id = stable_catalog_id(f"version:{tool_id}:{definition_hash}")
+    return (
+        Tool(
+            id=tool_id,
+            workspace_id=workspace_id,
+            source_id=source_id,
+            kind="builtin",
+            stable_key="inline_python",
+            function_name="inline_python",
+            current_version_id=version_id,
+            status="active",
+            availability="available",
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+        ToolVersion(
+            id=version_id,
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            revision=1,
+            display_name="Python code",
+            description=(
+                "Run inline Python in the Workflow sandbox. Optional managed "
+                "Skills are staged read-only and may install their requirements "
+                "through the Worker public egress proxy."
+            ),
+            input_schema=input_schema,
+            output_schema=output_schema,
+            execution_spec=execution_spec,
+            definition_hash=definition_hash,
+            created_at=timestamp,
+        ),
+        ToolPolicy(
+            id=stable_catalog_id(f"policy:{tool_id}"),
+            workspace_id=workspace_id,
+            tool_id=tool_id,
+            tool_version_id=version_id,
+            definition_hash=definition_hash,
+            revision=1,
+            approval="auto",
+            effect="pure",
+            allowed_access_sources=["console", "public", "api"],
+            workflow_callable=True,
+            parallel_safe=False,
+            created_at=timestamp,
+            updated_at=timestamp,
+        ),
+    )

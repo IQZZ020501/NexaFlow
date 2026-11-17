@@ -12,11 +12,63 @@ export type McpTool = {
 export type McpToolPolicyMode = "approval_required" | "read_only" | "disabled"
 export type McpTransport = "streamable_http" | "sse" | "stdio"
 
+export type McpOAuthConfiguration = {
+  authorization_endpoint: string
+  token_endpoint: string
+  revocation_endpoint: string
+  client_id: string
+  client_auth_method: "none" | "client_secret_basic" | "client_secret_post"
+  client_secret?: string
+  scopes: string[]
+}
+
+export type McpOAuthStatus = {
+  status:
+    "disconnected" | "connected" | "refreshing" | "reauthorization_required"
+  expires_at: string | null
+  configuration: Omit<McpOAuthConfiguration, "client_secret">
+}
+
+export type McpTaskContract = {
+  status_tool: string
+  result_tool: string
+  cancel_tool: string
+  poll_seconds: number
+}
+export type McpTaskConfiguration = {
+  tools: string[]
+  contracts: Record<string, McpTaskContract>
+}
+
+export function getMcpTaskConfiguration(
+  token: string,
+  workspaceId: string,
+  serverId: string
+) {
+  return request<McpTaskConfiguration>(
+    mcpPath(workspaceId, `/${serverId}/long-tasks`),
+    { token }
+  )
+}
+
+export function configureMcpTasks(
+  token: string,
+  workspaceId: string,
+  serverId: string,
+  contracts: Record<string, McpTaskContract>
+) {
+  return request<McpTaskConfiguration>(
+    mcpPath(workspaceId, `/${serverId}/long-tasks`),
+    { token, method: "PUT", body: JSON.stringify({ contracts }) }
+  )
+}
+
 export type McpServer = {
   id: string
   workspace_id: string
   name: string
   transport: McpTransport
+  auth_mode?: "bearer" | "oauth"
   url: string | null
   stdio_command: string | null
   tools: McpTool[]
@@ -35,6 +87,7 @@ export type McpServerCreatePayload =
       transport: "streamable_http" | "sse"
       url: string
       bearer_token?: string
+      oauth?: McpOAuthConfiguration
     }
   | {
       name: string
@@ -58,6 +111,64 @@ function mcpPath(workspaceId: string, suffix = "") {
   return `/api/v1/workspaces/${workspaceId}/mcp-servers${suffix}`
 }
 
+export function getMcpOAuth(
+  token: string,
+  workspaceId: string,
+  serverId: string
+) {
+  return request<McpOAuthStatus>(mcpPath(workspaceId, `/${serverId}/oauth`), {
+    token,
+  })
+}
+
+export function configureMcpOAuth(
+  token: string,
+  workspaceId: string,
+  serverId: string,
+  payload: McpOAuthConfiguration
+) {
+  return request<McpOAuthStatus>(mcpPath(workspaceId, `/${serverId}/oauth`), {
+    token,
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function authorizeMcpOAuth(
+  token: string,
+  workspaceId: string,
+  serverId: string
+) {
+  return request<{ authorization_url: string; redirect_uri: string }>(
+    mcpPath(workspaceId, `/${serverId}/oauth/authorize`),
+    { token, method: "POST" }
+  )
+}
+
+export function completeMcpOAuth(
+  token: string,
+  workspaceId: string,
+  serverId: string,
+  state: string,
+  code: string
+) {
+  return request<McpOAuthStatus>(
+    mcpPath(workspaceId, `/${serverId}/oauth/callback`),
+    { token, method: "POST", body: JSON.stringify({ state, code }) }
+  )
+}
+
+export function disconnectMcpOAuth(
+  token: string,
+  workspaceId: string,
+  serverId: string
+) {
+  return request<McpOAuthStatus>(
+    mcpPath(workspaceId, `/${serverId}/oauth/disconnect`),
+    { token, method: "POST" }
+  )
+}
+
 /**
  * Retrieves MCP servers configured for a workspace.
  *
@@ -70,7 +181,7 @@ function mcpPath(workspaceId: string, suffix = "") {
 export function listMcpServers(
   token: string,
   workspaceId: string,
-  options: { limit?: number; offset?: number } = {},
+  options: { limit?: number; offset?: number } = {}
 ) {
   return request<McpServer[]>(`${mcpPath(workspaceId)}${listQuery(options)}`, {
     token,

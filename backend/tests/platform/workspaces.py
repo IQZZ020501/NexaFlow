@@ -1156,12 +1156,26 @@ def exercise_workspace_analytics() -> None:
         assert (
             tools_inventory["total"]
             == tools_inventory["builtin"]
-            + tools_inventory["python"]
             + tools_inventory["mcp"]
         )
-        # Only the injected archived probe is inactive in this workspace.
-        assert tools_inventory["active"] == tools_inventory["total"] - 1
+        # Archived probes and internal runtime capabilities are outside the catalog.
+        assert tools_inventory["active"] == tools_inventory["total"]
         assert tools_inventory["builtin"] >= 2
+        governance_inventory = client.get(
+            f"/api/v1/workspaces/{workspace_id}/inventory",
+            headers=auth_headers(admin_token),
+        )
+        assert governance_inventory.status_code == 200, governance_inventory.text
+        assert governance_inventory.json()["tools_total"] == tools_inventory["total"]
+        catalog = client.get(
+            f"/api/v1/workspaces/{workspace_id}/tools",
+            headers=auth_headers(admin_token),
+        )
+        assert catalog.status_code == 200, catalog.text
+        regular_tools = [
+            item for item in catalog.json() if item["function_name"] != "generate_image"
+        ]
+        assert len(regular_tools) == tools_inventory["total"]
         assert payload["tool_usage"] == {
             "calls": {
                 "value": 4,

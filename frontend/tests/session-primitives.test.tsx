@@ -355,6 +355,7 @@ function SessionProbe() {
       <button type="button" onClick={() => session.notify("success", "hello")}>
         notify
       </button>
+      <button type="button" onClick={() => session.notify("error", "failure details")}>notify-error</button>
       <button type="button" onClick={() => setLanguage("en")}>
         language-en
       </button>
@@ -810,6 +811,22 @@ describe("SessionProvider", () => {
       () => expect(screen.getByTestId("notif").textContent).toBe("none"),
       { timeout: 5000 }
     )
+  })
+
+  test("errors stay visible until dismissed, including after a later success", async () => {
+    restoreHandler()
+    renderSession()
+    await waitFor(() =>
+      expect(screen.getByTestId("restored").textContent).toBe("true")
+    )
+    fireEvent.click(screen.getByText("notify-error"))
+    fireEvent.click(screen.getByText("notify"))
+    await new Promise((resolve) => setTimeout(resolve, 3400))
+    expect(screen.getByTestId("notif").textContent).toBe(
+      "error:failure details"
+    )
+    fireEvent.click(screen.getByText("dismiss"))
+    expect(screen.getByTestId("notif").textContent).toBe("none")
   })
 
   test("reports team loading errors", async () => {

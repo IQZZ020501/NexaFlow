@@ -15,14 +15,18 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
     message_chunk_to_message,
+    messages_from_dict,
+    messages_to_dict,
 )
 from langchain_core.tools import StructuredTool
 
-from app.application.agents.tools.builder import (
+from app.application.agents.integration import (
     build_knowledge_search_tool,
     build_unified_agent_tool,
 )
+from app.application.workflows.nodes.capabilities import workflow_skill_catalog
 from app.application.workflows.tools.runtime import WorkflowToolRuntime
+from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agents.models import AGENT_RUN_SUCCEEDED_STATUS
 from app.domain.agents.runtime.graph import (
     ModelTextStreamFilter,
@@ -82,6 +86,10 @@ class WorkflowNodeScope:
     form_submissions: dict[str, dict[str, Any]] = field(default_factory=dict)
     child_runs: dict[str, AgentRun] = field(default_factory=dict)
     output_delta: Callable[[str, str], Awaitable[None]] | None = None
+    llm_states: dict[str, Any] = field(default_factory=dict)
+    save_llm_state: Callable[[str, dict[str, Any] | None], Awaitable[None]] | None = (
+        None
+    )
 
 
 def _path_value(value: Any, path: str) -> Any:
@@ -322,7 +330,10 @@ async def _llm_tool_call(
         raise ValueError("Workflow model returned invalid tool arguments.")
     snapshot = scope.tool_runtime.get_by_function(tool.name)
     if snapshot is None:
-        raise ValueError("Workflow model requested an unavailable tool.")
+        result = await tool.ainvoke(arguments)
+        if not isinstance(result, AgentToolResult):
+            raise ValueError("Workflow capability returned an invalid result.")
+        return result
     return await scope.tool_runtime.invoke(
         snapshot,
         node.id,
@@ -340,46 +351,96 @@ async def _model_tool_loop(
     call_params: dict[str, Any],
     tools: list[StructuredTool],
     on_delta: Callable[[str], Awaitable[None]] | None = None,
+    registry=None,
 ) -> tuple[str, dict[str, Any], str]:
-    """Run the LLM with bound Tools until it answers or the call cap hits."""
-    bound = build_chat_model(scope.settings, model).bind_tools(tools)
-    total_usage: dict[str, Any] = {}
-    tool_call_count = 0
-    reasoning = ""
-    for _ in range(MAX_WORKFLOW_LLM_TOOL_CALLS):
-        message = await _invoke_model(bound, messages, call_params, on_delta)
-        reasoning = _message_reasoning(message)
-        total_usage = merge_usage(total_usage, usage_from_message(message))
-        if int(total_usage.get("total_tokens") or 0) > remaining_model_tokens:
-            raise ValueError("Workflow model token budget exceeded.")
-        completion = model_completion(message)
-        if completion.tool_calls:
-            messages.append(sanitized_model_message(message, completion))
-            for call in completion.tool_calls:
-                if not call.id or not call.name:
-                    raise ValueError("Workflow model returned an invalid tool call.")
-                tool = next(
-                    (item for item in tools if item.name == call.name), None
+    """Checkpoint model decisions before calls so approval never repeats a decision."""
+    state = scope.llm_states.get(node.id, {})
+    if state:
+        messages = messages_from_dict(state["messages"])
+        if registry:
+            registry.restore(state.get("capabilities", {}))
+    total_usage = state.get("usage", {})
+    tool_call_count = int(state.get("tool_call_count", 0))
+    model_calls = int(state.get("model_calls", 0))
+    pending = list(state.get("pending", []))
+    reasoning = state.get("reasoning", "")
+    final = state.get("final")
+    if isinstance(final, str):
+        return final, total_usage, reasoning
+
+    async def save():
+        payload = {
+            "messages": messages_to_dict(messages),
+            "usage": total_usage,
+            "tool_call_count": tool_call_count,
+            "model_calls": model_calls,
+            "pending": pending,
+            "reasoning": reasoning,
+            "capabilities": registry.snapshot() if registry else {},
+            **({"final": final} if final is not None else {}),
+        }
+        scope.llm_states[node.id] = payload
+        if scope.save_llm_state:
+            await scope.save_llm_state(node.id, payload)
+
+    while pending or model_calls < MAX_WORKFLOW_LLM_TOOL_CALLS:
+        if not pending:
+            active = registry.tools if registry else tools
+            bound = build_chat_model(scope.settings, model).bind_tools(active)
+            remaining = remaining_model_tokens - int(
+                total_usage.get("total_tokens") or 0
+            )
+            if remaining <= 0:
+                raise ValueError("Workflow model token budget exceeded.")
+            params = dict(call_params)
+            for key, limit in _model_output_limit(
+                model.provider_type, remaining
+            ).items():
+                params[key] = min(int(params.get(key, limit)), limit)
+            message = await _invoke_model(bound, messages, params, on_delta)
+            model_calls += 1
+            reasoning = _message_reasoning(message)
+            total_usage = merge_usage(total_usage, usage_from_message(message))
+            if int(total_usage.get("total_tokens") or 0) > remaining_model_tokens:
+                raise ValueError("Workflow model token budget exceeded.")
+            completion = model_completion(message)
+            sanitized = sanitized_model_message(message, completion)
+            if not isinstance(sanitized, AIMessage):
+                sanitized = AIMessage(
+                    content=completion.content,
+                    tool_calls=sanitized.tool_calls,
+                    invalid_tool_calls=sanitized.invalid_tool_calls,
+                    additional_kwargs=sanitized.additional_kwargs,
                 )
-                if tool is None:
-                    raise ValueError("Workflow model requested an unavailable tool.")
-                result = await _llm_tool_call(
-                    scope,
-                    node,
-                    tool,
-                    call,
-                    tool_call_count,
+            messages.append(sanitized)
+            pending = [
+                {"id": call.id, "name": call.name, "arguments": call.arguments}
+                for call in completion.tool_calls
+            ]
+            final = completion.content if not pending else None
+            await save()
+            if not pending:
+                # Keep the completed response until the engine commits the node.
+                return completion.content, total_usage, reasoning
+        for raw in pending[:]:
+            if tool_call_count >= MAX_WORKFLOW_LLM_TOOL_CALLS:
+                raise ValueError("Workflow model tool call limit reached.")
+            call = ModelToolCall(**raw)
+            if not call.id or not call.name:
+                raise ValueError("Workflow model returned an invalid tool call.")
+            active = registry.tools if registry else tools
+            tool = next((item for item in active if item.name == call.name), None)
+            if tool is None:
+                raise ValueError("Workflow model requested an unavailable tool.")
+            result = await _llm_tool_call(scope, node, tool, call, tool_call_count)
+            tool_call_count += 1
+            messages.append(
+                ToolMessage(
+                    content=result.content, tool_call_id=call.id, name=tool.name
                 )
-                tool_call_count += 1
-                messages.append(
-                    ToolMessage(
-                        content=result.content,
-                        tool_call_id=call.id,
-                        name=tool.name,
-                    )
-                )
-            continue
-        return completion.content, total_usage, reasoning
+            )
+            pending.pop(0)
+            await save()
     raise ValueError("Workflow model tool call limit reached.")
 
 
@@ -562,6 +623,9 @@ async def execute_workflow_node(
             parsed.model_params_setting,
             context.remaining_model_tokens,
         )
+        references = {
+            item.tool_id: item for item in [*parsed.tools, *parsed.capability_tools]
+        }
         tools = [
             build_unified_agent_tool(
                 scope.tool_runtime.get_by_reference(
@@ -569,8 +633,28 @@ async def execute_workflow_node(
                     reference.version_id,
                 )
             )
-            for reference in parsed.tools
+            for reference in references.values()
+            if not (
+                scope.run.access_source == "api"
+                and scope.tool_runtime.get_by_reference(
+                    reference.tool_id, reference.version_id
+                ).execution_spec.get("builtin")
+                == "skill_dependency_install"
+            )
         ]
+        registry = (
+            workflow_skill_catalog(scope.run, parsed.skills, tools)
+            if parsed.skills
+            else None
+        )
+        if registry:
+            messages.insert(
+                0,
+                SystemMessage(
+                    content=skill_execution_context(list(registry.skills.values()))
+                ),
+            )
+
         async def emit_output_delta(delta: str) -> None:
             assert scope.output_delta is not None
             await scope.output_delta(node.id, delta)
@@ -586,6 +670,7 @@ async def execute_workflow_node(
                 call_params,
                 tools,
                 on_delta,
+                registry,
             )
         else:
             content, usage, reasoning = await _invoke_chat(

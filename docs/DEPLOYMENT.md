@@ -30,7 +30,7 @@
 - `.githooks/` — 仓库 Git hooks（`pre-commit`，由 `scripts/setup-hooks.sh` 启用）
 - `.dockerignore` — 镜像构建上下文裁剪（同时是 `dev.py` 的镜像构建输入）
 - `.github/workflows/ci.yml` — CI：校验唯一 Compose 与开发入口，运行前后端套件
-- `.gitignore` — 忽略规则（Python/Node 产物、虚拟环境、日志、.env、`deploy/data/`、`docs/local/`、`.agents/`、`coverage/`、docs/MVP_TASK_PLAN.md、.codegraph、.playwright-cli/ 等）
+- `.gitignore` — 忽略规则（Python/Node 产物、虚拟环境、日志、.env、`deploy/data/`、`docs/local/`、`.agents/`、`coverage/`、.codegraph、.playwright-cli/ 等）
 - `.playwright-cli/` — Playwright 浏览器自动化运行产物目录（已被 gitignore 忽略）
 
 ## 配置归属
@@ -141,7 +141,7 @@ docker compose down
 
 容量值在 Compose 的 `x-backend-environment.OPENSANDBOX_MAX_SANDBOXES` 中修改。默认预热池关闭，空闲时不保留执行沙箱。后台 Worker 仍按任务自动伸缩；低配环境避免同时导入大量文档，仅启动成功不能证明峰值内存足够。
 
-执行档位由 `backend/app/adapters/execution/resources.py` 定义：small 为 1 vCPU / 512 MiB，standard 为 1 vCPU / 1 GiB，heavy 为 2 vCPU / 2 GiB。bash、Skill 与文件渲染会申请 heavy；这是每台沙箱的限额，不代表始终占满。4 台 heavy 接近上限时，仅执行沙箱就可能使用约 8 GiB，此外还有业务进程、数据库、向量索引、网络侧车和宿主机。
+执行档位由 `backend/app/adapters/execution/resources.py` 定义：small 为 1 vCPU / 512 MiB，standard 为 1 vCPU / 1 GiB，heavy 为 2 vCPU / 2 GiB。普通 bash/脚本 Skill 为 standard，文件渲染、固定文档 Skill 和依赖安装能力为 heavy；Run 按冻结能力集取足够的档位，这是每台沙箱的限额，不代表始终占满。4 台 heavy 接近上限时，仅执行沙箱就可能使用约 8 GiB，此外还有业务进程、数据库、向量索引、网络侧车和宿主机。
 
 一个 Run 可能同时持有代码执行沙箱和独立 stdio MCP 宿主，上限设为 `1` 时不能组合使用这两类能力；完整组合使用至少保留 `2` 个槽位。大知识库会增加 PostgreSQL/Qdrant 的存储、索引和查询需求，向量容量需按数据量另算，参见 [Qdrant 官方容量说明](https://qdrant.tech/documentation/capacity-planning/)。合并容器简化的是部署和进程管理，不会消除业务进程的 CPU/内存开销。
 
@@ -162,7 +162,7 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
   `DATABASE_URL`、`ENVIRONMENT`、`LOG_LEVEL`、`KNOWLEDGE_STORAGE_DIR`、
   `CELERY_BROKER_URL`、`PUBLIC_APP_URL`、
   `MCP_ALLOW_PRIVATE_NETWORKS`、`CORS_ORIGINS`。部署镜像和网站端口直接编辑 `x-images` / `x-settings.web-port`；`NEXAFLOW_APP_IMAGE` 和 `NEXAFLOW_PORT` 不再控制部署 Compose。`NEXAFLOW_POSTGRES_IMAGE` 仅用于本地开发的数据库镜像覆盖。
-- 执行容量：共享后端配置的 `OPENSANDBOX_MAX_SANDBOXES` 限制所有 Worker 同时存活的沙箱总数，当前单机 Compose 设置为 `4`。代码默认 `0` 表示不限制，但 `production` 要求正数。按执行主机的承载能力设置；槽位记录在 Redis（`CELERY_BROKER_URL`）中，按沙箱的原生过期时间自动失效。满载时最多等待 5 秒，仍无空位的工具调用回到队列，由 Run 稍后重试，不会被判为失败；Redis 不可用时不创建沙箱。
+- 执行容量：共享后端配置的 `OPENSANDBOX_MAX_SANDBOXES` 限制所有 Worker 同时存活的沙箱总数，当前单机 Compose 设置为 `4`。代码默认 `0` 表示不限制，但 `production` 要求正数。按执行主机的承载能力设置；槽位记录在 Redis（`CELERY_BROKER_URL`）中，按沙箱的原生过期时间自动失效。满载时立即交回 Worker，ToolInvocation 保存最多 300 秒且不超过 Run deadline 的资源等待，确认未派发的等待不消耗执行尝试。包含 stdio MCP 的新 Agent Run 在第一次需要环境时原子预留代码与 MCP 两份预算，同一 Run 最多一个 stdio 宿主；实际 guest 按需创建。准入按工作空间轮转、空间内到达顺序执行，仍由 heartbeat/Beat 重试唤起。Redis 不可用时不创建沙箱。高级可选 `OPENSANDBOX_MEMORY_BUDGET_MIB` / `OPENSANDBOX_CPU_BUDGET` 默认 `0`（不启用加权预算），设置后扣除预热池的保守成本；数量、内存、CPU、workspace 和 consumer 额度必须同时满足。详见 [可靠性与准入契约](RUN_RELIABILITY.md)。
 - 兼容既有部署的高级运行策略：`MCP_REQUEST_TIMEOUT_SECONDS`、
   `MODEL_REQUEST_TIMEOUT_SECONDS`、`AGENT_TOOL_TIMEOUT_SECONDS`、
   `AGENT_RUN_TIMEOUT_SECONDS`、`AGENT_MAX_TURNS`、`AGENT_MAX_TOOL_CALLS`、
@@ -183,7 +183,7 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
 - `backend/scripts/worker.py --role` 决定一个 Worker 的职责：`all`（默认，本地开发）消费全部队列并内嵌 Beat；`background` 只消费 `celery` 队列（知识库、工具测试、邮件、清理）并内嵌 Beat，用 prefork 自动伸缩；`agents` 只消费 `agents-legacy`/`agents-v2`，不带 Beat，用线程池让同一进程的所有对话共享一个事件循环，默认并发 32（可追加 `--concurrency=N`）。部署监督器分别启动 background 与 agents，不将两种池混合；两者使用不同 Celery 节点名，避免同一容器主机名造成控制消息冲突。Worker 使用 NullPool，每个执行中的 Run 会短暂占用 PostgreSQL 连接，调大并发前要确认 `max_connections` 足够。
 - API 与内嵌 Beat 的后台 Worker 必须连接同一 PostgreSQL/Redis；后台 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Agent Run 只在消息超过租约时长仍未被消费、或租约刚过期时才重新派发，并记录在 `agent_run_states.redispatched_at`，积压时不会每轮重复投递；发现 Run 已被其他 Worker 持有有效租约的重复消息直接结束，不再定时重试。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - Compose 中设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。stdio MCP 和已批准的 Skill 依赖安装可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent/Workflow Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
-- `execution_sessions` 持久化 Run 的沙箱 ID、短租约和依赖锁；任意 Worker 按 ID 接回，Python、生成文件、渲染器、Workflow 代码节点和 bash 共用 Run 沙箱。结束/取消主动销毁，Beat 按分钟回收过期、孤儿和待关闭会话。Run 内 stdio 服务通过另一台宿主沙箱的 HTTP 桥接进程复用，工具发现仍然一次性。
+- `execution_sessions` 持久化 Run 的沙箱 ID、短租约和依赖锁；任意 Worker 按 ID 接回，Skill 脚本、生成文件、历史渲染器和 bash 共用 Run 沙箱。结束/取消主动销毁，Beat 按分钟回收过期、孤儿和待关闭会话。Run 内 stdio 服务通过另一台宿主沙箱的 HTTP 桥接进程复用，工具发现仍然一次性。
 - 新建 Agent Run 默认自带 bash 能力，无需绑定，工具目录与选择器隐藏它；默认预算为 24 轮、64 次工具调用、900 秒，历史 Run 保留原冻结预算。单条命令最多 300 秒，输出最多 30 KiB。新生成的执行主机配置 TTL 上限为 1860 秒；已有 `server.toml` 需由操作者提高上限，覆盖 Run 最长截止时间加 60 秒，配置生成器不会自动覆盖。
 - `OPENSANDBOX_WARM_POOL_SIZE` 默认为 0，开启后从 `OPENSANDBOX_MAX_SANDBOXES` 扣除池大小；公开/API 每位访客最多同时占两台（含 stdio 宿主）。small/standard/heavy 暂用 1 CPU/512 MiB、1 CPU/1 GiB、2 CPU/2 GiB；这些规格尚未做 Kata 生产校准。
 - 旧 Unix Broker、Seatbelt/namespace supervisor、`SANDBOX_NETWORK`、宿主 Skills 目录和宿主依赖安装已移除。schema-v1 测试 Skills 需重新导入。

@@ -133,6 +133,7 @@ from app.infra.security.secrets import encrypt_secret
 from app.infra.storage import object_storage
 from app.infra.tools import mcp_stdio
 from app.ports import mcp as ports_mcp
+from app.ports.mcp import MAX_MCP_STORED_RESULT_BYTES
 from app.schemas.models.contracts import (
     RegisteredModelCreateRequest,
     RegisteredModelUpdateRequest,
@@ -571,10 +572,10 @@ class _YieldingParent(BaseChatModel):
         return ChatResult(generations=[])
 
     def _stream(self, *args, **kwargs):
-        yield SimpleNamespace(text="chunk")
+        yield ChatGenerationChunk(message=AIMessageChunk(content="chunk"))
 
     async def _astream(self, *args, **kwargs):
-        yield SimpleNamespace(text="chunk")
+        yield ChatGenerationChunk(message=AIMessageChunk(content="chunk"))
 
 
 class _YieldingMixinModel(_ProviderErrorChatMixin, _YieldingParent):
@@ -1770,7 +1771,7 @@ def test_call_mcp_tool() -> None:
         assert fake_client.call_tool.call_args.kwargs.get("meta") is None
 
         fake_client.call_tool.return_value = SimpleNamespace(
-            structured_content={"data": "x" * (MAX_MCP_RESULT_BYTES + 100)},
+            structured_content={"data": "x" * (MAX_MCP_STORED_RESULT_BYTES + 100)},
             content=[],
             is_error=False,
         )
@@ -1786,7 +1787,9 @@ def test_call_mcp_tool() -> None:
             )
         # The call already ran, so an oversized result is cut rather than failed.
         assert not result.is_error and result.structured_content is None
-        assert result.meta == {"nexaflow/truncated": True}
+        assert result.meta["nexaflow/truncated"] is True
+        assert result.meta["nexaflow/full_result_available"] is False
+        assert result.meta["nexaflow/result_bytes"] > MAX_MCP_STORED_RESULT_BYTES
         assert len(json.dumps(result.payload()).encode()) <= MAX_MCP_RESULT_BYTES
 
         fake_client.call_tool.return_value = SimpleNamespace(
@@ -2042,6 +2045,11 @@ def test_object_storage() -> None:
         )
         assert empty is not None
         assert not (root / "data/empty.bin").exists()
+        assert (
+            run(storage.put_chunks("data/empty.bin", _chunks(), None, allow_empty=True))
+            == 0
+        )
+        assert (root / "data/empty.bin").read_bytes() == b""
 
         class _ExplodingChunks:
             def __init__(self):
@@ -2219,7 +2227,6 @@ def test_settings_defaults_and_validation() -> None:
     assert base.agent_external_agent_runs_per_minute == 60
     assert base.agent_external_consumer_runs_per_minute == 10
     assert base.opensandbox_url == "http://127.0.0.1:8088"
-    assert base.workflow_sandbox_timeout_seconds == 5.0
     assert base.jwt_expires_minutes == 1440
     assert base.refresh_token_expires_days == 30
     assert config_mod.Settings.public_app_url == "http://localhost:8080"
@@ -2290,14 +2297,6 @@ def test_settings_defaults_and_validation() -> None:
             "AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE",
         ),
         (replace(base, opensandbox_url="file:///host"), "OPENSANDBOX_URL"),
-        (
-            replace(base, workflow_sandbox_timeout_seconds=0.05),
-            "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
-        ),
-        (
-            replace(base, workflow_sandbox_timeout_seconds=31),
-            "WORKFLOW_SANDBOX_TIMEOUT_SECONDS",
-        ),
         (
             replace(base, artifact_sandbox_timeout_seconds=0.05),
             "ARTIFACT_SANDBOX_TIMEOUT_SECONDS",
@@ -3575,6 +3574,7 @@ def test_refresh_mcp_server() -> None:
 
     with patch.object(
         tools_services, "discover_mcp_tools", new=AsyncMock(return_value=McpDiscovery(tools=[_mcp_tool_dict("new-tool")]))
+    ), patch.object(mcp_repo, "get_mcp_server_by_id", new=AsyncMock(return_value=server)
     ), patch.object(mcp_repo, "save_mcp_server", new=AsyncMock()), patch.object(
         mcp_repo, "refresh_mcp_server", new=AsyncMock(return_value=server)
     ), patch.object(

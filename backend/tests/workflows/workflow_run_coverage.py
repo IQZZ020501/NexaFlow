@@ -4,7 +4,7 @@ Targets:
 - app/application/workflow_runs.py          (run lifecycle, forms, streams)
 - app/shareddomain/workflows/engine.py      (validation + scheduler branches)
 - app/shareddomain/workflows/services.py    (definition/version boundaries)
-- app/shareddomain/workflows/uploads.py     (cleanup records)
+- app/domain/uploads/service.py     (cleanup records)
 - app/api/v1/workflows/routes.py         (validate / form / stream endpoints)
 
 Run from backend/:
@@ -92,7 +92,7 @@ async def _noop_maintain_agent_run_lease(run_id, worker_task_id, settings, lease
 
 
 _workflow_executor_module.maintain_agent_run_lease = _noop_maintain_agent_run_lease
-import app.application.runs.dispatch as _run_dispatch_module
+import app.bootstrap.runs as _run_dispatch_module
 
 _run_dispatch_module.run_durable_workflow_run = _patched_run_durable_workflow_run
 
@@ -1511,7 +1511,7 @@ def test_workflow_services_boundaries() -> None:
                         raise AssertionError("expected 422 for mcp policy")
                     except HTTPException as exc:
                         assert exc.status_code == 422
-                        assert "read-only policy" in str(exc.detail)
+                        assert "enabled policy" in str(exc.detail)
 
                 # 214-216: llm mcp_enable references are collected
                 refs_graph = _simple_graph()
@@ -1626,7 +1626,7 @@ def test_workflow_services_boundaries() -> None:
 def test_upload_cleanup_records() -> None:
     from tests.agents.agents import agent_model_server
 
-    from app.domain.workflows.uploads import (
+    from app.domain.uploads.service import (
         prepare_due_upload_cleanups,
         queue_upload_cleanups,
         run_upload_storage_cleanup,
@@ -1664,7 +1664,7 @@ def test_upload_cleanup_records() -> None:
 
         async def failure_path(cleanup_id: str) -> None:
             with patch(
-                "app.domain.workflows.uploads.create_object_storage",
+                "app.domain.uploads.service.create_object_storage",
                 return_value=_RaisingStorage(),
             ):
                 try:
