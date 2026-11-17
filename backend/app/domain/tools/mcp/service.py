@@ -730,7 +730,7 @@ async def set_mcp_tool_policy(
         approval = "each_call"
         effect = "unknown"
         allowed_access_sources = ["console", "public"]
-        workflow_callable = False
+        workflow_callable = True
         parallel_safe = False
 
     policy = leaf.policy

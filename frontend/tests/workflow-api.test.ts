@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   createWorkflowRun,
   observeWorkflowRun,
+  resolveWorkflowToolApproval,
   uploadWorkflowFiles,
   updateWorkflowDefinition,
 } from "../src/lib/api/workflows"
@@ -34,6 +35,62 @@ function ndjsonResponse(events: object[]) {
 }
 
 describe("workflow API", () => {
+  test("submits a decision for the exact node-prefixed invocation", async () => {
+    let requested = ""
+    let body = ""
+    let authorization: string | null = null
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => {
+      requested = String(input)
+      body = String(init?.body)
+      authorization = new Headers(init?.headers).get("Authorization")
+      return Response.json({ id: "run-1", status: "queued" })
+    }) as typeof fetch
+    const run = await resolveWorkflowToolApproval(
+      "token",
+      "ws-1",
+      "wf-1",
+      "run-1",
+      "node:llm:2:lookup",
+      true
+    )
+    expect(requested).toBe(
+      "/api/v1/workspaces/ws-1/workflows/wf-1/runs/run-1/tool-calls/node%3Allm%3A2%3Alookup/approval"
+    )
+    expect(JSON.parse(body)).toEqual({ approve: true })
+    expect(authorization as string | null).toBe("Bearer token")
+    expect(run.status).toBe("queued")
+  })
+
+  for (const type of [
+    "approval_required",
+    "workflow_input_required",
+  ] as const) {
+    test(`stops observation while awaiting ${type}`, async () => {
+      let calls = 0
+      const received: string[] = []
+      globalThis.setTimeout = ((callback: () => void) => {
+        queueMicrotask(callback)
+        return 1
+      }) as typeof setTimeout
+      globalThis.fetch = (async () =>
+        ndjsonResponse([
+          {
+            type: ++calls === 1 ? type : "complete",
+            sequence: calls,
+            run: { id: "run-1" },
+          },
+        ])) as unknown as typeof fetch
+      await observeWorkflowRun("token", "ws-1", "wf-1", "run-1", (event) =>
+        received.push(event.type)
+      )
+      expect(received).toEqual([type])
+      expect(calls).toBe(1)
+    })
+  }
+
   test("saves drafts with an optimistic revision", async () => {
     let body = ""
     let url = ""

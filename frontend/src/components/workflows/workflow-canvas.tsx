@@ -24,6 +24,7 @@ import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import type { TFunction } from "@/i18n"
 import type { Agent } from "@/lib/api/agents"
+import type { AgentSkill } from "@/lib/api/agent-skills"
 import type { AgentFormState } from "@/components/agents/agents-page"
 import { InteractionConfigFields } from "@/components/agents/interaction-config-fields"
 import type { KnowledgeBase } from "@/lib/api/knowledge"
@@ -98,6 +99,7 @@ type WorkflowCanvasProps = {
   knowledgeBases: KnowledgeBase[]
   mcpServers: McpServer[]
   tools: ToolDetail[]
+  skills?: AgentSkill[]
   agents: Agent[]
   runtimeStatuses: Record<string, WorkflowNodeExecution["status"]>
   readOnly: boolean
@@ -471,6 +473,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
           knowledgeBases: props.knowledgeBases,
           mcpServers: props.mcpServers,
           tools: props.tools,
+          skills: props.skills ?? [],
           agents: props.agents,
           nodes,
           edges,
@@ -485,6 +488,7 @@ function CanvasInner(props: WorkflowCanvasProps) {
       props.agents,
       props.knowledgeBases,
       props.mcpServers,
+      props.skills,
       props.models,
       props.readOnly,
       props.runtimeStatuses,

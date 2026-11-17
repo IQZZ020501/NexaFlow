@@ -1879,7 +1879,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert installer_policy.approval == "each_call"
         assert installer_policy.effect == "external_write"
         assert installer_policy.allowed_access_sources == ["console", "public"]
-        assert installer_policy.workflow_callable is False
+        assert installer_policy.workflow_callable is True
         assert installer_policy.parallel_safe is False
 
         for skill_name in ("documents", "pdf", "pptx", "spreadsheets", "skill-creator"):
@@ -1902,7 +1902,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             assert skill_version.execution_spec["skill"] == skill_name
             assert skill_version.execution_spec["instructions"]
             assert skill_version.input_schema["properties"] == {}
-            assert skill_policy.workflow_callable is False
+            assert skill_policy.workflow_callable is True
             assert skill_policy.approval == "auto"
 
         legacy_tool, legacy_version, legacy_policy = build_artifact_tool(workspace_id)
@@ -3311,7 +3311,7 @@ async def assert_mcp_discovery_materializes_first_leaf(
         assert policy.approval == "each_call"
         assert policy.effect == "unknown"
         assert policy.allowed_access_sources == ["console"]
-        assert policy.workflow_callable is False
+        assert policy.workflow_callable is True
         assert policy.parallel_safe is False
 
         query_count = 0
@@ -5171,7 +5171,11 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         try:
             await runtime.invoke(snapshot, "node-uncertain", "call-uncertain", {})
         except RuntimeError as exc:
-            assert "outcome unknown" in str(exc)
+            from app.application.workflows.tools.runtime import (
+                WorkflowToolApprovalRequired,
+            )
+
+            assert isinstance(exc, WorkflowToolApprovalRequired)
         else:
             raise AssertionError("An uncertain Workflow Tool outcome must raise.")
 

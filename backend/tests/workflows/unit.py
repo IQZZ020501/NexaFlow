@@ -640,6 +640,149 @@ def test_workflow_tool_migration_matches_runtime_catalog() -> None:
         assert rows[0]["tool_version_id"] == migrated_version["id"]
 
 
+def test_workflow_skill_execution_rejects_other_nodes_pinned_skills() -> None:
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, patch
+
+    from app.application.agent_skills.execution import load_authorized_run_skill
+
+    @asynccontextmanager
+    async def database():
+        yield object()
+
+    async def check():
+        snapshot = object()
+        run = SimpleNamespace(
+            workspace_id="ws",
+            execution_user_id="user",
+            status="running_v2",
+            application_snapshot={},
+            skill_snapshots=[{"version_id": "other-node-version"}],
+        )
+        context = SimpleNamespace(
+            workspace_id="ws",
+            execution_user_id="user",
+            origin="workflow",
+            run_id="run",
+            resource_snapshot={"skill_version_ids": ["own-version"]},
+        )
+        with (
+            patch(
+                "app.application.agent_skills.execution.get_session_factory",
+                return_value=database,
+            ),
+            patch(
+                "app.application.agent_skills.execution.runs.get_agent_run_by_id",
+                new=AsyncMock(return_value=run),
+            ),
+            patch("app.application.agent_skills.execution.require_execution_profile"),
+            patch(
+                "app.application.agent_skills.execution.agent_skill_snapshot_from_payload",
+                return_value=snapshot,
+            ),
+            patch(
+                "app.application.agent_skills.execution.require_pinned_skill_access",
+                new=AsyncMock(),
+            ) as authorize,
+        ):
+            try:
+                await load_authorized_run_skill(object(), context, "other-node-version")
+            except ValueError as exc:
+                assert "this Workflow node" in str(exc)
+            else:
+                raise AssertionError("A node used another node's pinned Skill.")
+            authorize.assert_not_awaited()
+            context.resource_snapshot = {"skill_version_ids": ["other-node-version"]}
+            assert (
+                await load_authorized_run_skill(object(), context, "other-node-version")
+                is snapshot
+            )
+            authorize.assert_awaited_once()
+
+    asyncio.run(check())
+
+
+def test_workflow_skill_guide_derives_bash_and_rejects_conflicting_versions() -> None:
+    from app.domain.tools.catalog.service import (
+        build_shell_tool,
+        build_skill_artifact_tool,
+    )
+    from app.domain.workflows.definitions.skills import prepare_workflow_skills
+    from app.schemas.workflows.contracts import WorkflowGraph
+
+    async def check():
+        guide, version, _ = build_skill_artifact_tool("workspace", "pptx")
+        shell, shell_version, _ = build_shell_tool("workspace")
+        graph = WorkflowGraph.model_validate(
+            {
+                "nodes": [
+                    {
+                        "id": "llm",
+                        "position": {"x": 0, "y": 0},
+                        "data": {
+                            "type": "llm",
+                            "title": "LLM",
+                            "config": {
+                                "prompt": "Deck",
+                                "tools": [
+                                    {"tool_id": guide.id, "version_id": version.id}
+                                ],
+                                "capability_tools": [
+                                    {"tool_id": "forged", "version_id": "forged"}
+                                ],
+                            },
+                        },
+                    }
+                ],
+                "edges": [],
+            }
+        )
+        assert (
+            await prepare_workflow_skills(
+                object(), "workspace", graph, object(), "admin"
+            )
+            == []
+        )
+        assert graph.nodes[0].data.config["capability_tools"] == [
+            {"tool_id": shell.id, "version_id": shell_version.id}
+        ]
+        graph.nodes[0].data.config["tools"] = []
+        await prepare_workflow_skills(object(), "workspace", graph, object(), "admin")
+        assert graph.nodes[0].data.config["capability_tools"] == []
+        graph = WorkflowGraph.model_validate(
+            {
+                "nodes": [
+                    {
+                        "id": f"llm-{index}",
+                        "position": {"x": 0, "y": 0},
+                        "data": {
+                            "type": "llm",
+                            "title": "LLM",
+                            "config": {
+                                "prompt": "Analyze",
+                                "skills": [
+                                    {"skill_id": "skill", "version_id": version_id}
+                                ],
+                            },
+                        },
+                    }
+                    for index, version_id in enumerate(["old-version", "new-version"])
+                ],
+                "edges": [],
+            }
+        )
+        try:
+            await prepare_workflow_skills(
+                object(), "workspace", graph, object(), "admin"
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 422 and "multiple versions" in exc.detail
+        else:
+            raise AssertionError("Conflicting Skill versions were bound.")
+
+    asyncio.run(check())
+
+
 def main() -> None:
     test_workflow_uses_canonical_tool_refs()
     test_workflow_legacy_tools_normalize_to_one_canonical_node_contract()
@@ -649,6 +792,8 @@ def main() -> None:
     test_workflow_tool_invocation_identity_is_stable_and_bounded()
     test_workflow_tool_runtime_serializes_unsafe_tools_and_blocks_direct_only_llm()
     test_workflow_tool_migration_matches_runtime_catalog()
+    test_workflow_skill_execution_rejects_other_nodes_pinned_skills()
+    test_workflow_skill_guide_derives_bash_and_rejects_conflicting_versions()
     print("WORKFLOWS_UNIT_OK")
 
 

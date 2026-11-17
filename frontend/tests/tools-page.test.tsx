@@ -113,17 +113,48 @@ beforeEach(() => {
   }) as typeof fetch
 })
 function sourceGroup(name: string) {
-  const toggle = screen.getByRole("button", {
-    name: new RegExp(`(展开|收起) ${name} 的工具`),
-  })
-  return toggle.closest("[data-slot='mcp-source-group']") as HTMLElement
+  return screen
+    .getAllByRole("article", { hidden: true })
+    .find((item) => item.getAttribute("aria-label") === name)!
 }
 
-function expandSource(name: string) {
-  fireEvent.click(screen.getByRole("button", { name: `展开 ${name} 的工具` }))
+function manageSourceTools(name: string) {
+  const manage = screen.getByRole("button", { name: `管理来源 ${name}` })
+  fireEvent.pointerDown(manage)
+  fireEvent.click(manage)
+  fireEvent.click(screen.getByRole("menuitem", { name: "管理工具" }))
 }
 
 describe("ToolsPage", () => {
+  test("groups shared MCP operations without connection details or child cards even when searching", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes("/tools?"))
+        return jsonResponse([
+          tool({ can_manage: false }),
+          tool({
+            id: "tool-second",
+            display_name: "Second operation",
+            can_manage: false,
+          }),
+        ])
+      return jsonResponse([])
+    }) as typeof fetch
+    renderPage(<ToolsPage initialKind="mcp" />)
+    await screen.findByRole("article", { name: "Owned source" })
+    expect(screen.getAllByRole("article")).toHaveLength(1)
+    expect(screen.queryByText("Owned formatter")).toBeNull()
+    expect(screen.queryByText("Second operation")).toBeNull()
+    expect(screen.queryByText("Formats text")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "管理来源 Owned source" })
+    ).toBeNull()
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "Second operation" },
+    })
+    expect(screen.getByRole("article", { name: "Owned source" })).toBeTruthy()
+    expect(screen.queryByText("Second operation")).toBeNull()
+  })
+
   test("searches workspace Skills independently of built-in tools and edits the pinned files", async () => {
     const skill: AgentSkill = {
       id: "skill-1",
@@ -274,19 +305,22 @@ describe("ToolsPage", () => {
         return jsonResponse([
           tool({
             id: "tool-alpha",
-            display_name: "Alpha",
+            display_name: "Alpha operation",
+            source: { ...tool().source, id: "alpha", name: "Alpha" },
             created_at: "2026-09-02T00:00:00Z",
             updated_at: "2026-09-01T00:00:00Z",
           }),
           tool({
             id: "tool-bravo",
-            display_name: "Bravo",
+            display_name: "Bravo operation",
+            source: { ...tool().source, id: "bravo", name: "Bravo" },
             created_at: "2026-09-01T00:00:00Z",
             updated_at: "2026-09-02T00:00:00Z",
           }),
           tool({
             id: "tool-charlie",
-            display_name: "Charlie",
+            display_name: "Charlie operation",
+            source: { ...tool().source, id: "charlie", name: "Charlie" },
             created_at: "2026-09-03T00:00:00Z",
             updated_at: "2026-09-03T00:00:00Z",
           }),
@@ -302,7 +336,7 @@ describe("ToolsPage", () => {
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent)
     expect(visibleToolNames()).toEqual(["Charlie", "Bravo", "Alpha"])
-    expect(screen.getAllByText(/更新时间 ·/)).toHaveLength(3)
+    expect(screen.queryByText("Alpha operation")).toBeNull()
 
     const sortTrigger = screen.getByRole("button", { name: "排序" })
     fireEvent.pointerDown(sortTrigger)
@@ -350,40 +384,26 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
+    await screen.findByText("Owned source")
     expect(
-      screen.queryByRole("checkbox", { name: "选择 Owned formatter" })
+      screen.queryByRole("checkbox", { name: "选择 Owned source" })
     ).toBeNull()
-    const searchToolbar = screen.getByRole("search")
-    fireEvent.click(
-      within(searchToolbar).getByRole("button", { name: "批量管理" })
-    )
-    const ownedCard = screen.getByText("Owned formatter").closest("article")!
-    const ownedCheckbox = screen.getByRole("checkbox", {
-      name: "选择 Owned formatter",
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+    const service = screen.getByRole("checkbox", {
+      name: "选择 Owned source",
     }) as HTMLInputElement
-
-    fireEvent.click(ownedCard)
-    expect(ownedCheckbox.checked).toBe(true)
-    expect(screen.getByText("已选择 1 项")).toBeTruthy()
-
-    fireEvent.click(ownedCard)
-    expect(ownedCheckbox.checked).toBe(false)
-    expect(screen.getByText("已选择 0 项")).toBeTruthy()
-
-    fireEvent.click(ownedCard)
-    fireEvent.keyDown(
-      screen.getByText("Second formatter").closest("article")!,
-      {
-        key: "Enter",
-      }
-    )
+    fireEvent.click(service)
+    expect(service.checked).toBe(true)
     expect(screen.getByText("已选择 2 项")).toBeTruthy()
-
+    expect(screen.queryByText("Owned formatter")).toBeNull()
+    expect(screen.queryByText("Second formatter")).toBeNull()
+    fireEvent.click(service)
+    expect(service.checked).toBe(false)
+    expect(screen.getByText("已选择 0 项")).toBeTruthy()
+    fireEvent.click(service)
     fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
     const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
     fireEvent.click(within(dialog).getByRole("button", { name: "生产工具" }))
-
     await waitFor(() =>
       expect(requests).toEqual([
         {
@@ -443,22 +463,13 @@ describe("ToolsPage", () => {
     await screen.findAllByText("Remote tools")
     expect(screen.queryByText("Remote lookup")).toBeNull()
 
-    // A folded source must not hide batch management.
     fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
-    const sourceToggle = screen.getByRole("button", {
-      name: "收起 Remote tools 的工具",
-    })
-    expect(sourceToggle.hasAttribute("disabled")).toBe(true)
-
-    // Batch mode unfolds the source so its tools can be selected.
-    const card = (await screen.findByText("Remote lookup")).closest("article")!
-    fireEvent.click(card)
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择 Remote tools" }))
     expect(screen.getByText("已选择 1 项")).toBeTruthy()
-
+    expect(screen.queryByText("Remote lookup")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "移动到文件夹" }))
     const dialog = await screen.findByRole("dialog", { name: "移动到文件夹" })
     fireEvent.click(within(dialog).getByRole("button", { name: "生产工具" }))
-
     await waitFor(() =>
       expect(requests).toEqual([
         {
@@ -508,7 +519,7 @@ describe("ToolsPage", () => {
     expect(screen.queryByRole("button", { name: "批量管理" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "MCP" }))
-    await screen.findByText("Owned formatter")
+    await screen.findByText("Owned source")
     expect(screen.getByRole("button", { name: "批量管理" })).toBeTruthy()
   })
 
@@ -579,8 +590,9 @@ describe("ToolsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "MCP" }))
     await screen.findAllByText("Remote tools")
     expect(screen.queryByText("Remote lookup")).toBeNull()
-    expandSource("Remote tools")
-    await screen.findByText("Remote lookup")
+    expect(
+      screen.queryByRole("button", { name: "展开 Remote tools 的工具" })
+    ).toBeNull()
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
     expect(screen.queryByText("生成 PDF")).toBeNull()
 
@@ -664,8 +676,11 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
-    const card = (await screen.findByText("Retired lookup")).closest("article")!
+    manageSourceTools("Remote tools")
+    await screen.findByText("Retired lookup")
+    const card = screen.getByRole("dialog", {
+      name: "管理 Remote tools 的工具",
+    })
     expect(within(card).getByText("每次调用前审批")).toBeTruthy()
     expect(within(card).getByText("上游未发现该工具")).toBeTruthy()
   })
@@ -708,7 +723,7 @@ describe("ToolsPage", () => {
   test("keeps a failed Tool detail open with an explicit retry", async () => {
     const remote = tool({
       id: "tool-mcp",
-      kind: "mcp",
+      kind: "builtin",
       function_name: "remote_lookup",
       display_name: "Remote lookup",
       source: {
@@ -759,9 +774,10 @@ describe("ToolsPage", () => {
     expect(
       screen.getByRole("button", { name: "管理来源 Empty MCP" })
     ).toBeTruthy()
-    // A source without tools still opens an explicit empty state.
-    expandSource("Empty MCP")
-    expect(within(emptySourceCard).getByText("没有匹配的工具")).toBeTruthy()
+    expect(screen.queryByText("没有匹配的工具")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "展开 Empty MCP 的工具" })
+    ).toBeNull()
   })
 
   test("lets an MCP owner manage policies and disable their own tool", async () => {
@@ -798,7 +814,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -863,7 +879,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -931,9 +947,10 @@ describe("ToolsPage", () => {
   })
 
   test("shows governance actions only to managers and keeps view-only code hidden", async () => {
-    const owned = tool()
+    const owned = tool({ kind: "builtin" })
     const shared = tool({
       id: "tool-view",
+      kind: "builtin",
       function_name: "shared_formatter",
       display_name: "Shared viewer",
       created_by_user_id: "u-2",
@@ -969,7 +986,6 @@ describe("ToolsPage", () => {
       await screen.findByRole("menuitem", { name: "查看详情" })
     ).toBeTruthy()
     expect(screen.getByRole("menuitem", { name: "授权" })).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: "禁用" })).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: "归档" })).toBeNull()
     fireEvent.keyDown(document, { key: "Escape" })
 
@@ -1108,9 +1124,9 @@ describe("ToolsPage", () => {
     const sseCard = sourceGroup("SSE tools")
     expect(within(sseCard).getByText("SSE")).toBeTruthy()
     const stdioCard = sourceGroup("Local stdio")
-    expect(
-      within(stdioCard).getByText(/stdio 命令：npx mcp-server/)
-    ).toBeTruthy()
+    expect(within(stdioCard).getByText("stdio")).toBeTruthy()
+    expect(screen.queryByText(/npx mcp-server/)).toBeNull()
+    expect(screen.queryByText("https://tools.example.com/sse")).toBeNull()
     expect(within(stdioCard).getByText("连接超时")).toBeTruthy()
   })
 
@@ -1124,7 +1140,7 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
-    await screen.findByText("Owned formatter")
+    await screen.findByText("Owned source")
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "zzz-no-match" },
     })
@@ -1154,7 +1170,8 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
-    await screen.findByText("tavily_search")
+    await screen.findByText("Tavily")
+    expect(screen.queryByText("tavily_search")).toBeNull()
     expect(screen.queryByText("mcp_tavily_search_a1b2c3d4")).toBeNull()
 
     fireEvent.change(screen.getByRole("searchbox"), {
@@ -1167,7 +1184,7 @@ describe("ToolsPage", () => {
   test("opens a tool detail with the keyboard", async () => {
     const remote = tool({
       id: "tool-mcp",
-      kind: "mcp",
+      kind: "builtin",
       function_name: "remote_lookup",
       display_name: "Remote lookup",
       source: {
@@ -1216,9 +1233,9 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
-    const card = screen.getByText("Remote lookup").closest("article")!
+    const card = sourceGroup("Remote tools")
     expect(within(card).getByText("来源已禁用")).toBeTruthy()
 
     const manage = screen.getByRole("button", {
@@ -1260,7 +1277,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1315,7 +1332,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1376,7 +1393,7 @@ describe("ToolsPage", () => {
     await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
     const sourceCard = sourceGroup("Remote tools")
     await waitFor(() =>
-      expect(within(sourceCard).getByText("已停用")).toBeTruthy()
+      expect(within(sourceCard).getByText("来源已禁用")).toBeTruthy()
     )
   })
 
@@ -1414,7 +1431,7 @@ describe("ToolsPage", () => {
     await waitFor(() => expect(requests).toEqual([{ method: "POST" }]))
     const sourceCard = sourceGroup("Remote tools")
     await waitFor(() =>
-      expect(within(sourceCard).getByText("已启用")).toBeTruthy()
+      expect(within(sourceCard).getByText("可用")).toBeTruthy()
     )
   })
 
@@ -1525,7 +1542,7 @@ describe("ToolsPage", () => {
       expect(notifications).toContainEqual(["error", "cannot disable"])
     )
     const sourceCard = sourceGroup("Remote tools")
-    expect(within(sourceCard).getByText("已启用")).toBeTruthy()
+    expect(within(sourceCard).getByText("可用")).toBeTruthy()
 
     fireEvent.pointerDown(manage)
     fireEvent.click(manage)
@@ -1578,7 +1595,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1657,7 +1674,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1719,8 +1736,6 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
-    await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理来源 Remote tools",
     })
@@ -1770,7 +1785,7 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    expandSource("Remote tools")
+    manageSourceTools("Remote tools")
     await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
       name: "管理工具 Remote lookup",
@@ -1815,15 +1830,14 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage />)
-    await screen.findByText("Remote lookup")
+    await screen.findByText("Remote tools")
+    expect(screen.queryByText("Remote lookup")).toBeNull()
     expect(
-      screen.queryByRole("button", { name: "管理工具 Remote lookup" })
+      screen.queryByRole("button", { name: "管理来源 Remote tools" })
     ).toBeNull()
-    fireEvent.click(screen.getByText("Remote lookup").closest("article")!)
-    const note = "只显示已发布的脱敏详情；草稿和代码仅所有者或管理员可见。"
-    await screen.findByText(note)
-    fireEvent.keyDown(document, { key: "Escape" })
-    await waitFor(() => expect(screen.queryByText(note)).toBeNull())
+    fireEvent.click(sourceGroup("Remote tools"))
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(screen.queryByText("输入 Schema")).toBeNull()
   })
 
   test("creates a public MCP source from the add dialog", async () => {

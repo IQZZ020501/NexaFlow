@@ -57,6 +57,7 @@ SUITES = (
     "agents.agent_services_coverage",
     "agents.agent_runtime_coverage",
     "workflows.workflows",
+    "workflows.capabilities",
     "workflows.workflow_run_coverage",
     "workflows.workflow_node_coverage",
     "tools.tools",

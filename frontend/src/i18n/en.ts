@@ -1,6 +1,15 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "查看服务状态与后台失败记录": "View service status and background failures",
+  管理工具: "Manage tools",
+  "管理 {name} 的工具": "Manage tools for {name}",
+  "按工具管理权限与执行策略。":
+    "Manage permissions and execution policies for each tool.",
+  "MCP 操作": "MCP operation",
+  "选择 MCP 操作": "Select an MCP operation",
+  "选择此服务将超过 20 个工具上限":
+    "Selecting this service would exceed the 20-tool limit",
   技能创建: "Skill Creator",
   "生成可导入的技能包；不自动发布或授权。":
     "Create an importable Skill package without publishing or granting permissions.",
@@ -771,6 +780,14 @@ export const en = {
   工具: "Tools",
   "管理外部 API、内部服务和可被应用调用的工具能力。":
     "Manage external APIs, internal services, and tool capabilities apps can call.",
+  "添加工具和 Skills": "Add tools and Skills",
+  "添加 MCP 工具或 Skills": "Add MCP tools or Skills",
+  "按 MCP 服务添加工具，或选择已发布的 Skill；需要审批的调用会暂停等待确认。":
+    "Add MCP services or published Skills. Calls requiring approval pause for confirmation.",
+  "搜索工具或 Skills": "Search tools or Skills",
+  "移除 {name}": "Remove {name}",
+  "最多选择 4 个 Skills": "Select up to 4 Skills",
+  "没有匹配的工具或 Skills": "No matching tools or Skills",
   添加工具: "Add tool",
   还没有工具: "No tools yet",
   "MCP Server": "MCP Server",

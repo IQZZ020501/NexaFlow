@@ -48,7 +48,7 @@ async def check():
     assert (
         policy.approval == "auto"
         and policy.effect == "pure"
-        and not policy.workflow_callable
+        and policy.workflow_callable
         and not policy.parallel_safe
     )
     assert policy.allowed_access_sources == ["console", "public", "api"]

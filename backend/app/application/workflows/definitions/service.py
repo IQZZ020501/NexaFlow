@@ -10,6 +10,7 @@ from app.application.workflows.access.service import (
     list_external_workflow_runs,
     list_public_workflow_conversations,
     regenerate_external_workflow_run,
+    resolve_external_workflow_tool_approval,
     set_external_workflow_run_feedback,
     stream_external_workflow_run,
     submit_external_workflow_form,
@@ -21,6 +22,7 @@ from app.application.workflows.runs.service import (
     list_workflow_node_executions,
     list_workflow_runs,
     regenerate_workflow_run,
+    resolve_workflow_tool_approval,
     set_workflow_run_feedback,
     stream_workflow_run,
     submit_workflow_form,
@@ -80,6 +82,8 @@ __all__ = [
     "upload_public_workflow_files",
     "upload_workspace_workflow_files",
     "validate_workflow_definition",
+    "resolve_workflow_tool_approval",
+    "resolve_external_workflow_tool_approval",
 ]
 
 

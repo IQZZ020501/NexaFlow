@@ -55,6 +55,10 @@ class WorkflowChildRequired(RuntimeError):
         self.request = request
 
 
+class WorkflowApprovalRequired(RuntimeError):
+    pass
+
+
 class EdgeState(StrEnum):
     UNKNOWN = "unknown"
     TAKEN = "taken"
@@ -65,6 +69,7 @@ class NodeState(StrEnum):
     PENDING = "pending"
     AWAITING_INPUT = "awaiting_input"
     AWAITING_CHILD = "awaiting_child"
+    AWAITING_APPROVAL = "awaiting_approval"
     SUCCEEDED = "succeeded"
     SKIPPED = "skipped"
     FAILED = "failed"
@@ -115,6 +120,7 @@ class NodeResult:
     model_usage: dict[str, Any] = field(default_factory=dict)
     interrupt: dict[str, Any] | None = None
     child_request: dict[str, Any] | None = None
+    approval_request: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -479,6 +485,7 @@ class WorkflowEngine:
             first_error: WorkflowEngineError | None = None
             pending_form: dict[str, Any] | None = None
             pending_child: dict[str, Any] | None = None
+            pending_approval = False
             for node, result in zip(ready, results, strict=True):
                 sequence = current.step_count + 1
                 if isinstance(result, BaseException):
@@ -502,6 +509,19 @@ class WorkflowEngine:
                         message,
                         node_id=node.id,
                     )
+                    continue
+
+                if result.approval_request is not None:
+                    await on_node_finished(
+                        NodeTransition(
+                            node=node,
+                            status=NodeState.AWAITING_APPROVAL,
+                            sequence=sequence,
+                            result=result,
+                        ),
+                        current,
+                    )
+                    pending_approval = True
                     continue
 
                 if result.interrupt is not None:
@@ -589,6 +609,8 @@ class WorkflowEngine:
                 )
             if first_error:
                 raise first_error
+            if pending_approval:
+                raise WorkflowApprovalRequired("Workflow Tool approval is required.")
             if pending_form is not None:
                 raise WorkflowInputRequired(pending_form)
             if pending_child is not None:

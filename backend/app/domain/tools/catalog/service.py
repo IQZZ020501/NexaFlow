@@ -287,7 +287,7 @@ async def reconcile_mcp_discovery(
                     approval="each_call",
                     effect="unknown",
                     allowed_access_sources=["console"],
-                    workflow_callable=False,
+                    workflow_callable=True,
                     parallel_safe=False,
                     created_at=timestamp,
                     updated_at=timestamp,
@@ -532,7 +532,7 @@ def build_skill_script_tool(
             approval="auto",
             effect="pure",
             allowed_access_sources=["console", "public", "api"],
-            workflow_callable=False,
+            workflow_callable=True,
             parallel_safe=False,
             created_at=timestamp,
             updated_at=timestamp,
@@ -645,7 +645,7 @@ def build_skill_dependency_installer_tool(
             approval="each_call",
             effect="external_write",
             allowed_access_sources=["console", "public"],
-            workflow_callable=False,
+            workflow_callable=True,
             parallel_safe=False,
             created_at=timestamp,
             updated_at=timestamp,
@@ -993,7 +993,7 @@ def build_skill_artifact_tool(
         "required": ["skill", "instructions"],
         "additionalProperties": False,
     }
-    policy.workflow_callable = False
+    policy.workflow_callable = True
     definition_hash = canonical_definition_hash(
         {
             "name": function_name,

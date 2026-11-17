@@ -731,7 +731,11 @@ def tool_invocation_to_response(invocation: Any) -> AgentToolCallResponse:
     except ValueError:
         turn = 0
     return AgentToolCallResponse(
-        call_id=call_id if separator else invocation.invocation_id,
+        call_id=invocation.invocation_id
+        if invocation.origin == "workflow"
+        else call_id
+        if separator
+        else invocation.invocation_id,
         turn=turn,
         tool_name=snapshot.function_name,
         tool_kind=snapshot.kind,
@@ -740,9 +744,7 @@ def tool_invocation_to_response(invocation: Any) -> AgentToolCallResponse:
         status=invocation.status,
         approval_required=(
             invocation.policy_snapshot.get("approval_required")
-            if isinstance(
-                invocation.policy_snapshot.get("approval_required"), bool
-            )
+            if isinstance(invocation.policy_snapshot.get("approval_required"), bool)
             else snapshot.approval == TOOL_APPROVAL_EACH_CALL
         ),
         last_error=invocation.error_message,
@@ -816,7 +818,12 @@ async def resolve_agent_run_tool_approval(
         matching = [
             item
             for item in invocations
-            if item.invocation_id.partition(":")[2] == call_id
+            if (
+                item.invocation_id
+                if item.origin == "workflow"
+                else item.invocation_id.partition(":")[2]
+            )
+            == call_id
         ]
         actionable = [
             item
@@ -881,7 +888,16 @@ async def resolve_agent_run_tool_approval(
                 status.HTTP_409_CONFLICT,
                 "Agent tool call is no longer awaiting approval.",
             )
-        queued = await agent_repository.queue_agent_run(db, run.id)
+        other_pending = invocation.origin == "workflow" and any(
+            item.id != invocation.id
+            and item.status in {"awaiting_approval", "uncertain"}
+            for item in invocations
+        )
+        queued = (
+            False
+            if other_pending
+            else await agent_repository.queue_agent_run(db, run.id)
+        )
         if changed:
             record_audit_log(
                 db,

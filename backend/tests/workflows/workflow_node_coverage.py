@@ -115,6 +115,7 @@ def _node_scope(**overrides) -> SimpleNamespace:
     scope = SimpleNamespace(
         run=SimpleNamespace(
             agent_id="workflow-1",
+            access_source="console",
             model_id="model-1",
             workspace_id="workspace-1",
             goal="g",
@@ -128,6 +129,8 @@ def _node_scope(**overrides) -> SimpleNamespace:
         node_histories={},
         form_submissions={},
         output_delta=None,
+        llm_states={},
+        save_llm_state=None,
     )
     for key, value in overrides.items():
         setattr(scope, key, value)
@@ -2770,13 +2773,20 @@ def test_workflow_access_conversations_and_run_listing() -> None:
             status="succeeded",
             duration_ms=5,
         )
-        with patch(
-            "app.application.workflows.access.service._external_run",
-            new=AsyncMock(return_value=(run, detail)),
-        ), patch(
-            "app.application.workflows.access.service.workflow_repository."
-            "list_node_executions",
-            new=AsyncMock(return_value=[execution]),
+        with (
+            patch(
+                "app.application.workflows.access.service._external_run",
+                new=AsyncMock(return_value=(run, detail)),
+            ),
+            patch(
+                "app.application.workflows.access.service.workflow_repository."
+                "list_node_executions",
+                new=AsyncMock(return_value=[execution]),
+            ),
+            patch(
+                "app.application.workflows.runs.service.tool_repository.list_tool_invocations",
+                new=AsyncMock(return_value=[]),
+            ),
         ):
             response = await get_external_workflow_run(
                 object(), "wf-1", "run-1", "public", "user-1"  # type: ignore[arg-type]
@@ -4081,25 +4091,35 @@ def test_workflow_access_application_functions_direct() -> None:
                 outputs={"text": "ok"},
             )
         ]
-        with patch(
-            "app.application.workflows.access.service.get_published_workflow_context",
-            new=AsyncMock(),
-        ), patch.object(
-            agent_repository,
-            "list_agent_runs",
-            new=AsyncMock(return_value=runs),
-        ), patch.object(
-            agent_repository,
-            "count_agent_runs",
-            new=AsyncMock(return_value=1),
-        ), patch.object(
-            workflow_repository,
-            "list_run_details_for_external_conversations",
-            new=AsyncMock(return_value=details),
-        ), patch.object(
-            workflow_repository,
-            "list_node_executions_for_runs",
-            new=AsyncMock(return_value=executions),
+        with (
+            patch(
+                "app.application.workflows.access.service.get_published_workflow_context",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                agent_repository,
+                "list_agent_runs",
+                new=AsyncMock(return_value=runs),
+            ),
+            patch.object(
+                agent_repository,
+                "count_agent_runs",
+                new=AsyncMock(return_value=1),
+            ),
+            patch.object(
+                workflow_repository,
+                "list_run_details_for_external_conversations",
+                new=AsyncMock(return_value=details),
+            ),
+            patch.object(
+                workflow_repository,
+                "list_node_executions_for_runs",
+                new=AsyncMock(return_value=executions),
+            ),
+            patch(
+                "app.application.workflows.runs.service.tool_repository.list_tool_invocations",
+                new=AsyncMock(return_value=[]),
+            ),
         ):
             listing = await list_external_workflow_runs(
                 object(), "wf-1", "public", "user-1", 10, 0  # type: ignore[arg-type]

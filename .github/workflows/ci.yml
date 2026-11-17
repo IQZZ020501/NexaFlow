@@ -140,7 +140,9 @@ jobs:
         run: uv run python -m tests.infra.mcp_transports
 
       - name: Run workflow tests
-        run: uv run python -m tests.workflows.workflows
+        run: |
+          uv run python -m tests.workflows.workflows
+          uv run python -m tests.workflows.capabilities
 
       - name: Run OpenSandbox execution image checks
         working-directory: .

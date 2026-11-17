@@ -13,10 +13,12 @@ from app.application.agents.access.service import (
 from app.application.workflows.runs.service import (
     create_workflow_run,
     regenerate_workflow_run_from_source,
+    resolve_workflow_run_tool_approval,
     resume_workflow_form,
     stream_workflow_run,
     update_run_feedback,
     workflow_pending_form,
+    workflow_run_response,
 )
 from app.application.workflows.uploads.service import (
     published_interaction_config,
@@ -165,6 +167,7 @@ def _external_run_from_payload(payload: dict[str, Any]) -> ExternalWorkflowRunRe
         finished_at=payload.get("finished_at"),
         updated_at=payload["updated_at"],
         pending_form=payload.get("pending_form"),
+        tool_calls=payload.get("tool_calls", []),
         feedback=payload.get("feedback"),
         feedback_updated_at=payload.get("feedback_updated_at"),
     )
@@ -325,11 +328,23 @@ async def get_external_workflow_run(
     """
     run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
     executions = await workflow_repository.list_node_executions(db, run.id)
-    return _external_run_response(
+    response = _external_run_response(
         run,
         detail,
         [_external_progress(execution, detail) for execution in executions],
     )
+    response.tool_calls = (await workflow_run_response(db, run, detail)).tool_calls
+    return response
+
+
+async def resolve_external_workflow_tool_approval(
+    db, workflow_id, run_id, actor, settings, *, call_id, approve
+):
+    run, detail = await _external_run(db, workflow_id, run_id, "public", actor.id)
+    response = await resolve_workflow_run_tool_approval(
+        db, run, detail, actor, settings, call_id=call_id, approve=approve
+    )
+    return _external_run_from_payload(response.model_dump(mode="json"))
 
 
 async def regenerate_external_workflow_run(
@@ -483,6 +498,9 @@ async def list_external_workflow_runs(
                     ],
                 )
             )
+            items[-1].tool_calls = (
+                await workflow_run_response(db, run, detail)
+            ).tool_calls
     return ExternalWorkflowRunListResponse(
         items=items, total=total, offset=offset, limit=limit
     )
@@ -576,6 +594,7 @@ async def stream_external_workflow_run(
             "complete",
             "error",
             "workflow_input_required",
+            "approval_required",
         } and isinstance(event.get("run"), dict):
             yield {
                 **{key: event[key] for key in ("type", "sequence") if key in event},

@@ -1,6 +1,6 @@
 import { apiUrl, listQuery, request } from "@/lib/api-client"
 import { observeNdjsonStream } from "@/lib/api/run-stream"
-import type { AgentInteractionConfig } from "@/lib/api/agents"
+import type { AgentInteractionConfig, AgentToolCall } from "@/lib/api/agents"
 import type { WorkflowNodeType, WorkflowPendingForm } from "@/lib/api/workflows"
 
 export type PublicWorkflowProfile = {
@@ -37,6 +37,7 @@ export type ExternalWorkflowProgress = {
     | "running"
     | "awaiting_input"
     | "awaiting_child"
+    | "awaiting_approval"
     | "succeeded"
     | "failed"
     | "skipped"
@@ -60,6 +61,7 @@ export type ExternalWorkflowRun = {
   finished_at: string | null
   updated_at: string
   pending_form: WorkflowPendingForm | null
+  tool_calls?: AgentToolCall[]
   feedback?: "positive" | "negative" | null
   feedback_updated_at?: string | null
   live_stream_epoch?: string
@@ -75,7 +77,12 @@ export type PublicWorkflowRunStreamEvent =
       delta: string
     }
   | {
-      type: "run" | "complete" | "error" | "workflow_input_required"
+      type:
+        | "run"
+        | "complete"
+        | "error"
+        | "workflow_input_required"
+        | "approval_required"
       sequence: number
       run: ExternalWorkflowRun
     }
@@ -90,6 +97,26 @@ export type WorkflowApiDocumentation = {
 
 const path = (workflowId: string, suffix = "") =>
   `/api/v1/public/workflows/${workflowId}${suffix}`
+
+export function resolvePublicWorkflowToolApproval(
+  workflowId: string,
+  token: string,
+  runId: string,
+  callId: string,
+  approve: boolean
+) {
+  return request<ExternalWorkflowRun>(
+    path(
+      workflowId,
+      `/runs/${runId}/tool-calls/${encodeURIComponent(callId)}/approval`
+    ),
+    {
+      token,
+      method: "POST",
+      body: JSON.stringify({ approve }),
+    }
+  )
+}
 
 /**
  * Fetches the public profile for a workflow.
@@ -315,7 +342,17 @@ export function observePublicWorkflowRun(
         }
       ),
     onEvent,
-    { signal, errorLabel: "Public Workflow stream" }
+    {
+      signal,
+      errorLabel: "Public Workflow stream",
+      isTerminal: (event) =>
+        [
+          "complete",
+          "error",
+          "workflow_input_required",
+          "approval_required",
+        ].includes(event.type),
+    }
   )
 }
 

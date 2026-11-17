@@ -21,6 +21,13 @@ from app.entities.tools import ToolSnapshot
 from app.entities.workflows import WorkflowRunDetail
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
+from app.schemas.workflows.contracts import LlmNodeConfig
+
+
+class WorkflowToolApprovalRequired(RuntimeError):
+    def __init__(self, call_id: str):
+        super().__init__("Workflow Tool requires approval.")
+        self.call_id = call_id
 
 
 def workflow_tool_invocation_identity(
@@ -101,6 +108,19 @@ class WorkflowToolRuntime:
         deadline_at = self.detail.deadline_at
         if deadline_at.tzinfo is None:
             deadline_at = deadline_at.replace(tzinfo=UTC)
+        node = next(
+            (
+                item
+                for item in self.detail.graph_snapshot.get("nodes", [])
+                if item.get("id") == node_id
+            ),
+            None,
+        )
+        config = (
+            LlmNodeConfig.model_validate(node["data"]["config"])
+            if node and node.get("data", {}).get("type") == "llm"
+            else None
+        )
         context = ToolInvocationContext(
             workspace_id=self.run.workspace_id,
             origin="workflow",
@@ -111,6 +131,11 @@ class WorkflowToolRuntime:
             access_source=self.run.access_source,
             deadline_at=deadline_at,
             idempotency_key=idempotency_key,
+            resource_snapshot={
+                "skill_version_ids": [item.version_id for item in config.skills]
+                if config
+                else []
+            },
         )
         try:
             async with get_session_factory()() as db:
@@ -130,7 +155,7 @@ class WorkflowToolRuntime:
                 is_error=True,
             )
         if invocation.status == TOOL_INVOCATION_AWAITING_APPROVAL:
-            raise RuntimeError("Workflow Tools cannot require approval.")
+            raise WorkflowToolApprovalRequired(invocation_id)
         while True:
             try:
                 result = await execute_tool_invocation(
@@ -147,11 +172,9 @@ class WorkflowToolRuntime:
                 await asyncio.sleep(min(0.25, remaining))
         mapped = tool_runtime_result_to_agent_result(result)
         if mapped.outcome_uncertain:
-            raise RuntimeError(
-                result.error_message or result.summary or "Tool outcome is uncertain."
-            )
+            raise WorkflowToolApprovalRequired(invocation_id)
         if result.error_code == "approval_required":
-            raise RuntimeError("Workflow Tools cannot require approval.")
+            raise WorkflowToolApprovalRequired(invocation_id)
         return mapped
 
 

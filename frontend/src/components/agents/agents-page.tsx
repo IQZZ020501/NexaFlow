@@ -2159,6 +2159,7 @@ export function AgentsPage({
             knowledgeBases={knowledgeBases}
             mcpServers={mcpServers}
             tools={tools}
+            skills={agentSkills}
             agents={workflowAgents}
             isToolsLoading={isToolsLoading}
             toolsError={toolsError}
@@ -2200,7 +2201,9 @@ export function AgentsPage({
             setQuestion={setQuestion}
             approvalMode={approvalMode}
             projectId={selectedProjectId}
-            onProjectChange={(id) => setProjectChoice({ key: projectChoiceKey, id })}
+            onProjectChange={(id) =>
+              setProjectChoice({ key: projectChoiceKey, id })
+            }
             onApprovalModeChange={setApprovalMode}
             files={agentFiles}
             setFiles={setAgentFiles}

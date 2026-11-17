@@ -227,7 +227,6 @@ test("Tool and Agent nodes keep pinned bindings while MCP editors remain availab
   expect(nodeConfig).toContain("agent_version_id")
   expect(nodeConfig).toContain('node.type === "mcp"')
   expect(nodeConfig).not.toContain('node.type === "code"')
-  expect(nodeConfig).toContain('tool.approval === "auto"')
   expectStringArray(card, [
     "llm",
     "knowledge",

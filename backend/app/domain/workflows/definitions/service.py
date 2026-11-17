@@ -4,6 +4,8 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
+from app.domain.agent_skills.service import sync_agent_skill_bindings
 from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
 from app.domain.agents.access.publications import agent_publication_hash
 from app.domain.agents.service import (
@@ -32,6 +34,7 @@ from app.domain.tools.mcp.service import (
 )
 from app.domain.tools.runtime import tool_snapshot_from_payload
 from app.domain.workflows.definitions.defaults import default_workflow_graph
+from app.domain.workflows.definitions.skills import prepare_workflow_skills
 from app.domain.workflows.resources import (
     build_workflow_resource_snapshot,
     canonicalize_workflow_graph,
@@ -229,7 +232,22 @@ async def prepare_workflow_resources(
         parsed,
         legacy_tools,
     )
+    skill_snapshots = await prepare_workflow_skills(
+        db, agent.workspace_id, canonical, actor, workspace_role, binding_application_id
+    )
     _knowledge_base_ids, references = canonical_workflow_resource_references(canonical)
+    _knowledge_base_ids = list(
+        dict.fromkeys(
+            [
+                *_knowledge_base_ids,
+                *(
+                    key
+                    for skill in skill_snapshots
+                    for key in skill.definition.get("knowledge_base_ids", [])
+                ),
+            ]
+        )
+    )
     if binding_application_id is None:
         snapshots = await resolve_tool_refs_for_actor(
             db,
@@ -251,10 +269,10 @@ async def prepare_workflow_resources(
         except ValueError as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     for snapshot in snapshots:
-        if snapshot.approval != "auto" or not snapshot.workflow_callable:
+        if snapshot.approval == "disabled" or not snapshot.workflow_callable:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                "Workflow Tools must be automatic and workflow-callable.",
+                "Workflow Tools must be enabled and workflow-callable.",
             )
     llm_tool_ids = {
         item.tool_id
@@ -282,6 +300,7 @@ async def prepare_workflow_resources(
         _knowledge_base_ids,
         snapshots,
         agent_snapshots,
+        skill_snapshots,
     )
     return (
         canonical,
@@ -406,12 +425,11 @@ async def validate_workflow_resources(
             )
             if (
                 policy is None
-                or effective_mcp_tool_policy_mode(tool.definition, policy)
-                != "read_only"
+                or effective_mcp_tool_policy_mode(tool.definition, policy) == "disabled"
             ):
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    "Workflow MCP nodes require a current read-only policy.",
+                    "Workflow MCP nodes require an enabled policy.",
                 )
     return parsed
 
@@ -480,15 +498,18 @@ async def save_definition(
     actor: User,
     workspace_role: str | None,
 ) -> WorkflowDefinition:
-    canonical, snapshots, _resource_snapshot, _resource_hash = (
-        await prepare_workflow_resources(
-            db,
-            agent,
-            graph,
-            actor,
-            workspace_role,
-            require_complete_graph=False,
-        )
+    (
+        canonical,
+        snapshots,
+        resource_snapshot,
+        _resource_hash,
+    ) = await prepare_workflow_resources(
+        db,
+        agent,
+        graph,
+        actor,
+        workspace_role,
+        require_complete_graph=False,
     )
     serialized = canonical.model_dump(by_alias=True, mode="json")
     updated = await workflow_repository.update_definition_graph(
@@ -510,6 +531,16 @@ async def save_definition(
         agent.workspace_id,
         agent.id,
         snapshots,
+        actor.id,
+    )
+    await sync_agent_skill_bindings(
+        db,
+        agent.workspace_id,
+        agent.id,
+        [
+            agent_skill_snapshot_from_payload(item)
+            for item in resource_snapshot.get("skills", [])
+        ],
         actor.id,
     )
     await db.commit()
@@ -552,6 +583,16 @@ async def publish_definition(
         published_by_user_id=actor.id,
     )
     version = await workflow_repository.create_version(db, version)
+    await sync_agent_skill_bindings(
+        db,
+        agent.workspace_id,
+        agent.id,
+        [
+            agent_skill_snapshot_from_payload(item)
+            for item in resource_snapshot.get("skills", [])
+        ],
+        actor.id,
+    )
     await sync_application_tool_bindings(
         db,
         agent.workspace_id,

@@ -23,7 +23,7 @@ from app.ports.execution import ExecutionError, build_execution_platform
 
 
 async def execute_shell(settings, arguments, context):
-    if not context.run_id or context.origin != "agent":
+    if not context.run_id or context.origin not in {"agent", "workflow"}:
         raise ValueError("Command execution requires an authorized Agent Run.")
     mounts = {}
     dependencies = []
@@ -38,6 +38,10 @@ async def execute_shell(settings, arguments, context):
         ):
             raise ValueError("Command execution requires an active authorized Run.")
         for payload in run.skill_snapshots:
+            if context.origin == "workflow" and payload.get(
+                "version_id"
+            ) not in context.resource_snapshot.get("skill_version_ids", []):
+                continue
             skill = agent_skill_snapshot_from_payload(payload)
             await require_pinned_skill_access(db, context.workspace_id, skill)
             mounts[skill_mount_name(skill.name, skill.version_id)] = (

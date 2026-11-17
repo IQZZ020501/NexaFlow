@@ -104,14 +104,14 @@ describe("ToolPicker", () => {
   test("loads searchable usable tools and excludes view-only tools", async () => {
     renderPage(picker())
     expect(screen.getByText("正在加载工具")).toBeTruthy()
-    await screen.findByText("Lookup account")
+    await screen.findByText("Finance")
     expect(screen.queryByText("Private report")).toBeNull()
     expect(screen.queryByText("Create downloadable file")).toBeNull()
 
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "finance" },
     })
-    expect(screen.getByText("Lookup account")).toBeTruthy()
+    expect(screen.getByText("Finance")).toBeTruthy()
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "missing" },
     })
@@ -211,8 +211,8 @@ describe("ToolPicker", () => {
 
     fireEvent.click(categories.getByRole("button", { name: "MCP 工具" }))
     expect(screen.queryByText("图片生成")).toBeNull()
-    expect(screen.getByText("Lookup account")).toBeTruthy()
-    fireEvent.click(screen.getByRole("checkbox", { name: "Private report" }))
+    expect(screen.getByText("Finance")).toBeTruthy()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Reports" }))
     expect(screen.getByText("已选择 1 个工具")).toBeTruthy()
 
     fireEvent.click(categories.getByRole("button", { name: "内置工具" }))
@@ -226,7 +226,7 @@ describe("ToolPicker", () => {
     })
     expect(screen.getByText("没有匹配的工具")).toBeTruthy()
     fireEvent.click(categories.getByRole("button", { name: "全部工具" }))
-    expect(screen.getByText("Lookup account")).toBeTruthy()
+    expect(screen.getByText("Finance")).toBeTruthy()
     expect(screen.queryByText("Install Skill dependencies")).toBeNull()
   })
 
@@ -245,10 +245,10 @@ describe("ToolPicker", () => {
         (value) => changes.push(value)
       )
     )
-    await screen.findByText("Lookup account")
+    await screen.findByText("Finance")
     expect(screen.queryByText("图片生成")).toBeNull()
     expect(screen.getByText("已选择 0 个工具")).toBeTruthy()
-    fireEvent.click(screen.getByRole("checkbox", { name: "Lookup account" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Finance" }))
     expect(changes.at(-1)).toEqual([
       { tool_id: "image-tool", version_id: "image-version" },
       { tool_id: "tool-use", version_id: "version-2" },
@@ -266,7 +266,7 @@ describe("ToolPicker", () => {
         (value) => changes.push(value)
       )
     )
-    await screen.findByText("Lookup account")
+    await screen.findByText("Finance")
     expect(screen.getByText("已固定旧版本")).toBeTruthy()
     expect(screen.getByText("工具已不可用或授权已撤销")).toBeTruthy()
     expect(changes).toEqual([])
@@ -283,7 +283,7 @@ describe("ToolPicker", () => {
     await screen.findByText("工具加载失败")
     response = async () => jsonResponse(tools)
     fireEvent.click(screen.getByRole("button", { name: "重试" }))
-    await screen.findByText("Lookup account")
+    await screen.findByText("Finance")
     expect((screen.getByRole("searchbox") as HTMLInputElement).disabled).toBe(
       false
     )
@@ -292,11 +292,11 @@ describe("ToolPicker", () => {
   test("supports keyboard selection and a mobile-safe dialog width", async () => {
     const changes: ToolRef[][] = []
     renderPage(picker([], (value) => changes.push(value)))
-    await screen.findByText("Lookup account")
+    await screen.findByText("Finance")
     const dialog = screen.getByRole("dialog", { name: "选择工具" })
     expect(dialog.className).toContain("w-[calc(100%-2rem)]")
     const option = within(dialog).getByRole("checkbox", {
-      name: "Lookup account",
+      name: "Finance",
     })
     const search = within(dialog).getByRole("searchbox")
     search.focus()
@@ -332,7 +332,7 @@ describe("ToolPicker", () => {
     const trigger = screen.getByRole("button", { name: "Open tools" })
     trigger.focus()
     fireEvent.click(trigger)
-    await screen.findByText("Lookup account")
+    await screen.findByText("Finance")
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("searchbox"))
     )

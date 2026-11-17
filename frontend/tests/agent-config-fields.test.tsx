@@ -252,9 +252,7 @@ describe("AgentConfigFields", () => {
   test("shows the first active image model and switches between image models", async () => {
     renderPage(<FieldsHarness form={initialForm()} />)
 
-    const trigger = screen.getByLabelText(
-      "选择生图模型"
-    ) as HTMLButtonElement
+    const trigger = screen.getByLabelText("选择生图模型") as HTMLButtonElement
     expect(trigger.textContent).toContain("Seedream")
 
     fireEvent.pointerDown(trigger)
@@ -277,7 +275,8 @@ describe("AgentConfigFields", () => {
     expect(screen.getByText("产品文档")).toBeTruthy()
 
     fireEvent.click(screen.getByText("工具").closest("button")!)
-    expect(screen.getByText("Catalog search")).toBeTruthy()
+    expect(screen.getByText("Database")).toBeTruthy()
+    expect(screen.queryByText("Catalog search")).toBeNull()
   })
 
   test("configures image generation below Tools without listing it as a regular Tool", () => {
@@ -453,21 +452,15 @@ describe("AgentConfigFields", () => {
     expect(
       (await within(dialog).findAllByText("Database")).length
     ).toBeGreaterThan(0)
-    expect(within(dialog).getByText("Execute SQL")).toBeTruthy()
-
-    fireEvent.click(
-      within(dialog).getByRole("checkbox", { name: "Execute SQL" })
-    )
-    await waitFor(() =>
-      expect(screen.getAllByText("2 个工具").length).toBeGreaterThan(0)
-    )
-
-    fireEvent.click(
-      within(dialog).getByRole("checkbox", { name: "Catalog search" })
-    )
-    fireEvent.click(
-      within(dialog).getByRole("checkbox", { name: "Execute SQL" })
-    )
+    expect(within(dialog).queryByText("Execute SQL")).toBeNull()
+    const service = within(dialog).getByRole("checkbox", {
+      name: "Database",
+    }) as HTMLInputElement
+    expect(service.indeterminate).toBe(true)
+    fireEvent.click(service)
+    await waitFor(() => expect(service.checked).toBe(true))
+    expect(screen.queryByText("2 个工具")).toBeNull()
+    fireEvent.click(service)
     await waitFor(() =>
       expect(screen.getByText("选择的工具展示在这里")).toBeTruthy()
     )

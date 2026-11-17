@@ -2328,12 +2328,16 @@ class _FakeWorkflowToolRuntime:
 
 def _llm_scope(**overrides) -> SimpleNamespace:
     scope = SimpleNamespace(
-        run=SimpleNamespace(agent_id="workflow-1", model_id="model-1"),
+        run=SimpleNamespace(
+            agent_id="workflow-1", model_id="model-1", access_source="console"
+        ),
         settings=None,
         models={"model-1": SimpleNamespace(provider_type="openai_compatible")},
         node_histories={},
         tool_runtime=_FakeWorkflowToolRuntime(),
         output_delta=None,
+        llm_states={},
+        save_llm_state=None,
     )
     for key, value in overrides.items():
         setattr(scope, key, value)

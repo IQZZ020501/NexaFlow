@@ -1042,7 +1042,7 @@ def test_builtin_skill_guides_are_frozen_and_read_only() -> None:
         assert version.execution_spec["builtin"] == "skill_guide"
         assert version.execution_spec["skill"] == name
         assert len(version.execution_spec["instructions"].encode()) <= 16_000
-        assert policy.workflow_callable is False
+        assert policy.workflow_callable is True
         validate_tool_arguments(snapshot, {})
         assert normalize_tool_arguments(_tool.function_name, version.input_schema, {"arguments": "{}"}) == {}
         for invalid in ({"filename": "old.pptx"}, {"code": "print(1)"}, {"workbook": {}}):

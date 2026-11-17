@@ -667,6 +667,7 @@ describe("WorkflowNodeCard", () => {
         config: { prompt: "x" },
       })
     )
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Weather" }))
     expect(updates.at(-1)?.config.tools).toEqual([
       { tool_id: "tool-1", version_id: "version-1" },
@@ -685,13 +686,14 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Weather" }))
     expect(removals.at(-1)?.config.tools).toEqual([])
   })
 
   test("LLM node lists no available tools", () => {
     renderNode(nodeData("llm", { config: { prompt: "x" } }))
-    expect(screen.getByText("暂无可用工具")).toBeTruthy()
+    expect(screen.getByText("添加 MCP 工具或 Skills")).toBeTruthy()
   })
 
   test("LLM node shows unavailable tools and MCP switches", async () => {
@@ -716,10 +718,10 @@ describe("WorkflowNodeCard", () => {
       })
     )
     expect(screen.getByText(/gone-1/)).toBeTruthy()
-    expect(screen.getByText("My MCP / search")).toBeTruthy()
+    expect(screen.getByText("My MCP")).toBeTruthy()
     expect(screen.queryByText("My MCP / fetch")).toBeNull()
     // Toggle the read-only MCP tool on (the reference carries its label).
-    fireEvent.click(screen.getByRole("checkbox", { name: "My MCP / search" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "My MCP" }))
     expect(updates.at(-1)?.config.mcp_servers).toMatchObject([
       { server_id: "mcp-1", tool_name: "search" },
     ])
@@ -728,7 +730,7 @@ describe("WorkflowNodeCard", () => {
     expect(updates.at(-1)?.config.mcp_enable).toBe(false)
     expect(updates.at(-1)?.config.mcp_servers).toEqual([])
     // Remove the unavailable pinned tool.
-    fireEvent.click(screen.getByRole("checkbox", { name: /gone-1/ }))
+    fireEvent.click(screen.getByRole("button", { name: "移除 gone-1" }))
     expect(updates.at(-1)?.config.tools).toEqual([])
     // Uncheck path: re-render with the MCP server already pinned so the
     // checkbox starts checked; clicking it removes the reference.
@@ -745,7 +747,7 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
-    fireEvent.click(screen.getByRole("checkbox", { name: "My MCP / search" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "My MCP" }))
     expect(removals.at(-1)?.config.mcp_servers).toEqual([])
   })
 
@@ -1424,6 +1426,158 @@ describe("WorkflowNodeCard", () => {
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,
       configurable: true,
+    })
+  })
+  test("groups callable MCP tools for LLM selection and respects the tool budget", () => {
+    const source = {
+      id: "music",
+      name: "Music",
+      kind: "mcp" as const,
+      transport: null,
+    }
+    const first = {
+      ...workflowTool("search", "Search tracks"),
+      kind: "mcp" as const,
+      source,
+    }
+    const second = { ...first, id: "lyrics", display_name: "Get lyrics" }
+    const blocked = { ...first, id: "blocked", can_use: false }
+    const updates: WorkflowNodeData[] = []
+    renderNode(
+      nodeData("llm", {
+        tools: [
+          first,
+          second,
+          blocked,
+          { ...first, id: "approval", approval: "each_call" },
+          { ...first, id: "direct-only", workflow_callable: false },
+        ],
+        onUpdate: (data) => updates.push(data),
+        config: { tools: [] },
+      })
+    )
+    expect(screen.queryByText("Search tracks")).toBeNull()
+    expect(screen.queryByText("Get lyrics")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Music" }))
+    expect(updates.at(-1)?.config.tools).toEqual([
+      { tool_id: "search", version_id: "version-1" },
+      { tool_id: "lyrics", version_id: "version-1" },
+      { tool_id: "approval", version_id: "version-1" },
+    ])
+    cleanup()
+    renderNode(
+      nodeData("llm", {
+        tools: [first, second],
+        config: {
+          tools: Array.from({ length: 19 }, (_, index) => ({
+            tool_id: `existing-${index}`,
+            version_id: "v1",
+          })),
+        },
+      })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    expect(
+      (screen.getByRole("checkbox", { name: "Music" }) as HTMLInputElement)
+        .disabled
+    ).toBe(true)
+  })
+
+  test("can remove a partially selected MCP service at the LLM tool limit", () => {
+    const source = {
+      id: "music",
+      name: "Music",
+      kind: "mcp" as const,
+      transport: null,
+    }
+    const first = {
+      ...workflowTool("search", "Search tracks"),
+      kind: "mcp" as const,
+      source,
+    }
+    const second = { ...first, id: "lyrics", display_name: "Get lyrics" }
+    const unrelated = Array.from({ length: 19 }, (_, index) => ({
+      tool_id: `existing-${index}`,
+      version_id: "v1",
+    }))
+    const updates: WorkflowNodeData[] = []
+    renderNode(
+      nodeData("llm", {
+        tools: [first, second],
+        onUpdate: (data) => updates.push(data),
+        config: {
+          tools: [
+            { tool_id: first.id, version_id: "old-version" },
+            ...unrelated,
+          ],
+        },
+      })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    expect(
+      (screen.getByRole("checkbox", { name: "Music" }) as HTMLInputElement)
+        .disabled
+    ).toBe(true)
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "移除 Music",
+      })
+    )
+    expect(updates.at(-1)?.config.tools).toEqual(unrelated)
+  })
+
+  test("selects an MCP operation inside its node and clears the previous operation arguments", async () => {
+    const source = {
+      id: "music",
+      name: "Music",
+      kind: "mcp" as const,
+      transport: null,
+    }
+    const first = {
+      ...workflowTool("search", "Search tracks"),
+      kind: "mcp" as const,
+      source,
+      version_id: "version-1",
+    }
+    const second = {
+      ...first,
+      id: "lyrics",
+      display_name: "Get lyrics",
+      version_id: "lyrics-v2",
+      current_version_id: "lyrics-v2",
+    }
+    const blocked = {
+      ...first,
+      id: "blocked",
+      display_name: "Write tracks",
+      approval: "each_call" as const,
+    }
+    const updates: WorkflowNodeData[] = []
+    renderNode(
+      nodeData("tool", {
+        title: "Music",
+        tools: [first, second, blocked],
+        onUpdate: (data) => updates.push(data),
+        config: {
+          mcp_source_id: "music",
+          tool: { tool_id: "search", version_id: "version-1" },
+          arguments: { query: "old argument" },
+        },
+      })
+    )
+    const operation = screen.getByRole("button", { name: "Search tracks" })
+    fireEvent.pointerDown(operation)
+    fireEvent.click(operation)
+    const disabled = await screen.findByRole("menuitem", {
+      name: /Write tracks/,
+    })
+    expect(disabled.getAttribute("aria-disabled")).not.toBe("true")
+    fireEvent.click(screen.getByRole("menuitem", { name: "Get lyrics" }))
+    expect(updates.at(-1)?.config).toMatchObject({
+      mcp_source_id: "music",
+      tool: { tool_id: "lyrics", version_id: "lyrics-v2" },
+      arguments: {},
     })
   })
 })

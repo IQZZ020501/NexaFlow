@@ -1511,7 +1511,7 @@ def test_workflow_services_boundaries() -> None:
                         raise AssertionError("expected 422 for mcp policy")
                     except HTTPException as exc:
                         assert exc.status_code == 422
-                        assert "read-only policy" in str(exc.detail)
+                        assert "enabled policy" in str(exc.detail)
 
                 # 214-216: llm mcp_enable references are collected
                 refs_graph = _simple_graph()

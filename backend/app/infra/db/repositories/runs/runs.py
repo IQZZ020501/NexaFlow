@@ -338,7 +338,15 @@ async def get_agent_run_by_request(
 async def get_agent_run_by_id(
     db: AsyncSession,
     run_id: str,
+    *,
+    for_update: bool = False,
 ) -> AgentRunEntity | None:
+    if for_update:
+        await db.execute(
+            select(AgentRunState.run_id)
+            .where(AgentRunState.run_id == run_id)
+            .with_for_update()
+        )
     row = await _load_run_rows(db, run_id)
     if row is None:
         return None
