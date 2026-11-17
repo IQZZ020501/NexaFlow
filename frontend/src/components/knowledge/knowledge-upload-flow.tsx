@@ -208,6 +208,7 @@ export function KnowledgeUploadFlow({
   >(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const folderInputRef = React.useRef<HTMLInputElement>(null)
+  const [fileSelectionErrors, setFileSelectionErrors] = React.useState<string[]>([])
 
   React.useEffect(() => {
     folderInputRef.current?.setAttribute("webkitdirectory", "")
@@ -304,24 +305,31 @@ export function KnowledgeUploadFlow({
       return
     }
 
-    const supportedFiles = nextFiles.filter((file) =>
-      supportedFileTypes.some((extension) =>
-        file.name.toLowerCase().endsWith(extension),
-      ),
-    )
+    const selectionErrors: string[] = []
+    const supportedFiles = nextFiles.filter((file) => {
+      const reason =
+        file.size === 0
+          ? t("文件为空（0 字节），请选择有内容的文件")
+          : !supportedFileTypes.some((extension) =>
+                file.name.toLowerCase().endsWith(extension)
+              )
+            ? t("不支持的文件格式")
+            : null
+      if (reason)
+        selectionErrors.push(t("{name}：{reason}", { name: file.name, reason }))
+      return !reason
+    })
     const limitedFiles = appendKnowledgeUploadFiles(files, supportedFiles)
     setFiles((current) => appendKnowledgeUploadFiles(current, supportedFiles))
-    if (supportedFiles.length !== nextFiles.length) {
-      onNotify("error", t("已忽略不支持的文件格式"))
-    }
     if (limitedFiles.length < files.length + supportedFiles.length) {
-      onNotify(
-        "error",
+      selectionErrors.push(
         t("队列最多保留 {value} 个文件", {
           value: MAX_KNOWLEDGE_UPLOAD_DOCUMENTS,
-        }),
+        })
       )
     }
+    setFileSelectionErrors(selectionErrors)
+    if (selectionErrors.length) onNotify("error", selectionErrors.join("\n"))
   }
 
   function removeFile(indexToRemove: number) {
@@ -331,6 +339,7 @@ export function KnowledgeUploadFlow({
   function changeImportMode(nextMode: KnowledgeImportMode) {
     setImportMode(nextMode)
     setFiles([])
+    setFileSelectionErrors([])
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
@@ -883,13 +892,18 @@ export function KnowledgeUploadFlow({
       result.status === "fulfilled" ? [result.value] : [],
     )
     const failedCount = uploadResults.length - attachments.length
-    const firstFailure = uploadResults.find(
-      (result) => result.status === "rejected",
+    const failures = uploadResults.flatMap((result, index) =>
+      result.status === "rejected"
+        ? [
+            t("{name}：{reason}", {
+              name: files[index].name,
+              reason: getErrorMessage(result.reason, t),
+            }),
+          ]
+        : []
     )
     if (!attachments.length) {
-      if (firstFailure?.status === "rejected") {
-        reportError(firstFailure.reason)
-      }
+      onNotify("error", failures.join("\n"))
       return []
     }
 
@@ -926,7 +940,7 @@ export function KnowledgeUploadFlow({
           t("已上传 {uploaded} 个文件，{failed} 个上传失败", {
             uploaded: documents.length,
             failed: failedCount,
-          }),
+          }) + "\n" + failures.join("\n"),
         )
       }
       return documents.map((document) => ({ ...document, chunks: [] }))
@@ -1084,7 +1098,7 @@ export function KnowledgeUploadFlow({
                     "m-5 flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center transition-colors",
                     isDragActive
                       ? "border-primary bg-primary/5"
-                      : "border-border bg-muted/20 hover:bg-muted/30",
+                      : "border-border bg-muted/20 hover:bg-muted/30"
                   )}
                   onDragOver={(event) => {
                     event.preventDefault()
@@ -1117,6 +1131,14 @@ export function KnowledgeUploadFlow({
                       chooseFiles(Array.from(event.target.files ?? []))
                     }
                   />
+                  {fileSelectionErrors.length ? (
+                    <div
+                      role="alert"
+                      className="mb-4 w-full rounded-lg border border-destructive/30 p-3 text-left text-sm break-words whitespace-pre-wrap text-destructive"
+                    >
+                      {fileSelectionErrors.join("\n")}
+                    </div>
+                  ) : null}
                   <span className="flex size-14 items-center justify-center rounded-lg border bg-background shadow-sm">
                     <UploadIcon className="size-6 text-primary" />
                   </span>
@@ -1134,10 +1156,10 @@ export function KnowledgeUploadFlow({
                     <p className="mx-auto max-w-xl text-sm leading-6 text-muted-foreground">
                       {importMode === "qa"
                         ? t(
-                            "CSV/XLSX 需包含 question/问题、answer/答案，可选 source/来源 列。",
+                            "CSV/XLSX 需包含 question/问题、answer/答案，可选 source/来源 列。"
                           )
                         : t(
-                            "保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。",
+                            "保留文档标题和段落结构，表格会在预览阶段转换为 Markdown。"
                           )}
                     </p>
                     <p className="mx-auto max-w-3xl text-xs leading-5 text-muted-foreground">
@@ -1213,11 +1235,15 @@ export function KnowledgeUploadFlow({
             <aside className="space-y-4 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
               <section className="rounded-lg border bg-background p-4 shadow-sm">
                 <SectionTitle
-                  icon={importMode === "qa" ? FileSpreadsheetIcon : ScissorsIcon}
+                  icon={
+                    importMode === "qa" ? FileSpreadsheetIcon : ScissorsIcon
+                  }
                   title={importMode === "qa" ? t("问答导入") : t("分段规则")}
                   description={
                     importMode === "qa"
-                      ? t("每行按问题、答案和来源生成一个片段，分段规则不适用。")
+                      ? t(
+                          "每行按问题、答案和来源生成一个片段，分段规则不适用。"
+                        )
                       : t("先用智能规则生成预览，需要时再精调。")
                   }
                 />
@@ -1228,7 +1254,7 @@ export function KnowledgeUploadFlow({
                       checked={segmentMode === "smart"}
                       title={t("智能分段")}
                       description={t(
-                        "按常见文档结构自动设置长度、重叠和清洗规则。",
+                        "按常见文档结构自动设置长度、重叠和清洗规则。"
                       )}
                       onSelect={() => setSegmentMode("smart")}
                     />
@@ -1236,7 +1262,7 @@ export function KnowledgeUploadFlow({
                       checked={segmentMode === "advanced"}
                       title={t("高级分段")}
                       description={t(
-                        "手动控制片段字符数、重叠字符和文本清洗规则。",
+                        "手动控制片段字符数、重叠字符和文本清洗规则。"
                       )}
                       onSelect={() => setSegmentMode("advanced")}
                     />
@@ -1258,7 +1284,7 @@ export function KnowledgeUploadFlow({
                           value={chunkSize}
                           onChange={(event) =>
                             setChunkSize(
-                              Number(event.target.value) || SMART_CHUNK_SIZE,
+                              Number(event.target.value) || SMART_CHUNK_SIZE
                             )
                           }
                         />
@@ -1312,7 +1338,7 @@ export function KnowledgeUploadFlow({
                               onChange={(event) =>
                                 toggleCleaningRule(
                                   rule.value,
-                                  event.target.checked,
+                                  event.target.checked
                                 )
                               }
                             />
@@ -1384,7 +1410,9 @@ export function KnowledgeUploadFlow({
             <main className="min-w-0 overflow-hidden rounded-lg border bg-background shadow-sm lg:flex lg:min-h-0 lg:flex-col">
               <div className="flex shrink-0 flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <SectionTitle
-                  icon={importMode === "qa" ? FileSpreadsheetIcon : FileTextIcon}
+                  icon={
+                    importMode === "qa" ? FileSpreadsheetIcon : FileTextIcon
+                  }
                   title={importMode === "qa" ? t("问答预览") : t("分段预览")}
                   description={
                     importMode === "qa"
@@ -1420,7 +1448,7 @@ export function KnowledgeUploadFlow({
                         "group/document-tab inline-flex h-9 max-w-64 shrink-0 items-center rounded-md border text-sm font-medium transition-colors",
                         selectedDocument?.id === document.id
                           ? "border-primary bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                       )}
                     >
                       <button
@@ -1438,10 +1466,11 @@ export function KnowledgeUploadFlow({
                           variant="ghost"
                           size="icon-xs"
                           className={cn(
-                            "mr-1 rounded-sm text-muted-foreground/60 opacity-0 transition-[color,background-color,opacity] hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 group-hover/document-tab:opacity-100 group-focus-within/document-tab:opacity-100 max-sm:opacity-100",
-                            selectedDocument?.id === document.id && "opacity-100",
+                            "mr-1 rounded-sm text-muted-foreground/60 opacity-0 transition-[color,background-color,opacity] group-focus-within/document-tab:opacity-100 group-hover/document-tab:opacity-100 hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive focus-visible:opacity-100 max-sm:opacity-100",
+                            selectedDocument?.id === document.id &&
+                              "opacity-100",
                             deletingDocumentId === document.id &&
-                              "bg-destructive/10 text-destructive opacity-100",
+                              "bg-destructive/10 text-destructive opacity-100"
                           )}
                           aria-label={t("移除 {value}", {
                             value: document.filename,

@@ -814,6 +814,42 @@ describe("KnowledgeBasePage list view", () => {
     )
   })
 
+  test("does not resurrect a deleted card when an older list snapshot arrives", async () => {
+    let listRequests = 0
+    const late = Promise.withResolvers<Response>()
+    fetchHandler = (url, init) => {
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?"))
+        return ++listRequests === 2
+          ? late.promise
+          : jsonResponse([makeKnowledgeBase()])
+      return jsonResponse([])
+    }
+    const page = renderPage(<KnowledgeBasePage />)
+    await screen.findByText("KB Alpha")
+    openMenu(within(cardElement("KB Alpha")).getByTitle("更多"))
+    fireEvent.click(await screen.findByText("永久删除知识库"))
+    await screen.findByRole("dialog", { name: "确认操作" })
+    session.token = "refreshed-token"
+    page.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <KnowledgeBasePage />
+      </LanguageProvider>
+    )
+    await waitFor(() => expect(listRequests).toBe(2))
+    await respondToConfirm("删除")
+    await waitFor(() =>
+      expect(notifications.some(([, msg]) => msg === "知识库已删除")).toBe(true)
+    )
+    late.resolve(jsonResponse([makeKnowledgeBase()]))
+    await waitFor(() =>
+      expect(Boolean(screen.queryByText("正在加载"))).toBe(false)
+    )
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(Boolean(screen.queryByText("KB Alpha"))).toBe(false)
+  })
+
   test("reports an error when deleting a knowledge base fails", async () => {
     fetchHandler = (url, init) => {
       const method = init?.method ?? "GET"
@@ -861,12 +897,15 @@ describe("KnowledgeBasePage list view", () => {
 
     const dialog = await screen.findByRole("dialog")
     expect(
-      within(dialog).getByText("配置知识库名称、描述和默认数据源。")
+      within(dialog).getByText("配置知识库名称、描述和检索模型。")
     ).toBeTruthy()
 
-    fireEvent.change(within(dialog).getByLabelText("知识库名称"), {
-      target: { value: "New KB" },
-    })
+    const nameInput = within(dialog).getByLabelText("知识库名称") as HTMLInputElement
+    expect(nameInput.maxLength).toBe(120)
+    expect((within(dialog).getByLabelText("描述") as HTMLTextAreaElement).maxLength).toBe(2000)
+    fireEvent.change(nameInput, { target: { value: "   " } })
+    expect((within(dialog).getByRole("button", { name: "新建知识库" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(nameInput, { target: { value: " New KB " } })
     fireEvent.change(within(dialog).getByLabelText("描述"), {
       target: { value: "Fresh docs" },
     })
@@ -2840,7 +2879,10 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     ).toBe(false)
     const limitInput = screen.getByLabelText("返回数量") as HTMLInputElement
     fireEvent.change(limitInput, { target: { value: "99" } })
-    expect(limitInput.value).toBe("20")
+    expect(limitInput.value).toBe("99")
+    expect(screen.getByText("返回数量必须是 1 到 20 之间的整数")).toBeTruthy()
+    expect((screen.getByRole("button", { name: "测试召回" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(limitInput, { target: { value: "20" } })
     fireEvent.click(screen.getByRole("button", { name: "测试召回" }))
 
     await waitFor(() => {
@@ -2908,9 +2950,10 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(secondCard))
 
-    // Query limit clamps to 1..20.
+    // Invalid input stays visible so it can be corrected explicitly.
     fireEvent.change(limitInput, { target: { value: "0" } })
-    expect(limitInput.value).toBe("1")
+    expect(limitInput.value).toBe("0")
+    expect(screen.getByText("返回数量必须是 1 到 20 之间的整数")).toBeTruthy()
   })
 
   test("does not submit an empty query", async () => {

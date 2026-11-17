@@ -10,6 +10,7 @@ import {
   LockIcon,
   LogOutIcon,
   MegaphoneIcon,
+  MenuIcon,
   PaletteIcon,
   SettingsIcon,
 } from "lucide-react"
@@ -225,7 +226,10 @@ export function TopBar() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <nav className="hidden min-w-0 flex-1 justify-center gap-2 overflow-x-auto overflow-y-hidden sm:flex">
+          <nav
+            aria-label={t("主导航")}
+            className="hidden min-w-0 flex-1 justify-center gap-2 xl:flex"
+          >
             {featureNavItems.map((item) => {
               const Icon = item.icon
               const isActive =
@@ -249,7 +253,42 @@ export function TopBar() {
               )
             })}
           </nav>
-          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-lg"
+                  className="hidden sm:inline-flex xl:hidden"
+                  aria-label={t("主导航")}
+                  title={t("主导航")}
+                >
+                  <MenuIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuGroup>
+                  {featureNavItems.map((item) => {
+                    const Icon = item.icon
+                    const isActive =
+                      item.key === "analytics"
+                        ? isAnalyticsActive
+                        : pathname.startsWith(item.href)
+                    return (
+                      <DropdownMenuItem key={item.key} asChild>
+                        <Link
+                          href={item.href}
+                          aria-current={isActive ? "page" : undefined}
+                        >
+                          <Icon />
+                          {item.label}
+                        </Link>
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <MessageCenter />
             <div className="hidden items-center gap-1 sm:flex sm:gap-2">
               <DropdownMenu>

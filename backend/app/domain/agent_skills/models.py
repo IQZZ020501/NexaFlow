@@ -29,7 +29,7 @@ class AgentSkill(Base):
         ),
         UniqueConstraint("workspace_id", "id", name="uq_agent_skills_workspace_id"),
         CheckConstraint(
-            "status IN ('active', 'disabled')",
+            "status IN ('active', 'disabled', 'archived')",
             name="ck_agent_skills_status",
         ),
     )

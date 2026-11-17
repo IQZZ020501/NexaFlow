@@ -6,14 +6,46 @@ export type RequestOptions = RequestInit & {
   token?: string
 }
 
+export type ApiValidationIssue = { loc: Array<string | number>; msg: string }
+
 export class ApiError extends Error {
   status: number
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    readonly validationIssues: ApiValidationIssue[] = []
+  ) {
     super(message)
     this.name = "ApiError"
     this.status = status
   }
+}
+
+function responseError(status: number, payload: unknown, fallback: string) {
+  const detail =
+    payload && typeof payload === "object" && "detail" in payload
+      ? payload.detail
+      : null
+  const issues = Array.isArray(detail)
+    ? detail.flatMap((item) =>
+        item &&
+        typeof item === "object" &&
+        typeof item.msg === "string" &&
+        Array.isArray(item.loc)
+          ? [
+              {
+                loc: item.loc.filter(
+                  (part: unknown) =>
+                    typeof part === "string" || typeof part === "number"
+                ),
+                msg: item.msg,
+              },
+            ]
+          : []
+      )
+    : []
+  return new ApiError(status, errorMessage(payload, fallback), issues)
 }
 
 /**
@@ -123,7 +155,7 @@ export async function request<T>(path: string, options: RequestOptions = {}) {
     } catch {
       // Keep the plain response body as the fallback message.
     }
-    throw new ApiError(response.status, errorMessage(payload, response.statusText))
+    throw responseError(response.status, payload, response.statusText)
   }
 
   const text = await response.text()
@@ -142,7 +174,7 @@ export async function requestPage<T>(path: string, options: RequestOptions = {})
     const text = await response.text()
     let payload: unknown = text
     try { payload = text ? JSON.parse(text) : null } catch { /* plain text */ }
-    throw new ApiError(response.status, errorMessage(payload, response.statusText))
+    throw responseError(response.status, payload, response.statusText)
   }
   return {
     items: await response.json() as T[],

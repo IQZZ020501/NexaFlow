@@ -230,7 +230,7 @@ describe("KnowledgeBaseDialogs", () => {
 
     const dialog = screen.getByRole("dialog")
     expect(
-      within(dialog).getByText("配置知识库名称、描述和默认数据源。")
+      within(dialog).getByText("配置知识库名称、描述和检索模型。")
     ).toBeTruthy()
 
     fireEvent.change(within(dialog).getByLabelText("知识库名称"), {

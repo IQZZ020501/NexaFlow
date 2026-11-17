@@ -188,8 +188,10 @@ describe("ToolsPage", () => {
       updated_at: "2026-09-18T00:00:00Z",
     }
     let patchBody: unknown
+    let deleted = false
     globalThis.fetch = (async (input, options) => {
       const url = String(input)
+      if (options?.method === "DELETE") { deleted = true; return new Response(null, { status: 204 }) }
       if (options?.method === "PATCH") {
         patchBody = JSON.parse(String(options.body))
         return jsonResponse(skill)
@@ -222,6 +224,22 @@ describe("ToolsPage", () => {
       target: { value: "no-match" },
     })
     expect(screen.getByText("没有匹配的工具")).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText("搜索名称、描述或来源"), { target: { value: "" } })
+    fireEvent.click(
+      within(
+        screen
+          .getByRole("button", { name: "Research package" })
+          .closest("article")!
+      ).getByRole("button", { name: "删除" })
+    )
+    const confirm = await screen.findByRole("dialog", { name: "确认操作" })
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }))
+    await waitFor(() => expect(deleted).toBe(true))
+    await waitFor(() =>
+      expect(
+        Boolean(screen.queryByRole("button", { name: "Research package" }))
+      ).toBe(false)
+    )
   })
 
   test("enables and disables manageable Skills and reports mutation errors", async () => {
@@ -576,8 +594,8 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage initialKind="builtin" />)
     await screen.findByText("生成 PDF")
     expect(screen.getByRole("heading", { name: "内置 Skills" })).toBeTruthy()
-    expect(screen.getByRole("heading", { name: "我的 Skills" })).toBeTruthy()
-    expect(screen.getByText("还没有自己的 Skill")).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "自定义 Skills" })).toBeTruthy()
+    expect(screen.getByText("还没有可用的 Skill")).toBeTruthy()
     const searchToolbar = screen.getByRole("search")
     expect(within(searchToolbar).getByRole("searchbox")).toBeTruthy()
     expect(

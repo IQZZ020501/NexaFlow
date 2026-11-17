@@ -545,6 +545,15 @@ describe("knowledge upload flow: files step", () => {
     expect(screen.getByText("1 个")).toBeTruthy()
   })
 
+  test("rejects empty files with filenames while retaining valid selections", () => {
+    const { container, callbacks } = renderFlow({ step: "files" })
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File([], "empty.txt"), new File(["valid"], "valid.txt")] } })
+    expect(screen.getByRole("alert").textContent).toContain("empty.txt：文件为空（0 字节）")
+    expect(Boolean(screen.queryByRole("button", { name: "移除 empty.txt" }))).toBe(false)
+    expect(screen.getByRole("button", { name: "移除 valid.txt" })).toBeTruthy()
+    expect(notifyMessages(callbacks.onNotify.mock.calls)[0]).toContain("empty.txt")
+  })
+
   test("ignores unsupported file formats and notifies", () => {
     const { container, callbacks } = renderFlow({ step: "files" })
     const fileInput = container.querySelectorAll('input[type="file"]')[0]
@@ -561,7 +570,7 @@ describe("knowledge upload flow: files step", () => {
     expect(screen.getByText("guide.md")).toBeTruthy()
     expect(screen.getByText("readme.txt")).toBeTruthy()
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-      "已忽略不支持的文件格式",
+      "setup.exe：不支持的文件格式\ndiagram.png：不支持的文件格式",
     )
   })
 
@@ -617,7 +626,7 @@ describe("knowledge upload flow: files step", () => {
     expect(screen.getByText("guide.md")).toBeTruthy()
     expect(screen.queryByText("setup.exe")).toBeNull()
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-      "已忽略不支持的文件格式",
+      "setup.exe：不支持的文件格式",
     )
   })
 
@@ -815,7 +824,7 @@ describe("knowledge upload flow: segment step route restore", () => {
 
     await waitFor(() =>
       expect(callbacks.onBackToFiles.mock.calls.length).toBeGreaterThan(0),)
-    expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain("upload boom")
+    expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain("guide.md：upload boom")
   })
 
   test("cleans up attachments when document creation fails", async () => {
@@ -890,7 +899,7 @@ describe("knowledge upload flow: segment step route restore", () => {
     const restoreState = callbacks.onRouteSegment.mock.calls[1][0] as KnowledgeUploadRouteState
     expect(restoreState.documentIds).toEqual(["doc-1"])
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-      "已上传 1 个文件，1 个上传失败",
+      "已上传 1 个文件，1 个上传失败\nnotes.txt：notes boom",
     )
   })
 
@@ -1077,7 +1086,7 @@ describe("knowledge upload flow: segment step route restore", () => {
       expect(callbacks.onBackToFiles.mock.calls.length).toBeGreaterThan(0),
     )
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-      "transient failure",
+      "guide.md：transient failure",
     )
 
     // Back on the files step the queue is preserved, so retry directly.

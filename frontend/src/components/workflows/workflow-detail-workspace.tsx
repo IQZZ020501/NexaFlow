@@ -1433,6 +1433,7 @@ export function WorkflowDetailWorkspace({
                         ) : null}
                         <textarea
                           id="workflow-run-question"
+                          enterKeyHint="send"
                           rows={3}
                           maxLength={4000}
                           aria-label={
@@ -1462,7 +1463,8 @@ export function WorkflowDetailWorkspace({
                           onKeyDown={(event) => {
                             if (
                               event.key === "Enter" &&
-                              (event.metaKey || event.ctrlKey)
+                              !event.shiftKey &&
+                              !event.nativeEvent.isComposing
                             ) {
                               event.preventDefault()
                               event.currentTarget.form?.requestSubmit()

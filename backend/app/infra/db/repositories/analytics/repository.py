@@ -32,6 +32,7 @@ from app.entities.analytics import (
     WorkspaceAnalyticsTeamMember,
     WorkspaceAnalyticsToolCall,
 )
+from app.infra.db.repositories.tools.inventory import tool_catalog_conditions
 
 
 async def get_workspace_analytics_counts(
@@ -220,9 +221,8 @@ async def list_workspace_analytics_tool_calls(
             ToolInvocationOrm.tool_id.is_not(None),
             select(active_tool.id)
             .where(
-                active_tool.workspace_id == ToolInvocationOrm.workspace_id,
+                *tool_catalog_conditions(workspace_id, tool=active_tool),
                 active_tool.stable_key == ToolOrm.stable_key,
-                active_tool.status == "active",
             )
             .exists(),
             ToolInvocationOrm.created_at >= start_at,
@@ -305,9 +305,7 @@ async def get_workspace_analytics_inventory(
                 func.count().label("total"),
             )
             .where(
-                ToolOrm.workspace_id == workspace_id,
-                ToolOrm.kind.in_(("builtin", "mcp")),
-                ToolOrm.function_name != "inline_python",
+                *tool_catalog_conditions(workspace_id),
             )
             .group_by(ToolOrm.kind, ToolOrm.status)
         )

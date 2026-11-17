@@ -40,6 +40,7 @@ from app.entities.tools import (
 )
 from app.entities.workspaces.resource_permissions import ResourcePermission
 from app.infra.db.mapping import save, to_entity
+from app.infra.db.repositories.tools.inventory import tool_catalog_conditions
 
 ToolCatalogRow = tuple[
     Tool,
@@ -288,9 +289,8 @@ async def list_tool_catalog_rows(
             ),
         )
         .where(
-            ToolOrm.workspace_id == workspace_id,
-            ToolOrm.status != "archived",
-            ToolOrm.kind != "python",
+            # Image generation remains available to the separate model settings.
+            *tool_catalog_conditions(workspace_id, include_model_tools=True),
         )
     )
     if not include_all:

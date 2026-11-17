@@ -508,6 +508,18 @@ describe("workspace analytics", () => {
     expect(link.closest("nav")).toBeTruthy()
   })
 
+  test("provides every navigation entry in the compact menu", async () => {
+    renderPage(<TopBar />)
+    const menuButton = screen.getByRole("button", { name: "主导航" })
+    expect(menuButton.className).toContain("xl:hidden")
+    expect(menuButton.className).toContain("sm:inline-flex")
+    fireEvent.pointerDown(menuButton)
+    const menu = await screen.findByRole("menu")
+    for (const name of ["应用", "知识库", "模型", "工具", "数据大屏"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeTruthy()
+    }
+  })
+
   test("returns to the application home after switching workspaces", async () => {
     renderPage(<TopBar />)
 

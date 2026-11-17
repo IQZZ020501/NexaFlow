@@ -1,6 +1,66 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "请先配置 Embedding 模型": "Configure an Embedding model first",
+  "检索模型测试失败，请检查连接配置后重试": "The retrieval model test failed. Check the connection settings and retry.",
+  "绑定的 Skill 授权已失效，请重新配置": "Authorization for a bound Skill has expired. Update the configuration.",
+  "检索模型测试失败，模型服务返回状态码 {value}": "The retrieval model test failed with provider status {value}",
+  操作失败: "Operation failed",
+  "相似度必须是 0 到 1 之间的数字":
+    "Similarity must be a number between 0 and 1",
+  "返回数量必须是 1 到 20 之间的整数":
+    "Result count must be an integer between 1 and 20",
+  "配置知识库名称、描述和检索模型。":
+    "Configure the knowledge base name, description, and retrieval models.",
+  "文件为空（0 字节），请选择有内容的文件":
+    "The file is empty (0 bytes). Choose a file with content.",
+  不支持的文件格式: "Unsupported file format",
+  "{name}：{reason}": "{name}: {reason}",
+  "删除 Skill“{name}”？删除后无法再调用，历史版本和执行记录会保留。":
+    "Delete Skill “{name}”? It will no longer be callable. Published versions and execution history will be retained.",
+  "Skill 已删除": "Skill deleted",
+  "自定义 Skills": "Custom Skills",
+  "没有匹配的 Skill": "No matching Skills",
+  "还没有可用的 Skill": "No Skills available yet",
+  "统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。":
+    "Current resources across the entire workspace, independent of the date filter. Personal lists show only resources you can access.",
+  "工具按内置工具（含内置 Skills）和 MCP 子工具计数，仅统计当前工具目录中的资源。":
+    "Tools count built-in tools (including built-in Skills) and individual MCP tools currently listed in the tool catalog.",
+  "文件超过大小限制，请缩小后重试":
+    "The file exceeds the size limit. Reduce its size and retry.",
+  名称不能为空或仅包含空格:
+    "The name cannot be empty or contain only whitespace",
+  "检索模型不存在，请重新选择":
+    "The retrieval model no longer exists. Select another model.",
+  "检索模型已停用，请重新选择":
+    "The retrieval model is disabled. Select another model.",
+  "请选择 Embedding 类型的模型": "Select an Embedding model",
+  "请选择 Rerank 类型的模型": "Select a Rerank model",
+  "知识库已有任务运行中，请完成后重试":
+    "A knowledge base task is already running. Wait for it to finish and retry.",
+  "Skill 已停用，请启用后重试": "The Skill is disabled. Enable it and retry.",
+  "绑定的 Skill 已停用或已删除，请重新配置":
+    "A bound Skill is disabled or deleted. Update the configuration.",
+  "Skill 已停用，请启用后再发布":
+    "The Skill is disabled. Enable it before publishing.",
+  "Skill 版本不可用，请重新选择":
+    "The Skill version is unavailable. Select another version.",
+  "Skill 发布发生冲突，请刷新后重试":
+    "Skill publication conflicted. Refresh and retry.",
+  "Skill 发布版本无效，请重新发布":
+    "The published Skill version is invalid. Publish it again.",
+  "Skill 引用的知识库未启用，请重新配置":
+    "The knowledge base referenced by the Skill is inactive. Update the configuration.",
+  "至少输入 {value} 个字符": "Enter at least {value} characters",
+  "最多输入 {value} 个字符": "Enter at most {value} characters",
+  "数值必须大于或等于 {value}":
+    "The value must be greater than or equal to {value}",
+  "数值必须小于或等于 {value}":
+    "The value must be less than or equal to {value}",
+  此项为必填项: "This field is required",
+  请输入有效的整数: "Enter a valid integer",
+  请输入有效的数字: "Enter a valid number",
+  输入参数: "Input",
   "查看服务状态与后台失败记录": "View service status and background failures",
   管理工具: "Manage tools",
   "管理 {name} 的工具": "Manage tools for {name}",

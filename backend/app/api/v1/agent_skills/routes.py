@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import WorkspaceContext, get_workspace_context_from_path
 from app.application.agent_skills import (
     create_agent_skill,
+    delete_agent_skill,
     get_agent_skill,
     list_agent_skill_permissions,
     list_agent_skill_versions,
@@ -114,6 +115,18 @@ async def patch_workspace_agent_skill(
         context.user,
         context.membership_role,
     )
+
+
+@router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_agent_skill(
+    skill_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    await delete_agent_skill(
+        db, context.workspace.id, skill_id, context.user, context.membership_role,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{skill_id}/publish", response_model=AgentSkillVersionResponse)

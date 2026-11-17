@@ -211,7 +211,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const notify = React.useCallback(
     (kind: AppNotification["kind"], message: string) => {
-      setNotification({ id: Date.now(), kind, message })
+      setNotification((current) =>
+        current?.kind === "error" && kind !== "error"
+          ? current
+          : { id: Date.now(), kind, message }
+      )
     },
     []
   )
@@ -420,7 +424,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [clearSession, notify, refreshAt, renewAccessToken, token])
 
   React.useEffect(() => {
-    if (!notification) {
+    if (!notification || notification.kind === "error") {
       return
     }
 

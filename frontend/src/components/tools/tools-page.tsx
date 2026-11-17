@@ -34,6 +34,7 @@ import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
 import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
 import { SkillDialog } from "@/components/tools/skill-dialog"
 import {
+  deleteAgentSkill,
   listAllAgentSkills,
   updateAgentSkill,
   type AgentSkill,
@@ -222,6 +223,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   )
   const [skillDialogOpen, setSkillDialogOpen] = React.useState(false)
   const [workspaceSkills, setWorkspaceSkills] = React.useState<AgentSkill[]>([])
+  const deletedSkillIds = React.useRef(new Set<string>())
   const [editingSkill, setEditingSkill] = React.useState<
     AgentSkill | undefined
   >()
@@ -270,7 +272,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       if (requestId !== requestRef.current) return
       setTools(nextTools)
       setSources(nextSources)
-      setWorkspaceSkills(nextSkills)
+      setWorkspaceSkills(
+        nextSkills.filter((skill) => !deletedSkillIds.current.has(skill.id))
+      )
     } catch (nextError) {
       if (requestId !== requestRef.current) return
       setTools([])
@@ -524,6 +528,38 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
       message("success", enabled ? t("工具来源已启用") : t("工具来源已禁用"))
     } catch (nextError) {
       message("error", getErrorMessage(nextError, t))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function removeSkill(skill: AgentSkill) {
+    if (busyId || !skill.can_manage) return
+    if (
+      !(await confirmAction({
+        description: t(
+          "删除 Skill“{name}”？删除后无法再调用，历史版本和执行记录会保留。",
+          { name: skill.name }
+        ),
+        confirmLabel: t("删除"),
+        destructive: true,
+      }))
+    )
+      return
+    setBusyId(skill.id)
+    try {
+      await deleteAgentSkill(accessToken, workspaceId, skill.id)
+      deletedSkillIds.current.add(skill.id)
+      setWorkspaceSkills((current) =>
+        current.filter((item) => item.id !== skill.id)
+      )
+      if (editingSkill?.id === skill.id) {
+        setSkillDialogOpen(false)
+        setEditingSkill(undefined)
+      }
+      message("success", t("Skill 已删除"))
+    } catch (cause) {
+      message("error", getErrorMessage(cause, t))
     } finally {
       setBusyId(null)
     }
@@ -1135,11 +1171,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                     id="workspace-skills-heading"
                     className="text-sm font-semibold"
                   >
-                    {t("我的 Skills")}
+                    {t("自定义 Skills")}
                   </h2>
-                  <Badge variant="secondary">{workspaceSkills.length}</Badge>
+                  <Badge variant="secondary">
+                    {filteredWorkspaceSkills.length}
+                  </Badge>
                 </div>
-                {workspaceSkills.length ? (
+                {filteredWorkspaceSkills.length ? (
                   <div className={resourceCardGridClass}>
                     {filteredWorkspaceSkills.map((skill) => (
                       <ResourceCard
@@ -1149,7 +1187,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                       >
                         <Button
                           variant="ghost"
-                          className="h-auto max-w-full justify-start px-0 py-0 text-sm font-semibold"
+                          className="h-auto max-w-full min-w-0 justify-start px-0 py-0 text-left text-sm font-semibold [overflow-wrap:anywhere] break-words whitespace-normal"
                           onClick={() => {
                             setEditingSkill(skill)
                             setSkillDialogOpen(true)
@@ -1157,10 +1195,13 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         >
                           {skill.name}
                         </Button>
-                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                        <p
+                          title={skill.description}
+                          className="mt-1 line-clamp-2 text-sm break-words text-muted-foreground"
+                        >
                           {skill.description}
                         </p>
-                        <div className="mt-auto flex items-center gap-2 pt-3">
+                        <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
                           {!skill.can_manage ? (
                             <Badge variant="outline">{t("共享给我的")}</Badge>
                           ) : null}
@@ -1171,6 +1212,17 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                 ? `${t("已发布版本")} ${skill.current_version_number}`
                                 : t("草稿")}
                           </Badge>
+                          {skill.can_manage ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busyId !== null}
+                              onClick={() => void removeSkill(skill)}
+                            >
+                              <Trash2Icon />
+                              {t("删除")}
+                            </Button>
+                          ) : null}
                           {skill.can_manage ? (
                             <Button
                               variant="outline"
@@ -1209,7 +1261,11 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   </div>
                 ) : (
                   <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
-                    <p className="font-medium">{t("还没有自己的 Skill")}</p>
+                    <p className="font-medium">
+                      {workspaceSkills.length
+                        ? t("没有匹配的 Skill")
+                        : t("还没有可用的 Skill")}
+                    </p>
                     <p className="mt-1 max-w-md text-sm text-muted-foreground">
                       {t("从添加工具新建或导入 Skill。")}
                     </p>

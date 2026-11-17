@@ -50,6 +50,7 @@ import {
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
+  availableWorkflowNodePosition,
   canvasPositionLeftOf,
   draggedCanvasPosition,
   nonOverlappingCanvasPosition,
@@ -184,23 +185,27 @@ function CanvasInner(props: WorkflowCanvasProps) {
       config?: Record<string, unknown>
     ) => {
       if (props.readOnly) return
-      if (
-        ["start", "end"].includes(type) &&
-        nodes.some((node) => node.data.type === type)
-      ) {
-        return
-      }
-      const node = createWorkflowNode(
-        type,
-        title,
-        nodes.length,
-        config,
-        startNodeId
-      )
-      if (position) node.position = position
-      setNodes((current) => [...current, node])
+      setNodes((current) => {
+        if (
+          ["start", "end"].includes(type) &&
+          current.some((node) => node.data.type === type)
+        )
+          return current
+        const node = createWorkflowNode(
+          type,
+          title,
+          current.length,
+          config,
+          startNodeId
+        )
+        node.position = availableWorkflowNodePosition(
+          position ?? node.position,
+          current
+        )
+        return [...current, node]
+      })
     },
-    [nodes, props.readOnly, props.t, startNodeId]
+    [props.readOnly, props.t, startNodeId]
   )
 
   const flowPaneRef = React.useRef<HTMLDivElement | null>(null)
@@ -401,7 +406,13 @@ function CanvasInner(props: WorkflowCanvasProps) {
       )
       copy.position = { x: source.position.x + 300, y: source.position.y + 80 }
       copy.data.config = structuredClone(source.data.config)
-      setNodes((current) => [...current, copy])
+      setNodes((current) => [
+        ...current,
+        {
+          ...copy,
+          position: availableWorkflowNodePosition(copy.position, current),
+        },
+      ])
     },
     [nodes, props.readOnly, t]
   )

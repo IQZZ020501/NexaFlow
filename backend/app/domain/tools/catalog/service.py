@@ -18,6 +18,7 @@ from app.domain.tools.access.permissions import (
     require_tool_view,
 )
 from app.domain.tools.catalog.guides import skill_instructions
+from app.domain.tools.catalog.visibility import INTERNAL_BUILTIN_FUNCTION_NAMES
 from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.entities.tools import (
@@ -97,14 +98,6 @@ BUILTIN_SKILL_DEFINITIONS = (
         ),
     ),
 )
-
-INTERNAL_BUILTIN_FUNCTION_NAMES = (
-    "bash",
-    "create_artifact",
-    "inline_python",
-    "install_skill_dependencies",
-)
-
 
 def stable_catalog_id(key: str) -> str:
     return str(uuid5(CATALOG_ID_NAMESPACE, key))

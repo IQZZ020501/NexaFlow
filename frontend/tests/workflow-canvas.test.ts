@@ -9,6 +9,7 @@ import type {
 import {
   applyWorkflowEdgeChanges,
   applyWorkflowNodeChanges,
+  availableWorkflowNodePosition,
   canvasPositionLeftOf,
   draggedCanvasPosition,
   nonOverlappingCanvasPosition,
@@ -38,6 +39,16 @@ type ChangeableNode = WorkflowNode & {
 type ChangeableEdge = WorkflowEdge & { selected?: boolean }
 
 describe("workflow canvas", () => {
+  test("keeps repeated center insertion and copies clear of expanded nodes", () => {
+    const nodes = [node("existing", { x: 400, y: 300 })]
+    for (let index = 0; index < 5; index++) {
+      const position = availableWorkflowNodePosition({ x: 400, y: 300 }, nodes)
+      expect(nodes.every((other) => Math.abs(position.x - other.position.x) >= 344)).toBe(true)
+      nodes.push(node(String(index), position))
+    }
+    const copied = availableWorkflowNodePosition({ x: 700, y: 380 }, nodes)
+    expect(nodes.every((other) => Math.abs(copied.x - other.position.x) >= 344)).toBe(true)
+  })
   test("applies pointer movement to a canvas position", () => {
     expect(
       draggedCanvasPosition(

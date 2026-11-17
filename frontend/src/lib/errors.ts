@@ -2,6 +2,28 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Document is empty.": "文件为空（0 字节），请选择有内容的文件",
+  "Document is too large.": "文件超过大小限制，请缩小后重试",
+  "Unsupported document type.": "不支持的文件格式",
+  "Unsupported file type.": "不支持的文件格式",
+  "Document format is not supported.": "不支持的文件格式",
+  "Invalid name.": "名称不能为空或仅包含空格",
+  "Knowledge model not found.": "检索模型不存在，请重新选择",
+  "Knowledge model is disabled.": "检索模型已停用，请重新选择",
+  "Embedding model is required.": "请先配置 Embedding 模型",
+  "Knowledge model test request failed.": "检索模型测试失败，请检查连接配置后重试",
+  "Agent Skill binding permission is no longer valid.": "绑定的 Skill 授权已失效，请重新配置",
+  "Skill execution access is no longer valid.": "绑定的 Skill 授权已失效，请重新配置",
+  "Knowledge model must be embedding.": "请选择 Embedding 类型的模型",
+  "Knowledge model must be reranker.": "请选择 Rerank 类型的模型",
+  "Knowledge task is already running.": "知识库已有任务运行中，请完成后重试",
+  "Agent Skill is disabled.": "Skill 已停用，请启用后重试",
+  "A bound Agent Skill is disabled.": "绑定的 Skill 已停用或已删除，请重新配置",
+  "Disabled Agent Skills cannot be published.": "Skill 已停用，请启用后再发布",
+  "Agent Skill version is not available for binding.": "Skill 版本不可用，请重新选择",
+  "Agent Skill publication conflicted.": "Skill 发布发生冲突，请刷新后重试",
+  "Agent Skill publication is invalid.": "Skill 发布版本无效，请重新发布",
+  "Agent Skill knowledge base is not active.": "Skill 引用的知识库未启用，请重新配置",
   "SMTP settings are not configured.": "尚未配置 SMTP",
   "SMTP test failed.": "SMTP 测试失败，请检查服务器、端口、加密方式和凭据",
   "SMTP host and sender address are required when enabled.":
@@ -38,6 +60,54 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Model connection test timed out.": "模型连接测试超时，请检查供应商后重试",
 }
 
+function localizedMessage(message: string, t: TFunction): string {
+  const key =
+    API_ERROR_LABEL_KEYS[message] ??
+    API_ERROR_LABEL_KEYS[message.replace(/^Value error, /, "")]
+  if (key) return t(key)
+  const providerStatus =
+    /^Knowledge model test failed with provider status (\d+)\.$/.exec(message)
+  if (providerStatus)
+    return t("检索模型测试失败，模型服务返回状态码 {value}", {
+      value: providerStatus[1],
+    })
+  const length =
+    /^String should have (at least|at most) (\d+) characters?$/.exec(message)
+  if (length)
+    return t(
+      length[1] === "at least"
+        ? "至少输入 {value} 个字符"
+        : "最多输入 {value} 个字符",
+      { value: length[2] }
+    )
+  const bound =
+    /^Input should be (greater than or equal to|less than or equal to) (-?[\d.]+)$/.exec(
+      message
+    )
+  if (bound)
+    return t(
+      bound[1] === "greater than or equal to"
+        ? "数值必须大于或等于 {value}"
+        : "数值必须小于或等于 {value}",
+      { value: bound[2] }
+    )
+  if (message === "Field required") return t("此项为必填项")
+  if (/^Input should be a valid integer/.test(message))
+    return t("请输入有效的整数")
+  if (/^Input should be a valid number/.test(message))
+    return t("请输入有效的数字")
+  if (message === "Request failed") return t("请求失败")
+  return message
+}
+
+const VALIDATION_FIELD_KEYS: Record<string, TranslationKey> = {
+  name: "名称",
+  description: "描述",
+  similarity: "相似度",
+  limit: "返回数量",
+  query: "查询内容",
+}
+
 /**
  * Converts an unknown error into a user-facing message.
  *
@@ -53,17 +123,29 @@ export function getErrorMessage(error: unknown, t: TFunction) {
     if (error.status === 403 || error.status === 404) {
       return t("资源不存在或无权访问")
     }
-    const labelKey = API_ERROR_LABEL_KEYS[error.message]
-    if (labelKey) return t(labelKey)
-    return error.message
+    if (error.validationIssues.length)
+      return error.validationIssues
+        .map((issue) => {
+          const field = [...issue.loc]
+            .reverse()
+            .find(
+              (part) => typeof part === "string" && VALIDATION_FIELD_KEYS[part]
+            )
+          const reason = localizedMessage(issue.msg, t)
+          return t("{name}：{reason}", {
+            name: field ? t(VALIDATION_FIELD_KEYS[field]) : t("输入参数"),
+            reason,
+          })
+        })
+        .join("\n")
+    return localizedMessage(error.message, t)
   }
 
   if (error instanceof Error) {
     if (/failed to fetch|networkerror|load failed/i.test(error.message)) {
       return t("网络连接失败，请稍后重试")
     }
-    const labelKey = API_ERROR_LABEL_KEYS[error.message]
-    return labelKey ? t(labelKey) : error.message
+    return localizedMessage(error.message, t)
   }
 
   return t("请求失败")
