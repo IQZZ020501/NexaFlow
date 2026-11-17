@@ -777,8 +777,9 @@ async def assert_truncated_tool_call_is_not_executed() -> None:
     recovery = next(
         message.content for message in provider.requests[1] if message.type == "tool"
     )
-    assert "compact legacy" in str(recovery).lower()
-    assert "layout" in str(recovery).lower()
+    assert "load its instructions" in str(recovery).lower()
+    assert "use bash" in str(recovery).lower()
+    assert "compact legacy" not in str(recovery).lower()
 
 
 async def assert_invalid_tool_arguments_are_not_executed() -> None:

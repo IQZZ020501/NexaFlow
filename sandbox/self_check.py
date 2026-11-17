@@ -1,11 +1,9 @@
 """Behavioral checks inside the execution image, without business credentials."""
 
 import base64
-import io
 import json
 import os
 import tempfile
-import zipfile
 from pathlib import Path
 
 try:
@@ -60,22 +58,7 @@ def check_execution():
                 }
             },
         ),
-        (
-            "pptx",
-            "pptx",
-            {
-                "presentation": {
-                    "title": "Functional check",
-                    "slides": [
-                        {
-                            "layout": "bullets",
-                            "title": "Result",
-                            "bullets": ["Hello OpenSandbox"],
-                        }
-                    ],
-                }
-            },
-        ),
+
     ):
         result = execute(
             {
@@ -90,92 +73,14 @@ def check_execution():
         content = base64.b64decode(result["artifact"]["content_base64"])
         assert 0 < len(content) <= MAX_FILE
         assert content.startswith(b"%PDF" if fmt == "pdf" else b"PK")
-    pptd = execute(
-        {
-            "skill": "pptx",
-            "stdin": json.dumps(
-                {
-                    "presentation": {
-                        "title": "PPTD functional check",
-                        "scenario": "tech-engineering",
-                        "design_system": "electric-violet-business",
-                        "media": [
-                            {
-                                "filename": "pixel.png",
-                                "content_base64": (
-                                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
-                                    "AAAAC0lEQVR42mP8/x8AAusB9Y9Zb6sAAAAASUVORK5CYII="
-                                ),
-                            }
-                        ],
-                        "slides": [
-                            {
-                                "page_type": "cover",
-                                "background": {"type": "solid", "color": "$background"},
-                                "elements": [
-                                    {
-                                        "elementId": "accent",
-                                        "elementType": "shape",
-                                        "bounds": [72, 72, 12, 396],
-                                        "shapeName": "rect",
-                                        "fill": {"type": "solid", "color": "$accent"},
-                                    },
-                                    {
-                                        "elementId": "image",
-                                        "elementType": "image",
-                                        "bounds": [760, 72, 128, 128],
-                                        "src": "media/pixel.png",
-                                        "fit": {"mode": "cover"},
-                                    },
-                                    {
-                                        "elementId": "title",
-                                        "elementType": "text",
-                                        "bounds": [118, 176, 720, 92],
-                                        "content": {
-                                            "style": "$title",
-                                            "fontSize": 48,
-                                            "text": "Offline PPTD",
-                                        },
-                                    },
-                                    {
-                                        "elementId": "body",
-                                        "elementType": "text",
-                                        "bounds": [120, 286, 650, 48],
-                                        "content": {
-                                            "style": "$body",
-                                            "text": "Editable composition and native animation",
-                                        },
-                                    },
-                                ],
-                                "animations": [
-                                    {
-                                        "elementId": "title",
-                                        "effect": "zoom-in",
-                                        "trigger": "onClick",
-                                        "durationMs": 600,
-                                    },
-                                    {
-                                        "elementId": "body",
-                                        "effect": "fade-in",
-                                        "trigger": "afterPrevious",
-                                    },
-                                ],
-                            }
-                        ],
-                    }
-                }
-            ),
-            "artifact": {"filename": "pptd-check.pptx", "format": "pptx"},
-            "limits": {"timeout_ms": 10000},
-        }
-    )
-    assert pptd["ok"], pptd
-    assert '"renderer":"open-kimi-pptd"' in pptd["stdout"], pptd
-    pptd_content = base64.b64decode(pptd["artifact"]["content_base64"])
-    with zipfile.ZipFile(io.BytesIO(pptd_content)) as archive:
-        slide_xml = archive.read("ppt/slides/slide1.xml")
-        assert b"<p:transition" in slide_xml
-        assert b"<p:timing" in slide_xml
+    try:
+        from .renderer_checks.authoring import check_office_authoring
+        from .renderer_checks.presentations import check_pptx_authoring
+    except ImportError:
+        from renderer_checks.authoring import check_office_authoring
+        from renderer_checks.presentations import check_pptx_authoring
+    check_pptx_authoring()
+    check_office_authoring()
     for code in (
         "import os; os.symlink('/etc/passwd', output_path)",
         "import os; os.mkfifo(output_path)",

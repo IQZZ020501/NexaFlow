@@ -46,6 +46,30 @@ class BuiltinToolAdapter:
         context: ToolInvocationContext,
     ) -> ToolRuntimeResult:
         builtin = snapshot.execution_spec.get("builtin")
+        if builtin == "skill_guide":
+            from app.domain.tools.catalog.guides import BUILTIN_GUIDE_NAMES
+
+            skill = snapshot.execution_spec.get("skill")
+            instructions = snapshot.execution_spec.get("instructions")
+            if (
+                not isinstance(skill, str)
+                or skill not in BUILTIN_GUIDE_NAMES
+                or not isinstance(instructions, str)
+                or not instructions.strip()
+                or len(instructions.encode("utf-8")) > 16_000
+            ):
+                return _failure(
+                    "skill_guide_invalid", "Skill instructions are unavailable."
+                )
+            return ToolRuntimeResult(
+                ok=True,
+                data={"skill": skill, "instructions": instructions},
+                summary="Skill loaded. Follow its instructions using authorized bash.",
+                error_code=None,
+                error_message=None,
+                outcome="confirmed",
+                usage={},
+            )
         if builtin == "shell":
             from app.application.tools.runtime.adapters.shell import execute_shell
             try:

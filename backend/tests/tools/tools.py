@@ -427,7 +427,8 @@ def test_documents_reference_migration_targets_current_catalog() -> None:
     )
     assert migration.down_revision == "202609070001"
     assert desired_tool.current_version_id == desired_version.id
-    assert "reference_docx_base64" in desired_version.input_schema["properties"]
+    assert desired_version.input_schema["properties"] == {}
+    assert "python-docx" in desired_version.execution_spec["instructions"]
 
 
 def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
@@ -561,8 +562,8 @@ def test_documents_formal_legal_migration_refreshes_stale_versions() -> None:
             ).where(versions.c.id == desired_version.id)
         ).one()
         assert refreshed.revision == 2
-        assert "formal_legal" in refreshed.description
-        assert "default" not in refreshed.input_schema["properties"]["style"]
+        assert "python-docx" in refreshed.description
+        assert refreshed.input_schema["properties"] == {}
         assert connection.scalar(
             sa.select(policies.c.tool_version_id).where(
                 policies.c.id == "stale-policy-id"
@@ -952,32 +953,7 @@ def test_open_kimi_ppt_migration_refreshes_stale_versions() -> None:
                 tables["tool_versions"].c.id == desired_version.id
             )
         ).scalar_one()
-        slide_layout = (
-            refreshed_schema["properties"]["presentation"]["properties"]["slides"]
-            ["items"]["properties"]["layout"]
-        )
-        presentation_properties = refreshed_schema["properties"]["presentation"][
-            "properties"
-        ]
-        assert "theme" in presentation_properties
-        assert len(presentation_properties["design_system"]["enum"]) == 30
-        assert "elements" in presentation_properties["slides"]["items"]["properties"]
-        assert len(
-            presentation_properties["slides"]["items"]["properties"]["animations"]
-            ["items"]["properties"]["effect"]["enum"]
-        ) == 22
-        assert "style" in presentation_properties["slides"]["items"]["properties"]
-        assert set(slide_layout["enum"]) == {
-            "section",
-            "bullets",
-            "two_column",
-            "icons",
-            "table",
-            "hero",
-            "stats",
-            "steps",
-            "quote",
-        }
+        assert refreshed_schema == {"type": "object", "properties": {}, "additionalProperties": False}
         policy_row = connection.execute(
             sa.select(
                 tables["tool_policies"].c.tool_version_id,
@@ -1026,27 +1002,14 @@ def test_open_kimi_ppt_migration_refreshes_stale_versions() -> None:
         assert after_downgrade == desired_version.id
 
 
-def test_pptx_argument_normalization_keeps_model_theme() -> None:
+def test_pptx_skill_uses_empty_load_arguments() -> None:
     from app.domain.tools.catalog.service import build_skill_artifact_tool
     from app.domain.tools.runtime import normalize_tool_arguments
 
     _tool, version, _policy = build_skill_artifact_tool("workspace", "pptx")
-    normalized = normalize_tool_arguments(
-        "pptx_skill",
-        version.input_schema,
-        {
-            "filename": "themed.pptx",
-            "title": "Themed deck",
-            "theme": {
-                "background_color": "#07111F",
-                "text_color": "#F8FAFC",
-                "accent_color": "#F59E0B",
-            },
-            "slides": [{"layout": "hero", "title": "One idea"}],
-        },
-    )
-    assert normalized["presentation"]["theme"]["accent_color"] == "#F59E0B"
-    assert "theme" not in normalized
+    assert normalize_tool_arguments("pptx_skill", version.input_schema, {"arguments": "{}"}) == {}
+    assert version.execution_spec["builtin"] == "skill_guide"
+    assert "python-pptx" in version.execution_spec["instructions"]
 
 
 def test_artifact_generator_preflight_is_actionable() -> None:
@@ -1890,6 +1853,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             "skill_pdf",
             "skill_pptx",
             "skill_spreadsheets",
+            "skill_skill-creator",
             "run_skill_script",
         }
         tool = next(tool for tool in tools if tool.stable_key == "current_time")
@@ -1937,7 +1901,7 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
         assert installer_policy.workflow_callable is False
         assert installer_policy.parallel_safe is False
 
-        for skill_name in ("documents", "pdf", "pptx", "spreadsheets"):
+        for skill_name in ("documents", "pdf", "pptx", "spreadsheets", "skill-creator"):
             skill_tool = next(
                 item for item in tools if item.stable_key == f"skill_{skill_name}"
             )
@@ -1953,63 +1917,11 @@ async def assert_workspace_system_catalog(workspace_id: str) -> None:
             )
             assert skill_version is not None
             assert skill_policy is not None
-            assert skill_version.execution_spec == {
-                "builtin": "skill",
-                "skill": skill_name,
-            }
-            skill_properties = skill_version.input_schema["properties"]
-            assert "skills" not in skill_properties
-            assert "code" not in skill_properties
-            if skill_name == "documents":
-                assert set(skill_properties) == {
-                    "filename",
-                    "content",
-                    "style",
-                    "reference_docx_base64",
-                }
-            elif skill_name == "pdf":
-                assert set(skill_properties) == {"filename", "content"}
-            elif skill_name == "spreadsheets":
-                assert set(skill_properties) == {"filename", "workbook"}
-            else:
-                assert set(skill_properties) == {"filename", "presentation"}
-                presentation_schema = skill_properties["presentation"]
-                assert presentation_schema["properties"]["template"]["enum"] == [
-                    "minimal",
-                    "editorial",
-                    "bold",
-                ]
-                theme_schema = presentation_schema["properties"]["theme"]
-                assert set(theme_schema["properties"]) == {
-                    "background_color",
-                    "text_color",
-                    "accent_color",
-                    "panel_color",
-                    "muted_text_color",
-                    "rule_color",
-                    "font_family",
-                    "heading_font_family",
-                    "cover_title_size",
-                    "slide_title_size",
-                    "body_size",
-                    "panel_radius",
-                    "cover_accent_width",
-                    "title_alignment",
-                }
-                slide_schema = presentation_schema["properties"]["slides"]["items"]
-                assert "style" in slide_schema["properties"]
-                assert slide_schema["properties"]["layout"]["enum"] == [
-                    "section",
-                    "bullets",
-                    "two_column",
-                    "icons",
-                    "table",
-                    "hero",
-                    "stats",
-                    "steps",
-                    "quote",
-                ]
-            assert skill_policy.workflow_callable is True
+            assert skill_version.execution_spec["builtin"] == "skill_guide"
+            assert skill_version.execution_spec["skill"] == skill_name
+            assert skill_version.execution_spec["instructions"]
+            assert skill_version.input_schema["properties"] == {}
+            assert skill_policy.workflow_callable is False
             assert skill_policy.approval == "auto"
 
         legacy_tool, legacy_version, legacy_policy = build_artifact_tool(workspace_id)
@@ -5767,10 +5679,7 @@ async def assert_tool_adapters(workspace_id: str) -> None:
         ToolInvocationContext,
     )
     from app.application.tools.runtime.service import validate_tool_output
-    from app.domain.tools.catalog.service import (
-        build_artifact_tool,
-        build_skill_artifact_tool,
-    )
+    from app.domain.tools.catalog.service import build_artifact_tool
     from app.domain.tools.runtime import build_tool_snapshot
     from app.entities.defaults import utc_now
     from app.entities.tools import McpServer
@@ -5917,12 +5826,12 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     with ZipFile(docx_bytes, "w", ZIP_DEFLATED) as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
         archive.writestr("word/document.xml", "<document/>")
-    skill_version = build_skill_artifact_tool(workspace_id, "documents")[1]
     skill_snapshot = dataclasses.replace(
         snapshot,
-        input_schema=skill_version.input_schema,
-        output_schema=skill_version.output_schema,
-        execution_spec=skill_version.execution_spec,
+        # Historical snapshots retain the three legacy renderer adapters.
+        input_schema={"type": "object"},
+        output_schema=artifact_snapshot.output_schema,
+        execution_spec={"builtin": "skill", "skill": "documents"},
     )
     with patch(
         "app.application.tools.runtime.adapters.builtin.execute_skill_artifact",
@@ -6287,8 +6196,8 @@ async def assert_tool_adapters(workspace_id: str) -> None:
     # Skill adapter invalid configuration (tool_adapters.py:157-160).
     broken_skill_snapshot = dataclasses.replace(
         snapshot,
-        input_schema=skill_version.input_schema,
-        output_schema=skill_version.output_schema,
+        input_schema=skill_snapshot.input_schema,
+        output_schema=skill_snapshot.output_schema,
         execution_spec={"builtin": "skill"},
     )
     result = await builtin.invoke(
@@ -6328,6 +6237,7 @@ def test_workspace_creation_initializes_system_catalog() -> None:
             "pdf_skill",
             "pptx_skill",
             "spreadsheets_skill",
+            "skill_creator",
             "run_skill_script",
         }
         run(assert_tool_policy_revision_compare_and_swap(workspace_id))
@@ -6909,7 +6819,10 @@ def test_tool_tasks_are_registered() -> None:
 
 
 def main() -> None:
-    from tests.tools.catalog_upgrade import test_existing_file_catalog_upgrade
+    from tests.tools.catalog_upgrade import (
+        test_existing_file_catalog_upgrade,
+        test_existing_pptx_design_catalog_upgrade,
+    )
     from tests.tools.personal import (
         test_personal_configuration,
         test_personal_name_migration,
@@ -6925,7 +6838,8 @@ def main() -> None:
     test_builtin_image_migration_refreshes_stale_versions()
     test_open_kimi_ppt_migration_refreshes_stale_versions()
     test_existing_file_catalog_upgrade()
-    test_pptx_argument_normalization_keeps_model_theme()
+    test_existing_pptx_design_catalog_upgrade()
+    test_pptx_skill_uses_empty_load_arguments()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
     test_mcp_network_policy_migration_is_reversible_and_defaults_legacy()

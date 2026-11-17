@@ -45,9 +45,9 @@ STORAGE_CHECK_SECONDS = 1.0
 BUILTIN_SKILLS = {
     "documents": "docx",
     "pdf": "pdf",
-    "pptx": "pptx",
     "spreadsheets": "xlsx",
 }
+BUNDLED_SKILLS = frozenset({*BUILTIN_SKILLS, "pptx", "skill-creator"})
 SKILLS_DIR = Path(__file__).parent / "skills"
 PACKAGE_DIR = Path("/tmp/nexaflow-skill")
 SESSION_DIR = Path("/tmp/nexaflow-session")
@@ -73,7 +73,6 @@ def _use_address_space_limit(request):
     shell = request.get("shell")
     return (
         "mcp" not in request
-        and request.get("skill") != "pptx"
         and not str(request.get("script", "")).endswith(".js")
         and not (isinstance(shell, dict) and shell.get("manager") == "node")
     )
@@ -268,7 +267,7 @@ def execute(request):
         raise ValueError("Invalid built-in Skill.")
     selected = request.get("skills", [])
     if not isinstance(selected, list) or any(
-        name not in BUILTIN_SKILLS for name in selected
+        name not in BUNDLED_SKILLS for name in selected
     ):
         raise ValueError("Unavailable runtime Skill.")
     if artifact and (
@@ -311,13 +310,11 @@ def execute(request):
             "HOME": temporary,
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "OMP_NUM_THREADS": "1",
             "NEXAFLOW_OUTPUT_PATH": str(output),
             "NEXAFLOW_SKILLS_DIR": str(SKILLS_DIR),
         }
-        if skill == "pptx":
-            node_binary = shutil.which("node")
-            if node_binary is not None:
-                env["NEXAFLOW_NODE_BINARY"] = node_binary
         # Only version-pinned package files arrive here, never host paths.
         bundle_files = request.get("files", {})
         if not isinstance(bundle_files, dict) or len(bundle_files) > 64:

@@ -910,12 +910,9 @@ async def tool_node(
         elif state["finish_reason"] == "length":
             recovery = (
                 " Retry with one smaller, complete tool call. For pptx_skill, use "
-                "compact legacy layout mode: every slide must include layout and title; "
-                "use section, bullets, two_column, icons, table, hero, stats, steps, "
-                "or quote; omit page_type, elements, animations, scenario, "
-                "design_system, and page_transition; put typography and color fields "
-                "such as cover_title_size inside presentation.theme. Reduce the slide "
-                "count or copy length if the call still cannot fit."
+                "{} to load its instructions, then use bash to create or edit the "
+                "deck with python-pptx. The Skill loader does not accept slide "
+                "content, coordinates, composition objects or code."
                 if call["name"] == "pptx_skill"
                 else " Retry with a smaller, complete argument object or finish without the tool."
             )

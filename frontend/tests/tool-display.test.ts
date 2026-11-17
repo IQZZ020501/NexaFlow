@@ -198,7 +198,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("创建 PDF 文件。")
+    ).toBe("加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。")
     expect(
       toolDisplayDescription(
         {
@@ -208,7 +208,7 @@ describe("tool display helpers", () => {
         },
         t
       )
-    ).toBe("创建 PPTX 演示文稿。")
+    ).toBe("加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。")
   })
 
   test("translates the artifact tool in all supported languages", () => {

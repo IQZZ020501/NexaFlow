@@ -36,6 +36,11 @@ RUN apt-get update \
 
 COPY --from=backend-builder /app/.venv /app/.venv
 COPY backend/app /app/app
+COPY sandbox/skills/documents/SKILL.md /app/app/domain/tools/catalog/guides/documents/SKILL.md
+COPY sandbox/skills/pdf/SKILL.md /app/app/domain/tools/catalog/guides/pdf/SKILL.md
+COPY sandbox/skills/pptx/SKILL.md /app/app/domain/tools/catalog/guides/pptx/SKILL.md
+COPY sandbox/skills/spreadsheets/SKILL.md /app/app/domain/tools/catalog/guides/spreadsheets/SKILL.md
+COPY sandbox/skills/skill-creator/SKILL.md /app/app/domain/tools/catalog/guides/skill-creator/SKILL.md
 COPY backend/alembic /app/alembic
 COPY backend/scripts/worker.py /app/scripts/worker.py
 COPY backend/alembic.ini backend/main.py /app/

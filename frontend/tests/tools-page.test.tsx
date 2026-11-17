@@ -477,6 +477,7 @@ describe("ToolsPage", () => {
       ["pdf_skill", "PDF Skill"],
       ["pptx_skill", "PPTX Skill"],
       ["spreadsheets_skill", "Spreadsheets Skill"],
+      ["skill_creator", "Skill Creator"],
     ].map(([functionName, displayName], index) =>
       tool({
         id: `tool-builtin-skill-${index}`,
@@ -1082,7 +1083,7 @@ describe("ToolsPage", () => {
     expect(
       await screen.findByRole("heading", { name: "生成 PDF Skill" })
     ).toBeTruthy()
-    expect(await screen.findByText("Runtime contract")).toBeTruthy()
+    expect(await screen.findByRole("heading", { name: "PDF operations" })).toBeTruthy()
     expect(screen.queryByText("输入 Schema")).toBeNull()
     expect(screen.queryByText("输出 Schema")).toBeNull()
 

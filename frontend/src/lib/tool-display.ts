@@ -97,6 +97,7 @@ export function builtinToolDisplayName(functionName: string, t: TFunction) {
   if (functionName === "pdf_skill") return t("生成 PDF")
   if (functionName === "pptx_skill") return t("生成 PPT")
   if (functionName === "spreadsheets_skill") return t("生成 Excel")
+  if (functionName === "skill_creator") return t("技能创建")
   if (functionName === "generate_image") return t("图片生成")
   return null
 }
@@ -276,16 +277,19 @@ export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
     )
   }
   if (tool.function_name === "documents_skill") {
-    return t("创建 DOCX 文件。")
+    return t("加载 Word 文档处理指引，在沙箱中读取、创建或修改 DOCX。")
   }
   if (tool.function_name === "pdf_skill") {
-    return t("创建 PDF 文件。")
+    return t("加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。")
   }
   if (tool.function_name === "pptx_skill") {
-    return t("创建 PPTX 演示文稿。")
+    return t("加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。")
   }
   if (tool.function_name === "spreadsheets_skill") {
-    return t("创建 Excel 工作簿。")
+    return t("加载表格处理指引，在沙箱中分析 CSV 或修改 Excel。")
+  }
+  if (tool.function_name === "skill_creator") {
+    return t("生成可导入的技能包；不自动发布或授权。")
   }
   if (tool.function_name === "generate_image") {
     return t("使用 Agent 选定的生图模型生成图片；每次调用需要确认。")

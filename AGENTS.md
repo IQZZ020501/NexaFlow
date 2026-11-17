@@ -326,8 +326,8 @@ not trigger unrelated cleanup.
   rendering, pinned Python/JavaScript Skill scripts, bash commands and stdio MCP; it adds
   program/file/output/time limits inside the platform's container/VM boundary.
   The image includes Node.js/npm/npx, python-docx, PyMuPDF, openpyxl,
-  python-pptx, Pillow, the adapted offline open-kimi-ppt PPTD/WASM exporter,
-  and the standard library. Business secrets and mounts are
+  python-pptx, pandas, Pillow, MarkItDown, headless LibreOffice Writer/Calc/Impress,
+  Noto CJK fonts and the standard library. Business secrets and mounts are
   never forwarded. `app/ports/execution.py` and the OpenSandbox adapter own
   authenticated lifecycle, UID 65532 execution, bounded I/O, destruction and
   native TTL cleanup. `execution_sessions` persists Run guests, staged packages
@@ -351,13 +351,15 @@ not trigger unrelated cleanup.
   The SDK Redis warm pool defaults off; its total idle size is deducted from
   host capacity. Public/API consumers can hold at most two guests, including
   stdio hosts. Resource profiles use provisional sizes pending Kata calibration.
-  Fixed `documents`, `pdf`, `pptx`, and `spreadsheets` Skills live under
-  `sandbox/skills`; each declares a read-only renderer entrypoint and artifact
-  format in `SKILL.md` and is registered as a fixed selectable built-in Tool.
-  The PPTX Skill keeps legacy layout calls compatible while new calls use the
-  vendored, MIT-licensed open-kimi-ppt PPTD/WASM exporter offline with bounded
-  inline media and model-selected animations. Fixed Skill Tools accept
-  content/data rather than caller-supplied Python.
+  Built-in `documents`, `pdf`, `pptx`, `spreadsheets` and `skill-creator`
+  guides live under `sandbox/skills`. Their selectable Tools accept only `{}`
+  and return version-pinned instructions; Agent bash performs file operations
+  through the existing execution port and artifact ledger. They are not
+  Workflow-callable; Workflow file generation uses Python Code nodes. Helpers
+  inspect packages, preview Office files and validate importable Skill drafts.
+  Do not impose fixed PPT layouts or palettes. The old PPT layout/PPTD/WASM
+  implementation is removed; DOCX/PDF/XLSX renderers only serve frozen legacy
+  contracts. Guides and package contents never grant capabilities or permissions.
   Workspace Skills are immutable schema-v2 SKILL.md/file bundles with lazy
   loading, live ACL checks and unified-ledger script execution. They cannot
   clamp an entire Run's budgets or grant tools themselves. Their scripts may

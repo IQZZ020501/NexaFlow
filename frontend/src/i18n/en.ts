@@ -1,6 +1,8 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "技能创建": "Skill Creator",
+  "生成可导入的技能包；不自动发布或授权。": "Create an importable Skill package without publishing or granting permissions.",
   "长任务契约": "Long task contract",
   "仅为支持请求身份、状态、结果和取消的连接器启用。普通 MCP 调用保持原有行为。": "Enable only for connectors that support request identity, status, results, and cancellation. Ordinary MCP calls keep their existing behavior.",
   "状态和结果操作必须只读，取消必须幂等。此工具的授权同时允许管理它提交的同一任务。保存后需重新审核工具策略。": "Status and result operations must be read only; cancellation must be idempotent. Authorizing this tool also allows managing the same job it submits. Review the tool policy again after saving.",
@@ -1664,10 +1666,10 @@ export const en = {
   "生成 PDF": "Generate PDF",
   "生成 PPT": "Generate PowerPoint",
   "生成 Excel": "Generate Excel",
-  "创建 DOCX 文件。": "Create DOCX files.",
-  "创建 PDF 文件。": "Create PDF files.",
-  "创建 PPTX 演示文稿。": "Create PPTX presentations.",
-  "创建 Excel 工作簿。": "Create Excel workbooks.",
+  "加载 Word 文档处理指引，在沙箱中读取、创建或修改 DOCX。": "Load Word instructions to read, create or edit DOCX files in the sandbox.",
+  "加载 PDF 处理指引，在沙箱中读取、转换或修改 PDF。": "Load PDF instructions to read, convert or edit PDFs in the sandbox.",
+  "加载 PPT 处理指引，在沙箱中自由设计或修改演示文稿。": "Load PowerPoint instructions to freely design or edit decks in the sandbox.",
+  "加载表格处理指引，在沙箱中分析 CSV 或修改 Excel。": "Load spreadsheet instructions to analyze CSV or edit Excel files in the sandbox.",
   运行成功: "Succeeded",
   运行失败: "Failed",
   "重排内容必须包含非空文本。": "Rerank content must contain non-empty text.",

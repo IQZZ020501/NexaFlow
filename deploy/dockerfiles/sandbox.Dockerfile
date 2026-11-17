@@ -21,6 +21,9 @@ RUN apt-get update \
         fonts-noto-cjk \
         libstdc++6 \
         libatomic1 \
+        libreoffice-impress \
+        libreoffice-writer \
+        libreoffice-calc \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 65532 nexaflow \
     && useradd --uid 65532 --gid 65532 --no-create-home nexaflow

@@ -25,7 +25,7 @@ from app.infra.db.repositories.tools import repository
 from app.infra.db.session import get_session_factory
 
 
-def test_existing_file_catalog_upgrade():
+def _check_catalog_upgrade(*, pptx_only=False):
     builders = {
         name: getattr(catalog, name)
         for name in ("build_shell_tool", "build_skill_artifact_tool", "build_image_generation_tool")
@@ -34,6 +34,8 @@ def test_existing_file_catalog_upgrade():
     def legacy(builder):
         def build(*args, **kwargs):
             tool, version, policy = builder(*args, **kwargs)
+            if pptx_only and tool.function_name != "pptx_skill":
+                return tool, version, policy
             identity = catalog.stable_catalog_id(f"legacy-file-delivery:{tool.id}")
             if tool.function_name == "generate_image":
                 tool = replace(tool, availability="unavailable")
@@ -47,11 +49,15 @@ def test_existing_file_catalog_upgrade():
             )
         return build
 
-    path = Path(__file__).parents[2] / "alembic/versions/202611170001_builtin_file_delivery_catalog.py"
+    migration_name = (
+        "202611170002_pptx_design_catalog.py" if pptx_only
+        else "202611170001_builtin_file_delivery_catalog.py"
+    )
+    path = Path(__file__).parents[2] / "alembic/versions" / migration_name
     spec = spec_from_file_location("builtin_file_delivery_catalog", path)
     migration = module_from_spec(spec)
     spec.loader.exec_module(migration)
-    assert migration.down_revision == "202611160006"
+    assert migration.down_revision == ("202611170001" if pptx_only else "202611160006")
 
     async def inspect(workspace_id):
         async with get_session_factory()() as db:
@@ -99,7 +105,18 @@ def test_existing_file_catalog_upgrade():
             with patch.object(agent_runs, "build_shell_tool", legacy(builders["build_shell_tool"])):
                 old_run = client.post(run_url, headers=headers, json={"goal": "Saved historical configuration"})
                 assert old_run.status_code == 201, old_run.text
-            failed = client.post(run_url, headers=headers, json={"goal": "Reproduce version mismatch"})
+            if pptx_only:
+                new_tool, new_version, _policy = builders["build_skill_artifact_tool"](workspace_id, "pptx")
+                new_references = [
+                    {**ref, "version_id": new_version.id} if ref["tool_id"] == new_tool.id else ref
+                    for ref in references
+                ]
+                failed = client.patch(
+                    agents_url(workspace_id, f"/{agent_id}"), headers=headers,
+                    json={"tools": new_references},
+                )
+            else:
+                failed = client.post(run_url, headers=headers, json={"goal": "Reproduce version mismatch"})
             assert failed.status_code == 422, failed.text
             assert failed.json()["detail"] == "Tool version is not available for binding."
             before = asyncio.run(inspect(workspace_id))
@@ -112,12 +129,14 @@ def test_existing_file_catalog_upgrade():
         before_tools, old_versions, old_policies, old_bindings, old_snapshots, old_publications = before
         after_tools, new_versions, new_policies, new_bindings, new_snapshots, new_publications = after
         assert all(version in new_versions for version in old_versions)
-        assert len(new_versions) == len(old_versions) + 6
+        assert len(new_versions) == len(old_versions) + (1 if pptx_only else 6)
         assert all(snapshot in new_snapshots for snapshot in old_snapshots)
         assert new_publications == old_publications
         changed_ids = {tool.id for tool in after_tools
                        if tool.current_version_id != next(old.current_version_id for old in before_tools if old.id == tool.id)}
-        assert len(changed_ids) == 6
+        assert len(changed_ids) == (1 if pptx_only else 6)
+        if pptx_only:
+            assert changed_ids == {tool.id for tool in after_tools if tool.function_name == "pptx_skill"}
         for tool in after_tools:
             old_tool = next(old for old in before_tools if old.id == tool.id)
             assert (tool.status, tool.availability) == (old_tool.status, old_tool.availability)
@@ -132,8 +151,33 @@ def test_existing_file_catalog_upgrade():
         assert all(row[2] == versions_by_tool[row[1]] for row in new_bindings)
         asyncio.run(upgrade())
         assert asyncio.run(inspect(workspace_id)) == after
+        if pptx_only:
+            # A previous migration may already set current_version_id to the new
+            # definition while an older editable binding still points elsewhere.
+            # Re-running the replacement migration must advance that binding too.
+            stale_binding = next(row for row in old_bindings if row[1] in changed_ids)
+
+            async def restore_older_binding():
+                async with get_session_factory()() as db:
+                    await db.execute(sa.text(
+                        "UPDATE application_tool_bindings SET tool_version_id = :version WHERE id = :id"
+                    ), {"version": stale_binding[2], "id": stale_binding[0]})
+                    await db.commit()
+
+            asyncio.run(restore_older_binding())
+            asyncio.run(upgrade())
+            assert asyncio.run(inspect(workspace_id)) == after
+
+
+def test_existing_file_catalog_upgrade():
+    _check_catalog_upgrade()
+
+
+def test_existing_pptx_design_catalog_upgrade():
+    _check_catalog_upgrade(pptx_only=True)
 
 
 if __name__ == "__main__":
     test_existing_file_catalog_upgrade()
+    test_existing_pptx_design_catalog_upgrade()
     print("BUILTIN_FILE_CATALOG_UPGRADE_OK")

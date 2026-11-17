@@ -105,23 +105,42 @@ Agent Run 的私有 OpenSandbox 会话，并由后续脚本复用。Worker 恢�
 脚本本身始终无外网。固定 renderer 依赖仍须预装到 digest 固定的执行镜像。
 MCP 走已授权 Tool，不向脚本注入业务凭据。
 
-## 固定文件渲染 Tools
+## 内置文件工作流与 Skill Creator
 
-`sandbox/skills/{documents,pdf,pptx,spreadsheets}` 是 NexaFlow 维护的固定渲染器
-（PPTX 包含经适配的 MIT 开源组件），预装于执行镜像，并非上传后即可自动
-注册的第三方包。它们继续在
-Agent/Workflow 工具选择器中提供同一输入契约：
+`sandbox/skills/{documents,pdf,pptx,spreadsheets,skill-creator}` 存放项目维护的
+指引与辅助脚本。五个可选内置 Tool 均以 `{}` 加载完整指引，随后由 Agent
+通过已授权的 bash 在 Run 私有沙箱读写文件；不再要求固定 Markdown、
+结构化工作表或 PPT 构图输入。加载本身不执行程序、不生成文件或授予能力。
 
-- `documents_skill`：DOCX 文件名与 Markdown，可继承参考 DOCX 格式。
-- `pdf_skill`：PDF 文件名与 Markdown。
-- `pptx_skill`：PPTX 文件名与演示场景、30 套命名设计系统、960×540
-  自由画布元素、讲者备注和 22 种可编排动画。新请求通过适配后的
-  open-kimi-ppt PPTD/WASM 离线导出；旧的结构化布局请求继续兼容。
-  图片只接受有总量限制的内联本地媒体，固定 Skill 不访问网络。
-- `spreadsheets_skill`：XLSX 文件名与结构化工作表/行。
+- `documents_skill`：python-docx 创建与定点修改，检查原文样式、章节、
+  表格、图像、页眉页脚与相关 OOXML；可用 LibreOffice Writer 生成预览。
+- `pdf_skill`：PyMuPDF 读取、渲染、合并、拆分、旋转、表单与明确请求的
+  内容编辑；没有 Aside 专用接口，不预装 OCR。
+- `pptx_skill`：python-pptx 自由设计与定点修改，保留原主题、母版、
+  图表、嵌入工作簿、图像和备注。构图、字体和配色由任务决定。
+  提供有界结构盘点和 LibreOffice Impress 预览辅助脚本；
+  旧 layout、PPTD/WASM 与固定构图引擎已删除。
+- `spreadsheets_skill`：pandas 分析、openpyxl 编辑 CSV/XLSX/XLSM；
+  保留公式和有关元数据，避免 DataFrame 导出覆盖原工作簿。
+  LibreOffice Calc 可在副本中重算；未重算的缓存值不得宣称验证通过。
+- `skill_creator`：生成可导入的 SKILL.md/ZIP，并检查项目导入限制。
+  不写宿主账户目录，不自动发布、绑定或授权新 Skill。
 
-调用方只能传内容/数据，不能替换 renderer 代码。这四项功能和 Workflow
-Python Code 均通过同一 execution port 进入 OpenSandbox。
+每份完整指引随 ToolVersion 参与定义哈希并冻结，业务镜像只携带 Markdown，
+辅助代码和锁定依赖预装在执行镜像。文件通过现有 bash 出口自动持久化和
+交付，沿用 5 MiB 上限、租户隔离、连续会话恢复与不可变版本。
+
+这些加载器仅供 Agent 使用，`workflow_callable=false`；Workflow 的文件
+生成应使用其已有 Python Code 节点。DOCX/PDF/XLSX 旧 renderer 仍仅用于
+已有冻结契约，不作为新 Skill 的创作接口。PPT 旧实现已按要求完全删除。
+生成页图并不等于完成视觉检查，指引要求明确报告实际检查能力与局限。
+
+升级须同时发布业务代码与执行镜像，再应用 `202611170003`：刷新已有工作
+空间的四个文件 Tool、补齐 Skill Creator，将可编辑应用绑定移到新契约，
+保留审批/访问策略及发布、执行历史。新契约只接受 `{}`；历史发布版本需
+重新发布，使用旧输入的 Workflow 需改用 Python 节点。此处提供迁移但不
+自动操作正在运行的数据库或服务。回退须配套恢复业务代码、执行镜像与
+数据库备份；迁移降级不会重建已删除的 PPT 实现。
 
 ## 执行边界与检查
 
