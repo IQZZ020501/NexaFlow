@@ -181,7 +181,7 @@ NexaFlow/
 ├── docker-compose.yml  唯一的单机部署配置
 ├── backend/    FastAPI API、服务、能力适配器、Celery 与 Alembic
 ├── frontend/   Next.js App Router、页面组件、API 客户端与三语词典
-├── sandbox/    OpenSandbox 独立执行镜像、任务协议与固定文件渲染器
+├── sandbox/    OpenSandbox 独立执行镜像、任务协议与文件处理指南
 ├── deploy/     Dockerfile、OpenSandbox 可选配置与 Nginx 示例
 ├── docs/       模块、产品与工程文档
 ├── scripts/    仓库辅助脚本
@@ -195,11 +195,12 @@ NexaFlow/
 | 需要了解 | 文档 |
 | --- | --- |
 | 模块职责与代码入口 | [文档索引](docs/INDEX.md) |
+| 整个项目的架构与模块边界 | [模块化单体](docs/MODULAR_MONOLITH.md) |
 | 业务服务部署、配置与数据存储 | [部署说明](docs/DEPLOYMENT.md) |
 | 独立执行主机、镜像与网络策略 | [OpenSandbox 部署](deploy/opensandbox/README.md) |
 | Agent 运行、持久化与恢复 | [Agent 运行时](docs/AGENTS_RUNTIME.md) |
 | 知识导入、检索与评测 | [知识库](docs/KNOWLEDGE.md) |
-| 工作流节点与执行语义 | [工作流设计](docs/WORKFLOW_DESIGN.md) |
+| 工作流节点与执行语义 | [工作流说明](docs/WORKFLOWS.md) |
 | 技能包格式、授权与脚本执行 | [Skills](docs/SKILLS.md) |
 | 模型供应商与适配方式 | [模型接入矩阵](docs/model-providers.md) |
 | 飞书、钉钉、企业微信登录 | [企业身份接入](docs/ENTERPRISE_IDENTITY.md) |
@@ -253,7 +254,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 ```
 
 执行镜像自检及真实 OpenSandbox 检查见 [部署说明](deploy/opensandbox/README.md)。
-根目录开发监督器 `scripts/dev.py` 的单元测试单独运行：`uv run python scripts/dev_test.py`（不在 CI 覆盖率范围内）。
+根目录开发与部署入口检查：`uv run --project backend python -m unittest scripts.dev_test scripts.compose_test`，该命令也在 CI 中执行。
 完整 CI 套件以 [.github/workflows/ci.yml](.github/workflows/ci.yml) 为准。
 
 ## 安全说明

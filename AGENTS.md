@@ -597,16 +597,16 @@ examples.
   explicit isolated OpenSandbox test server. Verify effective dns+nft filtering,
   timeout, package isolation and cleanup; production VM isolation must also be
   validated on Linux/Kata, not inferred from a local ordinary-Docker smoke.
-- For the remaining Tools redesign, run
+- For execution-plane compatibility checks, run
   `uv run python -m tests.execution.opensandbox_probe --url "$OPENSANDBOX_URL" --image "$OPENSANDBOX_IMAGE"`
   from `backend/` on an isolated execution host with the control-plane key and
   `OPENSANDBOX_PROBE_REDIS_URL` in its private environment. The probe verifies
   actual Docker runtime, reconnect/renew, proxy streaming, SDK shared pool,
   metadata filtering, filesystem behavior and cleanup. Its explicit
   `--allow-development` mode does not establish Kata/VM isolation. The user
-  deferred the Kata test environment on 2026-10-14; it no longer gates A–F
-  implementation, but production VM and resource calibration remain pending.
-  See `docs/TOOLS_REDESIGN.md` for verified results and remaining measurements.
+  deferred the Kata test environment on 2026-10-14; production VM and resource
+  calibration remain pending. See `deploy/opensandbox/README.md` for the check
+  procedure and `docs/EXECUTION_HOSTS.md` for placement and capacity boundaries.
 - Run full coverage only for coverage work, release/CI validation, or changes
   broad enough to put a repository gate at risk. Do not claim a percentage
   unless it was measured in the current task. The configured gates and commands

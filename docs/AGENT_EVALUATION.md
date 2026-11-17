@@ -1,8 +1,6 @@
-# Agent 生产评测门禁
+# Agent 评测用法
 
 Agent 评测分成两层：CI 中的确定性运行时回归，和部署/发布前对真实 Agent 的在线评测。前者阻止执行内核、工具安全和通用能力循环回退；后者验证当前模型、知识、提示词和工具组合的实际质量。
-
-已执行的在线结果见 [2026-11-17 DeepSeek 基线](evaluations/2026-11-17-deepseek-flash/README.md)：首轮 4/5，表格数值约束调整后的定向复测通过；两份不同配置的报告独立保存，不合并为全量通过。
 
 ## CI 门禁
 
@@ -17,7 +15,22 @@ uv run python -m tests.agents.evaluation_files
 
 ## 在线发布门禁
 
-文件交付可从 [examples/agent-delivery-evaluation.json](examples/agent-delivery-evaluation.json) 开始，再加入具体 Agent 的业务用例。该数据集覆盖 CSV→XLSX、中文 DOCX/PDF、PPTX、三轮表格修改与 A→B→A 文件修改；具体模型结果必须来自实际运行报告，样本本身不是成功率证据。生产数据集建议至少覆盖 20–50 个稳定用例，并包含以下类别：
+为目标 Agent 编写本地 JSON 数据集。下面的最小示例可保存为 `/tmp/nexaflow-agent-evaluation-cases.json`，用于检查直接回答与断言链路：
+
+```json
+{
+  "gate": {"minimum_pass_rate": 1.0},
+  "cases": [
+    {
+      "id": "direct-answer",
+      "goal": "计算 12 加 8，只输出结果数字。",
+      "expect": {"answer_contains": ["20"]}
+    }
+  ]
+}
+```
+
+该例只说明格式。实际数据集应覆盖具体业务，并加入以下类别：
 
 - 关键业务答案和拒答边界；
 - 可选知识检索、没有检索和检索无结果场景；
@@ -33,7 +46,7 @@ uv run python -m scripts.agent_eval \
   --base-url https://nexaflow.example.com \
   --workspace-id WORKSPACE_ID \
   --agent-id AGENT_ID \
-  --dataset ../docs/examples/agent-delivery-evaluation.json \
+  --dataset /tmp/nexaflow-agent-evaluation-cases.json \
   --output /tmp/nexaflow-agent-evaluation.json
 ```
 
@@ -43,7 +56,7 @@ uv run python -m scripts.agent_eval \
 
 ## 数据集契约
 
-每个用例支持（`id`、`goal` 必填，`category` 默认 `general`，`expect.status` 默认 `succeeded`）：
+每个用例的 `id`、`goal` 必填，`category` 默认 `general`，`expect.status` 默认 `succeeded`。以下答案、工具、来源、成本和文件断言均放在 `expect` 对象内：
 
 - `id` / `goal` / `category`：用例标识、发送给 Agent 的目标与分类；
 - `samples`：同一问题重复执行次数，用于发现模型波动；
@@ -58,13 +71,13 @@ uv run python -m scripts.agent_eval \
 - `follow_ups`：最多 7 轮 `{goal, expect}`，与第一轮共用一个会话，每轮创建独立且幂等的 Run，样本总超时不重置。所有轮次参与门禁，结束后重新下载旧文件验证其不可变性。不同用例/样本使用新会话，避免相互污染。
 - 数据集顶层 `gate.minimum_pass_rate`：总通过率阈值，默认 `1.0`（取值范围 `0 < x <= 1`）。
 
-设置 `max_total_tokens` 时，只要任一模型调用没有报告 usage，该样本就以 `usage:unreported` 失败，门禁不会猜测 token。在线运行遇到人工审批或输入等待会立即结束采样，并以当前 Run 状态参与断言。文件交付 Agent 需要 bash 或对应的固定渲染 Skill，并使用隔离的评测会话及已批准的工具策略；外部副作用不属于这些样本。
+设置 `max_total_tokens` 时，只要任一模型调用没有报告 usage，该样本就以 `usage:unreported` 失败，门禁不会猜测 token。在线运行遇到人工审批或输入等待会立即结束采样，并以当前 Run 状态参与断言。文件交付 Agent 需要已授权的 bash、MCP 或 Skill 脚本能力，并使用隔离的评测会话及已批准的工具策略；外部副作用不属于这些样本。
 
 文件身份来自成功工具事件，评测器通过当前用户授权下载，校验响应中的产物/Run 身份，再读取实际字节。文本提取限制为 200000 字符，文件为 5 MiB、Office 解压总量为 64 MiB；超限或不可解析以规则失败报告。PDF/Office 可解析不代表排版合格；排版敏感的任务仍需渲染后人工或专用视觉验收。
 
-## 发布流程建议
+## 使用结果
 
 1. PR 必须先通过确定性 CI 门禁。
 2. 在与生产相同的模型、知识版本、工具策略和环境变量下运行在线数据集。
-3. 保存不含内容的 JSON 报告作为发布证据；失败时根据用例 ID 定位服务端 Run 和审计事件。
+3. 报告输出到指定的本地路径；失败时根据用例 ID 定位服务端 Run 和审计事件。报告属于运行产物，不是说明文档。
 4. 模型凭据、请求参数或知识权限在 Run 创建后发生漂移时，运行会失败关闭，应重新创建评测 Run，而不是继续使用失真的旧上下文。

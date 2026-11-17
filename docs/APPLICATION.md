@@ -4,7 +4,7 @@
 
 应用服务层：HTTP 层与领域层之间的编排与业务规则。负责跨模块流程（登录签发、运行编排、工具调用、知识检索）与规则校验（最后一名管理员、角色约束、运行配额）；审计编排由各用例服务在事务内调用（`record_audit_log` 实现位于领域层审计服务），查询型审计用例集中在 `app/application/audit`。
 
-重构后按**功能域**组织为特性包（agents / workflows / knowledge / tools / identity / workspaces / teams / models / resource_folders / governance / audit / analytics / artifacts / email / runs / agent_skills / announcements / projects / publications / uploads），不再按单文件平铺；各特性的用例文件放 `service.py`，任务型/执行型逻辑放独立模块（`executor.py`、`runner.py`）；后台执行器组合与派发位于 `app/bootstrap/`。公开接口、依赖声明与边界检查见 [MODULAR_MONOLITH.md](MODULAR_MONOLITH.md)。
+按**功能域**组织为特性包（agents / workflows / knowledge / tools / identity / workspaces / teams / models / resource_folders / governance / audit / analytics / artifacts / email / runs / agent_skills / announcements / projects / publications / uploads），各特性的用例文件放 `service.py`，任务型/执行型逻辑放独立模块（`executor.py`、`runner.py`）；后台执行器组合与派发位于 `app/bootstrap/`。公开接口、依赖声明与边界检查见 [MODULAR_MONOLITH.md](MODULAR_MONOLITH.md)。
 
 ## 分层关系
 
@@ -61,6 +61,7 @@ app/application/
 ├── audit/{__init__,system_logs}.py
 ├── analytics/__init__.py
 ├── artifacts/{service,workspace}.py
+├── projects/{service,runtime}.py
 ├── publications/service.py
 ├── uploads/service.py
 ├── email/{delivery,smtp}.py
@@ -74,24 +75,24 @@ app/application/
 - `agents/__init__.py` — Agent 用例门面：重导出 Agent CRUD、Run 编排、外部访问、工具构建与提示词用例，以及 Agent 权限用例（`list_agent_permissions`/`upsert_agent_permission`/`revoke_agent_permission`/`require_agent_edit`，来自 `app.domain.agents.access.permissions`），保持 API 层入口稳定（沿用旧 `agents.py` 的职责；同时透出共用上传服务）。
 - `agents/integration.py` — Workflow 调用 Agent 的公开能力面：固定子运行、预检、工具构建与结果映射，内部实现仍由 Agent 模块拥有。
 - `agents/prompts.py` — AI 辅助的 Agent 指令（system prompt）生成。
-- `agents/runs/service.py` — Agent Run 编排：登录态运行的准备、执行、流式与列表；含提交入队、按来源主体查询、工具审批与可重放事件订阅（对应旧 `agent_runs.py`）。
-- `agents/runs/executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布（对应旧 `agent_executor.py`）。
-- `agents/runs/children.py` — Workflow Agent 节点的固定发布版本、durable child Run 的创建/恢复/取消编排（对应旧 `agent_child_runs.py`）。
-- `agents/runs/memory.py` — Agent 对话记忆：按会话恢复角色消息，并在模型上下文预算内压缩旧轮次、持久化摘要（对应旧 `agent_memory.py`）。
+- `agents/runs/service.py` — Agent Run 编排：登录态运行的准备、执行、流式与列表；含提交入队、按来源主体查询、工具审批与可重放事件订阅。
+- `agents/runs/executor.py` — Durable Executor：短事务装载、租约心跳/接管、节点 checkpoint、工具账本与 Redis 实时 delta 发布。
+- `agents/runs/children.py` — Workflow Agent 节点的固定发布版本、durable child Run 的创建/恢复/取消编排。
+- `agents/runs/memory.py` — Agent 对话记忆：按会话恢复角色消息，并在模型上下文预算内压缩旧轮次、持久化摘要。
 - `agents/runs/session.py` — Run 来源主体授权后的持久后续任务追加；复用事件表与 RunState 终态锁，harness 消费状态进入 checkpoint。
 - `agents/runs/snapshots.py` — Run 创建时冻结运行时长、模型轮次与工具调用预算、非敏感模型运行配置指纹和知识资源/可检索内容指纹，并提供执行前漂移校验；`max_knowledge_calls`/`max_knowledge_rounds`/`max_model_tokens` 仅作为历史快照兼容字段写入，不再作为硬门禁。
-- `agents/access/service.py` — Agent 外部访问用例：发布资料、登录成员的公开会话（消费方标识为登录用户 id）、Agent 级 API Key 创建/轮换/撤销、公开/API 流安全投影（`sanitize_external_agent_stream`）与 Redis 成本限流；跨来源日志/用户/监控聚合（对应旧 `agent_access.py`）。
-- `agents/tools/builder.py` — 把已冻结的 `ToolSnapshot` 构造为模型可调用工具（知识检索工具、统一 Tool、MCP 工具），并提供 run→response 与来源引用的纯映射（对应旧 `agent_tools.py`；`ToolRef → ToolSnapshot` 解析已下沉到领域层 `app/domain/tools/access/bindings.py`）。
-- `agents/tools/runtime.py` — Agent 侧对接统一 durable Tool Runtime 的薄桥接：幂等身份、审批状态与结果映射（对应旧 `agent_tool_runtime.py`）。
+- `agents/access/service.py` — Agent 外部访问用例：发布资料、登录成员的公开会话（消费方标识为登录用户 id）、Agent 级 API Key 创建/轮换/撤销、公开/API 流安全投影（`sanitize_external_agent_stream`）与 Redis 成本限流；跨来源日志/用户/监控聚合。
+- `agents/tools/builder.py` — 把已冻结的 `ToolSnapshot` 构造为模型可调用工具（知识检索工具、统一 Tool、MCP 工具），并提供 run→response 与来源引用的纯映射（`ToolRef → ToolSnapshot` 解析已下沉到领域层 `app/domain/tools/access/bindings.py`）。
+- `agents/tools/runtime.py` — Agent 侧对接统一 durable Tool Runtime 的薄桥接：幂等身份、审批状态与结果映射。
 
 ### workflows/
 
 - `workflows/definitions/service.py` — Workflow 定义/版本用例（草稿 CRUD、图校验、版本响应）；承载 workflows 的公开用例面，取代旧 `workflows.py` 门面的定义与版本部分。
-- `workflows/runs/service.py` — Workflow 运行用例：草稿/发布运行创建、资源快照、Tool/Agent 预检、事件订阅与表单恢复（对应旧 `workflow_runs.py`）。
-- `workflows/runs/executor.py` — 图级确定性执行：租约/checkpoint、durable child Run 与终态编排（旧 `workflow_executor.py` 的图执行部分）。
-- `workflows/nodes/executor.py` — 单节点执行器：节点作用域（Jinja 沙箱渲染、LLM 工具循环、直接 Tool 节点）与节点产物组装（旧 `workflow_executor.py` 的节点执行部分；Workflow 用例不写审计日志）。
-- `workflows/tools/runtime.py` — `WorkflowToolRuntime`：直接 Tool 节点与 LLM Tool 循环共用的 canonical `ToolInvocation` 适配（对应旧 `workflow_tool_runtime.py`）。
-- `workflows/access/service.py` — 已发布 Workflow 的公开/API Key 资料、会话、Run 与安全流投影（对应旧 `workflow_access.py`）。
+- `workflows/runs/service.py` — Workflow 运行用例：草稿/发布运行创建、资源快照、Tool/Agent 预检、事件订阅与表单恢复。
+- `workflows/runs/executor.py` — 图级确定性执行：租约/checkpoint、durable child Run 与终态编排。
+- `workflows/nodes/executor.py` — 单节点执行器：节点作用域（Jinja 沙箱渲染、LLM 工具循环、直接 Tool 节点）与节点产物组装。
+- `workflows/tools/runtime.py` — `WorkflowToolRuntime`：直接 Tool 节点与 LLM Tool 循环共用的 canonical `ToolInvocation` 适配。
+- `workflows/access/service.py` — 已发布 Workflow 的公开/API Key 资料、会话、Run 与安全流投影。
 
 ### knowledge/
 
@@ -101,15 +102,15 @@ app/application/
 
 ### tools/
 
-- `tools/__init__.py` — 统一 Tool 用例门面（对应旧 `tools.py`）：向 API 暴露目录、Source、授权与策略操作。
-- `tools/management/service.py` — Tool/Source 管理用例：Tool/Source 查询、MCP Source 生命周期及 `view/use` 授权（对应旧 `tool_management.py`）。
-- `tools/runtime/service.py` — 跨 provider 的 durable Tool 执行：canonical `ToolInvocation` 预检、入队、租约执行、终态与 `uncertain` 处理（对应旧 `tool_runtime.py`）。
+- `tools/__init__.py` — 统一 Tool 用例门面：向 API 暴露目录、Source、授权与策略操作。
+- `tools/management/service.py` — Tool/Source 管理用例：Tool/Source 查询、MCP Source 生命周期及 `view/use` 授权。
+- `tools/runtime/service.py` — 跨 provider 的 durable Tool 执行：canonical `ToolInvocation` 预检、入队、租约执行、终态与 `uncertain` 处理。
 - `app/ports/tools.py` — provider-neutral 执行契约：`ToolAdapter` Protocol、`ToolInvocationContext`、`ToolRuntimeResult`、`ToolAdapterBusy`。
 - `tools/runtime/adapters/` — provider 分流实现：`__init__.build_tool_adapter` 按 tool kind 分发到 `BuiltinToolAdapter`、`McpToolAdapter`（内置含图片生成与 Skill 脚本等 spec）。
 
 ### identity/
 
-- `identity/service.py` — 身份用例：登录认证、access/refresh token 签发、改密、用户 CRUD 与会话管理编排（对应旧 `identity.py`）。
+- `identity/service.py` — 身份用例：登录认证、access/refresh token 签发、改密、用户 CRUD 与会话管理编排。
 - `identity/sessions.py` — 登录会话用例：会话列表、按 token 定位，以及吊销（单个/全部/其他设备）。
 - `identity/invitations.py` — 工作区邀请用例：创建/列表/撤销/删除/接受，含邮件投递状态。
 - `identity/password_reset.py` — 匿名找回密码：请求与确认令牌的签发/校验。
@@ -117,7 +118,7 @@ app/application/
 
 ### 其余特性
 
-- `workspaces/service.py` — 工作区应用服务：创建/更新/删除、成员增删改、成员角色校验与最后一名管理员规则；`build_workspace_context` 供 Agent/Workflow 运行构建上下文（对应旧 `workspace.py`）。
+- `workspaces/service.py` — 工作区应用服务：创建/更新/删除、成员增删改、成员角色校验与最后一名管理员规则；`build_workspace_context` 供 Agent/Workflow 运行构建上下文。
 - `teams/__init__.py` — 团队用例门面：团队 CRUD、成员与角色管理。
 - `models/service.py` — 模型注册表用例：模型管理流程的校验编排、审计记录与 DTO 组装（能力层实现见下）。
 - `models/registry.py` — 模型能力层：凭据加解密与校验、provider 目录探测、注册模型管理辅助（供 `service.py` 与注册 API 使用）；该层不依赖审计与 schema，但仍依赖 `app/domain/models/registered.py` 的 ORM 模型与 `app/adapters/llm`。
@@ -127,6 +128,7 @@ app/application/
 - `audit/system_logs.py` — 系统日志用例：带敏感字段脱敏的分页查询（`SystemLog`）。
 - `analytics/__init__.py` — 工作区分析用例门面（`get_workspace_analytics`）。
 - `artifacts/service.py` — 生成物用例：创建/下载链接签发与校验、过期清理。
+- `projects/service.py`、`projects/runtime.py` — 创建者私有项目、不可变文件版本、Run 绑定与工作树恢复/保存，详见 [项目文件](PROJECT_FILES.md)。
 - `email/delivery.py` — 事务邮件：入队（含身份类邮件）、due 投递扫描、按租约投递与终态处理、来源撤销。
 - `email/smtp.py` — SMTP 设置用例：读写（密码密文存储）、连通性测试、transport 配置构建。
 - `agent_skills/service.py` — Agent Skill 用例：技能包 CRUD、版本与发布、应用绑定同步与 `view/use` 授权。
@@ -140,32 +142,3 @@ app/application/
 - `publications/service.py` — 共享发布上下文、发布者有效性与工作空间成员校验，供 Agent、Workflow 与生成物下载使用。
 - `uploads/service.py` — Agent / Workflow 共用的临时附件校验、存储、文本解析与访问令牌；持久清理位于 `app/domain/uploads/service.py`。
 - `app/bootstrap/runs.py` — Worker 组合入口，按 generation 和 Run 类型选择 durable 执行器；用例通过 `app/ports/runs.py` 入队，保持队列与 eager 行为。
-
-## 旧文件迁移映射（重构前单文件 → 现树）
-
-| 旧路径（已删除） | 新位置 |
-| --- | --- |
-| `app/application/identity.py` | `identity/service.py`（登录/令牌/改密/用户 CRUD）；会话与找回密码、SSO 分别见 `identity/{sessions,password_reset,enterprise}.py` |
-| `app/application/workspace.py` | `workspaces/service.py`；工作区邀请见 `identity/invitations.py` |
-| `app/application/agents.py` | `agents/__init__.py`（门面，表面保持稳定） |
-| `app/application/agent_runs.py` | `agents/runs/service.py` |
-| `app/application/agent_access.py` | `agents/access/service.py` |
-| `app/application/agent_executor.py` | `agents/runs/executor.py` |
-| `app/application/agent_tools.py` | `agents/tools/builder.py` |
-| `app/application/agent_tool_runtime.py` | `agents/tools/runtime.py` |
-| `app/application/agent_child_runs.py` | `agents/runs/children.py` |
-| `app/application/agent_memory.py` | `agents/runs/memory.py` |
-| `app/application/tools.py` | `tools/__init__.py`（门面，表面保持稳定） |
-| `app/application/tool_management.py` | `tools/management/service.py` |
-| `app/application/tool_runtime.py` | `tools/runtime/service.py` |
-| `app/application/tool_adapters.py` | 归位为 `tools/runtime/`：契约 `app/ports/tools.py`（`ToolAdapter` 等）+ provider 分流 `tools/runtime/adapters/`（`__init__.build_tool_adapter`、`builtin`/`mcp`/`image_generation`/`shell`、`_common`） |
-| `app/application/workflows.py` | 门面取消：定义/版本公开用例由 `workflows/definitions/service.py` 承载；运行/访问归位到对应 `service.py`；共用上传归 `uploads/service.py` |
-| `app/application/workflow_runs.py` | `workflows/runs/service.py` |
-| `app/application/workflow_executor.py` | 拆分为 `workflows/runs/executor.py`（图级执行/租约/终态）+ `workflows/nodes/executor.py`（单节点执行） |
-| `app/application/workflow_tool_runtime.py` | `workflows/tools/runtime.py` |
-| `app/application/workflow_access.py` | `workflows/access/service.py` |
-| `app/application/workflow_uploads.py` | `uploads/service.py`（Agent / Workflow 共用） |
-| `app/application/knowledge*.py`（知识相关散件） | `knowledge/{documents,retrieval,evaluation}/…` 按职责拆分 |
-| `app/application/agent_skill*.py`（Skill 相关散件） | `agent_skills/{service,dependencies,execution,scripts,packages}.py` |
-| `app/application/announcement*.py`（公告相关散件） | `announcements/{service,live}.py`（另新增 `app/ports/announcements.py` + `app/adapters/announcements/live_stream.py`） |
-| `app/application/agent_runs.py` 中的取消/反馈逻辑 | 抽出为共享用例 `runs/{lifecycle,feedback}.py`，由 Agent 与 Workflow 复用 |

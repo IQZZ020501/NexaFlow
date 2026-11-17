@@ -1,6 +1,6 @@
 # 私有项目文件
 
-项目属于一个 workspace 和一个创建者。只有当前仍可访问该 workspace 的创建者可以管理或读取项目，workspace/global admin 没有额外文件权限。第一版用于直接 Console Agent Run，公开聊天、API 消费者和 Workflow child Run 不继承私有项目。
+项目属于一个 workspace 和一个创建者。只有当前仍可访问该 workspace 的创建者可以管理或读取项目，workspace/global admin 没有额外文件权限。用于直接 Console Agent Run，公开聊天、API 消费者和 Workflow child Run 不继承私有项目。
 
 应用列表和新 Agent 对话提供“项目文件”入口。新对话可选择项目，已有对话保留原绑定，切换项目需要新建对话。`/app/projects` 与 `/app/projects/[id]` 支持创建、重命名、上传、文件重命名、删除和历史下载；存在活动 Run 时拒绝删除整个项目。
 
@@ -22,4 +22,6 @@
 
 API 前缀为 `/api/v1/workspaces/{workspace_id}/projects`：集合 GET/POST；项目 GET/PATCH/DELETE；文件 GET/POST/DELETE `/files`；重命名 POST `/files/rename`；历史 GET `/versions?path=...`；当前用户授权下载 GET `/versions/{version_id}/content`。迁移为 `202611160003`。
 
-验证：`uv run python -m tests.projects.api`、`tests.projects.runtime`、沙箱命令测试及前端 `tests/projects.test.tsx` 通过；独立 PostgreSQL 完成迁移升级/回退/重升。`tests.projects.opensandbox_smoke.check(settings)` 在独立控制面/Redis/SQLite 中实际验证 UID 65532 写保护、关闭后重建、跨 Run 恢复、删除/重命名不复活、原交付字节保留，返回 `PROJECT_FILES_OPENSANDBOX_OK`，测试 guest 均销毁。这是普通 Docker 检查，不是 Kata 验证。
+## 检查入口
+
+从 `backend/` 运行 `uv run python -m tests.projects.api` 和 `uv run python -m tests.projects.runtime`；前端项目交互覆盖在 `frontend/tests/projects.test.tsx`。真实执行平面检查由 `tests.projects.opensandbox_smoke.check(settings)` 提供，只能使用隔离的控制面、数据库和 Redis；覆盖源文件写保护、guest 重建、跨 Run 恢复、重命名/删除与不可变交付文件。普通 Docker 检查不能证明 Kata 隔离。

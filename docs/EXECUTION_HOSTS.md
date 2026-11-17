@@ -23,12 +23,9 @@ Ephemeral jobs also persist creation reservations, including in single-host depl
 
 Warm pools must remain disabled in fleet mode. Single-host warm-pool behavior is unchanged. CPU/memory profiles remain provisional, especially for Kata. Physical host failure, storage reliability and production load require deployment-specific validation; two local control planes do not establish those properties.
 
-Validation on 2026-11-17:
+## Validation
 
-- Real Redis and isolated SQL checks exercised host placement, sticky identities, Redis reconstruction, endpoint-change refusal and cancellation cleanup (`tests.execution.placement`). PostgreSQL concurrency checks admitted eight requests for the same Run onto one host, bounded two-host admission, and reconstructed the ledger after Redis loss (`tests.execution.placement_postgres`).
-- A saturated Redis queue completed sixty mixed resource requests across five workspaces, granted each workspace in the first round, preserved per-workspace FIFO and enforced shared quotas across hosts (`tests.execution.load`). This checks arbitration, not production guest throughput or calibrated resource capacity.
-- `tests.execution.admissions` retained an uncertain ephemeral create through Redis loss, and refused a second guest. `tests.execution.wakeup` preserved original identities, waiting deadlines and attempts and respected a live Run lease.
-- Two independent local OpenSandbox control planes created actual ordinary Docker guests. Code Runs used different hosts; stdio shared its Run's host. Pausing one control-plane process made work fail without migration; after resuming it, the original files remained. All test guests were closed (`tests.execution.placement_smoke`). This was not a physical multi-host or Kata test.
+Redis and SQL suites cover sticky host placement, shared quotas, reconstruction after Redis loss, uncertain creation, cancellation and release notifications. `tests.execution.placement_smoke` additionally exercises real guests on two isolated OpenSandbox control planes, including reconnecting to the original host after a control-plane interruption. Local control planes do not establish physical multi-host reliability, Kata isolation or calibrated capacity.
 
 Run Redis checks only against an explicitly isolated test instance:
 

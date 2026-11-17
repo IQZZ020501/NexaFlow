@@ -16,6 +16,8 @@
 - `vector_store.py` — 向量库端口：`VectorStore` Protocol 描述完整契约（健康检查、collection 删除、向量 upsert/查询/删除；collection 创建在首次 upsert 时隐式完成），`build_vector_store()` 为组合点，另有同名委托函数（`check_vector_store_health`、`upsert_vectors`、`query_vectors`、`delete_vectors`）；值类型 `VectorChunk` / `VectorHit` 一并由此再导出。
 - `mcp.py` — MCP 客户端端口：`McpClient` Protocol（`discover_mcp_tools` / `call_mcp_tool`），委托函数 `discover_mcp_tools` / `call_mcp_tool` / `normalize_mcp_url`，`build_mcp_client()` 返回多传输客户端实现；连接、发现与错误类型（`McpConnection`、`McpDiscovery`、`McpCallResult`、`McpTransport`、`McpClientError`、`MAX_MCP_TOOL_PAGES` 等）一并再导出。
 - `execution.py` — 私有执行能力端口：`ExecutionError`、`ExecutionScope`、`execution_scope` ContextVar、`ExecutionPlatform` Protocol（`execute` / `close_session`）、`build_execution_platform()` 与 `close_execution_session()`；stdio MCP 与 Skill 依赖安装在 OpenSandbox 内执行所依赖的接缝。
+- `oauth.py` — MCP 外部账号的端点校验与受限 HTTP 令牌交换委托；授权状态、刷新租约与撤销意图见 [MCP OAuth](MCP_OAUTH.md)。
+- `tools.py`、`runs.py` — 统一 Tool 执行契约与 Run 入队委托；执行用例由所属模块实现，Worker 执行器在 `app/bootstrap/runs.py` 组合。
 - `enterprise_identity.py` — 企业身份端口：`EnterpriseIdentityProvider` Protocol，并再导出实现层契约面（`build_authorization_url`、`resolve_external_principal`、`ExternalPrincipal`、`EnterpriseProviderError`）。
 - `announcements.py` — 公告实时投递端口：`AnnouncementLiveStreamPublisher` / `AnnouncementLiveStreamReader`、`AnnouncementStreamEntry` 与 `build_announcement_live_stream_publisher()` / `build_announcement_live_stream_reader()`。
 - `errors.py` — `ExternalServiceError`：各端口异常类型的公共基类，供基础设施日志按 `source=external` 归类。

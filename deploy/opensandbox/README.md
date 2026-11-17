@@ -16,8 +16,7 @@ kernel. A dedicated Kata host is an optional stronger isolation boundary.
 
 Do not give business containers a Docker socket or execute model programs
 inside them. The Worker talks to an authenticated OpenSandbox
-control plane. Python tools, Workflow code, artifact renderers, Skill scripts
-and bash commands reuse a database-backed Run-private sandbox so
+control plane. Legacy artifact renderers, Skill scripts and bash commands reuse a database-backed Run-private sandbox so
 approved dependencies survive subsequent script calls; it is explicitly destroyed
 when the Run reaches a terminal state and still has a native expiry as fallback.
 

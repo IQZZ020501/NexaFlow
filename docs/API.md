@@ -46,13 +46,16 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/knowledge/evaluation.py` — 同前缀 `/evaluations`：评测用例列表/创建/删除、异步运行、运行列表/详情、指定运行与最近运行指标汇总；读取要求 view/edit，写入要求 edit
 - `backend/app/api/v1/models/routes.py` — 供应商目录接口（`/model-providers` 系列）与 `/workspaces/{workspace_id}/models` 已注册模型 CRUD
 - `backend/app/api/v1/tools/sources.py` — `/workspaces/{workspace_id}/tool-sources`：MCP Source 创建、分页、刷新、启停和删除；普通成员限公网 HTTP/SSE，stdio 与私网配置要求工作空间管理员
-- `backend/app/api/v1/tools/routes.py` — `/workspaces/{workspace_id}/tools`：builtin/Python/MCP 统一目录、详情、Python 草稿/测试/发布/启停/归档、策略及 `view/use` 授权
+- `backend/app/api/v1/tools/routes.py` — `/workspaces/{workspace_id}/tools`：builtin/MCP 目录、详情、策略及 `view/use` 授权；Python Tool 生命周期接口已移除
 - `backend/app/api/v1/tools/mcp.py` — 旧 MCP Server 契约兼容接口；新工具中心使用 `tool-sources` 与 `tools` 路由
 - `backend/app/api/v1/agents/routes.py` — `/workspaces/{workspace_id}/agents`：Agent CRUD、发布、API 凭据、指令生成（`/generate-instructions`）、监控统计（`/monitoring`）、附件上传（`/uploads`）、跨来源对话日志/用户/统计，以及登录态 Run 提交（`POST /runs` 与兼容的 `POST /runs/stream`）、会话输入（`/runs/{run_id}/inputs`）、工具账本、审批/拒绝、反馈与游标 NDJSON 订阅
 - `backend/app/api/v1/agents/access.py` — `/public/agents/{agent_id}` 提供已发布 Agent 的公开资料、文档页、会话与安全 Run 流；`/agent-api/{agent_id}` 提供 Agent API Key 校验、专属文档解锁、Run 提交、查询和安全流
 - `backend/app/api/v1/workflows/routes.py` — `/workspaces/{workspace_id}/workflows`（路径参数仍命名为 `{agent_id}`）：Workflow 草稿定义、资源校验、不可变版本、恢复、附件上传、调试运行、表单恢复与节点审计
 - `backend/app/api/v1/workflows/access.py` — `/public/workflows/{workflow_id}` 与 `/workflow-api/{workflow_id}` 的资料、文档页、API 文档、Run 和安全流
 - `backend/app/api/v1/artifacts/routes.py` — `/artifacts`：生成物 bearer 下载与图片预览，以及 `GET /artifacts/{artifact_id}/content` 的当前用户授权下载（响应 `Cache-Control: private, no-store`）
+- `backend/app/api/v1/projects/routes.py` — `/workspaces/{workspace_id}/projects`：创建者私有项目、文件版本、重命名与授权下载
+- `backend/app/api/v1/tools/oauth.py` — MCP 外部账号授权开始、回调交换、状态与断开
+- `backend/app/api/v1/tools/remote_tasks.py` — MCP 持久远端任务映射配置（`GET/PUT /mcp-servers/{server_id}/long-tasks`）
 - `backend/app/api/v1/agent_skills/routes.py` — `/workspaces/{workspace_id}/agent-skills`：技能包导入检查、CRUD、发布、版本列表与 view/use 授权
 - `backend/app/api/v1/resource_folders/routes.py` — `/workspaces/{workspace_id}/resource-folders`：资源文件夹 CRUD 与资源移动（单条/批量）
 - `backend/app/api/v1/announcements/routes.py` — `/messages`（列表、未读数、SSE `/stream`、全部已读与单条已读）、`/admin/announcements` 与 `/workspaces/{workspace_id}/announcements`
@@ -73,7 +76,7 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/schemas/workspaces/contracts.py` — 工作区及其成员、管理员创建请求的请求/响应模型
 - `backend/app/schemas/teams/contracts.py` — 团队创建/更新/响应模型
 - `backend/app/schemas/knowledge/contracts.py` — 知识库、文档、QA 导入模式、分块、解析参数、任务、检索命中/trace 与检索评测请求/响应模型
-- `backend/app/schemas/agents/contracts.py` — Agent 创建/更新/响应与运行/计划/事件/流式响应模型
+- `backend/app/schemas/agents/contracts.py` — Agent 创建/更新/响应与运行/事件/流式响应模型
 - `backend/app/schemas/tools/contracts.py` — 统一 Tool/Source/Version/Policy/Permission/Invocation 与固定 `ToolRefSchema` 契约；MCP Server 契约在 `tools/mcp.py`
 - `backend/app/schemas/workflows/contracts.py` — Workflow 图、节点配置、版本、运行、节点审计、表单恢复与 Tool/Agent 固定引用契约
 - `backend/app/schemas/models/contracts.py` — LLM 供应商目录（model-types/base-models/credential-form）与已注册模型模型

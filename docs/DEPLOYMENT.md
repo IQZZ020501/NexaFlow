@@ -30,7 +30,7 @@
 - `.githooks/` — 仓库 Git hooks（`pre-commit`，由 `scripts/setup-hooks.sh` 启用）
 - `.dockerignore` — 镜像构建上下文裁剪（同时是 `dev.py` 的镜像构建输入）
 - `.github/workflows/ci.yml` — CI：校验唯一 Compose 与开发入口，运行前后端套件
-- `.gitignore` — 忽略规则（Python/Node 产物、虚拟环境、日志、.env、`deploy/data/`、`docs/local/`、`.agents/`、`coverage/`、docs/MVP_TASK_PLAN.md、.codegraph、.playwright-cli/ 等）
+- `.gitignore` — 忽略规则（Python/Node 产物、虚拟环境、日志、.env、`deploy/data/`、`docs/local/`、`.agents/`、`coverage/`、.codegraph、.playwright-cli/ 等）
 - `.playwright-cli/` — Playwright 浏览器自动化运行产物目录（已被 gitignore 忽略）
 
 ## 配置归属
@@ -183,7 +183,7 @@ Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中
 - `backend/scripts/worker.py --role` 决定一个 Worker 的职责：`all`（默认，本地开发）消费全部队列并内嵌 Beat；`background` 只消费 `celery` 队列（知识库、工具测试、邮件、清理）并内嵌 Beat，用 prefork 自动伸缩；`agents` 只消费 `agents-legacy`/`agents-v2`，不带 Beat，用线程池让同一进程的所有对话共享一个事件循环，默认并发 32（可追加 `--concurrency=N`）。部署监督器分别启动 background 与 agents，不将两种池混合；两者使用不同 Celery 节点名，避免同一容器主机名造成控制消息冲突。Worker 使用 NullPool，每个执行中的 Run 会短暂占用 PostgreSQL 连接，调大并发前要确认 `max_connections` 足够。
 - API 与内嵌 Beat 的后台 Worker 必须连接同一 PostgreSQL/Redis；后台 Worker 只运行一个实例，由 Beat 重新派发 queued/租约过期的 Knowledge Task 与 Agent Run。Agent Run 只在消息超过租约时长仍未被消费、或租约刚过期时才重新派发，并记录在 `agent_run_states.redispatched_at`，积压时不会每轮重复投递；发现 Run 已被其他 Worker 持有有效租约的重复消息直接结束，不再定时重试。Celery 的 late ack、worker-lost reject 与数据库租约共同完成接管。
 - Compose 中设置 `OPENSANDBOX_URL`、私有 API key 和执行镜像；生产镜像必须使用 digest。stdio MCP 和已批准的 Skill 依赖安装可请求 `OPENSANDBOX_EGRESS_DOMAINS` 子集；其他程序无外网。适配器在写入代码/凭据前核对实际 dns+nft 默认拒绝与私网 deny 规则，不接受 dns-only 降级。Agent/Workflow Run 冻结非敏感镜像/网络指纹，配置变化会拒绝重试。
-- `execution_sessions` 持久化 Run 的沙箱 ID、短租约和依赖锁；任意 Worker 按 ID 接回，Python、生成文件、渲染器、Workflow 代码节点和 bash 共用 Run 沙箱。结束/取消主动销毁，Beat 按分钟回收过期、孤儿和待关闭会话。Run 内 stdio 服务通过另一台宿主沙箱的 HTTP 桥接进程复用，工具发现仍然一次性。
+- `execution_sessions` 持久化 Run 的沙箱 ID、短租约和依赖锁；任意 Worker 按 ID 接回，Skill 脚本、生成文件、历史渲染器和 bash 共用 Run 沙箱。结束/取消主动销毁，Beat 按分钟回收过期、孤儿和待关闭会话。Run 内 stdio 服务通过另一台宿主沙箱的 HTTP 桥接进程复用，工具发现仍然一次性。
 - 新建 Agent Run 默认自带 bash 能力，无需绑定，工具目录与选择器隐藏它；默认预算为 24 轮、64 次工具调用、900 秒，历史 Run 保留原冻结预算。单条命令最多 300 秒，输出最多 30 KiB。新生成的执行主机配置 TTL 上限为 1860 秒；已有 `server.toml` 需由操作者提高上限，覆盖 Run 最长截止时间加 60 秒，配置生成器不会自动覆盖。
 - `OPENSANDBOX_WARM_POOL_SIZE` 默认为 0，开启后从 `OPENSANDBOX_MAX_SANDBOXES` 扣除池大小；公开/API 每位访客最多同时占两台（含 stdio 宿主）。small/standard/heavy 暂用 1 CPU/512 MiB、1 CPU/1 GiB、2 CPU/2 GiB；这些规格尚未做 Kata 生产校准。
 - 旧 Unix Broker、Seatbelt/namespace supervisor、`SANDBOX_NETWORK`、宿主 Skills 目录和宿主依赖安装已移除。schema-v1 测试 Skills 需重新导入。

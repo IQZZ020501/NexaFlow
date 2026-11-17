@@ -1,6 +1,6 @@
 # 运行可靠性与资源准入
 
-本轮落实《NexaFlow 架构改进与沙箱调度设计》的 P1：活动 Run 恢复、创建幂等、文件稳定身份、资源等待与组合准入、独立于摘要的精确引用。继续复用 PostgreSQL Run 四表、统一 ToolInvocation 账本、Celery 与 OpenSandbox，不增加常驻服务。
+系统通过以下机制实现持久运行：活动 Run 恢复、创建幂等、文件稳定身份、资源等待与组合准入、独立于摘要的精确引用。继续复用 PostgreSQL Run 四表、统一 ToolInvocation 账本、Celery 与 OpenSandbox，不增加常驻服务。
 
 ## Run 恢复与创建
 
@@ -70,10 +70,6 @@ NEXAFLOW_TEST_REDIS_URL=redis://127.0.0.1:6379/15 uv run python -m tests.executi
 
 该测试使用随机主机命名空间，并只清理自己的键。不得把地址指向业务 Redis。迁移升级/降级和数据库并发需要独立 PostgreSQL 17（含项目固定 pg_search）验证。
 
-2026-11-16 本地验证结果：24 组后端回归通过，前端 286 项测试、TypeScript、ESLint、生产构建通过，Python Ruff、编译和架构检查通过。隔离 PostgreSQL 17 完整迁移链升级及本次迁移降级/升级往返通过；8 个同键并发事务只创建一个 Run；两个双环境 Run 只准入一个，Redis 账本丢失后能从数据库重建并继续拒绝超额准入。业务数据库未迁移。
+准入与恢复的其他检查入口：`tests.execution.wakeup`、`tests.execution.admissions`、`tests.execution.load`。它们分别覆盖释放后的唤醒、创建结果不明时的容量保留，以及工作空间轮转/FIFO。测试通过不代表完成生产创建耗时、峰值资源和 P50/P95 负载校准。
 
-后续扩展回归时已更新 LLM 测试桩的 `generation_info`，该基础设施套件通过；未修改生产 LLM 行为。
-
-后续普通 Docker 的真实 OpenSandbox 文件恢复、两控制面放置及控制面暂停恢复检查通过，见 [EXECUTION_HOSTS.md](EXECUTION_HOSTS.md)。项目文件、OAuth/远端任务和可信扩展的交付状态见 [ARCHITECTURE_DELIVERY.md](ARCHITECTURE_DELIVERY.md)。DeepSeek 真实模型基线首轮 4/5 的失败记录保留；表格产品规则与无缓存公式反馈修复后，以原中性 Agent 指令完整重跑 5/5，见 [修复回归](evaluations/2026-11-17-spreadsheet-values/README.md)。生产负载、物理多主机与 Kata 校准仍需分别验收；自主子代理依用户要求暂不实施。
-
-2026-11-17 收尾补齐 Workflow 与旧快照的组合需求、释放即时唤醒及临时创建的数据库预留账本。`tests.execution.wakeup` 验证原调用身份、等待期限和执行次数不变；`tests.execution.admissions` 验证不明创建经 Redis 丢失仍占容量；`tests.execution.load` 在真实 Redis 饱和队列下完成 5 空间 60 请求、首轮轮转与空间内 FIFO。PostgreSQL 并发放置和完整空库迁移到 `202611160006` 通过。这些验证不代替生产环境的创建耗时、峰值资源和 P50/P95 负载测量。
+可选多主机与故障边界见 [执行主机](EXECUTION_HOSTS.md)，项目文件、MCP 外部授权和持久任务分别见 [项目文件](PROJECT_FILES.md)、[MCP OAuth](MCP_OAUTH.md)、[MCP 远端任务](MCP_TASKS.md)。
