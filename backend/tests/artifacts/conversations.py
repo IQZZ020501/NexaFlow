@@ -16,6 +16,7 @@ from tests.support import settings
 
 from app.application.artifacts import service, workspace
 from app.domain.artifacts.models import GeneratedArtifact as ArtifactRow
+from app.entities.agents import Agent
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
 from app.infra.db.base import Base
@@ -52,6 +53,14 @@ async def check():
             patch.object(workspace, "get_session_factory", return_value=factory),
         ):
             async with factory() as db:
+                await runs.create_agent(
+                    db,
+                    Agent(
+                        id=first.agent_id,
+                        workspace_id=first.workspace_id,
+                        created_by_user_id=first.execution_user_id,
+                    ),
+                )
                 await runs.create_agent_run(db, first)
                 await runs.create_agent_run(db, current)
                 with patch.object(service, "utc_now", return_value=first.created_at):
