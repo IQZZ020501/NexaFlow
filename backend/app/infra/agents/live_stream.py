@@ -40,6 +40,19 @@ class AgentLiveStreamPublisher:
         self._redis = _redis_client(settings)
         self._key = live_stream_key(run_id)
         self._available = True
+        self.cursor = "0-0"
+
+    async def start(self) -> None:
+        # A new worker's first process snapshot must also exclude live events
+        # published by its predecessor, even before it emits its own delta.
+        try:
+            async with asyncio.timeout(LIVE_STREAM_PUBLISH_TIMEOUT_SECONDS):
+                entries = await self._redis.xrevrange(self._key, count=1)
+                if entries:
+                    self.cursor = entries[0][0]
+        except (RedisError, OSError, TimeoutError) as exc:
+            self._available = False
+            log_error(logger, "Agent live stream start unavailable.", exc)
 
     async def publish(self, event: dict[str, Any]) -> None:
         if not self._available or event.get("type") not in LIVE_EVENT_TYPES:
@@ -56,7 +69,8 @@ class AgentLiveStreamPublisher:
                         approximate=True,
                     )
                     pipe.expire(self._key, LIVE_STREAM_TTL_SECONDS)
-                    await pipe.execute()
+                    results = await pipe.execute()
+                    self.cursor = results[0]
         except (RedisError, OSError, TimeoutError) as exc:
             self._available = False
             log_error(

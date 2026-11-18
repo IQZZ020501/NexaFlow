@@ -167,6 +167,7 @@ class UnifiedAgentToolRuntime:
                 self.settings,
                 f"{self.worker_task_id}:{invocation_id}",
                 run_worker_task_id=self.worker_task_id,
+                lease_lost=self.lease_lost,
             )
         except ToolInvocationBusy as exc:
             raise AgentToolBusy(call["id"], str(exc), exc.resource_wait) from exc

@@ -7,9 +7,11 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from tests import support
+from tests.agents.agent_access import agent_model_server, model_payload
 from tests.infra.mcp_transports import TOKEN, start_http_server, stop_process
 from tests.support import activate_admin, auth_headers, create_active_user, test_client
 
+from app.application.agents.runs.service import prepare_agent_run
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.tools.remote_task_cleanup import recover_remote_task_cancellations
 from app.application.tools.runtime.service import (
@@ -17,10 +19,11 @@ from app.application.tools.runtime.service import (
     queue_tool_invocation,
 )
 from app.domain.tools.mcp.task_contract import apply_task_contracts, server_binding
-from app.domain.tools.runtime import build_tool_snapshot
+from app.domain.tools.runtime import build_tool_snapshot, tool_snapshot_from_payload
 from app.entities.defaults import utc_now
 from app.entities.mcp_tasks import McpRemoteTask
 from app.entities.runs import AgentRun
+from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.repositories.identity import users
 from app.infra.db.repositories.tools import mcp as mcp_repository
 from app.infra.db.repositories.tools import remote_tasks as tasks
@@ -30,7 +33,7 @@ from app.ports.mcp import McpConnection, call_mcp_tool
 from app.ports.tools import ToolInvocationContext
 
 
-async def queue(workspace_id, message, timeout=20):
+async def queue(workspace_id, message, timeout=20, agent_id=None, origin="agent"):
     async with get_session_factory()() as db:
         actor = await users.get_active_user_by_username(db, "admin")
         tool = next(
@@ -47,9 +50,17 @@ async def queue(workspace_id, message, timeout=20):
         assert snapshot.execution_spec["long_task"]["status_tool"] == "job_status"
         run = AgentRun(
             workspace_id=workspace_id,
+            agent_id=agent_id or "",
+            requested_by_user_id=actor.id,
             execution_user_id=actor.id,
             execution_deadline_at=utc_now() + timedelta(seconds=600),
+            configuration_source="draft",
+            status="running_v2",
+            worker_task_id="run-worker",
+            lease_expires_at=utc_now() + timedelta(seconds=600),
         )
+        if agent_id:
+            run = await runs.create_agent_run(db, run)
         runtime = UnifiedAgentToolRuntime(
             run, [snapshot], "deadline-test", support.settings(), asyncio.Event()
         )
@@ -59,14 +70,15 @@ async def queue(workspace_id, message, timeout=20):
         key = "remote-task-" + uuid4().hex
         context = ToolInvocationContext(
             workspace_id=workspace_id,
-            origin="test",
-            root_run_id=None,
-            run_id=None,
+            origin=origin if agent_id else "test",
+            root_run_id=run.id if agent_id else None,
+            run_id=run.id if agent_id else None,
             invocation_id=key,
             execution_user_id=actor.id,
             access_source="console",
             deadline_at=utc_now() + timedelta(seconds=timeout),
             idempotency_key=key,
+            run_worker_task_id=run.worker_task_id if agent_id else None,
         )
         invocation = await queue_tool_invocation(
             db, snapshot, {"message": message}, context
@@ -131,13 +143,62 @@ async def resume_fixture(
         invocation.attempts = invocation.max_attempts
         await repository.save_tool_invocation(db, invocation)
         await db.commit()
-    result = await execute_tool_invocation(invocation_id, settings, "recovery-worker")
+    result = await execute_tool_invocation(
+        invocation_id,
+        settings,
+        "recovery-worker",
+        run_worker_task_id=context.run_worker_task_id,
+    )
     assert result.ok and result.data["structuredContent"]["result"] == "recovered", (
         result
     )
     async with get_session_factory()() as db:
         stored = await repository.get_tool_invocation_by_id(db, invocation_id)
         assert stored.attempts == stored.max_attempts and stored.status == "succeeded"
+
+
+async def api_read_only(workspace_id, agent_id, settings):
+    async with get_session_factory()() as db:
+        actor = await users.get_active_user_by_username(db, "admin")
+        run, _model = await prepare_agent_run(
+            db,
+            workspace_id,
+            agent_id,
+            "Read metrics",
+            actor,
+            "admin",
+            access_source="api",
+            consumer_id="machine",
+            settings=settings,
+            approval_mode="full_access",
+        )
+        assert run.application_snapshot["approval_mode"] == "ask_risky"
+        run.status = "running_v2"
+        run.worker_task_id = "api-worker"
+        run.lease_expires_at = utc_now() + timedelta(seconds=60)
+        await runs.save_agent_run(db, run)
+        await db.commit()
+    # Runs created before this fix may still have the old frozen preference.
+    run.application_snapshot = {
+        **run.application_snapshot,
+        "approval_mode": "always_ask",
+    }
+    snapshots = [tool_snapshot_from_payload(item) for item in run.tool_snapshots]
+    tool = next(item for item in snapshots if item.kind == "mcp")
+    runtime = UnifiedAgentToolRuntime(
+        run, snapshots, "api-worker", settings, asyncio.Event()
+    )
+    result = await runtime.before(
+        1, {"id": "metrics", "name": tool.function_name}, {}, {}
+    )
+    assert not result.is_error, result
+    async with get_session_factory()() as db:
+        calls = await repository.list_tool_invocations(db, workspace_id, run.id)
+        assert (
+            len(calls) == 1
+            and calls[0].status == "succeeded"
+            and calls[0].attempts == 1
+        )
 
 
 def main():
@@ -156,6 +217,7 @@ def main():
     try:
         with (
             patch.object(support, "settings", return_value=settings),
+            agent_model_server() as model_url,
             test_client() as client,
         ):
             token, workspace_id = activate_admin(client)
@@ -248,6 +310,103 @@ def main():
                 call_mcp_tool, connection, settings, "job_metrics", {}
             )
             assert metrics.structured_content["cancels"] == 1
+
+            model = client.post(
+                root + "/models",
+                headers=headers,
+                json=model_payload(model_url),
+            )
+            assert model.status_code == 201, model.text
+            agent = client.post(
+                root + "/agents",
+                headers=headers,
+                json={"name": "Long task owner", "model_id": model.json()["id"]},
+            )
+            assert agent.status_code == 201, agent.text
+            for origin in ("agent", "workflow"):
+                ident, frozen, current = client.portal.call(
+                    queue, workspace_id, "owned", 20, agent.json()["id"], origin
+                )
+
+                async def owned_completion():
+                    result = await execute_tool_invocation(
+                        ident,
+                        settings,
+                        "owned-worker",
+                        run_worker_task_id=current.run_worker_task_id,
+                    )
+                    assert result.ok, result
+
+                client.portal.call(owned_completion)
+                ident, frozen, current = client.portal.call(
+                    queue, workspace_id, "recovered", 20, agent.json()["id"], origin
+                )
+                client.portal.call(
+                    resume_fixture, ident, frozen, current, connection, settings
+                )
+
+            metrics_tool = next(
+                item for item in tools if item["display_name"] == "job_metrics"
+            )
+            assert (
+                client.put(
+                    root + f"/tools/{metrics_tool['id']}/policy",
+                    headers=headers,
+                    json={"mode": "read_only"},
+                ).status_code
+                == 200
+            )
+            bound = client.patch(
+                root + f"/agents/{agent.json()['id']}",
+                headers=headers,
+                json={
+                    "tools": [
+                        {
+                            "tool_id": metrics_tool["id"],
+                            "version_id": metrics_tool["current_version_id"],
+                        }
+                    ]
+                },
+            )
+            assert bound.status_code == 200, bound.text
+            client.portal.call(
+                api_read_only, workspace_id, agent.json()["id"], settings
+            )
+            assert (
+                client.put(
+                    root + f"/tools/{metrics_tool['id']}/policy",
+                    headers=headers,
+                    json={"mode": "approval_required"},
+                ).status_code
+                == 200
+            )
+
+            async def rejects_interactive_api():
+                from fastapi import HTTPException
+
+                async with get_session_factory()() as db:
+                    actor = await users.get_active_user_by_username(db, "admin")
+                    try:
+                        await prepare_agent_run(
+                            db,
+                            workspace_id,
+                            agent.json()["id"],
+                            "Cannot approve",
+                            actor,
+                            "admin",
+                            access_source="api",
+                            consumer_id="machine",
+                            settings=settings,
+                            approval_mode="full_access",
+                        )
+                    except HTTPException as exc:
+                        assert exc.status_code == 409
+                    else:
+                        raise AssertionError(
+                            "API accepted a tool requiring interactive approval"
+                        )
+
+            client.portal.call(rejects_interactive_api)
 
             ident, _frozen, _current = client.portal.call(
                 queue, workspace_id, "must not submit"

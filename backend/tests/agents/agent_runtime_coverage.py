@@ -1294,7 +1294,7 @@ def assert_live_stream_degradation() -> None:
         async def execute(self):
             if self.error is not None:
                 raise self.error
-            return []
+            return ["1000-0", True]
 
     class FakePublishRedis:
         def __init__(self, error: Exception | None = None) -> None:

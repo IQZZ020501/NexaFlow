@@ -254,6 +254,8 @@ def external_progress_events(
             event_status = "failed"
         turn = max(0, int(event.get("turn") or 0))
         summary = str(event.get("summary") or "")
+        stream_metadata: dict[str, Any] = {}
+        _copy_external_stream_metadata(event, stream_metadata)
 
         if event_type == "thought":
             if summary == "agent.answer_ready":
@@ -266,6 +268,7 @@ def external_progress_events(
                 )
                 upsert(
                     ExternalAgentProgressEventResponse(
+                        **stream_metadata,
                         id=_external_progress_id(event, "answer"),
                         type="answer",
                         status=answer_status,
@@ -289,6 +292,7 @@ def external_progress_events(
                 }[summary]
                 upsert(
                     ExternalAgentProgressEventResponse(
+                        **stream_metadata,
                         id=_external_progress_id(event, "analysis"),
                         type="analysis",
                         status=event_status,
@@ -337,6 +341,7 @@ def external_progress_events(
         )
         upsert(
             ExternalAgentProgressEventResponse(
+                **stream_metadata,
                 id=_external_progress_id(event, "tool"),
                 type=progress_type,
                 status=event_status,

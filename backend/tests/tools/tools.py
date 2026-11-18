@@ -4943,6 +4943,9 @@ async def assert_workflow_tool_runtime(workspace_id: str) -> None:
         agent_id="wf-edge-agent",
         execution_user_id=actor_id,
         access_source="api",
+        status="running",
+        worker_task_id="wf-edge-worker",
+        lease_expires_at=utc_now() + timedelta(seconds=60),
     )
     async with get_session_factory()() as db:
         model = RegisteredModel(
@@ -6050,6 +6053,7 @@ def test_tool_tasks_are_registered() -> None:
 
 def main() -> None:
     from tests.tools.catalog_upgrade import (
+        test_existing_documents_inspection_catalog_upgrade,
         test_existing_file_catalog_upgrade,
         test_existing_pptx_design_catalog_upgrade,
     )
@@ -6069,6 +6073,7 @@ def main() -> None:
     test_open_kimi_ppt_migration_refreshes_stale_versions()
     test_existing_file_catalog_upgrade()
     test_existing_pptx_design_catalog_upgrade()
+    test_existing_documents_inspection_catalog_upgrade()
     test_pptx_skill_uses_empty_load_arguments()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
@@ -6098,6 +6103,9 @@ def main() -> None:
     test_tool_tasks_never_execute_inline_and_recover_queued_tests()
     test_tool_tasks_are_registered()
     test_tool_boundaries_reject_unsafe_payloads()
+    from tests.tools.lifecycle import main as test_tool_lifecycle
+
+    test_tool_lifecycle()
     print("TOOLS_SUITE_OK")
 
 

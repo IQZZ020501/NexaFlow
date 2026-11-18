@@ -1369,7 +1369,8 @@ describe("AgentDetailWorkspace preview", () => {
         screen.getByText(status === "failed" ? "Agent 回答失败" : "已停止")
       ).toBeTruthy()
       expect(container.querySelectorAll(".animate-spin")).toHaveLength(0)
-      expect(container.querySelectorAll(".text-emerald-600")).toHaveLength(1)
+      const previousProcess = screen.getByText("回答已生成").closest("details")!
+      expect(previousProcess.open).toBe(false)
     }
   )
 
@@ -1516,6 +1517,11 @@ describe("AgentDetailWorkspace preview", () => {
     renderPage(<Harness activeView="settings" runs={[run]} />)
     expect(screen.queryByText("agent.analysis_plan")).toBeNull()
     expect(screen.getAllByText("已完成分析")).toHaveLength(2)
+    expect(screen.queryByText("Tool reasoning result")).toBeNull()
+    expect(screen.queryByText("Reasoning line")).toBeNull()
+    const reasoningStep = screen.getByRole("button", { name: "已完成分析" })
+    expect(reasoningStep.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(reasoningStep)
     const reasoning = screen.getByText("Tool reasoning result")
     const preparing = screen.getAllByText("search")[0]!
     expect(
@@ -1530,7 +1536,10 @@ describe("AgentDetailWorkspace preview", () => {
           element.textContent === "query:\nlatest releases"
       )
     ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "正在分析问题" }))
     expect(screen.getByText("Reasoning line")).toBeTruthy()
+    fireEvent.click(reasoningStep)
+    expect(screen.queryByText("Tool reasoning result")).toBeNull()
     const searchLabels = screen.getAllByText("search")
     expect(searchLabels).toHaveLength(2)
 
@@ -1540,6 +1549,71 @@ describe("AgentDetailWorkspace preview", () => {
     expect(within(completedToolCard).getByText("调用输入")).toBeTruthy()
     expect(within(completedToolCard).getByText(/query/)).toBeTruthy()
     expect(within(completedToolCard).getByText("调用结果")).toBeTruthy()
+  })
+
+  test("keeps reasoning collapsed through streaming and folds the completed process", async () => {
+    const event: AgentRunEvent = {
+      type: "thought",
+      turn: 1,
+      tool_name: "",
+      tool_label: "",
+      tool_kind: "unknown",
+      server_name: "",
+      status: "running",
+      summary: "agent.analyzing",
+      call_id: "",
+      input: {},
+      output: null,
+      duration_ms: 0,
+      reasoning: "First chunk",
+    }
+    const running = makeRun({ status: "running", result: "", events: [event] })
+    const view = renderPage(<Harness activeView="settings" runs={[running]} />)
+    const process = screen.getByText("执行过程").closest("details")!
+    expect(process.open).toBe(true)
+    expect(screen.queryByText("First chunk")).toBeNull()
+
+    const step = screen.getByRole("button", { name: "正在分析问题" })
+    fireEvent.click(step)
+    expect(screen.getByText("First chunk")).toBeTruthy()
+    const streamed = {
+      ...running,
+      events: [{ ...event, reasoning: "First chunk, continued" }],
+    }
+    view.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <Harness activeView="settings" runs={[streamed]} />
+      </LanguageProvider>
+    )
+    expect(screen.getByText("First chunk, continued")).toBeTruthy()
+    fireEvent.click(step)
+    view.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <Harness
+          activeView="settings"
+          runs={[
+            { ...streamed, events: [{ ...event, reasoning: "Final chunk" }] },
+          ]}
+        />
+      </LanguageProvider>
+    )
+    expect(screen.queryByText("Final chunk")).toBeNull()
+    expect(step.getAttribute("aria-expanded")).toBe("false")
+
+    view.rerender(
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <Harness
+          activeView="settings"
+          runs={[{ ...streamed, status: "succeeded", result: "Final answer" }]}
+        />
+      </LanguageProvider>
+    )
+    expect(process.open).toBe(false)
+    expect(screen.getByText("Final answer")).toBeTruthy()
+    fireEvent.click(screen.getByText("执行过程"))
+    await waitFor(() => expect(process.open).toBe(true))
+    fireEvent.click(step)
+    expect(screen.getByText("First chunk, continued")).toBeTruthy()
   })
 
   test("shows bash commands and nonzero exit codes in the console timeline", () => {
@@ -1562,6 +1636,9 @@ describe("AgentDetailWorkspace preview", () => {
       ],
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
+    const process = screen.getByText("执行过程").closest("details")!
+    expect(process.open).toBe(false)
+    fireEvent.click(screen.getByText("执行过程"))
     const button = screen.getByText("命令行").closest("button")!
     expect(button.getAttribute("aria-expanded")).toBe("false")
     fireEvent.click(button)
@@ -1707,6 +1784,8 @@ describe("AgentDetailWorkspace preview", () => {
     await waitFor(() =>
       expect(screen.getByText("等待工具调用确认")).toBeTruthy()
     )
+    const approve = screen.getByRole("button", { name: "批准并执行" })
+    expect(approve.closest("details")).toBeNull()
   })
 
   test("typing and submitting the ask form calls onAsk", () => {

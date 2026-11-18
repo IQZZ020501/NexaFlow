@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from app.domain.agent_skills.contracts import (
 )
 from app.domain.agent_skills.paths import skill_mount_name
 from app.domain.tools.catalog.service import build_shell_tool
+from app.domain.tools.runtime import build_tool_snapshot, validate_tool_output
 from app.entities.agent_skills import AgentSkillSnapshot
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
@@ -172,6 +174,23 @@ async def check():
         access.assert_awaited_once()
         await shell.execute_shell(config, {"command": "true"}, context)
         assert create.call_args.kwargs["idempotency_key"] == key
+        response.update(stdout='"' * 10000, stderr='\\' * 10000, exit_code=0)
+        result = await shell.execute_shell(config, {"command": "verbose"}, context)
+        from app.entities.tools import ToolSource
+
+        snapshot = build_tool_snapshot(
+            tool, ToolSource(id=tool.source_id, workspace_id="workspace"),
+            version, policy, "user",
+        )
+        validate_tool_output(snapshot, result.data)
+        assert result.data["exit_code"] == 0
+        assert result.data["artifacts"][0]["artifact_id"] == "artifact"
+        assert result.data["truncated"] is True
+        assert result.data["result_id"] == context.idempotency_key
+        original = json.loads(result.full_result)
+        assert original["stdout"] == response["stdout"]
+        assert original["stderr"] == response["stderr"]
+        response.update(stdout="partial", stderr="", exit_code=124)
         access.side_effect = ValueError("revoked")
         count = platform.execute.await_count
         try:

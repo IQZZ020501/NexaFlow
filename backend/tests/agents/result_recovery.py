@@ -106,6 +106,10 @@ async def assert_retained_mcp_results() -> None:
                 return_value=factory,
             ),
             patch(
+                "app.application.tools.runtime.ownership.get_session_factory",
+                return_value=factory,
+            ),
+            patch(
                 "app.application.agents.tools.results.get_session_factory",
                 return_value=factory,
             ),

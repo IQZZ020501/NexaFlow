@@ -3621,8 +3621,14 @@ def assert_external_agent_access() -> None:
                         "input",
                         "output",
                         "input_truncated",
+                        "sequence",
+                        "live_sequence",
+                        "stream_epoch",
                     }
                     assert isinstance(event["event"]["reasoning"], str)
+                    assert event["event"]["sequence"] == event["sequence"]
+                    assert isinstance(event["event"]["live_sequence"], str)
+                    assert len(event["event"]["stream_epoch"]) == 32
                 serialized = json.dumps(event)
                 for forbidden in (
                     "workspace_id",

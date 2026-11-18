@@ -943,6 +943,9 @@ def main():
     asyncio.run(assert_retained_mcp_results())
     asyncio.run(assert_tool_result_migration())
     asyncio.run(assert_capabilities_and_lazy_skills())
+    from tests.agents.harness_efficiency import assert_efficiency_feedback
+
+    asyncio.run(assert_efficiency_feedback())
     asyncio.run(assert_skill_file_reads_and_revocation())
     asyncio.run(assert_loading_script_skill_activates_authorized_runner())
     asyncio.run(assert_shell_is_always_active())

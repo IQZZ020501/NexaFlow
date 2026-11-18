@@ -1,9 +1,47 @@
-"""Bound model-visible MCP output while retaining an exact durable JSON value."""
+"""Bound model-visible Tool output while retaining an exact durable JSON value."""
 
 import json
 from typing import Any
 
+from app.domain.tools.runtime import MAX_TOOL_RESULT_BYTES
 from app.ports.mcp import MAX_MCP_RESULT_BYTES, MAX_MCP_STORED_RESULT_BYTES
+
+
+def prepare_shell_result(
+    payload: dict[str, Any], result_id: str
+) -> tuple[dict[str, Any], str | None]:
+    """Budget the encoded envelope, keeping exit status and artifact references."""
+    encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+    if len(encoded.encode("utf-8")) <= MAX_TOOL_RESULT_BYTES:
+        return payload, None
+    retained = len(encoded.encode("utf-8")) <= MAX_MCP_STORED_RESULT_BYTES
+    preview = {
+        **payload,
+        "truncated": True,
+        "full_result_available": retained,
+        "summary": (
+            "Command result preview. Use read_tool_result(result_id, offset, limit) "
+            "to read the saved JSON logs; follow next_offset until null."
+            if retained
+            else "Command result preview only; full logs exceed the storage limit."
+        ),
+    }
+    if retained:
+        preview.update(result_id=result_id, total_characters=len(encoded))
+    while (
+        len(json.dumps(preview, ensure_ascii=False).encode("utf-8"))
+        > MAX_TOOL_RESULT_BYTES
+    ):
+        logs = [name for name in ("stdout", "stderr") if preview.get(name)]
+        if not logs:
+            # Never drop exit status or artifact references to make room for logs.
+            raise ValueError("Command result metadata exceeds its size limit.")
+        name = max(
+            logs,
+            key=lambda key: len(json.dumps(preview[key], ensure_ascii=False).encode()),
+        )
+        preview[name] = preview[name][: len(preview[name]) // 2]
+    return preview, encoded if retained else None
 
 
 def prepare_mcp_result(

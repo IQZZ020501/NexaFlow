@@ -3,6 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.artifacts.service import create_generated_artifact
+from app.application.tools.runtime.ownership import require_ownership
 from app.domain.artifacts.services import (
     MAX_ARTIFACT_BYTES,
     artifact_filename_from_label,
@@ -14,7 +15,9 @@ from app.domain.models.runtime import (
 )
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
+from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
+from app.ports.execution import execution_scope
 from app.ports.llm import ModelProviderError, generate_image
 from app.ports.tools import (
     ToolInvocationContext,
@@ -93,6 +96,16 @@ async def generate_image_artifact(
     resolution = arguments.get("resolution", "1K")
     if resolution not in {"1K", "2K", "4K"}:
         raise ValueError("Image resolution is invalid.")
+    if context.worker_task_id:
+        async with get_session_factory()() as db:
+            invocation = await require_ownership(db, context)
+            await tool_repository.mark_tool_invocation_dispatch(
+                db, invocation, "dispatched"
+            )
+            await db.commit()
+    scope = execution_scope.get()
+    if scope is not None:
+        scope.attempt.unconfirmed = True
     content = await generate_image(settings, model, prompt, size, resolution)
     if not content or len(content) > MAX_ARTIFACT_BYTES:
         raise ModelProviderError("Generated image exceeds the 5 MiB file limit.")
@@ -115,6 +128,8 @@ async def generate_image_artifact(
             filename = derived
             break
     async with get_session_factory()() as db:
+        if context.worker_task_id:
+            invocation = await require_ownership(db, context)
         link = await create_generated_artifact(
             db,
             settings,
@@ -124,8 +139,15 @@ async def generate_image_artifact(
             artifact_format="png",
             filename=filename,
             content=content,
+            invocation_id=context.invocation_id,
         )
+        if context.worker_task_id:
+            await tool_repository.mark_tool_invocation_dispatch(
+                db, invocation, "completed"
+            )
         await db.commit()
+    if scope is not None:
+        scope.attempt.unconfirmed = False
     return ToolRuntimeResult(
         ok=True,
         data={

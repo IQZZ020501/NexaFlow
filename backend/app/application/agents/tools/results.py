@@ -1,4 +1,4 @@
-"""Read retained MCP results within the executing Run's identity boundary."""
+"""Read retained Tool results within the executing Run's identity boundary."""
 
 import json
 

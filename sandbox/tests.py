@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 from . import job
 from .artifact_tests import ArtifactQualityTests  # noqa: F401
 from .command_tests import CommandTests  # noqa: F401
+from .documents_tests import DocumentInspectionTests  # noqa: F401
 from .pptx_tests import PptxAuthoringTests  # noqa: F401
 from .self_check import check_execution
 from .skill_guide_tests import SkillGuideTests  # noqa: F401

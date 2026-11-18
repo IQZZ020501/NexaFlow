@@ -1,12 +1,13 @@
 # ruff: noqa: F401
 from dataclasses import fields
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.agents.models import AGENT_RUN_RUNNING_STATUSES, AgentRunState
 from app.domain.platform.models import ResourcePermission as ResourcePermissionOrm
 from app.domain.platform.models import User as UserOrm
 from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershipOrm
@@ -292,6 +293,67 @@ async def claim_tool_invocation(
     )
     return result.rowcount == 1
 
+
+async def owned_tool_invocation(
+    db: AsyncSession,
+    context,
+    now: datetime,
+    *,
+    renew_until: datetime | None = None,
+    require_live_lease: bool = True,
+) -> ToolInvocation | None:
+    def live(deadline):
+        return deadline is not None and (
+            deadline.replace(tzinfo=UTC) if deadline.tzinfo is None else deadline
+        ) > now
+
+    # Cancellation locks RunState before its invocations. Use the same order
+    # for dispatch, heartbeat and artifact/result commits to serialize them.
+    if context.run_id and context.run_worker_task_id:
+        run = await db.scalar(
+            select(AgentRunState)
+            .where(
+                AgentRunState.run_id == context.run_id,
+                AgentRunState.workspace_id == context.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            run is None
+            or run.status not in AGENT_RUN_RUNNING_STATUSES
+            or run.worker_task_id != context.run_worker_task_id
+            or (require_live_lease and not live(run.lease_expires_at))
+        ):
+            return None
+    row = await db.scalar(
+        select(ToolInvocationOrm)
+        .where(
+            ToolInvocationOrm.workspace_id == context.workspace_id,
+            ToolInvocationOrm.idempotency_key == context.idempotency_key,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if (
+        row is None
+        or row.status != TOOL_INVOCATION_RUNNING
+        or row.worker_task_id != context.worker_task_id
+        or (require_live_lease and not live(row.lease_expires_at))
+    ):
+        return None
+    if renew_until is not None:
+        row.lease_expires_at = renew_until
+        row.updated_at = now
+        await db.flush()
+    return to_entity(ToolInvocation, row)
+
+
+async def mark_tool_invocation_dispatch(db, invocation, state):
+    row = await db.get(ToolInvocationOrm, invocation.id)
+    row.policy_snapshot = {**row.policy_snapshot, "dispatch_state": state}
+    await db.flush()
+
 async def finalize_tool_invocation(
     db: AsyncSession,
     workspace_id: str,
@@ -439,7 +501,10 @@ async def settle_exhausted_agent_tool_invocations(
     for invocation in invocations:
         effect = _tool_invocation_effect(invocation)
         status, outcome, summary, message = (
-            exhausted_tool_invocation_terminal_state(invocation.status, effect)
+            exhausted_tool_invocation_terminal_state(
+                invocation.status, effect,
+                dispatched=invocation.policy_snapshot.get("dispatch_state") != "not_started",
+            )
         )
         invocation.status = status
         invocation.outcome = outcome
@@ -476,6 +541,7 @@ async def settle_cancelled_agent_tool_invocations(
         status, outcome, summary, _message = exhausted_tool_invocation_terminal_state(
             invocation.status,
             effect,
+            dispatched=invocation.policy_snapshot.get("dispatch_state") != "not_started",
         )
         invocation.status = status
         invocation.outcome = outcome

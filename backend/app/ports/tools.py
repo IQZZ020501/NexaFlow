@@ -1,5 +1,6 @@
 """Provider-neutral contracts for unified Tool execution."""
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -9,6 +10,10 @@ from app.entities.tools import ToolKind, ToolRef, ToolSnapshot, freeze_json
 
 class ToolAdapterBusy(RuntimeError):
     pass
+
+
+class ToolInvocationOwnershipLost(RuntimeError):
+    """The executing worker must stop dispatching and persisting side effects."""
 
 
 @dataclass(frozen=True)
@@ -29,6 +34,7 @@ class ToolInvocationContext:
     approval_required: bool | None = None
     worker_task_id: str | None = None
     run_worker_task_id: str | None = None
+    ownership_lost: asyncio.Event | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -70,6 +76,7 @@ __all__ = [
     "ToolAdapter",
     "ToolAdapterBusy",
     "ToolInvocationContext",
+    "ToolInvocationOwnershipLost",
     "ToolRef",
     "ToolRuntimeResult",
     "ToolSnapshot",

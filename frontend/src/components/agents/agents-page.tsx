@@ -2,6 +2,11 @@
 
 import * as React from "react"
 import { isStaleRunSnapshot } from "@/lib/run-state"
+import {
+  includesAgentProcessDelta,
+  mergeAgentProcessEvent,
+  mergeAgentProcessSnapshot,
+} from "@/lib/agent-process-stream"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import dynamic from "next/dynamic"
 import { useParams, useRouter } from "next/navigation"
@@ -250,7 +255,16 @@ export function mergeInitialAgentRun(pendingRun: AgentRun, liveRun: AgentRun) {
     attachments: liveRun.attachments?.length
       ? liveRun.attachments
       : pendingRun.attachments,
-    events: liveRun.events.length > 0 ? liveRun.events : pendingRun.events,
+    events: keepLiveAnswer
+      ? mergeAgentProcessSnapshot(
+          pendingRun.events,
+          liveRun.events,
+          (event) =>
+            event.call_id || `${event.type}:${event.turn}:${event.tool_name}`
+        )
+      : liveRun.events.length > 0
+        ? liveRun.events
+        : pendingRun.events,
     result:
       keepLiveAnswer && !liveRun.result ? pendingRun.result : liveRun.result,
     live_stream_epoch: keepLiveAnswer
@@ -299,7 +313,13 @@ export function mergeAgentRunStreamEvent(
             event.tool_name === streamEvent.event.tool_name
       )
       if (eventIndex === -1) {
-        return { ...run, events: [...run.events, streamEvent.event] }
+        return {
+          ...run,
+          events: [
+            ...run.events,
+            { ...streamEvent.event, sequence: streamEvent.sequence },
+          ],
+        }
       }
       const currentEvent = run.events[eventIndex]
       const nextEvent =
@@ -332,7 +352,12 @@ export function mergeAgentRunStreamEvent(
       return {
         ...run,
         events: run.events.map((event, index) =>
-          index === eventIndex ? nextEvent : event
+          index === eventIndex
+            ? mergeAgentProcessEvent(currentEvent, {
+                ...nextEvent,
+                sequence: streamEvent.sequence,
+              })
+            : event
         ),
       }
     })
@@ -358,13 +383,25 @@ export function mergeAgentRunStreamEvent(
       const events = run.events.map((event) => {
         if (event.call_id !== streamEvent.call_id) return event
         found = true
-        const input = sameStream ? event.input : {}
+        if (
+          event.summary !== "agent.preparing_tool_call" ||
+          includesAgentProcessDelta(event, streamEvent)
+        ) {
+          return event
+        }
+        const sameProcessStream =
+          !streamEvent.stream_epoch ||
+          streamEvent.stream_epoch ===
+            (event.stream_epoch ?? run.live_stream_epoch)
+        const input = sameProcessStream ? event.input : {}
         const current =
           typeof input[streamEvent.field] === "string"
             ? String(input[streamEvent.field])
             : ""
         return {
           ...event,
+          stream_epoch: streamEvent.stream_epoch ?? event.stream_epoch,
+          live_sequence: streamEvent.live_sequence ?? event.live_sequence,
           tool_name: streamEvent.tool_name || event.tool_name,
           tool_label: streamEvent.tool_name || event.tool_label,
           input: {
@@ -387,6 +424,8 @@ export function mergeAgentRunStreamEvent(
           tool_kind: "unknown",
           server_name: "",
           input: { [streamEvent.field]: streamEvent.delta },
+          stream_epoch: streamEvent.stream_epoch,
+          live_sequence: streamEvent.live_sequence,
           output: null,
           duration_ms: 0,
         })
@@ -443,12 +482,26 @@ export function mergeAgentRunStreamEvent(
                 output: null,
                 duration_ms: 0,
                 reasoning: streamEvent.delta,
+                stream_epoch: streamEvent.stream_epoch,
+                live_sequence: streamEvent.live_sequence,
               })
             } else {
               const current = events[eventIndex]
+              if (
+                current.status !== "running" ||
+                includesAgentProcessDelta(current, streamEvent)
+              ) {
+                return run
+              }
+              const sameProcessStream =
+                !streamEvent.stream_epoch ||
+                streamEvent.stream_epoch ===
+                  (current.stream_epoch ?? run.live_stream_epoch)
               events[eventIndex] = {
                 ...current,
-                reasoning: sameStream
+                stream_epoch: streamEvent.stream_epoch ?? current.stream_epoch,
+                live_sequence: streamEvent.live_sequence ?? current.live_sequence,
+                reasoning: sameProcessStream
                   ? (current.reasoning ?? "") + streamEvent.delta
                   : streamEvent.delta,
               }

@@ -743,6 +743,12 @@ def test_agent_approval_modes_only_change_interactive_consent() -> None:
 
     run = AgentRun(application_snapshot={"approval_mode": "full_access"})
     assert run_agent_approval_mode(run) == "full_access"
+    for frozen_mode in ("always_ask", "full_access", "ask_risky"):
+        api_run = AgentRun(
+            access_source="api", application_snapshot={"approval_mode": frozen_mode}
+        )
+        assert not agent_tool_requires_approval(run_agent_approval_mode(api_run), external_read)
+        assert agent_tool_requires_approval(run_agent_approval_mode(api_run), risky)
     assert normalize_agent_approval_mode("invalid") == "always_ask"
     request = AgentRunCreateRequest(goal="Run", approval_mode="always_ask")
     assert request.approval_mode == "always_ask"
@@ -2747,6 +2753,11 @@ def test_agent_live_stream_round_trip() -> None:
                 )
             ]
 
+        async def xrevrange(self, name, count):
+            assert name == agent_live_stream.live_stream_key("run-1")
+            assert count == 1
+            return self.entries[-1:][::-1]
+
         async def aclose(self):
             return None
 
@@ -2759,6 +2770,8 @@ def test_agent_live_stream_round_trip() -> None:
                 settings(),
                 "run-1",
             )
+            assert publisher.cursor == "0-0"
+            await publisher.start()
             await publisher.publish({"type": "process", "event": {}})
             await publisher.publish(
                 {
@@ -2774,6 +2787,11 @@ def test_agent_live_stream_round_trip() -> None:
                     "stream_epoch": "worker-1",
                 }
             )
+            assert publisher.cursor == "1700000000000-1"
+            successor = agent_live_stream.AgentLiveStreamPublisher(settings(), "run-1")
+            await successor.start()
+            assert successor.cursor == publisher.cursor
+            await successor.close()
             await publisher.publish(
                 {
                     "type": "answer_reset",

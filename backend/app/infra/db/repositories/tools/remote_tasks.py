@@ -1,4 +1,4 @@
-from datetime import UTC, timedelta
+from datetime import timedelta
 
 from sqlalchemy import and_, or_, select, update
 
@@ -6,13 +6,8 @@ from app.domain.tools.mcp.task_models import McpRemoteTask as TaskOrm
 from app.domain.tools.models import ToolInvocation as InvocationOrm
 from app.entities.defaults import utc_now
 from app.entities.mcp_tasks import McpRemoteTask
-from app.entities.tools import ToolInvocation
 from app.infra.db import mapping
-from app.infra.db.repositories.agents import repository as runs
-
-
-def _utc(value):
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+from app.infra.db.repositories.tools.invocations import owned_tool_invocation
 
 
 async def get(db, invocation_id, *, lock=False):
@@ -28,38 +23,11 @@ async def save(db, task):
 
 
 async def owned_invocation(db, context, settings):
-    row = await db.scalar(
-        select(InvocationOrm)
-        .where(
-            InvocationOrm.workspace_id == context.workspace_id,
-            InvocationOrm.idempotency_key == context.idempotency_key,
-        )
-        .with_for_update()
-        .execution_options(populate_existing=True)
+    now = utc_now()
+    return await owned_tool_invocation(
+        db, context, now,
+        renew_until=now + timedelta(seconds=settings.agent_executor_lease_seconds),
     )
-    if (
-        row is None
-        or row.status != "running"
-        or row.worker_task_id != context.worker_task_id
-        or row.lease_expires_at is None
-        or _utc(row.lease_expires_at) <= utc_now()
-    ):
-        return None
-    if context.run_id and context.run_worker_task_id:
-        run = await runs.get_agent_run_by_id(db, context.run_id)
-        if (
-            run is None
-            or run.status != "running"
-            or run.worker_task_id != context.run_worker_task_id
-            or run.lease_expires_at is None
-            or _utc(run.lease_expires_at) <= utc_now()
-        ):
-            return None
-    row.lease_expires_at = utc_now() + timedelta(
-        seconds=settings.agent_executor_lease_seconds
-    )
-    await db.flush()
-    return mapping.to_entity(ToolInvocation, row)
 
 
 async def progress(db, invocation, task):

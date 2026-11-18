@@ -105,6 +105,9 @@ export type AgentPlanStep = {
 }
 
 export type AgentRunEvent = {
+  sequence?: number
+  live_sequence?: string
+  stream_epoch?: string
   type: "thought" | "tool"
   turn: number
   tool_name: string

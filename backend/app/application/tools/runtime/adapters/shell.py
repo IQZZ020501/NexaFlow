@@ -15,6 +15,7 @@ from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agent_skills.paths import skill_mount_name
 from app.domain.agents.models import AGENT_RUN_RUNNING_STATUSES
 from app.domain.artifacts.services import artifact_format_from_filename
+from app.domain.tools.results import prepare_shell_result
 from app.entities.defaults import utc_now
 from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.session import get_session_factory
@@ -167,9 +168,11 @@ async def execute_shell(settings, arguments, context):
         locks = {skill.version_id: [{"manager": plan.manager, "packages": list(plan.packages), "environment_hash": digest} for plan, digest in installed] for skill, installed in dependencies if installed}
         data.update(await save_project_files(settings, run, context, platform, response, locks))
     data.update(artifacts=artifacts, warnings=warnings[:16])
+    data, full_result = prepare_shell_result(data, context.idempotency_key)
     return ToolRuntimeResult(
         ok=True,
         data=data,
+        full_result=full_result,
         summary=f"Command exited with status {response['exit_code']}.",
         error_code=None,
         error_message=None,

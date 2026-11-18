@@ -3033,6 +3033,13 @@ describe("AgentsPage run flows", () => {
       .getAllByText("执行过程")
       .map((heading) => heading.closest("details")!)
     expect(processes).toHaveLength(2)
+    for (const process of processes) {
+      expect(process.open).toBe(false)
+      fireEvent.click(process.querySelector("summary")!)
+      fireEvent.click(
+        within(process).getByRole("button", { name: "回答已生成" })
+      )
+    }
     expect(
       within(processes[0]).getByText("Reasoning for the first question")
     ).toBeTruthy()

@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.tools.runtime.adapters import build_tool_adapter
+from app.application.tools.runtime.ownership import invoke_owned
 from app.domain.tools.access.permissions import evaluate_tool_authorization
 from app.domain.tools.runtime import (
     TOOL_APPROVAL_AUTO,
@@ -49,6 +50,7 @@ from app.ports.tools import (
     ToolAdapter,
     ToolAdapterBusy,
     ToolInvocationContext,
+    ToolInvocationOwnershipLost,
     ToolRuntimeResult,
 )
 
@@ -103,6 +105,8 @@ async def queue_tool_invocation(
             else snapshot.approval == TOOL_APPROVAL_EACH_CALL
         ),
     }
+    if snapshot.execution_spec.get("builtin") == "image_generation":
+        payload["dispatch_state"] = "not_started"
     approval_required = bool(payload["approval_required"])
     candidate = ToolInvocation(
         workspace_id=context.workspace_id,
@@ -148,6 +152,7 @@ async def execute_tool_invocation(
     *,
     adapter: ToolAdapter | None = None,
     run_worker_task_id: str | None = None,
+    lease_lost: asyncio.Event | None = None,
 ) -> ToolRuntimeResult:
     async with get_session_factory()() as db:
         invocation = await tool_repository.get_tool_invocation_by_id(db, invocation_id)
@@ -224,7 +229,11 @@ async def execute_tool_invocation(
                 lease_expires_at = lease_expires_at.replace(tzinfo=UTC)
             if lease_expires_at is not None and lease_expires_at >= now:
                 raise ToolInvocationBusy("Tool invocation is owned by another worker.")
-            if snapshot.effect in TOOL_UNCERTAIN_EFFECTS and not resumable_remote_task:
+            if (
+                snapshot.effect in TOOL_UNCERTAIN_EFFECTS
+                and not resumable_remote_task
+                and invocation.policy_snapshot.get("dispatch_state") != "not_started"
+            ):
                 return await _fail_pending(
                     db,
                     invocation,
@@ -291,6 +300,7 @@ async def execute_tool_invocation(
             context,
             worker_task_id=worker_task_id,
             run_worker_task_id=run_worker_task_id,
+            ownership_lost=asyncio.Event(),
         )
 
     result = _failure("tool_adapter_mismatch", "Tool provider is unavailable.")
@@ -308,13 +318,26 @@ async def execute_tool_invocation(
             async with asyncio.timeout(remaining):
                 scope_token = execution_scope.set(scope)
                 try:
-                    result = await selected_adapter.invoke(
+                    result = await invoke_owned(
+                        selected_adapter,
                         snapshot,
                         invocation.arguments,
                         context,
+                        settings,
+                        lease_lost,
                     )
                 finally:
                     execution_scope.reset(scope_token)
+        except ToolInvocationOwnershipLost:
+            result = _failure(
+                "tool_ownership_lost",
+                "Tool invocation ownership was lost.",
+                uncertain=scope.attempt.unconfirmed
+                or (
+                    snapshot.effect in TOOL_UNCERTAIN_EFFECTS
+                    and invocation.policy_snapshot.get("dispatch_state") != "not_started"
+                ),
+            )
         except ToolAdapterBusy as exc:
             if not scope.attempt.unconfirmed:
                 async with get_session_factory()() as db:
@@ -378,14 +401,20 @@ async def execute_tool_invocation(
                 "tool_deadline_exceeded",
                 "Tool invocation deadline expired.",
                 uncertain=scope.attempt.unconfirmed
-                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                or (
+                    snapshot.effect in TOOL_UNCERTAIN_EFFECTS
+                    and invocation.policy_snapshot.get("dispatch_state") != "not_started"
+                ),
             )
         except Exception:
             result = _failure(
                 "tool_execution_failed",
                 "Tool execution failed.",
                 uncertain=scope.attempt.unconfirmed
-                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+                or (
+                    snapshot.effect in TOOL_UNCERTAIN_EFFECTS
+                    and invocation.policy_snapshot.get("dispatch_state") != "not_started"
+                ),
             )
 
     if result.ok:
@@ -395,6 +424,26 @@ async def execute_tool_invocation(
             result = _failure("invalid_tool_output", "Tool output is invalid.")
 
     async with get_session_factory()() as db:
+        # Expiry alone does not discard a completed response. A changed owner
+        # or terminal Run does; serialize the check with cancellation.
+        owned = await tool_repository.owned_tool_invocation(
+            db, context, utc_now(), require_live_lease=False,
+        )
+        if owned is None:
+            stored = await tool_repository.get_tool_invocation(
+                db, invocation.workspace_id, invocation.id,
+            )
+            if (
+                stored is not None
+                and stored.status in TOOL_INVOCATION_TERMINAL_STATUSES
+            ):
+                return _stored_result(stored)
+            return _failure(
+                "tool_result_not_persisted",
+                "Tool result could not be persisted.",
+                uncertain=result.outcome == "uncertain"
+                or snapshot.effect in TOOL_UNCERTAIN_EFFECTS,
+            )
         stored = await tool_repository.get_tool_invocation(
             db,
             invocation.workspace_id,

@@ -193,8 +193,10 @@ class ExecutionScope:
 
 
 def _upsert_process_event(
-    events: list[dict[str, Any]], event: dict[str, Any]
+    events: list[dict[str, Any]], event: dict[str, Any], *, sequence: int | None = None
 ) -> None:
+    if sequence is not None:
+        event = {**event, "sequence": sequence}
     call_id = event.get("call_id")
     for index, current in enumerate(events):
         same_event = (
@@ -640,7 +642,7 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
     for row in event_rows:
         event = row.event.get("event", {})
         if row.event.get("type") == "process":
-            _upsert_process_event(process_events, event)
+            _upsert_process_event(process_events, event, sequence=row.id)
     run.events = _completed_process_events(process_events)
     return ExecutionScope(
         run=run,
@@ -1023,9 +1025,15 @@ async def _execute_claimed_agent_run(
             return
         if event_type != "process":
             return
-        process_event = event.get("event", {})
-        await _append_event(run, event, worker_task_id=worker_task_id)
-        _upsert_process_event(process_events, process_event)
+        process_event = {
+            **event.get("event", {}),
+            "stream_epoch": worker_task_id,
+            "live_sequence": live_stream.cursor,
+        }
+        sequence = await _append_event(
+            run, {**event, "event": process_event}, worker_task_id=worker_task_id
+        )
+        _upsert_process_event(process_events, process_event, sequence=sequence)
 
     async def save_checkpoint(checkpoint: dict[str, Any], phase: str) -> None:
         if lease_lost.is_set():
@@ -1047,6 +1055,7 @@ async def _execute_claimed_agent_run(
     try:
         try:
             async with asyncio.timeout(_remaining_run_seconds(run_deadline)):
+                await live_stream.start()
                 result = await run_agent(
                     chat_model,
                     messages,
@@ -1061,6 +1070,7 @@ async def _execute_claimed_agent_run(
                     max_turns=max_turns,
                     max_tool_calls=max_tool_calls,
                     session=session,
+                    execution_deadline_at=run_deadline,
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
@@ -1222,7 +1232,9 @@ async def _fail_unhandled_claimed_run(
         process_events: list[dict[str, Any]] = []
         for row in event_rows:
             if row.event.get("type") == "process":
-                _upsert_process_event(process_events, row.event.get("event", {}))
+                _upsert_process_event(
+                    process_events, row.event.get("event", {}), sequence=row.id
+                )
         finalized = await agent_repository.finalize_agent_run(
             db,
             run_id,

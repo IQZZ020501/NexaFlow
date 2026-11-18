@@ -48,17 +48,13 @@ function waitForReconnect(delayMs: number, signal?: AbortSignal) {
 /**
  * Consumes an NDJSON response stream and processes each parsed event.
  *
- * @param cursor - The initial numeric cursor used to track stream progress
- * @param liveCursor - The initial live cursor used to track stream progress
  * @param isTerminal - Determines whether an event marks the end of observation
- * @returns The latest numeric and live cursors and whether a terminal event was received
+ * @returns Whether a terminal event was received
  * @throws Error If the response has no body
  */
 async function consumeNdjsonStream<TEvent extends NdjsonCursorEvent>(
   response: Response,
   onEvent: (event: TEvent) => void,
-  cursor: number,
-  liveCursor: string,
   isTerminal: (event: TEvent) => boolean
 ) {
   if (!response.body) {
@@ -78,26 +74,28 @@ async function consumeNdjsonStream<TEvent extends NdjsonCursorEvent>(
       if (tolerateIncomplete) return
       throw error
     }
-    if (typeof event.sequence === "number") {
-      cursor = Math.max(cursor, event.sequence)
-    }
-    if (typeof event.live_sequence === "string") {
-      liveCursor = event.live_sequence
-    }
     terminal = terminal || isTerminal(event)
     onEvent(event)
   }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() ?? ""
-    lines.forEach((line) => consumeLine(line))
-    if (done) break
+  try {
+    while (!terminal) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      for (const line of lines) {
+        consumeLine(line)
+        if (terminal) break
+      }
+      if (done) break
+    }
+    if (!terminal) consumeLine(buffer, true)
+    return terminal
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
-  consumeLine(buffer, true)
-  return { cursor, liveCursor, terminal }
 }
 
 /**
@@ -141,23 +139,30 @@ export async function observeNdjsonStream<TEvent extends NdjsonCursorEvent>(
         )
         continue
       }
-      const consumed = await consumeNdjsonStream(
+      const terminal = await consumeNdjsonStream(
         response,
-        onEvent,
-        cursor,
-        liveCursor,
+        (event: TEvent) => {
+          onEvent(event)
+          // Commit cursors as each event is handled. A later reader.read()
+          // failure must not discard the progress of this response.
+          if (
+            (typeof event.sequence === "number" && event.sequence > cursor) ||
+            (typeof event.live_sequence === "string" &&
+              event.live_sequence !== liveCursor) ||
+            isTerminal(event)
+          ) {
+            reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
+          }
+          if (typeof event.sequence === "number") {
+            cursor = Math.max(cursor, event.sequence)
+          }
+          if (typeof event.live_sequence === "string") {
+            liveCursor = event.live_sequence
+          }
+        },
         isTerminal as (event: TEvent) => boolean
       )
-      if (
-        consumed.cursor !== cursor ||
-        consumed.liveCursor !== liveCursor ||
-        consumed.terminal
-      ) {
-        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
-      }
-      cursor = consumed.cursor
-      liveCursor = consumed.liveCursor
-      if (consumed.terminal) return
+      if (terminal) return
     } catch (error) {
       if (signal?.aborted) throw signal.reason ?? error
       if (
