@@ -7,13 +7,13 @@ from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from copy import copy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
-    HumanMessage,
     ToolMessage,
     message_chunk_to_message,
 )
@@ -22,6 +22,7 @@ from langchain_core.utils.json import parse_partial_json
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
+from app.domain.agents.runtime.budget import RUNTIME_STATUS_MARKER, runtime_status
 from app.domain.agents.runtime.callbacks import NexaFlowCallback, safe_event_value
 from app.domain.agents.runtime.session import AgentSession
 from app.domain.agents.runtime.state import AgentState, PendingToolCall
@@ -76,6 +77,7 @@ class AgentRuntimeContext:
     max_turns: int = MAX_AGENT_TURNS
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS
     session: AgentSession | None = None
+    execution_deadline_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -482,6 +484,14 @@ async def agent_node(
     if state["turn"] >= runtime.context.max_turns:
         raise AgentRunnerError("Agent turn limit reached.")
 
+    state = {
+        **state,
+        "messages": [
+            message for message in state["messages"]
+            if not message.additional_kwargs.get(RUNTIME_STATUS_MARKER)
+        ],
+    }
+
     if runtime.context.session is not None:
         try:
             state = await runtime.context.session.prepare_turn(state)
@@ -531,18 +541,14 @@ async def agent_node(
     )
     tool_budget_exhausted = state["tool_call_count"] >= runtime.context.max_tool_calls
     allow_tools = turn < runtime.context.max_turns and not tool_budget_exhausted
-    model_messages = state["messages"]
-    if not allow_tools:
-        model_messages = [
-            *model_messages,
-            HumanMessage(
-                content=(
-                    "The tool-call budget is exhausted or this is the final model turn. "
-                    "Do not call tools. Answer using the information already available "
-                    "and explain anything that remains incomplete."
-                )
-            ),
-        ]
+    model_messages = [
+        *state["messages"],
+        runtime_status(
+            turn, runtime.context.max_turns,
+            state["tool_call_count"], runtime.context.max_tool_calls,
+            runtime.context.execution_deadline_at,
+        ),
+    ]
     bound_model = (
         model.bind_tools(available_tools) if allow_tools and available_tools else model
     )

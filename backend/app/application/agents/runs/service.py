@@ -132,6 +132,15 @@ def execution_messages(
         "Follow any explicit prohibition in the Agent instructions and all safety, access, and "
         "approval requirements. If a tool requires approval, call it and let the approval flow "
         "pause the Run; do not claim that it is unavailable.\n"
+        "Execution discipline: combine related read-only inspections into one bounded script; "
+        "reuse saved scripts and results when their source files have not changed. "
+        "Once enough information is available, save a working deliverable early, then verify "
+        "and correct it instead of repeatedly exploring. For follow-up edits, inspect the "
+        "existing files and scripts first. Check command exit codes and stderr, reopen the "
+        "exact saved output and verify actual exported artifacts before claiming delivery. "
+        "Turn numeric and structural output requirements into programmatic checks on the saved result, "
+        "and correct failed checks before delivery. "
+        "Keep scratch files outside outputs and never trade required validation for fewer calls.\n"
     )
     answer_format_rule = (
         "Answer format: write clean Markdown optimized for scanning. Keep paragraphs "
@@ -1077,7 +1086,7 @@ async def prepare_agent_run(
     if access_source not in {"console", "public", "api"}:
         raise ValueError("Invalid Agent run access source.")
     approval_mode = (
-        DEFAULT_AGENT_APPROVAL_MODE
+        "ask_risky"
         if access_source == "api"
         else normalize_agent_approval_mode(approval_mode)
     )
@@ -1469,6 +1478,8 @@ async def stream_agent_run(
                     assert row.id is not None
                     cursor = row.id
                     event = {**row.event, "sequence": cursor}
+                    if event.get("type") == "process":
+                        event["event"] = {**event["event"], "sequence": cursor}
                     if event.get("type") in {"complete", "error"}:
                         terminal_event = event
                     else:

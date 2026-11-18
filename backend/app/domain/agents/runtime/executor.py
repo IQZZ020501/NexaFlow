@@ -2,6 +2,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -94,6 +95,7 @@ async def run_agent(
     max_turns: int = MAX_AGENT_TURNS,
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS,
     session: AgentSession | None = None,
+    execution_deadline_at: datetime | None = None,
     max_knowledge_calls: int = 6,
     max_knowledge_rounds: int = 3,
     max_no_progress_rounds: int = 2,
@@ -192,6 +194,7 @@ async def run_agent(
             max_turns=max_turns,
             max_tool_calls=max_tool_calls,
             session=session,
+            execution_deadline_at=execution_deadline_at,
         ),
         stream_mode="values",
     ):

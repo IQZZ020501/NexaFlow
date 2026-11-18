@@ -251,6 +251,9 @@ class AgentPlanStepResponse(BaseModel):
 
 
 class AgentRunEventResponse(BaseModel):
+    sequence: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    live_sequence: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    stream_epoch: str | None = Field(default=None, exclude_if=lambda value: value is None)
     type: Literal["thought", "tool"] = "tool"
     turn: int
     tool_name: str
@@ -399,6 +402,9 @@ class ExternalAgentKnowledgeHitResponse(BaseModel):
 
 
 class ExternalAgentProgressEventResponse(BaseModel):
+    sequence: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    live_sequence: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    stream_epoch: str | None = Field(default=None, exclude_if=lambda value: value is None)
     id: str
     type: Literal["analysis", "knowledge", "tool", "answer"]
     status: Literal["running", "succeeded", "failed"]

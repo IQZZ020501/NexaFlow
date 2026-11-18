@@ -188,7 +188,7 @@ describe("mergeInitialAgentRun", () => {
     }
   })
 
-  test("keeps live events and answer when the live run already has them", () => {
+  test("keeps prior steps in turn order while merging a newer snapshot and answer", () => {
     const live = makeRun({
       id: "run-1",
       status: "running",
@@ -196,7 +196,7 @@ describe("mergeInitialAgentRun", () => {
       events: [thoughtEvent({ turn: 2 })],
     })
     const merged = mergeInitialAgentRun(pending, live)
-    expect(merged.events).toEqual(live.events)
+    expect(merged.events).toEqual([...pending.events, ...live.events])
     expect(merged.result).toBe("Live answer")
   })
 

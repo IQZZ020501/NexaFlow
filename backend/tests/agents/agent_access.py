@@ -2059,7 +2059,7 @@ def assert_http_external_access() -> None:
             )
             assert api_run.status_code == 201, api_run.text
             api_run_id = api_run.json()["id"]
-            assert api_run.json()["approval_mode"] == "always_ask"
+            assert api_run.json()["approval_mode"] == "ask_risky"
 
             api_get = client.get(
                 f"{api_base}/runs/{api_run_id}",

@@ -12,7 +12,9 @@ import tests.support  # noqa: F401
 from langchain_core.messages import HumanMessage
 from tests.support import settings
 
+from app.application.agents.access.service import external_progress_events
 from app.application.agents.runs import history, service
+from app.application.agents.runs.executor import _upsert_process_event
 from app.domain.agents.runtime.capabilities import CapabilityRegistry
 from app.domain.agents.runtime.extensions import ExtensionRuntime
 from app.domain.agents.runtime.references import (
@@ -25,9 +27,90 @@ from app.domain.agents.runtime.session import AgentSession
 from app.domain.agents.runtime.usage import empty_usage
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
+from app.infra.agents import live_stream
+from app.schemas.agents.contracts import AgentRunEventResponse
 
 
 class RecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unavailable_live_cursor_keeps_durable_execution_available(self):
+        redis = SimpleNamespace(
+            xrevrange=AsyncMock(side_effect=TimeoutError),
+            pipeline=AsyncMock(),
+            aclose=AsyncMock(),
+        )
+        with patch.object(live_stream, "_redis_client", return_value=redis):
+            publisher = live_stream.AgentLiveStreamPublisher(settings(), "run-1")
+            await publisher.start()
+            await publisher.publish({"type": "reasoning_delta", "delta": "AB"})
+            self.assertEqual(publisher.cursor, "0-0")
+            redis.pipeline.assert_not_called()
+            await publisher.close()
+
+    async def test_process_versions_and_live_watermarks_survive_public_projection(self):
+        process = {
+            "type": "thought",
+            "turn": 2,
+            "tool_name": "",
+            "status": "running",
+            "summary": "agent.reviewing_tool_results",
+            "reasoning": "AB",
+            "stream_epoch": "worker-private-id",
+            "live_sequence": "1000-2",
+        }
+        events = []
+        _upsert_process_event(events, process, sequence=7)
+        snapshot = AgentRunEventResponse(**events[0]).model_dump(mode="json")
+        self.assertEqual(snapshot["sequence"], 7)
+        self.assertEqual(snapshot["live_sequence"], "1000-2")
+        public = external_progress_events([snapshot], "running")[0].model_dump(
+            mode="json"
+        )
+        self.assertEqual(public["sequence"], 7)
+        self.assertEqual(public["live_sequence"], "1000-2")
+        self.assertNotEqual(public["stream_epoch"], "worker-private-id")
+        self.assertEqual(len(public["stream_epoch"]), 32)
+
+        run = AgentRun(status="running")
+
+        @asynccontextmanager
+        async def session():
+            yield object()
+
+        reader = SimpleNamespace(
+            read=AsyncMock(return_value=[]), close=AsyncMock(), available=False
+        )
+        with (
+            patch.object(service, "get_session_factory", return_value=session),
+            patch.object(service, "AgentLiveStreamReader", return_value=reader),
+            patch.object(
+                service,
+                "run_to_response",
+                return_value=SimpleNamespace(model_dump=lambda **_: {}),
+            ),
+            patch.object(
+                service.agent_repository,
+                "get_agent_run_by_id",
+                AsyncMock(return_value=run),
+            ),
+            patch.object(
+                service.agent_repository,
+                "list_agent_run_events",
+                AsyncMock(
+                    return_value=[
+                        SimpleNamespace(
+                            id=7, event={"type": "process", "event": process}
+                        ),
+                    ]
+                ),
+            ),
+        ):
+            stream = service.stream_agent_run(None, run, None, None, None, settings())
+            await anext(stream)
+            streamed = await anext(stream)
+            self.assertEqual(streamed["event"]["sequence"], 7)
+            self.assertEqual(streamed["event"]["live_sequence"], "1000-2")
+            await stream.aclose()
+
     async def test_expired_lease_is_recovering_until_database_terminal(self):
         run = AgentRun(
             status="running", lease_expires_at=utc_now() - timedelta(seconds=1)

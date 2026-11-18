@@ -23,6 +23,10 @@ def normalize_agent_approval_mode(value: object) -> AgentApprovalMode:
 
 
 def run_agent_approval_mode(run: AgentRun) -> AgentApprovalMode:
+    if run.access_source == "api":
+        # Machine callers cannot resolve interactive consent. The frozen Tool
+        # policy and API preflight still reject non-auto or unsafe tools.
+        return "ask_risky"
     return normalize_agent_approval_mode(run.application_snapshot.get("approval_mode"))
 
 

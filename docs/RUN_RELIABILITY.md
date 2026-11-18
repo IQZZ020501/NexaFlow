@@ -7,9 +7,20 @@
 - Console 和公开聊天读取历史后，继续观察原来的 queued/running/awaiting_approval Run。恢复观察不创建新 Run，也不执行新的工具调用。
 - 流层遇到过期 Worker 租约，发送 `recovering` 快照并继续观察；只有数据库已保存的成功、失败或取消状态才结束流。Beat 和既有租约机制负责恢复执行。
 - 审批 HTTP 响应可能晚于同一 Run 的完成事件。Console/公开聊天的快照合并拒绝把已保存终态降回运行中，避免最终回答被迟到的审批响应覆盖；持续审批流回归覆盖此竞态。
+- 持久过程携带事件 `sequence`、Worker `stream_epoch` 和已包含的 Redis `live_sequence`，快照与公开进度投影保留这些位置（公开 epoch 仍做哈希）。前端按过程版本合并，只追加水位之后的推理/参数增量；工具开始执行后输入固定，重连快照保留已显示的较新过程。NDJSON 每处理一条事件即提交恢复游标，读流异常不会退回旧位置。
+- OpenAI 兼容与专用 DeepSeek 的 Chat Completions 历史保留供应商返回的 `reasoning_content`，包含工具结果后的下一轮请求；未返回该字段的消息不补造字段，Responses API 沿用其原生序列化。两轮回归覆盖真实 Agent 循环和流式/非流式 SDK 请求，使用模拟供应商。
 - 创建、Console/公开聊天重新生成支持可选 `request_id`，长度 1–64，限 ASCII 字母、数字、`_`、`-`。同一 workspace、application、access_source、consumer 内，同键同内容返回原 Run；同键不同 goal/conversation/file IDs/approval mode 返回 `409`。不同重新生成来源也会产生冲突。
 - Agent 行锁串行化请求查询和写入，数据库唯一约束兜底。重放先于一次性上传解析、配额和派发；已完成 Run 也能重放。
 - 前端为一次提交生成一个键，响应不明的网络错误或 5xx 只自动重试一次，重用原始请求体。取消和确定的 4xx 不重试。缺省不传键的旧客户端仍按原契约创建。
+
+## 工具租约、审批与结果
+
+- 普通调用和 MCP 长任务均核对 invocation 与所属 Run 的 Worker 身份。Run 状态接受共享的 `running` / `running_v2` 集合；普通调用在 adapter 等待期间续租，失去任一归属或收到 Run 租约丢失信号时通知并取消 adapter。结果写回再次核对归属；只有租约过期而未被接管时，已返回的成功结果仍可保存。
+- Agent API 使用 `ask_risky` 解释审批偏好，包括读取旧 Run 快照时。创建预检和执行前检查继续要求 Tool 策略为 `auto`、effect 为 `pure` 或 `external_read`，且允许 API 访问；需要交互审批的工具在创建时拒绝。Console 和公开聊天仍按用户选择审批。
+- bash 按最终 UTF-8 JSON 大小裁剪 stdout/stderr 预览，使整体结果保持在 32 KiB 内，并保留退出码和制品引用。超出预览的结果在 2 MiB 内保存到 `tool_invocations.full_result`，通过同 Run、执行用户和访问来源隔离的 `read_tool_result` 分页读取；沙箱原有的 30 KiB 日志采集上限保持不变。
+- 生图账本记录 `not_started`、`dispatched`、`completed`。请求前在短事务中检查归属并提交派发标记，制品写入在同一归属锁下提交；取消事务与这些边界按 RunState → invocation 顺序锁定。取消发生在模型配置读取期间时，不再派发供应商请求；已派发的请求仍可能收费，取消后返回的图片不会跨过归属检查落库。缺少派发标记的旧记录继续保守判定 `uncertain`。
+
+`tests.tools.tools` 包含 `tests.tools.lifecycle` 的真实账本时序回归，覆盖续租、Run/invocation 接管、取消发生在生图派发前后、结果重放以及 bash 日志分页与身份隔离。带实际 Run 的 HTTP 长任务首次提交、恢复和 API 只读审批检查由 `tests.tools.remote_tasks` 覆盖。
 
 ## 文件身份与授权
 

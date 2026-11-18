@@ -117,6 +117,8 @@ from app.infra.db.repositories.tools.invocations import (
     has_unsettled_agent_tool_invocations,
     list_recoverable_tool_test_invocation_ids,
     list_tool_invocations,
+    mark_tool_invocation_dispatch,
+    owned_tool_invocation,
     refresh_tool_invocation_deadline,
     requeue_tool_invocation,
     resolve_tool_invocation_approval,

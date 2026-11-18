@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from typing import ClassVar
 
+import httpx2 as httpx
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import text
@@ -34,6 +35,7 @@ from app.adapters.llm.runtime import (
     build_reranker,
     extract_registered_image_text,
 )
+from app.domain.agents.runtime import AgentToolResult, create_agent_tool, run_agent
 from app.domain.knowledge.models import KnowledgeBase
 from app.domain.models.registered import RegisteredModel
 from app.infra.db.session import get_session_factory
@@ -544,7 +546,113 @@ def test_delete_model_with_active_knowledge_reference() -> None:
         )
 
 
+async def assert_reasoning_tool_round_trip() -> None:
+    """Exercise the real SDK and serializers without a paid provider request."""
+    for provider in ("openai_compatible", "deepseek"):
+        for streaming in (False, True):
+            requests = []
+
+            async def handle(request):
+                body = json.loads(request.content)
+                requests.append(body)
+                assistants = [m for m in body["messages"] if m["role"] == "assistant"]
+                if assistants:
+                    previous = assistants[-1]
+                    assert previous.get("reasoning_content") == "Inspect the weather."
+                    tool_result = next(
+                        m for m in body["messages"] if m["role"] == "tool"
+                    )
+                    assert (
+                        tool_result["tool_call_id"] == previous["tool_calls"][0]["id"]
+                    )
+                    message = {"role": "assistant", "content": "Sunny"}
+                    finish_reason = "stop"
+                else:
+                    message = {
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning_content": "Inspect the weather.",
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {"name": "weather", "arguments": "{}"},
+                            }
+                        ],
+                    }
+                    finish_reason = "tool_calls"
+                response = {
+                    "id": "reasoning-test",
+                    "created": 0,
+                    "model": "reasoning-model",
+                    "object": "chat.completion",
+                    "choices": [
+                        {"index": 0, "message": message, "finish_reason": finish_reason}
+                    ],
+                }
+                if not streaming:
+                    return httpx.Response(200, json=response)
+                if message.get("tool_calls"):
+                    message["tool_calls"][0]["index"] = 0
+                response["object"] = "chat.completion.chunk"
+                response["choices"][0] = {
+                    "index": 0,
+                    "delta": message,
+                    "finish_reason": finish_reason,
+                }
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content=f"data: {json.dumps(response)}\n\ndata: [DONE]\n\n",
+                )
+
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(handle)
+            ) as client:
+                model = build_chat_model(
+                    provider,
+                    {"api_base": "https://example.invalid/v1", "api_key": "test"},
+                    "reasoning-model",
+                    request_params={"http_async_client": client},
+                )
+                executed = []
+                events = []
+
+                async def weather(arguments):
+                    executed.append(arguments)
+                    return AgentToolResult(content="Sunny", summary="Weather read")
+
+                async def emit(event):
+                    events.append(event)
+
+                tool = create_agent_tool(
+                    name="weather",
+                    description="Read test weather",
+                    parameters={"type": "object", "properties": {}},
+                    execute=weather,
+                )
+                answer = await run_agent(
+                    model,
+                    [{"role": "user", "content": "Weather?"}],
+                    [tool],
+                    on_event=emit if streaming else None,
+                )
+                assert answer.content == "Sunny"
+                assert executed == ["{}"]
+                assert len(requests) == 2
+                if streaming:
+                    assert (
+                        "".join(
+                            event["delta"]
+                            for event in events
+                            if event["type"] == "reasoning_delta"
+                        )
+                        == "Inspect the weather."
+                    )
+
+
 def main() -> None:
+    asyncio.run(assert_reasoning_tool_round_trip())
     assert_provider_factories()
     assert_provider_catalog_contract()
     with test_client() as client, model_test_server() as model_base_url:

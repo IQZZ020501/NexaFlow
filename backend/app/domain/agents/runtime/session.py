@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from app.domain.agents.runtime.capabilities import CapabilityRegistry
+from app.domain.agents.runtime.capabilities import CATALOG_MARKER, CapabilityRegistry
 from app.domain.agents.runtime.context import AgentContextManager
 from app.domain.agents.runtime.references import (
     REFERENCE_MARKER,
@@ -65,7 +65,10 @@ class AgentSession:
             [
                 message
                 for message in state["messages"]
-                if not message.additional_kwargs.get(REFERENCE_MARKER)
+                if not any(
+                    message.additional_kwargs.get(key)
+                    for key in (REFERENCE_MARKER, CATALOG_MARKER)
+                )
             ]
         )
         usage = state["model_usage"]
@@ -77,6 +80,9 @@ class AgentSession:
         projection = reference_message(references)
         if projection is not None:
             messages.append(projection)
+        catalog = self.capabilities.catalog_message()
+        if catalog is not None:
+            messages.append(catalog)
         if self.context is not None:
             self.context.restore(harness.get("context_memory"))
             messages, compaction_usage = await self.context.prepare(
@@ -85,10 +91,16 @@ class AgentSession:
             # Compaction may replace the projection with prose. Always restore
             # the authoritative projection from the checkpoint, exactly once.
             messages = [
-                m for m in messages if not m.additional_kwargs.get(REFERENCE_MARKER)
+                m for m in messages
+                if not any(
+                    m.additional_kwargs.get(key)
+                    for key in (REFERENCE_MARKER, CATALOG_MARKER)
+                )
             ]
             if projection is not None:
                 messages.append(projection)
+            if catalog is not None:
+                messages.append(catalog)
             usage = merge_usage(usage, compaction_usage)
             if self.context.memory is not None:
                 harness["context_memory"] = self.context.snapshot()

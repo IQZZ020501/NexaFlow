@@ -177,10 +177,13 @@ def validate_tool_output(snapshot: ToolSnapshot, data: Any) -> None:
 def exhausted_tool_invocation_terminal_state(
     invocation_status: str,
     effect: str | None,
+    *,
+    dispatched: bool | None = None,
 ) -> tuple[str, str, str, str]:
     uncertain = (
         invocation_status == TOOL_INVOCATION_RUNNING
         and effect not in TOOL_SAFE_EXTERNAL_EFFECTS
+        and dispatched is not False
     )
     if uncertain:
         return (

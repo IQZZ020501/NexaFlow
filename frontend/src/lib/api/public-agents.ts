@@ -45,6 +45,9 @@ export type ExternalAgentKnowledgeHit = {
 }
 
 export type ExternalAgentProgressEvent = {
+  sequence?: number
+  live_sequence?: string
+  stream_epoch?: string
   id: string
   type: "analysis" | "knowledge" | "tool" | "answer"
   status: "running" | "succeeded" | "failed"

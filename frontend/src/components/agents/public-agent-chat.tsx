@@ -2,6 +2,11 @@
 
 import * as React from "react"
 import { isStaleRunSnapshot } from "@/lib/run-state"
+import {
+  includesAgentProcessDelta,
+  mergeAgentProcessEvent,
+  mergeAgentProcessSnapshot,
+} from "@/lib/agent-process-stream"
 import { useRouter } from "next/navigation"
 import {
   BotIcon,
@@ -623,8 +628,17 @@ export function mergePublicRunEvent(
             result: event.run.result || run.result,
             live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
             live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
-            progress:
-              event.run.progress.length > 0 ? event.run.progress : run.progress,
+            progress: ["queued", "running", "awaiting_approval"].includes(
+              event.run.status
+            )
+              ? mergeAgentProcessSnapshot(
+                  run.progress,
+                  event.run.progress,
+                  (item) => item.id
+                )
+              : event.run.progress.length > 0
+                ? event.run.progress
+                : run.progress,
             session_inputs: event.run.session_inputs?.length
               ? event.run.session_inputs
               : run.session_inputs,
@@ -652,10 +666,27 @@ export function mergePublicRunEvent(
             )
           : -1
       const index = eventIndex === -1 ? syntheticAnalysisIndex : eventIndex
-      if (index === -1) progress.push(event.event)
+      const incoming = {
+        ...event.event,
+        sequence: event.sequence ?? event.event.sequence,
+      }
+      if (event.event.type === "analysis") {
+        const answer = progress.find(
+          (item) => item.type === "answer" && item.turn === event.event.turn
+        )
+        if (
+          answer &&
+          (incoming.sequence === undefined ||
+            answer.sequence === undefined ||
+            incoming.sequence <= answer.sequence)
+        ) {
+          return run
+        }
+      }
+      if (index === -1) progress.push(incoming)
       else {
         const current = progress[index]
-        progress[index] =
+        const next =
           current?.stage === "preparing" && event.event.type === "tool"
             ? {
                 ...event.event,
@@ -683,8 +714,15 @@ export function mergePublicRunEvent(
                   current.input_truncated || event.event.input_truncated,
               }
             : event.event
+        progress[index] = mergeAgentProcessEvent(current, {
+          ...next,
+          sequence: incoming.sequence,
+        })
       }
-      if (event.event.type === "answer" && event.event.reasoning) {
+      if (
+        event.event.type === "answer" &&
+        progress[index === -1 ? progress.length - 1 : index]?.reasoning
+      ) {
         const analysisIndex = progress.findIndex(
           (item) => item.type === "analysis" && item.turn === event.event.turn
         )
@@ -726,19 +764,32 @@ export function mergePublicRunEvent(
           tool_kind: "unknown",
           server_name: "",
           input: { [event.field]: event.delta },
+          stream_epoch: event.stream_epoch,
+          live_sequence: event.live_sequence,
           output: null,
           input_truncated: event.input_truncated,
           hits: [],
         })
       } else {
         const current = progress[index]
-        const input = sameStream ? (current.input ?? {}) : {}
+        if (
+          current.stage !== "preparing" ||
+          includesAgentProcessDelta(current, event)
+        ) {
+          return run
+        }
+        const sameProcessStream =
+          !event.stream_epoch ||
+          event.stream_epoch === (current.stream_epoch ?? run.live_stream_epoch)
+        const input = sameProcessStream ? (current.input ?? {}) : {}
         const currentValue =
           typeof input[event.field] === "string"
             ? String(input[event.field])
             : ""
         progress[index] = {
           ...current,
+          stream_epoch: event.stream_epoch ?? current.stream_epoch,
+          live_sequence: event.live_sequence ?? current.live_sequence,
           tool_name: event.tool_name || current.tool_name,
           tool_label: event.tool_name || current.tool_label,
           input: {
@@ -835,6 +886,17 @@ export function mergePublicRunEvent(
       const index = progress.findIndex(
         (item) => item.type === "analysis" && item.turn === event.turn
       )
+      const answer = progress.find(
+        (item) => item.type === "answer" && item.turn === event.turn
+      )
+      if (
+        answer &&
+        (index === -1 ||
+          (answer.sequence !== undefined &&
+            answer.sequence >= (progress[index].sequence ?? 0)))
+      ) {
+        return run
+      }
       if (index === -1) {
         progress.push({
           id: `reasoning-${event.turn}`,
@@ -844,13 +906,26 @@ export function mergePublicRunEvent(
           turn: event.turn,
           count: null,
           reasoning: event.delta,
+          stream_epoch: event.stream_epoch,
+          live_sequence: event.live_sequence,
           hits: [],
         })
       } else {
         const current = progress[index]
+        if (
+          current.status !== "running" ||
+          includesAgentProcessDelta(current, event)
+        ) {
+          return run
+        }
+        const sameProcessStream =
+          !event.stream_epoch ||
+          event.stream_epoch === (current.stream_epoch ?? run.live_stream_epoch)
         progress[index] = {
           ...current,
-          reasoning: sameStream
+          stream_epoch: event.stream_epoch ?? current.stream_epoch,
+          live_sequence: event.live_sequence ?? current.live_sequence,
+          reasoning: sameProcessStream
             ? (current.reasoning ?? "") + event.delta
             : event.delta,
         }

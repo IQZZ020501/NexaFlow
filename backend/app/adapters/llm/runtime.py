@@ -15,6 +15,7 @@ from google.genai.errors import APIError as GoogleAPIError
 from langchain_anthropic import ChatAnthropic
 from langchain_aws import BedrockEmbeddings, BedrockRerank, ChatBedrockConverse
 from langchain_core.embeddings import Embeddings
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -188,7 +189,31 @@ class AzureChatModel(_ProviderErrorChatMixin, AzureChatOpenAI):
     pass
 
 
-class DeepSeekChatModel(_ProviderErrorChatMixin, ChatDeepSeek):
+class _ReasoningContentChatMixin:
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        # Chat Completions extensions are omitted by LangChain's OpenAI
+        # serializer. Keep provider-returned reasoning in tool-loop history;
+        # Responses API inputs retain their own native representation.
+        for message, serialized in zip(
+            self._convert_input(input_).to_messages(),
+            payload.get("messages", []),
+            strict=False,
+        ):
+            if isinstance(message, AIMessage):
+                reasoning = message.additional_kwargs.get("reasoning_content")
+                if isinstance(reasoning, str):
+                    serialized["reasoning_content"] = reasoning
+        return payload
+
+
+class DeepSeekChatModel(_ReasoningContentChatMixin, _ProviderErrorChatMixin, ChatDeepSeek):
     pass
 
 
@@ -229,7 +254,9 @@ def _normalized_chat_result(result: ChatResult) -> ChatResult:
     return result
 
 
-class OpenAICompatibleChatModel(_ProviderErrorChatMixin, ChatOpenAI):
+class OpenAICompatibleChatModel(
+    _ReasoningContentChatMixin, _ProviderErrorChatMixin, ChatOpenAI
+):
     def _create_chat_result(
         self,
         response: dict[str, Any] | Any,

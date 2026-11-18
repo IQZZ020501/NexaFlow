@@ -276,7 +276,52 @@ def test_chat_adapters_normalize_sync_async_and_stream_finish_reasons() -> None:
                 assert normalize_finish_reason(aggregate.message.response_metadata) == "length"
 
 
+def test_reasoning_content_round_trips_in_chat_history() -> None:
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    from app.adapters.llm.runtime import build_chat_model
+
+    for provider in ("openai_compatible", "deepseek"):
+        model = build_chat_model(
+            provider,
+            {"api_base": "https://example.invalid/v1", "api_key": "test"},
+            "reasoning-model",
+        )
+        for reasoning in ("Inspect the tool result first.", ""):
+            assistant = AIMessage(
+                content="",
+                additional_kwargs={"reasoning_content": reasoning},
+                tool_calls=[{"name": "weather", "args": {}, "id": "call-1"}],
+            )
+            messages = [
+                HumanMessage(content="Weather?"),
+                assistant,
+                ToolMessage(content="Sunny", tool_call_id="call-1"),
+                AIMessage(
+                    content="Sunny", additional_kwargs={"reasoning_content": "Done"}
+                ),
+                AIMessage(content="No reasoning field"),
+            ]
+            payload = model._get_request_payload(messages)
+            assert payload["messages"][1]["reasoning_content"] == reasoning
+            assert payload["messages"][2]["tool_call_id"] == "call-1"
+            assert payload["messages"][3]["reasoning_content"] == "Done"
+            assert "reasoning_content" not in payload["messages"][4]
+            assert assistant.additional_kwargs == {"reasoning_content": reasoning}
+
+    model = build_chat_model(
+        "openai_compatible",
+        {"api_base": "https://example.invalid/v1", "api_key": "test"},
+        "reasoning-model",
+        request_params={"use_responses_api": True},
+    )
+    payload = model._get_request_payload([AIMessage(content="Answer")])
+    assert "messages" not in payload
+    assert "input" in payload
+
+
 def main() -> None:
+    test_reasoning_content_round_trips_in_chat_history()
     test_chat_adapters_normalize_sync_async_and_stream_finish_reasons()
     test_model_type_normalization()
     test_siliconflow_embedding_catalog_includes_existing_bge_model()
