@@ -49,6 +49,14 @@ x-backend-environment: &backend-environment
   POSTGRES_PORT: "5432"
   CELERY_BROKER_URL: redis://redis:6379/0
   KNOWLEDGE_STORAGE_DIR: /data/knowledge
+  # Set s3 and private bucket credentials here when business processes use
+  # different hosts. Empty values retain the local persistent-volume default.
+  OBJECT_STORAGE_BACKEND: local
+  OBJECT_STORAGE_BUCKET: ""
+  OBJECT_STORAGE_ENDPOINT: ""
+  OBJECT_STORAGE_REGION: us-east-1
+  OBJECT_STORAGE_ACCESS_KEY: ""
+  OBJECT_STORAGE_SECRET_KEY: ""
   QDRANT_URL: http://qdrant:6333
   OPENSANDBOX_URL: http://opensandbox:8088
   OPENSANDBOX_API_KEY: *sandbox-api-key
@@ -184,6 +192,27 @@ services:
     depends_on:
       opensandbox:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  # Optional extra Agent workers; the combined app keeps the single Beat.
+  agent-worker:
+    <<: *app-image
+    profiles: [agent-workers]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ["python", "scripts/worker.py", "--role=agents", "--hostname=extra-agents@%h"]
+    environment: *backend-environment
+    volumes:
+      - ./deploy/data/uploads:/data/knowledge
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
       migrate:
         condition: service_completed_successfully
       redis:

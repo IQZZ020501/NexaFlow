@@ -74,8 +74,9 @@ async def execute_shell(settings, arguments, context):
             await restore_skill_dependencies(skill, installed, context, platform)
             or reset
         )
-    await restore_conversation_files(run, platform, timeout_seconds=seconds + 10)
+    reset = bool(await restore_conversation_files(run, platform, timeout_seconds=seconds + 10)) or reset
     project = await restore_project_files(run, platform, timeout_seconds=seconds + 10)
+    reset = bool(isinstance(project, dict) and project.get("workspace_reset")) or reset
     response = await platform.execute(
         {
             "execution_session": "agent_run",

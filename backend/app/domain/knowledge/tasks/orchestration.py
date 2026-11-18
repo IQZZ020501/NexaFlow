@@ -29,7 +29,6 @@ from app.domain.knowledge.documents.qa_import import (
 )
 from app.domain.knowledge.service import (
     get_knowledge_model,
-    knowledge_document_path,
     knowledge_object_storage,
 )
 from app.domain.models.registered import RegisteredModel
@@ -67,6 +66,7 @@ from app.entities.knowledge import (
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.observability.logger import get_logger
+from app.infra.storage.object_storage import with_local_file
 from app.schemas.knowledge import (
     KnowledgeAssetResponse,
     KnowledgeDocumentChunkResponse,
@@ -325,9 +325,8 @@ async def extract_document_chunk_contents(
 ) -> DocumentChunkDrafts:
     if (document.meta or {}).get("import_mode") == "qa":
         rows = await asyncio.to_thread(
-            extract_qa_rows,
+            with_local_file, knowledge_object_storage(settings), document.storage_path, extract_qa_rows,
             document.filename,
-            knowledge_document_path(settings, document.storage_path),
         )
         return DocumentChunkDrafts(
             parents=[],
@@ -347,10 +346,9 @@ async def extract_document_chunk_contents(
         )
 
     text, assets = await asyncio.to_thread(
-        extract_document,
+        with_local_file, knowledge_object_storage(settings), document.storage_path, extract_document,
         document.filename,
         document.content_type,
-        knowledge_document_path(settings, document.storage_path),
     )
     text = clean_text(
         text,
@@ -420,10 +418,8 @@ async def replace_document_chunks(
             previous_key = str(
                 (document.meta or {}).get("normalized_artifact_key") or ""
             )
-            if artifact.object_key != previous_key or not storage.path(
-                artifact.object_key
-            ).exists():
-                storage.put_bytes(
+            if artifact.object_key != previous_key or not await asyncio.to_thread(storage.exists, artifact.object_key):
+                await asyncio.to_thread(storage.put_bytes,
                     artifact.object_key,
                     artifact.content.encode("utf-8"),
                 )
@@ -447,7 +443,7 @@ async def replace_document_chunks(
                 f"{document.workspace_id}/{document.knowledge_base_id}/assets/"
                 f"{document.id}/{draft.id}/{draft.filename}"
             )
-            storage.put_bytes(object_key, draft.content)
+            await asyncio.to_thread(storage.put_bytes, object_key, draft.content)
             written_object_keys.append(object_key)
             assets.append(
                 KnowledgeAsset(
@@ -541,7 +537,7 @@ async def replace_document_chunks(
         )
     except Exception:
         for object_key in written_object_keys:
-            storage.delete(object_key)
+            await asyncio.to_thread(storage.delete, object_key)
         raise
     return vector_ids, stale_object_keys, written_object_keys
 

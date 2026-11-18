@@ -195,10 +195,11 @@ def main():
             "quarterly/data.csv": b"amount\n12\n",
             "scripts/main.py": b"print(12)",
         }
-        imports = SimpleNamespace(execute=AsyncMock(return_value={"ok": True}))
+        imports = SimpleNamespace(execute=AsyncMock(return_value={"ok": True, "workspace_reset": True}))
         assert asyncio.run(
             runtime.restore_project_files(first, imports, timeout_seconds=20)
-        )
+        ) == {"workspace_reset": True}
+        imports.execute.return_value = {"ok": True}
         assert len(imports.execute.await_args_list) == 2
         assert all(
             call.args[0]["restore_project_files"]["role"] == "work"

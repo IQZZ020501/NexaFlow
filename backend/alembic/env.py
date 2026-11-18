@@ -27,6 +27,10 @@ from app.domain.execution.models import (  # noqa: F401
     ExecutionPlacement,
     ExecutionSession,
 )
+from app.domain.governance.models import (  # noqa: F401
+    ModelUsageReservation,
+    WorkspaceTokenMonth,
+)
 from app.domain.identity.enterprise.models import (  # noqa: F401
     EnterpriseIdentity,
     EnterpriseIdentityConnection,

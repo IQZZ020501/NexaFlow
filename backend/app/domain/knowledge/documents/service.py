@@ -1,3 +1,5 @@
+import asyncio
+
 """Knowledge documents and attachments."""
 
 from pathlib import Path
@@ -94,11 +96,7 @@ def clean_upload_filename(filename: str | None) -> str:
 
 
 def knowledge_object_storage(settings: Settings) -> ObjectStorage:
-    return create_object_storage(settings.knowledge_storage_dir)
-
-
-def knowledge_document_path(settings: Settings, storage_path: str) -> Path:
-    return knowledge_object_storage(settings).path(storage_path)
+    return create_object_storage(settings.knowledge_storage_dir, settings=settings)
 
 
 async def list_knowledge_documents(
@@ -192,7 +190,7 @@ async def upload_knowledge_attachment(
         await db.commit()
     except Exception:
         await db.rollback()
-        storage.delete(object_key)
+        await asyncio.to_thread(storage.delete, object_key)
         raise
     attachment = await knowledge_base_repository.refresh_knowledge_attachment(
         db,
@@ -223,7 +221,7 @@ async def delete_knowledge_attachment(
     object_key = attachment.object_key
     await knowledge_base_repository.delete_knowledge_attachment(db, attachment)
     await db.commit()
-    knowledge_object_storage(settings).delete(object_key)
+    await asyncio.to_thread(knowledge_object_storage(settings).delete, object_key)
 
 
 async def create_knowledge_documents_from_attachments(

@@ -40,6 +40,11 @@ class ModelProviderError(ExternalServiceError):
     pass
 
 
+class ModelQuotaExceeded(ModelProviderError):
+    def __init__(self):
+        super().__init__("Workspace monthly token quota exceeded.")
+
+
 class ModelProviderStatusError(ModelProviderError):
     def __init__(self, status_code: int, message: str = "") -> None:
         self.status_code = status_code
@@ -199,6 +204,7 @@ __all__ = [
     "ExternalServiceError",
     "ModelCompletion",
     "ModelProviderError",
+    "ModelQuotaExceeded",
     "ModelProviderStatusError",
     "ModelProviderTimeoutError",
     "ModelToolCall",

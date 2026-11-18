@@ -1,6 +1,8 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "工作空间本月模型 Token 额度不足，请联系管理员": "This workspace has insufficient model token quota for this month. Contact an administrator.",
+  "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失": "The execution environment was rebuilt. Saved files will be restored; unsaved temporary state may be lost.",
   "请先配置 Embedding 模型": "Configure an Embedding model first",
   "检索模型测试失败，请检查连接配置后重试": "The retrieval model test failed. Check the connection settings and retry.",
   "绑定的 Skill 授权已失效，请重新配置": "Authorization for a bound Skill has expired. Update the configuration.",

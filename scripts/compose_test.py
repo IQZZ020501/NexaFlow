@@ -77,6 +77,19 @@ class ComposeTests(unittest.TestCase):
         self.assertNotIn(None, names)
         self.assertNotEqual(*names)
 
+    def test_optional_agents_scale_without_another_beat_or_published_port(self) -> None:
+        rendered = subprocess.run(
+            ["docker", "compose", "--profile", "agent-workers", "config", "--format", "json"],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        )
+        worker = json.loads(rendered.stdout)["services"]["agent-worker"]
+        self.assertIn("--role=agents", worker["command"])
+        self.assertNotIn("--beat", worker["command"])
+        self.assertNotIn("container_name", worker)
+        self.assertNotIn("ports", worker)
+        self.assertEqual(worker["cap_drop"], ["ALL"])
+        self.assertEqual(worker["environment"]["DATABASE_URL"], self.config["services"]["app"]["environment"]["DATABASE_URL"])
+
     def test_frontend_environment_does_not_receive_backend_credentials(self) -> None:
         with patch.dict(
             os.environ,

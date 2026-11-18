@@ -257,6 +257,12 @@ def external_progress_events(
         stream_metadata: dict[str, Any] = {}
         _copy_external_stream_metadata(event, stream_metadata)
 
+        if event_type == "environment" and summary == "agent.workspace_reset":
+            upsert(ExternalAgentProgressEventResponse(
+                **stream_metadata, id=_external_progress_id(event, "environment"),
+                type="environment", status="succeeded", stage="completed", turn=turn,
+            ))
+            continue
         if event_type == "thought":
             if summary == "agent.answer_ready":
                 answer_status: Literal["running", "succeeded", "failed"] = (

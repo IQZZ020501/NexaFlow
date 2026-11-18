@@ -6,7 +6,8 @@ Endpoints must not import ``app.domain``, ``app.adapters``, or
 ``app.infra`` directly; this module is the only entry point.
 """
 
-from pathlib import Path
+import asyncio
+from collections.abc import Iterator
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +42,6 @@ from app.domain.knowledge.service import (
     delete_knowledge_attachment,
     document_to_response,
     get_knowledge_base,
-    knowledge_document_path,
     knowledge_object_storage,
     list_knowledge_bases,
     list_knowledge_documents,
@@ -212,14 +212,25 @@ async def document_response_with_chunk_count(
     )
 
 
+async def get_knowledge_document_file(
+    settings: Settings, key: str, missing="Document file is missing."
+) -> Iterator[bytes]:
+    storage = knowledge_object_storage(settings)
+    try:
+        await asyncio.to_thread(storage.stat, key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, missing) from exc
+    return storage.read_chunks(key)
+
+
 async def get_knowledge_asset_file(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
     document_id: str,
     asset_id: str,
     settings: Settings,
-) -> tuple[KnowledgeAsset, Path]:
-    """Resolve a knowledge asset and its on-disk path for HTTP serving."""
+) -> tuple[KnowledgeAsset, Iterator[bytes]]:
+    """Resolve an authorized knowledge asset and its byte stream."""
     asset = await knowledge_base_repository.get_document_asset(
         db,
         knowledge_base,
@@ -228,16 +239,13 @@ async def get_knowledge_asset_file(
     )
     if asset is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset not found.")
-    asset_path = knowledge_object_storage(settings).path(asset.object_key)
-    if not asset_path.is_file():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Knowledge asset file is missing.")
-    return asset, asset_path
+    return asset, await get_knowledge_document_file(settings, asset.object_key, "Knowledge asset file is missing.")
 
 
-def get_knowledge_document_markdown_file(
+async def get_knowledge_document_markdown_file(
     document: KnowledgeDocument,
     settings: Settings,
-) -> Path:
+) -> Iterator[bytes]:
     """Resolve the canonical Markdown artifact for an authorized document."""
     object_key = (document.meta or {}).get("normalized_artifact_key")
     if not isinstance(object_key, str) or not object_key:
@@ -245,13 +253,7 @@ def get_knowledge_document_markdown_file(
             status.HTTP_404_NOT_FOUND,
             "Document Markdown is not available.",
         )
-    markdown_path = knowledge_object_storage(settings).path(object_key)
-    if not markdown_path.is_file():
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "Document Markdown file is missing.",
-        )
-    return markdown_path
+    return await get_knowledge_document_file(settings, object_key, "Document Markdown file is missing.")
 
 
 __all__ = [
@@ -280,7 +282,7 @@ __all__ = [
     "get_knowledge_document",
     "get_knowledge_document_markdown_file",
     "get_latest_evaluation_summary",
-    "knowledge_document_path",
+    "get_knowledge_document_file",
     "list_evaluation_cases",
     "list_evaluation_runs",
     "list_knowledge_bases",

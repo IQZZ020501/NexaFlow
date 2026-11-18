@@ -196,7 +196,8 @@ not trigger unrelated cleanup.
 - Regression suites live in `backend/tests/` and run from `backend/` with
   `uv run python -m tests.<suite>`.
 - Knowledge parsing, indexing, and durable deletion cleanup run through Celery
-  with Redis; API and worker instances must share `KNOWLEDGE_STORAGE_DIR` and
+  with Redis; API and worker instances must share the local `KNOWLEDGE_STORAGE_DIR`
+  or identical private `OBJECT_STORAGE_BACKEND=s3` settings and
   use the same `QDRANT_URL`. Deletion cleanup intent is persisted in
   `knowledge_storage_cleanups`; Celery Beat redispatches due records, so do not
   replace it with best-effort post-commit cleanup.
@@ -221,7 +222,10 @@ not trigger unrelated cleanup.
   `agents` serves `agents-legacy`/`agents-v2` on a threads pool without Beat,
   so concurrent runs share one process event loop. Compose's single `app`
   container runs separate background and agents processes; do not scale `app`
-  horizontally because it contains the singleton Beat. Code reached from
+  horizontally because it contains the singleton Beat. The optional
+  `agent-workers` Compose profile scales only additional `--role=agents`
+  containers, sharing database, Redis, storage and execution settings.
+  Code reached from
   Agent or Workflow runs must not block that event loop; offload blocking
   calls with `asyncio.to_thread`.
 - Beat re-publishes a claimable Agent Run only when its last delivery is
@@ -232,6 +236,13 @@ not trigger unrelated cleanup.
 - Agent and workflow uploads are one-time and expire after 24 hours. Cleanup
   intent is persisted in `workflow_upload_storage_cleanups` and recovered by
   Celery Beat; user, Agent, and workspace deletion must queue cleanup first.
+- Registered LLM calls reserve workspace monthly token capacity per provider
+  request and settle reported usage once; Run summaries are never charged again.
+  Timeout, cancellation and missing usage retain their reservation until explicit
+  provider reconciliation. This admission estimate is not a provider billing or
+  money hard cap. VISION, embedding, reranker and image APIs remain outside it.
+  Preserve the ledger on rollback; operational procedures live in
+  `docs/RUN_RELIABILITY.md`.
 - Agent-generated files use safe filenames with arbitrary common extensions
   and are capped at 5 MiB. Files linked to a persisted Run stay in PostgreSQL
   until their conversation/application is deleted; standalone files expire
@@ -584,6 +595,11 @@ examples.
   run Alembic against the target database or a temporary explicit test
   database. For Celery wiring changes, verify the expected tasks register on
   `celery_app`.
+  Storage contracts run with `tests.infra.object_storage`; optional live S3
+  uses explicit `NEXAFLOW_TEST_S3_*` settings. `tests.governance.tokens`
+  uses SQLite by default, or explicitly isolated `NEXAFLOW_TEST_DATABASE_URL`
+  for PostgreSQL concurrency. Migration and reconciliation scripts are read-only
+  unless invoked with `--copy` / `--apply`; never target production in tests.
 - Compose changes: run root `docker compose config --quiet` and verify
   `docker compose config --images`; render the local infrastructure configuration
   returned by `scripts.dev.infrastructure_configuration` on Compose stdin too.

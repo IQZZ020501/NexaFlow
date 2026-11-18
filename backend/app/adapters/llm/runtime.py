@@ -684,7 +684,9 @@ def build_registered_chat_model(
     *,
     timeout: float | None = None,
 ) -> BaseChatModel:
-    return _build_registered_chat_model(model, settings, "LLM", timeout=timeout)
+    from app.infra.models.metering import MeteredChatModel
+
+    return MeteredChatModel(_build_registered_chat_model(model, settings, "LLM", timeout=timeout), model)
 
 
 def build_registered_vision_model(

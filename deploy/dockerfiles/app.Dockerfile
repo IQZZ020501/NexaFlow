@@ -42,7 +42,7 @@ COPY sandbox/skills/pptx/SKILL.md /app/app/domain/tools/catalog/guides/pptx/SKIL
 COPY sandbox/skills/spreadsheets/SKILL.md /app/app/domain/tools/catalog/guides/spreadsheets/SKILL.md
 COPY sandbox/skills/skill-creator/SKILL.md /app/app/domain/tools/catalog/guides/skill-creator/SKILL.md
 COPY backend/alembic /app/alembic
-COPY backend/scripts/worker.py /app/scripts/worker.py
+COPY backend/scripts/worker.py backend/scripts/migrate_object_storage.py backend/scripts/reconcile_model_usage.py /app/scripts/
 COPY backend/alembic.ini backend/main.py /app/
 
 COPY --from=frontend-builder /app/.next/standalone /opt/frontend

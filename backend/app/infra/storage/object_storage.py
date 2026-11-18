@@ -1,18 +1,26 @@
+"""Storage access shared by local files and private S3-compatible buckets."""
+
 import shutil
-from collections.abc import AsyncIterable
-from pathlib import Path
-from typing import Protocol
+import tempfile
+from collections.abc import AsyncIterable, Iterator
+from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO, Protocol
+
+
+@dataclass(frozen=True)
+class ObjectInfo:
+    size_bytes: int
 
 
 class ObjectStorage(Protocol):
-    """Object storage port consumed by business domains.
-
-    Implementations (e.g. ``LocalObjectStorage``) are wired by the
-    application layer; domain code must never depend on a concrete class.
-    """
-
-    def path(self, key: str) -> Path: ...
-
+    def stat(self, key: str) -> ObjectInfo: ...
+    def open_reader(self, key: str) -> AbstractContextManager[BinaryIO]: ...
+    def materialize(self, key: str) -> AbstractContextManager[Path]: ...
+    def read_bytes(self, key: str, max_bytes: int) -> bytes: ...
+    def read_chunks(self, key: str) -> Iterator[bytes]: ...
+    def exists(self, key: str) -> bool: ...
     async def put_chunks(
         self,
         key: str,
@@ -21,15 +29,16 @@ class ObjectStorage(Protocol):
         *,
         allow_empty: bool = False,
     ) -> int: ...
-
     def put_bytes(self, key: str, content: bytes) -> int: ...
-
     def delete(self, key: str) -> None: ...
-
     def delete_prefix(self, prefix: str) -> None: ...
 
 
-def create_object_storage(root: Path) -> ObjectStorage:
+def create_object_storage(root: Path, *, settings=None) -> ObjectStorage:
+    if settings is not None and settings.object_storage_backend == "s3":
+        from app.infra.storage.s3 import S3ObjectStorage
+
+        return S3ObjectStorage(settings)
     return LocalObjectStorage(root)
 
 
@@ -45,24 +54,75 @@ class EmptyObjectError(ObjectStorageError):
     pass
 
 
-class LocalObjectStorage:
+def validate_key(key: str) -> str:
+    if not isinstance(key, str) or not key or "\\" in key or "\x00" in key:
+        raise ObjectStorageError("Invalid object key.")
+    parts = key.split("/")
+    if PurePosixPath(key).is_absolute() or any(
+        part in {"", ".", ".."} for part in parts
+    ):
+        raise ObjectStorageError("Object key escapes the storage root.")
+    return key
+
+
+class ReadableStorage:
+    def exists(self, key: str) -> bool:
+        try:
+            self.stat(key)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def read_bytes(self, key: str, max_bytes: int) -> bytes:
+        with self.open_reader(key) as stream:
+            content = stream.read(max_bytes + 1)
+        if len(content) > max_bytes:
+            raise ObjectTooLargeError("Object is too large.")
+        return content
+
+    def read_chunks(self, key: str) -> Iterator[bytes]:
+        with self.open_reader(key) as stream:
+            while chunk := stream.read(64 * 1024):
+                yield chunk
+
+    @contextmanager
+    def materialize(self, key: str):
+        with tempfile.TemporaryDirectory(prefix="nexaflow-object-") as directory:
+            target = Path(directory) / "input"
+            with self.open_reader(key) as source, target.open("wb") as output:
+                size = 0
+                while chunk := source.read(64 * 1024):
+                    size += len(chunk)
+                    if size > 100 * 1024 * 1024:
+                        raise ObjectTooLargeError("Object is too large.")
+                    output.write(chunk)
+            yield target
+
+
+class LocalObjectStorage(ReadableStorage):
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
 
     def path(self, key: str) -> Path:
-        candidate = (self.root / key).resolve()
+        candidate = (self.root / validate_key(key)).resolve()
         if candidate != self.root and self.root not in candidate.parents:
             raise ObjectStorageError("Object key escapes the storage root.")
         return candidate
 
-    async def put_chunks(
-        self,
-        key: str,
-        chunks: AsyncIterable[bytes],
-        max_bytes: int | None,
-        *,
-        allow_empty: bool = False,
-    ) -> int:
+    def stat(self, key: str) -> ObjectInfo:
+        path = self.path(key)
+        if not path.is_file():
+            raise FileNotFoundError("Stored object is missing.")
+        return ObjectInfo(path.stat().st_size)
+
+    def open_reader(self, key: str):
+        return self.path(key).open("rb")
+
+    @contextmanager
+    def materialize(self, key: str):
+        yield self.path(key)
+
+    async def put_chunks(self, key, chunks, max_bytes, *, allow_empty=False) -> int:
         target = self.path(key)
         target.parent.mkdir(parents=True, exist_ok=True)
         size = 0
@@ -73,7 +133,7 @@ class LocalObjectStorage:
                     if max_bytes is not None and size > max_bytes:
                         raise ObjectTooLargeError("Object is too large.")
                     output.write(chunk)
-        except Exception:
+        except BaseException:
             target.unlink(missing_ok=True)
             raise
         if size == 0 and not allow_empty:
@@ -101,8 +161,13 @@ class LocalObjectStorage:
             parent = parent.parent
 
     def delete_prefix(self, prefix: str) -> None:
-        target = self.path(prefix)
         try:
-            shutil.rmtree(target)
+            shutil.rmtree(self.path(prefix))
         except FileNotFoundError:
             pass
+
+
+def with_local_file(storage: ObjectStorage, key: str, operation, *args, **kwargs):
+    """Call only in a worker thread; remote downloads and parsing may block."""
+    with storage.materialize(key) as path:
+        return operation(*args, path, **kwargs)

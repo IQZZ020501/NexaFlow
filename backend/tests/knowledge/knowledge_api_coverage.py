@@ -582,7 +582,8 @@ def exercise_direct_endpoint_calls(
                     settings,
                     db,
                 )
-                assert downloaded.path.is_file()
+                assert b"".join([chunk async for chunk in downloaded.body_iterator])
+                assert downloaded.headers["content-disposition"].startswith("attachment;")
 
                 markdown = (
                     await knowledge_lifecycle_api.read_workspace_knowledge_document_markdown(
@@ -593,7 +594,7 @@ def exercise_direct_endpoint_calls(
                         db,
                     )
                 )
-                assert markdown.path.is_file()
+                assert b"".join([chunk async for chunk in markdown.body_iterator])
                 assert markdown.media_type == "text/markdown; charset=utf-8"
 
                 # GET /{kb}/documents/{id}/download — missing file -> 404.
@@ -634,7 +635,7 @@ def exercise_direct_endpoint_calls(
                         db,
                     )
                 )
-                assert asset_response.path.is_file()
+                assert b"".join([chunk async for chunk in asset_response.body_iterator]) == b"png-bytes"
 
                 # Missing asset -> 404.
                 try:
@@ -742,7 +743,7 @@ def exercise_direct_endpoint_calls(
                 assert counted.id == document_id
 
                 # get_knowledge_asset_file success + both 404 branches.
-                resolved_asset, resolved_path = (
+                resolved_asset, resolved_content = (
                     await knowledge_application.get_knowledge_asset_file(
                         db,
                         knowledge_base,
@@ -751,7 +752,7 @@ def exercise_direct_endpoint_calls(
                         settings,
                     )
                 )
-                assert resolved_path.is_file()
+                assert b"".join(resolved_content) == b"png-bytes"
                 assert resolved_asset.id == asset_id
                 try:
                     await knowledge_application.get_knowledge_asset_file(

@@ -277,6 +277,13 @@ def assert_tool_payload_limits() -> None:
 
 
 def assert_external_progress_events() -> None:
+    reset = {"type": "environment", "status": "succeeded", "turn": 0,
+        "summary": "agent.workspace_reset", "call_id": "environment:private-session:private-guest",
+        "sequence": 8, "output": {"workspace_reset": True}}
+    environment = external_progress_events([reset, reset], "running")
+    assert len(environment) == 1 and environment[0].type == "environment"
+    assert environment[0].stage == "completed" and environment[0].sequence == 8
+    assert "private" not in environment[0].model_dump_json()
     events = [
         # 235: status outside the allowed set is skipped.
         {"type": "thought", "status": "queued", "turn": 1, "summary": "agent.answer_ready"},

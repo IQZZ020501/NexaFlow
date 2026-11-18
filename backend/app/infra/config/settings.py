@@ -113,6 +113,12 @@ class Settings:
     agent_event_poll_seconds: float = 0.5
     agent_external_agent_runs_per_minute: int = 60
     agent_external_consumer_runs_per_minute: int = 10
+    object_storage_backend: str = "local"
+    object_storage_bucket: str = ""
+    object_storage_endpoint: str = ""
+    object_storage_region: str = "us-east-1"
+    object_storage_access_key: str = ""
+    object_storage_secret_key: str = ""
     opensandbox_url: str = "http://127.0.0.1:8088"
     opensandbox_api_key: str = ""
     opensandbox_hosts: tuple[SandboxHost, ...] = ()
@@ -216,6 +222,12 @@ class Settings:
             agent_external_consumer_runs_per_minute=int(
                 os.getenv("AGENT_EXTERNAL_CONSUMER_RUNS_PER_MINUTE", "10")
             ),
+            object_storage_backend=os.getenv("OBJECT_STORAGE_BACKEND", "local"),
+            object_storage_bucket=os.getenv("OBJECT_STORAGE_BUCKET", ""),
+            object_storage_endpoint=os.getenv("OBJECT_STORAGE_ENDPOINT", ""),
+            object_storage_region=os.getenv("OBJECT_STORAGE_REGION", "us-east-1"),
+            object_storage_access_key=os.getenv("OBJECT_STORAGE_ACCESS_KEY", ""),
+            object_storage_secret_key=os.getenv("OBJECT_STORAGE_SECRET_KEY", ""),
             opensandbox_url=os.getenv(
                 "OPENSANDBOX_URL", "http://127.0.0.1:8088"
             ).rstrip("/"),
@@ -259,6 +271,22 @@ class Settings:
         return settings
 
     def validate(self, require_bootstrap: bool = True) -> None:
+        if self.object_storage_backend not in {"local", "s3"}:
+            raise RuntimeError("OBJECT_STORAGE_BACKEND must be local or s3.")
+        if self.object_storage_backend == "s3":
+            if not all((
+                self.object_storage_bucket,
+                self.object_storage_access_key,
+                self.object_storage_secret_key,
+            )):
+                raise RuntimeError("S3 storage requires a bucket and explicit credentials.")
+            if self.object_storage_endpoint:
+                endpoint = urlsplit(self.object_storage_endpoint)
+                if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname
+                    or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
+                    raise RuntimeError("Invalid object storage endpoint.")
+                if self.environment == "production" and endpoint.scheme != "https":
+                    raise RuntimeError("Production object storage requires HTTPS.")
         if self.opensandbox_hosts:
             identifiers = [host.id for host in self.opensandbox_hosts]
             origins = [host.url.rstrip("/") for host in self.opensandbox_hosts]

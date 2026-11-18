@@ -1,5 +1,7 @@
 // Simplified Chinese dictionary; keys are the default (Chinese) copy.
 export const zhHans = {
+  "工作空间本月模型 Token 额度不足，请联系管理员": "工作空间本月模型 Token 额度不足，请联系管理员",
+  "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失": "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失",
   "请先配置 Embedding 模型": "请先配置 Embedding 模型",
   "检索模型测试失败，请检查连接配置后重试": "检索模型测试失败，请检查连接配置后重试",
   "绑定的 Skill 授权已失效，请重新配置": "绑定的 Skill 授权已失效，请重新配置",

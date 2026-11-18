@@ -16,7 +16,8 @@ from app.ports.execution import (
 
 async def restore_conversation_files(
     run: AgentRun, platform: ExecutionPlatform, *, timeout_seconds: float
-) -> None:
+) -> bool:
+    reset = False
     async with get_session_factory()() as db:
         files = await repository.list_conversation_files(db, run)
     # Fetch and transfer one bounded blob at a time, outside DB transactions.
@@ -48,6 +49,8 @@ async def restore_conversation_files(
             ) from exc
         if response.get("ok") is not True:
             raise ExecutionError("Conversation file could not be restored.")
+        reset = reset or bool(response.get("workspace_reset"))
+    return reset
 
 
 __all__ = [

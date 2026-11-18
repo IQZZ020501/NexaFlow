@@ -24,6 +24,12 @@
 
 ## 文件身份与授权
 
+沙箱丢失后的重建与 Worker 重连是不同事件。新 guest 发布与
+`environment` / `agent.workspace_reset` 过程事件在同一数据库事务中提交；
+即使重建发生在导入文件阶段，后续 bash 只报告普通重连，刷新页面仍能看到环境重建提示。
+会话产物和已保存的工作文件按各自授权范围恢复，依赖锁按现有规则重放；
+没有保存的文件、后台服务、浏览器和进程内存不在恢复保证内。
+
 每次导出保留独立 `artifact_id`、`relative_path`、SHA-256 `content_hash` 和同会话同路径的 `previous_artifact_id`。旧数据允许缺少新增元数据。版本身份不依赖可过期的下载地址；两个目录的同名文件分别展示，旧消息继续指向原版本。
 
 | 调用方 | 稳定读取入口 | 每次读取的授权 |
@@ -69,6 +75,31 @@ checkpoint 的 `harness.exact_references`（schema version 1）独立保存文�
 历史读取要求 workspace、application、access_source、consumer、execution_user、conversation 六项身份一致，历史来源必须已成功；本 Run 可读取自身已保存状态。原始文本与结构化引用均作为不可信数据进入模型，不赋予工具或访问权限。
 
 ## 升级与验证
+
+迁移 `202611180002` 增加按工作空间时区划分的月度模型用量和逐请求预留。
+注册 LLM 的每次异步供应商调用（含工具绑定、压缩、Workflow 和子 Run）在发出前
+原子检查 `used_tokens + reserved_tokens`；结算只使用这次供应商报告的用量，
+不重复累加父子 Run 的汇总。无月度限制仍记录用量，但不改变原来的输出参数。
+启用月限额时，预留输入序列化 UTF-8 字节数加 4096 framing 余量，以及请求的输出上限
+（未指定时 4096）；向供应商传递相应输出限制。该准入估算可能高估普通文本输入，
+也不是供应商计费的数学硬上限：特殊输入或供应商计数超出估算时仍记录实际用量，
+后续请求被阻止。Embedding、reranker、VISION 和生图不在本次 LLM 月度账本内，
+不能把它当成覆盖所有外部 API 的金额预算。
+
+超时、取消、Worker 中断或没有 usage 的响应保留预留，避免把可能已计费的请求当成零。
+运维应先在供应商侧核实实际 token，再从 `backend/` 只读查看并显式结算：
+
+```sh
+uv run python -m scripts.reconcile_model_usage --reservation-id RESERVATION_ID
+uv run python -m scripts.reconcile_model_usage --reservation-id RESERVATION_ID --actual-tokens VERIFIED_TOKENS --apply
+```
+
+新账本从升级开始记录，不从历史 Run 汇总反推计费。部署时先完成迁移；
+若在月中启用，需在运维侧考虑升级前的供应商用量。回退前停止模型调用、备份账本，
+再降级代码并保留账本；非空账本的 migration downgrade 会拒绝执行，
+避免丢失已用量和不确定预留。
+回归入口为 `tests.governance.tokens`，显式提供隔离
+`NEXAFLOW_TEST_DATABASE_URL` 时验证 PostgreSQL 并发，否则使用 SQLite。
 
 迁移 `202611160001` 增加请求身份/唯一约束、资源等待、artifact 哈希/前版本，以及会话预留/创建意图。生产仍通过现有 `migrate` 服务升级；不要让新代码先于迁移运行。回滚前需停止相关运行并保存新增元数据，再降级代码/迁移；直接 downgrade 会移除新增元数据。
 

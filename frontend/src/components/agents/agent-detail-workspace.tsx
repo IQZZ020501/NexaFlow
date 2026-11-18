@@ -182,6 +182,8 @@ function processSummary(
     (event.status !== "succeeded" || event.summary === "agent.answer_ready")
   )
     return t("已停止")
+  if (event.type === "environment")
+    return t("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")
   if (event.summary === "agent.analyzing") return t("正在分析问题")
   if (event.summary === "agent.reviewing_tool_results")
     return t("正在整理工具结果")

@@ -31,6 +31,7 @@ from app.infra.storage.object_storage import (
     EmptyObjectError,
     ObjectTooLargeError,
     create_object_storage,
+    with_local_file,
 )
 from app.ports.llm import (
     VISION_MODEL_REQUIRED_MESSAGE,
@@ -285,7 +286,7 @@ async def _upload_files(
     ):
         await _vision_text_extractor(db, agent.workspace_id, settings)
 
-    storage = create_object_storage(settings.knowledge_storage_dir)
+    storage = create_object_storage(settings.knowledge_storage_dir, settings=settings)
     stored: list[WorkflowUpload] = []
     stored_keys: list[str] = []
     total_size = 0
@@ -339,7 +340,7 @@ async def _upload_files(
     except ObjectTooLargeError as exc:
         await db.rollback()
         for object_key in stored_keys:
-            storage.delete(object_key)
+            await asyncio.to_thread(storage.delete, object_key)
         raise HTTPException(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"{application_type.title()} uploads are too large.",
@@ -347,7 +348,7 @@ async def _upload_files(
     except EmptyObjectError as exc:
         await db.rollback()
         for object_key in stored_keys:
-            storage.delete(object_key)
+            await asyncio.to_thread(storage.delete, object_key)
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"{application_type.title()} upload is empty.",
@@ -355,7 +356,7 @@ async def _upload_files(
     except Exception:
         await db.rollback()
         for object_key in stored_keys:
-            storage.delete(object_key)
+            await asyncio.to_thread(storage.delete, object_key)
         raise
 
     return stored
@@ -464,7 +465,7 @@ async def _resolve_workflow_files(
     _validate_upload_policy(ordered, config, "workflow")
     contents: dict[str, str] = {}
     if extract_text:
-        storage = create_object_storage(settings.knowledge_storage_dir)
+        storage = create_object_storage(settings.knowledge_storage_dir, settings=settings)
         image_text_extractor = (
             await _vision_text_extractor(db, agent.workspace_id, settings)
             if any(item.category == "image" for item in ordered)
@@ -476,10 +477,9 @@ async def _resolve_workflow_files(
         try:
             for item in ordered:
                 extracted, _assets = await asyncio.to_thread(
-                    extract_document,
+                    with_local_file, storage, item.object_key, extract_document,
                     item.filename,
                     item.content_type,
-                    storage.path(item.object_key),
                     image_text_extractor=image_text_extractor,
                     supported_extensions=EXTRACTABLE_DOCUMENT_EXTENSIONS,
                 )
@@ -579,7 +579,7 @@ async def _resolve_agent_file_text(
     if sum(item.size_bytes for item in ordered) > MAX_WORKFLOW_UPLOAD_BYTES:
         raise HTTPException(413, "Agent uploads are too large.")
 
-    storage = create_object_storage(settings.knowledge_storage_dir)
+    storage = create_object_storage(settings.knowledge_storage_dir, settings=settings)
     text_only = {
         item.id
         for item in ordered
@@ -599,8 +599,7 @@ async def _resolve_agent_file_text(
                 if "/" not in item.filename and item.filename.lower().endswith(".zip")
                 else MAX_ARTIFACT_BYTES
             )
-            with storage.path(item.object_key).open("rb") as stream:
-                content = stream.read(maximum + 1)
+            content = storage.read_bytes(item.object_key, maximum)
             if len(content) > maximum:
                 raise ValueError("Conversation upload exceeds its size limit.")
             inputs.append((item.filename, content))
@@ -610,7 +609,7 @@ async def _resolve_agent_file_text(
         input_files = await asyncio.to_thread(read_inputs)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    except OSError as exc:
+    except (OSError, ObjectTooLargeError) as exc:
         raise HTTPException(422, "Agent upload could not be read.") from exc
     image_text_extractor = (
         await _vision_text_extractor(db, agent.workspace_id, settings)
@@ -632,10 +631,9 @@ async def _resolve_agent_file_text(
             ):
                 continue
             extracted, _assets = await asyncio.to_thread(
-                extract_document,
+                with_local_file, storage, item.object_key, extract_document,
                 item.filename,
                 item.content_type,
-                storage.path(item.object_key),
                 image_text_extractor=image_text_extractor,
                 supported_extensions=EXTRACTABLE_DOCUMENT_EXTENSIONS,
             )

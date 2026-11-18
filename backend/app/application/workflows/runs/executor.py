@@ -79,6 +79,7 @@ from app.ports.execution import ExecutionScope, close_execution_session, executi
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderTimeoutError,
+    ModelQuotaExceeded,
 )
 from app.ports.mcp import close_mcp_run_sessions
 from app.schemas.workflows.contracts import (
@@ -293,6 +294,8 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
 
 
 def _safe_node_error(exc: Exception) -> str:
+    if isinstance(exc, ModelQuotaExceeded):
+        return str(exc)
     if isinstance(exc, ModelProviderTimeoutError):
         return "Workflow model request timed out."
     if isinstance(exc, ModelProviderError):
