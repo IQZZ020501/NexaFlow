@@ -3,6 +3,7 @@ import tempfile
 from collections.abc import Awaitable, Callable
 from datetime import UTC, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from redis.asyncio import Redis
@@ -22,6 +23,7 @@ from app.infra.db.repositories.governance import inventory as governance_reposit
 from app.infra.db.repositories.governance import (
     settings as workspace_governance_repository,
 )
+from app.infra.storage.object_storage import create_object_storage
 from app.ports.vector_store import check_vector_store_health
 from app.schemas.governance.contracts import (
     AdminHealthResponse,
@@ -99,6 +101,19 @@ def _probe_storage_sync(root: Path) -> None:
 
 
 async def _probe_storage(settings: Settings) -> None:
+    if settings.object_storage_backend == "s3":
+        def probe():
+            storage = create_object_storage(settings.knowledge_storage_dir, settings=settings)
+            key = f".nexaflow-health/{uuid4().hex}"
+            try:
+                storage.put_bytes(key, _STORAGE_PROBE_CONTENT)
+                if storage.read_bytes(key, len(_STORAGE_PROBE_CONTENT)) != _STORAGE_PROBE_CONTENT:
+                    raise OSError("Storage probe content could not be read back.")
+            finally:
+                storage.delete(key)
+
+        await asyncio.to_thread(probe)
+        return
     if settings.knowledge_storage_dir is None:
         raise OSError("Storage directory is not configured.")
     await asyncio.to_thread(_probe_storage_sync, settings.knowledge_storage_dir)

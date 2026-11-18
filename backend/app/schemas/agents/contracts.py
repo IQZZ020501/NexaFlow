@@ -254,7 +254,7 @@ class AgentRunEventResponse(BaseModel):
     sequence: int | None = Field(default=None, exclude_if=lambda value: value is None)
     live_sequence: str | None = Field(default=None, exclude_if=lambda value: value is None)
     stream_epoch: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    type: Literal["thought", "tool"] = "tool"
+    type: Literal["thought", "tool", "environment"] = "tool"
     turn: int
     tool_name: str
     status: Literal["running", "succeeded", "failed"]
@@ -406,7 +406,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
     live_sequence: str | None = Field(default=None, exclude_if=lambda value: value is None)
     stream_epoch: str | None = Field(default=None, exclude_if=lambda value: value is None)
     id: str
-    type: Literal["analysis", "knowledge", "tool", "answer"]
+    type: Literal["analysis", "knowledge", "tool", "answer", "environment"]
     status: Literal["running", "succeeded", "failed"]
     stage: Literal[
         "analyzing",

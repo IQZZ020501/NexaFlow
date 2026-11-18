@@ -75,11 +75,11 @@ async def delete_knowledge_document(
     )
     await db.commit()
     storage = knowledge_object_storage(settings)
-    storage.delete(document.storage_path)
+    await asyncio.to_thread(storage.delete, document.storage_path)
     for object_key in asset_object_keys:
-        storage.delete(object_key)
+        await asyncio.to_thread(storage.delete, object_key)
     if normalized_object_key:
-        storage.delete(normalized_object_key)
+        await asyncio.to_thread(storage.delete, normalized_object_key)
     await asyncio.to_thread(
         delete_vectors,
         settings,

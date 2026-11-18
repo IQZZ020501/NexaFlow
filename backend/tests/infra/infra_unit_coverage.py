@@ -739,7 +739,11 @@ def test_build_registered_models() -> None:
     runtime_settings = settings()
     model = _registered_model()
     chat = build_registered_chat_model(model, runtime_settings)
-    assert type(chat).__name__ == "DeepSeekChatModel"
+    from app.infra.models.metering import MeteredChatModel
+
+    assert isinstance(chat, MeteredChatModel)
+    assert type(chat.model).__name__ == "DeepSeekChatModel"
+    assert chat.model_name == chat.model.model_name
 
     embedding = _registered_model(
         provider="model_custom_provider",

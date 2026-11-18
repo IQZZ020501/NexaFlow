@@ -650,6 +650,18 @@ describe("PublicAgentChat timestamps", () => {
     expect(timestamps).toHaveLength(1)
     expect(timestamps[0]?.getAttribute("datetime")).toBe("2026-08-10T00:00:01Z")
   })
+
+  test("shows an environment reset from persisted public history", async () => {
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [conversation("conv-1", "第一个会话")] },
+      history: { items: [run({ progress: [{
+        id: "environment-1", type: "environment", status: "succeeded",
+        stage: "completed", turn: 0, count: null, hits: [],
+      }] })] },
+    })
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    await screen.findByText("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")
+  })
 })
 
 /* ------------------------------------------------------------------ */

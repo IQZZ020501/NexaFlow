@@ -2,6 +2,7 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Workspace monthly token quota exceeded.": "工作空间本月模型 Token 额度不足，请联系管理员",
   "Artifact workspace path is invalid.": "文件路径无效，请检查文件夹或压缩包",
   "Artifact filename is invalid.": "文件路径无效，请检查文件夹或压缩包",
   "Uploaded file path exceeds 255 characters.": "文件路径过长，最多 255 个字符",

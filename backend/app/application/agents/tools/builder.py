@@ -45,6 +45,7 @@ from app.infra.db.session import get_session_factory
 from app.ports.llm import (
     ModelProviderError,
     ModelProviderStatusError,
+    ModelQuotaExceeded,
 )
 from app.ports.mcp import McpClientError, call_mcp_tool
 from app.schemas.agents.contracts import AgentRunResponse, AgentRunSourceResponse
@@ -497,6 +498,8 @@ def safe_agent_run_error(error: str) -> str:
 
 
 def safe_agent_error(exc: Exception) -> str:
+    if isinstance(exc, ModelQuotaExceeded):
+        return str(exc)
     if isinstance(exc, ModelProviderStatusError):
         return safe_agent_run_error(str(exc))
     if isinstance(exc, AgentRunnerError):

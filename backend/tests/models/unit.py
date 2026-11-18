@@ -320,7 +320,35 @@ def test_reasoning_content_round_trips_in_chat_history() -> None:
     assert "input" in payload
 
 
+def test_metered_chat_preserves_context_window_through_binding() -> None:
+    from langchain_deepseek import ChatDeepSeek
+
+    from app.application.agents.runs.memory import _configured_context_window
+    from app.infra.models.metering import MeteredChatModel
+
+    profile = {"max_input_tokens": 1_000_000, "tool_calling": True}
+    provider = ChatDeepSeek(
+        model="unit-profile-model", api_key="test", profile=profile
+    )
+    registered = SimpleNamespace(meta={})
+    metered = MeteredChatModel(provider, registered)
+    tool = {
+        "name": "echo",
+        "description": "Return a value.",
+        "parameters": {"type": "object", "properties": {}},
+    }
+    for model in (metered, metered.bind(max_tokens=8), metered.bind_tools([tool])):
+        assert model.profile == provider.profile
+        assert _configured_context_window(registered, model) == 1_000_000
+        configured = SimpleNamespace(meta={"context_window_tokens": 65536})
+        assert _configured_context_window(configured, model) == 65536
+
+    provider.profile = None
+    assert MeteredChatModel(provider, registered).profile is None
+
+
 def main() -> None:
+    test_metered_chat_preserves_context_window_through_binding()
     test_reasoning_content_round_trips_in_chat_history()
     test_chat_adapters_normalize_sync_async_and_stream_finish_reasons()
     test_model_type_normalization()

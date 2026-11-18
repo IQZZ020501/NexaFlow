@@ -36,7 +36,7 @@ async def run_upload_storage_cleanup(cleanup_id: str, settings: Settings) -> Non
             return
         try:
             await asyncio.to_thread(
-                create_object_storage(settings.knowledge_storage_dir).delete,
+                create_object_storage(settings.knowledge_storage_dir, settings=settings).delete,
                 cleanup.object_key,
             )
         except Exception as exc:

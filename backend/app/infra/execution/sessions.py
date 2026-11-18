@@ -218,6 +218,7 @@ class SessionStore:
             return session, run, False, stale
 
     async def publish(self, session, *, scope=None, **values):
+        reset = values.pop("workspace_reset", False)
         async with get_session_factory()() as db:
             if scope is not None:
                 info = await repository.run_for_execution(
@@ -233,9 +234,11 @@ class SessionStore:
                 ):
                     raise ExecutionBusy("Run execution lease was lost.")
             saved = await repository.update_owned(db, session, session.holder, **values)
+            if not saved:
+                raise ExecutionBusy("Run sandbox lease was lost.")
+            if reset:
+                await repository.record_workspace_reset(db, session, values["sandbox_id"])
             await db.commit()
-        if not saved:
-            raise ExecutionBusy("Run sandbox lease was lost.")
         for name, value in values.items():
             setattr(session, name, value)
 

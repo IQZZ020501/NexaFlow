@@ -7,7 +7,10 @@ The server must already have the execution image and pinned execd/egress images.
 import argparse
 import asyncio
 import base64
+import json
 import os
+import subprocess
+import sys
 import time
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -28,6 +31,7 @@ from tests.support import settings
 from app.adapters.execution import pool
 from app.adapters.execution.capacity import CapacityScope, SandboxCapacity
 from app.adapters.execution.opensandbox import OpenSandboxExecution
+from app.domain.agents.models import AgentRunState
 from app.domain.execution.models import ExecutionSession as SessionRow
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
@@ -234,6 +238,26 @@ async def assert_live_shell(platform):
     )
     assert takeover["ok"] and takeover["exit_code"] == 0, takeover
 
+    # Lose the guest between commands, then rebuild while importing a saved
+    # artifact. Temporary files disappear; a durable environment event remains
+    # even though the subsequent bash response has workspace_reset=False.
+    assert await platform._destroy_sandbox(platform._sessions[record.id].sandbox)
+    restored = await platform.execute(
+        {"execution_session": "agent_run", "restore_files": {"result.txt": encoded("artifact")}},
+        timeout_seconds=15, max_output_bytes=4096,
+    )
+    assert restored["ok"] and restored["workspace_reset"] is True, restored
+    rebuilt = await platform.execute(
+        {"execution_session": "agent_run", "command": {"command": "test ! -e state && cat outputs/result.txt", "timeout_seconds": 5}},
+        timeout_seconds=15, max_output_bytes=4096,
+    )
+    assert rebuilt["exit_code"] == 0 and rebuilt["stdout"] == "artifact", rebuilt
+    assert not rebuilt.get("workspace_reset"), rebuilt
+    async with sessions.get_session_factory()() as db:
+        run = await runs.get_agent_run_by_id(db, "smoke-run")
+        assert any(event["type"] == "environment" for event in run.events)
+    print("OPENSANDBOX_REBUILD_RECOVERY_OK")
+
 
 async def assert_live_pool_and_capacity(runtime, redis_url):
     """Opt-in shared Redis checks; the URL must be an isolated test instance."""
@@ -327,6 +351,124 @@ async def assert_live_pool_and_capacity(runtime, redis_url):
                 await sdk_pool.shutdown()
                 await sdk_pool.release_all_idle()
                 pool._pools.pop(key, None)
+
+
+async def assert_live_worker_crash(platform):
+    """Kill the execution client process, then fence its live guest command."""
+    database_url = str(sessions.get_session_factory().kw["bind"].url)
+    assert database_url.startswith("sqlite+aiosqlite:///"), "Use the isolated smoke database only"
+    source = '''
+import asyncio, json, os, sys
+from dataclasses import replace
+import tests.support
+from tests.support import settings
+from app.infra.db.session import configure_database
+from app.ports.execution import build_execution_platform, execution_scope, ExecutionScope
+async def main():
+ config = replace(settings(), **json.loads(sys.argv[1]), opensandbox_api_key=os.environ['OPENSANDBOX_API_KEY'])
+ configure_database(config)
+ execution_scope.set(ExecutionScope('smoke-workspace','command','smoke-run','smoke-worker'))
+ await build_execution_platform(config).execute(
+  {'execution_session':'agent_run','command':{'command':'echo kept > crash-state; setsid sleep 120 >/dev/null 2>&1 & echo $! > crash-pid; wait','timeout_seconds':120}},
+  timeout_seconds=130,max_output_bytes=4096)
+asyncio.run(main())
+'''
+    settings = platform.settings
+    options = {"database_url": database_url, "opensandbox_url": settings.opensandbox_url,
+        "opensandbox_image": settings.opensandbox_image, "celery_broker_url": settings.celery_broker_url}
+    record = (await platform.store.for_run("smoke-workspace", "smoke-run"))[0]
+    cached = platform._sessions[record.id].sandbox
+    with TemporaryDirectory(prefix="nexaflow-worker-crash-") as directory:
+        with open(os.path.join(directory, "worker.log"), "w") as output:
+            child = subprocess.Popen([sys.executable, "-c", source, json.dumps(options)],
+                env={**os.environ, "OPENSANDBOX_API_KEY": settings.opensandbox_api_key},
+                stdout=output, stderr=subprocess.STDOUT)
+            try:
+                async with asyncio.timeout(25):
+                    while True:
+                        assert child.poll() is None, "Execution child exited before dispatch"
+                        marker = await cached.commands.run("test -s /workspace/crash-pid")
+                        if marker.exit_code == 0:
+                            break
+                        await asyncio.sleep(0.1)
+                child.kill()
+                assert await asyncio.to_thread(child.wait, timeout=5) < 0
+                # Simulate the expired Run lease being claimed by a new Worker.
+                async with sessions.get_session_factory()() as db:
+                    await db.execute(update(AgentRunState).where(AgentRunState.run_id == "smoke-run").values(worker_task_id="successor"))
+                    await db.execute(update(SessionRow).where(SessionRow.id == record.id).values(holder_expires_at=utc_now()-timedelta(seconds=1)))
+                    await db.commit()
+                await cached.close()
+                platform._sessions.clear()
+                token = execution_scope.set(ExecutionScope("smoke-workspace", "command", "smoke-run", "successor"))
+                try:
+                    result = await platform.execute(
+                        {"execution_session":"agent_run", "command":{"command":"p=$(cat crash-pid); (test ! -e /proc/$p/status || grep -q '^State:.*Z' /proc/$p/status) && cat crash-state", "timeout_seconds":5}},
+                        timeout_seconds=15, max_output_bytes=4096)
+                    assert result["exit_code"] == 0 and result["stdout"].strip() == "kept", result
+                    current = (await platform.store.for_run("smoke-workspace", "smoke-run"))[0]
+                    assert current.sandbox_id == record.sandbox_id
+                    assert not result.get("workspace_reset")
+                finally:
+                    execution_scope.reset(token)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    await asyncio.to_thread(child.wait, timeout=5)
+                async with sessions.get_session_factory()() as db:
+                    await db.execute(update(AgentRunState).where(AgentRunState.run_id == "smoke-run").values(worker_task_id="smoke-worker"))
+                    await db.commit()
+    print("OPENSANDBOX_WORKER_SIGKILL_RECOVERY_OK")
+
+
+async def assert_live_redis_restart(runtime, restart):
+    """Restart an explicit disposable Redis with a live guest and unused slot."""
+    from redis.asyncio import Redis
+
+    runtime = replace(runtime, opensandbox_warm_pool_size=0, opensandbox_max_sandboxes=2)
+    platform = OpenSandboxExecution(runtime)
+    token = execution_scope.set(ExecutionScope("smoke-workspace", "command", "smoke-run", "smoke-worker"))
+    try:
+        async with sessions.get_session_factory()() as db:
+            from app.domain.agents.models import AgentRunSnapshot
+
+            snapshot = await db.get(AgentRunSnapshot, "smoke-run")
+            snapshot.application_snapshot = {**snapshot.application_snapshot,
+                "sandbox_requirements": {"schema_version": 1, "profiles": ["standard", "standard"]}}
+            await db.commit()
+        command = {"execution_session": "agent_run", "command": {"command": "echo retained > redis-state", "timeout_seconds": 5}}
+        result = await platform.execute(command, timeout_seconds=15, max_output_bytes=4096)
+        assert result["exit_code"] == 0, result
+        before = (await platform.store.for_run("smoke-workspace", "smoke-run"))[0]
+        assert len(before.capacity_reservation["profiles"]) == 2
+        await restart()
+        redis = Redis.from_url(runtime.celery_broker_url)
+        try:
+            assert await redis.zcard(platform.capacity.key) == 0
+            capacity_scope = CapacityScope(workspace_key="other-workspace")
+
+            async def reserve(records):
+                await platform.capacity.restore(records)
+                assert await redis.zcard(platform.capacity.key) == 2
+                return await platform.capacity.acquire(30, capacity_scope), {}
+
+            try:
+                await platform.store.admit(runtime, None, None, reserve)
+            except ExecutionBusy:
+                pass
+            else:
+                raise AssertionError("Redis restart lost the unused resource promise")
+            result = await platform.execute(
+                {"execution_session": "agent_run", "command": {"command": "cat redis-state", "timeout_seconds": 5}},
+                timeout_seconds=15, max_output_bytes=4096)
+            after = (await platform.store.for_run("smoke-workspace", "smoke-run"))[0]
+            assert after.sandbox_id == before.sandbox_id and result["stdout"].strip() == "retained"
+        finally:
+            await redis.aclose()
+    finally:
+        await platform.close_session("smoke-workspace", "smoke-run")
+        execution_scope.reset(token)
+    print("OPENSANDBOX_REDIS_RESTART_RECOVERY_OK")
 
 
 async def assert_live_workspace_quota(platform):
@@ -548,6 +690,7 @@ async def run_checks(runtime) -> None:
         assert session_result.get("ok"), session_result
         assert session_result["stdout"].strip() == "7", session_result
         await assert_live_shell(platform)
+        await assert_live_worker_crash(platform)
         await assert_live_workspace_quota(platform)
         await assert_live_export_reads(platform)
         await assert_live_execution_deadline(platform)
@@ -587,8 +730,8 @@ async def run(url: str, image: str, redis_url: str | None = None) -> None:
     )
     async with isolated_run_store(runtime):
         await run_checks(runtime)
-    if redis_url:
-        await assert_live_pool_and_capacity(runtime, redis_url)
+        if redis_url:
+            await assert_live_pool_and_capacity(runtime, redis_url)
 
 
 def main() -> None:

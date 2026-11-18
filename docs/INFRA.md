@@ -54,7 +54,13 @@
 
 ### app/infra/storage/
 
-- `backend/app/infra/storage/object_storage.py` — `ObjectStorage` 协议端口（业务领域消费，绝不依赖具体类）与 `LocalObjectStorage` 实现、`ObjectStorageError`/`ObjectTooLargeError`/`EmptyObjectError` 错误层次；用于 Artifact/生成文件的二进制持久化（同步 `put_bytes` 与流式 `put_chunks`、`delete_prefix` 过期清理）。
+- `backend/app/infra/storage/object_storage.py` — 知识文件、资产和临时上传共用的 `ObjectStorage` 协议：元信息、读取流、有界字节读取、临时文件 materialize、写入及清理。协议不要求本地路径；`LocalObjectStorage.path` 只保留给本地实现兼容使用。业务解析通过 `with_local_file` 在线程内 materialize，下载通过原授权 API 流式输出。会话生成文件和工作文件版本由 PostgreSQL 保存。
+- `backend/app/infra/storage/s3.py` — 私有 S3 兼容实现，固定连接/读取超时与有限重试，不创建公开 URL；生产自定义 endpoint 要求 HTTPS。配置、SHA-256 迁移和回退边界见 [部署](DEPLOYMENT.md#私有对象存储与迁移)。
+- 系统存储健康检查在 S3 模式下真实写入、回读并清理随机探针对象；不会因为本机目录可写就将远端存储报告为健康。
+
+### app/infra/models/
+
+- `metering.py` — 注册 LLM 每次异步请求的月度 token 准入与结算，复用 PostgreSQL 原子计数；超时、取消和缺少 usage 时保留不确定预留。压缩、工具绑定、Workflow 和子 Run 经过相同边界，Run 汇总不二次扣费。范围及估算限制见 [运行可靠性](RUN_RELIABILITY.md#升级与验证)。
 
 ### app/infra/sandbox/
 

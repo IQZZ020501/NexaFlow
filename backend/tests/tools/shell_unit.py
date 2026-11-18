@@ -148,7 +148,7 @@ async def check():
         patch.object(shell, "installed_dependency_plans", AsyncMock(return_value=[])),
         patch.object(shell, "require_pinned_skill_access", AsyncMock()) as access,
         patch.object(shell, "build_execution_platform", return_value=platform),
-        patch.object(shell, "restore_conversation_files", AsyncMock()) as restore,
+        patch.object(shell, "restore_conversation_files", AsyncMock(return_value=False)) as restore,
         patch.object(
             shell, "create_generated_artifact", AsyncMock(return_value=link)
         ) as create,
@@ -187,6 +187,13 @@ async def check():
         assert result.data["artifacts"][0]["artifact_id"] == "artifact"
         assert result.data["truncated"] is True
         assert result.data["result_id"] == context.idempotency_key
+        # Rebuilding while importing saved files must survive the later command,
+        # whose response only knows it reconnected to an existing guest.
+        response["workspace_reset"] = False
+        restore.return_value = True
+        restored_result = await shell.execute_shell(config, {"command": "true"}, context)
+        assert restored_result.data["workspace_reset"] is True
+        restore.return_value = False
         original = json.loads(result.full_result)
         assert original["stdout"] == response["stdout"]
         assert original["stderr"] == response["stderr"]

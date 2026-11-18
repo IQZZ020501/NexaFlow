@@ -1,7 +1,8 @@
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -15,8 +16,8 @@ from app.application.knowledge.documents.service import (
     get_knowledge_asset_file,
     get_knowledge_base,
     get_knowledge_document,
+    get_knowledge_document_file,
     get_knowledge_document_markdown_file,
-    knowledge_document_path,
     require_knowledge_base_permission,
     set_knowledge_document_active,
 )
@@ -35,7 +36,7 @@ router = APIRouter(
 
 @router.get(
     "/{knowledge_base_id}/documents/{document_id}/download",
-    response_class=FileResponse,
+    response_class=StreamingResponse,
 )
 async def download_workspace_knowledge_base_document(
     knowledge_base_id: str,
@@ -43,7 +44,7 @@ async def download_workspace_knowledge_base_document(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> FileResponse:
+) -> StreamingResponse:
     knowledge_base = await get_knowledge_base(
         db,
         context.workspace.id,
@@ -61,22 +62,21 @@ async def download_workspace_knowledge_base_document(
         document_id,
         include_staged=permission == "edit",
     )
-    document_path = knowledge_document_path(settings, document.storage_path)
-    if not document_path.is_file():
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "Document file is missing.",
-        )
-    return FileResponse(
-        document_path,
+    content = await get_knowledge_document_file(settings, document.storage_path)
+    return StreamingResponse(
+        content,
         media_type="application/octet-stream",
-        filename=document.filename,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(document.filename)}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
 @router.get(
     "/{knowledge_base_id}/documents/{document_id}/content",
-    response_class=FileResponse,
+    response_class=StreamingResponse,
 )
 async def read_workspace_knowledge_document_markdown(
     knowledge_base_id: str,
@@ -84,7 +84,7 @@ async def read_workspace_knowledge_document_markdown(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> FileResponse:
+) -> StreamingResponse:
     knowledge_base = await get_knowledge_base(
         db,
         context.workspace.id,
@@ -102,17 +102,21 @@ async def read_workspace_knowledge_document_markdown(
         document_id,
         include_staged=permission == "edit",
     )
-    markdown_path = get_knowledge_document_markdown_file(document, settings)
-    return FileResponse(
-        markdown_path,
+    content = await get_knowledge_document_markdown_file(document, settings)
+    return StreamingResponse(
+        content,
         media_type="text/markdown; charset=utf-8",
-        content_disposition_type="inline",
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
 @router.get(
     "/{knowledge_base_id}/documents/{document_id}/assets/{asset_id}",
-    response_class=FileResponse,
+    response_class=StreamingResponse,
 )
 async def read_workspace_knowledge_document_asset(
     knowledge_base_id: str,
@@ -121,7 +125,7 @@ async def read_workspace_knowledge_document_asset(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> FileResponse:
+) -> StreamingResponse:
     knowledge_base = await get_knowledge_base(
         db,
         context.workspace.id,
@@ -139,18 +143,21 @@ async def read_workspace_knowledge_document_asset(
         document_id,
         include_staged=permission == "edit",
     )
-    asset, asset_path = await get_knowledge_asset_file(
+    asset, content = await get_knowledge_asset_file(
         db,
         knowledge_base,
         document_id,
         asset_id,
         settings,
     )
-    return FileResponse(
-        asset_path,
+    return StreamingResponse(
+        content,
         media_type=asset.content_type,
-        filename=asset.filename,
-        content_disposition_type="inline",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(asset.filename)}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
     )
 
 

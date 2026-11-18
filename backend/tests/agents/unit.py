@@ -1110,6 +1110,9 @@ def test_safe_agent_error_classification() -> None:
     provider_error = ModelProviderError("boom")
     assert safe_agent_error(provider_error) == "Agent model request failed."
     assert safe_agent_error(ValueError("other")) == "Agent execution failed."
+    from app.ports.llm import ModelQuotaExceeded
+
+    assert safe_agent_error(ModelQuotaExceeded()) == "Workspace monthly token quota exceeded."
 
 
 def test_agent_reasoning_content_accepts_provider_variants() -> None:

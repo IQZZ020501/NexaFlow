@@ -1616,6 +1616,19 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getByText("First chunk, continued")).toBeTruthy()
   })
 
+  test("shows a persisted environment reset after loading history", () => {
+    const run = makeRun({ events: [{
+      type: "environment", turn: 0, tool_name: "", status: "succeeded",
+      summary: "agent.workspace_reset", call_id: "environment:session:guest",
+      tool_label: "", tool_kind: "unknown", server_name: "", input: {},
+      output: { workspace_reset: true }, duration_ms: 0,
+    }] })
+    renderPage(<Harness activeView="settings" runs={[run]} />)
+    fireEvent.click(screen.getByText("执行过程"))
+    expect(screen.getByText("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")).toBeTruthy()
+    expect(screen.queryByText("environment:session:guest")).toBeNull()
+  })
+
   test("shows bash commands and nonzero exit codes in the console timeline", () => {
     const run = makeRun({
       events: [

@@ -504,6 +504,8 @@ function PublicExecutionProcess({
       (event.status !== "succeeded" || event.type === "answer")
     )
       return t("已停止")
+    if (event.type === "environment")
+      return t("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")
     if (event.type === "knowledge") return t("知识库检索")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer" && effectiveStatus(event) === "failed")

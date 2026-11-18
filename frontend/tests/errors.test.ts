@@ -9,6 +9,12 @@ function tFor(language: Language): TFunction {
 }
 
 describe("API error localization", () => {
+  test("localizes workspace token admission failures", () => {
+    const error = new Error("Workspace monthly token quota exceeded.")
+    expect(getErrorMessage(error, tFor("zh-Hans"))).toContain("额度不足")
+    expect(getErrorMessage(error, tFor("zh-Hant"))).toContain("額度不足")
+    expect(getErrorMessage(error, tFor("en"))).toContain("token quota")
+  })
   test("localizes upload errors and identifies fields in server validation errors", () => {
     expect(getErrorMessage(new ApiError(422, "Document is empty."), tFor("zh-Hans"))).toContain("0 字节")
     expect(getErrorMessage(new ApiError(422, "validation", [

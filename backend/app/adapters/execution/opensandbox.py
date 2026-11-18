@@ -419,6 +419,7 @@ class OpenSandboxExecution:
                     staged_packages=[],
                     environments={},
                     creation_pending=False,
+                    workspace_reset=reset,
                 )
             except BaseException:
                 await self._destroy_sandbox(sandbox, deadline=deadline)

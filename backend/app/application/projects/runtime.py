@@ -88,6 +88,7 @@ async def restore_project_files(run, platform, *, timeout_seconds):
         project = await _authorized_project(db, run)
         state = await _cursor(db, run, project)
         files = await _versions(db, project, state)
+    reset = False
     for path, file in files.items():
         if file.deleted:
             continue
@@ -112,7 +113,8 @@ async def restore_project_files(run, platform, *, timeout_seconds):
             ) from exc
         if response.get("ok") is not True:
             raise ExecutionNotStarted("Project file could not be restored.")
-    return True
+        reset = reset or bool(response.get("workspace_reset"))
+    return {"workspace_reset": reset}
 
 
 def _manifest(response):

@@ -169,6 +169,17 @@ async def check():
                 config, replace(scope, worker_task_id="worker-2"), 10
             )
             assert reset and replacement.id != current.id
+            await store.publish(replacement, sandbox_id="rebuilt", state="ready", workspace_reset=True)
+            async with factory() as db:
+                restored = await runs.get_agent_run_by_id(db, run.id)
+                resets = [event for event in restored.events if event["type"] == "environment"]
+                assert len(resets) == 1 and resets[0]["output"]["workspace_reset"] is True
+            await store.release(replacement)
+            replacement, _, reset, _ = await store.acquire(config, replace(scope, worker_task_id="worker-2"), 10)
+            assert not reset and replacement.sandbox_id == "rebuilt"
+            async with factory() as db:
+                restored = await runs.get_agent_run_by_id(db, run.id)
+                assert len([event for event in restored.events if event["type"] == "environment"]) == 1
             async with factory() as db:
                 try:
                     await repository.create(

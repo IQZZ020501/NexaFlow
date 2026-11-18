@@ -49,7 +49,7 @@ export type ExternalAgentProgressEvent = {
   live_sequence?: string
   stream_epoch?: string
   id: string
-  type: "analysis" | "knowledge" | "tool" | "answer"
+  type: "analysis" | "knowledge" | "tool" | "answer" | "environment"
   status: "running" | "succeeded" | "failed"
   stage:
     | "analyzing"

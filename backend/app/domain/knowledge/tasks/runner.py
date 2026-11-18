@@ -210,10 +210,10 @@ async def run_parse_task(
     except Exception:
         await db.rollback()
         for object_key in written_object_keys:
-            storage.delete(object_key)
+            await asyncio.to_thread(storage.delete, object_key)
         raise
     for object_key in stale_object_keys:
-        storage.delete(object_key)
+        await asyncio.to_thread(storage.delete, object_key)
     ensure_knowledge_task_lease(lease_lost)
     await asyncio.to_thread(
         delete_vectors,

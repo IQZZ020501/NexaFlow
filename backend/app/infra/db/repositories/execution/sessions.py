@@ -143,6 +143,20 @@ async def get(db, session_id):
     return to_entity(ExecutionSession, row) if row else None
 
 
+async def record_workspace_reset(db, session, sandbox_id):
+    from app.infra.db.repositories.runs.events import append_agent_run_event
+
+    await append_agent_run_event(db, session.workspace_id, session.run_id, {
+        "type": "process",
+        "event": {
+            "type": "environment", "turn": 0, "tool_name": "",
+            "call_id": f"environment:{session.id}:{sandbox_id}",
+            "status": "succeeded", "summary": "agent.workspace_reset",
+            "output": {"workspace_reset": True},
+        },
+    })
+
+
 async def for_run(db, workspace_id, run_id):
     rows = (
         await db.scalars(

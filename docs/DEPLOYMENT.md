@@ -129,6 +129,58 @@ docker compose down
 
 从独立 `api` / `frontend` / `worker` / `agent-worker` 的旧拓扑升级时，先用旧配置执行 `docker compose down` 再替换文件；若已换成新配置，先执行 `docker compose down --remove-orphans`。之后再拉取并启动，避免旧 Worker 与新 `app` 同时运行。`app` 中包含唯一的 Beat，不能通过 `--scale app=N` 扩容。
 
+需要增加 Agent/Workflow 并发时，根 Compose 的可选 `agent-workers` profile
+只增加 `--role=agents` 进程，不启动第二个 Beat，也不开放端口：
+
+```sh
+docker compose --profile agent-workers up -d --wait --scale agent-worker=2
+```
+
+这里的 `2` 是额外 Worker 容器数；默认 `app` 仍有一个 Agent Worker。
+Worker 数量不增加沙箱容量，必须共享同一数据库、Redis、对象存储和执行主机目录。
+本机 local 存储可共享现有上传卷；跨机器 Worker 应先完成下述存储迁移。
+新增服务复用 `x-images.app`；发布此改动后须使用包含新代码的应用 digest。
+
+### 私有对象存储与迁移
+
+默认 `OBJECT_STORAGE_BACKEND=local` 保留单机持久卷。多业务节点可选择共享文件系统，
+或在共享 `x-backend-environment` 配置 `OBJECT_STORAGE_BACKEND=s3`、
+`OBJECT_STORAGE_BUCKET`、`OBJECT_STORAGE_REGION`、`OBJECT_STORAGE_ACCESS_KEY`、
+`OBJECT_STORAGE_SECRET_KEY`；S3 兼容服务另配 `OBJECT_STORAGE_ENDPOINT`。
+生产自定义 endpoint 要求 HTTPS。凭据只下发后端，桶保持私有；至少授权对应桶的
+Get/Head/Put/List/Delete，不设置 public ACL。API 与所有 Worker 必须使用相同配置。
+
+知识文档、canonical Markdown、附件资产和一次性上传通过同一存储接口访问。
+下载保持原有 HTTP 授权，解析器在线程内临时下载到本地，结束后清理；
+会话产物和持久工作文件版本继续由 PostgreSQL 保存。
+对象存储不提供跨 PostgreSQL 的原子事务，已有持久清理意图和 Beat 恢复机制仍须保留。
+远端对象需纳入独立备份及生命周期策略，不能把可被引用的知识文件统一设成 24 小时过期。
+
+切换前暂停新上传及执行，等待在途任务结束并备份 PostgreSQL、上传目录。
+在有私密目标存储配置的源码环境，从 `backend/` 执行
+（默认只读；不打印对象名和凭据）：
+
+```sh
+uv run python -m scripts.migrate_object_storage --source-root /absolute/path/to/uploads
+uv run python -m scripts.migrate_object_storage --source-root /absolute/path/to/uploads --copy
+uv run python -m scripts.migrate_object_storage --source-root /absolute/path/to/uploads
+```
+
+部署容器内使用同一应用镜像自带的 Python 和脚本，例如：
+
+```sh
+docker compose run --rm --no-deps app python -m scripts.migrate_object_storage --source-root /data/knowledge
+```
+
+复制阶段给该命令追加 `--copy`。对账脚本同样可用
+`docker compose run --rm --no-deps app python -m scripts.reconcile_model_usage ...`。
+
+首轮缺少对象返回 2。`--copy` 只复制缺少的 key，逐文件验证 SHA-256；
+已有对象内容不一致时停止，不覆盖或删除源文件。最后一轮必须 `missing=0`。
+再统一切换 API/Worker 配置，检查旧文档下载、Markdown/资产、上传解析与删除清理后恢复流量。
+尚未恢复写入时可切回保留的 local 卷；切换后有新文件写入时，先停写并把增量同步回来，
+不能直接退回旧目录。不要让 local 和 S3 Worker 混跑。
+
 ### 资源容量
 
 以下建议按模型、Embedding 和 reranker 使用外部 API、知识库数据较少、普通 Docker 单机部署估算，不含本地模型推理资源，也不是已完成满载压测的硬件下限：

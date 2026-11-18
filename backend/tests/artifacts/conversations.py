@@ -149,10 +149,13 @@ async def check():
                     row.expires_at = now - timedelta(days=1)
                 await db.commit()
             await service.cleanup_expired_generated_artifacts()
-            platform = SimpleNamespace(execute=AsyncMock(return_value={"ok": True}))
-            await workspace.restore_conversation_files(
+            platform = SimpleNamespace(execute=AsyncMock(side_effect=[
+                {"ok": True, "workspace_reset": True}, {"ok": True, "workspace_reset": False},
+            ]))
+            reset = await workspace.restore_conversation_files(
                 current, platform, timeout_seconds=10
             )
+            assert reset is True
             restored = {}
             for call in platform.execute.await_args_list:
                 for path, content in call.args[0]["restore_files"].items():

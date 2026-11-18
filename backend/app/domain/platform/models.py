@@ -17,6 +17,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.domain.governance.models import (  # noqa: F401
+    ModelUsageReservation,
+    WorkspaceTokenMonth,
+)
 from app.entities.defaults import APP_TIMEZONE_NAME, new_id, utc_now
 from app.entities.email.smtp import SMTP_SETTINGS_ID
 from app.infra.db.base import Base
