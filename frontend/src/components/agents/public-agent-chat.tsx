@@ -32,6 +32,10 @@ import {
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import {
+  AgentReasoningStep,
+  useAgentProcessDisclosure,
+} from "@/components/agents/agent-reasoning-step"
 import { useAgentFileDrop } from "@/components/agents/use-agent-file-drop"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
@@ -119,43 +123,6 @@ type PublicAgentChatProps = {
   initialConversationId?: string | null
 }
 
-function ReasoningBlock({ reasoning }: { reasoning: string }) {
-  const scrollRef = React.useRef<HTMLDivElement>(null)
-  const shouldFollowRef = React.useRef(true)
-
-  React.useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (!element || !shouldFollowRef.current) return
-
-    const scrollToBottom = () => {
-      if (!shouldFollowRef.current) return
-      element.scrollTop = element.scrollHeight
-    }
-    scrollToBottom()
-    const frame = requestAnimationFrame(scrollToBottom)
-    const resizeObserver = new ResizeObserver(scrollToBottom)
-    resizeObserver.observe(element)
-    return () => {
-      cancelAnimationFrame(frame)
-      resizeObserver.disconnect()
-    }
-  }, [reasoning])
-
-  return (
-    <div
-      ref={scrollRef}
-      className="mt-1 ml-5 max-h-48 overflow-y-auto border-l pl-3 break-words whitespace-pre-wrap text-foreground/80"
-      onScroll={(event) => {
-        const element = event.currentTarget
-        shouldFollowRef.current =
-          element.scrollHeight - element.scrollTop - element.clientHeight < 32
-      }}
-    >
-      {reasoning}
-    </div>
-  )
-}
-
 export function publicToolName(
   event: ExternalAgentProgressEvent,
   t?: TFunction
@@ -201,7 +168,7 @@ function PublicToolEventRow({
 
   const leading = (
     <>
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+      <span className="flex size-3.5 shrink-0 items-center justify-center">
         {event.type === "knowledge" ? (
           <DatabaseIcon className="size-3.5" />
         ) : (
@@ -211,8 +178,8 @@ function PublicToolEventRow({
           />
         )}
       </span>
-      <span className="min-w-0 flex-1 leading-4">
-        <span className="block truncate text-[13px] font-medium text-foreground">
+      <span className="flex min-w-0 flex-1 items-baseline gap-2 leading-5">
+        <span className="min-w-0 truncate text-xs">
           {title}
           {event.server_name ? (
             <span className="ml-1 font-normal text-muted-foreground">
@@ -221,7 +188,7 @@ function PublicToolEventRow({
           ) : null}
         </span>
         {detail ? (
-          <span className="block truncate text-[11px] text-muted-foreground">
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
             {detail}
           </span>
         ) : null}
@@ -231,24 +198,26 @@ function PublicToolEventRow({
   )
 
   return (
-    <div className="overflow-hidden rounded-md border border-border/70 bg-background/60">
+    <div className="min-w-0">
       {canExpand ? (
         <button
           type="button"
-          className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex w-full items-center gap-2 rounded-sm px-1 py-1.5 text-left text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-expanded={isOpen}
           onClick={() => setIsOpen((current) => !current)}
         >
           {leading}
           <ChevronDownIcon
-            className={`size-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+            className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
           />
         </button>
       ) : (
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5">{leading}</div>
+        <div className="flex items-center gap-2 px-1 py-1.5 text-muted-foreground">
+          {leading}
+        </div>
       )}
       {canExpand && isOpen ? (
-        <div className="grid gap-2.5 border-t bg-muted/20 p-2.5 text-xs">
+        <div className="mt-1 mb-2 ml-6 grid min-w-0 gap-2.5 border-l pl-3 text-xs">
           {Object.keys(event.input ?? {}).length > 0 ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -454,10 +423,10 @@ function PublicPendingToolCall({
       detail={
         call.status === "approved" || call.status === "pending"
           ? t("等待执行")
-          : t("正在调用 {name}", { name: title })
+          : t("运行中")
       }
       statusIcon={
-        <LoaderCircleIcon className="size-4 animate-spin text-sky-600" />
+        <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
       }
     />
   )
@@ -483,7 +452,9 @@ function PublicExecutionProcess({
   children?: React.ReactNode
 }) {
   const { t } = useLanguage()
-  const [isOpen, setIsOpen] = React.useState(true)
+  const { isOpen, onToggle } = useAgentProcessDisclosure(
+    completed ? "succeeded" : run.status
+  )
   const timeline = React.useMemo(() => {
     if (progress.some((event) => event.type === "analysis")) {
       return progress
@@ -551,7 +522,7 @@ function PublicExecutionProcess({
     if (event.stage === "waiting_resources" && status === "running")
       return executionWaitSummary(event.output, t)
     if (status === "running") {
-      return t("正在调用 {name}", { name: title(event) })
+      return t("运行中")
     }
     if (status === "failed") {
       return typeof event.output === "string" && event.output
@@ -567,63 +538,62 @@ function PublicExecutionProcess({
   function statusIcon(event: ExternalAgentProgressEvent) {
     const status = effectiveStatus(event)
     if (status === "running") {
-      return <LoaderCircleIcon className="size-4 animate-spin text-sky-600" />
+      return (
+        <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
+      )
     }
     if (status === "failed") {
-      return <CircleXIcon className="size-4 text-destructive" />
+      return <CircleXIcon className="size-3.5 shrink-0 text-destructive" />
     }
-    return <CircleCheckIcon className="size-4 text-emerald-600" />
+    return <CircleCheckIcon className="size-3.5 shrink-0" />
   }
 
   if (timeline.length === 0 && runCancelled && !hasToolCalls) return null
 
   return (
-    <details
-      className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
-      open={isOpen}
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
-    >
-      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-        <BrainIcon className="size-4" />
-        <span className="flex-1">{t("执行过程")}</span>
-        <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
-      </summary>
-      <div className="mt-2 space-y-1.5 border-l pl-3">
-        {timeline.length === 0 && !hasToolCalls ? (
-          <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
-            <LoaderCircleIcon className="size-4 animate-spin" />
-            {t(run.status === "queued" ? "等待执行" : "正在生成回答")}
-          </div>
-        ) : (
-          timeline.map((event) => {
-            const eventDetail = detail(event)
-            return event.type === "knowledge" || event.type === "tool" ? (
-              <PublicToolEventRow
-                key={event.id}
-                event={event}
-                title={title(event)}
-                detail={eventDetail}
-                statusIcon={statusIcon(event)}
-              />
-            ) : (
-              <div
-                key={event.id}
-                className="px-1 py-1 text-xs text-muted-foreground"
-              >
-                <div className="flex items-center gap-2">
-                  {statusIcon(event)}
-                  <span>{title(event)}</span>
-                </div>
-                {event.reasoning ? (
-                  <ReasoningBlock reasoning={event.reasoning} />
-                ) : null}
-              </div>
-            )
-          })
-        )}
-        {children}
-      </div>
-    </details>
+    <>
+      <details className="group mb-4 text-sm" open={isOpen} onToggle={onToggle}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+          <BrainIcon className="size-3.5" />
+          <span className="flex-1">{t("执行过程")}</span>
+          <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="mt-1 ml-1.5 space-y-0.5 border-l border-border/70 pl-3">
+          {timeline.length === 0 && !hasToolCalls ? (
+            <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
+              <LoaderCircleIcon className="size-4 animate-spin" />
+              {t(run.status === "queued" ? "等待执行" : "正在生成回答")}
+            </div>
+          ) : (
+            timeline.map((event) => {
+              const eventDetail = detail(event)
+              return event.type === "knowledge" || event.type === "tool" ? (
+                <PublicToolEventRow
+                  key={event.id}
+                  event={event}
+                  title={title(event)}
+                  detail={eventDetail}
+                  statusIcon={statusIcon(event)}
+                />
+              ) : (
+                <AgentReasoningStep
+                  key={event.id}
+                  title={title(event)}
+                  status={effectiveStatus(event)}
+                  reasoning={event.reasoning}
+                />
+              )
+            })
+          )}
+          {isOpen ? children : null}
+        </div>
+      </details>
+      {!isOpen && hasToolCalls ? (
+        <div className="mb-3 ml-1.5 space-y-1.5 border-l border-border/70 pl-3">
+          {children}
+        </div>
+      ) : null}
+    </>
   )
 }
 

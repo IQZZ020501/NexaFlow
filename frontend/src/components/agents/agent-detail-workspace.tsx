@@ -35,6 +35,10 @@ import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import {
+  AgentReasoningStep,
+  useAgentProcessDisclosure,
+} from "@/components/agents/agent-reasoning-step"
 import { useAgentFileDrop } from "@/components/agents/use-agent-file-drop"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Badge } from "@/components/ui/badge"
@@ -245,18 +249,28 @@ function ToolEventDetails({
       ? t("知识库检索")
       : processToolName(event, t)
   const label = toolName
-  const detail = isPreparing ? null : processSummary(event, run, t)
   const status = effectiveProcessStatus(event, run.status)
+  const detail = isPreparing
+    ? null
+    : event.summary === "agent.tool_running"
+      ? t(
+          status === "running"
+            ? "运行中"
+            : status === "failed"
+              ? "调用失败"
+              : "完成"
+        )
+      : processSummary(event, run, t)
 
   return (
-    <div className="overflow-hidden rounded-md border border-border/70 bg-background/60">
+    <div className="min-w-0">
       <button
         type="button"
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="flex w-full items-center gap-2 rounded-sm px-1 py-1.5 text-left text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
       >
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-500/10 text-sky-700 dark:text-sky-400">
+        <span className="flex size-3.5 shrink-0 items-center justify-center">
           {event.tool_kind === "knowledge" ? (
             <DatabaseIcon className="size-3.5" />
           ) : (
@@ -266,8 +280,8 @@ function ToolEventDetails({
             />
           )}
         </span>
-        <span className="min-w-0 flex-1 leading-4">
-          <span className="block truncate text-[13px] font-medium text-foreground">
+        <span className="flex min-w-0 flex-1 items-baseline gap-2 leading-5">
+          <span className="min-w-0 truncate text-xs">
             {label}
             {event.server_name ? (
               <span className="ml-1 font-normal text-muted-foreground">
@@ -275,23 +289,25 @@ function ToolEventDetails({
               </span>
             ) : null}
           </span>
-          <span className="block truncate text-[11px] text-muted-foreground">
-            {detail}
-          </span>
+          {detail ? (
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              {detail}
+            </span>
+          ) : null}
         </span>
         {status === "running" ? (
-          <LoaderCircleIcon className="size-3.5 animate-spin text-sky-600" />
+          <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
         ) : status === "succeeded" ? (
-          <CircleCheckIcon className="size-3.5 text-emerald-600" />
+          <CircleCheckIcon className="size-3.5 shrink-0" />
         ) : (
-          <CircleXIcon className="size-3.5 text-destructive" />
+          <CircleXIcon className="size-3.5 shrink-0 text-destructive" />
         )}
         <ChevronDownIcon
-          className={`size-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+          className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
         />
       </button>
       {isOpen ? (
-        <div className="grid gap-2.5 border-t bg-muted/20 p-2.5 text-xs">
+        <div className="mt-1 mb-2 ml-6 grid min-w-0 gap-2.5 border-l pl-3 text-xs">
           {event.tool_name === "bash" &&
           event.output &&
           typeof event.output === "object" &&
@@ -418,24 +434,12 @@ function ProcessTimelineRows({
         t={t}
       />
     ) : (
-      <div
+      <AgentReasoningStep
         key={`${event.type}-${event.turn}-${index}`}
-        className="relative px-1 text-xs leading-5 text-muted-foreground"
-      >
-        <div className="flex items-start gap-2">
-          {effectiveProcessStatus(event, run.status) === "running" ? (
-            <LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin" />
-          ) : effectiveProcessStatus(event, run.status) === "succeeded" ? (
-            <CircleCheckIcon className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-          ) : (
-            <CircleXIcon className="mt-0.5 size-3.5 shrink-0 text-destructive" />
-          )}
-          <span>{processSummary(event, run, t)}</span>
-        </div>
-        {event.reasoning ? (
-          <ReasoningContent reasoning={event.reasoning} />
-        ) : null}
-      </div>
+        title={processSummary(event, run, t)}
+        status={effectiveProcessStatus(event, run.status)}
+        reasoning={event.reasoning}
+      />
     )
   )
 }
@@ -592,7 +596,8 @@ function RunExchange({
       visibleTimeline.some(
         ({ event }) => event.type === "tool" && event.status === "running"
       ))
-  const [isProcessOpen, setIsProcessOpen] = React.useState(true)
+  const { isOpen: isProcessOpen, onToggle: onProcessToggle } =
+    useAgentProcessDisclosure(run.status)
   const [editDraft, setEditDraft] = React.useState<string | null>(null)
   const collapsedProcessStatus = collapsedProcessStatusKey(
     run.status,
@@ -605,6 +610,22 @@ function RunExchange({
   const answerStartedAt = run.events.findLast(
     (event) => event.summary === "agent.answer_ready"
   )?.created_at
+  const inlineToolSteps = inlineToolCalls.map((call) =>
+    ["awaiting_approval", "uncertain"].includes(call.status) ? (
+      <InlineToolApproval
+        key={call.call_id}
+        runId={run.id}
+        call={call}
+        resolvingCallId={resolvingCallId}
+        onDecision={(callId, decision) =>
+          onToolCallDecision(run.id, callId, decision)
+        }
+        t={t}
+      />
+    ) : (
+      <PendingToolEvent key={call.call_id} call={call} run={run} t={t} />
+    )
+  )
   return (
     <article className="flex flex-col gap-5">
       <div className="ml-auto flex max-w-[85%] min-w-0 flex-col items-end gap-1">
@@ -693,16 +714,13 @@ function RunExchange({
                 <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
                   {visibleProcessTimeline(completedTimeline, inlineCallIds)
                     .length > 0 ? (
-                    <details
-                      className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
-                      open
-                    >
-                      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-                        <BrainIcon className="size-4" />
+                    <details className="group mb-4 text-sm">
+                      <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                        <BrainIcon className="size-3.5" />
                         <span className="flex-1">{t("执行过程")}</span>
-                        <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+                        <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
                       </summary>
-                      <div className="mt-2 space-y-1.5 border-l pl-3">
+                      <div className="mt-1 ml-1.5 space-y-0.5 border-l border-border/70 pl-3">
                         <ProcessTimelineRows
                           timeline={visibleProcessTimeline(
                             completedTimeline,
@@ -746,44 +764,29 @@ function RunExchange({
           <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
             {hasProcess ? (
               <details
-                className="group mb-4 rounded-xl bg-muted/50 px-3 py-2.5 text-sm"
+                className="group mb-4 text-sm"
                 open={isProcessOpen}
-                onToggle={(event) => setIsProcessOpen(event.currentTarget.open)}
+                onToggle={onProcessToggle}
               >
-                <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-                  <BrainIcon className="size-4" />
+                <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                  <BrainIcon className="size-3.5" />
                   <span className="flex-1">{t("执行过程")}</span>
-                  <ChevronDownIcon className="size-4 transition-transform group-open:rotate-180" />
+                  <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
                 </summary>
-                <div className="mt-2 space-y-1.5 border-l pl-3">
+                <div className="mt-1 ml-1.5 space-y-0.5 border-l border-border/70 pl-3">
                   <ProcessTimelineRows
                     timeline={visibleTimeline}
                     run={run}
                     t={t}
                   />
-                  {inlineToolCalls.map((call) =>
-                    ["awaiting_approval", "uncertain"].includes(call.status) ? (
-                      <InlineToolApproval
-                        key={call.call_id}
-                        runId={run.id}
-                        call={call}
-                        resolvingCallId={resolvingCallId}
-                        onDecision={(callId, decision) =>
-                          onToolCallDecision(run.id, callId, decision)
-                        }
-                        t={t}
-                      />
-                    ) : (
-                      <PendingToolEvent
-                        key={call.call_id}
-                        call={call}
-                        run={run}
-                        t={t}
-                      />
-                    )
-                  )}
+                  {isProcessOpen ? inlineToolSteps : null}
                 </div>
               </details>
+            ) : null}
+            {!isProcessOpen && inlineToolSteps.length > 0 ? (
+              <div className="mb-3 ml-1.5 space-y-1.5 border-l border-border/70 pl-3">
+                {inlineToolSteps}
+              </div>
             ) : null}
 
             {run.result ? (
@@ -853,41 +856,6 @@ function RunExchange({
           </div>
         ))}
     </article>
-  )
-}
-
-function ReasoningContent({ reasoning }: { reasoning: string }) {
-  const scrollRef = React.useRef<HTMLDivElement>(null)
-  const shouldFollowRef = React.useRef(true)
-
-  React.useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (!element || !shouldFollowRef.current) return
-
-    const scrollToBottom = () => {
-      if (!shouldFollowRef.current) return
-      element.scrollTop = element.scrollHeight
-    }
-    scrollToBottom()
-    const frame = requestAnimationFrame(scrollToBottom)
-    const resizeObserver = new ResizeObserver(scrollToBottom)
-    resizeObserver.observe(element)
-    return () => {
-      cancelAnimationFrame(frame)
-      resizeObserver.disconnect()
-    }
-  }, [reasoning])
-
-  return (
-    <div
-      ref={scrollRef}
-      className="mt-1 ml-5 max-h-48 overflow-y-auto border-l pl-3 break-words whitespace-pre-wrap text-foreground/80"
-      onScroll={(event) => {
-        shouldFollowRef.current = isNearScrollBottom(event.currentTarget)
-      }}
-    >
-      {reasoning}
-    </div>
   )
 }
 
