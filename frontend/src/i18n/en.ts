@@ -2,27 +2,19 @@ import type { TranslationKey } from "./zh-hans"
 
 export const en = {
   新建项目: "New project",
+  编辑项目: "Edit project",
+  "更多项目操作：{name}": "More project actions: {name}",
   项目: "Projects",
   项目名称: "Project name",
-  项目说明: "Project instructions",
-  "将相关对话、项目说明和资料放在一起，仅你自己可见。":
-    "Keep related conversations, instructions, and sources together, visible only to you.",
-  "描述项目目标、背景和回答要求":
-    "Describe the project goal, background, and response requirements",
+  "将相关对话和资料放在一起，仅你自己可见。":
+    "Keep related conversations and sources together, visible only to you.",
   创建项目: "Create project",
-  项目设置: "Project settings",
   项目资料: "Project sources",
-  项目说明与资料: "Instructions and sources",
-  "说明和资料从下一次发送起生效，历史回答保持原样。":
-    "Changes apply to the next message. Previous answers keep their original context.",
   上传资料: "Upload sources",
   "项目内各段对话共用只读资料；每个文件最多 5 MiB，合计最多 64 个文件、64 MiB。":
     "Conversations share read-only sources: up to 5 MiB per file, 64 files and 64 MiB in total.",
   暂无项目资料: "No project sources yet",
   "移除项目资料：{filename}": "Remove project source: {filename}",
-  从当前对话保存: "Save from this conversation",
-  选择生成文件: "Select a generated file",
-  保存到项目资料: "Save to project sources",
   恢复项目: "Restore project",
   归档项目: "Archive project",
   解散项目: "Dissolve project",

@@ -43,13 +43,12 @@ export function listChatProjects(
 export function createChatProject(
   agentId: string,
   token: string,
-  name: string,
-  instructions: string
+  name: string
 ) {
   return request<ChatProject>(path(agentId), {
     token,
     method: "POST",
-    body: JSON.stringify({ name, instructions }),
+    body: JSON.stringify({ name }),
   })
 }
 
@@ -145,16 +144,4 @@ export function chatProjectFileUrl(
   fileId: string
 ) {
   return path(agentId, `/${projectId}/files/${fileId}/content`)
-}
-
-export function saveChatProjectArtifact(
-  agentId: string,
-  token: string,
-  projectId: string,
-  artifactId: string
-) {
-  return request<{ items: ChatProjectFile[] }>(
-    path(agentId, `/${projectId}/artifacts`),
-    { token, method: "POST", body: JSON.stringify({ artifact_id: artifactId }) }
-  )
 }

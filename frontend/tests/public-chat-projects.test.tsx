@@ -9,9 +9,7 @@ import {
   within,
 } from "@testing-library/react"
 import { PublicAgentChat } from "@/components/agents/public-agent-chat"
-import { ChatProjectPanel } from "@/components/agents/public-chat-projects"
-import { projectArtifactOptions } from "@/lib/chat-project-artifacts"
-import { publicChatUrl, type ChatProject } from "@/lib/api/public-chat-projects"
+import type { ChatProject } from "@/lib/api/public-chat-projects"
 import { ApiError } from "@/lib/api-client"
 import { getErrorMessage } from "@/lib/errors"
 import { translate, type TFunction } from "@/i18n"
@@ -115,6 +113,24 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
+async function openProjectMenu(name = "Research") {
+  const trigger = await screen.findByRole("button", {
+    name: `更多项目操作：${name}`,
+  })
+  await waitFor(() =>
+    expect((trigger as HTMLButtonElement).disabled).toBe(false)
+  )
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+  await screen.findByRole("menu")
+  return trigger
+}
+
+async function editProject(name = "Research") {
+  await openProjectMenu(name)
+  fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }))
+  return await screen.findByRole("dialog", { name: "编辑项目" })
+}
+
 test("selects a project through a durable route without reading its other conversations", async () => {
   renderPage(<PublicAgentChat agentId={agentId} />)
   fireEvent.click(await screen.findByRole("button", { name: "Research" }))
@@ -123,9 +139,7 @@ test("selects a project through a durable route without reading its other conver
   )
   expect(screen.getByRole("heading", { name: "Research" })).toBeTruthy()
   expect(requests.some(({ url }) => url.includes("/runs?"))).toBe(false)
-  fireEvent.click(
-    screen.getByRole("button", { name: "Existing conversation" })
-  )
+  fireEvent.click(screen.getByRole("button", { name: "Existing conversation" }))
   await waitFor(() =>
     expect(
       requests.some(({ url }) => url.includes("conversation_id=conversation-1"))
@@ -142,9 +156,8 @@ test("creates a project and sends its first question in a server-owned project c
       const payload = JSON.parse(String(init.body))
       expect(payload).toEqual({
         name: "New research",
-        instructions: "Keep it concise",
       })
-      projects = [{ ...template, ...payload }]
+      projects = [{ ...template, ...payload, instructions: "" }]
       return jsonResponse(projects[0], 201)
     }
     if (url === base + `/projects/${projectId}/conversations`) {
@@ -188,9 +201,7 @@ test("creates a project and sends its first question in a server-owned project c
   fireEvent.change(within(dialog).getByLabelText("项目名称"), {
     target: { value: "New research" },
   })
-  fireEvent.change(within(dialog).getByLabelText("项目说明"), {
-    target: { value: "Keep it concise" },
-  })
+  expect(within(dialog).queryByLabelText("项目说明")).toBeNull()
   fireEvent.click(within(dialog).getByRole("button", { name: "创建项目" }))
   await screen.findByRole("heading", { name: "New research" })
   fireEvent.change(screen.getByLabelText("请输入问题"), {
@@ -202,7 +213,7 @@ test("creates a project and sends its first question in a server-owned project c
   expect(window.location.pathname).toContain(`/projects/${projectId}`)
 })
 
-test("saves instructions and uploads sources without interrupting the chat composer", async () => {
+test("edits project names and sources without changing existing instructions", async () => {
   extra = (url, init) => {
     if (url === base + `/projects/${projectId}` && init?.method === "PUT") {
       projects[0] = { ...projects[0]!, ...JSON.parse(String(init.body)) }
@@ -228,28 +239,22 @@ test("saves instructions and uploads sources without interrupting the chat compo
     return null
   }
   renderPage(<PublicAgentChat agentId={agentId} initialProjectId={projectId} />)
-  fireEvent.click(await screen.findByRole("button", { name: "项目说明与资料" }))
-  fireEvent.change(screen.getByLabelText("项目说明"), {
-    target: { value: "Updated instructions" },
-  })
-  fireEvent.click(screen.getByRole("button", { name: "保存" }))
-  await waitFor(() =>
-    expect(projects[0]!.instructions).toBe("Updated instructions")
-  )
+  const dialog = await editProject()
+  expect(screen.queryByRole("button", { name: "项目说明与资料" })).toBeNull()
+  expect(within(dialog).queryByLabelText("项目说明")).toBeNull()
+  expect(within(dialog).queryByText("从当前对话保存")).toBeNull()
+  expect(within(dialog).queryByRole("button", { name: "解散项目" })).toBeNull()
   await waitFor(() =>
     expect(
       (screen.getByRole("button", { name: "上传资料" }) as HTMLButtonElement)
         .disabled
     ).toBe(false)
   )
-  const sources = within(
-    screen.getByRole("complementary", { name: "项目设置" })
-  )
+  const sources = within(dialog)
   fireEvent.change(sources.getByLabelText("上传文件或 ZIP"), {
     target: { files: [new File(["data"], "notes.txt")] },
   })
   await screen.findByText("notes.txt")
-  expect(screen.getByLabelText("请输入问题")).toBeTruthy()
   await waitFor(() =>
     expect(
       (
@@ -263,6 +268,15 @@ test("saves instructions and uploads sources without interrupting the chat compo
     screen.getByRole("button", { name: "移除项目资料：notes.txt" })
   )
   await waitForElementToBeRemoved(() => sources.queryByText("notes.txt"))
+  fireEvent.change(sources.getByLabelText("项目名称"), {
+    target: { value: "Updated research" },
+  })
+  fireEvent.click(sources.getByRole("button", { name: "保存" }))
+  await waitForElementToBeRemoved(dialog)
+  expect(projects[0]!.name).toBe("Updated research")
+  expect(projects[0]!.instructions).toBe("Use sources")
+  expect(screen.getByLabelText("请输入问题")).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "Updated research" })).toBeTruthy()
 }, 10000)
 
 test("uploads a selected project folder with its relative paths intact", async () => {
@@ -286,10 +300,7 @@ test("uploads a selected project folder with its relative paths intact", async (
     return null
   }
   renderPage(<PublicAgentChat agentId={agentId} initialProjectId={projectId} />)
-  fireEvent.click(await screen.findByRole("button", { name: "项目说明与资料" }))
-  const sources = within(
-    screen.getByRole("complementary", { name: "项目设置" })
-  )
+  const sources = within(await editProject())
   await waitFor(() =>
     expect(
       (sources.getByRole("button", { name: "上传资料" }) as HTMLButtonElement)
@@ -322,7 +333,7 @@ test("previews private HTML sources in an opaque pane while keeping the composer
         })
       : null
   renderPage(<PublicAgentChat agentId={agentId} initialProjectId={projectId} />)
-  fireEvent.click(await screen.findByRole("button", { name: "项目说明与资料" }))
+  await editProject()
   fireEvent.click(
     await screen.findByRole("button", { name: "预览文件：guide.html" })
   )
@@ -331,6 +342,7 @@ test("previews private HTML sources in an opaque pane while keeping the composer
   expect(frame.getAttribute("srcdoc")).toContain("Project guide")
   expect(frame.getAttribute("srcdoc")).not.toContain(session.token)
   expect(screen.getByLabelText("请输入问题")).toBeTruthy()
+  expect(screen.queryByRole("dialog", { name: "编辑项目" })).toBeNull()
   const download = requests.find(({ url }) =>
     url.endsWith(`/files/${artifactId}/content`)
   )!
@@ -353,8 +365,8 @@ test("dissolves a project and preserves its conversation in ordinary history", a
       initialConversationId="conversation-1"
     />
   )
-  fireEvent.click(await screen.findByRole("button", { name: "项目说明与资料" }))
-  fireEvent.click(screen.getByRole("button", { name: "解散项目" }))
+  await openProjectMenu()
+  fireEvent.click(screen.getByRole("menuitem", { name: "解散项目" }))
   const confirmation = screen.getByRole("dialog")
   fireEvent.click(
     within(confirmation).getByRole("button", { name: "解散项目" })
@@ -364,6 +376,54 @@ test("dissolves a project and preserves its conversation in ordinary history", a
     screen.getByRole("button", { name: "Existing conversation" })
   ).toBeTruthy()
   expect(window.location.pathname).toBe(`/chat/${agentId}`)
+  expect(window.location.search).toBe("?conversation_id=conversation-1")
+})
+
+test("archives and dissolves another project without changing the active conversation", async () => {
+  const otherId = "00000000-0000-4000-8000-000000000004"
+  projects.push({ ...projects[0]!, id: otherId, name: "Other" })
+  conversations[0]!.project_id = projectId
+  extra = (url, init) => {
+    if (url === base + `/projects/${otherId}`) {
+      if (init?.method === "PUT") {
+        projects[1] = { ...projects[1]!, ...JSON.parse(String(init.body)) }
+        return jsonResponse(projects[1])
+      }
+      if (init?.method === "DELETE") return new Response(null, { status: 204 })
+    }
+    return null
+  }
+  renderPage(
+    <PublicAgentChat
+      agentId={agentId}
+      initialProjectId={projectId}
+      initialConversationId="conversation-1"
+    />
+  )
+  await openProjectMenu("Other")
+  fireEvent.click(screen.getByRole("menuitem", { name: "归档项目" }))
+  await waitFor(() => expect(projects[1]!.archived).toBe(true))
+  expect(projects[0]!.archived).toBe(false)
+  fireEvent.click(await screen.findByRole("button", { name: "显示已归档项目" }))
+  await openProjectMenu("Other")
+  fireEvent.click(screen.getByRole("menuitem", { name: "解散项目" }))
+  fireEvent.click(screen.getByRole("button", { name: "取消" }))
+  expect(requests.some(({ init }) => init?.method === "DELETE")).toBe(false)
+  await openProjectMenu("Other")
+  fireEvent.click(screen.getByRole("menuitem", { name: "解散项目" }))
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "解散项目" })
+  )
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "更多项目操作：Other" }) === null
+    ).toBe(true)
+  )
+  expect(screen.getByRole("heading", { name: "Research" })).toBeTruthy()
+  expect(conversations[0]!.project_id).toBe(projectId)
+  expect(window.location.pathname).toBe(
+    `/chat/${agentId}/projects/${projectId}`
+  )
   expect(window.location.search).toBe("?conversation_id=conversation-1")
 })
 
@@ -410,9 +470,9 @@ test("archiving prevents new sends and restoring re-enables them", async () => {
     return null
   }
   renderPage(<PublicAgentChat agentId={agentId} initialProjectId={projectId} />)
-  fireEvent.click(await screen.findByRole("button", { name: "项目说明与资料" }))
-  fireEvent.click(screen.getByRole("button", { name: "归档项目" }))
-  await screen.findByRole("button", { name: "恢复项目" })
+  await openProjectMenu()
+  fireEvent.click(screen.getByRole("menuitem", { name: "归档项目" }))
+  await screen.findByText("已归档")
   fireEvent.change(screen.getByLabelText("请输入问题"), {
     target: { value: "Continue" },
   })
@@ -420,7 +480,21 @@ test("archiving prevents new sends and restoring re-enables them", async () => {
     (screen.getByRole("button", { name: "发送问题" }) as HTMLButtonElement)
       .disabled
   ).toBe(true)
-  fireEvent.click(screen.getByRole("button", { name: "恢复项目" }))
+  const dialog = await editProject()
+  expect(
+    (within(dialog).getByLabelText("项目名称") as HTMLInputElement).disabled
+  ).toBe(true)
+  expect(
+    (
+      within(dialog).getByRole("button", {
+        name: "上传资料",
+      }) as HTMLButtonElement
+    ).disabled
+  ).toBe(true)
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }))
+  await waitFor(() => expect(dialog.isConnected).toBe(false))
+  await openProjectMenu()
+  fireEvent.click(screen.getByRole("menuitem", { name: "恢复项目" }))
   await waitFor(() =>
     expect(
       (screen.getByRole("button", { name: "发送问题" }) as HTMLButtonElement)
@@ -442,77 +516,90 @@ test("rejects an unknown project route without creating a conversation", async (
   expect(requests.some(({ init }) => init?.method === "POST")).toBe(false)
 })
 
-test("keeps the latest saved generated files available for explicit promotion", () => {
+test("edits an unselected project without leaving the current conversation and cancels unsaved changes", async () => {
+  renderPage(
+    <PublicAgentChat agentId={agentId} initialConversationId="conversation-1" />
+  )
+  const dialog = await editProject()
   expect(
-    projectArtifactOptions([
-      {
-        tool_name: "bash",
-        status: "succeeded",
-        output: {
-          artifacts: [{ artifact_id: artifactId, filename: "data.csv" }],
-        },
-      },
-      {
-        tool_name: "bash",
-        status: "failed",
-        output: {
-          artifacts: [{ artifact_id: artifactId, filename: "failed.txt" }],
-        },
-      },
-      {
-        tool_name: "mcp_tool",
-        status: "succeeded",
-        output: { artifact_id: artifactId, filename: "untrusted.txt" },
-      },
-    ])
-  ).toEqual([{ id: artifactId, filename: "data.csv" }])
-  expect(publicChatUrl(agentId, "conversation", projectId)).toBe(
-    `/chat/${agentId}/projects/${projectId}?conversation_id=conversation`
+    (within(dialog).getByLabelText("项目名称") as HTMLInputElement).value
+  ).toBe("Research")
+  fireEvent.change(within(dialog).getByLabelText("项目名称"), {
+    target: { value: "Unsaved" },
+  })
+  expect(window.location.pathname).toBe(`/chat/${agentId}`)
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }))
+  await waitFor(() => expect(dialog.isConnected).toBe(false))
+  expect(projects[0]!.name).toBe("Research")
+  expect(screen.getByRole("heading", { name: "Assistant" })).toBeTruthy()
+  expect(requests.some(({ init }) => init?.method === "PUT")).toBe(false)
+  await waitFor(() =>
+    expect(
+      document.activeElement ===
+        screen.getByRole("button", { name: "更多项目操作：Research" })
+    ).toBe(true)
   )
 })
 
-test("saves a generated artifact to project sources through the shared dropdown", async () => {
+test("keeps failed edits open for retry and rejects blank names", async () => {
+  let fail = true
   extra = (url, init) => {
-    if (
-      url === base + `/projects/${projectId}/artifacts` &&
-      init?.method === "POST"
-    ) {
-      expect(JSON.parse(String(init.body))).toEqual({ artifact_id: artifactId })
-      return jsonResponse(
-        {
-          items: [
-            {
-              id: artifactId,
-              path: "result.txt",
-              size_bytes: 4,
-              content_hash: "hash",
-            },
-          ],
-        },
-        201
-      )
+    if (url === base + `/projects/${projectId}` && init?.method === "PUT") {
+      if (fail) return jsonResponse({ detail: "Request failed" }, 500)
+      projects[0] = { ...projects[0]!, ...JSON.parse(String(init.body)) }
+      return jsonResponse(projects[0])
     }
     return null
   }
-  renderPage(
-    <ChatProjectPanel
-      project={projects[0]!}
-      agentId={agentId}
-      token={session.token}
-      onClose={() => undefined}
-      onSave={async () => undefined}
-      onDissolve={async () => undefined}
-      onPreview={() => undefined}
-      artifacts={[{ id: artifactId, filename: "result.txt" }]}
-    />
+  renderPage(<PublicAgentChat agentId={agentId} initialProjectId={projectId} />)
+  const dialog = await editProject()
+  fireEvent.change(within(dialog).getByLabelText("项目名称"), {
+    target: { value: "   " },
+  })
+  expect(
+    (within(dialog).getByRole("button", { name: "保存" }) as HTMLButtonElement)
+      .disabled
+  ).toBe(true)
+  fireEvent.change(within(dialog).getByLabelText("项目名称"), {
+    target: { value: "Retried research" },
+  })
+  fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
+  await within(dialog).findByRole("alert")
+  expect(projects[0]!.name).toBe("Research")
+  fail = false
+  await waitFor(() =>
+    expect(
+      (
+        within(dialog).getByRole("button", {
+          name: "保存",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false)
   )
+  fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
+  await waitForElementToBeRemoved(dialog)
+  expect(projects[0]!.name).toBe("Retried research")
+})
+
+test("opens the editor from mobile history and returns focus when it closes", async () => {
+  renderPage(<PublicAgentChat agentId={agentId} />)
+  const historyButton = await screen.findByRole("button", {
+    name: "打开历史记录",
+  })
+  fireEvent.click(historyButton)
+  const history = await screen.findByRole("dialog", { name: "历史记录" })
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: "从当前对话保存" }),
+    within(history).getByRole("button", { name: "更多项目操作：Research" }),
     { button: 0, ctrlKey: false }
   )
-  fireEvent.click(await screen.findByRole("menuitem", { name: "result.txt" }))
-  fireEvent.click(screen.getByRole("button", { name: "保存到项目资料" }))
-  await screen.findByRole("button", { name: "移除项目资料：result.txt" })
+  fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }))
+  const editor = await screen.findByRole("dialog", { name: "编辑项目" })
+  expect(screen.queryByRole("dialog", { name: "历史记录" })).toBeNull()
+  fireEvent.click(within(editor).getByRole("button", { name: "关闭" }))
+  await waitFor(() =>
+    expect(document.activeElement === historyButton).toBe(true)
+  )
+  expect(screen.getByLabelText("请输入问题")).toBeTruthy()
 })
 
 test("localizes project API errors in all three languages", () => {

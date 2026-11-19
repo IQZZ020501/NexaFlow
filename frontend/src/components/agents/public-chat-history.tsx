@@ -2,6 +2,8 @@
 
 import * as React from "react"
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   BotIcon,
   ChevronDownIcon,
   DownloadIcon,
@@ -12,6 +14,7 @@ import {
   MessageSquarePlusIcon,
   PlusIcon,
   SearchIcon,
+  Settings2Icon,
   XIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -31,6 +34,62 @@ import type {
 } from "@/lib/api/public-agents"
 import type { ChatProject } from "@/lib/api/public-chat-projects"
 
+function ProjectMenu({
+  project,
+  busy,
+  onEdit,
+  onToggleArchive,
+  onDissolve,
+}: {
+  project: ChatProject
+  busy: boolean
+  onEdit: (project: ChatProject, opener: HTMLButtonElement) => void
+  onToggleArchive: (project: ChatProject) => void
+  onDissolve: (project: ChatProject) => void
+}) {
+  const { t } = useLanguage()
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          ref={triggerRef}
+          variant="ghost"
+          size="icon-xs"
+          className="mr-1 size-8 shrink-0 text-muted-foreground sm:size-6"
+          aria-label={t("更多项目操作：{name}", { name: project.name })}
+          title={t("更多项目操作：{name}", { name: project.name })}
+          disabled={busy}
+        >
+          <EllipsisIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44 min-w-0">
+        <DropdownMenuItem
+          onSelect={() => {
+            if (triggerRef.current) onEdit(project, triggerRef.current)
+          }}
+        >
+          <Settings2Icon />
+          {t("编辑")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onToggleArchive(project)}>
+          {project.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
+          {project.archived ? t("恢复项目") : t("归档项目")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          variant="destructive"
+          onSelect={() => onDissolve(project)}
+        >
+          <XIcon />
+          {t("解散项目")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function PublicChatHistory({
   profile,
   conversations,
@@ -46,6 +105,9 @@ export function PublicChatHistory({
   activeProjectId,
   onCreateProject,
   onSelectProject,
+  onEditProject,
+  onToggleArchiveProject,
+  onDissolveProject,
   onMove,
   projectBusy,
   projectsError,
@@ -65,6 +127,9 @@ export function PublicChatHistory({
   activeProjectId: string | null
   onCreateProject: () => void
   onSelectProject: (id: string) => void
+  onEditProject: (project: ChatProject, opener: HTMLButtonElement) => void
+  onToggleArchiveProject: (project: ChatProject) => void
+  onDissolveProject: (project: ChatProject) => void
   onMove: (conversationId: string, projectId: string | null) => void
   projectBusy: boolean
   projectsError: boolean
@@ -304,6 +369,13 @@ export function PublicChatHistory({
                         </span>
                       ) : null}
                     </button>
+                    <ProjectMenu
+                      project={project}
+                      busy={projectBusy}
+                      onEdit={onEditProject}
+                      onToggleArchive={onToggleArchiveProject}
+                      onDissolve={onDissolveProject}
+                    />
                   </div>
                   {open ? (
                     <div className="mt-1 ml-3 space-y-0.5 border-l border-border/60 pl-2">
