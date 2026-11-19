@@ -310,6 +310,7 @@ type HarnessProps = {
   onSave?: (event: unknown) => void
   onPublish?: () => void
   onAsk?: (event: unknown) => void
+  onAskSuggestedQuestion?: (question: string) => void
   onCancelAsk?: () => void
   onNewConversation?: () => void
   onToolCallDecision?: (
@@ -382,6 +383,7 @@ function Harness(props: HarnessProps = {}) {
       onPublish={callbacks.onPublish}
       onViewChange={callbacks.onViewChange as never}
       onAsk={callbacks.onAsk as never}
+      onAskSuggestedQuestion={props.onAskSuggestedQuestion}
       onCancelAsk={callbacks.onCancelAsk}
       onNewConversation={callbacks.onNewConversation}
       onToolCallDecision={callbacks.onToolCallDecision}
@@ -399,6 +401,51 @@ function navButton(name: string) {
   const navs = screen.getAllByLabelText("Agent 详情导航")
   return within(navs[0]).getByRole("button", { name })
 }
+
+test("shows related questions only below the latest answer and sends the selection", () => {
+  const selected: string[] = []
+  renderPage(
+    <Harness
+      activeView="settings"
+      runs={[
+        makeRun({ suggested_questions: ["How do I apply?", "Who qualifies?"] }),
+        makeRun({ id: "older", suggested_questions: ["Older suggestion?"] }),
+      ]}
+      onAskSuggestedQuestion={(question) => selected.push(question)}
+    />
+  )
+  expect(screen.queryByText("Older suggestion?")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Who qualifies?" }))
+  expect(selected).toEqual(["Who qualifies?"])
+  const region = screen.getByRole("region", { name: "你可能还想问" })
+  expect(region.closest("article")?.textContent).toContain("How do I apply?")
+})
+
+test.each(["running", "failed", "cancelled"] as const)(
+  "hides related questions on a %s run",
+  (status) => {
+    renderPage(
+      <Harness
+        activeView="settings"
+        runs={[makeRun({ status, suggested_questions: ["Who qualifies?"] })]}
+        onAskSuggestedQuestion={() => undefined}
+      />
+    )
+    expect(screen.queryByRole("region", { name: "你可能还想问" })).toBeNull()
+  }
+)
+
+test("disables related questions while the Agent configuration has unsaved changes", () => {
+  renderPage(
+    <Harness
+      activeView="settings"
+      isDirty
+      runs={[makeRun({ suggested_questions: ["Who qualifies?"] })]}
+      onAskSuggestedQuestion={() => undefined}
+    />
+  )
+  expect(screen.getByRole("button", { name: "Who qualifies?" }).hasAttribute("disabled")).toBe(true)
+})
 
 describe("AgentDetailWorkspace header and navigation", () => {
   test("renders the header with model line and view label", () => {

@@ -104,6 +104,7 @@ _RUN_STATE_FIELDS = (
     "grounding_meta",
     "plan",
     "result",
+    "suggested_questions",
     "context_summary",
     "model_usage",
     "last_error",
@@ -431,6 +432,7 @@ async def finalize_agent_run(
     grounding_status: str | None = None,
     grounding_meta: dict | None = None,
     session_input_ids: list[int] | None = None,
+    suggested_questions: list[str] | None = None,
 ) -> bool:
     del events
     if session_input_ids is not None:
@@ -463,6 +465,8 @@ async def finalize_agent_run(
     }
     if model_usage is not None:
         values["model_usage"] = model_usage
+    if suggested_questions is not None:
+        values["suggested_questions"] = suggested_questions
     if grounding_status is not None:
         values["grounding_status"] = grounding_status
     if grounding_meta is not None:

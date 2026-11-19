@@ -1663,6 +1663,36 @@ describe("PublicWorkflowChat", () => {
 })
 
 describe("PublicAgentChat", () => {
+  test("sends a saved related question in the same conversation without sending the draft or files", async () => {
+    const submitted: Record<string, unknown>[] = []
+    fetchHandler = agentFetchHandler({
+      history: { items: [run({ suggested_questions: ["How do I apply?", "Who qualifies?"] })] },
+      createRun: (body) => {
+        submitted.push(body)
+        return jsonResponse(run({ id: "run-2", question: String(body.goal), status: "running", result: "" }), 201)
+      },
+      streamResponses: [() => ndjsonResponse([
+        { type: "complete", sequence: 1, run: run({ id: "run-2", question: "Who qualifies?", result: "Eligibility details", suggested_questions: ["Which documents do I need?"] }) },
+      ])],
+    })
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    const suggestion = await screen.findByRole("button", { name: "Who qualifies?" })
+    const composer = screen.getByRole("textbox", { name: "请输入问题" })
+    fireEvent.change(composer, { target: { value: "My unfinished draft" } })
+    fireEvent.change(document.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["draft"], "draft.txt", { type: "text/plain" })] },
+    })
+    fireEvent.click(suggestion)
+    expect(await screen.findByText("Eligibility details")).toBeTruthy()
+    expect(submitted).toHaveLength(1)
+    expect(submitted[0]).toMatchObject({ goal: "Who qualifies?", conversation_id: "conv-1" })
+    expect(submitted[0].file_ids ?? []).toEqual([])
+    expect((composer as HTMLTextAreaElement).value).toBe("My unfinished draft")
+    expect(screen.getByText("draft.txt")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Who qualifies?" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Which documents do I need?" })).toBeTruthy()
+  })
+
   test.each(["queued", "running", "awaiting_approval"] as const)(
     "resumes a %s history Run without creating another Run",
     async (status) => {

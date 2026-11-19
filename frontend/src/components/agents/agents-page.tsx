@@ -1764,13 +1764,16 @@ export function AgentsPage({
     }
   }
 
-  async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleAsk(
+    event?: React.FormEvent<HTMLFormElement>,
+    suggestedQuestion?: string
+  ) {
+    event?.preventDefault()
     if (isAsking) {
       await handleFollowUp()
       return
     }
-    const nextQuestion = question.trim()
+    const nextQuestion = (suggestedQuestion ?? question).trim()
     if (
       !token ||
       !selectedWorkspaceId ||
@@ -1792,7 +1795,7 @@ export function AgentsPage({
       "",
       appViewPath(selectedAgent.id, "agent", "settings", conversationId)
     )
-    setQuestion("")
+    if (!suggestedQuestion) setQuestion("")
     setPendingQuestion(nextQuestion)
     setIsAsking(true)
     const askAbortController = new AbortController()
@@ -1804,7 +1807,7 @@ export function AgentsPage({
       requested_by_user_id: me?.user.id ?? "",
       conversation_id: conversationId,
       goal: nextQuestion,
-      attachments: agentFiles.map(runAttachmentFromFile),
+      attachments: suggestedQuestion ? [] : agentFiles.map(runAttachmentFromFile),
       model_id: selectedAgent.model_id,
       model_name:
         models.find((m) => m.id === selectedAgent.model_id)?.name ?? "",
@@ -1840,14 +1843,15 @@ export function AgentsPage({
     setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
     try {
-      const uploaded = agentFiles.length
-        ? await uploadAgentFiles(
-            token,
-            selectedWorkspaceId,
-            selectedAgent.id,
-            agentFiles
-          )
-        : []
+      const uploaded =
+        !suggestedQuestion && agentFiles.length
+          ? await uploadAgentFiles(
+              token,
+              selectedWorkspaceId,
+              selectedAgent.id,
+              agentFiles
+            )
+          : []
       await streamAgentRun(
         token,
         selectedWorkspaceId,
@@ -1893,7 +1897,7 @@ export function AgentsPage({
         uploaded.map((item) => item.id),
         approvalMode
       )
-      setAgentFiles([])
+      if (!suggestedQuestion) setAgentFiles([])
     } catch (error) {
       const userCancelled = askAbortController.signal.aborted
       const isCurrentConversation = isCurrentAgentConversation(
@@ -1901,7 +1905,7 @@ export function AgentsPage({
         conversationId
       )
       if (!liveRunId && isCurrentConversation) {
-        setQuestion(nextQuestion)
+        if (!suggestedQuestion) setQuestion(nextQuestion)
         setRuns((current) =>
           current.filter((run) => run.id !== placeholderRun.id)
         )
@@ -2266,6 +2270,9 @@ export function AgentsPage({
             canManagePublishing={canManagePublishing}
             notify={notify}
             onAsk={handleAsk}
+            onAskSuggestedQuestion={(question) =>
+              void handleAsk(undefined, question)
+            }
             onCancelAsk={handleCancelAsk}
             onRegenerateRun={(runId, goal) =>
               void handleRegenerateRun(runId, goal)

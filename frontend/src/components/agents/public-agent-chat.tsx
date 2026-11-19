@@ -36,6 +36,7 @@ import {
 } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import { AgentSuggestedQuestions } from "@/components/agents/agent-suggested-questions"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
 import {
   AgentReasoningStep,
@@ -1881,16 +1882,19 @@ export function PublicAgentChat({
     }
   }
 
-  async function handleAsk(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleAsk(
+    event?: React.FormEvent<HTMLFormElement>,
+    suggestedQuestion?: string
+  ) {
+    event?.preventDefault()
     if (isSending) {
       await handleFollowUp()
       return
     }
-    const nextQuestion = question.trim()
+    const nextQuestion = (suggestedQuestion ?? question).trim()
     const currentProfile = profile
     if (!nextQuestion || isSending || !token || !currentProfile) return
-    setQuestion("")
+    if (!suggestedQuestion) setQuestion("")
     setSendError(null)
     setIsSending(true)
     const controller = new AbortController()
@@ -1903,7 +1907,7 @@ export function PublicAgentChat({
       id: placeholderId,
       conversation_id: activeConversationId ?? "",
       question: nextQuestion,
-      attachments: files.map(runAttachmentFromFile),
+      attachments: suggestedQuestion ? [] : files.map(runAttachmentFromFile),
       status: "running",
       result: "",
       error: null,
@@ -1916,9 +1920,10 @@ export function PublicAgentChat({
     setRuns((current) => [placeholder, ...current])
     let liveRunId = placeholderId
     try {
-      const uploaded = files.length
-        ? await uploadPublicAgentFiles(agentId, token, files)
-        : []
+      const uploaded =
+        !suggestedQuestion && files.length
+          ? await uploadPublicAgentFiles(agentId, token, files)
+          : []
       await streamPublicAgentRun(
         agentId,
         token,
@@ -1964,7 +1969,7 @@ export function PublicAgentChat({
         uploaded.map((item) => item.id),
         approvalMode
       )
-      setFiles([])
+      if (!suggestedQuestion) setFiles([])
       await refreshConversations()
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -2412,6 +2417,23 @@ export function PublicAgentChat({
                                       />
                                     ) : null}
                                   </div>
+                                ) : null}
+                                {run.status === "succeeded" &&
+                                run.result &&
+                                index === visibleRuns.length - 1 ? (
+                                  <AgentSuggestedQuestions
+                                    questions={run.suggested_questions}
+                                    onSelect={(question) =>
+                                      void handleAsk(undefined, question)
+                                    }
+                                    disabled={
+                                      isSending ||
+                                      isRunsLoading ||
+                                      Boolean(regeneratingRunId) ||
+                                      fileDrop.isReadingFiles
+                                    }
+                                    t={t}
+                                  />
                                 ) : null}
                               </div>
                             </div>

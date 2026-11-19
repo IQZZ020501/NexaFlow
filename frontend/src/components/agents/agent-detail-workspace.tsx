@@ -32,6 +32,7 @@ import {
 } from "lucide-react"
 
 import { RunActionBar } from "@/components/app/run-action-bar"
+import { AgentSuggestedQuestions } from "@/components/agents/agent-suggested-questions"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
@@ -126,6 +127,7 @@ type AgentDetailWorkspaceProps = {
   onPublish: () => void
   onViewChange: (view: AgentDetailView) => void
   onAsk: (event: React.FormEvent<HTMLFormElement>) => void
+  onAskSuggestedQuestion?: (question: string) => void
   onCancelAsk: () => void | Promise<void>
   onNewConversation: () => void
   onToolCallDecision: (
@@ -517,6 +519,8 @@ function RunExchange({
   onToolCallDecision,
   onRegenerateRun,
   onRunFeedback,
+  onSuggestedQuestion,
+  suggestionsDisabled,
   regeneratingRunId,
   feedbackPendingRunId,
   regenerateDisabled,
@@ -533,6 +537,8 @@ function RunExchange({
   ) => void
   onRegenerateRun?: (runId: string, goal?: string) => void
   onRunFeedback?: (runId: string, value: "positive" | "negative" | null) => void
+  onSuggestedQuestion?: (question: string) => void
+  suggestionsDisabled?: boolean
   regeneratingRunId?: string | null
   feedbackPendingRunId?: string | null
   regenerateDisabled?: boolean
@@ -842,6 +848,14 @@ function RunExchange({
               ) : null}
             </div>
           ) : null}
+          {run.status === "succeeded" && run.result ? (
+            <AgentSuggestedQuestions
+              questions={run.suggested_questions}
+              onSelect={onSuggestedQuestion}
+              disabled={suggestionsDisabled}
+              t={t}
+            />
+          ) : null}
         </div>
       </div>
       {sessionInputs
@@ -899,6 +913,7 @@ export function AgentDetailWorkspace({
   onPublish,
   onViewChange,
   onAsk,
+  onAskSuggestedQuestion,
   onCancelAsk,
   onNewConversation,
   onToolCallDecision,
@@ -1418,6 +1433,19 @@ export function AgentDetailWorkspace({
                                 onToolCallDecision={onToolCallDecision}
                                 onRegenerateRun={onRegenerateRun}
                                 onRunFeedback={onRunFeedback}
+                                onSuggestedQuestion={
+                                  index === visibleRuns.length - 1
+                                    ? onAskSuggestedQuestion
+                                    : undefined
+                                }
+                                suggestionsDisabled={
+                                  isAsking ||
+                                  isRunsLoading ||
+                                  isDirty ||
+                                  Boolean(regeneratingRunId) ||
+                                  fileDrop.isReadingFiles ||
+                                  agent.status !== "active"
+                                }
                                 regenerateDisabled={isAsking || isRunsLoading}
                                 editable={
                                   index === visibleRuns.length - 1 &&
