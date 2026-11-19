@@ -346,9 +346,11 @@ class OpenSandboxExecution:
         if not record.sandbox_id and not allow_create:
             raise ExecutionNotStarted("Run sandbox no longer exists.")
         if not record.sandbox_id and record.creation_pending:
-            raise ExecutionBusy(
-                "Previous sandbox creation is unconfirmed.",
-                reason="environment_cleanup",
+            # Keep the unknown guest accounted for, but do not repeatedly queue
+            # commands that cannot recover this session before its native TTL.
+            raise ExecutionNotStarted(
+                "Previous sandbox creation could not be confirmed. "
+                "Execution is unavailable for this Run; continue with other tools."
             )
         cached = self._sessions.get(record.id)
         sandbox = (

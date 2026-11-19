@@ -883,7 +883,11 @@ async def assert_wrapped_creation_failure_keeps_durable_capacity():
                     max_output_bytes=1000,
                 )
             except ExecutionBusy as exc:
-                assert exc.reason == "environment_cleanup"
+                raise AssertionError(
+                    "An unconfirmed create queued another five-minute resource wait"
+                ) from exc
+            except ExecutionNotStarted as exc:
+                assert "this Run" in str(exc)
             else:
                 raise AssertionError(
                     "A second guest was created after an unconfirmed create"

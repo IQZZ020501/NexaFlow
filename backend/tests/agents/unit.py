@@ -2992,6 +2992,33 @@ def test_web_page_delivery_instructions_match_preview_capabilities() -> None:
     assert messages[-1]["content"] == "Create an interactive page."
 
 
+def test_empty_conversation_files_do_not_request_directory_scans() -> None:
+    from app.application.agents.runs.service import execution_messages
+
+    for files in (
+        [],
+        [{"path": "removed.docx", "deleted": True}],
+        [{"path": "policy.docx", "role": "work"}],
+    ):
+        messages = execution_messages(
+            SimpleNamespace(
+                instructions="Answer from the configured knowledge base.",
+                application_snapshot={"project": {"id": "files", "files": files}},
+                goal="What does the reimbursement form contain?",
+                attachment_context="",
+            )
+        )
+        protocol = messages[0]["content"]
+        if any(not item.get("deleted") for item in files):
+            assert "private persistent project" in protocol
+            assert "project_saved" in protocol
+        else:
+            assert "no uploaded or saved project files" in protocol
+            assert "List those directories" not in protocol
+            assert "Do not scan project directories" in protocol
+        assert messages[-1]["content"] == "What does the reimbursement form contain?"
+
+
 def test_provider_truncation_never_completes_agent() -> None:
     from langchain_core.messages import AIMessage
 
@@ -3240,6 +3267,7 @@ def main() -> None:
     test_context_compaction_reads_middle_history_and_restores_constraints()
     test_provider_truncation_never_completes_agent()
     test_web_page_delivery_instructions_match_preview_capabilities()
+    test_empty_conversation_files_do_not_request_directory_scans()
     test_effective_agent_permission_matrix()
     test_tool_ref_requires_stable_ids()
     test_agent_publication_snapshot_is_canonical_and_tool_versioned()

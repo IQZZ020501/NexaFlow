@@ -9,21 +9,28 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from langchain_core.messages import AIMessage
 from tests import support
+from tests.agents.evaluation import ScriptedModel, answer_message
 from tests.support import activate_admin, settings, test_client
 
+from app.adapters.execution import opensandbox
 from app.application.agents.tools.results import read_run_tool_result
+from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.tools.runtime import service
 from app.application.tools.runtime.adapters import image_generation, shell
+from app.domain.agents.runtime import AgentToolResult, create_agent_tool, run_agent
 from app.domain.models.registered import RegisteredModel
 from app.domain.tools.runtime import build_tool_snapshot
 from app.entities.agents import Agent
 from app.entities.defaults import utc_now
 from app.entities.runs import AgentRun
 from app.infra.db.repositories.agents import repository as runs
+from app.infra.db.repositories.execution import sessions as execution_sessions
 from app.infra.db.repositories.identity import users
 from app.infra.db.repositories.tools import repository as tools
 from app.infra.db.session import get_session_factory
+from app.infra.execution.profile import execution_profile
 from app.ports.tools import ToolInvocationContext, ToolRuntimeResult
 
 
@@ -66,6 +73,7 @@ async def fixture(workspace_id, *, image=False):
                 worker_task_id="run-owner",
                 lease_expires_at=utc_now() + timedelta(seconds=60),
                 execution_deadline_at=utc_now() + timedelta(seconds=60),
+                application_snapshot={"execution_profile": execution_profile(settings())},
             ),
         )
         tool = next(
@@ -105,6 +113,111 @@ async def cancel(run):
     async with get_session_factory()() as db:
         await runs.cancel_agent_run_tree(db, run.id, utc_now())
         await db.commit()
+
+
+async def check_unconfirmed_creation_fails_without_resource_wait(workspace_id):
+    run, invocation, snapshot = await fixture(workspace_id)
+    config = replace(settings(), opensandbox_api_key="test-control-plane")
+    platform = opensandbox.OpenSandboxExecution(config)
+    platform.capacity.acquire = AsyncMock(return_value="held-slot")
+    platform.capacity.release = AsyncMock()
+    with (
+        patch.object(shell, "build_execution_platform", return_value=platform),
+        patch.object(
+            opensandbox.Sandbox,
+            "create",
+            AsyncMock(side_effect=RuntimeError("SDK wrapped create failure")),
+        ) as create,
+    ):
+        for turn in range(1, 4):
+            if turn > 1:
+                async with get_session_factory()() as db:
+                    invocation = await service.queue_tool_invocation(
+                        db,
+                        snapshot,
+                        {"command": "true"},
+                        ToolInvocationContext(
+                            workspace_id=workspace_id,
+                            origin="agent",
+                            root_run_id=run.id,
+                            run_id=run.id,
+                            invocation_id=f"{turn}:retry",
+                            execution_user_id=run.execution_user_id,
+                            access_source="console",
+                            deadline_at=run.execution_deadline_at,
+                            idempotency_key=f"{run.id}:{turn}",
+                            approval_required=False,
+                        ),
+                    )
+                    await db.commit()
+            try:
+                result = await service.execute_tool_invocation(
+                    invocation.id,
+                    config,
+                    "tool-owner",
+                    run_worker_task_id=run.worker_task_id,
+                )
+            except service.ToolInvocationBusy as exc:
+                raise AssertionError(
+                    "A failed sandbox creation paused the Agent for another 300 seconds"
+                ) from exc
+            assert not result.ok and result.outcome == "confirmed", result
+            if turn > 1:
+                assert "this Run" in result.error_message, result
+            async with get_session_factory()() as db:
+                row = await tools.get_tool_invocation_by_id(db, invocation.id)
+                assert row.status == "failed" and not row.resource_wait
+                sessions = await execution_sessions.for_run(db, workspace_id, run.id)
+                assert len(sessions) == 1
+                record = sessions[0]
+                assert record.sandbox_id is None and record.creation_pending
+                assert record.capacity_token == "held-slot"
+            if turn == 2:
+                # Background cleanup may mark the unresolved intent closing.
+                await platform.close_session(workspace_id, run.id)
+
+        knowledge = AsyncMock(
+            return_value=AgentToolResult(content="Form fields", summary="Found")
+        )
+        runtime = UnifiedAgentToolRuntime(
+            run, [snapshot], run.worker_task_id, config, asyncio.Event()
+        )
+        responses = [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": name, "id": name, "args": args}],
+                response_metadata={"finish_reason": "tool_calls"},
+            )
+            for name, args in (("bash", {"command": "true"}), ("search_knowledge", {}))
+        ]
+        model = ScriptedModel([*responses, answer_message("Form fields")])
+        fallback = await asyncio.wait_for(
+            run_agent(
+                model,
+                [{"role": "user", "content": "What does the form contain?"}],
+                [
+                    create_agent_tool(
+                        name="bash",
+                        description="Execute a command",
+                        parameters=snapshot.input_schema,
+                        execute=AsyncMock(side_effect=AssertionError("Bypassed ledger")),
+                    ),
+                    create_agent_tool(
+                        name="search_knowledge",
+                        description="Search documents",
+                        parameters={"type": "object", "properties": {}},
+                        execute=knowledge,
+                    ),
+                ],
+                before_tool_call=runtime.before,
+            ),
+            timeout=5,
+        )
+        assert fallback.content == "Form fields"
+        assert any("this Run" in str(message.content) for message in model.requests[1])
+        knowledge.assert_awaited_once()
+        create.assert_awaited_once()
+        platform.capacity.release.assert_not_awaited()
 
 
 def success():
@@ -398,6 +511,7 @@ def main():
 
 def check_all(client):
     _token, workspace_id = activate_admin(client)
+    client.portal.call(check_unconfirmed_creation_fails_without_resource_wait, workspace_id)
     client.portal.call(check_renewal, workspace_id)
     client.portal.call(check_expired_result_without_takeover, workspace_id)
     client.portal.call(check_shell_log_paging, workspace_id)
