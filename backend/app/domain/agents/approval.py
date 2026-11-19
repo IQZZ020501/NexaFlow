@@ -30,27 +30,46 @@ def run_agent_approval_mode(run: AgentRun) -> AgentApprovalMode:
     return normalize_agent_approval_mode(run.application_snapshot.get("approval_mode"))
 
 
+def model_decides_mcp_approval(run: AgentRun) -> bool:
+    """Only new interactive Runs delegate individual MCP decisions to the model."""
+    return (
+        run.access_source in {"console", "public"}
+        and run.application_snapshot.get("mcp_approval_version") == 2
+        and run_agent_approval_mode(run) == "ask_risky"
+    )
+
+
 def agent_tool_requires_approval(
     mode: AgentApprovalMode,
     snapshot: ToolSnapshot,
+    *,
+    model_decides_mcp: bool = False,
+    model_requires_approval: bool | None = None,
 ) -> bool:
     """Apply interactive consent without weakening the frozen Tool policy."""
     if mode == "full_access":
         return False
     if mode == "always_ask":
-        return snapshot.effect != "pure"
+        return snapshot.kind == "mcp" or snapshot.effect != "pure"
+    if snapshot.kind == "mcp" and model_decides_mcp:
+        return model_requires_approval is not False
     return snapshot.approval == TOOL_APPROVAL_EACH_CALL
 
 
 def agent_mcp_requires_approval(
     mode: AgentApprovalMode,
     policy_mode: str,
+    *,
+    model_decides_mcp: bool = False,
+    model_requires_approval: bool | None = None,
 ) -> bool:
     """Return whether an enabled legacy MCP call needs interactive consent."""
     if mode == "full_access":
         return False
     if mode == "always_ask":
         return policy_mode != "disabled"
+    if model_decides_mcp:
+        return model_requires_approval is not False
     return policy_mode != "read_only"
 
 
@@ -60,6 +79,7 @@ __all__ = [
     "AgentApprovalMode",
     "agent_mcp_requires_approval",
     "agent_tool_requires_approval",
+    "model_decides_mcp_approval",
     "normalize_agent_approval_mode",
     "run_agent_approval_mode",
 ]

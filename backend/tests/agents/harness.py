@@ -941,6 +941,9 @@ def assert_session_input_api_isolation():
 
 
 def main():
+    from tests.agents.mcp_approval import assert_mcp_conversation_approval
+
+    assert_mcp_conversation_approval()
     from tests.agents.result_recovery import (
         assert_retained_mcp_results,
         assert_tool_result_migration,

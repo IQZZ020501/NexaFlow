@@ -65,7 +65,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -82,7 +81,6 @@ import {
   listAllToolSources,
   refreshToolSource,
   setToolSourceEnabled,
-  updateToolPolicy,
   type ToolDetail,
   type ToolKind,
   type ToolSourceDetail,
@@ -104,7 +102,7 @@ import { isRegularTool } from "@/lib/tool-visibility"
 import { cn } from "@/lib/utils"
 
 const catalogTabs = [
-  { kind: "builtin", label: "Skills" },
+  { kind: "builtin", label: "技能" },
   { kind: "mcp", label: "MCP" },
 ] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
 
@@ -234,9 +232,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const [selectedToolIds, setSelectedToolIds] = React.useState<string[]>([])
   const [isBatchManaging, setIsBatchManaging] = React.useState(false)
   const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
-  const [managedSourceId, setManagedSourceId] = React.useState<string | null>(
-    null
-  )
   const [detailTarget, setDetailTarget] = React.useState<ToolSummary | null>(
     null
   )
@@ -327,23 +322,26 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     displayToolName
   )
   const isSkillsTab = Boolean(initialKind) && activeKind === "builtin"
-  const filteredWorkspaceSkills = workspaceSkills.filter(
-    (skill) =>
-      !query ||
-      `${skill.name} ${skill.description}`.toLowerCase().includes(query)
-  )
-  const builtinSkillTools = sortToolResources(
-    tools.filter(
-      (tool) =>
-        isBuiltinSkillTool(tool.function_name) &&
-        (!query ||
-          `${displayToolName(tool)} ${displayToolDescription(tool)}`
-            .toLowerCase()
-            .includes(query))
-    ),
+  const filteredSkills = sortToolResources<ToolSummary | AgentSkill>(
+    [
+      ...tools.filter(
+        (tool) =>
+          isBuiltinSkillTool(tool.function_name) &&
+          (!query ||
+            `${displayToolName(tool)} ${displayToolDescription(tool)}`
+              .toLowerCase()
+              .includes(query))
+      ),
+      ...workspaceSkills.filter(
+        (skill) =>
+          !query ||
+          `${skill.name} ${skill.description}`.toLowerCase().includes(query)
+      ),
+    ],
     toolSortKey,
     locale,
-    displayToolName
+    (skill) =>
+      "function_name" in skill ? displayToolName(skill) : skill.name
   )
   const builtinTools = filteredTools.filter(
     (tool) => tool.kind === "builtin" && !isBuiltinSkillTool(tool.function_name)
@@ -394,28 +392,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     (group) => group.source.name
   )
   const flatTools = filteredTools.filter((tool) => tool.kind !== "mcp")
-  const managedTools = tools.filter(
-    (tool) =>
-      tool.kind === "mcp" &&
-      tool.source.id === managedSourceId &&
-      tool.can_manage
-  )
-  const managedSourceName =
-    managedTools[0]?.source.name ??
-    sources.find((source) => source.id === managedSourceId)?.name ??
-    ""
   const movableToolIds = filteredTools
     .filter((tool) => tool.can_manage && tool.kind !== "builtin")
     .map((tool) => tool.id)
-  function upsertTool(updated: ToolSummary) {
-    setTools((current) => {
-      const exists = current.some((tool) => tool.id === updated.id)
-      return exists
-        ? current.map((tool) => (tool.id === updated.id ? updated : tool))
-        : [updated, ...current]
-    })
-  }
-
   function upsertSource(updated: ToolSourceDetail) {
     setSources((current) => {
       const exists = current.some((source) => source.id === updated.id)
@@ -442,47 +421,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     setDetailTarget(tool)
     setDetailTool(null)
     await loadDetail(tool)
-  }
-
-  async function setMcpPolicy(
-    tool: ToolSummary,
-    mode: "approval_required" | "read_only" | "disabled"
-  ) {
-    if (busyId || tool.kind !== "mcp") return
-    if (
-      mode === "read_only" &&
-      !(await confirmAction({
-        description: t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
-          name: displayToolName(tool),
-        }),
-      }))
-    ) {
-      return
-    }
-    if (
-      mode === "disabled" &&
-      !(await confirmAction({
-        description: t(
-          "禁用工具“{name}”？已绑定的 Agent 和 Workflow 将无法调用它。",
-          { name: displayToolName(tool) }
-        ),
-        confirmLabel: t("禁用"),
-        destructive: true,
-      }))
-    ) {
-      return
-    }
-    setBusyId(tool.id)
-    try {
-      upsertTool(
-        await updateToolPolicy(accessToken, workspaceId, tool.id, mode)
-      )
-      message("success", t("MCP 工具策略已更新"))
-    } catch (nextError) {
-      message("error", getErrorMessage(nextError, t))
-    } finally {
-      setBusyId(null)
-    }
   }
 
   async function refreshSource(source: ToolSourceDetail) {
@@ -538,7 +476,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     if (
       !(await confirmAction({
         description: t(
-          "删除 Skill“{name}”？删除后无法再调用，历史版本和执行记录会保留。",
+          "删除技能“{name}”？删除后无法再调用，历史版本和执行记录会保留。",
           { name: skill.name }
         ),
         confirmLabel: t("删除"),
@@ -557,7 +495,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         setSkillDialogOpen(false)
         setEditingSkill(undefined)
       }
-      message("success", t("Skill 已删除"))
+      message("success", t("技能已删除"))
     } catch (cause) {
       message("error", getErrorMessage(cause, t))
     } finally {
@@ -585,7 +523,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         current.filter((item) => item.source.id !== source.id)
       )
       setSources((current) => current.filter((item) => item.id !== source.id))
-      setManagedSourceId((current) => (current === source.id ? null : current))
       message("success", t("工具来源已删除"))
     } catch (nextError) {
       message("error", getErrorMessage(nextError, t))
@@ -601,7 +538,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     : null
 
   function renderToolManagementMenu(tool: ToolSummary) {
-    const source = sources.find((item) => item.id === tool.source.id)
     return (
       <CardMoreMenu
         label={t("管理工具 {name}", {
@@ -622,64 +558,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           <ShieldCheckIcon />
           {t("授权")}
         </DropdownMenuItem>
-        {tool.kind === "mcp" ? (
-          <DropdownMenuItem
-            disabled={!source || Boolean(busyId)}
-            onSelect={() => source && void refreshSource(source)}
-          >
-            <RefreshCwIcon />
-            {t("刷新工具")}
-          </DropdownMenuItem>
-        ) : null}
-        {tool.kind === "mcp" ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t("工具执行策略")}</DropdownMenuLabel>
-            {source?.status === "disabled" ? (
-              <DropdownMenuItem disabled>{t("来源已禁用")}</DropdownMenuItem>
-            ) : (
-              <>
-                <DropdownMenuItem
-                  disabled={Boolean(busyId)}
-                  onSelect={() => void setMcpPolicy(tool, "read_only")}
-                >
-                  <ShieldCheckIcon />
-                  {t("只读自动执行")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={Boolean(busyId)}
-                  onSelect={() => void setMcpPolicy(tool, "approval_required")}
-                >
-                  <ShieldCheckIcon />
-                  {t("每次调用前审批")}
-                </DropdownMenuItem>
-                {tool.status !== "disabled" ? (
-                  <DropdownMenuItem
-                    variant="destructive"
-                    disabled={Boolean(busyId)}
-                    onSelect={() => void setMcpPolicy(tool, "disabled")}
-                  >
-                    <PowerIcon />
-                    {t("禁用")}
-                  </DropdownMenuItem>
-                ) : null}
-              </>
-            )}
-          </>
-        ) : null}
-        {tool.kind === "mcp" && source ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={Boolean(busyId)}
-              onSelect={() => void removeSource(source)}
-            >
-              <Trash2Icon />
-              {t("删除来源")}
-            </DropdownMenuItem>
-          </>
-        ) : null}
       </CardMoreMenu>
     )
   }
@@ -780,7 +658,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("工具")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("管理自己的 MCP 与 Skills；共享给你的资源可按授权使用。")}
+            {t("管理自己的 MCP 与技能；共享给你的资源可按授权使用。")}
           </p>
         </div>
         <DropdownMenu>
@@ -798,7 +676,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setSkillDialogOpen(true)}>
               <SparklesIcon />
-              {t("Skills")}
+              {t("技能")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -965,18 +843,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                             }
                           />
                         ) : null}
-                        {detail || manageableTools.length ? (
+                        {detail ? (
                           <CardMoreMenu
                             label={t("管理来源 {name}", { name: source.name })}
                           >
-                            {manageableTools.length ? (
-                              <DropdownMenuItem
-                                onSelect={() => setManagedSourceId(source.id)}
-                              >
-                                <WrenchIcon />
-                                {t("管理工具")}
-                              </DropdownMenuItem>
-                            ) : null}
                             {detail?.mcp_server_id &&
                             detail.transport !== "stdio" ? (
                               <>
@@ -1071,14 +941,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </Button>
           </div>
         ) : isSkillsTab ? (
-          query &&
-          builtinSkillTools.length === 0 &&
-          builtinTools.length === 0 &&
-          filteredWorkspaceSkills.length === 0 ? (
-            <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-              {t("没有匹配的工具")}
-            </div>
-          ) : (
+          builtinTools.length || filteredSkills.length ? (
             <div className="space-y-8">
               {builtinTools.length ? (
                 <section aria-labelledby="builtin-tools-heading">
@@ -1097,20 +960,27 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         key={tool.id}
                         as="article"
                         interactive
+                        className="h-auto gap-0"
                         onActivate={() => void openDetail(tool)}
                       >
-                        <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 min-w-0 shrink-0 items-center gap-3">
                           <ResourceCardIcon>
                             <BuiltinToolIcon
                               functionName={tool.function_name}
                               className="size-5"
                             />
                           </ResourceCardIcon>
-                          <span className="truncate text-sm font-semibold">
+                          <span
+                            title={displayToolName(tool)}
+                            className="truncate text-sm font-semibold"
+                          >
                             {displayToolName(tool)}
                           </span>
                         </span>
-                        <span className="mt-3 line-clamp-2 text-sm text-muted-foreground">
+                        <span
+                          title={displayToolDescription(tool)}
+                          className="mt-3 h-5 shrink-0 truncate text-sm leading-5 text-muted-foreground"
+                        >
                           {displayToolDescription(tool) || t("暂无描述")}
                         </span>
                       </ResourceCard>
@@ -1118,168 +988,172 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   </div>
                 </section>
               ) : null}
-              <section aria-labelledby="builtin-skills-heading">
-                <div className="mb-3 flex items-center gap-2">
-                  <h2
-                    id="builtin-skills-heading"
-                    className="text-sm font-semibold"
-                  >
-                    {t("内置 Skills")}
-                  </h2>
-                  <Badge variant="secondary">{builtinSkillTools.length}</Badge>
-                </div>
-                {builtinSkillTools.length ? (
-                  <div className={resourceCardGridClass}>
-                    {builtinSkillTools.map((tool) => (
-                      <ResourceCard
-                        key={tool.id}
-                        as="article"
-                        interactive
-                        onActivate={() => void openDetail(tool)}
-                      >
-                        <div className="flex min-w-0 gap-3">
-                          <ResourceCardIcon>
-                            <BuiltinToolIcon
-                              functionName={tool.function_name}
-                              className="size-5"
-                            />
-                          </ResourceCardIcon>
-                          <div className="min-w-0">
-                            <ResourceCardTitle as="h3">
-                              {displayToolName(tool)}{" "}
-                              <span className="font-normal text-muted-foreground">
-                                {t("Skill")}
-                              </span>
-                            </ResourceCardTitle>
+              {filteredSkills.length ? (
+                <div className={resourceCardGridClass}>
+                  {filteredSkills.map((skill) => {
+                    if ("function_name" in skill) {
+                      const tool = skill
+                      return (
+                        <ResourceCard
+                          key={tool.id}
+                          as="article"
+                          interactive
+                          className="h-auto gap-0"
+                          onActivate={() => void openDetail(tool)}
+                        >
+                          <div className="flex h-9 min-w-0 shrink-0 items-center gap-3">
+                            <ResourceCardIcon>
+                              <BuiltinToolIcon
+                                functionName={tool.function_name}
+                                className="size-5"
+                              />
+                            </ResourceCardIcon>
+                            <div className="min-w-0">
+                              <ResourceCardTitle
+                                as="h3"
+                                title={displayToolName(tool)}
+                              >
+                                {displayToolName(tool)}
+                              </ResourceCardTitle>
+                            </div>
                           </div>
-                        </div>
-                        <p className="mt-3 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                          {displayToolDescription(tool) || t("暂无描述")}
-                        </p>
-                      </ResourceCard>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex min-h-24 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-                    {t("没有匹配的工具")}
-                  </div>
-                )}
-              </section>
-              <section aria-labelledby="workspace-skills-heading">
-                <div className="mb-3 flex items-center gap-2">
-                  <h2
-                    id="workspace-skills-heading"
-                    className="text-sm font-semibold"
-                  >
-                    {t("自定义 Skills")}
-                  </h2>
-                  <Badge variant="secondary">
-                    {filteredWorkspaceSkills.length}
-                  </Badge>
-                </div>
-                {filteredWorkspaceSkills.length ? (
-                  <div className={resourceCardGridClass}>
-                    {filteredWorkspaceSkills.map((skill) => (
+                          <p
+                            title={displayToolDescription(tool)}
+                            className="mt-3 h-5 shrink-0 truncate text-sm leading-5 text-muted-foreground"
+                          >
+                            {displayToolDescription(tool) || t("暂无描述")}
+                          </p>
+                        </ResourceCard>
+                      )
+                    }
+                    const skillStatus =
+                      skill.status === "disabled"
+                        ? t("已停用")
+                        : skill.current_version_number
+                          ? `${t("已发布版本")} ${skill.current_version_number}`
+                          : t("草稿")
+                    return (
                       <ResourceCard
                         key={skill.id}
                         as="article"
-                        className="gap-0"
+                        className="h-auto gap-0"
                       >
-                        <Button
-                          variant="ghost"
-                          className="h-auto max-w-full min-w-0 justify-start px-0 py-0 text-left text-sm font-semibold [overflow-wrap:anywhere] break-words whitespace-normal"
-                          onClick={() => {
-                            setEditingSkill(skill)
-                            setSkillDialogOpen(true)
-                          }}
-                        >
-                          {skill.name}
-                        </Button>
-                        <p
-                          title={skill.description}
-                          className="mt-1 line-clamp-2 text-sm break-words text-muted-foreground"
-                        >
-                          {skill.description}
-                        </p>
-                        <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
-                          {!skill.can_manage ? (
-                            <Badge variant="outline">{t("共享给我的")}</Badge>
-                          ) : null}
-                          <Badge variant="secondary">
-                            {skill.status === "disabled"
-                              ? t("已停用")
-                              : skill.current_version_number
-                                ? `${t("已发布版本")} ${skill.current_version_number}`
-                                : t("草稿")}
-                          </Badge>
-                          {skill.can_manage ? (
+                        <ResourceCardHeader className="h-9 shrink-0 items-center">
+                          <div className="flex min-w-0 flex-1 items-center gap-3">
+                            <ResourceCardIcon>
+                              <SparklesIcon className="size-5" />
+                            </ResourceCardIcon>
                             <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={busyId !== null}
-                              onClick={() => void removeSkill(skill)}
-                            >
-                              <Trash2Icon />
-                              {t("删除")}
-                            </Button>
-                          ) : null}
-                          {skill.can_manage ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={busyId === skill.id}
-                              onClick={async () => {
-                                setBusyId(skill.id)
-                                try {
-                                  await updateAgentSkill(
-                                    accessToken,
-                                    workspaceId,
-                                    skill.id,
-                                    {
-                                      status:
-                                        skill.status === "active"
-                                          ? "disabled"
-                                          : "active",
-                                    }
-                                  )
-                                  await load()
-                                } catch (cause) {
-                                  message("error", getErrorMessage(cause, t))
-                                } finally {
-                                  setBusyId(null)
-                                }
+                              variant="ghost"
+                              title={skill.name}
+                              className="h-auto min-w-0 shrink justify-start px-0 py-0 text-left text-sm font-semibold"
+                              onClick={() => {
+                                setEditingSkill(skill)
+                                setSkillDialogOpen(true)
                               }}
                             >
-                              {skill.status === "active"
-                                ? t("停用")
-                                : t("启用")}
+                              <span className="truncate">{skill.name}</span>
                             </Button>
-                          ) : null}
-                        </div>
+                          </div>
+                          <ResourceCardActions className="max-w-1/2 min-w-0">
+                            {!skill.can_manage ? (
+                              <Badge
+                                variant="outline"
+                                title={t("共享给我的")}
+                                className="min-w-0 shrink"
+                              >
+                                <span className="truncate">
+                                  {t("共享给我的")}
+                                </span>
+                              </Badge>
+                            ) : null}
+                            <Badge
+                              variant="secondary"
+                              title={skillStatus}
+                              className="min-w-0 shrink"
+                            >
+                              <span className="truncate">{skillStatus}</span>
+                            </Badge>
+                            {skill.can_manage ? (
+                              <CardMoreMenu
+                                label={t("管理技能 {name}", {
+                                  name: skill.name,
+                                })}
+                              >
+                                <DropdownMenuItem
+                                  disabled={busyId === skill.id}
+                                  onSelect={async () => {
+                                    setBusyId(skill.id)
+                                    try {
+                                      await updateAgentSkill(
+                                        accessToken,
+                                        workspaceId,
+                                        skill.id,
+                                        {
+                                          status:
+                                            skill.status === "active"
+                                              ? "disabled"
+                                              : "active",
+                                        }
+                                      )
+                                      await load()
+                                    } catch (cause) {
+                                      message(
+                                        "error",
+                                        getErrorMessage(cause, t)
+                                      )
+                                    } finally {
+                                      setBusyId(null)
+                                    }
+                                  }}
+                                >
+                                  <PowerIcon />
+                                  {skill.status === "active"
+                                    ? t("停用")
+                                    : t("启用")}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  disabled={busyId !== null}
+                                  onSelect={() => void removeSkill(skill)}
+                                >
+                                  <Trash2Icon />
+                                  {t("删除")}
+                                </DropdownMenuItem>
+                              </CardMoreMenu>
+                            ) : null}
+                          </ResourceCardActions>
+                        </ResourceCardHeader>
+                        <p
+                          title={skill.description}
+                          className="mt-3 h-5 shrink-0 truncate text-sm leading-5 text-muted-foreground"
+                        >
+                          {skill.description || t("暂无描述")}
+                        </p>
                       </ResourceCard>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
-                    <p className="font-medium">
-                      {workspaceSkills.length
-                        ? t("没有匹配的 Skill")
-                        : t("还没有可用的 Skill")}
-                    </p>
-                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                      {t("从添加工具新建或导入 Skill。")}
-                    </p>
-                    <Button
-                      className="mt-4"
-                      type="button"
-                      onClick={() => setSkillDialogOpen(true)}
-                    >
-                      <SparklesIcon />
-                      {t("新建 Skill")}
-                    </Button>
-                  </div>
-                )}
-              </section>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : query ? (
+            <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
+              {t("没有匹配的技能")}
+            </div>
+          ) : (
+            <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
+              <p className="font-medium">{t("还没有可用的技能")}</p>
+              <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                {t("从添加工具新建或导入技能。")}
+              </p>
+              <Button
+                className="mt-4"
+                type="button"
+                onClick={() => setSkillDialogOpen(true)}
+              >
+                <SparklesIcon />
+                {t("新建技能")}
+              </Button>
             </div>
           )
         ) : catalogTools.length === 0 && catalogSources.length === 0 ? (
@@ -1302,53 +1176,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           </div>
         )}
       </ResourceFolderLayout>
-
-      <Dialog
-        open={managedSourceId !== null}
-        onOpenChange={(open) => !open && setManagedSourceId(null)}
-      >
-        <DialogContent className="flex max-h-[80svh] flex-col overflow-hidden">
-          <DialogHeader>
-            <DialogTitle className="break-words">
-              {t("管理 {name} 的工具", { name: managedSourceName })}
-            </DialogTitle>
-            <DialogDescription>
-              {t("按工具管理权限与执行策略。")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 divide-y overflow-y-auto">
-            {managedTools.map((tool) => (
-              <div
-                key={tool.id}
-                className="flex flex-wrap items-center gap-2 py-3"
-              >
-                <span className="min-w-0 flex-1 basis-32 truncate text-sm font-medium">
-                  {displayToolName(tool)}
-                </span>
-                <Badge variant="outline">
-                  {toolIsAvailable(tool) ? t("可用") : t("不可用")}
-                </Badge>
-                {tool.policy_mode ? (
-                  <Badge variant="outline">
-                    {t(
-                      tool.policy_mode === "read_only"
-                        ? "只读自动执行"
-                        : tool.policy_mode === "disabled"
-                          ? "工具调用已禁用"
-                          : "每次调用前审批"
-                    )}
-                  </Badge>
-                ) : null}
-                {tool.availability === "unavailable" &&
-                tool.status === "active" ? (
-                  <Badge variant="outline">{t("上游未发现该工具")}</Badge>
-                ) : null}
-                {renderToolManagementMenu(tool)}
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <ResourceFolderPickerDialog
         open={isBatchMoveOpen}
@@ -1492,7 +1319,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         ? displayToolName(detailTarget)
                         : t("工具详情")}{" "}
                     <span className="text-sm font-normal text-muted-foreground">
-                      {t("Skill")}
+                      {t("技能")}
                     </span>
                   </DialogTitle>
                   <DialogDescription className="mt-1 leading-6 [overflow-wrap:anywhere]">

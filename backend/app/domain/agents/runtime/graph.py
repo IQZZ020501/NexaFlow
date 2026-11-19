@@ -279,13 +279,19 @@ class ModelTextStreamFilter:
         return "" if _partial_dsml_start(tail) is not None else tail
 
 
-def partial_tool_input_preview(arguments: str) -> dict[str, str]:
+def partial_tool_input_preview(
+    arguments: str, *, model_approval: bool = False
+) -> dict[str, str]:
     try:
         parsed = parse_partial_json(arguments)
     except (json.JSONDecodeError, TypeError, ValueError):
         return {}
     if not isinstance(parsed, dict):
         return {}
+    if model_approval:
+        parsed = parsed.get("arguments")
+        if not isinstance(parsed, dict):
+            return {}
     safe_value = safe_event_value(parsed, max_string_chars=None, max_list_items=None)
     if not isinstance(safe_value, dict):
         return {}
@@ -552,6 +558,7 @@ async def agent_node(
     bound_model = (
         model.bind_tools(available_tools) if allow_tools and available_tools else model
     )
+    tool_metadata = {tool.name: agent_tool_metadata(tool) for tool in available_tools}
     try:
         if callback.enabled:
             async with aclosing(bound_model.astream(model_messages)) as stream:
@@ -611,7 +618,11 @@ async def agent_node(
                                     )
                                 )
                             preview = partial_tool_input_preview(
-                                str(streamed["arguments"])
+                                str(streamed["arguments"]),
+                                model_approval=(
+                                    tool_metadata.get(tool_name, {}).get("model_approval")
+                                    == "true"
+                                ),
                             )
                             previous = streamed["preview"]
                             for field, value in preview.items():
@@ -903,6 +914,15 @@ async def tool_node(
             }
         )
         parsed_arguments = parsed_arguments_by_index[call_index]
+        if metadata.get("model_approval") == "true" and isinstance(
+            parsed_arguments, dict
+        ):
+            # Approval belongs to the Run ledger, never the remote tool's
+            # arguments. Missing or malformed decisions require confirmation.
+            metadata["model_requires_approval"] = (
+                "false" if parsed_arguments.get("requires_approval") is False else "true"
+            )
+            parsed_arguments = parsed_arguments.get("arguments")
         if tool_budget_overflow:
             blocked_result = AgentToolResult(
                 content=(

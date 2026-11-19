@@ -320,6 +320,17 @@ class AgentModelHandler(BaseHTTPRequestHandler):
         elif mcp_tool_name and not any(
             item.get("role") == "tool" for item in body.get("messages", [])
         ):
+            mcp_parameters = next(
+                tool["function"]["parameters"]
+                for tool in body["tools"]
+                if tool["function"]["name"] == mcp_tool_name
+            )
+            mcp_arguments = {"topic": "release"}
+            if "requires_approval" in mcp_parameters.get("properties", {}):
+                mcp_arguments = {
+                    "arguments": mcp_arguments,
+                    "requires_approval": False,
+                }
             message = {
                 "role": "assistant",
                 "content": None,
@@ -329,7 +340,7 @@ class AgentModelHandler(BaseHTTPRequestHandler):
                         "type": "function",
                         "function": {
                             "name": mcp_tool_name,
-                            "arguments": json.dumps({"topic": "release"}),
+                            "arguments": json.dumps(mcp_arguments),
                         },
                     }
                 ],
@@ -1758,8 +1769,6 @@ async def assert_runtime_budgets_are_enforced() -> None:
         RepeatedToolProvider("search_knowledge", 5),  # type: ignore[arg-type]
         [{"role": "user", "content": "Run it"}],
         [knowledge_tool],
-        max_knowledge_calls=1,
-        max_knowledge_rounds=1,
     )
     assert retrievals == 5
     assert len(result.events) == 5
@@ -1949,7 +1958,6 @@ async def assert_knowledge_plugin_allows_model_selected_repeated_queries() -> No
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Find the release evidence"}],
         [knowledge_tool],
-        adaptive_retrieval=True,
     )
     assert executions == 2
     assert result.content == "Done."
@@ -2007,7 +2015,6 @@ async def assert_retrieval_stops_at_evidence_sufficiency() -> None:
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Find both facts"}],
         [knowledge_tool],
-        knowledge_min_evidence_items=2,
     )
     assert executions == 1
     assert result.content == "Done."
@@ -2084,9 +2091,6 @@ async def assert_retrieval_source_diversity_keeps_searching() -> None:
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Find corroborating evidence"}],
         [knowledge_tool],
-        adaptive_retrieval=True,
-        knowledge_min_evidence_items=2,
-        knowledge_require_source_diversity=True,
     )
     assert executions == 2
     assert result.content == "Done."
@@ -2130,7 +2134,6 @@ async def assert_empty_knowledge_result_allows_best_effort_answer() -> None:
         provider,  # type: ignore[arg-type]
         [{"role": "user", "content": "Answer even if the workspace has no evidence."}],
         [knowledge_tool],
-        adaptive_retrieval=True,
     )
     assert executions == 1
     assert result.content == "General answer (not verified against workspace sources)."
@@ -4819,8 +4822,8 @@ def main() -> None:
             read_only_question = client.post(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
                 headers=auth_headers(admin_token),
-                # The policy mode is what auto-runs a read-only tool; the run
-                # default asks for approval on every call.
+                # The model explicitly auto-approves this routine read in the
+                # middle mode; the default still asks on every MCP call.
                 json={
                     "goal": "Check the release again",
                     "approval_mode": "ask_risky",

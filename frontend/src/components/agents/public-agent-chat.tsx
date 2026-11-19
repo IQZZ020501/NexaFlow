@@ -3,7 +3,7 @@
 import * as React from "react"
 import { PublicChatHistory as ConversationHistory } from "@/components/agents/public-chat-history"
 import {
-  ChatProjectPanel,
+  EditChatProjectDialog,
   CreateChatProjectDialog,
   usePublicChatProjects,
 } from "@/components/agents/public-chat-projects"
@@ -15,7 +15,6 @@ import {
   updateChatProject,
   type ChatProject,
 } from "@/lib/api/public-chat-projects"
-import { projectArtifactOptions } from "@/lib/chat-project-artifacts"
 import { isStaleRunSnapshot } from "@/lib/run-state"
 import {
   includesAgentProcessDelta,
@@ -31,10 +30,8 @@ import {
   CircleAlertIcon,
   CircleXIcon,
   DatabaseIcon,
-  FolderOpenIcon,
   LoaderCircleIcon,
   MenuIcon,
-  MessageSquarePlusIcon,
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
@@ -1045,10 +1042,12 @@ export function PublicAgentChat({
   const [activeProjectId, setActiveProjectId] = React.useState<string | null>(
     initialProjectId
   )
-  const [projectPanelOpen, setProjectPanelOpen] = React.useState(false)
+  const [editingProjectId, setEditingProjectId] = React.useState<string | null>(
+    null
+  )
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [projectBusy, setProjectBusy] = React.useState(false)
-  const hasArtifactPreview = !!artifactPreview.selection || projectPanelOpen
+  const hasArtifactPreview = !!artifactPreview.selection
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
   const [question, setQuestion] = React.useState("")
   const [approvalMode, setApprovalMode] =
@@ -1091,6 +1090,9 @@ export function PublicAgentChat({
   const currentProject = projectData.projects.find(
     (item) => item.id === currentProjectId
   )
+  const editingProject = projectData.projects.find(
+    (item) => item.id === editingProjectId
+  )
   const projectUnavailable = Boolean(
     currentProjectId && (!currentProject || currentProject.archived)
   )
@@ -1107,6 +1109,7 @@ export function PublicAgentChat({
   } | null>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const projectSettingsRef = React.useRef<HTMLButtonElement>(null)
+  const historyButtonRef = React.useRef<HTMLButtonElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
@@ -1340,7 +1343,7 @@ export function PublicAgentChat({
       )
       if (conversationRef.current === conversationId) {
         setActiveProjectId(projectId)
-        setProjectPanelOpen(false)
+        setEditingProjectId(null)
         window.history.replaceState(
           null,
           "",
@@ -1363,38 +1366,58 @@ export function PublicAgentChat({
     notify("success", t("项目已保存"))
   }
 
-  async function handleDissolveProject() {
-    if (!token || !currentProject) return
-    if (
-      !(await confirm({
-        title: t("解散项目"),
-        description: t(
-          "解散后对话将移回历史记录，已生成文件和历史回答会保留。"
-        ),
-        confirmLabel: t("解散项目"),
-        destructive: true,
-      }))
-    )
-      return
-    await dissolveChatProject(agentId, token, currentProject.id)
-    projectData.setProjects((current) =>
-      current.filter((item) => item.id !== currentProject.id)
-    )
-    setConversations((current) =>
-      current.map((item) =>
-        item.project_id === currentProject.id
-          ? { ...item, project_id: null }
-          : item
+  async function handleToggleArchiveProject(project: ChatProject) {
+    if (!token || projectBusy) return
+    setProjectBusy(true)
+    try {
+      await handleSaveProject({ ...project, archived: !project.archived })
+    } catch (error) {
+      notify("error", getErrorMessage(error, t))
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  async function handleDissolveProject(project: ChatProject) {
+    if (!token || projectBusy) return
+    setIsHistoryOpen(false)
+    setProjectBusy(true)
+    try {
+      if (
+        !(await confirm({
+          title: t("解散项目"),
+          description: t(
+            "解散后对话将移回历史记录，已生成文件和历史回答会保留。"
+          ),
+          confirmLabel: t("解散项目"),
+          destructive: true,
+        }))
       )
-    )
-    if (projectRef.current === currentProject.id) {
-      setActiveProjectId(null)
-      setProjectPanelOpen(false)
-      window.history.replaceState(
-        null,
-        "",
-        publicChatUrl(agentId, conversationRef.current)
+        return
+      await dissolveChatProject(agentId, token, project.id)
+      projectData.setProjects((current) =>
+        current.filter((item) => item.id !== project.id)
       )
+      setConversations((current) =>
+        current.map((item) =>
+          item.project_id === project.id
+            ? { ...item, project_id: null }
+            : item
+        )
+      )
+      if (projectRef.current === project.id) {
+        setActiveProjectId(null)
+        setEditingProjectId(null)
+        window.history.replaceState(
+          null,
+          "",
+          publicChatUrl(agentId, conversationRef.current)
+        )
+      }
+    } catch (error) {
+      notify("error", getErrorMessage(error, t))
+    } finally {
+      setProjectBusy(false)
     }
   }
 
@@ -1419,7 +1442,7 @@ export function PublicAgentChat({
       conversations.find((item) => item.conversation_id === conversationId)
         ?.project_id ?? null
     )
-    setProjectPanelOpen(false)
+    setEditingProjectId(null)
     setIsHistoryOpen(false)
     window.history.replaceState(
       null,
@@ -1442,7 +1465,7 @@ export function PublicAgentChat({
     sessionInputRef.current = null
     setActiveConversationId(null)
     setActiveProjectId(projectId)
-    setProjectPanelOpen(false)
+    setEditingProjectId(null)
     setRuns([])
     setToolCallsByRun({})
     setResolvingCallId(null)
@@ -2016,6 +2039,13 @@ export function PublicAgentChat({
     activeProjectId: currentProjectId,
     onCreateProject: () => setCreateProjectOpen(true),
     onSelectProject: (projectId: string) => startNewConversation(projectId),
+    onEditProject: (project: ChatProject, opener: HTMLButtonElement) => {
+      projectSettingsRef.current = opener
+      setEditingProjectId(project.id)
+      setIsHistoryOpen(false)
+    },
+    onToggleArchiveProject: handleToggleArchiveProject,
+    onDissolveProject: handleDissolveProject,
     onMove: handleMoveConversation,
     projectBusy,
     projectsError: projectData.error,
@@ -2043,6 +2073,7 @@ export function PublicAgentChat({
           >
             <header className="flex min-h-16 shrink-0 items-center gap-2 border-b bg-background/95 px-3 pt-[env(safe-area-inset-top)] backdrop-blur sm:gap-3 sm:px-6">
               <Button
+                ref={historyButtonRef}
                 type="button"
                 variant="ghost"
                 size="icon"
@@ -2066,34 +2097,6 @@ export function PublicAgentChat({
                     : profile.description || t("公开对话")}
                 </p>
               </div>
-              {currentProject ? (
-                <Button
-                  ref={projectSettingsRef}
-                  variant="ghost"
-                  size={hasArtifactPreview ? "icon" : "sm"}
-                  className="shrink-0"
-                  aria-label={t("项目说明与资料")}
-                  title={t("项目说明与资料")}
-                  aria-expanded={projectPanelOpen}
-                  onClick={() => {
-                    artifactPreview.close()
-                    setProjectPanelOpen((value) => !value)
-                  }}
-                >
-                  <FolderOpenIcon />
-                  {!hasArtifactPreview ? t("项目说明与资料") : null}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={t("新建对话")}
-                title={t("新建对话")}
-                onClick={() => startNewConversation()}
-              >
-                <MessageSquarePlusIcon />
-              </Button>
             </header>
 
             <div
@@ -2584,29 +2587,7 @@ export function PublicAgentChat({
               </div>
             </div>
           </section>
-          {projectPanelOpen && currentProject && token ? (
-            <ChatProjectPanel
-              key={currentProject.id}
-              project={currentProject}
-              agentId={agentId}
-              token={token}
-              onClose={() => setProjectPanelOpen(false)}
-              onSave={handleSaveProject}
-              onDissolve={handleDissolveProject}
-              artifacts={projectArtifactOptions(
-                [...runs].reverse().flatMap((run) => run.progress)
-              )}
-              onPreview={(artifact, opener) => {
-                artifactPreview.open(
-                  artifact,
-                  projectSettingsRef.current ?? opener
-                )
-                setProjectPanelOpen(false)
-              }}
-            />
-          ) : (
-            <AgentArtifactPreviewPanel />
-          )}
+          <AgentArtifactPreviewPanel />
         </div>
 
         <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
@@ -2624,6 +2605,31 @@ export function PublicAgentChat({
             />
           </DialogContent>
         </Dialog>
+        {editingProject && token ? (
+          <EditChatProjectDialog
+            key={editingProject.id}
+            project={editingProject}
+            agentId={agentId}
+            token={token}
+            onClose={() => setEditingProjectId(null)}
+            onSave={handleSaveProject}
+            onReturnFocus={() => {
+              const opener = projectSettingsRef.current?.isConnected
+                ? projectSettingsRef.current
+                : historyButtonRef.current
+              opener?.focus({ preventScroll: true })
+            }}
+            onPreview={(artifact, opener) => {
+              artifactPreview.open(
+                artifact,
+                (projectSettingsRef.current?.isConnected
+                  ? projectSettingsRef.current
+                  : historyButtonRef.current) ?? opener
+              )
+              setEditingProjectId(null)
+            }}
+          />
+        ) : null}
         {token ? (
           <CreateChatProjectDialog
             open={createProjectOpen}

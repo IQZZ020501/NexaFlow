@@ -80,7 +80,6 @@
 
 ### app/infra/tools/
 
-- `backend/app/infra/tools/dispatch.py` — durable ToolInvocation 的 broker 分发：`enqueue_tool_invocation` 经 Celery `send_task("app.tools.run", …)` 投递。
 - `backend/app/infra/tools/mcp_stdio.py` — MCP stdio 配置（command/args/cwd/env/egress_domains）解析、加密序列化和输入边界；路径属于执行镜像，不查询或执行业务宿主文件。
 
 ### app/infra/email/

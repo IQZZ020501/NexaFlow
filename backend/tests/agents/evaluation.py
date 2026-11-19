@@ -123,7 +123,6 @@ async def runtime_observations() -> tuple[AgentEvaluationObservation, ...]:
         ScriptedModel([answer_message("Direct answer: ready.")]),
         [{"role": "user", "content": "Respond directly."}],
         [],
-        max_model_tokens=100,
     )
 
     async def echo(arguments: str) -> AgentToolResult:
@@ -149,7 +148,6 @@ async def runtime_observations() -> tuple[AgentEvaluationObservation, ...]:
         ),
         [{"role": "user", "content": "Use echo."}],
         [tool],
-        max_model_tokens=100,
     )
 
     knowledge = create_agent_tool(
@@ -281,15 +279,12 @@ def test_gate_rejects_blocked_tools_and_unreported_usage() -> None:
     assert summary["required_failures"] == ["security#1"]
 
 
-def test_plain_answer_ignores_retired_grounding_and_token_limits() -> None:
+def test_plain_answer_has_no_grounding_stage() -> None:
     async def execute() -> None:
         result = await run_agent(
             ScriptedModel([answer_message("A useful ordinary answer.", tokens=12)]),
             [{"role": "user", "content": "Answer normally."}],
             [],
-            grounding_mode="required",
-            initial_evidence=[{"chunk_id": "chunk-1", "content": "unrelated"}],
-            max_model_tokens=1,
         )
         assert result.content == "A useful ordinary answer."
         assert not hasattr(result, "grounding_status")
@@ -320,8 +315,6 @@ def test_plain_answer_streams_immediately_without_a_manifest() -> None:
                 [{"role": "user", "content": "Answer normally."}],
                 [],
                 on_event=emit,
-                grounding_mode="required",
-                initial_evidence=[{"chunk_id": "chunk-1", "content": "unrelated"}],
             )
         )
         await model.first_chunk_emitted.wait()
@@ -398,9 +391,6 @@ def test_capabilities_share_the_same_loop_and_budget() -> None:
             [{"role": "user", "content": "Use the capabilities as needed."}],
             tools,
             max_turns=6,
-            adaptive_retrieval=True,
-            max_no_progress_rounds=1,
-            knowledge_min_evidence_items=1,
         )
         assert result.content == "Completed."
         assert invoked == ["knowledge", "mcp", "builtin", "knowledge", "knowledge"]
@@ -527,7 +517,7 @@ def test_live_runner_contract_is_safe_and_observable() -> None:
 
 
 def main() -> None:
-    test_plain_answer_ignores_retired_grounding_and_token_limits()
+    test_plain_answer_has_no_grounding_stage()
     test_plain_answer_streams_immediately_without_a_manifest()
     test_capabilities_share_the_same_loop_and_budget()
     test_legacy_checkpoint_uses_the_generic_protocol_without_replaying_tools()

@@ -2,27 +2,20 @@ import type { TranslationKey } from "./zh-hans"
 
 export const en = {
   新建项目: "New project",
+  编辑项目: "Edit project",
+  "更多项目操作：{name}": "More project actions: {name}",
+  "新建项目对话：{name}": "New conversation in project: {name}",
   项目: "Projects",
   项目名称: "Project name",
-  项目说明: "Project instructions",
-  "将相关对话、项目说明和资料放在一起，仅你自己可见。":
-    "Keep related conversations, instructions, and sources together, visible only to you.",
-  "描述项目目标、背景和回答要求":
-    "Describe the project goal, background, and response requirements",
+  "将相关对话和资料放在一起，仅你自己可见。":
+    "Keep related conversations and sources together, visible only to you.",
   创建项目: "Create project",
-  项目设置: "Project settings",
   项目资料: "Project sources",
-  项目说明与资料: "Instructions and sources",
-  "说明和资料从下一次发送起生效，历史回答保持原样。":
-    "Changes apply to the next message. Previous answers keep their original context.",
   上传资料: "Upload sources",
   "项目内各段对话共用只读资料；每个文件最多 5 MiB，合计最多 64 个文件、64 MiB。":
     "Conversations share read-only sources: up to 5 MiB per file, 64 files and 64 MiB in total.",
   暂无项目资料: "No project sources yet",
   "移除项目资料：{filename}": "Remove project source: {filename}",
-  从当前对话保存: "Save from this conversation",
-  选择生成文件: "Select a generated file",
-  保存到项目资料: "Save to project sources",
   恢复项目: "Restore project",
   归档项目: "Archive project",
   解散项目: "Dissolve project",
@@ -55,7 +48,7 @@ export const en = {
   "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失": "The execution environment was rebuilt. Saved files will be restored; unsaved temporary state may be lost.",
   "请先配置 Embedding 模型": "Configure an Embedding model first",
   "检索模型测试失败，请检查连接配置后重试": "The retrieval model test failed. Check the connection settings and retry.",
-  "绑定的 Skill 授权已失效，请重新配置": "Authorization for a bound Skill has expired. Update the configuration.",
+  "绑定的技能授权已失效，请重新配置": "Authorization for a bound Skill has expired. Update the configuration.",
   "检索模型测试失败，模型服务返回状态码 {value}": "The retrieval model test failed with provider status {value}",
   操作失败: "Operation failed",
   "相似度必须是 0 到 1 之间的数字":
@@ -68,16 +61,15 @@ export const en = {
     "The file is empty (0 bytes). Choose a file with content.",
   不支持的文件格式: "Unsupported file format",
   "{name}：{reason}": "{name}: {reason}",
-  "删除 Skill“{name}”？删除后无法再调用，历史版本和执行记录会保留。":
+  "删除技能“{name}”？删除后无法再调用，历史版本和执行记录会保留。":
     "Delete Skill “{name}”? It will no longer be callable. Published versions and execution history will be retained.",
-  "Skill 已删除": "Skill deleted",
-  "自定义 Skills": "Custom Skills",
-  "没有匹配的 Skill": "No matching Skills",
-  "还没有可用的 Skill": "No Skills available yet",
+  "技能已删除": "Skill deleted",
+  "没有匹配的技能": "No matching Skills",
+  "还没有可用的技能": "No Skills available yet",
   "统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。":
     "Current resources across the entire workspace, independent of the date filter. Personal lists show only resources you can access.",
-  "工具按内置工具（含内置 Skills）和 MCP 子工具计数，仅统计当前工具目录中的资源。":
-    "Tools count built-in tools (including built-in Skills) and individual MCP tools currently listed in the tool catalog.",
+  "工具按内置工具（含技能）和 MCP 子工具计数，仅统计当前工具目录中的资源。":
+    "Tools count built-in tools (including Skills) and individual MCP tools currently listed in the tool catalog.",
   "文件超过大小限制，请缩小后重试":
     "The file exceeds the size limit. Reduce its size and retry.",
   名称不能为空或仅包含空格:
@@ -90,18 +82,18 @@ export const en = {
   "请选择 Rerank 类型的模型": "Select a Rerank model",
   "知识库已有任务运行中，请完成后重试":
     "A knowledge base task is already running. Wait for it to finish and retry.",
-  "Skill 已停用，请启用后重试": "The Skill is disabled. Enable it and retry.",
-  "绑定的 Skill 已停用或已删除，请重新配置":
+  "技能已停用，请启用后重试": "The Skill is disabled. Enable it and retry.",
+  "绑定的技能已停用或已删除，请重新配置":
     "A bound Skill is disabled or deleted. Update the configuration.",
-  "Skill 已停用，请启用后再发布":
+  "技能已停用，请启用后再发布":
     "The Skill is disabled. Enable it before publishing.",
-  "Skill 版本不可用，请重新选择":
+  "技能版本不可用，请重新选择":
     "The Skill version is unavailable. Select another version.",
-  "Skill 发布发生冲突，请刷新后重试":
+  "技能发布发生冲突，请刷新后重试":
     "Skill publication conflicted. Refresh and retry.",
-  "Skill 发布版本无效，请重新发布":
+  "技能发布版本无效，请重新发布":
     "The published Skill version is invalid. Publish it again.",
-  "Skill 引用的知识库未启用，请重新配置":
+  "技能引用的知识库未启用，请重新配置":
     "The knowledge base referenced by the Skill is inactive. Update the configuration.",
   "至少输入 {value} 个字符": "Enter at least {value} characters",
   "最多输入 {value} 个字符": "Enter at most {value} characters",
@@ -207,22 +199,22 @@ export const en = {
 
   "应如何批准工具调用？": "How should tool calls be approved?",
   请求批准: "Request approval",
-  按策略审批: "Policy approval",
+  按策略自动执行: "Run by policy",
   完全访问: "Full access",
   "启用完全访问？": "Enable full access?",
   "完全访问会自动运行已授权的工具，不再逐步询问。请确认你了解该模式的安全影响。":
     "Full access runs authorized tools automatically without asking first. Confirm that you understand the security impact of this mode.",
   启用完全访问: "Enable full access",
   外部读取或副作用操作前询问: "Ask for external reads or side effects",
-  仅风险操作需批准: "Ask only for risky operations",
+  "模型判断 MCP 调用是否需要确认": "Model decides when MCP calls need approval",
   "自动运行已授权工具，仍受安全限制": "Auto-run authorized tools; limits apply",
   "执行权限：{mode}": "Execution permission: {mode}",
-  "编辑 Skill": "Edit Skill",
+  "编辑技能": "Edit Skill",
   技能指令: "Skill instructions",
   包文件: "Package files",
   保存并发布: "Save and publish",
-  "Skill 包不能超过 2 MiB": "Skill packages cannot exceed 2 MiB",
-  "Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。":
+  "技能包不能超过 2 MiB": "Skill packages cannot exceed 2 MiB",
+  "技能是按需加载的指令与文件包，不会自动生成或授权外部工具。":
     "Skills are instruction and file packages loaded on demand. They do not automatically create or authorize external tools.",
   追加后续任务: "Queue follow-up",
   后续任务已排队: "Follow-up queued",
@@ -307,7 +299,7 @@ export const en = {
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
   应用名称已存在: "App name already exists",
-  "Skill 名称已存在": "Skill name already exists",
+  "技能名称已存在": "Skill name already exists",
   文件夹名称已存在: "Folder name already exists",
   模型名称已存在: "Model name already exists",
   模型已存在: "Model already exists",
@@ -742,15 +734,7 @@ export const en = {
   还没有应用: "No apps yet",
   "创建应用后，可以编排对话、检索和工具调用流程。":
     "Create an app to orchestrate chat, retrieval, and tool-calling flows.",
-  查看模板: "View templates",
-  "配置应用名称和描述。": "Configure the app name and description.",
-  应用名称: "App name",
-  "例如：客服助手": "Example: Support assistant",
-  应用描述: "App description",
-  "例如：面向客服团队的业务助手":
-    "Example: Business assistant for the support team",
   负责人: "Owner",
-  "例如：运营团队": "Example: Operations team",
   知识库: "Knowledge",
   知识库检索: "Knowledge retrieval",
   目录: "Folders",
@@ -781,15 +765,7 @@ export const en = {
   还没有知识库: "No knowledge bases yet",
   "创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。":
     "Create a knowledge base to upload documents, configure retrieval, and let apps use it.",
-  查看示例: "View examples",
-  "配置知识库名称、描述和默认数据源。":
-    "Configure the knowledge base name, description, and default data source.",
   知识库名称: "Knowledge base name",
-  "例如：产品文档": "Example: Product docs",
-  知识库描述: "Knowledge base description",
-  "例如：产品资料与常见问题": "Example: Product materials and FAQs",
-  数据源: "Data source",
-  "例如：本地文档": "Example: Local documents",
   模型: "Models",
   "按模型维度接入供应商、基础模型和访问凭据。":
     "Connect providers, base models, and credentials at the model level.",
@@ -798,15 +774,10 @@ export const en = {
   没有匹配的模型: "No matching models",
   "接入模型后，应用可以使用它进行对话、检索增强和工具调用。":
     "Connect a model so apps can use it for chat, retrieval augmentation, and tool calling.",
-  查看配置: "View configuration",
   "配置供应商、基础模型、API URL 和 API Key。":
     "Configure provider, base model, API URL, and API Key.",
-  "配置供应商、基础模型和连接凭据。":
-    "Configure provider, base model, and connection credentials.",
   供应商: "Provider",
-  "例如：OpenAI": "Example: OpenAI",
   模型名称: "Model name",
-  "例如：gpt-4.1": "Example: gpt-4.1",
   "API URL": "API URL",
   "API Key": "API Key",
   "API Version": "API version",
@@ -815,7 +786,6 @@ export const en = {
   "AWS Access Key ID": "AWS access key ID",
   "AWS Secret Access Key": "AWS secret access key",
   "AWS Session Token": "AWS session token",
-  "sk-...": "sk-...",
   编辑: "Edit",
   删除: "Delete",
   更多: "More",
@@ -878,47 +848,43 @@ export const en = {
   更新模型配置: "Update model config",
   删除模型配置: "Delete model config",
   工具: "Tools",
-  "管理外部 API、内部服务和可被应用调用的工具能力。":
-    "Manage external APIs, internal services, and tool capabilities apps can call.",
-  "添加工具和 Skills": "Add tools and Skills",
-  "添加 MCP 工具或 Skills": "Add MCP tools or Skills",
-  "按 MCP 服务添加工具，或选择已发布的 Skill；需要审批的调用会暂停等待确认。":
+  "添加工具和技能": "Add tools and Skills",
+  "添加 MCP 工具或技能": "Add MCP tools or Skills",
+  "按 MCP 服务添加工具，或选择已发布的技能；需要审批的调用会暂停等待确认。":
     "Add MCP services or published Skills. Calls requiring approval pause for confirmation.",
-  "搜索工具或 Skills": "Search tools or Skills",
+  "搜索工具或技能": "Search tools or Skills",
   "移除 {name}": "Remove {name}",
-  "最多选择 4 个 Skills": "Select up to 4 Skills",
-  "没有匹配的工具或 Skills": "No matching tools or Skills",
+  "最多选择 4 个技能": "Select up to 4 Skills",
+  "没有匹配的工具或技能": "No matching tools or Skills",
   添加工具: "Add tool",
   还没有工具: "No tools yet",
   "MCP Server": "MCP Server",
-  Skills: "Skills",
-  Skill: "Skill",
-  "新建 Skill": "New Skill",
-  "导入 Skill": "Import Skill",
-  "创建 Skill": "Create Skill",
+  技能: "Skills",
+  "新建技能": "New Skill",
+  "导入技能": "Import Skill",
+  "创建技能": "Create Skill",
   "写 SKILL.md，并声明参数。平台会生成 Tool。":
     "Write SKILL.md and declare parameters. The platform generates the Tool.",
-  "新建 Skill，或导入 SKILL.md / zip。":
+  "新建技能，或导入 SKILL.md / zip。":
     "Create a Skill, or import SKILL.md / a zip.",
   "上传包含 SKILL.md 的 zip 包。": "Upload a zip that contains SKILL.md.",
   "请上传 SKILL.md 或 zip。": "Upload SKILL.md or a zip.",
   "请先解压 zip，上传其中的 SKILL.md。":
     "Unzip first, then upload the SKILL.md inside.",
   "无法读取该文件。": "Could not read that file.",
-  "选择 Skill 文件": "Choose a Skill file",
+  "选择技能文件": "Choose a Skill file",
   "SKILL.md": "SKILL.md",
   "参数写在 frontmatter 或稍后在表单里补。":
     "Declare parameters in front matter, or add them in the form later.",
-  "内置 Skills": "Built-in Skills",
-  "我的 Skills": "My Skills",
-  "还没有自己的 Skill": "No Skills of your own yet",
-  "管理自己的 MCP 与 Skills；共享给你的资源可按授权使用。":
+  "我的技能": "My Skills",
+  "还没有自己的技能": "No Skills of your own yet",
+  "管理自己的 MCP 与技能；共享给你的资源可按授权使用。":
     "Manage your own MCP connections and Skills. Shared resources follow their granted permissions.",
   "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。":
     "You manage this connection. Shared tools run through it. Saving discovers the available tools.",
-  "工作区 Skills": "Workspace Skills",
-  "还没有工作区 Skill": "No workspace Skills yet",
-  "从添加工具新建或导入 Skill。": "Create or import a Skill from Add tool.",
+  "工作区技能": "Workspace Skills",
+  "还没有工作区技能": "No workspace Skills yet",
+  "从添加工具新建或导入技能。": "Create or import a Skill from Add tool.",
   我的工具: "My tools",
   共享给我的: "Shared with me",
   内置工具: "Built-in tools",
@@ -953,6 +919,7 @@ export const en = {
   不可用: "Unavailable",
   没有使用权限: "No use permission",
   工具当前不可用: "Tool is currently unavailable",
+  "工具不可用，请刷新工具列表后重新选择": "Tool is unavailable. Refresh the tool list and select it again.",
   不支持工作流调用: "Not callable from Workflows",
   需要逐次审批: "Requires approval for every call",
   工具调用已禁用: "Tool calls are disabled",
@@ -967,6 +934,7 @@ export const en = {
   工具来源已启用: "Tool source enabled",
   工具来源已禁用: "Tool source disabled",
   "管理工具 {name}": "Manage tool {name}",
+  "管理技能 {name}": "Manage skill {name}",
   查看详情: "View details",
   删除来源: "Delete source",
   "删除来源“{name}”？该来源下的全部工具都会被移除。":
@@ -1016,16 +984,6 @@ export const en = {
     "Ask directly and the Agent will use its configured knowledge bases and tools as needed.",
   "配置工作流的默认模型；知识库、工具和 Agent 由节点选择。":
     "Configure the default Workflow model. Knowledge bases, tools, and Agents are selected on nodes.",
-  "添加工具后，应用可以调用外部系统完成查询、写入和自动化动作。":
-    "Add a tool so apps can call external systems for reads, writes, and automation.",
-  "配置工具名称、描述和调用地址。":
-    "Configure the tool name, description, and endpoint.",
-  工具名称: "Tool name",
-  "例如：订单查询": "Example: Order lookup",
-  工具描述: "Tool description",
-  "例如：查询订单状态": "Example: Query order status",
-  调用地址: "Endpoint",
-  "https://api.example.com/orders": "https://api.example.com/orders",
   添加成员: "Add member",
   移除成员: "Remove member",
   更新成员角色: "Update member role",

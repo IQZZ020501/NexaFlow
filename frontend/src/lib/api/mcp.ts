@@ -81,25 +81,6 @@ export type McpServer = {
   updated_at: string
 }
 
-export type McpServerCreatePayload =
-  | {
-      name: string
-      transport: "streamable_http" | "sse"
-      url: string
-      bearer_token?: string
-      oauth?: McpOAuthConfiguration
-    }
-  | {
-      name: string
-      transport: "stdio"
-      stdio_config: {
-        command: string
-        args: string[]
-        cwd?: string
-        env: Record<string, string>
-      }
-    }
-
 /**
  * Builds the API path for MCP servers in a workspace.
  *
@@ -189,25 +170,6 @@ export function listMcpServers(
 }
 
 /**
- * Creates an MCP server in a workspace.
- *
- * @param workspaceId - The workspace containing the server
- * @param payload - The server configuration
- * @returns The created MCP server
- */
-export function createMcpServer(
-  token: string,
-  workspaceId: string,
-  payload: McpServerCreatePayload
-) {
-  return request<McpServer>(mcpPath(workspaceId), {
-    method: "POST",
-    token,
-    body: JSON.stringify(payload),
-  })
-}
-
-/**
  * Refreshes an MCP server's configuration and available tools.
  *
  * @param serverId - The identifier of the MCP server to refresh
@@ -222,57 +184,4 @@ export function refreshMcpServer(
     method: "POST",
     token,
   })
-}
-
-/**
- * Deletes an MCP server from a workspace.
- *
- * @param token - Authentication token for the request
- * @param workspaceId - Identifier of the workspace containing the server
- * @param serverId - Identifier of the server to delete
- */
-export function deleteMcpServer(
-  token: string,
-  workspaceId: string,
-  serverId: string
-) {
-  return request<void>(mcpPath(workspaceId, `/${serverId}`), {
-    method: "DELETE",
-    token,
-  })
-}
-
-/**
- * Updates the policy mode for an MCP server tool.
- *
- * @param toolName - The name of the tool whose policy to update
- * @param mode - The policy mode to apply to the tool
- * @returns The updated tool policy metadata
- */
-export function updateMcpToolPolicy(
-  token: string,
-  workspaceId: string,
-  serverId: string,
-  toolName: string,
-  mode: McpToolPolicyMode
-) {
-  return request<{
-    workspace_id: string
-    mcp_server_id: string
-    tool_name: string
-    definition_hash: string
-    mode: McpToolPolicyMode
-    reviewed_by_user_id: string | null
-    reviewed_at: string | null
-  }>(
-    mcpPath(
-      workspaceId,
-      `/${serverId}/tools/${encodeURIComponent(toolName)}/policy`
-    ),
-    {
-      method: "PUT",
-      token,
-      body: JSON.stringify({ mode }),
-    }
-  )
 }

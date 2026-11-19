@@ -14,6 +14,7 @@ from app.application.tools.runtime.service import (
 )
 from app.domain.agents.approval import (
     agent_tool_requires_approval,
+    model_decides_mcp_approval,
     run_agent_approval_mode,
 )
 from app.domain.agents.runtime import (
@@ -108,7 +109,6 @@ class UnifiedAgentToolRuntime:
         metadata: dict[str, str],
         arguments: dict[str, Any],
     ) -> AgentToolResult | None:
-        del metadata
         snapshot = self.snapshots.get(call["name"])
         if snapshot is None:
             return None
@@ -134,6 +134,8 @@ class UnifiedAgentToolRuntime:
             approval_required=agent_tool_requires_approval(
                 run_agent_approval_mode(self.run),
                 snapshot,
+                model_decides_mcp=model_decides_mcp_approval(self.run),
+                model_requires_approval=metadata.get("model_requires_approval") != "false",
             ),
         )
         try:

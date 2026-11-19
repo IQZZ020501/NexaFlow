@@ -703,18 +703,6 @@ export function removeTeamMember(
   )
 }
 
-/**
- * Retrieves administrator audit logs matching the specified filters.
- *
- * @param filters - Optional criteria used to narrow the audit logs
- * @returns The matching audit log entries
- */
-export function listAuditLogs(token: string, filters: AuditFilters = {}) {
-  return request<AuditLog[]>(`/api/v1/admin/audit-logs${filtersQuery(filters)}`, {
-    token,
-  })
-}
-
 export function listAuditLogsPage(token: string, filters: AuditFilters = {}) {
   return requestPage<AuditLog>(`/api/v1/admin/audit-logs${filtersQuery(filters)}`, { token })
 }
@@ -745,24 +733,6 @@ export async function listAllAuditLogs(
     }
     offset += page.items.length
   }
-}
-
-/**
- * Retrieves audit logs for a workspace, optionally filtered by audit criteria.
- *
- * @param workspaceId - The identifier of the workspace whose audit logs are retrieved
- * @param filters - Optional criteria used to filter the audit logs
- * @returns The workspace's matching audit log entries
- */
-export function listWorkspaceAuditLogs(
-  token: string,
-  workspaceId: string,
-  filters: AuditFilters = {}
-) {
-  return request<AuditLog[]>(
-    `/api/v1/workspaces/${workspaceId}/audit-logs${filtersQuery(filters)}`,
-    { token }
-  )
 }
 
 export function listWorkspaceAuditLogsPage(token: string, workspaceId: string, filters: AuditFilters = {}) {
@@ -797,24 +767,6 @@ export async function listAllWorkspaceAuditLogs(
     }
     offset += page.items.length
   }
-}
-
-/**
- * Retrieves system logs matching the supplied filters.
- *
- * @param filters - Optional filters for log level, event, status code, user, time range, and stack trace inclusion
- * @returns The matching system logs
- */
-export function listSystemLogs(token: string, filters: AuditFilters & {
-  level?: string
-  event?: string
-  status_code?: number
-  user_id?: string
-  include_stack?: boolean
-} = {}) {
-  return request<SystemLog[]>(`/api/v1/admin/system-logs${filtersQuery(filters)}`, {
-    token,
-  })
 }
 
 export function listSystemLogsPage(token: string, filters: AuditFilters & {

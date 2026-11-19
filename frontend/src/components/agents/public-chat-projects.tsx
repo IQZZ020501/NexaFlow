@@ -4,6 +4,7 @@ import * as React from "react"
 import {
   DownloadIcon,
   EyeIcon,
+  FolderIcon,
   LoaderCircleIcon,
   PlusIcon,
   Trash2Icon,
@@ -16,12 +17,11 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ArtifactPreviewPane } from "@/components/agents/artifacts/artifact-preview-pane"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
-import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { AgentArtifactPreviewContext } from "@/components/agents/artifacts/agent-artifact-preview-context"
 import { ArtifactDownloadLink } from "@/components/knowledge/markdown-content"
 import { useLanguage } from "@/contexts/language-provider"
@@ -33,7 +33,6 @@ import {
   deleteChatProjectFile,
   listChatProjectFiles,
   listChatProjects,
-  saveChatProjectArtifact,
   uploadChatProjectFiles,
   type ChatProject,
   type ChatProjectFile,
@@ -118,7 +117,6 @@ export function CreateChatProjectDialog({
 }) {
   const { t } = useLanguage()
   const [name, setName] = React.useState("")
-  const [instructions, setInstructions] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   return (
@@ -132,7 +130,7 @@ export function CreateChatProjectDialog({
         <DialogHeader>
           <DialogTitle>{t("新建项目")}</DialogTitle>
           <DialogDescription>
-            {t("将相关对话、项目说明和资料放在一起，仅你自己可见。")}
+            {t("将相关对话和资料放在一起，仅你自己可见。")}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -146,13 +144,11 @@ export function CreateChatProjectDialog({
               const project = await createChatProject(
                 agentId,
                 token,
-                name.trim(),
-                instructions
+                name.trim()
               )
               onCreated(project)
               onOpenChange(false)
               setName("")
-              setInstructions("")
             } catch (error) {
               setError(getErrorMessage(error, t))
             } finally {
@@ -167,17 +163,6 @@ export function CreateChatProjectDialog({
               maxLength={120}
               required
               onChange={(event) => setName(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-2 text-sm">
-            {t("项目说明")}
-            <textarea
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-              value={instructions}
-              maxLength={12000}
-              rows={5}
-              onChange={(event) => setInstructions(event.target.value)}
-              placeholder={t("描述项目目标、背景和回答要求")}
             />
           </label>
           {error ? (
@@ -218,14 +203,13 @@ function filePreview(
   }
 }
 
-export function ChatProjectPanel({
+export function EditChatProjectDialog({
   project,
   agentId,
   token,
   onClose,
   onSave,
-  onDissolve,
-  artifacts,
+  onReturnFocus,
   onPreview,
 }: {
   project: ChatProject
@@ -233,21 +217,19 @@ export function ChatProjectPanel({
   token: string
   onClose: () => void
   onSave: (project: ChatProject) => Promise<void>
-  onDissolve: () => Promise<void>
-  artifacts: { id: string; filename: string }[]
+  onReturnFocus: () => void
   onPreview: (artifact: PreviewArtifact, opener: HTMLButtonElement) => void
 }) {
   const { t } = useLanguage()
   const preview = React.useContext(AgentArtifactPreviewContext)
-  const panelId = React.useId()
+  const formId = React.useId()
+  const openingPreview = React.useRef(false)
   const [name, setName] = React.useState(project.name)
-  const [instructions, setInstructions] = React.useState(project.instructions)
   const [files, setFiles] = React.useState<ChatProjectFile[]>([])
   const [loading, setLoading] = React.useState(true)
   const [attempt, retry] = React.useReducer((value) => value + 1, 0)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [artifactId, setArtifactId] = React.useState("")
   const updateSource = preview?.updateSource
   React.useEffect(() => {
     const controller = new AbortController()
@@ -269,7 +251,7 @@ export function ChatProjectPanel({
       `project:${project.id}`,
       files.map((file) => chatProjectFileUrl(agentId, project.id, file.id))
     )
-    // Keep a selected project preview registered after this panel closes.
+    // Keep a selected project preview registered after this dialog closes.
   }, [agentId, project.id, files, updateSource])
   async function act(action: () => Promise<void>) {
     if (busy) return
@@ -284,243 +266,195 @@ export function ChatProjectPanel({
     }
   }
   return (
-    <ArtifactPreviewPane id={panelId} label={t("项目设置")} onClose={onClose}>
-      <header className="flex min-h-16 shrink-0 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top)]">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
-          {project.name}
-        </h2>
-        <IconButton label={t("关闭")} onClick={onClose}>
-          <XIcon className="size-4" />
-        </IconButton>
-      </header>
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
-        {error ? (
-          <div
-            role="alert"
-            className="flex items-center gap-2 text-sm text-destructive"
-          >
-            <span className="flex-1">{error}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setLoading(true)
-                setError(null)
-                retry()
-              }}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose()
+      }}
+    >
+      <DialogContent
+        className="flex min-h-0 max-w-xl flex-col gap-0 overflow-hidden p-0"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          if (!openingPreview.current) onReturnFocus()
+        }}
+      >
+        <DialogHeader className="flex-row items-center gap-3 px-5 py-4">
+          <DialogTitle className="min-w-0 flex-1">{t("编辑项目")}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("将相关对话和资料放在一起，仅你自己可见。")}
+          </DialogDescription>
+          <IconButton label={t("关闭")} onClick={onClose} disabled={busy}>
+            <XIcon className="size-4" />
+          </IconButton>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pb-5">
+          {error ? (
+            <div
+              role="alert"
+              className="flex items-center gap-2 text-sm text-destructive"
             >
-              {t("重试")}
-            </Button>
-          </div>
-        ) : null}
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void act(() =>
-              onSave({ ...project, name: name.trim(), instructions })
-            )
-          }}
-        >
-          <label className="grid gap-2 text-sm">
-            {t("项目名称")}
-            <Input
-              value={name}
-              required
-              maxLength={120}
-              disabled={busy || project.archived}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-2 text-sm">
-            {t("项目说明")}
-            <textarea
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-              value={instructions}
-              rows={7}
-              maxLength={12000}
-              disabled={busy || project.archived}
-              onChange={(event) => setInstructions(event.target.value)}
-            />
-          </label>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {t("说明和资料从下一次发送起生效，历史回答保持原样。")}
-          </p>
+              <span className="flex-1">{error}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setLoading(true)
+                  setError(null)
+                  retry()
+                }}
+              >
+                {t("重试")}
+              </Button>
+            </div>
+          ) : null}
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (!name.trim() || project.archived) return
+              void act(async () => {
+                await onSave({ ...project, name: name.trim() })
+                onClose()
+              })
+            }}
+          >
+            <label className="grid gap-2 text-sm">
+              {t("项目名称")}
+              <div className="relative">
+                <FolderIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  autoFocus={!project.archived}
+                  className="pl-9"
+                  value={name}
+                  required
+                  maxLength={120}
+                  disabled={busy || project.archived}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+            </label>
+          </form>
+          <section className="space-y-3" aria-label={t("项目资料")}>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-medium">{t("项目资料")}</h3>
+              <AgentFilePicker
+                label={t("上传资料")}
+                disabled={busy || project.archived || loading}
+                t={t}
+                onFiles={(selected) =>
+                  void act(async () => {
+                    setFiles(
+                      (
+                        await uploadChatProjectFiles(
+                          agentId,
+                          token,
+                          project.id,
+                          selected
+                        )
+                      ).items
+                    )
+                  })
+                }
+              />
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              {t(
+                "项目内各段对话共用只读资料；每个文件最多 5 MiB，合计最多 64 个文件、64 MiB。"
+              )}
+            </p>
+            {loading ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t("正在加载")}
+              </p>
+            ) : !files.length ? (
+              <p className="text-sm text-muted-foreground">
+                {t("暂无项目资料")}
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {files.map((file) => {
+                  const artifact = filePreview(agentId, project.id, file)
+                  return (
+                    <div
+                      key={file.id}
+                      className="flex min-w-0 items-center gap-1 rounded-md border p-1"
+                    >
+                      {artifact ? (
+                        <button
+                          disabled={busy}
+                          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-2 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                          aria-label={t("预览文件：{filename}", {
+                            filename: file.path,
+                          })}
+                          onClick={(event) => {
+                            openingPreview.current = true
+                            onPreview(artifact, event.currentTarget)
+                          }}
+                        >
+                          <span className="truncate">{file.path}</span>
+                          <EyeIcon className="size-3.5 shrink-0" />
+                        </button>
+                      ) : (
+                        <span className="min-w-0 flex-1 truncate px-2 text-sm">
+                          {file.path}
+                        </span>
+                      )}
+                      <ArtifactDownloadLink
+                        href={chatProjectFileUrl(agentId, project.id, file.id)}
+                        filename={file.path.split("/").pop()}
+                        className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-muted-foreground no-underline hover:bg-muted"
+                      >
+                        <DownloadIcon className="size-4" />
+                        <span className="sr-only">{t("下载原文")}</span>
+                      </ArtifactDownloadLink>
+                      <IconButton
+                        label={t("移除项目资料：{filename}", {
+                          filename: file.path,
+                        })}
+                        disabled={busy || project.archived}
+                        onClick={() =>
+                          void act(async () => {
+                            await deleteChatProjectFile(
+                              agentId,
+                              token,
+                              project.id,
+                              file.id
+                            )
+                            setFiles((current) =>
+                              current.filter((item) => item.id !== file.id)
+                            )
+                          })
+                        }
+                      >
+                        <Trash2Icon className="size-4" />
+                      </IconButton>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+        <DialogFooter className="shrink-0 border-t px-5 py-4">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            {t("取消")}
+          </Button>
           <Button
             type="submit"
-            size="sm"
+            form={formId}
             disabled={
               busy ||
               project.archived ||
               !name.trim() ||
-              (name === project.name && instructions === project.instructions)
+              name.trim() === project.name
             }
           >
+            {busy ? <LoaderCircleIcon className="animate-spin" /> : null}
             {t("保存")}
           </Button>
-        </form>
-        <section className="space-y-3" aria-label={t("项目资料")}>
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">{t("项目资料")}</h3>
-            <AgentFilePicker
-              label={t("上传资料")}
-              disabled={busy || project.archived || loading}
-              t={t}
-              onFiles={(selected) =>
-                void act(async () => {
-                  setFiles(
-                    (
-                      await uploadChatProjectFiles(
-                        agentId,
-                        token,
-                        project.id,
-                        selected
-                      )
-                    ).items
-                  )
-                })
-              }
-            />
-          </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            {t(
-              "项目内各段对话共用只读资料；每个文件最多 5 MiB，合计最多 64 个文件、64 MiB。"
-            )}
-          </p>
-          {loading ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {t("正在加载")}
-            </p>
-          ) : !files.length ? (
-            <p className="text-sm text-muted-foreground">{t("暂无项目资料")}</p>
-          ) : (
-            <div className="space-y-1">
-              {files.map((file) => {
-                const artifact = filePreview(agentId, project.id, file)
-                return (
-                  <div
-                    key={file.id}
-                    className="flex min-w-0 items-center gap-1 rounded-md border p-1"
-                  >
-                    {artifact ? (
-                      <button
-                        className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-2 text-left text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
-                        aria-label={t("预览文件：{filename}", {
-                          filename: file.path,
-                        })}
-                        onClick={(event) =>
-                          onPreview(artifact, event.currentTarget)
-                        }
-                      >
-                        <span className="truncate">{file.path}</span>
-                        <EyeIcon className="size-3.5 shrink-0" />
-                      </button>
-                    ) : (
-                      <span className="min-w-0 flex-1 truncate px-2 text-sm">
-                        {file.path}
-                      </span>
-                    )}
-                    <ArtifactDownloadLink
-                      href={chatProjectFileUrl(agentId, project.id, file.id)}
-                      filename={file.path.split("/").pop()}
-                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-muted-foreground no-underline hover:bg-muted"
-                    >
-                      <DownloadIcon className="size-4" />
-                      <span className="sr-only">{t("下载原文")}</span>
-                    </ArtifactDownloadLink>
-                    <IconButton
-                      label={t("移除项目资料：{filename}", {
-                        filename: file.path,
-                      })}
-                      disabled={busy || project.archived}
-                      onClick={() =>
-                        void act(async () => {
-                          await deleteChatProjectFile(
-                            agentId,
-                            token,
-                            project.id,
-                            file.id
-                          )
-                          setFiles((current) =>
-                            current.filter((item) => item.id !== file.id)
-                          )
-                        })
-                      }
-                    >
-                      <Trash2Icon className="size-4" />
-                    </IconButton>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-          {artifacts.length && !project.archived ? (
-            <div className="space-y-2 border-t pt-3">
-              <div className="grid gap-2 text-sm">
-                <span>{t("从当前对话保存")}</span>
-                <FilterDropdown
-                  ariaLabel={t("从当前对话保存")}
-                  value={artifactId}
-                  onChange={setArtifactId}
-                  disabled={busy}
-                  options={[
-                    { value: "", label: t("选择生成文件") },
-                    ...artifacts.map((artifact) => ({
-                      value: artifact.id,
-                      label: artifact.filename,
-                    })),
-                  ]}
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy || !artifactId}
-                onClick={() =>
-                  void act(async () => {
-                    setFiles(
-                      (
-                        await saveChatProjectArtifact(
-                          agentId,
-                          token,
-                          project.id,
-                          artifactId
-                        )
-                      ).items
-                    )
-                    setArtifactId("")
-                  })
-                }
-              >
-                {t("保存到项目资料")}
-              </Button>
-            </div>
-          ) : null}
-        </section>
-        <div className="flex flex-wrap gap-2 border-t pt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() =>
-              void act(() =>
-                onSave({ ...project, archived: !project.archived })
-              )
-            }
-          >
-            {project.archived ? t("恢复项目") : t("归档项目")}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive"
-            disabled={busy}
-            onClick={() => void act(onDissolve)}
-          >
-            {t("解散项目")}
-          </Button>
-        </div>
-      </div>
-    </ArtifactPreviewPane>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -9,6 +9,21 @@ function tFor(language: Language): TFunction {
 }
 
 describe("API error localization", () => {
+  test.each([
+    "Tool is not available for binding.",
+    "Tool version is not available for binding.",
+  ])("localizes tool binding failures: %s", (message) => {
+    const error = new ApiError(422, message)
+    expect(getErrorMessage(error, tFor("zh-Hans"))).toBe(
+      "工具不可用，请刷新工具列表后重新选择"
+    )
+    expect(getErrorMessage(error, tFor("zh-Hant"))).toBe(
+      "工具不可用，請重新整理工具清單後重新選擇"
+    )
+    expect(getErrorMessage(error, tFor("en"))).toBe(
+      "Tool is unavailable. Refresh the tool list and select it again."
+    )
+  })
   test("localizes workspace token admission failures", () => {
     const error = new Error("Workspace monthly token quota exceeded.")
     expect(getErrorMessage(error, tFor("zh-Hans"))).toContain("额度不足")
@@ -50,8 +65,8 @@ describe("API error localization", () => {
     ],
     [
       "Agent Skill name already exists.",
-      "Skill 名称已存在",
-      "Skill 名稱已存在",
+      "技能名称已存在",
+      "技能名稱已存在",
       "Skill name already exists",
     ],
     [

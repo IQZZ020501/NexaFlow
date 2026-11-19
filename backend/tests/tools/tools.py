@@ -3218,6 +3218,7 @@ async def assert_mcp_discovery_materializes_first_leaf(
         mcp_function_name_candidates,
         reconcile_mcp_discovery,
     )
+    from app.entities.defaults import utc_now
     from app.entities.tools import McpServer, Tool, ToolSource
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import mcp as mcp_repository
@@ -3343,6 +3344,16 @@ async def assert_mcp_discovery_materializes_first_leaf(
         )
         assert [item.id for item in versions] == [original_version_id]
 
+        # Refreshing a changed definition must not carry a previously reviewed
+        # automatic grant (including API access) over to new behavior.
+        policy.approval = "auto"
+        policy.effect = "external_read"
+        policy.allowed_access_sources = ["console", "public", "api"]
+        policy.parallel_safe = True
+        policy.reviewed_by_user_id = actor.id
+        policy.reviewed_at = utc_now()
+        await tool_repository.save_tool_policy(db, policy)
+
         changed = [
             {
                 **discovery[0],
@@ -3366,8 +3377,22 @@ async def assert_mcp_discovery_materializes_first_leaf(
         assert tool.current_version_id == versions[0].id
         policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
         assert policy is not None
-        assert policy.definition_hash == original_policy_hash
-        assert policy.tool_version_id == original_version_id
+        assert policy.definition_hash != original_policy_hash
+        assert policy.definition_hash == versions[0].definition_hash
+        assert policy.tool_version_id == versions[0].id
+        assert policy.approval == "each_call"
+        assert policy.effect == "unknown"
+        assert policy.allowed_access_sources == ["console", "public"]
+        assert policy.reviewed_by_user_id is None
+
+        # An explicit kill switch survives both disappearance and definition
+        # changes when a tool is rediscovered.
+        policy.approval = "disabled"
+        policy.allowed_access_sources = []
+        policy.workflow_callable = False
+        await tool_repository.save_tool_policy(db, policy)
+        tool.status = "disabled"
+        await tool_repository.save_tool(db, tool)
 
         await reconcile_mcp_discovery(db, server, source, [])
         tool = (await tool_repository.list_tools_by_source(
@@ -3392,6 +3417,11 @@ async def assert_mcp_discovery_materializes_first_leaf(
         assert tool.current_version_id == original_version_id
         assert tool.availability == "available"
         assert len(versions) == 2
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert tool.status == "disabled"
+        assert policy.approval == "disabled"
+        assert policy.tool_version_id == original_version_id
+        assert policy.allowed_access_sources == []
         await db.rollback()
 
 
@@ -5824,22 +5854,14 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
         assert deleted.status_code == 204, deleted.text
 
 
-def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
-    from tests.support import settings as test_settings
-
+def test_tool_worker_executes_and_retries_busy_invocations() -> None:
     from app.application.tools.runtime.service import ToolInvocationBusy
-    from app.infra.tools import dispatch as tool_dispatch
     from app.tasks.tools import jobs as tool_tasks
 
     original_configure = tool_tasks.configure_task_worker
     original_execute = tool_tasks.execute_tool_invocation
-    original_send_task = tool_dispatch.celery_app.send_task
-    original_log_error = tool_dispatch.log_error
-    original_broker_url = tool_dispatch.celery_app.conf.broker_url
-    original_eager = tool_dispatch.celery_app.conf.task_always_eager
     try:
         tool_tasks.configure_task_worker = lambda _settings: None
-        tool_dispatch.log_error = lambda *args, **kwargs: None
         calls: list[tuple[str, str]] = []
 
         async def execute(invocation_id, _settings, worker_task_id):
@@ -5884,38 +5906,9 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         else:
             raise AssertionError("A busy Tool invocation must be retried.")
 
-        dispatched: list[dict] = []
-        tool_dispatch.celery_app.conf.task_always_eager = True
-        tool_dispatch.celery_app.send_task = lambda *args, **kwargs: dispatched.append(
-            {"task": args[0], **kwargs}
-        )
-        asyncio.run(
-            tool_dispatch.enqueue_tool_invocation("invocation-5", test_settings())
-        )
-        assert dispatched == [
-            {
-                "task": "app.tools.run",
-                "args": ("invocation-5",),
-                "shadow": "运行工具",
-            }
-        ]
-        assert tool_dispatch.celery_app.conf.task_always_eager is True
-        assert calls == [("invocation-1", "tool-worker-1")]
-
-        def unavailable(**_kwargs):
-            raise OSError("broker unavailable")
-
-        tool_dispatch.celery_app.send_task = unavailable
-        asyncio.run(
-            tool_dispatch.enqueue_tool_invocation("invocation-6", test_settings())
-        )
     finally:
         tool_tasks.configure_task_worker = original_configure
         tool_tasks.execute_tool_invocation = original_execute
-        tool_dispatch.celery_app.send_task = original_send_task
-        tool_dispatch.log_error = original_log_error
-        tool_dispatch.celery_app.conf.broker_url = original_broker_url
-        tool_dispatch.celery_app.conf.task_always_eager = original_eager
 
 
 def test_tool_boundaries_reject_unsafe_payloads() -> None:
@@ -6057,6 +6050,7 @@ def main() -> None:
         test_existing_file_catalog_upgrade,
         test_existing_pptx_design_catalog_upgrade,
     )
+    from tests.tools.mcp_approval_upgrade import test_existing_mcp_approval_upgrade
     from tests.tools.personal import (
         test_personal_configuration,
         test_personal_name_migration,
@@ -6074,6 +6068,7 @@ def main() -> None:
     test_existing_file_catalog_upgrade()
     test_existing_pptx_design_catalog_upgrade()
     test_existing_documents_inspection_catalog_upgrade()
+    test_existing_mcp_approval_upgrade()
     test_pptx_skill_uses_empty_load_arguments()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()
@@ -6100,7 +6095,7 @@ def main() -> None:
     test_generated_artifact_rejects_source_as_docx()
     test_generated_artifact_downloads_common_formats()
     test_canonical_mcp_policy_allows_owner_read_only_attestation()
-    test_tool_tasks_never_execute_inline_and_recover_queued_tests()
+    test_tool_worker_executes_and_retries_busy_invocations()
     test_tool_tasks_are_registered()
     test_tool_boundaries_reject_unsafe_payloads()
     from tests.tools.lifecycle import main as test_tool_lifecycle

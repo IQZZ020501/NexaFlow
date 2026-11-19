@@ -2,16 +2,22 @@
 
 import * as React from "react"
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   BotIcon,
   ChevronDownIcon,
   DownloadIcon,
   EllipsisIcon,
   FolderIcon,
+  FolderMinusIcon,
   HistoryIcon,
   LoaderCircleIcon,
   MessageSquarePlusIcon,
   PlusIcon,
   SearchIcon,
+  Settings2Icon,
+  SquarePenIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,6 +25,7 @@ import { IconButton } from "@/components/ui/icon-button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
@@ -30,6 +37,72 @@ import type {
   PublicAgentProfile,
 } from "@/lib/api/public-agents"
 import type { ChatProject } from "@/lib/api/public-chat-projects"
+
+function ProjectMenu({
+  project,
+  busy,
+  onEdit,
+  onToggleArchive,
+  onDissolve,
+}: {
+  project: ChatProject
+  busy: boolean
+  onEdit: (project: ChatProject, opener: HTMLButtonElement) => void
+  onToggleArchive: (project: ChatProject) => void
+  onDissolve: (project: ChatProject) => void
+}) {
+  const { t } = useLanguage()
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          ref={triggerRef}
+          variant="ghost"
+          size="icon-xs"
+          className="mr-1 size-8 shrink-0 text-muted-foreground sm:size-6"
+          aria-label={t("更多项目操作：{name}", { name: project.name })}
+          title={t("更多项目操作：{name}", { name: project.name })}
+          disabled={busy}
+        >
+          <EllipsisIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="right"
+        align="start"
+        sideOffset={6}
+        className="w-max max-w-48 min-w-36"
+      >
+        <DropdownMenuItem
+          className="text-xs"
+          onSelect={() => {
+            if (triggerRef.current) onEdit(project, triggerRef.current)
+          }}
+        >
+          <Settings2Icon />
+          {t("编辑")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="text-xs"
+          onSelect={() => onToggleArchive(project)}
+        >
+          {project.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
+          {project.archived ? t("恢复项目") : t("归档项目")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          variant="destructive"
+          className="text-xs"
+          onSelect={() => onDissolve(project)}
+        >
+          <XIcon />
+          {t("解散项目")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 export function PublicChatHistory({
   profile,
@@ -46,6 +119,9 @@ export function PublicChatHistory({
   activeProjectId,
   onCreateProject,
   onSelectProject,
+  onEditProject,
+  onToggleArchiveProject,
+  onDissolveProject,
   onMove,
   projectBusy,
   projectsError,
@@ -65,6 +141,9 @@ export function PublicChatHistory({
   activeProjectId: string | null
   onCreateProject: () => void
   onSelectProject: (id: string) => void
+  onEditProject: (project: ChatProject, opener: HTMLButtonElement) => void
+  onToggleArchiveProject: (project: ChatProject) => void
+  onDissolveProject: (project: ChatProject) => void
   onMove: (conversationId: string, projectId: string | null) => void
   projectBusy: boolean
   projectsError: boolean
@@ -84,6 +163,10 @@ export function PublicChatHistory({
   const ordinary = filtered.filter(
     (item) => !item.project_id || !projectIds.has(item.project_id)
   )
+  function selectProject(projectId: string) {
+    setExpanded((current) => ({ ...current, [projectId]: true }))
+    onSelectProject(projectId)
+  }
   function row(conversation: PublicAgentConversation, grouped = false) {
     const pending = Boolean(
       deletingConversationId || exportingConversationId || projectBusy
@@ -126,60 +209,69 @@ export function PublicChatHistory({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            side="bottom"
-            align="center"
-            sideOffset={4}
-            className="w-44 min-w-0 rounded-md p-1"
+            side="right"
+            align="start"
+            sideOffset={6}
+            className="w-max max-w-48 min-w-40"
           >
             <DropdownMenuItem
-              className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
+              className="text-xs"
               disabled={pending}
               onSelect={() => onExport(conversation.conversation_id)}
             >
-              <DownloadIcon />
+              <DownloadIcon aria-hidden="true" />
               {t("导出对话")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t("移入项目")}
-            </DropdownMenuLabel>
-            {projects
-              .filter(
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs">
+                {t("移入项目")}
+              </DropdownMenuLabel>
+              {projects
+                .filter(
+                  (project) =>
+                    !project.archived && project.id !== conversation.project_id
+                )
+                .map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    className="text-xs"
+                    onSelect={() =>
+                      onMove(conversation.conversation_id, project.id)
+                    }
+                  >
+                    <FolderIcon aria-hidden="true" />
+                    <span className="truncate">{project.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              {!projects.some(
                 (project) =>
                   !project.archived && project.id !== conversation.project_id
-              )
-              .map((project) => (
-                <DropdownMenuItem
-                  key={project.id}
-                  onSelect={() =>
-                    onMove(conversation.conversation_id, project.id)
-                  }
-                >
-                  <span className="truncate">{project.name}</span>
+              ) ? (
+                <DropdownMenuItem className="text-xs" disabled>
+                  <FolderIcon aria-hidden="true" />
+                  {t("暂无可选项目")}
                 </DropdownMenuItem>
-              ))}
-            {!projects.some(
-              (project) =>
-                !project.archived && project.id !== conversation.project_id
-            ) ? (
-              <DropdownMenuItem disabled>{t("暂无可选项目")}</DropdownMenuItem>
-            ) : null}
-
-            {conversation.project_id ? (
-              <DropdownMenuItem
-                disabled={pending}
-                onSelect={() => onMove(conversation.conversation_id, null)}
-              >
-                {t("移出项目")}
-              </DropdownMenuItem>
-            ) : null}
+              ) : null}
+              {conversation.project_id ? (
+                <DropdownMenuItem
+                  className="text-xs"
+                  disabled={pending}
+                  onSelect={() => onMove(conversation.conversation_id, null)}
+                >
+                  <FolderMinusIcon aria-hidden="true" />
+                  {t("移出项目")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              className="h-8 px-2 py-1 text-xs"
+              className="text-xs"
               disabled={pending}
               onSelect={() => onDelete(conversation.conversation_id)}
             >
+              <Trash2Icon aria-hidden="true" className="text-destructive" />
               {t("删除对话")}
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -220,7 +312,7 @@ export function PublicChatHistory({
           />
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
+          <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground sm:pr-0.5">
             <FolderIcon className="size-3.5" />
             <span className="flex-1">{t("项目")}</span>
             <IconButton
@@ -288,13 +380,7 @@ export function PublicChatHistory({
                           ? "page"
                           : undefined
                       }
-                      onClick={() => {
-                        setExpanded((current) => ({
-                          ...current,
-                          [project.id]: true,
-                        }))
-                        onSelectProject(project.id)
-                      }}
+                      onClick={() => selectProject(project.id)}
                       title={project.name}
                     >
                       {project.name}
@@ -304,6 +390,21 @@ export function PublicChatHistory({
                         </span>
                       ) : null}
                     </button>
+                    <ProjectMenu
+                      project={project}
+                      busy={projectBusy}
+                      onEdit={onEditProject}
+                      onToggleArchive={onToggleArchiveProject}
+                      onDissolve={onDissolveProject}
+                    />
+                    <IconButton
+                      label={t("新建项目对话：{name}", { name: project.name })}
+                      className="mr-1 size-8 shrink-0 text-muted-foreground sm:size-5"
+                      disabled={projectBusy || project.archived}
+                      onClick={() => selectProject(project.id)}
+                    >
+                      <SquarePenIcon className="size-3" />
+                    </IconButton>
                   </div>
                   {open ? (
                     <div className="mt-1 ml-3 space-y-0.5 border-l border-border/60 pl-2">

@@ -1376,22 +1376,6 @@ describe("lib/api/knowledge", () => {
     })
   })
 
-  test("queries the knowledge base with the given limit", async () => {
-    const calls: Array<{ url: string; body: string }> = []
-    stubFetch((url, init) => {
-      calls.push({ url, body: String(init?.body ?? "") })
-      return new Response("[]", { status: 200 })
-    })
-    await knowledgeApi.queryKnowledgeBase("tok", "ws-1", "kb-1", {
-      query: "hello",
-      limit: 3,
-    })
-    expect(calls[0].url).toBe(
-      "/api/v1/workspaces/ws-1/knowledge-bases/kb-1/query"
-    )
-    expect(JSON.parse(calls[0].body)).toEqual({ query: "hello", limit: 3 })
-  })
-
   test("inspects retrieval with production query controls", async () => {
     const calls: Array<{ url: string; body: string }> = []
     stubFetch((url, init) => {
@@ -1500,16 +1484,14 @@ describe("lib/api/llm", () => {
     expect(urls[1]).toBe("/api/v1/model-providers?model_type=EMBEDDING")
   })
 
-  test("lists provider model types and base models", async () => {
+  test("lists provider base models", async () => {
     const urls: string[] = []
     stubFetch((url) => {
       urls.push(url)
       return new Response("[]", { status: 200 })
     })
-    await llmApi.listModelProviderModelTypes("tok", "openai")
     await llmApi.listModelProviderBaseModels("tok", "openai", "EMBEDDING")
-    expect(urls[0]).toBe("/api/v1/model-providers/model-types?provider=openai")
-    expect(urls[1]).toBe(
+    expect(urls[0]).toBe(
       "/api/v1/model-providers/base-models?provider=openai&model_type=EMBEDDING"
     )
   })

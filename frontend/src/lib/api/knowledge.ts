@@ -741,31 +741,6 @@ export function rebuildKnowledgeIndex(
 }
 
 /**
- * Queries a knowledge base for relevant results.
- *
- * @param token - The authentication token
- * @param workspaceId - The workspace identifier
- * @param knowledgeBaseId - The knowledge base identifier
- * @param payload - The query text and maximum number of results
- * @returns The matching knowledge-base hits
- */
-export function queryKnowledgeBase(
-  token: string,
-  workspaceId: string,
-  knowledgeBaseId: string,
-  payload: { query: string; limit: number }
-) {
-  return request<KnowledgeQueryHit[]>(
-    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/query`,
-    {
-      method: "POST",
-      token,
-      body: JSON.stringify(payload),
-    }
-  )
-}
-
-/**
  * Inspects knowledge-base retrieval for a query.
  *
  * @param payload - The query and retrieval configuration to inspect
