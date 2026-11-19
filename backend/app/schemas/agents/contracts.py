@@ -475,6 +475,7 @@ class ExternalAgentRunListResponse(BaseModel):
 
 class PublicAgentConversationResponse(BaseModel):
     conversation_id: str
+    project_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     question: str
     status: str
     result: str

@@ -1,6 +1,56 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  新建项目: "New project",
+  项目: "Projects",
+  项目名称: "Project name",
+  项目说明: "Project instructions",
+  "将相关对话、项目说明和资料放在一起，仅你自己可见。":
+    "Keep related conversations, instructions, and sources together, visible only to you.",
+  "描述项目目标、背景和回答要求":
+    "Describe the project goal, background, and response requirements",
+  创建项目: "Create project",
+  项目设置: "Project settings",
+  项目资料: "Project sources",
+  项目说明与资料: "Instructions and sources",
+  "说明和资料从下一次发送起生效，历史回答保持原样。":
+    "Changes apply to the next message. Previous answers keep their original context.",
+  上传资料: "Upload sources",
+  "项目内各段对话共用只读资料；每个文件最多 5 MiB，合计最多 64 个文件、64 MiB。":
+    "Conversations share read-only sources: up to 5 MiB per file, 64 files and 64 MiB in total.",
+  暂无项目资料: "No project sources yet",
+  "移除项目资料：{filename}": "Remove project source: {filename}",
+  从当前对话保存: "Save from this conversation",
+  选择生成文件: "Select a generated file",
+  保存到项目资料: "Save to project sources",
+  恢复项目: "Restore project",
+  归档项目: "Archive project",
+  解散项目: "Dissolve project",
+  移入项目: "Move to project",
+  移出项目: "Remove from project",
+  暂无可选项目: "No projects available",
+  "项目加载失败，点击重试": "Projects could not load. Retry",
+  收起项目: "Collapse project",
+  展开项目: "Expand project",
+  暂无项目对话: "No conversations in this project",
+  隐藏已归档项目: "Hide archived projects",
+  显示已归档项目: "Show archived projects",
+  项目已保存: "Project saved",
+  项目已归档或不可访问: "This project is archived or unavailable",
+  "解散后对话将移回历史记录，已生成文件和历史回答会保留。":
+    "Conversations move back to history. Generated files and previous answers are preserved.",
+  项目不存在或不可访问: "Project not found or unavailable",
+  "项目已归档，请先恢复项目": "Restore this archived project before continuing",
+  项目资料不存在或已移除: "Project source not found or removed",
+  "项目中已有同名文件，请先重命名或移除旧文件":
+    "A file with this path already exists. Rename it or remove the existing file first.",
+  "项目资料超出限制或路径无效，请检查后重试":
+    "Project sources exceed their limits or contain invalid paths.",
+  "对话运行中，请完成后再移动或解散项目":
+    "Wait for the conversation to finish before moving it or dissolving its project.",
+  无法加载项目: "Unable to load project",
+  返回普通对话: "Back to chat",
+
   "工作空间本月模型 Token 额度不足，请联系管理员": "This workspace has insufficient model token quota for this month. Contact an administrator.",
   "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失": "The execution environment was rebuilt. Saved files will be restored; unsaved temporary state may be lost.",
   "请先配置 Embedding 模型": "Configure an Embedding model first",

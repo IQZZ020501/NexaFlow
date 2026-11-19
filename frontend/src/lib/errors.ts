@@ -2,6 +2,17 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Chat project not found.": "项目不存在或不可访问",
+  "Chat project is archived.": "项目已归档，请先恢复项目",
+  "Chat project file not found.": "项目资料不存在或已移除",
+  "Chat project already has a file with this path.":
+    "项目中已有同名文件，请先重命名或移除旧文件",
+  "Chat project files exceed their limits or contain invalid paths.":
+    "项目资料超出限制或路径无效，请检查后重试",
+  "Cannot move a conversation while it is running.":
+    "对话运行中，请完成后再移动或解散项目",
+  "Name cannot be empty.": "名称不能为空或仅包含空格",
+
   "Workspace monthly token quota exceeded.": "工作空间本月模型 Token 额度不足，请联系管理员",
   "Artifact workspace path is invalid.": "文件路径无效，请检查文件夹或压缩包",
   "Artifact filename is invalid.": "文件路径无效，请检查文件夹或压缩包",

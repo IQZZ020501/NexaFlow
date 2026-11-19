@@ -1,6 +1,21 @@
 "use client"
 
 import * as React from "react"
+import { PublicChatHistory as ConversationHistory } from "@/components/agents/public-chat-history"
+import {
+  ChatProjectPanel,
+  CreateChatProjectDialog,
+  usePublicChatProjects,
+} from "@/components/agents/public-chat-projects"
+import {
+  createProjectConversation,
+  dissolveChatProject,
+  moveChatConversation,
+  publicChatUrl,
+  updateChatProject,
+  type ChatProject,
+} from "@/lib/api/public-chat-projects"
+import { projectArtifactOptions } from "@/lib/chat-project-artifacts"
 import { isStaleRunSnapshot } from "@/lib/run-state"
 import {
   includesAgentProcessDelta,
@@ -16,18 +31,14 @@ import {
   CircleAlertIcon,
   CircleXIcon,
   DatabaseIcon,
-  DownloadIcon,
-  EllipsisIcon,
-  HistoryIcon,
+  FolderOpenIcon,
   LoaderCircleIcon,
   MenuIcon,
   MessageSquarePlusIcon,
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
-  SearchIcon,
   UserIcon,
-  XIcon,
 } from "lucide-react"
 
 import {
@@ -47,14 +58,6 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
 import { Button } from "@/components/ui/button"
 import { CopyButton } from "@/components/ui/copy-button"
-import { IconButton } from "@/components/ui/icon-button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   appendAttachmentFiles,
   AgentAttachmentList,
@@ -127,6 +130,7 @@ import {
 type PublicAgentChatProps = {
   agentId: string
   initialConversationId?: string | null
+  initialProjectId?: string | null
 }
 
 export function publicToolName(
@@ -1013,186 +1017,6 @@ export function cancelPublicAgentStream(streamControllerRef: {
 }
 
 /**
- * Renders the Agent identity, conversation controls, and conversation history.
- *
- * @param profile - The public Agent profile displayed in the history header.
- * @param conversations - The conversations available for selection.
- * @param activeConversationId - The identifier of the currently selected conversation.
- * @param onNew - Called when a new conversation is requested.
- * @param onSelect - Called with the identifier of the selected conversation.
- * @param onClose - Called when the mobile history panel is dismissed.
- */
-function ConversationHistory({
-  profile,
-  conversations,
-  activeConversationId,
-  onNew,
-  onSelect,
-  onDelete,
-  onClose,
-  deletingConversationId,
-  onExport,
-  exportingConversationId,
-}: {
-  profile: PublicAgentProfile | null
-  conversations: PublicAgentConversation[]
-  activeConversationId: string | null
-  onNew: () => void
-  onSelect: (conversationId: string) => void
-  onDelete: (conversationId: string) => void
-  onClose?: () => void
-  deletingConversationId: string | null
-  onExport: (conversationId: string) => void
-  exportingConversationId: string | null
-}) {
-  const { t } = useLanguage()
-  const [query, setQuery] = React.useState("")
-  const filteredConversations = React.useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase()
-    if (!normalized) return conversations
-    return conversations.filter((conversation) =>
-      `${conversation.question} ${conversation.result}`
-        .toLocaleLowerCase()
-        .includes(normalized)
-    )
-  }, [conversations, query])
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex min-h-16 items-center gap-3 border-b px-4 pt-[env(safe-area-inset-top)]">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <BotIcon className="size-4" />
-        </span>
-        <p className="min-w-0 flex-1 truncate text-sm font-semibold">
-          {profile?.name ?? t("公开 Agent")}
-        </p>
-        {onClose ? (
-          <IconButton label={t("关闭")} onClick={onClose}>
-            <XIcon />
-          </IconButton>
-        ) : null}
-      </div>
-      <div className="p-3">
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={onNew}
-        >
-          <MessageSquarePlusIcon data-icon="inline-start" />
-          {t("新建对话")}
-        </Button>
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
-          <HistoryIcon className="size-3.5" />
-          <span className="flex-1">{t("历史记录")}</span>
-        </div>
-        <div className="relative mb-2">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            className="h-10 w-full rounded-md border bg-background pr-2 pl-8 text-base outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:text-xs"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("搜索历史记录")}
-            aria-label={t("搜索历史记录")}
-          />
-        </div>
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-          {conversations.length === 0 ? (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-              {t("暂无历史记录")}
-            </p>
-          ) : filteredConversations.length === 0 ? (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-              {t("暂无匹配的历史记录")}
-            </p>
-          ) : (
-            filteredConversations.map((conversation) => (
-              <div
-                key={conversation.conversation_id}
-                className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-muted ${
-                  activeConversationId === conversation.conversation_id
-                    ? "bg-muted"
-                    : ""
-                }`}
-              >
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-current={
-                    activeConversationId === conversation.conversation_id
-                      ? "page"
-                      : undefined
-                  }
-                  onClick={() => onSelect(conversation.conversation_id)}
-                >
-                  <span className="block truncate text-sm font-medium">
-                    {conversation.question || t("新对话")}
-                  </span>
-                  <span className="mt-1 block truncate text-xs text-muted-foreground">
-                    {conversation.result || t("等待回答")}
-                  </span>
-                </button>
-                <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="size-8 shrink-0 rounded-md p-0 text-muted-foreground sm:size-5"
-                      aria-label={t("更多")}
-                      title={t("更多")}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {deletingConversationId ===
-                        conversation.conversation_id ||
-                      exportingConversationId ===
-                        conversation.conversation_id ? (
-                        <LoaderCircleIcon className="animate-spin" />
-                      ) : (
-                        <EllipsisIcon />
-                      )}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    side="bottom"
-                    align="center"
-                    sideOffset={4}
-                    className="w-36 min-w-0 rounded-md p-1"
-                  >
-                    <DropdownMenuItem
-                      className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
-                      disabled={Boolean(
-                        deletingConversationId || exportingConversationId
-                      )}
-                      onSelect={() => onExport(conversation.conversation_id)}
-                    >
-                      <DownloadIcon />
-                      {t("导出对话")}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="h-8 px-2 py-1 text-xs"
-                      variant="destructive"
-                      disabled={Boolean(
-                        deletingConversationId || exportingConversationId
-                      )}
-                      onSelect={() => onDelete(conversation.conversation_id)}
-                    >
-                      {t("删除对话")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/**
  * Renders the public Agent chat interface with conversation history, streaming responses, tool approvals, attachments, feedback, and run regeneration.
  *
  * @param agentId - The identifier of the public Agent to display
@@ -1201,6 +1025,7 @@ function ConversationHistory({
 export function PublicAgentChat({
   agentId,
   initialConversationId = null,
+  initialProjectId = null,
 }: PublicAgentChatProps) {
   const router = useRouter()
   const { t } = useLanguage()
@@ -1217,7 +1042,13 @@ export function PublicAgentChat({
   const artifactPreview = useAgentArtifactPreview(
     `${agentId}:${activeConversationId ?? ""}`
   )
-  const hasArtifactPreview = !!artifactPreview.selection
+  const [activeProjectId, setActiveProjectId] = React.useState<string | null>(
+    initialProjectId
+  )
+  const [projectPanelOpen, setProjectPanelOpen] = React.useState(false)
+  const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
+  const [projectBusy, setProjectBusy] = React.useState(false)
+  const hasArtifactPreview = !!artifactPreview.selection || projectPanelOpen
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
   const [question, setQuestion] = React.useState("")
   const [approvalMode, setApprovalMode] =
@@ -1250,6 +1081,20 @@ export function PublicAgentChat({
     null
   )
   const [sessionReady, setSessionReady] = React.useState(false)
+  const projectData = usePublicChatProjects(agentId, token, sessionReady)
+  const selectedConversation = conversations.find(
+    (item) => item.conversation_id === activeConversationId
+  )
+  const currentProjectId = selectedConversation
+    ? (selectedConversation.project_id ?? null)
+    : activeProjectId
+  const currentProject = projectData.projects.find(
+    (item) => item.id === currentProjectId
+  )
+  const projectUnavailable = Boolean(
+    currentProjectId && (!currentProject || currentProject.archived)
+  )
+
   const streamControllerRef = React.useRef<AbortController | null>(null)
   const activeRunIdRef = React.useRef<string | null>(null)
   const activePlaceholderIdRef = React.useRef<string | null>(null)
@@ -1261,9 +1106,12 @@ export function PublicAgentChat({
     content: string
   } | null>(null)
   const scrollRef = React.useRef<HTMLDivElement>(null)
+  const projectSettingsRef = React.useRef<HTMLButtonElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
+  const conversationRef = React.useRef(activeConversationId)
+  const projectRef = React.useRef(currentProjectId)
   const fileDrop = useAgentFileDrop(
     `${agentId}:${activeConversationId ?? ""}`,
     isSending || isRunsLoading,
@@ -1294,14 +1142,17 @@ export function PublicAgentChat({
   }, [t, token])
 
   React.useEffect(() => {
+    conversationRef.current = activeConversationId
+    projectRef.current = currentProjectId
+  }, [activeConversationId, currentProjectId])
+
+  React.useEffect(() => {
     if (!isSessionRestored || token) return
     streamControllerRef.current?.abort()
     const conversationId = initialConversationIdRef.current
-    const next = conversationId
-      ? `/chat/${agentId}?conversation_id=${encodeURIComponent(conversationId)}`
-      : `/chat/${agentId}`
+    const next = publicChatUrl(agentId, conversationId, initialProjectId)
     router.replace(`/login?next=${encodeURIComponent(next)}`)
-  }, [agentId, isSessionRestored, router, token])
+  }, [agentId, initialProjectId, isSessionRestored, router, token])
 
   React.useEffect(() => {
     return () => streamControllerRef.current?.abort()
@@ -1458,6 +1309,95 @@ export function PublicAgentChat({
     if (element) element.scrollTop = element.scrollHeight
   }, [runs, isRunsLoading])
 
+  React.useEffect(() => {
+    if (selectedConversation) {
+      window.history.replaceState(
+        null,
+        "",
+        publicChatUrl(
+          agentId,
+          selectedConversation.conversation_id,
+          selectedConversation.project_id
+        )
+      )
+    }
+  }, [agentId, selectedConversation])
+
+  async function handleMoveConversation(
+    conversationId: string,
+    projectId: string | null
+  ) {
+    if (!token || projectBusy) return
+    setProjectBusy(true)
+    try {
+      await moveChatConversation(agentId, token, conversationId, projectId)
+      setConversations((current) =>
+        current.map((item) =>
+          item.conversation_id === conversationId
+            ? { ...item, project_id: projectId }
+            : item
+        )
+      )
+      if (conversationRef.current === conversationId) {
+        setActiveProjectId(projectId)
+        setProjectPanelOpen(false)
+        window.history.replaceState(
+          null,
+          "",
+          publicChatUrl(agentId, conversationId, projectId)
+        )
+      }
+    } catch (error) {
+      notify("error", getErrorMessage(error, t))
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  async function handleSaveProject(project: ChatProject) {
+    if (!token) return
+    const saved = await updateChatProject(agentId, token, project)
+    projectData.setProjects((current) =>
+      current.map((item) => (item.id === saved.id ? saved : item))
+    )
+    notify("success", t("项目已保存"))
+  }
+
+  async function handleDissolveProject() {
+    if (!token || !currentProject) return
+    if (
+      !(await confirm({
+        title: t("解散项目"),
+        description: t(
+          "解散后对话将移回历史记录，已生成文件和历史回答会保留。"
+        ),
+        confirmLabel: t("解散项目"),
+        destructive: true,
+      }))
+    )
+      return
+    await dissolveChatProject(agentId, token, currentProject.id)
+    projectData.setProjects((current) =>
+      current.filter((item) => item.id !== currentProject.id)
+    )
+    setConversations((current) =>
+      current.map((item) =>
+        item.project_id === currentProject.id
+          ? { ...item, project_id: null }
+          : item
+      )
+    )
+    if (projectRef.current === currentProject.id) {
+      setActiveProjectId(null)
+      setProjectPanelOpen(false)
+      window.history.replaceState(
+        null,
+        "",
+        publicChatUrl(agentId, conversationRef.current)
+      )
+    }
+  }
+
   function selectConversation(conversationId: string) {
     if (conversationId === activeConversationId) {
       setIsHistoryOpen(false)
@@ -1475,15 +1415,25 @@ export function PublicAgentChat({
     setSendError(null)
     setIsRunsLoading(true)
     setActiveConversationId(conversationId)
+    setActiveProjectId(
+      conversations.find((item) => item.conversation_id === conversationId)
+        ?.project_id ?? null
+    )
+    setProjectPanelOpen(false)
     setIsHistoryOpen(false)
     window.history.replaceState(
       null,
       "",
-      `/chat/${agentId}?conversation_id=${encodeURIComponent(conversationId)}`
+      publicChatUrl(
+        agentId,
+        conversationId,
+        conversations.find((item) => item.conversation_id === conversationId)
+          ?.project_id
+      )
     )
   }
 
-  function startNewConversation() {
+  function startNewConversation(projectId: string | null = currentProjectId) {
     cancelPublicAgentStream(streamControllerRef)
     activeRunIdRef.current = null
     activePlaceholderIdRef.current = null
@@ -1491,6 +1441,8 @@ export function PublicAgentChat({
     sessionInputBusyRef.current = false
     sessionInputRef.current = null
     setActiveConversationId(null)
+    setActiveProjectId(projectId)
+    setProjectPanelOpen(false)
     setRuns([])
     setToolCallsByRun({})
     setResolvingCallId(null)
@@ -1502,7 +1454,11 @@ export function PublicAgentChat({
     setEditDraft("")
     setIsRunsLoading(false)
     setIsHistoryOpen(false)
-    window.history.replaceState(null, "", `/chat/${agentId}`)
+    window.history.replaceState(
+      null,
+      "",
+      publicChatUrl(agentId, null, projectId)
+    )
   }
 
   async function handleDeleteConversation(conversationId: string) {
@@ -1603,7 +1559,7 @@ export function PublicAgentChat({
                 session_inputs: run.session_inputs?.length
                   ? run.session_inputs
                   : item.session_inputs,
-              }
+                }
             : item
         )
       )
@@ -1682,6 +1638,7 @@ export function PublicAgentChat({
   async function handleRegenerateRun(runId: string, goal?: string) {
     if (
       !token ||
+      projectUnavailable ||
       isSending ||
       regeneratingRunId ||
       feedbackPendingRunId ||
@@ -1887,6 +1844,10 @@ export function PublicAgentChat({
     suggestedQuestion?: string
   ) {
     event?.preventDefault()
+    if (projectUnavailable) {
+      setSendError(t("项目已归档或不可访问"))
+      return
+    }
     if (isSending) {
       await handleFollowUp()
       return
@@ -1924,6 +1885,17 @@ export function PublicAgentChat({
         !suggestedQuestion && files.length
           ? await uploadPublicAgentFiles(agentId, token, files)
           : []
+      let conversationIdForRun = activeConversationId
+      if (!conversationIdForRun && currentProjectId) {
+        if (!currentProject || currentProject.archived)
+          throw new Error(t("项目已归档或不可访问"))
+        const conversation = await createProjectConversation(
+          agentId,
+          token,
+          currentProjectId
+        )
+        conversationIdForRun = conversation.conversation_id
+      }
       await streamPublicAgentRun(
         agentId,
         token,
@@ -1938,7 +1910,11 @@ export function PublicAgentChat({
               window.history.replaceState(
                 null,
                 "",
-                `/chat/${agentId}?conversation_id=${encodeURIComponent(streamEvent.run.conversation_id)}`
+                publicChatUrl(
+                  agentId,
+                  streamEvent.run.conversation_id,
+                  currentProjectId
+                )
               )
             }
             if (cancelRequestedRef.current) {
@@ -1965,7 +1941,7 @@ export function PublicAgentChat({
           }
         },
         controller.signal,
-        activeConversationId,
+        conversationIdForRun,
         uploaded.map((item) => item.id),
         approvalMode
       )
@@ -2035,7 +2011,15 @@ export function PublicAgentChat({
     profile,
     conversations,
     activeConversationId,
-    onNew: startNewConversation,
+    onNew: () => startNewConversation(null),
+    projects: projectData.projects,
+    activeProjectId: currentProjectId,
+    onCreateProject: () => setCreateProjectOpen(true),
+    onSelectProject: (projectId: string) => startNewConversation(projectId),
+    onMove: handleMoveConversation,
+    projectBusy,
+    projectsError: projectData.error,
+    onRetryProjects: projectData.retry,
     onSelect: selectConversation,
     onDelete: handleDeleteConversation,
     deletingConversationId,
@@ -2074,19 +2058,39 @@ export function PublicAgentChat({
               </span>
               <div className="min-w-0 flex-1">
                 <h1 className="truncate text-sm font-semibold">
-                  {profile.name}
+                  {currentProject?.name ?? profile.name}
                 </h1>
                 <p className="truncate text-xs text-muted-foreground">
-                  {profile.description || t("公开对话")}
+                  {currentProject
+                    ? profile.name
+                    : profile.description || t("公开对话")}
                 </p>
               </div>
+              {currentProject ? (
+                <Button
+                  ref={projectSettingsRef}
+                  variant="ghost"
+                  size={hasArtifactPreview ? "icon" : "sm"}
+                  className="shrink-0"
+                  aria-label={t("项目说明与资料")}
+                  title={t("项目说明与资料")}
+                  aria-expanded={projectPanelOpen}
+                  onClick={() => {
+                    artifactPreview.close()
+                    setProjectPanelOpen((value) => !value)
+                  }}
+                >
+                  <FolderOpenIcon />
+                  {!hasArtifactPreview ? t("项目说明与资料") : null}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 aria-label={t("新建对话")}
                 title={t("新建对话")}
-                onClick={startNewConversation}
+                onClick={() => startNewConversation()}
               >
                 <MessageSquarePlusIcon />
               </Button>
@@ -2172,6 +2176,7 @@ export function PublicAgentChat({
                           (event) => event.type === "answer"
                         )?.created_at
                         const canEdit =
+                          !projectUnavailable &&
                           index === visibleRuns.length - 1 &&
                           run.status === "succeeded"
                         const isEditing = editingRunId === run.id
@@ -2397,6 +2402,7 @@ export function PublicAgentChat({
                                         )}
                                         feedback={run.feedback}
                                         regenerateDisabled={
+                                          projectUnavailable ||
                                           isSending ||
                                           isRunsLoading ||
                                           Boolean(regeneratingRunId)
@@ -2427,6 +2433,7 @@ export function PublicAgentChat({
                                       void handleAsk(undefined, question)
                                     }
                                     disabled={
+                                      projectUnavailable ||
                                       isSending ||
                                       isRunsLoading ||
                                       Boolean(regeneratingRunId) ||
@@ -2466,6 +2473,18 @@ export function PublicAgentChat({
               <div
                 className={`shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))] ${isEmptyConversation ? "mb-auto" : "border-t bg-background"}`}
               >
+                {projectUnavailable ? (
+                  <p
+                    role="status"
+                    className="mx-auto mb-2 max-w-3xl text-xs text-muted-foreground"
+                  >
+                    {currentProject?.archived
+                      ? t("项目已归档，请先恢复项目")
+                      : projectData.loaded || projectData.error
+                        ? t("项目不存在或不可访问")
+                        : t("正在加载")}
+                  </p>
+                ) : null}
                 {sendError ? (
                   <p
                     role="alert"
@@ -2553,7 +2572,9 @@ export function PublicAgentChat({
                       <AgentChatSubmitButton
                         isRunning={isSending}
                         hasInput={Boolean(question.trim())}
-                        sendDisabled={fileDrop.isReadingFiles}
+                        sendDisabled={
+                          fileDrop.isReadingFiles || projectUnavailable
+                        }
                         onStop={handleCancelAsk}
                         t={t}
                       />
@@ -2563,7 +2584,29 @@ export function PublicAgentChat({
               </div>
             </div>
           </section>
-          <AgentArtifactPreviewPanel />
+          {projectPanelOpen && currentProject && token ? (
+            <ChatProjectPanel
+              key={currentProject.id}
+              project={currentProject}
+              agentId={agentId}
+              token={token}
+              onClose={() => setProjectPanelOpen(false)}
+              onSave={handleSaveProject}
+              onDissolve={handleDissolveProject}
+              artifacts={projectArtifactOptions(
+                [...runs].reverse().flatMap((run) => run.progress)
+              )}
+              onPreview={(artifact, opener) => {
+                artifactPreview.open(
+                  artifact,
+                  projectSettingsRef.current ?? opener
+                )
+                setProjectPanelOpen(false)
+              }}
+            />
+          ) : (
+            <AgentArtifactPreviewPanel />
+          )}
         </div>
 
         <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
@@ -2581,6 +2624,19 @@ export function PublicAgentChat({
             />
           </DialogContent>
         </Dialog>
+        {token ? (
+          <CreateChatProjectDialog
+            open={createProjectOpen}
+            onOpenChange={setCreateProjectOpen}
+            agentId={agentId}
+            token={token}
+            onCreated={(project) => {
+              projectData.setProjects((current) => [project, ...current])
+              startNewConversation(project.id)
+              setIsHistoryOpen(false)
+            }}
+          />
+        ) : null}
         {confirmDialog}
       </main>
     </AgentArtifactPreviewContext>

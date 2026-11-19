@@ -54,6 +54,7 @@ PUBLIC_INTERFACES = {
         "app.application.models.service",
     },
     "projects": {
+        "app.application.projects.chat",
         "app.application.projects.runtime",
         "app.application.projects.service",
     },
@@ -110,7 +111,7 @@ MODULE_DEPENDENCIES = {
     "identity": {"email"},
     "knowledge": set(),
     "models": set(),
-    "projects": {"artifacts", "workspaces"},
+    "projects": {"artifacts", "publications", "workspaces"},
     "publications": {"workspaces"},
     "resource_folders": set(),
     "runs": set(),

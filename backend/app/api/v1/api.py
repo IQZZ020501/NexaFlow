@@ -7,6 +7,7 @@ from app.api.v1.admin.system_logs import routes as system_logs
 from app.api.v1.admin.users import routes as users
 from app.api.v1.agent_skills import routes as agent_skills
 from app.api.v1.agents import access as agent_access
+from app.api.v1.agents import projects as chat_projects
 from app.api.v1.agents import routes as agents
 from app.api.v1.announcements import routes as announcements
 from app.api.v1.artifacts import routes as artifacts
@@ -60,6 +61,7 @@ api_router.include_router(tool_sources.router)
 api_router.include_router(tools.router)
 api_router.include_router(agent_skills.router)
 api_router.include_router(agents.router)
+api_router.include_router(chat_projects.router)
 api_router.include_router(workflows.router)
 api_router.include_router(agent_access.public_router)
 api_router.include_router(agent_access.api_router)

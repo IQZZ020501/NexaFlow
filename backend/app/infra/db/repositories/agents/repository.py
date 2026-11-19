@@ -1563,6 +1563,9 @@ async def delete_agent_graph(
         )
     )
     await db.execute(delete(AgentRun).where(AgentRun.agent_id == agent_id))
+    from app.infra.db.repositories.projects.chat import delete_application_projects
+
+    await delete_application_projects(db, agent_id)
     await db.execute(
         delete(AgentApiCredential).where(AgentApiCredential.agent_id == agent_id)
     )

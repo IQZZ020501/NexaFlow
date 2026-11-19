@@ -4,6 +4,7 @@ import base64
 import hashlib
 
 from app.application.artifacts.service import create_generated_artifact
+from app.application.projects.chat import frozen_source_files
 from app.application.projects.service import require_project, save_changes
 from app.application.workspaces.service import build_workspace_context
 from app.domain.projects.services import (
@@ -88,10 +89,15 @@ async def restore_project_files(run, platform, *, timeout_seconds):
         project = await _authorized_project(db, run)
         state = await _cursor(db, run, project)
         files = await _versions(db, project, state)
+        shared = await frozen_source_files(db, run)
+    restored = [
+        (path, file.content, file.role)
+        for path, file in files.items()
+        if not file.deleted
+    ]
+    restored.extend((path, content, "source") for path, content in shared.items())
     reset = False
-    for path, file in files.items():
-        if file.deleted:
-            continue
+    for path, content, role in restored:
         # Guest staging is per path and per role; imports never replace edits
         # already made in that guest. A rebuilt guest receives this cursor.
         try:
@@ -100,8 +106,8 @@ async def restore_project_files(run, platform, *, timeout_seconds):
                     "execution_session": "agent_run",
                     "restore_project_files": {
                         "project_id": project.id,
-                        "role": file.role,
-                        "files": {path: base64.b64encode(file.content).decode("ascii")},
+                        "role": role,
+                        "files": {path: base64.b64encode(content).decode("ascii")},
                     },
                 },
                 timeout_seconds=timeout_seconds,
