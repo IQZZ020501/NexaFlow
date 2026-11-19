@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -50,6 +51,11 @@ SECRET_KEY_PLACEHOLDERS = (
 )
 
 _PRINT_LOCK = threading.Lock()
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_LOG_LEVEL_PREFIX = re.compile(
+    r"^(?:\[[^\]\n]+:\s*|\d{4}-\d{2}-\d{2}[^|\n]*\|\s*)?"
+    r"(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL)(?=\s*[:/|])"
+)
 
 
 class DevError(RuntimeError):
@@ -70,6 +76,19 @@ class LocalImageBuild:
 def log(message: str) -> None:
     with _PRINT_LOCK:
         print(message, flush=True)
+
+
+def should_forward_log(line: str, minimum_level: int) -> bool:
+    """Filter known process log formats while retaining plain diagnostics and tracebacks."""
+    match = _LOG_LEVEL_PREFIX.match(_ANSI_ESCAPE.sub("", line).lstrip())
+    return match is None or logging.getLevelNamesMapping()[match[1]] >= minimum_level
+
+
+def development_log_level(values: dict[str, str]) -> int:
+    level = os.getenv("LOG_LEVEL", values.get("LOG_LEVEL", "WARNING")).upper()
+    if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise DevError(f"Invalid LOG_LEVEL: {level}.")
+    return logging.getLevelNamesMapping()[level]
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -540,6 +559,7 @@ class ManagedProcess:
         *,
         cwd: Path,
         env: dict[str, str],
+        log_level: int = logging.WARNING,
     ) -> ManagedProcess:
         process = subprocess.Popen(
             command,
@@ -555,7 +575,8 @@ class ManagedProcess:
         def forward_output() -> None:
             assert process.stdout is not None
             for line in process.stdout:
-                log(f"[{label}] {line.rstrip()}")
+                if should_forward_log(line, log_level):
+                    log(f"[{label}] {line.rstrip()}")
 
         thread = threading.Thread(target=forward_output, daemon=True)
         thread.start()
@@ -605,6 +626,7 @@ def start_stack(
     api_port: int,
     frontend_port: int,
 ) -> int:
+    log_level = development_log_level(values)
     backend_env = os.environ.copy()
     for key in (
         "OPENSANDBOX_URL",
@@ -650,6 +672,7 @@ def start_stack(
                 ],
                 cwd=ROOT,
                 env=public_process_env,
+                log_level=log_level,
             )
             managed.append(sandbox)
             wait_for_http(
@@ -682,6 +705,7 @@ def start_stack(
             ],
             cwd=BACKEND,
             env=backend_env,
+            log_level=log_level,
         )
         managed.append(api)
         wait_for_http("API", f"{api_url}/health", process=api)
@@ -691,6 +715,7 @@ def start_stack(
             ["uv", "run", "python", "scripts/worker.py"],
             cwd=BACKEND,
             env=backend_env,
+            log_level=log_level,
         )
         managed.append(worker)
 
@@ -699,6 +724,7 @@ def start_stack(
             ["bun", "run", "dev"],
             cwd=FRONTEND,
             env=public_process_env,
+            log_level=log_level,
         )
         managed.append(frontend)
         wait_for_http("Frontend", frontend_url, process=frontend)

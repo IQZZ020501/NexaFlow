@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import stat
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts.dev import (
     BUILD_INPUTS_LABEL,
+    DevError,
     LocalImageBuild,
+    ManagedProcess,
     build_inputs_fingerprint,
+    development_log_level,
     development_port,
     ensure_local_image,
     ensure_local_opensandbox,
@@ -20,6 +26,8 @@ from scripts.dev import (
     prepare,
     read_env,
     set_env_value,
+    should_forward_log,
+    start_stack,
 )
 
 
@@ -127,6 +135,102 @@ class OpenSandboxConfigurationTests(unittest.TestCase):
 class DevelopmentPortTests(unittest.TestCase):
     def test_uses_default_port(self) -> None:
         self.assertEqual(development_port("NEXAFLOW_TEST_UNUSED_PORT", 8000), 8000)
+
+
+class DevelopmentLogTests(unittest.TestCase):
+    def test_hides_low_level_process_logs_and_keeps_errors_with_tracebacks(self) -> None:
+        lines = [
+            "DEBUG: request headers",
+            "INFO: 127.0.0.1 - GET /health 200",
+            "[2026-11-19 11:51:04,722: INFO/MainProcess] Task cleanup received",
+            "2026-11-19 11:51:30,869 | INFO | NexaFlow | httpx | HTTP Request: GET /v1/sandboxes",
+            "\033[32mINFO\033[0m: opensandbox_server.api.lifecycle: listSandboxes",
+            "WARNING: lease is expiring",
+            "[2026-11-19 11:51:04,722: WARNING/MainProcess] Worker retry",
+            "2026-11-19 11:51:30,869 | ERROR | NexaFlow | executor | Run failed",
+            "Traceback (most recent call last):",
+            '  File "job.py", line 1, in run',
+            "ValueError: invalid input",
+            "CRITICAL: worker stopped",
+            "Frontend ready; text mentions INFO without a log prefix",
+        ]
+        with patch("scripts.dev.log") as log_mock:
+            process = ManagedProcess.start(
+                "test",
+                [sys.executable, "-c", f"import json; [print(line) for line in json.loads({json.dumps(json.dumps(lines))})]"],
+                cwd=Path(__file__).parents[1],
+                env={"PYTHONUNBUFFERED": "1"},
+            )
+            try:
+                self.assertEqual(process.process.wait(timeout=5), 0)
+                process.output_thread.join(timeout=5)
+                self.assertFalse(process.output_thread.is_alive())
+            finally:
+                process.stop()
+                process.process.stdout.close()
+        self.assertEqual(
+            [call.args[0] for call in log_mock.call_args_list],
+            [f"[test] {line}" for line in lines[5:]],
+        )
+
+    def test_process_can_show_info_when_requested(self) -> None:
+        with patch("scripts.dev.log") as log_mock:
+            process = ManagedProcess.start(
+                "test",
+                [sys.executable, "-c", "print('DEBUG: hidden'); print('INFO: visible')"],
+                cwd=Path(__file__).parents[1],
+                env={"PYTHONUNBUFFERED": "1"},
+                log_level=logging.INFO,
+            )
+            try:
+                self.assertEqual(process.process.wait(timeout=5), 0)
+                process.output_thread.join(timeout=5)
+                self.assertFalse(process.output_thread.is_alive())
+            finally:
+                process.stop()
+                process.process.stdout.close()
+        self.assertEqual([call.args[0] for call in log_mock.call_args_list], ["[test] INFO: visible"])
+
+    def test_configured_threshold_and_environment_precedence(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(development_log_level({}), logging.WARNING)
+            self.assertEqual(development_log_level({"LOG_LEVEL": "info"}), logging.INFO)
+            self.assertEqual(development_log_level({"LOG_LEVEL": "ERROR"}), logging.ERROR)
+        with patch.dict(os.environ, {"LOG_LEVEL": "critical"}):
+            self.assertEqual(development_log_level({"LOG_LEVEL": "INFO"}), logging.CRITICAL)
+        with (
+            patch.dict(os.environ, {"LOG_LEVEL": "TRACE"}),
+            self.assertRaisesRegex(DevError, "Invalid LOG_LEVEL"),
+        ):
+            development_log_level({})
+
+    def test_plain_diagnostics_and_level_words_inside_messages_are_not_hidden(self) -> None:
+        self.assertTrue(should_forward_log("Request failed: INFO from upstream", logging.WARNING))
+        self.assertTrue(should_forward_log("WARN: server retry", logging.WARNING))
+        self.assertTrue(should_forward_log("FATAL: server stopped", logging.CRITICAL))
+        self.assertFalse(should_forward_log("WARNING: retry", logging.ERROR))
+        self.assertTrue(should_forward_log("DEBUG: diagnostic", logging.DEBUG))
+
+    def test_stack_applies_the_same_display_threshold_to_all_processes(self) -> None:
+        for configured, expected in (({}, logging.WARNING), ({"LOG_LEVEL": "INFO"}, logging.INFO)):
+            with (
+                self.subTest(configured=configured),
+                patch.dict(os.environ, {}, clear=True),
+                patch("scripts.dev._request_status", return_value=None),
+                patch("scripts.dev._port_available", return_value=True),
+                patch("scripts.dev.wait_for_http"),
+                patch("scripts.dev.time.sleep", side_effect=KeyboardInterrupt),
+                patch("scripts.dev.log"),
+                patch("scripts.dev.ManagedProcess.start") as start_mock,
+            ):
+                start_mock.return_value = SimpleNamespace(
+                    process=SimpleNamespace(poll=lambda: None), stop=Mock(),
+                )
+                self.assertEqual(start_stack(
+                    configured, local_opensandbox=True, api_port=8000, frontend_port=3000,
+                ), 0)
+                self.assertEqual([call.args[0] for call in start_mock.call_args_list], ["sandbox", "api", "worker", "web"])
+                self.assertTrue(all(call.kwargs["log_level"] == expected for call in start_mock.call_args_list))
 
 
 class DevelopmentPreparationTests(unittest.TestCase):
