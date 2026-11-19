@@ -102,7 +102,7 @@ def main():
         assert client.get(memory_base).status_code == 401
         assert call("get", "") == {
             "enabled": True,
-            "automatic": False,
+            "automatic": True,
             "items": [],
         }
         payload = {
@@ -183,7 +183,32 @@ def main():
         assert "concise English" in str(AgentModelHandler.calls[0]["messages"])
         suggestion = json.loads(AgentModelHandler.calls[-1]["messages"][-1]["content"])
         assert "concise English" in suggestion["related_context"]
-        assert asyncio.run(queue(run_id)) == []  # automatic is off
+        automatic_jobs = asyncio.run(queue(run_id))
+        assert len(automatic_jobs) == 1
+        assert asyncio.run(queue(run_id)) == automatic_jobs
+        automatic_model = SimpleNamespace(
+            ainvoke=AsyncMock(
+                return_value=SimpleNamespace(text="[]", response_metadata={})
+            )
+        )
+        with patch(
+            "app.application.memories.extraction.build_chat_model",
+            return_value=automatic_model,
+        ):
+            asyncio.run(extract_memories(automatic_jobs[0], settings()))
+        automatic_source = json.loads(
+            automatic_model.ainvoke.call_args.args[0][-1]["content"]
+        )
+        assert automatic_source["automatic"] is True
+        assert automatic_source["sources"] == ["Explain Docker"]
+        assert asyncio.run(queue(run_id)) == []
+
+        call("put", "/preferences", json={"enabled": True, "automatic": False})
+        assert call("get", "")["automatic"] is False
+        opted_out = create_run()
+        asyncio.run(claim(opted_out))
+        asyncio.run(finish(opted_out))
+        assert asyncio.run(queue(opted_out)) == []
 
         other_run = create_run(actor_headers=other_headers)
         assert asyncio.run(context(other_run)) == ""

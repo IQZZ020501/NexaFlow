@@ -11,6 +11,58 @@ from alembic.operations import Operations
 
 
 class MigrationTests(unittest.TestCase):
+    def test_automatic_default_preserves_existing_choices(self):
+        filename = (
+            Path(__file__).parents[2]
+            / "alembic/versions/202611200001_automatic_memory_default.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "automatic_memory_default_migration", filename
+        )
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        engine = sa.create_engine("sqlite://")
+        try:
+            with engine.begin() as connection:
+                profiles = sa.Table(
+                    "user_memory_preferences",
+                    sa.MetaData(),
+                    sa.Column("id", sa.String(36), primary_key=True),
+                    sa.Column(
+                        "automatic", sa.Boolean(), nullable=False, server_default=sa.false()
+                    ),
+                )
+                profiles.create(connection)
+                connection.execute(
+                    profiles.insert(),
+                    [
+                        {"id": "disabled", "automatic": False},
+                        {"id": "enabled", "automatic": True},
+                    ],
+                )
+                with patch.object(
+                    migration, "op", Operations(MigrationContext.configure(connection))
+                ):
+                    migration.upgrade()
+                    connection.execute(profiles.insert().values(id="new"))
+                    self.assertEqual(
+                        dict(connection.execute(sa.select(profiles)).all()),
+                        {"disabled": False, "enabled": True, "new": True},
+                    )
+                    migration.downgrade()
+                    connection.execute(profiles.insert().values(id="after-downgrade"))
+                    self.assertEqual(
+                        dict(connection.execute(sa.select(profiles)).all()),
+                        {
+                            "disabled": False,
+                            "enabled": True,
+                            "new": True,
+                            "after-downgrade": False,
+                        },
+                    )
+        finally:
+            engine.dispose()
+
     def test_upgrade_cascades_and_downgrade(self):
         filename = (
             Path(__file__).parents[2] / "alembic/versions/202611190004_user_memories.py"

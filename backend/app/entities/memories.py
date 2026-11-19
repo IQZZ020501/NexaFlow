@@ -12,7 +12,7 @@ class MemoryPreferences:
     workspace_id: str = ""
     user_id: str = ""
     enabled: bool = True
-    automatic: bool = False
+    automatic: bool = True
     epoch: int = 0
     created_at: datetime = field(default_factory=utc_now)
 

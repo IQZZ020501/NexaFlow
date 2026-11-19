@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,7 +33,7 @@ class MemoryPreferences(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    automatic: Mapped[bool] = mapped_column(Boolean, default=False)
+    automatic: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     epoch: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now
