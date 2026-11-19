@@ -16,6 +16,7 @@ import {
   PlusIcon,
   SearchIcon,
   Settings2Icon,
+  SquarePenIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
@@ -162,6 +163,10 @@ export function PublicChatHistory({
   const ordinary = filtered.filter(
     (item) => !item.project_id || !projectIds.has(item.project_id)
   )
+  function selectProject(projectId: string) {
+    setExpanded((current) => ({ ...current, [projectId]: true }))
+    onSelectProject(projectId)
+  }
   function row(conversation: PublicAgentConversation, grouped = false) {
     const pending = Boolean(
       deletingConversationId || exportingConversationId || projectBusy
@@ -307,7 +312,7 @@ export function PublicChatHistory({
           />
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground">
+          <div className="flex items-center gap-2 px-2 py-2 text-xs font-medium text-muted-foreground sm:pr-0.5">
             <FolderIcon className="size-3.5" />
             <span className="flex-1">{t("项目")}</span>
             <IconButton
@@ -375,13 +380,7 @@ export function PublicChatHistory({
                           ? "page"
                           : undefined
                       }
-                      onClick={() => {
-                        setExpanded((current) => ({
-                          ...current,
-                          [project.id]: true,
-                        }))
-                        onSelectProject(project.id)
-                      }}
+                      onClick={() => selectProject(project.id)}
                       title={project.name}
                     >
                       {project.name}
@@ -398,6 +397,14 @@ export function PublicChatHistory({
                       onToggleArchive={onToggleArchiveProject}
                       onDissolve={onDissolveProject}
                     />
+                    <IconButton
+                      label={t("新建项目对话：{name}", { name: project.name })}
+                      className="mr-1 size-8 shrink-0 text-muted-foreground sm:size-5"
+                      disabled={projectBusy || project.archived}
+                      onClick={() => selectProject(project.id)}
+                    >
+                      <SquarePenIcon className="size-3" />
+                    </IconButton>
                   </div>
                   {open ? (
                     <div className="mt-1 ml-3 space-y-0.5 border-l border-border/60 pl-2">

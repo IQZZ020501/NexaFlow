@@ -2269,7 +2269,7 @@ describe("PublicAgentChat", () => {
     ).toBe("conv-2")
 
     // Start a brand-new conversation.
-    fireEvent.click(screen.getByTitle("新建对话"))
+    fireEvent.click(screen.getByRole("button", { name: "新建对话" }))
     expect(await screen.findByText("开始新对话")).toBeTruthy()
     expect(window.location.pathname).toBe("/chat/agent-1")
     expect(window.location.search).toBe("")
@@ -3384,7 +3384,7 @@ describe("PublicAgentChat", () => {
     expect((composer as HTMLTextAreaElement).value).toBe("Adjust the page")
     fireEvent.click(first)
     expect(await screen.findByTitle("文件预览：first.html")).toBeTruthy()
-    fireEvent.click(screen.getByLabelText("新建对话"))
+    fireEvent.click(screen.getByRole("button", { name: "新建对话" }))
     await waitFor(() =>
       expect(screen.queryByTitle("文件预览：first.html")).toBeNull()
     )

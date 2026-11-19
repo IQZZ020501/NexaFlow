@@ -4,6 +4,7 @@ export const en = {
   新建项目: "New project",
   编辑项目: "Edit project",
   "更多项目操作：{name}": "More project actions: {name}",
+  "新建项目对话：{name}": "New conversation in project: {name}",
   项目: "Projects",
   项目名称: "Project name",
   "将相关对话和资料放在一起，仅你自己可见。":

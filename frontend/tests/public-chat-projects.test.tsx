@@ -146,6 +146,14 @@ test("selects a project through a durable route without reading its other conver
     ).toBe(true)
   )
   expect(window.location.pathname).toBe(`/chat/${agentId}`)
+  fireEvent.click(
+    screen.getByRole("button", { name: "新建项目对话：Research" })
+  )
+  expect(window.location.pathname).toBe(
+    `/chat/${agentId}/projects/${projectId}`
+  )
+  expect(window.location.search).toBe("")
+  expect(screen.getByRole("heading", { name: "Research" })).toBeTruthy()
 })
 
 test("creates a project and sends its first question in a server-owned project conversation", async () => {
@@ -473,6 +481,13 @@ test("archiving prevents new sends and restoring re-enables them", async () => {
   await openProjectMenu()
   fireEvent.click(screen.getByRole("menuitem", { name: "归档项目" }))
   await screen.findByText("已归档")
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "新建项目对话：Research",
+      }) as HTMLButtonElement
+    ).disabled
+  ).toBe(true)
   fireEvent.change(screen.getByLabelText("请输入问题"), {
     target: { value: "Continue" },
   })

@@ -32,7 +32,6 @@ import {
   DatabaseIcon,
   LoaderCircleIcon,
   MenuIcon,
-  MessageSquarePlusIcon,
   PencilIcon,
   SendIcon,
   ShieldAlertIcon,
@@ -2098,16 +2097,6 @@ export function PublicAgentChat({
                     : profile.description || t("公开对话")}
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={t("新建对话")}
-                title={t("新建对话")}
-                onClick={() => startNewConversation()}
-              >
-                <MessageSquarePlusIcon />
-              </Button>
             </header>
 
             <div
