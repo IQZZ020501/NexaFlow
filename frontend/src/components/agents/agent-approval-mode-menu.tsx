@@ -58,7 +58,7 @@ function ModeIcon({
 function modeLabel(mode: AgentApprovalMode, t: TFunction) {
   if (mode === "always_ask") return t("请求批准")
   if (mode === "full_access") return t("完全访问")
-  return t("按策略审批")
+  return t("按策略自动执行")
 }
 
 function modeDescription(mode: AgentApprovalMode, t: TFunction) {
@@ -68,7 +68,7 @@ function modeDescription(mode: AgentApprovalMode, t: TFunction) {
   if (mode === "full_access") {
     return t("自动运行已授权工具，仍受安全限制")
   }
-  return t("仅风险操作需批准")
+  return t("模型判断 MCP 调用是否需要确认")
 }
 
 export function AgentApprovalModeMenu({

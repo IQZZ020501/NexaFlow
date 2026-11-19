@@ -718,7 +718,7 @@ describe("AgentDetailWorkspace preview", () => {
     ).toContain("w-[min(21rem,calc(100vw-1rem))]")
     for (const description of [
       "外部读取或副作用操作前询问",
-      "仅风险操作需批准",
+      "模型判断 MCP 调用是否需要确认",
       "自动运行已授权工具，仍受安全限制",
     ]) {
       expect(screen.getByText(description).className).toContain("truncate")

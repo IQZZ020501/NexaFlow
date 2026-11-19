@@ -456,6 +456,7 @@ async def validate_regeneration_source(
             not in {
                 "attachments",
                 "approval_mode",
+                "mcp_approval_version",
                 "execution_profile",
                 "sandbox_requirements",
                 "project",
@@ -1381,6 +1382,7 @@ async def prepare_agent_run(
             "resources": resource_snapshot,
             "attachments": attachments or [],
             "approval_mode": approval_mode,
+            "mcp_approval_version": 2,
             "sandbox_requirements": {
                 "schema_version": 1,
                 "profiles": resource_profiles,

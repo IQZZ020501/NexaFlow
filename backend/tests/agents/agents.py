@@ -320,6 +320,17 @@ class AgentModelHandler(BaseHTTPRequestHandler):
         elif mcp_tool_name and not any(
             item.get("role") == "tool" for item in body.get("messages", [])
         ):
+            mcp_parameters = next(
+                tool["function"]["parameters"]
+                for tool in body["tools"]
+                if tool["function"]["name"] == mcp_tool_name
+            )
+            mcp_arguments = {"topic": "release"}
+            if "requires_approval" in mcp_parameters.get("properties", {}):
+                mcp_arguments = {
+                    "arguments": mcp_arguments,
+                    "requires_approval": False,
+                }
             message = {
                 "role": "assistant",
                 "content": None,
@@ -329,7 +340,7 @@ class AgentModelHandler(BaseHTTPRequestHandler):
                         "type": "function",
                         "function": {
                             "name": mcp_tool_name,
-                            "arguments": json.dumps({"topic": "release"}),
+                            "arguments": json.dumps(mcp_arguments),
                         },
                     }
                 ],
@@ -4819,8 +4830,8 @@ def main() -> None:
             read_only_question = client.post(
                 agents_url(workspace_id, f"/{mcp_agent_data['id']}/runs"),
                 headers=auth_headers(admin_token),
-                # The policy mode is what auto-runs a read-only tool; the run
-                # default asks for approval on every call.
+                # The model explicitly auto-approves this routine read in the
+                # middle mode; the default still asks on every MCP call.
                 json={
                     "goal": "Check the release again",
                     "approval_mode": "ask_risky",

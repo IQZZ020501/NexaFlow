@@ -25,7 +25,7 @@ Control tools accept exactly the lifecycle arguments below. Before a submit rece
 {"request_id": "stable-request-key", "task_id": null}
 ```
 
-The mapping and controller definition hashes become part of the frozen submit tool version. Configuring or changing them requires the normal tool policy review. Missing controllers make submission unavailable. One approval authorizes the mapped job lifecycle; it does not authorize unrelated control tools or bypass current source, user, workspace, binding or policy checks.
+The mapping and controller definition hashes become part of the frozen submit tool version. Configuring or changing them creates a new submit definition and resets any automatic policy grant; new conversations use their selected approval mode, while existing Run snapshots remain fenced. Missing controllers make submission unavailable. One approval authorizes the mapped job lifecycle; it does not authorize unrelated control tools or bypass current source, user, workspace, binding or policy checks.
 
 One `tool_invocations` row still owns execution and the full result. `mcp_remote_tasks` stores only durable remote identity, frozen contract, deadline, progress and cancellation intent. NexaFlow commits `submitting` before dispatch. After a worker crash, both a saved receipt and a lost receipt resume by status lookup; an uncertain submit is never blindly repeated. Reattachment preserves the original deadline and does not consume another submission attempt. Agent tasks use the frozen Run deadline; individual HTTP requests keep their transport timeout. No database transaction stays open while waiting on the remote service.
 

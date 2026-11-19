@@ -132,6 +132,7 @@ export function ToolPicker({
       tool.current_version_id &&
       tool.status === "active" &&
       tool.availability === "available" &&
+      tool.policy_mode !== "disabled" &&
       tool.function_name !== "inline_python" &&
       tool.function_name !== "create_artifact" &&
       isRegularTool(tool.function_name)
@@ -164,7 +165,8 @@ export function ToolPicker({
         !tool.can_use ||
         !tool.current_version_id ||
         tool.status !== "active" ||
-        tool.availability !== "available")
+        tool.availability !== "available" ||
+        tool.policy_mode === "disabled")
     )
   })
   const unavailableGroups = toolBindingGroups(unavailableBindings, tools, t)

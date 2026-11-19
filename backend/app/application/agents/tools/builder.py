@@ -727,7 +727,9 @@ def build_knowledge_search_tool(
     )
 
 
-def build_unified_agent_tool(snapshot: ToolSnapshot) -> StructuredTool:
+def build_unified_agent_tool(
+    snapshot: ToolSnapshot, *, model_decides_approval: bool = False
+) -> StructuredTool:
     """Expose a frozen Tool contract to the model; the durable hook executes it."""
 
     async def require_durable_runtime(_arguments: str) -> AgentToolResult:
@@ -746,6 +748,7 @@ def build_unified_agent_tool(snapshot: ToolSnapshot) -> StructuredTool:
         kind=snapshot.kind,
         parallel_safe=snapshot.parallel_safe,
         definition_hash=snapshot.definition_hash,
+        model_decides_approval=model_decides_approval and snapshot.kind == "mcp",
     )
 
 
@@ -763,6 +766,8 @@ def build_mcp_agent_tool(
     settings: Settings,
     application_id: str,
     policy_mode: str | None = None,
+    *,
+    model_decides_approval: bool = False,
 ) -> StructuredTool:
     definition = tool.definition
     effective_policy_mode = policy_mode or effective_mcp_tool_policy_mode(
@@ -868,4 +873,5 @@ def build_mcp_agent_tool(
         server_id=tool.server.id,
         definition_hash=mcp_tool_definition_hash(definition),
         source_tool_name=definition.name,
+        model_decides_approval=model_decides_approval,
     )

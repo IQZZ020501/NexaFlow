@@ -699,6 +699,7 @@ def test_agent_approval_modes_only_change_interactive_consent() -> None:
     from app.domain.agents.approval import (
         agent_mcp_requires_approval,
         agent_tool_requires_approval,
+        model_decides_mcp_approval,
         normalize_agent_approval_mode,
         run_agent_approval_mode,
     )
@@ -741,6 +742,36 @@ def test_agent_approval_modes_only_change_interactive_consent() -> None:
     assert agent_mcp_requires_approval("full_access", "approval_required") is False
     assert agent_mcp_requires_approval("always_ask", "disabled") is False
 
+    mcp = replace(risky, kind="mcp")
+    for decision in (True, False, None):
+        options = {
+            "model_decides_mcp": True,
+            "model_requires_approval": decision,
+        }
+        assert agent_tool_requires_approval("always_ask", mcp, **options) is True
+        assert agent_tool_requires_approval("full_access", mcp, **options) is False
+        assert agent_tool_requires_approval("ask_risky", mcp, **options) is (
+            decision is not False
+        )
+        for policy_mode in ("approval_required", "read_only"):
+            assert agent_mcp_requires_approval("ask_risky", policy_mode, **options) is (
+                decision is not False
+            )
+    assert agent_tool_requires_approval("always_ask", replace(mcp, effect="pure"))
+    for source in ("console", "public", "api"):
+        for version in (None, 2):
+            for mode in ("always_ask", "ask_risky", "full_access"):
+                candidate = AgentRun(
+                    access_source=source,
+                    application_snapshot={
+                        "approval_mode": mode,
+                        "mcp_approval_version": version,
+                    },
+                )
+                assert model_decides_mcp_approval(candidate) is (
+                    source != "api" and version == 2 and mode == "ask_risky"
+                )
+
     run = AgentRun(application_snapshot={"approval_mode": "full_access"})
     assert run_agent_approval_mode(run) == "full_access"
     for frozen_mode in ("always_ask", "full_access", "ask_risky"):
@@ -760,6 +791,99 @@ def test_agent_approval_modes_only_change_interactive_consent() -> None:
         pass
     else:
         raise AssertionError("Invalid Agent approval mode was accepted.")
+
+def test_model_mcp_approval_envelope_preserves_arguments() -> None:
+    from jsonschema import Draft202012Validator
+    from langchain_core.messages import AIMessage
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+    from langchain_google_genai._function_utils import (
+        convert_to_genai_function_declarations,
+    )
+    from tests.agents.evaluation import ScriptedModel, answer_message
+
+    from app.domain.agents.runtime import AgentToolResult, create_agent_tool, run_agent
+    from app.domain.agents.runtime.graph import partial_tool_input_preview
+
+    # Both a local $ref and upstream fields named like our envelope must retain
+    # their original meaning and reach the remote tool unchanged.
+    parameters = {
+        "type": "object",
+        "$defs": {"query": {"type": "string", "minLength": 1}},
+        "properties": {
+            "arguments": {"$ref": "#/$defs/query"},
+            "requires_approval": {"type": "string"},
+        },
+        "required": ["arguments", "requires_approval"],
+        "additionalProperties": False,
+    }
+    original = json.dumps(parameters, sort_keys=True)
+    payload = {"arguments": "orders", "requires_approval": "upstream value"}
+    assert partial_tool_input_preview(
+        json.dumps({"arguments": payload, "requires_approval": False}),
+        model_approval=True,
+    ) == payload
+    assert partial_tool_input_preview(
+        '{"requires_approval": false}', model_approval=True
+    ) == {}
+    executed, decisions, inputs = [], [], []
+
+    async def execute(raw):
+        executed.append(json.loads(raw))
+        return AgentToolResult(content="Done", summary="Done")
+
+    tool = create_agent_tool(
+        name="mcp_lookup",
+        description="Look up orders",
+        parameters=parameters,
+        execute=execute,
+        kind="mcp",
+        model_decides_approval=True,
+    )
+    assert json.dumps(parameters, sort_keys=True) == original
+    Draft202012Validator(tool.args_schema).validate(
+        {"arguments": payload, "requires_approval": False}
+    )
+    provider_schema = convert_to_openai_tool(tool)["function"]["parameters"]
+    Draft202012Validator(provider_schema).validate(
+        {"arguments": payload, "requires_approval": False}
+    )
+    google_schema = convert_to_genai_function_declarations([tool])
+    assert google_schema[0].function_declarations[0].parameters.properties[
+        "requires_approval"
+    ].type.value == "BOOLEAN"
+
+    async def before(_turn, _call, metadata, arguments):
+        decisions.append(metadata["model_requires_approval"])
+        inputs.append(arguments)
+
+    for value in (False, True, None, "false"):
+        envelope = {"arguments": payload}
+        if value is not None:
+            envelope["requires_approval"] = value
+        model = ScriptedModel(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": tool.name, "args": envelope, "id": "lookup"}],
+                    response_metadata={"finish_reason": "tool_calls"},
+                ),
+                answer_message("Completed"),
+            ]
+        )
+        result = asyncio.run(
+            run_agent(
+                model,
+                [{"role": "user", "content": "Look up my orders"}],
+                [tool],
+                before_tool_call=before,
+            )
+        )
+        assert len(model.requests) == 2
+        event = next(event for event in result.events if event["type"] == "tool")
+        assert event["input"] == payload
+    assert decisions == ["false", "true", "true", "true"]
+    assert inputs == executed == [payload] * 4
+
 
 def test_agent_tool_definition_comes_from_unified_snapshot() -> None:
     from app.application.agents.tools.builder import build_unified_agent_tool
@@ -3403,6 +3527,7 @@ def main() -> None:
     test_freeze_json_rejects_non_json_values()
     test_tool_adapter_contract_is_provider_neutral()
     test_agent_approval_modes_only_change_interactive_consent()
+    test_model_mcp_approval_envelope_preserves_arguments()
     test_agent_tool_definition_comes_from_unified_snapshot()
     test_agent_tool_runtime_uses_stable_invocation_identity_and_envelope()
     test_agent_tool_call_migration_preserves_approval_gate()

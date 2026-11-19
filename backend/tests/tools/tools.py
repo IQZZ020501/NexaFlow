@@ -3218,6 +3218,7 @@ async def assert_mcp_discovery_materializes_first_leaf(
         mcp_function_name_candidates,
         reconcile_mcp_discovery,
     )
+    from app.entities.defaults import utc_now
     from app.entities.tools import McpServer, Tool, ToolSource
     from app.infra.db.repositories.identity import users as user_repository
     from app.infra.db.repositories.tools import mcp as mcp_repository
@@ -3343,6 +3344,16 @@ async def assert_mcp_discovery_materializes_first_leaf(
         )
         assert [item.id for item in versions] == [original_version_id]
 
+        # Refreshing a changed definition must not carry a previously reviewed
+        # automatic grant (including API access) over to new behavior.
+        policy.approval = "auto"
+        policy.effect = "external_read"
+        policy.allowed_access_sources = ["console", "public", "api"]
+        policy.parallel_safe = True
+        policy.reviewed_by_user_id = actor.id
+        policy.reviewed_at = utc_now()
+        await tool_repository.save_tool_policy(db, policy)
+
         changed = [
             {
                 **discovery[0],
@@ -3366,8 +3377,22 @@ async def assert_mcp_discovery_materializes_first_leaf(
         assert tool.current_version_id == versions[0].id
         policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
         assert policy is not None
-        assert policy.definition_hash == original_policy_hash
-        assert policy.tool_version_id == original_version_id
+        assert policy.definition_hash != original_policy_hash
+        assert policy.definition_hash == versions[0].definition_hash
+        assert policy.tool_version_id == versions[0].id
+        assert policy.approval == "each_call"
+        assert policy.effect == "unknown"
+        assert policy.allowed_access_sources == ["console", "public"]
+        assert policy.reviewed_by_user_id is None
+
+        # An explicit kill switch survives both disappearance and definition
+        # changes when a tool is rediscovered.
+        policy.approval = "disabled"
+        policy.allowed_access_sources = []
+        policy.workflow_callable = False
+        await tool_repository.save_tool_policy(db, policy)
+        tool.status = "disabled"
+        await tool_repository.save_tool(db, tool)
 
         await reconcile_mcp_discovery(db, server, source, [])
         tool = (await tool_repository.list_tools_by_source(
@@ -3392,6 +3417,11 @@ async def assert_mcp_discovery_materializes_first_leaf(
         assert tool.current_version_id == original_version_id
         assert tool.availability == "available"
         assert len(versions) == 2
+        policy = await tool_repository.get_tool_policy(db, workspace_id, tool.id)
+        assert tool.status == "disabled"
+        assert policy.approval == "disabled"
+        assert policy.tool_version_id == original_version_id
+        assert policy.allowed_access_sources == []
         await db.rollback()
 
 
@@ -6057,6 +6087,7 @@ def main() -> None:
         test_existing_file_catalog_upgrade,
         test_existing_pptx_design_catalog_upgrade,
     )
+    from tests.tools.mcp_approval_upgrade import test_existing_mcp_approval_upgrade
     from tests.tools.personal import (
         test_personal_configuration,
         test_personal_name_migration,
@@ -6074,6 +6105,7 @@ def main() -> None:
     test_existing_file_catalog_upgrade()
     test_existing_pptx_design_catalog_upgrade()
     test_existing_documents_inspection_catalog_upgrade()
+    test_existing_mcp_approval_upgrade()
     test_pptx_skill_uses_empty_load_arguments()
     test_artifact_generator_preflight_is_actionable()
     test_agent_publication_migration_supports_sqlite_foreign_keys()

@@ -140,11 +140,6 @@ function withNotifySpy() {
   return calls
 }
 
-async function chooseDropdownOption(trigger: HTMLElement, label: string) {
-  fireEvent.pointerDown(trigger)
-  fireEvent.click(within(await screen.findByRole("menu")).getByText(label))
-}
-
 async function respondToConfirm(label: string) {
   const dialog = await screen.findByRole("dialog", { name: "确认操作" })
   fireEvent.click(within(dialog).getByRole("button", { name: label }))
@@ -414,11 +409,9 @@ describe("McpToolsPage", () => {
     fireEvent.click(screen.getAllByText("查看工具列表")[0])
     expect(screen.getByText("web_search")).toBeTruthy()
     expect(screen.getByText("Search the web")).toBeTruthy()
-    const selects = screen.getAllByLabelText("工具执行策略")
-    expect(selects).toHaveLength(3)
-    expect(selects[0].textContent).toContain("每次调用前审批")
-    expect(selects[1].textContent).toContain("禁用")
-    expect(selects[2].textContent).toContain("只读自动执行")
+    expect(screen.queryByLabelText("工具执行策略")).toBeNull()
+    expect(screen.queryByText("只读自动执行")).toBeNull()
+    expect(screen.queryByText("每次调用前审批")).toBeNull()
   })
 
   test("lets members add their own MCP servers", async () => {
@@ -429,14 +422,14 @@ describe("McpToolsPage", () => {
     expect(screen.queryAllByRole("button", { name: "添加 MCP Server" }).length).toBeGreaterThan(0)
   })
 
-  test("members can manage policies and connections returned by their own list", async () => {
+  test("members can manage their own connections without per-tool policies", async () => {
     setSession({ me: memberMe })
     handler = () => jsonResponse([mcpServer()])
     renderPage(<McpToolsPage />)
     await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
     expect(screen.getByLabelText("刷新工具")).toBeTruthy()
     expect(screen.getByLabelText("删除 MCP Server")).toBeTruthy()
-    expect(screen.getAllByLabelText("工具执行策略").length).toBeGreaterThan(0)
+    expect(screen.queryByLabelText("工具执行策略")).toBeNull()
   })
 
   test("reports list errors through notifications", async () => {
@@ -530,59 +523,6 @@ describe("McpToolsPage", () => {
     // The first batch stays and the list is not marked complete.
     expect(screen.getByText("Server 0")).toBeTruthy()
     expect(screen.queryByText("已加载全部")).toBeNull()
-  })
-
-  test("disables policy changes while another update is pending and keeps other servers intact", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    let resolvePolicy!: (response: Response) => void
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (url.includes("/tools/web_search/policy")) {
-        return new Promise<Response>((resolve) => {
-          resolvePolicy = resolve
-        })
-      }
-      if (url.includes("/mcp-servers")) {
-        return jsonResponse([mcpServer(), stdioServer])
-      }
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    fireEvent.click(screen.getAllByText("查看工具列表")[0])
-    fireEvent.click(screen.getAllByText("查看工具列表")[1])
-    const serverSelect = screen.getAllByLabelText("工具执行策略")[0]
-    const otherSelect = screen.getAllByLabelText("工具执行策略")[2]
-
-    // Start a policy update on the first server (kept pending).
-    await chooseDropdownOption(serverSelect, "只读自动执行")
-    await respondToConfirm("确认")
-    await waitFor(() => expect(notifications).toHaveLength(0))
-
-    expect((serverSelect as HTMLButtonElement).disabled).toBe(true)
-    expect((otherSelect as HTMLButtonElement).disabled).toBe(true)
-    expect(otherSelect.textContent).toContain("只读自动执行")
-    const policyCalls = calls.filter((call) => call.url.includes("/policy"))
-    expect(policyCalls).toHaveLength(1)
-
-    resolvePolicy(
-      jsonResponse({
-        workspace_id: "ws-1",
-        mcp_server_id: "mcp-1",
-        tool_name: "web_search",
-        definition_hash: "h1-new",
-        mode: "read_only",
-        reviewed_by_user_id: null,
-        reviewed_at: null,
-      })
-    )
-    await waitFor(() =>
-      expect(notifications).toEqual([["success", "MCP 工具策略已更新"]])
-    )
-    await waitFor(() => expect(serverSelect.textContent).toContain("只读自动执行"))
-    expect(otherSelect.textContent).toContain("只读自动执行")
   })
 
   test("creates a streamable_http server through the dialog", async () => {
@@ -826,105 +766,6 @@ describe("McpToolsPage", () => {
     await respondToConfirm("删除")
     await waitFor(() => expect(notifications).toEqual([["error", "gone"]]))
     expect(screen.getByText("Release tools")).toBeTruthy()
-  })
-
-  test("updates a tool policy to read_only after confirmation", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (url.includes("/tools/web_search/policy")) {
-        return jsonResponse({
-          workspace_id: "ws-1",
-          mcp_server_id: "mcp-1",
-          tool_name: "web_search",
-          definition_hash: "h1-new",
-          mode: "read_only",
-          reviewed_by_user_id: null,
-          reviewed_at: null,
-        })
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[0]
-    await chooseDropdownOption(select, "只读自动执行")
-    const dialog = await screen.findByRole("dialog", { name: "确认操作" })
-    expect(dialog.textContent).toContain("确认将工具“web_search”标记为只读并允许自动执行吗？")
-    expect((select as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(within(dialog).getByRole("button", { name: "确认" }))
-    await waitFor(() => expect(notifications).toEqual([["success", "MCP 工具策略已更新"]]))
-    const put = calls.find((c) => c.url.includes("/tools/web_search/policy"))
-    expect(put?.init?.method).toBe("PUT")
-    expect(JSON.parse(put!.init!.body as string)).toEqual({ mode: "read_only" })
-    await waitFor(() => expect(select.textContent).toContain("只读自动执行"))
-  })
-
-  test("restores the policy when the confirmation is declined", async () => {
-    setSession()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[0]
-    await chooseDropdownOption(select, "只读自动执行")
-    await respondToConfirm("取消")
-    expect(select.textContent).toContain("每次调用前审批")
-    expect(calls.some((c) => c.url.includes("/policy"))).toBe(false)
-  })
-
-  test("disables a tool without confirmation", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (url.includes("/tools/no_desc/policy")) {
-        return jsonResponse({
-          workspace_id: "ws-1",
-          mcp_server_id: "mcp-1",
-          tool_name: "no_desc",
-          definition_hash: "h2-new",
-          mode: "disabled",
-          reviewed_by_user_id: null,
-          reviewed_at: null,
-        })
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[1]
-    expect(select.textContent).toContain("禁用")
-    await chooseDropdownOption(select, "每次调用前审批")
-    await waitFor(() => expect(notifications).toEqual([["success", "MCP 工具策略已更新"]]))
-    expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
-    const put = calls.find((c) => c.url.includes("/tools/no_desc/policy"))
-    expect(JSON.parse(put!.init!.body as string)).toEqual({ mode: "approval_required" })
-  })
-
-  test("restores the policy when the policy update fails", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    handler = (url) => {
-      if (url.includes("/tools/web_search/policy")) return jsonResponse({ detail: "policy failed" }, 500)
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    const select = screen.getAllByLabelText("工具执行策略")[0]
-    await chooseDropdownOption(select, "禁用")
-    await waitFor(() => expect(notifications).toEqual([["error", "policy failed"]]))
-    expect(select.textContent).toContain("每次调用前审批")
   })
 
   test("shows the saving state while connecting", async () => {

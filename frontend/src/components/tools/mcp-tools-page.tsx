@@ -16,7 +16,6 @@ import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
 import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
@@ -25,9 +24,7 @@ import {
   deleteMcpServer,
   listMcpServers,
   refreshMcpServer,
-  updateMcpToolPolicy,
   type McpServer,
-  type McpToolPolicyMode,
   type McpTransport,
 } from "@/lib/api/mcp"
 import { getMembershipRole } from "@/lib/display"
@@ -179,59 +176,6 @@ export function McpToolsPage() {
     }
   }
 
-  async function handlePolicyChange(
-    server: McpServer,
-    toolName: string,
-    mode: McpToolPolicyMode
-  ) {
-    if (!token || !selectedWorkspaceId || busyServerId) {
-      return
-    }
-    setBusyServerId(server.id)
-    try {
-      if (
-        mode === "read_only" &&
-        !(await confirmAction({
-          description: t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
-            name: toolName,
-          }),
-        }))
-      ) {
-        return
-      }
-      const policy = await updateMcpToolPolicy(
-        token,
-        selectedWorkspaceId,
-        server.id,
-        toolName,
-        mode
-      )
-      setServers((current) =>
-        current.map((item) =>
-          item.id === server.id
-            ? {
-                ...item,
-                tools: item.tools.map((tool) =>
-                  tool.name === toolName
-                    ? {
-                        ...tool,
-                        policy_mode: policy.mode,
-                        definition_hash: policy.definition_hash,
-                      }
-                    : tool
-                ),
-              }
-            : item
-        )
-      )
-      notify("success", t("MCP 工具策略已更新"))
-    } catch (error) {
-      reportError(error)
-    } finally {
-      setBusyServerId(null)
-    }
-  }
-
   return (
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -362,42 +306,6 @@ export function McpToolsPage() {
                           <p className="font-mono text-xs font-medium">
                             {tool.name}
                           </p>
-                          {canManage ? (
-                            <FilterDropdown
-                              value={tool.policy_mode}
-                              className="h-8 min-w-32 px-2 text-xs"
-                              ariaLabel={t("工具执行策略")}
-                              disabled={busyServerId !== null}
-                              options={[
-                                {
-                                  value: "approval_required",
-                                  label: t("每次调用前审批"),
-                                },
-                                {
-                                  value: "read_only",
-                                  label: t("只读自动执行"),
-                                },
-                                { value: "disabled", label: t("禁用") },
-                              ]}
-                              onChange={(value) =>
-                                void handlePolicyChange(
-                                  server,
-                                  tool.name,
-                                  value as McpToolPolicyMode
-                                )
-                              }
-                            />
-                          ) : (
-                            <Badge variant="outline">
-                              {t(
-                                tool.policy_mode === "read_only"
-                                  ? "只读自动执行"
-                                  : tool.policy_mode === "disabled"
-                                    ? "禁用"
-                                    : "每次调用前审批"
-                              )}
-                            </Badge>
-                          )}
                         </div>
                         {tool.description ? (
                           <p className="mt-1 text-xs leading-5 text-muted-foreground">

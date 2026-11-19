@@ -214,6 +214,7 @@ describe("ToolPicker extra", () => {
       viewOnly,
       { ...usable, id: "offline", availability: "unavailable" },
       { ...usable, id: "disabled", status: "disabled" },
+      { ...usable, id: "policy-disabled", policy_mode: "disabled" },
       { ...usable, id: "unpublished", current_version_id: null },
     ]
     const changes: ToolRef[][] = []
@@ -231,6 +232,23 @@ describe("ToolPicker extra", () => {
       { tool_id: "tool-a", version_id: "version-2" },
       { tool_id: "tool-b", version_id: "version-1" },
     ])
+  })
+
+  test("keeps a policy-disabled service removable without allowing it to be selected", async () => {
+    catalog = [{ ...usable, policy_mode: "disabled" }]
+    const changes: ToolRef[][] = []
+    renderPage(
+      picker(
+        [{ tool_id: usable.id, version_id: usable.current_version_id! }],
+        (value) => changes.push(value)
+      )
+    )
+    await screen.findByText("已选但不可用")
+    expect(Boolean(screen.queryByRole("checkbox", { name: "Finance" }))).toBe(
+      false
+    )
+    fireEvent.click(screen.getByRole("button", { name: "移除工具 Finance" }))
+    expect(changes.at(-1)).toEqual([])
   })
 
   test("preserves old versions in a partially selected service and removes the whole service", async () => {

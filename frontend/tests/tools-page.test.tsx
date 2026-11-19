@@ -118,13 +118,6 @@ function sourceGroup(name: string) {
     .find((item) => item.getAttribute("aria-label") === name)!
 }
 
-function manageSourceTools(name: string) {
-  const manage = screen.getByRole("button", { name: `管理来源 ${name}` })
-  fireEvent.pointerDown(manage)
-  fireEvent.click(manage)
-  fireEvent.click(screen.getByRole("menuitem", { name: "管理工具" }))
-}
-
 function openSkillMenu(name: string) {
   const trigger = screen.getByRole("button", { name: `管理技能 ${name}` })
   fireEvent.pointerDown(trigger)
@@ -740,39 +733,32 @@ describe("ToolsPage", () => {
     expect(screen.queryByRole("heading", { name: "内置工具" })).toBeNull()
   })
 
-  test("shows MCP policy and a retained upstream-missing state on the card", async () => {
+  test("MCP source menus keep connection controls without per-tool management", async () => {
     const remote = tool({
-      id: "tool-mcp-missing",
-      kind: "mcp",
-      function_name: "retired_lookup",
-      display_name: "Retired lookup",
-      availability: "unavailable",
-      policy_mode: "approval_required",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
+      source: { id: "source-mcp", name: "Remote tools", kind: "mcp", transport: null },
+      policy_mode: "read_only",
     })
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const mutations: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.includes("/tool-sources?")) {
-        return jsonResponse([source({ tool_count: 0 })])
-      }
+      if (init?.method && init.method !== "GET") mutations.push(url)
+      if (url.includes("/tool-sources?")) return jsonResponse([source({ tool_count: 1 })])
       if (url.includes("/tools?")) return jsonResponse([remote])
       return jsonResponse([])
     }) as typeof fetch
-
     renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Retired lookup")
-    const card = screen.getByRole("dialog", {
-      name: "管理 Remote tools 的工具",
-    })
-    expect(within(card).getByText("每次调用前审批")).toBeTruthy()
-    expect(within(card).getByText("上游未发现该工具")).toBeTruthy()
+    await screen.findByText("Remote tools")
+    const trigger = screen.getByRole("button", { name: "管理来源 Remote tools" })
+    fireEvent.pointerDown(trigger)
+    fireEvent.click(trigger)
+    expect(screen.getByRole("menuitem", { name: "刷新工具" })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: "禁用" })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: "删除来源" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "管理工具" })).toBeNull()
+    expect(screen.queryByText("工具执行策略")).toBeNull()
+    expect(screen.queryByText("只读自动执行")).toBeNull()
+    expect(screen.queryByText("每次调用前审批")).toBeNull()
+    expect(mutations).toEqual([])
   })
 
   test("renders the unified empty state and member-safe add menu", async () => {
@@ -868,122 +854,6 @@ describe("ToolsPage", () => {
     expect(
       screen.queryByRole("button", { name: "展开 Empty MCP 的工具" })
     ).toBeNull()
-  })
-
-  test("lets an MCP owner manage policies and disable their own tool", async () => {
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const remoteSource = source({ tool_count: 1 })
-    const requests: Array<{ method: string; body: unknown }> = []
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.includes("/tool-sources?")) return jsonResponse([remoteSource])
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.endsWith("/tools/tool-mcp/policy")) {
-        requests.push({
-          method: init?.method ?? "GET",
-          body: JSON.parse(String(init?.body)),
-        })
-        return jsonResponse({ ...detail(remote), approval: "each_call" })
-      }
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    expect(
-      await screen.findByRole("menuitem", { name: "只读自动执行" })
-    ).toBeTruthy()
-    expect(
-      screen.getByRole("menuitem", { name: "每次调用前审批" })
-    ).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: "禁用" })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole("menuitem", { name: "每次调用前审批" }))
-    await waitFor(() =>
-      expect(requests).toEqual([
-        { method: "PUT", body: { mode: "approval_required" } },
-      ])
-    )
-  })
-
-  test("reserves disabling an MCP Tool for workspace admins", async () => {
-    Object.assign(session, {
-      me: {
-        ...member,
-        memberships: [{ workspace_id: "ws-1", role: "admin" }],
-      },
-    })
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const remoteSource = source({ tool_count: 1 })
-    const requests: unknown[] = []
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.includes("/tool-sources?")) return jsonResponse([remoteSource])
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.endsWith("/tools/tool-mcp/policy")) {
-        requests.push(JSON.parse(String(init?.body)))
-        return jsonResponse({
-          ...detail(remote),
-          status: "disabled",
-          availability: "unavailable",
-          approval: "disabled",
-        })
-      }
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "禁用" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "禁用" }
-      )
-    )
-    await waitFor(() => expect(requests).toEqual([{ mode: "disabled" }]))
   })
 
   test("lets members add public MCP sources but disables stdio and private URLs", async () => {
@@ -1300,89 +1170,23 @@ describe("ToolsPage", () => {
     await screen.findByText("输入 Schema")
   })
 
-  test("marks tools from disabled MCP sources and guards their policy menu", async () => {
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const disabledSource = source({ status: "disabled", tool_count: 1 })
+  test("disabled MCP sources retain their source enable action", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.includes("/tool-sources?")) return jsonResponse([disabledSource])
+      if (String(input).includes("/tool-sources?")) {
+        return jsonResponse([source({ status: "disabled", tool_count: 1 })])
+      }
       return jsonResponse([])
     }) as typeof fetch
-
     renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const card = sourceGroup("Remote tools")
-    expect(within(card).getByText("来源已禁用")).toBeTruthy()
-
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    expect(
-      await screen.findByRole("menuitem", { name: "来源已禁用" })
-    ).toBeTruthy()
-    expect(
-      screen.queryByRole("menuitem", { name: "每次调用前审批" })
-    ).toBeNull()
+    await screen.findByText("来源已禁用")
+    const trigger = screen.getByRole("button", { name: "管理来源 Remote tools" })
+    fireEvent.pointerDown(trigger)
+    fireEvent.click(trigger)
+    expect(screen.getByRole("menuitem", { name: "启用" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "管理工具" })).toBeNull()
   })
 
-  test("lets owners restore their disabled MCP tool policy without an admin role", async () => {
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      status: "disabled",
-      availability: "unavailable",
-      current_version_id: null,
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const remoteSource = source({ tool_count: 1 })
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.includes("/tool-sources?")) return jsonResponse([remoteSource])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    expect(
-      await screen.findByRole("menuitem", { name: "每次调用前审批" })
-    ).toBeTruthy()
-    expect(
-      screen.queryByRole("menuitem", { name: "工具调用已禁用" })
-    ).toBeNull()
-  })
-
-  test("refreshes an MCP source from the tool menu", async () => {
+  test("refreshes an MCP source from its source menu", async () => {
     const remote = tool({
       id: "tool-mcp",
       kind: "mcp",
@@ -1422,10 +1226,8 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage />)
     await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
     const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
+      name: "管理来源 Remote tools",
     })
     fireEvent.pointerDown(manage)
     fireEvent.click(manage)
@@ -1649,152 +1451,6 @@ describe("ToolsPage", () => {
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
   }, 20000)
 
-  test("marks an MCP tool read-only only after explicit confirmation", async () => {
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const remoteSource = source({ tool_count: 1 })
-    const requests: unknown[] = []
-    const notifications: Array<[string, string]> = []
-    Object.assign(session, {
-      notify: (kind: string, value: string) =>
-        notifications.push([kind, value]),
-    })
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-mcp/policy")) {
-        requests.push(JSON.parse(String(init?.body)))
-        return jsonResponse({ ...detail(remote), approval: "read_only" })
-      }
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.includes("/tool-sources?")) return jsonResponse([remoteSource])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "只读自动执行" })
-    )
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "取消" }
-      )
-    )
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
-    )
-    expect(requests).toEqual([])
-
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "只读自动执行" })
-    )
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "确认" }
-      )
-    )
-    await waitFor(() => expect(requests).toEqual([{ mode: "read_only" }]))
-    expect(notifications).toContainEqual(["success", "MCP 工具策略已更新"])
-  }, 20000)
-
-  test("keeps an MCP tool enabled when the admin cancels disabling", async () => {
-    Object.assign(session, {
-      me: {
-        ...member,
-        memberships: [{ workspace_id: "ws-1", role: "admin" }],
-      },
-    })
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const remoteSource = source({ tool_count: 1 })
-    const requests: unknown[] = []
-    const notifications: Array<[string, string]> = []
-    Object.assign(session, {
-      notify: (kind: string, value: string) =>
-        notifications.push([kind, value]),
-    })
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tools/tool-mcp/policy")) {
-        requests.push(JSON.parse(String(init?.body)))
-        return jsonResponse({ detail: "policy rejected" }, 503)
-      }
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.includes("/tool-sources?")) return jsonResponse([remoteSource])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "禁用" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "取消" }
-      )
-    )
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "确认操作" })).toBeNull()
-    )
-    expect(requests).toEqual([])
-
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "每次调用前审批" })
-    )
-    await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "policy rejected"])
-    )
-    expect(requests).toEqual([{ mode: "approval_required" }])
-  }, 20000)
-
   test("deletes an MCP source with confirmation and removes its tools", async () => {
     const src = source({ name: "Remote tools", tool_count: 1 })
     const remote = tool({
@@ -1841,56 +1497,6 @@ describe("ToolsPage", () => {
     await waitFor(() => expect(requests).toEqual([{ method: "DELETE" }]))
     await waitFor(() => expect(screen.queryByText("Remote lookup")).toBeNull())
     expect(screen.queryByText("Remote tools")).toBeNull()
-    await screen.findByText("还没有工具")
-  })
-
-  test("deletes an MCP source from the tool menu", async () => {
-    const src = source({ name: "Remote tools", tool_count: 1 })
-    const remote = tool({
-      id: "tool-mcp",
-      kind: "mcp",
-      function_name: "remote_lookup",
-      display_name: "Remote lookup",
-      source: {
-        id: "source-mcp",
-        name: "Remote tools",
-        kind: "mcp",
-        transport: "streamable_http",
-      },
-    })
-    const requests: Array<{ method: string }> = []
-    globalThis.fetch = (async (
-      input: RequestInfo | URL,
-      init?: RequestInit
-    ) => {
-      const url = String(input)
-      if (url.endsWith("/tool-sources/source-mcp")) {
-        requests.push({ method: init?.method ?? "GET" })
-        return jsonResponse(null)
-      }
-      if (url.includes("/tools?")) return jsonResponse([remote])
-      if (url.includes("/tool-sources?")) return jsonResponse([src])
-      return jsonResponse([])
-    }) as typeof fetch
-
-    renderPage(<ToolsPage />)
-    await screen.findAllByText("Remote tools")
-    manageSourceTools("Remote tools")
-    await screen.findByText("Remote lookup")
-    const manage = screen.getByRole("button", {
-      name: "管理工具 Remote lookup",
-    })
-    fireEvent.pointerDown(manage)
-    fireEvent.click(manage)
-    fireEvent.click(await screen.findByRole("menuitem", { name: "删除来源" }))
-    fireEvent.click(
-      within(await screen.findByRole("dialog", { name: "确认操作" })).getByRole(
-        "button",
-        { name: "删除" }
-      )
-    )
-    await waitFor(() => expect(requests).toEqual([{ method: "DELETE" }]))
-    await waitFor(() => expect(screen.queryByText("Remote lookup")).toBeNull())
     await screen.findByText("还没有工具")
   })
 

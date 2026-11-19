@@ -35,6 +35,7 @@ from app.domain.agent_skills.catalog import skill_execution_context
 from app.domain.agent_skills.contracts import agent_skill_snapshot_from_payload
 from app.domain.agents.approval import (
     agent_mcp_requires_approval,
+    model_decides_mcp_approval,
     run_agent_approval_mode,
 )
 from app.domain.agents.models import (
@@ -332,6 +333,8 @@ class DurableToolLedger:
             and agent_mcp_requires_approval(
                 run_agent_approval_mode(self.run),
                 metadata.get("policy_mode", ""),
+                model_decides_mcp=model_decides_mcp_approval(self.run),
+                model_requires_approval=metadata.get("model_requires_approval") != "false",
             )
         )
         idempotency_key = hashlib.sha256(
@@ -385,7 +388,10 @@ class DurableToolLedger:
                 approval_required = self.run.access_source != "api" and (
                     definition_changed
                     or agent_mcp_requires_approval(
-                        run_agent_approval_mode(self.run), policy_mode
+                        run_agent_approval_mode(self.run),
+                        policy_mode,
+                        model_decides_mcp=model_decides_mcp_approval(self.run),
+                        model_requires_approval=metadata.get("model_requires_approval") != "false",
                     )
                 )
             existing = await agent_repository.get_agent_tool_call(
@@ -836,10 +842,21 @@ async def _execute_claimed_agent_run(
     if knowledge_tool is not None:
         tools.append(knowledge_tool)
     tools.extend(
-        build_mcp_agent_tool(tool, settings, run.agent_id, policy_mode)
+        build_mcp_agent_tool(
+            tool,
+            settings,
+            run.agent_id,
+            policy_mode,
+            model_decides_approval=model_decides_mcp_approval(run),
+        )
         for tool, policy_mode in scope.mcp_tools
     )
-    tools.extend(build_unified_agent_tool(snapshot) for snapshot in scope.tool_snapshots)
+    tools.extend(
+        build_unified_agent_tool(
+            snapshot, model_decides_approval=model_decides_mcp_approval(run)
+        )
+        for snapshot in scope.tool_snapshots
+    )
     from app.application.agents.runs.memory import _configured_context_window
     from app.application.agents.runs.service import (
         execution_messages,

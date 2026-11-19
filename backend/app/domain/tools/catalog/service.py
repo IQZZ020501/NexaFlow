@@ -286,6 +286,36 @@ async def reconcile_mcp_discovery(
                     updated_at=timestamp,
                 ),
             )
+        else:
+            policy = await repository.get_tool_policy(db, source.workspace_id, tool.id)
+            if policy is not None and (
+                policy.tool_version_id != version.id
+                or policy.definition_hash != definition_hash
+            ):
+                # A refreshed definition can be used by new conversations
+                # without a separate per-tool review. Never carry an old
+                # automatic/read-only grant over to a changed definition.
+                expected_revision = policy.revision
+                disabled = policy.approval == "disabled" or tool.status == "disabled"
+                policy.tool_version_id = version.id
+                policy.definition_hash = definition_hash
+                policy.revision += 1
+                policy.approval = "disabled" if disabled else "each_call"
+                policy.effect = "unknown"
+                policy.allowed_access_sources = [] if disabled else ["console", "public"]
+                policy.workflow_callable = not disabled
+                policy.parallel_safe = False
+                policy.reviewed_by_user_id = None
+                policy.reviewed_at = None
+                policy.updated_at = timestamp
+                updated = await repository.update_tool_policy_if_revision(
+                    db, policy, expected_revision=expected_revision
+                )
+                if updated is None:
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        "MCP Tool policy was updated concurrently.",
+                    )
         tool.current_version_id = version.id
         tool.availability = "available"
         tool.updated_at = timestamp

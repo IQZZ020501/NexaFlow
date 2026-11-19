@@ -105,6 +105,8 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - `tests/agents/agent_runtime_coverage.py` — 执行内核覆盖：durable Run executor/runs service、记忆、domain runtime（executor/usage/tools/callbacks）与 Redis 实时流基础设施。
 - `tests/agents/evaluation.py` — 无网络的确定性生产门禁：直接回答、通用工具循环、无核验即时流式输出、usage 与必需用例聚合规则。
 - `tests/agents/harness.py` — harness 确定性循环、能力授权/恢复、Skill 渐进加载、context/扩展 hooks，以及数据库队列/终态与 Console/公开/API Key 隔离、本地模拟模型 durable 执行。
+- `tests/agents/mcp_approval.py` — 三种对话模式在 Console/公开聊天中的 MCP 调用、模型决策参数隔离、审批暂停/恢复、账本回放去重与来源停用；由 harness 套件一并执行。
+- `tests/tools/mcp_approval_upgrade.py` — 既有 MCP 定义与审批记录不同步时的绑定失败、数据迁移后恢复绑定、禁用保留及迁移幂等；由工具套件一并执行。
 - `tests/agents/result_recovery.py` — MCP 完整结果与账本原子保存、字符分页重组、执行身份隔离、checkpoint 恢复、旧 Worker 写入防护及增量迁移保护；由 harness 套件一并执行。
 
 ## 运行策略与生产边界
@@ -135,7 +137,7 @@ Agent feature 测试并入 `backend/tests/agents/` 包，从 `backend/` 以 `uv 
 - Run 持久层按职责拆分：`agent_runs` 只保存身份、调用者、谱系、反馈和 trace；`agent_run_states` 保存状态、租约、总截止时间、checkpoint、结果与模型用量；`agent_run_snapshots` 保存创建时冻结的执行配置、预算字段（三项生效 + 三项兼容）、非敏感模型配置指纹和知识资源信息；`agent_run_events` 只追加事件。版本化 Run 若检测到模型端点、凭据版本或请求参数漂移，以及知识权限被撤销，会在执行前失败关闭。所有 Agent/Workflow/测试工具执行统一写入 `tool_invocations`，不再维护第二套工具调用账本。
 - 发布前真实质量门禁使用 `backend/scripts/agent_eval.py` 调用现有工作区 Run API，按答案、工具、来源数量、token、模型调用数和延迟断言；数据集与运行说明见 `docs/AGENT_EVALUATION.md`。报告不保存问题、答案、证据正文或令牌。
 - Agent 草稿保存稳定的 `ToolRef(tool_id, version_id)`；发布版本和 Run 再冻结完整 ToolSnapshot。Tool/Source 禁用、授权撤销、成员失效或策略漂移会在 dispatch 前 fail closed，不静默换到新版本。
-- 新发现的 MCP 工具默认逐次审批；只有管理员按当前定义哈希显式设置为 `read_only` 才会自动运行，远端 `readOnlyHint` 等注解不会单独改变审批策略。管理员可按当前定义哈希设置为只读、审批或禁用，工具定义变化后已有策略回落到逐次审批。副作用调用携带稳定幂等键；传输超时、worker 在外部调用后崩溃或结果未落账时标记 `uncertain`，禁止自动重试，只能人工确认后"不重试并继续"。远端 MCP 若不兑现幂等键，系统提供的是保守恢复而非跨系统 exactly-once。
+- MCP 聊天审批统一由每次 Run 冻结的对话模式决定：请求批准（`always_ask`）在每次 MCP 调用前确认；按策略自动执行（`ask_risky`）由当前模型结合用户请求和调用参数选择直接执行或请求确认，授权或影响不明确时请求确认；完全访问（`full_access`）自动通过已授权工具的交互审批。新 Run 冻结 `mcp_approval_version=2`；中间档的模型决策随工具调用一起保存，缺失或无效决策默认确认，不增加辅助模型请求，审批恢复不重新决策或重复派发。执行参数与审批决策分离，远端 MCP 只收到原始业务参数。旧 Run/checkpoint 保留原策略语义。工具页不再提供 MCP「管理工具」及逐工具执行策略入口，连接、刷新、来源启停和删除继续保留。刷新产生新定义时，把策略版本同步到新定义并清除旧的自动/只读授权、保留禁用；旧 Run 快照仍因定义或策略漂移被拦截。数据迁移 `202611190003` 为既有工作区补齐同样的同步：只更新上游可用且未归档工具中版本或哈希已漂移的策略，保留显式禁用，不改写工具定义、应用绑定或历史 Run 快照；已经同步的策略保持原状。API Key 不采用模型自动决策，继续要求已授权的自动只读工具；Workflow 沿用冻结的工具策略与既有审批机制。远端 `readOnlyHint` 等注解不能单独授予权限。副作用调用携带稳定幂等键；传输超时、worker 在外部调用后崩溃或结果未落账时标记 `uncertain`，禁止自动重试，只能人工确认后"不重试并继续"。远端 MCP 若不兑现幂等键，系统提供的是保守恢复而非跨系统 exactly-once。
 - 发布和 API 凭据写操作仅工作空间管理员可执行。发布固化当时的模型、知识库和 ToolSnapshot；后续草稿变化不撤销既有发布，公开/API 继续运行上一发布版本，直到重新发布、取消发布或停用应用。外部运行使用发布者快照身份受审计，但不冒充访问者；仅允许仍有效、无需逐次审批的只读工具，不开放外部审批路径。
 - 公开访客 Cookie 和 API Key 都使用高熵随机值，数据库只保存 SHA-256 派生标识或密钥哈希。外部提交同时受 Agent 总量桶和来源主体桶限流；Redis 不可用时成本型请求失败关闭，不先排队后补跑。
 - 公开/API Key Run 复用内部 durable 事件链，HTTP 契约只投影固定枚举的分析、知识检索、工具调用、回答生成状态、知识片段数量与模型思考过程（`reasoning_delta` 增量及 progress 上的累积文本）；工具名称/参数、检索原文、System Prompt 和 trace 不离开内部边界。

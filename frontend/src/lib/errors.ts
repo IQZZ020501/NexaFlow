@@ -56,6 +56,8 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "A bound Agent Skill is disabled.": "绑定的技能已停用或已删除，请重新配置",
   "Disabled Agent Skills cannot be published.": "技能已停用，请启用后再发布",
   "Agent Skill version is not available for binding.": "技能版本不可用，请重新选择",
+  "Tool is not available for binding.": "工具不可用，请刷新工具列表后重新选择",
+  "Tool version is not available for binding.": "工具不可用，请刷新工具列表后重新选择",
   "Agent Skill publication conflicted.": "技能发布发生冲突，请刷新后重试",
   "Agent Skill publication is invalid.": "技能发布版本无效，请重新发布",
   "Agent Skill knowledge base is not active.": "技能引用的知识库未启用，请重新配置",

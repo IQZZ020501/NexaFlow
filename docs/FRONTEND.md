@@ -101,7 +101,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/llm/llm-page.tsx` — 模型管理页：注册模型 CRUD、凭据、目录浏览
 
 **tools/**（工具功能）
-- `frontend/src/components/tools/tools-page.tsx` — 生产工具中心：Skills/MCP 目录页签（内置工具、内置 Skills、工作区 Skills、MCP Server 分组）、跨页加载、详情、来源状态、策略与授权入口
+- `frontend/src/components/tools/tools-page.tsx` — 生产工具中心：技能/MCP 目录页签、统一技能列表、跨页加载、详情及 MCP 来源连接/刷新/启停/删除；MCP 不再提供「管理工具」或逐工具执行策略，聊天审批统一在对话输入框选择
 - `frontend/src/components/tools/mcp-source-dialog.tsx`、`mcp-form.ts` — MCP Source 创建：普通成员公网 HTTP/SSE，管理员额外支持 stdio/私网
 - `frontend/src/components/tools/skill-dialog.tsx` — Agent Skill 导入检查、版本与发布
 - `frontend/src/components/tools/builtin-tool-icon.tsx` — 内置工具/Skill 图标映射

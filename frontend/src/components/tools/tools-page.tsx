@@ -65,7 +65,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -82,7 +81,6 @@ import {
   listAllToolSources,
   refreshToolSource,
   setToolSourceEnabled,
-  updateToolPolicy,
   type ToolDetail,
   type ToolKind,
   type ToolSourceDetail,
@@ -234,9 +232,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
   const [selectedToolIds, setSelectedToolIds] = React.useState<string[]>([])
   const [isBatchManaging, setIsBatchManaging] = React.useState(false)
   const [isBatchMoveOpen, setIsBatchMoveOpen] = React.useState(false)
-  const [managedSourceId, setManagedSourceId] = React.useState<string | null>(
-    null
-  )
   const [detailTarget, setDetailTarget] = React.useState<ToolSummary | null>(
     null
   )
@@ -397,28 +392,9 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     (group) => group.source.name
   )
   const flatTools = filteredTools.filter((tool) => tool.kind !== "mcp")
-  const managedTools = tools.filter(
-    (tool) =>
-      tool.kind === "mcp" &&
-      tool.source.id === managedSourceId &&
-      tool.can_manage
-  )
-  const managedSourceName =
-    managedTools[0]?.source.name ??
-    sources.find((source) => source.id === managedSourceId)?.name ??
-    ""
   const movableToolIds = filteredTools
     .filter((tool) => tool.can_manage && tool.kind !== "builtin")
     .map((tool) => tool.id)
-  function upsertTool(updated: ToolSummary) {
-    setTools((current) => {
-      const exists = current.some((tool) => tool.id === updated.id)
-      return exists
-        ? current.map((tool) => (tool.id === updated.id ? updated : tool))
-        : [updated, ...current]
-    })
-  }
-
   function upsertSource(updated: ToolSourceDetail) {
     setSources((current) => {
       const exists = current.some((source) => source.id === updated.id)
@@ -445,47 +421,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     setDetailTarget(tool)
     setDetailTool(null)
     await loadDetail(tool)
-  }
-
-  async function setMcpPolicy(
-    tool: ToolSummary,
-    mode: "approval_required" | "read_only" | "disabled"
-  ) {
-    if (busyId || tool.kind !== "mcp") return
-    if (
-      mode === "read_only" &&
-      !(await confirmAction({
-        description: t("确认将工具“{name}”标记为只读并允许自动执行吗？", {
-          name: displayToolName(tool),
-        }),
-      }))
-    ) {
-      return
-    }
-    if (
-      mode === "disabled" &&
-      !(await confirmAction({
-        description: t(
-          "禁用工具“{name}”？已绑定的 Agent 和 Workflow 将无法调用它。",
-          { name: displayToolName(tool) }
-        ),
-        confirmLabel: t("禁用"),
-        destructive: true,
-      }))
-    ) {
-      return
-    }
-    setBusyId(tool.id)
-    try {
-      upsertTool(
-        await updateToolPolicy(accessToken, workspaceId, tool.id, mode)
-      )
-      message("success", t("MCP 工具策略已更新"))
-    } catch (nextError) {
-      message("error", getErrorMessage(nextError, t))
-    } finally {
-      setBusyId(null)
-    }
   }
 
   async function refreshSource(source: ToolSourceDetail) {
@@ -588,7 +523,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         current.filter((item) => item.source.id !== source.id)
       )
       setSources((current) => current.filter((item) => item.id !== source.id))
-      setManagedSourceId((current) => (current === source.id ? null : current))
       message("success", t("工具来源已删除"))
     } catch (nextError) {
       message("error", getErrorMessage(nextError, t))
@@ -604,7 +538,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     : null
 
   function renderToolManagementMenu(tool: ToolSummary) {
-    const source = sources.find((item) => item.id === tool.source.id)
     return (
       <CardMoreMenu
         label={t("管理工具 {name}", {
@@ -625,64 +558,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           <ShieldCheckIcon />
           {t("授权")}
         </DropdownMenuItem>
-        {tool.kind === "mcp" ? (
-          <DropdownMenuItem
-            disabled={!source || Boolean(busyId)}
-            onSelect={() => source && void refreshSource(source)}
-          >
-            <RefreshCwIcon />
-            {t("刷新工具")}
-          </DropdownMenuItem>
-        ) : null}
-        {tool.kind === "mcp" ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t("工具执行策略")}</DropdownMenuLabel>
-            {source?.status === "disabled" ? (
-              <DropdownMenuItem disabled>{t("来源已禁用")}</DropdownMenuItem>
-            ) : (
-              <>
-                <DropdownMenuItem
-                  disabled={Boolean(busyId)}
-                  onSelect={() => void setMcpPolicy(tool, "read_only")}
-                >
-                  <ShieldCheckIcon />
-                  {t("只读自动执行")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={Boolean(busyId)}
-                  onSelect={() => void setMcpPolicy(tool, "approval_required")}
-                >
-                  <ShieldCheckIcon />
-                  {t("每次调用前审批")}
-                </DropdownMenuItem>
-                {tool.status !== "disabled" ? (
-                  <DropdownMenuItem
-                    variant="destructive"
-                    disabled={Boolean(busyId)}
-                    onSelect={() => void setMcpPolicy(tool, "disabled")}
-                  >
-                    <PowerIcon />
-                    {t("禁用")}
-                  </DropdownMenuItem>
-                ) : null}
-              </>
-            )}
-          </>
-        ) : null}
-        {tool.kind === "mcp" && source ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              disabled={Boolean(busyId)}
-              onSelect={() => void removeSource(source)}
-            >
-              <Trash2Icon />
-              {t("删除来源")}
-            </DropdownMenuItem>
-          </>
-        ) : null}
       </CardMoreMenu>
     )
   }
@@ -968,18 +843,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                             }
                           />
                         ) : null}
-                        {detail || manageableTools.length ? (
+                        {detail ? (
                           <CardMoreMenu
                             label={t("管理来源 {name}", { name: source.name })}
                           >
-                            {manageableTools.length ? (
-                              <DropdownMenuItem
-                                onSelect={() => setManagedSourceId(source.id)}
-                              >
-                                <WrenchIcon />
-                                {t("管理工具")}
-                              </DropdownMenuItem>
-                            ) : null}
                             {detail?.mcp_server_id &&
                             detail.transport !== "stdio" ? (
                               <>
@@ -1309,53 +1176,6 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           </div>
         )}
       </ResourceFolderLayout>
-
-      <Dialog
-        open={managedSourceId !== null}
-        onOpenChange={(open) => !open && setManagedSourceId(null)}
-      >
-        <DialogContent className="flex max-h-[80svh] flex-col overflow-hidden">
-          <DialogHeader>
-            <DialogTitle className="break-words">
-              {t("管理 {name} 的工具", { name: managedSourceName })}
-            </DialogTitle>
-            <DialogDescription>
-              {t("按工具管理权限与执行策略。")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 divide-y overflow-y-auto">
-            {managedTools.map((tool) => (
-              <div
-                key={tool.id}
-                className="flex flex-wrap items-center gap-2 py-3"
-              >
-                <span className="min-w-0 flex-1 basis-32 truncate text-sm font-medium">
-                  {displayToolName(tool)}
-                </span>
-                <Badge variant="outline">
-                  {toolIsAvailable(tool) ? t("可用") : t("不可用")}
-                </Badge>
-                {tool.policy_mode ? (
-                  <Badge variant="outline">
-                    {t(
-                      tool.policy_mode === "read_only"
-                        ? "只读自动执行"
-                        : tool.policy_mode === "disabled"
-                          ? "工具调用已禁用"
-                          : "每次调用前审批"
-                    )}
-                  </Badge>
-                ) : null}
-                {tool.availability === "unavailable" &&
-                tool.status === "active" ? (
-                  <Badge variant="outline">{t("上游未发现该工具")}</Badge>
-                ) : null}
-                {renderToolManagementMenu(tool)}
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <ResourceFolderPickerDialog
         open={isBatchMoveOpen}
