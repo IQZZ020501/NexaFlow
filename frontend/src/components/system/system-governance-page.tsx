@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ActivityIcon,
+  BrainIcon,
   Building2Icon,
   CheckCircle2Icon,
   ClipboardIcon,
@@ -95,6 +96,7 @@ const navItems: Array<{
   label:
     | "工作空间"
     | "团队"
+    | "记忆"
     | "用户管理"
     | "审计日志"
     | "系统运行"
@@ -108,6 +110,7 @@ const navItems: Array<{
   { href: "/system/teams", label: "团队", icon: UsersIcon },
   { href: "/system/users", label: "用户管理", icon: UserCogIcon },
   { href: "/system/audit", label: "审计日志", icon: HistoryIcon },
+  { href: "/system/memories", label: "记忆", icon: BrainIcon },
   { href: "/system/operations", label: "系统运行", icon: ActivityIcon },
   { href: "/system/email", label: "SMTP 邮件", icon: MailIcon },
   { href: "/system/identity", label: "企业登录", icon: LogInIcon },
@@ -809,50 +812,65 @@ function GovernancePanel() {
   return (
     <div className="grid min-w-0 gap-4">
       {confirmDialog}
-      <Card>
-        <CardHeader className="flex-row flex-wrap items-end justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheckIcon className="size-4" />
+      <Card className="gap-0">
+        <CardHeader className="grid gap-5 border-b pb-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+          <div className="min-w-0 space-y-3">
+            <CardTitle className="flex items-center gap-2.5 text-lg">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <ShieldCheckIcon className="size-4" />
+              </span>
               {t("工作空间治理")}
             </CardTitle>
-            <CardDescription>
-              {t(
-                "系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略"
-              )}
-              {" "}{t("统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。")}
-              {" "}{t("工具按内置工具（含技能）和 MCP 子工具计数，仅统计当前工具目录中的资源。")}
+            <CardDescription className="max-w-5xl space-y-1 leading-6">
+              <p>
+                {t(
+                  "系统管理员可治理全部工作空间，工作空间管理员可治理本空间团队与策略"
+                )}
+              </p>
+              <p>
+                {t(
+                  "统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。"
+                )}
+              </p>
+              <p>
+                {t(
+                  "工具按内置工具（含技能）和 MCP 服务计数，每个 MCP 服务计为一个工具。"
+                )}
+              </p>
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-muted-foreground">
+          <div className="grid gap-1.5 lg:pt-0.5">
+            <span className="text-xs font-medium text-muted-foreground">
               {t("工作空间")}
-            </label>
-            <FilterDropdown
-              className="h-9 w-fit max-w-56"
-              value={selectedWorkspaceId}
-              onChange={session.selectWorkspace}
-              ariaLabel={t("选择工作空间")}
-              options={manageableWorkspaces.map((workspace) => ({
-                value: workspace.id,
-                label: displayWorkspaceName(workspace, t),
-              }))}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void load()}
-              disabled={loading}
-              aria-label={t("刷新")}
-              title={t("刷新")}
-            >
-              <RefreshCwIcon
-                className={cn("size-4", loading && "animate-spin")}
+            </span>
+            <div className="flex min-w-0 items-center gap-2">
+              <FilterDropdown
+                className="h-10 w-full min-w-0 flex-1"
+                value={selectedWorkspaceId}
+                onChange={session.selectWorkspace}
+                ariaLabel={t("选择工作空间")}
+                options={manageableWorkspaces.map((workspace) => ({
+                  value: workspace.id,
+                  label: displayWorkspaceName(workspace, t),
+                }))}
               />
-            </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-10"
+                onClick={() => void load()}
+                disabled={loading}
+                aria-label={t("刷新")}
+                title={t("刷新")}
+              >
+                <RefreshCwIcon
+                  className={cn("size-4", loading && "animate-spin")}
+                />
+              </Button>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <CardContent className="grid gap-3 pt-5 sm:grid-cols-2 lg:grid-cols-5">
           {cards.map(([label, value]) => (
             <div key={label} className="rounded-lg border bg-muted/20 p-3">
               <div className="text-xs text-muted-foreground">

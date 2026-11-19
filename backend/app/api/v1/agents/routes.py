@@ -459,6 +459,7 @@ async def create_workspace_agent_run(
         file_ids=payload.file_ids,
         approval_mode=payload.approval_mode,
         request_id=payload.request_id,
+        use_memory=payload.use_memory,
     )
 
 
@@ -616,6 +617,7 @@ async def stream_workspace_agent_run(
         input_files=input_files,
         settings=settings,
         approval_mode=payload.approval_mode,
+        use_memory=payload.use_memory,
     )
     await enqueue_prepared_agent_run(
         run.id,

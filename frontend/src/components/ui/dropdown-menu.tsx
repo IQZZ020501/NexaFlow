@@ -2,16 +2,27 @@ import * as React from "react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { DialogContentContext } from "@/components/ui/dialog"
 
 /**
  * Provides the root context for a dropdown menu.
+ * Menus inside dialogs default to non-modal so their triggers remain clickable.
  *
  * @param props - Properties forwarded to the Radix dropdown menu root.
  */
 function DropdownMenu({
+  modal,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
-  return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
+  const isInsideDialog = React.useContext(DialogContentContext)
+
+  return (
+    <DropdownMenuPrimitive.Root
+      data-slot="dropdown-menu"
+      modal={modal ?? !isInsideDialog}
+      {...props}
+    />
+  )
 }
 
 /**

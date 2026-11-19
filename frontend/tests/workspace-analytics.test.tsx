@@ -286,6 +286,9 @@ describe("workspace analytics", () => {
     ).toBeTruthy()
     expect(within(inventoryCard).getByText("文档 12 · 片段 340")).toBeTruthy()
     expect(within(inventoryCard).getByText("MCP 3 · 内置 4")).toBeTruthy()
+    expect(
+      within(inventoryCard).getByText(/每个 MCP 服务计为一个工具/)
+    ).toBeTruthy()
 
     const toolUsageCard = screen
       .getByText("工具调用")
@@ -506,6 +509,25 @@ describe("workspace analytics", () => {
     const link = screen.getByRole("link", { name: "数据大屏" })
     expect(link.getAttribute("href")).toBe("/system/analytics")
     expect(link.closest("nav")).toBeTruthy()
+  })
+
+  test("shows system management in an ordinary user's avatar menu", async () => {
+    const ordinary = makeSession()
+    ordinary.me!.user.is_global_admin = false
+    ordinary.me!.user.workspaces = [
+      { id: "ws-1", name: "Test Workspace", is_default: false, role: "member" },
+    ]
+    ordinary.me!.memberships = [{ workspace_id: "ws-1", role: "member" }]
+    Object.assign(sessionState, ordinary)
+
+    renderPage(<TopBar />)
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "打开用户菜单" })
+    )
+    const menu = await screen.findByRole("menu")
+    const systemLink = within(menu).getByRole("menuitem", { name: "系统管理" })
+    expect(systemLink.getAttribute("href")).toBe("/system/teams")
+    expect(within(menu).queryByRole("menuitem", { name: "记忆" })).toBeNull()
   })
 
   test("provides every navigation entry in the compact menu", async () => {

@@ -211,11 +211,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const notify = React.useCallback(
     (kind: AppNotification["kind"], message: string) => {
-      setNotification((current) =>
-        current?.kind === "error" && kind !== "error"
-          ? current
-          : { id: Date.now(), kind, message }
-      )
+      setNotification({ id: Date.now(), kind, message })
     },
     []
   )
@@ -422,20 +418,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     return () => window.clearTimeout(timer)
   }, [clearSession, notify, refreshAt, renewAccessToken, token])
-
-  React.useEffect(() => {
-    if (!notification || notification.kind === "error") {
-      return
-    }
-
-    const timer = window.setTimeout(() => {
-      setNotification((current) =>
-        current?.id === notification.id ? null : current
-      )
-    }, 3200)
-
-    return () => window.clearTimeout(timer)
-  }, [notification])
 
   React.useEffect(() => {
     if (isSessionLoading || !token || !selectedWorkspaceId || mustChangePassword) {

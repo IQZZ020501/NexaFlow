@@ -7,6 +7,7 @@ import { SystemShell } from "@/components/system/system-shell"
 const SYSTEM_TABS = [
   "workspaces",
   "teams",
+  "memories",
   "users",
   "audit",
   "permissions",

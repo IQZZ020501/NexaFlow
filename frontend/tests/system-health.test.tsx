@@ -132,6 +132,9 @@ describe("system health", () => {
       expect(healthCard("数据库").getByText("正常")).toBeTruthy()
     )
     const navigation = screen.getByRole("navigation", { name: "系统管理" })
+    expect(
+      within(navigation).getByRole("link", { name: "记忆" }).getAttribute("href")
+    ).toBe("/system/memories")
     const sidebar = navigation.parentElement
     const layout = sidebar?.parentElement
     const content = screen.getByRole("main")

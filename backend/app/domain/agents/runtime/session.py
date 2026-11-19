@@ -16,6 +16,7 @@ from app.domain.agents.runtime.state import AgentState
 from app.domain.agents.runtime.usage import merge_usage
 
 SessionInputSource = Callable[[list[int]], Awaitable[list[dict[str, Any]]]]
+PERSONAL_CONTEXT_MARKER = "nexaflow_personal_context"
 
 
 class AgentSession:
@@ -25,11 +26,13 @@ class AgentSession:
         context: AgentContextManager | None = None,
         input_source: SessionInputSource | None = None,
         reference_source: Callable[[], Awaitable[dict]] | None = None,
+        personal_context: Callable[[AgentState], Awaitable[str]] | None = None,
     ) -> None:
         self.capabilities = capabilities
         self.context = context
         self.input_source = input_source
         self.reference_source = reference_source
+        self.personal_context = personal_context
 
     async def apply_follow_ups(self, state: AgentState) -> tuple[AgentState, bool]:
         harness = dict(state.get("harness") or {})
@@ -67,7 +70,7 @@ class AgentSession:
                 for message in state["messages"]
                 if not any(
                     message.additional_kwargs.get(key)
-                    for key in (REFERENCE_MARKER, CATALOG_MARKER)
+                    for key in (REFERENCE_MARKER, CATALOG_MARKER, PERSONAL_CONTEXT_MARKER)
                 )
             ]
         )
@@ -108,4 +111,19 @@ class AgentSession:
                 harness["compaction_count"] = (
                     int(harness.get("compaction_count", 0)) + 1
                 )
+        # Refresh after compaction so removed memories never survive in a summary
+        # or a resumed checkpoint's personalization projection.
+        if self.personal_context is not None:
+            personal = await self.personal_context(state)
+            if personal:
+                personal_message = HumanMessage(
+                    content=personal,
+                    additional_kwargs={PERSONAL_CONTEXT_MARKER: True},
+                )
+                if self.context is None or self.context.tokens(
+                    [*messages, personal_message], self.capabilities.tools
+                ) <= int(self.context.context_window * 0.8) - min(
+                    4096, self.context.context_window // 4
+                ):
+                    messages.append(personal_message)
         return {**state, "messages": messages, "model_usage": usage, "harness": harness}

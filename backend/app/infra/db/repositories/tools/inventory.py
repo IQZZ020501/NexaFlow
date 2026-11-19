@@ -1,10 +1,10 @@
-from sqlalchemy import or_
+from sqlalchemy import or_, select, union_all
 
 from app.domain.tools.catalog.visibility import (
     INTERNAL_BUILTIN_FUNCTION_NAMES,
     MODEL_CONFIGURED_FUNCTION_NAMES,
 )
-from app.domain.tools.models import Tool
+from app.domain.tools.models import Tool, ToolSource
 
 
 def tool_catalog_conditions(
@@ -23,3 +23,18 @@ def tool_catalog_conditions(
             tool.function_name.not_in(excluded),
         ),
     )
+
+
+def tool_inventory_resources(workspace_id: str):
+    """One row per catalog builtin or MCP source, including sources without tools."""
+    return union_all(
+        select(Tool.kind, Tool.status).where(
+            *tool_catalog_conditions(workspace_id),
+            Tool.kind == "builtin",
+        ),
+        select(ToolSource.kind, ToolSource.status).where(
+            ToolSource.workspace_id == workspace_id,
+            ToolSource.kind == "mcp",
+            ToolSource.status != "archived",
+        ),
+    ).subquery()

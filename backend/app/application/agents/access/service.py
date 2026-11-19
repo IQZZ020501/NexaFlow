@@ -836,6 +836,8 @@ async def create_external_agent_run(
     file_ids: list[str] | None = None,
     approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
     request_id: str | None = None,
+    use_memory: bool = True,
+    from_suggestion: bool = False,
 ) -> ExternalAgentRunResponse:
     from app.application.agents.runs.requests import replay_run_request
 
@@ -851,6 +853,8 @@ async def create_external_agent_run(
             "goal": goal,
             "conversation_id": conversation_id,
             "file_ids": file_ids or [],
+            **({"use_memory": False} if not use_memory else {}),
+            **({"from_suggestion": True} if from_suggestion else {}),
             "approval_mode": DEFAULT_AGENT_APPROVAL_MODE
             if access_source == "api"
             else approval_mode,
@@ -895,6 +899,8 @@ async def create_external_agent_run(
         settings=settings,
         approval_mode=approval_mode,
         request_id=request_id,
+        use_memory=use_memory,
+        from_suggestion=from_suggestion,
         request_hash=fingerprint,
     )
     await enqueue_prepared_agent_run(

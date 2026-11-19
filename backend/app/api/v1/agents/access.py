@@ -237,6 +237,8 @@ async def create_public_agent_run(
         payload.file_ids,
         payload.approval_mode,
         request_id=payload.request_id,
+        use_memory=payload.use_memory,
+        from_suggestion=payload.from_suggestion,
     )
 
 

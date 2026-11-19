@@ -998,6 +998,51 @@ async def get_analytics_audit_details(workspace_id: str) -> dict:
         return log.details
 
 
+async def seed_inventory_mcp_source(
+    workspace_id: str,
+    actor_id: str,
+    name: str,
+    status: str,
+    child_count: int,
+) -> None:
+    async with get_session_factory()() as db:
+        server = None
+        if status != "archived":
+            server = McpServer(
+                workspace_id=workspace_id,
+                name=name,
+                url="https://tools.example.com/mcp",
+                status=status,
+                tools=[{"name": f"child_{index}"} for index in range(child_count)],
+                created_by_user_id=actor_id,
+            )
+            db.add(server)
+            await db.flush()
+        source = ToolSource(
+            workspace_id=workspace_id,
+            mcp_server_id=server.id if server else None,
+            kind="mcp",
+            name=name,
+            status=status,
+            created_by_user_id=actor_id,
+        )
+        db.add(source)
+        await db.flush()
+        db.add_all(
+            Tool(
+                workspace_id=workspace_id,
+                source_id=source.id,
+                kind="mcp",
+                stable_key=f"child_{index}",
+                function_name=f"mcp_{source.id}_{index}",
+                status=status,
+                created_by_user_id=actor_id,
+            )
+            for index in range(child_count)
+        )
+        await db.commit()
+
+
 def exercise_workspace_analytics() -> None:
     """
     Exercise workspace analytics authorization, aggregation, date-range handling, and audit logging.
@@ -1176,6 +1221,49 @@ def exercise_workspace_analytics() -> None:
             item for item in catalog.json() if item["function_name"] != "generate_image"
         ]
         assert len(regular_tools) == tools_inventory["total"]
+
+        for target_workspace_id, name, status, child_count in (
+            (workspace_id, "Inventory active MCP", "active", 4),
+            (workspace_id, "Inventory disabled MCP", "disabled", 4),
+            (workspace_id, "Inventory archived MCP", "archived", 2),
+            (other_workspace_id, "Inventory other MCP", "active", 3),
+        ):
+            asyncio.run(
+                seed_inventory_mcp_source(
+                    target_workspace_id, global_admin_id, name, status, child_count
+                )
+            )
+        for expected_mcp, expected_active in ((2, 1), (3, 2)):
+            if expected_mcp == 3:
+                asyncio.run(
+                    seed_inventory_mcp_source(
+                        workspace_id, global_admin_id, "Inventory empty MCP", "active", 0
+                    )
+                )
+            with_mcp = client.get(analytics_url, headers=auth_headers(admin_token))
+            assert with_mcp.status_code == 200, with_mcp.text
+            assert with_mcp.json()["inventory"]["tools"] == {
+                **tools_inventory,
+                "total": tools_inventory["total"] + expected_mcp,
+                "mcp": expected_mcp,
+                "active": tools_inventory["active"] + expected_active,
+            }
+            governance_with_mcp = client.get(
+                f"/api/v1/workspaces/{workspace_id}/inventory",
+                headers=auth_headers(admin_token),
+            )
+            assert governance_with_mcp.status_code == 200, governance_with_mcp.text
+            assert (
+                governance_with_mcp.json()["tools_total"]
+                == tools_inventory["total"] + expected_mcp
+            )
+        mcp_catalog = client.get(
+            f"/api/v1/workspaces/{workspace_id}/tools",
+            headers=auth_headers(admin_token),
+        )
+        assert mcp_catalog.status_code == 200, mcp_catalog.text
+        assert sum(item["kind"] == "mcp" for item in mcp_catalog.json()) == 8
+
         assert payload["tool_usage"] == {
             "calls": {
                 "value": 4,

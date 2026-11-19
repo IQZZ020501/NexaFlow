@@ -12,6 +12,7 @@ import type { WheelEventHandler as ReactWheelEventHandler } from "react"
 
 import { TopLoadingBar, TopProgress } from "@/components/app/top-progress"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
+import { OperationNotification } from "@/components/app/operation-notification"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -261,6 +262,10 @@ function SessionProbe() {
           ? `${session.notification.kind}:${session.notification.message}`
           : "none"}
       </span>
+      <OperationNotification
+        notification={session.notification}
+        onDismiss={session.dismissNotification}
+      />
       <span data-testid="pw">{String(session.passwordDialogOpen)}</span>
 
       <button type="button" onClick={() => session.login("login-token", false, 3600)}>
@@ -809,11 +814,27 @@ describe("SessionProvider", () => {
     fireEvent.click(screen.getByText("notify"))
     await waitFor(
       () => expect(screen.getByTestId("notif").textContent).toBe("none"),
-      { timeout: 5000 }
+      { timeout: 3000 }
     )
   })
 
-  test("errors stay visible until dismissed, including after a later success", async () => {
+  test("error notifications auto-dismiss after a delay", async () => {
+    restoreHandler()
+    renderSession()
+    await waitFor(() =>
+      expect(screen.getByTestId("restored").textContent).toBe("true")
+    )
+    fireEvent.click(screen.getByText("notify-error"))
+    expect(screen.getByTestId("notif").textContent).toBe(
+      "error:failure details"
+    )
+    await waitFor(
+      () => expect(screen.getByTestId("notif").textContent).toBe("none"),
+      { timeout: 3000 }
+    )
+  })
+
+  test("later notifications replace an earlier error", async () => {
     restoreHandler()
     renderSession()
     await waitFor(() =>
@@ -821,12 +842,7 @@ describe("SessionProvider", () => {
     )
     fireEvent.click(screen.getByText("notify-error"))
     fireEvent.click(screen.getByText("notify"))
-    await new Promise((resolve) => setTimeout(resolve, 3400))
-    expect(screen.getByTestId("notif").textContent).toBe(
-      "error:failure details"
-    )
-    fireEvent.click(screen.getByText("dismiss"))
-    expect(screen.getByTestId("notif").textContent).toBe("none")
+    expect(screen.getByTestId("notif").textContent).toBe("success:hello")
   })
 
   test("reports team loading errors", async () => {

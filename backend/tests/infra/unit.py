@@ -177,6 +177,7 @@ def test_celery_registers_one_task_per_job_type() -> None:
     registered = {name for name in celery_app.tasks if name.startswith("app.")}
     assert registered == {
         "app.agents.run",
+        "app.memories.extract",
         "app.email.send",
         "app.mcp.revoke",
         "app.mcp.cancel_tasks",

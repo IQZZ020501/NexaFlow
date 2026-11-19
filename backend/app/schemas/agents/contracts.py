@@ -175,6 +175,7 @@ AgentApprovalMode = Literal["always_ask", "ask_risky", "full_access"]
 
 
 class AgentRunCreateRequest(BaseModel):
+    use_memory: bool = True
     request_id: str | None = Field(
         default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"
     )
@@ -233,6 +234,8 @@ class ExternalAgentRunCreateRequest(BaseModel):
 
 
 class PublicAgentRunCreateRequest(ExternalAgentRunCreateRequest):
+    use_memory: bool = True
+    from_suggestion: bool = False
     file_ids: list[str] = Field(default_factory=list)
     approval_mode: AgentApprovalMode = "always_ask"
 

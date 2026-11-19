@@ -1,3 +1,6 @@
+"use client"
+
+import { useEffect, useEffectEvent } from "react"
 import { CircleCheckIcon, CircleOffIcon, InfoIcon, XIcon } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import { Button } from "@/components/ui/button"
@@ -5,7 +8,7 @@ import { cn } from "@/lib/utils"
 import type { AppNotification } from "@/lib/notifications"
 
 /**
- * Displays a dismissible success, info, or error notification banner.
+ * Displays a success, info, or error notification that closes after 2.5 seconds or manually.
  *
  * @param notification - The notification to display, or `null` when no banner should be rendered.
  * @returns The notification banner, or `null` when no notification is provided.
@@ -18,6 +21,23 @@ export function OperationNotification({
   onDismiss: () => void
 }) {
   const { t } = useLanguage()
+  const dismissExpiredNotification = useEffectEvent(
+    (expiredNotification: AppNotification) => {
+      if (notification === expiredNotification) {
+        onDismiss()
+      }
+    }
+  )
+
+  useEffect(() => {
+    if (!notification) return
+
+    const timer = window.setTimeout(() => {
+      dismissExpiredNotification(notification)
+    }, 2500)
+
+    return () => window.clearTimeout(timer)
+  }, [notification])
 
   if (!notification) {
     return null

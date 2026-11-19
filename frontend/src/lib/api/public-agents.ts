@@ -270,7 +270,8 @@ export function createPublicAgentRun(
   signal?: AbortSignal,
   fileIds: string[] = [],
   approvalMode: AgentApprovalMode = "always_ask",
-  requestId?: string
+  requestId?: string,
+  memoryOptions: { useMemory?: boolean; fromSuggestion?: boolean } = {}
 ) {
   return requestRun<ExternalAgentRun>(
     publicAgentPath(agentId, "/runs"),
@@ -280,6 +281,8 @@ export function createPublicAgentRun(
       ...(conversationId ? { conversation_id: conversationId } : {}),
       ...(fileIds.length ? { file_ids: fileIds } : {}),
       approval_mode: approvalMode,
+      ...(memoryOptions.useMemory === false ? { use_memory: false } : {}),
+      ...(memoryOptions.fromSuggestion ? { from_suggestion: true } : {}),
     },
     { token, signal }
   )
@@ -485,7 +488,8 @@ export async function streamPublicAgentRun(
   signal?: AbortSignal,
   conversationId?: string | null,
   fileIds: string[] = [],
-  approvalMode: AgentApprovalMode = "always_ask"
+  approvalMode: AgentApprovalMode = "always_ask",
+  memoryOptions: { useMemory?: boolean; fromSuggestion?: boolean } = {}
 ) {
   const run = await createPublicAgentRun(
     agentId,
@@ -494,7 +498,9 @@ export async function streamPublicAgentRun(
     conversationId,
     signal,
     fileIds,
-    approvalMode
+    approvalMode,
+    undefined,
+    memoryOptions
   )
   onEvent({ type: "run", sequence: 0, run })
   if (TERMINAL_STATUSES.has(run.status)) {

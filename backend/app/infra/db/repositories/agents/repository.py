@@ -1540,7 +1540,10 @@ async def delete_agent_graph(
     agent_id: str,
     resource_type: str,
 ) -> None:
+    from app.infra.db.repositories.memories import delete_application_data
     from app.infra.db.repositories.projects import repository as file_trees
+
+    await delete_application_data(db, agent_id)
 
     await file_trees.delete_conversation_files(
         db, select(AgentRun.id).where(AgentRun.agent_id == agent_id)

@@ -32,7 +32,10 @@ from app.entities.analytics import (
     WorkspaceAnalyticsTeamMember,
     WorkspaceAnalyticsToolCall,
 )
-from app.infra.db.repositories.tools.inventory import tool_catalog_conditions
+from app.infra.db.repositories.tools.inventory import (
+    tool_catalog_conditions,
+    tool_inventory_resources,
+)
 
 
 async def get_workspace_analytics_counts(
@@ -297,17 +300,15 @@ async def get_workspace_analytics_inventory(
         .where(KnowledgeDocumentChunkOrm.workspace_id == workspace_id)
     )
 
+    tool_resources = tool_inventory_resources(workspace_id)
     tool_rows = (
         await db.execute(
             select(
-                ToolOrm.kind,
-                ToolOrm.status,
+                tool_resources.c.kind,
+                tool_resources.c.status,
                 func.count().label("total"),
             )
-            .where(
-                *tool_catalog_conditions(workspace_id),
-            )
-            .group_by(ToolOrm.kind, ToolOrm.status)
+            .group_by(tool_resources.c.kind, tool_resources.c.status)
         )
     ).all()
     tools = WorkspaceAnalyticsInventoryTools()
