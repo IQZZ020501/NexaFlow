@@ -379,10 +379,18 @@ def ensure_local_opensandbox(values: dict[str, str]) -> tuple[dict[str, str], bo
                 content,
                 count=1,
             )
+            updated = re.sub(
+                r'(?m)^execd_image = "opensandbox/execd:v1\.0\.22"$',
+                'execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/'
+                "opensandbox/execd@sha256:"
+                '6cf7dba2f21f0b536e100563d841ac58a9f31c2b0a081b7ac76796a24d6f47e2"',
+                updated,
+                count=1,
+            )
             if updated != content:
                 _write_private(OPEN_SANDBOX_CONFIG, updated)
                 log(
-                    "[setup] Updated the legacy OpenSandbox timeout to 1860 seconds; "
+                    "[setup] Updated the generated OpenSandbox configuration; "
                     "restart OpenSandbox if it is already running."
                 )
     return read_env(ENV_FILE), True

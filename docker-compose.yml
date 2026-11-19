@@ -18,7 +18,7 @@ x-images:
   postgres: &postgres-image registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-postgres@sha256:956799fcfbe928ea4cc44c7daa331405ce808ba55de918118ed83fe6025867df
   execution: &execution-image registry.cn-shanghai.aliyuncs.com/ai-studios/nexaflow-execution@sha256:0c4215a17f9111251e226373c6c1728e1f588e2b27eb1a3f84a250b7b7bcb904
   server: &server-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server@sha256:ae8dfbb277f40a39ff01ef35e5e1c10675acfe0fa9db15259b8f323e5efab778
-  execd: &execd-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd@sha256:0d8f44cf4194732719aa79999d4b120c98bdab02bc61e9ad13f75f83af4c2684
+  execd: &execd-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd@sha256:6cf7dba2f21f0b536e100563d841ac58a9f31c2b0a081b7ac76796a24d6f47e2
   egress: &egress-image sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress@sha256:db7345d567b0970f384b8e3fa7a93a71b7f43d4b16bb2009de34096e9a87b3b5
 
 x-app-image: &app-image
@@ -390,7 +390,7 @@ configs:
 
       [runtime]
       type = "docker"
-      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd@sha256:0d8f44cf4194732719aa79999d4b120c98bdab02bc61e9ad13f75f83af4c2684"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd@sha256:6cf7dba2f21f0b536e100563d841ac58a9f31c2b0a081b7ac76796a24d6f47e2"
 
       [store]
       type = "sqlite"

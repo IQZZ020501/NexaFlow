@@ -24,7 +24,9 @@ when the Run reaches a terminal state and still has a native expiry as fallback.
 
 - Server: `opensandbox-server==0.2.3`.
 - Backend SDK: `opensandbox==0.1.16` (locked in `backend/uv.lock`).
-- Bootstrap: `opensandbox/execd:v1.0.22`.
+- Bootstrap: `opensandbox/execd:v1.1.0`, pinned to the same multi-architecture
+  digest in the generated configuration and Compose. This image includes the
+  hardening launcher cached and installed during runtime preparation.
 - Egress sidecar: `opensandbox/egress:v1.1.7`, **`dns+nft`** mode, IPv6 disabled.
 - Build the execution image separately from the business image:
 
@@ -80,6 +82,10 @@ Normal source development should use `make dev` at the repository root. It creat
 the private development configuration and key when missing, builds the execution
 image, starts the control plane and supervises the application processes. Use the
 manual commands above for a dedicated execution host or focused diagnostics.
+Existing generated development configurations still using the old default
+`execd:v1.0.22` are upgraded on the next `make dev`; operator-managed configurations
+and custom image choices are preserved. Restart a reused control plane to load
+the updated configuration.
 
 ## NexaFlow configuration
 
