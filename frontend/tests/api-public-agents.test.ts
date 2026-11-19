@@ -99,6 +99,26 @@ const conversations = {
 }
 
 describe("public agent API", () => {
+  test("keeps per-request memory and suggestion provenance in the create payload", async () => {
+    const requests = capture()
+    await createPublicAgentRun(
+      "agent-1",
+      "token-1",
+      "Next step",
+      "conv-1",
+      undefined,
+      [],
+      "always_ask",
+      "request-1",
+      { useMemory: false, fromSuggestion: true }
+    )
+    expect(requests[0]?.body).toMatchObject({
+      use_memory: false,
+      from_suggestion: true,
+      request_id: "request-1",
+    })
+  })
+
   test("retries a lost create response with the same request identity", async () => {
     const bodies: string[] = []
     withFetch((_url, init) => {

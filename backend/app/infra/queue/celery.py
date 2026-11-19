@@ -23,6 +23,7 @@ _GC_AFTER_TASKS = frozenset(
 
 TASK_DISPLAY_NAMES = {
     "app.agents.run": "运行 Agent",
+    "app.memories.extract": "更新用户记忆",
     "app.email.send": "发送邮件",
     "app.mcp.revoke": "撤销 MCP 授权",
     "app.mcp.cancel_tasks": "取消远端 MCP 任务",
@@ -146,6 +147,7 @@ def create_celery_app() -> Celery:
             "app.tasks.execution.jobs",
             "app.tasks.storage.jobs",
             "app.tasks.maintenance.jobs",
+            "app.tasks.memories.jobs",
         ],
     )
     app.conf.update(

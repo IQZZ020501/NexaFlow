@@ -50,6 +50,11 @@ from app.domain.knowledge.models import (  # noqa: F401
     KnowledgeStorageCleanup,
     KnowledgeTask,
 )
+from app.domain.memories.models import (  # noqa: F401
+    MemoryJob,
+    MemoryPreferences,
+    UserMemory,
+)
 from app.domain.models.registered import RegisteredModel  # noqa: F401
 from app.domain.platform.models import (  # noqa: F401  # noqa: F401  # noqa: F401
     PlatformSecret,

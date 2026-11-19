@@ -28,6 +28,7 @@ from app.api.v1.tools import sources as tool_sources
 from app.api.v1.workflows import access as workflow_access
 from app.api.v1.workflows import routes as workflows
 from app.api.v1.workspaces import routes as workspaces
+from app.api.v1.workspaces import memories as workspace_memories
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -62,6 +63,7 @@ api_router.include_router(tools.router)
 api_router.include_router(agent_skills.router)
 api_router.include_router(agents.router)
 api_router.include_router(chat_projects.router)
+api_router.include_router(workspace_memories.router)
 api_router.include_router(workflows.router)
 api_router.include_router(agent_access.public_router)
 api_router.include_router(agent_access.api_router)

@@ -333,6 +333,9 @@ async def find_users_by_identity(
 
 
 async def delete_user_graph(db: AsyncSession, user_id: str) -> None:
+    from app.infra.db.repositories.memories import delete_user_data
+
+    await delete_user_data(db, user_id)
     await delete_refresh_sessions_for_user(db, user_id)
     await db.execute(delete(TeamMembershipOrm).where(TeamMembershipOrm.user_id == user_id))
     await db.execute(

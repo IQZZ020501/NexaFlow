@@ -1966,7 +1966,8 @@ export function PublicAgentChat({
         controller.signal,
         conversationIdForRun,
         uploaded.map((item) => item.id),
-        approvalMode
+        approvalMode,
+        { fromSuggestion: Boolean(suggestedQuestion) }
       )
       if (!suggestedQuestion) setFiles([])
       await refreshConversations()

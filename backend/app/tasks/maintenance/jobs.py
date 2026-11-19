@@ -9,6 +9,7 @@ from app.application.agents.runs.executor import (
 )
 from app.application.artifacts.service import cleanup_expired_generated_artifacts
 from app.application.email.delivery import list_due_email_delivery_ids
+from app.application.memories.extraction import list_due_memory_jobs
 from app.application.tools.runtime.service import (
     list_recoverable_tool_test_invocation_ids,
 )
@@ -25,6 +26,7 @@ from app.tasks.agents.jobs import run_agent_job
 from app.tasks.email.jobs import run_email_delivery_job
 from app.tasks.knowledge.jobs import run_knowledge_task_job
 from app.tasks.mcp.jobs import recover_mcp_revocations_job, recover_mcp_tasks_job
+from app.tasks.memories.jobs import extract_user_memories_job
 from app.tasks.runtime import configure_task_worker, run_task_async
 from app.tasks.storage.jobs import run_storage_cleanup_job
 from app.tasks.tools.jobs import run_tool_invocation_job
@@ -97,7 +99,13 @@ def _recover_upload_storage_cleanups(_settings: Settings) -> None:
         run_storage_cleanup_job.apply_async(args=("upload", cleanup_id))
 
 
+def _recover_user_memories(_settings):
+    for job_id in run_task_async(list_due_memory_jobs()):
+        extract_user_memories_job.apply_async(args=(job_id,))
+
+
 FREQUENT_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
+    ("recover_user_memories", _recover_user_memories),
     ("recover_knowledge_tasks", _recover_knowledge_tasks),
     ("recover_unified_agent_runs", _recover_unified_agent_runs),
     ("recover_legacy_agent_runs", _recover_legacy_agent_runs),

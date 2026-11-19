@@ -508,6 +508,25 @@ describe("workspace analytics", () => {
     expect(link.closest("nav")).toBeTruthy()
   })
 
+  test("shows the shared memory entry in an ordinary user's avatar menu", async () => {
+    const ordinary = makeSession()
+    ordinary.me!.user.is_global_admin = false
+    ordinary.me!.user.workspaces = [
+      { id: "ws-1", name: "Test Workspace", is_default: false, role: "member" },
+    ]
+    ordinary.me!.memberships = [{ workspace_id: "ws-1", role: "member" }]
+    Object.assign(sessionState, ordinary)
+
+    renderPage(<TopBar />)
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "打开用户菜单" })
+    )
+    const menu = await screen.findByRole("menu")
+    const memoryLink = within(menu).getByRole("menuitem", { name: "记忆" })
+    expect(memoryLink.getAttribute("href")).toBe("/app/memories")
+    expect(within(menu).queryByRole("menuitem", { name: "系统管理" })).toBeNull()
+  })
+
   test("provides every navigation entry in the compact menu", async () => {
     renderPage(<TopBar />)
     const menuButton = screen.getByRole("button", { name: "主导航" })

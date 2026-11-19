@@ -280,7 +280,7 @@ class AgentModelHandler(BaseHTTPRequestHandler):
         )
         if any(
             item.get("role") == "system"
-            and "Suggest exactly three concise" in item.get("content", "")
+            and "Suggest up to three concise" in item.get("content", "")
             for item in body.get("messages", [])
         ):
             message = {
@@ -3316,7 +3316,11 @@ def assert_external_agent_access() -> None:
                 "file_ids",
                 "approval_mode",
                 "request_id",
+                "use_memory",
+                "from_suggestion",
             }
+            assert public_create_schema["properties"]["use_memory"]["default"] is True
+            assert public_create_schema["properties"]["from_suggestion"]["default"] is False
             public_schema_ref = openapi_payload["paths"][
                 "/api/v1/public/agents/{agent_id}/runs"
             ]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"]

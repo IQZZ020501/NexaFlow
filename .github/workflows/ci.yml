@@ -76,6 +76,9 @@ jobs:
           uv run python -m tests.projects.runtime
           uv run python -m tests.projects.chat
           uv run python -m tests.projects.migration
+          uv run python -m tests.memories.unit
+          uv run python -m tests.memories.api
+          uv run python -m tests.memories.migration
           uv run python -m tests.knowledge.unit
           uv run python -m tests.tools.unit
           uv run python -m tests.workflows.unit

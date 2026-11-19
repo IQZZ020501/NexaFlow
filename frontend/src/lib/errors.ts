@@ -2,6 +2,10 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Memory not found.": "记忆不存在或不可访问",
+  "Memory key already exists.": "已有相同主题的记忆，请编辑现有条目",
+  "Memory limit reached.": "最多保存 100 条记忆，请先删除不再需要的条目",
+  "Memory contains sensitive information.": "记忆中不能保存密码、密钥等敏感信息",
   "Chat project not found.": "项目不存在或不可访问",
   "Chat project is archived.": "项目已归档，请先恢复项目",
   "Chat project file not found.": "项目资料不存在或已移除",

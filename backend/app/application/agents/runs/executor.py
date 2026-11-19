@@ -29,6 +29,7 @@ from app.application.agents.tools.builder import (
     set_agent_tool_idempotency_key,
 )
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
+from app.application.memories import memory_context, queue_memory_job
 from app.application.runs.leases import maintain_agent_run_lease
 from app.application.workspaces.service import build_workspace_context
 from app.domain.agent_skills.catalog import skill_execution_context
@@ -915,6 +916,12 @@ async def _execute_claimed_agent_run(
         async with get_session_factory()() as db:
             return await pending_session_inputs(db, run.id, consumed)
 
+    async def personal_context(state):
+        inputs = (state.get("harness") or {}).get("inputs", [])
+        query = inputs[-1]["content"] if inputs else run.goal
+        async with get_session_factory()() as db:
+            return await memory_context(db, run, query)
+
     session = AgentSession(
         registry,
         AgentContextManager(
@@ -922,6 +929,7 @@ async def _execute_claimed_agent_run(
         ),
         session_inputs,
         reference_source,
+        personal_context,
     )
     tools = registry.tools
     base_messages = execution_messages(
@@ -1102,6 +1110,30 @@ async def _execute_claimed_agent_run(
         ):
             inputs = result.harness.get("inputs", [])
             question = inputs[-1]["content"] if inputs else run.goal
+            async with get_session_factory()() as context_db:
+                personal = await memory_context(context_db, run, question)
+            project_context = run.application_snapshot.get("chat_project", {})
+            related_context = ""
+            if personal or project_context:
+                recent = [
+                    {"role": item["role"], "content": item["content"][:2000]}
+                    for item in memory.messages[-4:]
+                ]
+                related_context = json.dumps(
+                    {
+                        "recent_conversation": recent,
+                        "recent_user_inputs": [
+                            {"content": item.get("content", "")[:2000]}
+                            for item in inputs[-3:]
+                        ],
+                        "project": {
+                            key: project_context.get(key)
+                            for key in ("name", "instructions")
+                        },
+                        "user_memories": personal,
+                    },
+                    ensure_ascii=False,
+                )
             suggested_questions, suggestion_usage = await generate_suggested_questions(
                 chat_model,
                 question,
@@ -1109,6 +1141,7 @@ async def _execute_claimed_agent_run(
                 provider_type=scope.model.provider_type,
                 request_params=(scope.model.meta or {}).get("request_params") or {},
                 timeout_seconds=max(0.0, (run_deadline - utc_now()).total_seconds()),
+                related_context=related_context,
             )
             model_usage = merge_usage(model_usage, suggestion_usage)
         async with get_session_factory()() as db:
@@ -1127,6 +1160,10 @@ async def _execute_claimed_agent_run(
                 grounding_meta={},
                 session_input_ids=result.harness.get("input_ids", []),
             )
+            if finalized:
+                # Persist intent with the successful answer. Beat recovers dispatch.
+                current = await agent_repository.get_agent_run_by_id(db, run.id)
+                await queue_memory_job(db, current)
             await db.commit()
         if not finalized:
             raise AgentToolBusy("", "Agent run finalization lease was lost.")

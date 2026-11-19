@@ -461,6 +461,8 @@ async def validate_regeneration_source(
                 "sandbox_requirements",
                 "project",
                 "chat_project",
+                "user_memory",
+                "from_suggestion",
             }
         } != {
             "schema_version": version.schema_version,
@@ -1107,6 +1109,8 @@ async def prepare_agent_run(
     request_id: str | None = None,
     request_hash: str | None = None,
     input_files: list[dict] | None = None,
+    use_memory: bool = True,
+    from_suggestion: bool = False,
 ) -> tuple[AgentRun, Any]:
     """
     Prepare a queued agent run using the selected agent configuration, resources, model, tools, and conversation.
@@ -1420,6 +1424,11 @@ async def prepare_agent_run(
     )
     run.request_id = request_id
     run.request_hash = request_hash
+    run.application_snapshot["from_suggestion"] = from_suggestion
+    if persist and not authorized_by_parent:
+        from app.application.memories import freeze_memory_policy
+
+        await freeze_memory_policy(db, run, use_memory=use_memory)
     if persist and not authorized_by_parent and access_source in {"console", "public"}:
         from app.application.projects.chat import freeze_project_context
         from app.application.projects.service import conversation_run_snapshot
@@ -1593,6 +1602,7 @@ async def create_agent_run(
     file_ids: list[str] | None = None,
     approval_mode: AgentApprovalMode = DEFAULT_AGENT_APPROVAL_MODE,
     request_id: str | None = None,
+    use_memory: bool = True,
 ) -> Any:
     from app.application.agents.runs.requests import replay_run_request
 
@@ -1609,6 +1619,7 @@ async def create_agent_run(
             "conversation_id": conversation_id,
             "file_ids": file_ids or [],
             "approval_mode": approval_mode,
+            **({"use_memory": False} if not use_memory else {}),
         },
     )
     if previous is not None:
@@ -1649,6 +1660,7 @@ async def create_agent_run(
         request_id=request_id,
         request_hash=fingerprint,
         input_files=input_files,
+        use_memory=use_memory,
     )
     await enqueue_prepared_agent_run(
         run.id,

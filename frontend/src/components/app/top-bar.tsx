@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   BarChart3Icon,
+  BrainIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   Building2Icon,
@@ -359,6 +360,12 @@ export function TopBar() {
                   <DropdownMenuItem onSelect={openPasswordDialog}>
                     <LockIcon />
                     {t("修改密码")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/app/memories">
+                      <BrainIcon />
+                      {t("记忆")}
+                    </Link>
                   </DropdownMenuItem>
                   {canAccessSystem ? (
                     <DropdownMenuItem asChild>

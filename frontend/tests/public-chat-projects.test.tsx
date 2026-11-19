@@ -221,6 +221,54 @@ test("creates a project and sends its first question in a server-owned project c
   expect(window.location.pathname).toContain(`/projects/${projectId}`)
 })
 
+test("uses memory by default and marks clicks on suggested questions", async () => {
+  projects = []
+  conversations = []
+  let count = 0
+  extra = (url, init) => {
+    if (url === base + "/runs" && init?.method === "POST") {
+      count += 1
+      const payload = JSON.parse(String(init.body))
+      return jsonResponse(
+        {
+          id: `memory-run-${count}`,
+          conversation_id: "memory-conversation",
+          question: payload.goal,
+          status: "succeeded",
+          result: `Memory answer ${count}`,
+          suggested_questions: count === 1 ? ["What next?"] : [],
+          error: null,
+          progress: [],
+          created_at: timestamp,
+          updated_at: timestamp,
+          started_at: timestamp,
+          finished_at: timestamp,
+        },
+        201
+      )
+    }
+    return null
+  }
+  renderPage(<PublicAgentChat agentId={agentId} />)
+  await screen.findByLabelText("请输入问题")
+  expect(screen.queryByRole("button", { name: "使用记忆" })).toBeNull()
+  fireEvent.change(screen.getByLabelText("请输入问题"), {
+    target: { value: "Explain Docker" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }))
+  await screen.findByText("Memory answer 1")
+  fireEvent.click(await screen.findByRole("button", { name: "What next?" }))
+  await screen.findByText("Memory answer 2")
+  const payloads = requests
+    .filter(
+      ({ url, init }) => url === base + "/runs" && init?.method === "POST"
+    )
+    .map(({ init }) => JSON.parse(String(init?.body)))
+  expect(payloads[0].use_memory).toBeUndefined()
+  expect(payloads[1].use_memory).toBeUndefined()
+  expect(payloads[1].from_suggestion).toBe(true)
+})
+
 test("edits project names and sources without changing existing instructions", async () => {
   extra = (url, init) => {
     if (url === base + `/projects/${projectId}` && init?.method === "PUT") {

@@ -50,6 +50,7 @@ PUBLIC_INTERFACES = {
         "app.application.knowledge.documents.service",
         "app.application.knowledge.retrieval.service",
     },
+    "memories": {"app.application.memories", "app.application.memories.extraction"},
     "models": {
         "app.application.models.service",
     },
@@ -95,6 +96,7 @@ MODULE_DEPENDENCIES = {
         "agent_skills",
         "governance",
         "knowledge",
+        "memories",
         "projects",
         "publications",
         "runs",
@@ -110,6 +112,7 @@ MODULE_DEPENDENCIES = {
     "governance": set(),
     "identity": {"email"},
     "knowledge": set(),
+    "memories": {"projects", "publications"},
     "models": set(),
     "projects": {"artifacts", "publications", "workspaces"},
     "publications": {"workspaces"},
