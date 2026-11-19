@@ -11,9 +11,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+from deploy.opensandbox.configure import server_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,6 +79,17 @@ class ComposeTests(unittest.TestCase):
         ]
         self.assertNotIn(None, names)
         self.assertNotEqual(*names)
+
+    def test_execd_preload_matches_generated_and_deployed_configuration(self) -> None:
+        image = self.config["services"]["execd-image"]["image"]
+        deployed = tomllib.loads(self.config["configs"]["opensandbox"]["content"])
+        self.assertEqual(deployed["runtime"]["execd_image"], image)
+        for development in (True, False):
+            with self.subTest(development=development):
+                generated = tomllib.loads(
+                    server_config(self.directory, "local-test-key", development=development)
+                )
+                self.assertEqual(generated["runtime"]["execd_image"], image)
 
     def test_optional_agents_scale_without_another_beat_or_published_port(self) -> None:
         rendered = subprocess.run(

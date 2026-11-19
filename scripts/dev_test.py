@@ -6,11 +6,13 @@ import os
 import stat
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from deploy.opensandbox.configure import server_config
 from scripts.dev import (
     BUILD_INPUTS_LABEL,
     DevError,
@@ -66,6 +68,79 @@ class OpenSandboxUrlTests(unittest.TestCase):
 
 
 class OpenSandboxConfigurationTests(unittest.TestCase):
+    def test_upgrades_generated_legacy_execd_without_changing_other_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "server.toml"
+            original = (
+                "# Generated for opensandbox-server==0.2.3; keep this file private.\n"
+                '[server]\napi_key = "local-test-key"\n'
+                "max_sandbox_timeout_seconds = 1860\n"
+                '[runtime]\ntype = "docker"\n'
+                'execd_image = "opensandbox/execd:v1.0.22"\n'
+                '[docker]\nnetwork_mode = "bridge"\n'
+            )
+            path.write_text(original, encoding="utf-8")
+            values = {
+                "OPENSANDBOX_URL": "http://127.0.0.1:8088",
+                "OPENSANDBOX_API_KEY": "local-test-key",
+                "OPENSANDBOX_IMAGE": "nexaflow/execution:local",
+            }
+            image = tomllib.loads(
+                server_config(Path(directory), "local-test-key", development=True)
+            )["runtime"]["execd_image"]
+            with (
+                patch("scripts.dev.OPEN_SANDBOX_CONFIG", path),
+                patch("scripts.dev.read_env", return_value=values),
+                patch("scripts.dev.run") as run_mock,
+                patch("scripts.dev.log") as log_mock,
+            ):
+                self.assertEqual(ensure_local_opensandbox(values), (values, True))
+                updated = path.read_text(encoding="utf-8")
+                self.assertNotIn("opensandbox/execd:v1.0.22", updated)
+                self.assertEqual(
+                    updated, original.replace("opensandbox/execd:v1.0.22", image)
+                )
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                ensure_local_opensandbox(values)
+                self.assertEqual(path.read_text(encoding="utf-8"), updated)
+                run_mock.assert_not_called()
+                log_mock.assert_called_once()
+
+    def test_preserves_operator_managed_execd_images(self) -> None:
+        for header, image in (
+            ("# Operator-managed configuration\n", "opensandbox/execd:v1.0.22"),
+            (
+                "# Generated for opensandbox-server==0.2.3; keep this file private.\n",
+                "custom/execd:operator-owned",
+            ),
+        ):
+            with (
+                self.subTest(header=header, image=image),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                path = Path(directory) / "server.toml"
+                original = (
+                    header + '[server]\napi_key = "local-test-key"\n'
+                    "max_sandbox_timeout_seconds = 1860\n"
+                    f'[runtime]\ntype = "docker"\nexecd_image = "{image}"\n'
+                )
+                path.write_text(original, encoding="utf-8")
+                values = {
+                    "OPENSANDBOX_URL": "http://127.0.0.1:8088",
+                    "OPENSANDBOX_API_KEY": "local-test-key",
+                    "OPENSANDBOX_IMAGE": "nexaflow/execution:local",
+                }
+                with (
+                    patch("scripts.dev.OPEN_SANDBOX_CONFIG", path),
+                    patch("scripts.dev.read_env", return_value=values),
+                    patch("scripts.dev.run") as run_mock,
+                    patch("scripts.dev.log") as log_mock,
+                ):
+                    ensure_local_opensandbox(values)
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+                run_mock.assert_not_called()
+                log_mock.assert_not_called()
+
     def test_upgrades_generated_legacy_timeout_without_changing_other_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "server.toml"
