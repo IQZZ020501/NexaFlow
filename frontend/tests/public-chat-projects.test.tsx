@@ -5,6 +5,7 @@ import {
   fireEvent,
   screen,
   waitFor,
+  waitForElementToBeRemoved,
   within,
 } from "@testing-library/react"
 import { PublicAgentChat } from "@/components/agents/public-agent-chat"
@@ -261,7 +262,7 @@ test("saves instructions and uploads sources without interrupting the chat compo
   fireEvent.click(
     screen.getByRole("button", { name: "移除项目资料：notes.txt" })
   )
-  await waitFor(() => expect(screen.queryByText("notes.txt")).toBeNull())
+  await waitForElementToBeRemoved(() => sources.queryByText("notes.txt"))
 }, 10000)
 
 test("uploads a selected project folder with its relative paths intact", async () => {
