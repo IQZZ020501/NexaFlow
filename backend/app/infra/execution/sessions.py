@@ -88,6 +88,11 @@ class SessionStore:
                 and repository.aware(session.holder_expires_at) <= now
             )
             if session and session.state == "closing":
+                if session.creation_pending and not session.sandbox_id:
+                    raise ExecutionNotStarted(
+                        "Previous sandbox creation could not be confirmed. "
+                        "Execution is unavailable for this Run; continue with other tools."
+                    )
                 raise ExecutionBusy(
                     "Previous Run sandbox cleanup is pending.",
                     reason="environment_cleanup",

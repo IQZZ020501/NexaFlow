@@ -190,7 +190,16 @@ def execution_messages(
             ),
         },
     ]
-    if run.application_snapshot.get("project"):
+    project = run.application_snapshot.get("project")
+    files = project.get("files") if project else None
+    if files is not None and not any(not item.get("deleted") for item in files):
+        messages[0]["content"] += (
+            "\nThis conversation has no uploaded or saved project files. "
+            "Do not scan project directories to look for source documents; use "
+            "the configured knowledge or other relevant tools when needed. "
+            "You may still use bash to create files requested by the user.\n"
+        )
+    elif project:
         messages[0]["content"] += (
             "\nThis conversation has a private persistent project. Read-only source files "
             "are under /project/sources; editable scripts and source work files belong "
