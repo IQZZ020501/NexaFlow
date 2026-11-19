@@ -454,6 +454,9 @@ def run_to_response(run: AgentRun, *, trace_id: str = "") -> AgentRunResponse:
             run.events,
         ),
         sources=knowledge_sources_from_events(run.events),
+        suggested_questions=(
+            run.suggested_questions if run.status == "succeeded" else []
+        ),
         model_usage=run.model_usage,
         execution_manifest={
             "schema_version": 1,

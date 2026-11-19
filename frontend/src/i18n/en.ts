@@ -177,6 +177,7 @@ export const en = {
   追加后续任务: "Queue follow-up",
   后续任务已排队: "Follow-up queued",
   后续任务: "Follow-up task",
+  你可能还想问: "You might also ask",
   语言: "Language",
   "切换语言，当前为 {language}": "Change language, currently {language}",
   主题: "Theme",

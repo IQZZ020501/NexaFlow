@@ -916,7 +916,13 @@ def assert_session_input_api_isolation():
                 finished.json()["session_inputs"][0]["previous_answer"] == "Completed."
             )
             assert finished.json()["session_inputs"][0]["previous_answer_turn"] == 1
-            assert len(AgentModelHandler.calls) == 2
+            assert len(AgentModelHandler.calls) == (2 if base == origins[-1][0] else 3)
+            if base != origins[-1][0]:
+                suggestion_call = AgentModelHandler.calls[-1]
+                source = json.loads(suggestion_call["messages"][-1]["content"])
+                assert source == {"question": "Then summarize", "answer": "Completed."}
+                assert not suggestion_call.get("tools")
+                assert len(finished.json()["suggested_questions"]) == 3
             assert "Use Chinese" not in str(AgentModelHandler.calls[0])
             assert "Then summarize" not in str(AgentModelHandler.calls[0])
             assert "Use Chinese" in str(AgentModelHandler.calls[1])

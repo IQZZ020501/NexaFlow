@@ -153,6 +153,7 @@ export type AgentRun = {
   plan: AgentPlanStep[]
   events: AgentRunEvent[]
   result: string
+  suggested_questions?: string[]
   sources?: AgentRunSource[]
   model_usage: Record<string, unknown>
   /** @deprecated Historical run compatibility only; no verifier is executed. */

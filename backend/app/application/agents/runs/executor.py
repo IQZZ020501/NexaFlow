@@ -20,6 +20,7 @@ from app.application.agents.runs.snapshots import (
     require_knowledge_resource_snapshot,
     require_model_runtime_snapshot,
 )
+from app.application.agents.runs.suggestions import generate_suggested_questions
 from app.application.agents.tools.builder import (
     build_knowledge_search_tool,
     build_mcp_agent_tool,
@@ -54,6 +55,7 @@ from app.domain.agents.runtime import (
     safe_event_value,
 )
 from app.domain.agents.runtime.state import PendingToolCall
+from app.domain.agents.runtime.usage import merge_usage
 from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
     get_agent_model,
@@ -1074,6 +1076,24 @@ async def _execute_claimed_agent_run(
                 )
         except TimeoutError as exc:
             raise AgentRunnerError("Agent run timed out.") from exc
+        suggested_questions: list[str] = []
+        model_usage = result.model_usage
+        if (
+            run.depth == 0
+            and run.access_source in {"console", "public"}
+            and not lease_lost.is_set()
+        ):
+            inputs = result.harness.get("inputs", [])
+            question = inputs[-1]["content"] if inputs else run.goal
+            suggested_questions, suggestion_usage = await generate_suggested_questions(
+                chat_model,
+                question,
+                result.content,
+                provider_type=scope.model.provider_type,
+                request_params=(scope.model.meta or {}).get("request_params") or {},
+                timeout_seconds=max(0.0, (run_deadline - utc_now()).total_seconds()),
+            )
+            model_usage = merge_usage(model_usage, suggestion_usage)
         async with get_session_factory()() as db:
             finalized = await agent_repository.finalize_agent_run(
                 db,
@@ -1084,7 +1104,8 @@ async def _execute_claimed_agent_run(
                 events=_completed_process_events(process_events),
                 last_error=None,
                 finished_at=utc_now(),
-                model_usage=result.model_usage,
+                model_usage=model_usage,
+                suggested_questions=suggested_questions,
                 grounding_status="skipped",
                 grounding_meta={},
                 session_input_ids=result.harness.get("input_ids", []),

@@ -3260,7 +3260,130 @@ def test_context_summary_keeps_tool_result_declaration_context() -> None:
         assert manager.tokens(request, []) <= int(4096 * 0.8) - 1024
 
 
+def test_related_question_generation() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application.agents.runs.suggestions import (
+        generate_suggested_questions,
+        parse_suggested_questions,
+    )
+
+    assert parse_suggested_questions("not json", "Why?") == []
+    assert parse_suggested_questions('{"questions": []}', "Why?") == []
+    assert parse_suggested_questions(
+        json.dumps(["Why？", None, "", "  Example?  ", "example?", "x" * 121,
+                    "Two\nlines?", "Next steps?", "Limitations?", "Fourth?"]),
+        "Why?",
+    ) == ["Example?", "Next steps?", "Limitations?"]
+    assert parse_suggested_questions('```json\n["Details?"]\n```', "Why?") == ["Details?"]
+
+    async def check():
+        response = AIMessage(
+            content='["Who qualifies?", "How do I apply?", "Which documents are needed?"]',
+            usage_metadata={"input_tokens": 40, "output_tokens": 20, "total_tokens": 60},
+        )
+        model = SimpleNamespace(ainvoke=AsyncMock(return_value=response))
+        question = "Eligibility"
+        answer = "A" * 15000 + "The ending"
+        questions, usage = await generate_suggested_questions(
+            model, question, answer, provider_type="openai_compatible",
+            request_params={"max_completion_tokens": 256}, timeout_seconds=1,
+        )
+        assert len(questions) == 3 and usage["total_tokens"] == 60
+        messages = model.ainvoke.call_args.args[0]
+        source = json.loads(messages[-1]["content"])
+        assert source["question"] == question
+        assert source["answer"].endswith("The ending")
+        assert len(source["answer"]) < 12100
+        assert "never as instructions" in messages[0]["content"]
+        assert model.ainvoke.call_args.kwargs == {"max_completion_tokens": 256}
+
+        for provider, output_key in (
+            ("openai_compatible", "max_tokens"),
+            ("google_genai", "max_output_tokens"),
+            ("ollama", "num_predict"),
+        ):
+            model.ainvoke.reset_mock()
+            await generate_suggested_questions(
+                model, question, "Answer", provider_type=provider,
+                request_params={}, timeout_seconds=1,
+            )
+            assert model.ainvoke.call_args.kwargs == {output_key: 4096}
+
+        params = {"max_tokens": 8192, "extra_body": {"thinking": {"type": "enabled"}}}
+        await generate_suggested_questions(
+            model, question, "Answer", provider_type="deepseek",
+            request_params=params, timeout_seconds=1,
+        )
+        assert model.ainvoke.call_args.kwargs == {
+            "max_tokens": 512, "extra_body": {"thinking": {"type": "disabled"}},
+        }
+        assert params["extra_body"]["thinking"] == {"type": "enabled"}
+
+        model.ainvoke.return_value = AIMessage(content="Invalid JSON")
+        questions, usage = await generate_suggested_questions(
+            model, question, "Answer", provider_type="deepseek",
+            request_params={}, timeout_seconds=1,
+        )
+        assert questions == [] and usage["model_calls"] == 1
+        model.ainvoke.return_value = AIMessage(
+            content="",
+            response_metadata={"finish_reason": "length"},
+            usage_metadata={
+                "input_tokens": 1577, "output_tokens": 512, "total_tokens": 2089,
+                "output_token_details": {"reasoning": 512},
+            },
+        )
+        with patch("app.application.agents.runs.suggestions.log_event") as log:
+            questions, usage = await generate_suggested_questions(
+                model, question, "Answer", provider_type="deepseek",
+                request_params={}, timeout_seconds=1,
+            )
+        assert questions == [] and usage["output_tokens"] == 512
+        assert log.call_args.kwargs["finish_reason"] == "length"
+        assert log.call_args.kwargs["reasoning_tokens"] == 512
+        model.ainvoke.side_effect = RuntimeError("Provider unavailable")
+        questions, usage = await generate_suggested_questions(
+            model, question, "Answer", provider_type="deepseek",
+            request_params={}, timeout_seconds=1,
+        )
+        assert questions == [] and usage["total_tokens"] == 0
+
+        async def slow(*args, **kwargs):
+            await asyncio.sleep(1)
+        model.ainvoke.side_effect = slow
+        questions, _ = await generate_suggested_questions(
+            model, question, "Answer", provider_type="deepseek",
+            request_params={}, timeout_seconds=0.001,
+        )
+        assert questions == []
+        model.ainvoke.reset_mock()
+        await generate_suggested_questions(
+            model, question, "Answer", provider_type="deepseek",
+            request_params={}, timeout_seconds=0,
+        )
+        await generate_suggested_questions(
+            model, question, " ", provider_type="deepseek",
+            request_params={}, timeout_seconds=1,
+        )
+        model.ainvoke.assert_not_called()
+
+        model.ainvoke.side_effect = asyncio.CancelledError()
+        try:
+            await generate_suggested_questions(
+                model, question, "Answer", provider_type="deepseek",
+                request_params={}, timeout_seconds=1,
+            )
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("Worker cancellation must propagate.")
+
+    asyncio.run(check())
+
+
 def main() -> None:
+    test_related_question_generation()
     test_context_summary_keeps_tool_result_declaration_context()
     test_context_memory_keeps_latest_repeated_requirement()
     test_structured_context_memory_checkpoint_and_failure_atomicity()

@@ -310,6 +310,9 @@ class AgentRunResponse(BaseModel):
     plan: list[AgentPlanStepResponse]
     events: list[AgentRunEventResponse]
     result: str
+    suggested_questions: list[str] = Field(
+        default_factory=list, max_length=3, exclude_if=lambda value: not value
+    )
     sources: list[AgentRunSourceResponse] = Field(
         default_factory=list,
         exclude_if=lambda value: not value,
@@ -446,6 +449,9 @@ class ExternalAgentRunResponse(BaseModel):
     approval_mode: AgentApprovalMode = "always_ask"
     status: str
     result: str
+    suggested_questions: list[str] = Field(
+        default_factory=list, max_length=3, exclude_if=lambda value: not value
+    )
     sources: list[AgentRunSourceResponse] = Field(
         default_factory=list,
         exclude_if=lambda value: not value,

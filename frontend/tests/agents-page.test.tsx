@@ -2852,6 +2852,48 @@ describe("AgentsPage run flows", () => {
     expect(screen.getByText("回答已生成")).toBeTruthy()
   })
 
+  test("sends a recommended question in the existing conversation and keeps the unsent draft", async () => {
+    const submitted: Record<string, unknown>[] = []
+    const previous = makeRun({ suggested_questions: ["Who qualifies?"] })
+    const completed = makeRun({ id: "run-2", goal: "Who qualifies?", result: "Eligibility details", suggested_questions: ["Which documents do I need?"] })
+    await renderDetail({
+      initialView: "settings",
+      initialConversationId: "conversation-1",
+      extraRoutes: [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: () => jsonResponse([previous]),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs`,
+          exact: true,
+          respond: (init) => {
+            submitted.push(JSON.parse(String(init?.body)))
+            return jsonResponse({ ...completed, status: "queued", result: "" }, 201)
+          },
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/agent-1/runs/run-2/stream`,
+          respond: () => ndjson([{ type: "complete", sequence: 1, run: completed }]),
+        },
+      ],
+    })
+    const suggestion = await screen.findByRole("button", { name: "Who qualifies?" })
+    const composer = screen.getByLabelText("向 Agent 提问") as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: "My unfinished draft" } })
+    fireEvent.click(suggestion)
+    expect(await screen.findByText("Eligibility details")).toBeTruthy()
+    expect(submitted).toHaveLength(1)
+    expect(submitted[0]).toMatchObject({ goal: "Who qualifies?", conversation_id: "conversation-1" })
+    expect(composer.value).toBe("My unfinished draft")
+    expect(screen.queryByRole("button", { name: "Who qualifies?" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Which documents do I need?" })).toBeTruthy()
+  })
+
   test("queues follow-ups with Enter on the live run without submitting another run", async () => {
     const queuedRun = makeRun({ id: "run-1", status: "queued", result: "" })
     const inputs: Array<{ input_id: string; mode: string; content: string }> =

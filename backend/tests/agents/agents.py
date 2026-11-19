@@ -262,6 +262,7 @@ async def grant_mcp_tool_use(
 
 class AgentModelHandler(BaseHTTPRequestHandler):
     calls: ClassVar[list[dict]] = []
+    suggestion_content = '["What are the next steps?", "Can you give an example?", "What should I check?"]'
 
     def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0"))
@@ -277,7 +278,28 @@ class AgentModelHandler(BaseHTTPRequestHandler):
             (name for name in tool_names if name.startswith("mcp_")),
             None,
         )
-        if "search_knowledge" in tool_names and not any(
+        if any(
+            item.get("role") == "system"
+            and "Suggest exactly three concise" in item.get("content", "")
+            for item in body.get("messages", [])
+        ):
+            message = {
+                "role": "assistant",
+                "content": AgentModelHandler.suggestion_content,
+            }
+            finish_reason = "stop"
+            if (
+                body.get("model") == "deepseek-v4-flash"
+                and body.get("thinking", {}).get("type") != "disabled"
+            ):
+                # Match a completed request whose entire output budget was reasoning.
+                message = {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Consider related benefits and applications.",
+                }
+                finish_reason = "length"
+        elif "search_knowledge" in tool_names and not any(
             item.get("role") == "tool" for item in body.get("messages", [])
         ):
             message = {
@@ -409,6 +431,43 @@ def model_payload(api_base: str, name: str = "Agent Model") -> dict:
         "model_name": "deepseek-chat",
         "credential": {"api_base": api_base, "api_key": "sk-agent-test-1234"},
     }
+
+
+def assert_deepseek_reasoning_suggestions() -> None:
+    from app.adapters.llm.runtime import build_chat_model
+    from app.application.agents.runs.suggestions import generate_suggested_questions
+
+    params = {
+        "extra_body": {
+            "thinking": {"type": "enabled"},
+            "test_marker": "preserved",
+        },
+    }
+    with agent_model_server() as model_base_url:
+        model = build_chat_model(
+            "deepseek",
+            {"api_base": model_base_url, "api_key": "test"},
+            "deepseek-v4-flash",
+            request_params=params,
+        )
+        questions, usage = asyncio.run(generate_suggested_questions(
+            model,
+            "Who qualifies for employee benefits?",
+            "Employees can apply through their union representative.",
+            provider_type="deepseek",
+            request_params=params,
+            timeout_seconds=2,
+        ))
+        assert len(questions) == 3, questions
+        assert usage["model_calls"] == 1
+        request = AgentModelHandler.calls[-1]
+        assert request["thinking"] == {"type": "disabled"}, request
+        assert request["test_marker"] == "preserved"
+        assert "tools" not in request
+        assert request["max_tokens"] == 512
+        assert params["extra_body"]["thinking"] == {"type": "enabled"}
+        original_payload = model._get_request_payload([{"role": "user", "content": "Test"}])
+        assert original_payload["extra_body"]["thinking"] == {"type": "enabled"}
 
 
 def agents_url(workspace_id: str, suffix: str = "") -> str:
@@ -3334,6 +3393,7 @@ def assert_external_agent_access() -> None:
                 "approval_mode",
                 "status",
                 "result",
+                "suggested_questions",
                 "error",
                 "progress",
                 "created_at",
@@ -3346,6 +3406,7 @@ def assert_external_agent_access() -> None:
             assert "workspace_id" not in public_run_one_payload
             assert "trace_id" not in public_run_one_payload
             assert isinstance(public_run_one_payload["progress"], list)
+            assert len(public_run_one_payload["suggested_questions"]) == 3
 
             public_run_two = client.post(
                 f"{public_base}/runs",
@@ -3363,6 +3424,7 @@ def assert_external_agent_access() -> None:
             assert stored_public_one is not None and stored_public_two is not None
             assert stored_public_one.requested_by_user_id is None
             assert stored_public_one.access_source == "public"
+            assert stored_public_one.suggested_questions == public_run_one_payload["suggested_questions"]
             assert stored_public_one.consumer_id == admin_user_id
             assert stored_public_two.consumer_id == member_user_id
             assert stored_public_two.consumer_id != stored_public_one.consumer_id
@@ -3514,6 +3576,8 @@ def assert_external_agent_access() -> None:
             )
             assert api_run_a.status_code == 201, api_run_a.text
             assert api_run_b.status_code == 201, api_run_b.text
+            assert "suggested_questions" not in api_run_a.json()
+            assert "suggested_questions" not in api_run_b.json()
             stored_api_a = asyncio.run(run_snapshot(api_run_a.json()["id"]))
             stored_api_b = asyncio.run(run_snapshot(api_run_b.json()["id"]))
             assert stored_api_a is not None and stored_api_b is not None
@@ -3797,10 +3861,42 @@ def assert_external_agent_access() -> None:
         agent_executor.run_agent = original_run_agent
 
 
+def assert_related_questions_migration() -> None:
+    from unittest.mock import patch
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    source = Path(__file__).parents[2] / "alembic/versions/202611190001_agent_suggested_questions.py"
+    spec = importlib.util.spec_from_file_location("agent_questions_migration", source)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE agent_run_states (run_id TEXT PRIMARY KEY, result TEXT)"))
+            connection.execute(text("INSERT INTO agent_run_states VALUES ('old', 'Original answer')"))
+            with patch.object(migration, "op", Operations(MigrationContext.configure(connection))):
+                migration.upgrade()
+                assert connection.scalar(text("SELECT suggested_questions FROM agent_run_states")) == "[]"
+                connection.execute(
+                    text("UPDATE agent_run_states SET suggested_questions = :questions"),
+                    {"questions": '["What next?"]'},
+                )
+                migration.downgrade()
+                assert connection.scalar(text("SELECT result FROM agent_run_states")) == "Original answer"
+                migration.upgrade()
+                assert connection.scalar(text("SELECT suggested_questions FROM agent_run_states")) == "[]"
+    finally:
+        engine.dispose()
+
+
 def main() -> None:
     """
     Run the comprehensive agent, workflow, knowledge, MCP, streaming, persistence, authorization, and public-access integration assertions.
     """
+    assert_deepseek_reasoning_suggestions()
+    assert_related_questions_migration()
     asyncio.run(assert_answer_delta_is_emitted_before_stream_completion())
     asyncio.run(assert_active_model_stream_does_not_time_out())
     asyncio.run(assert_hanging_model_stream_times_out())
@@ -4233,7 +4329,28 @@ def main() -> None:
             assert member_run["status"] == "succeeded"
             assert member_run["approval_mode"] == "full_access"
             assert member_run["conversation_id"]
-            assert member_run["model_usage"]["model_calls"] == 1
+            assert member_run["model_usage"]["model_calls"] == 2
+            assert member_run["suggested_questions"] == [
+                "What are the next steps?", "Can you give an example?", "What should I check?"
+            ]
+            stored_member_run = client.get(
+                agents_url(workspace_id, f"/{agent_id}/runs/{member_run['id']}"),
+                headers=auth_headers(member_token),
+            )
+            assert stored_member_run.status_code == 200, stored_member_run.text
+            assert stored_member_run.json()["suggested_questions"] == member_run["suggested_questions"]
+            from unittest.mock import patch
+
+            with patch.object(AgentModelHandler, "suggestion_content", "Invalid JSON"):
+                fallback = client.post(
+                    agents_url(workspace_id, f"/{agent_id}/runs"),
+                    headers=auth_headers(member_token),
+                    json={"goal": "Explain this in more detail"},
+                )
+            assert fallback.status_code == 201, fallback.text
+            assert fallback.json()["status"] == "succeeded"
+            assert fallback.json()["result"] == "Completed."
+            assert "suggested_questions" not in fallback.json()
             assert member_run["plan"] == []
             plan_calls = [
                 call
@@ -4340,6 +4457,7 @@ def main() -> None:
             assert logical_console_runs.status_code == 200, logical_console_runs.text
             assert [item["id"] for item in logical_console_runs.json()] == [
                 regenerated_console_payload["id"],
+                fallback.json()["id"],
                 member_run["id"],
             ]
 

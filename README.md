@@ -25,7 +25,7 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 | 能力 | 说明 |
 | --- | --- |
 | 应用构建与发布 | 统一管理 Agent 和工作流，保留草稿与不可变发布版本，提供访问页面、独立 API Key 和接口文档。 |
-| Agent 运行时 | 支持流式回答、对话记忆、上下文压缩、运行中追加输入、工具审批和模型用量记录；通过 Celery、租约、checkpoint 与事件恢复执行。新建 Run 默认具备在隔离环境中执行 bash 的能力。 |
+| Agent 运行时 | 支持流式回答、回答后的相关问题推荐、对话记忆、上下文压缩、运行中追加输入、工具审批和模型用量记录；通过 Celery、租约、checkpoint 与事件恢复执行。新建 Run 默认具备在隔离环境中执行 bash 的能力。 |
 | 知识库与 RAG | 支持文档与 QA 导入、智能层级分段、规范化 Markdown 预览、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/可选重排、引用和检索评测。 |
 | 可视化工作流 | React Flow 画布支持模型、知识检索、分类、条件、表单、变量、工具与已发布 Agent 等节点，提供草稿调试、版本管理和节点执行记录。 |
 | MCP 与统一工具 | 内置与 MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
@@ -165,6 +165,8 @@ make dev
 ```
 
 首次运行会自动创建私有 `.env`、生成缺失的本地密钥、同步后端/前端依赖、构建 PostgreSQL 与执行镜像、生成普通 Docker 的 OpenSandbox 开发配置、启动 PostgreSQL/Redis/Qdrant，并应用 Alembic 迁移。后续启动仅在对应镜像不存在或构建输入变化时重新构建；需要显式重跑镜像构建时使用 `make dev-rebuild`。随后由同一终端统一托管 OpenSandbox、API、Celery Worker 与前端，日志带进程前缀。开发配置保存在 `~/.local/share/nexaflow-opensandbox`，不会覆盖已有配置。
+
+带级别的运行日志默认仅显示 WARNING、ERROR 和 CRITICAL，启动进度、编译输出与异常堆栈继续显示。需要查看 INFO 日志时，可运行 `LOG_LEVEL=INFO make dev`，或在私有 `.env` 中设置 `LOG_LEVEL=INFO`；命令行环境变量优先。
 
 启动完成后访问 <http://localhost:3000>；API 健康检查和文档分别位于 <http://localhost:8000/health> 与 <http://localhost:8000/docs>。按 `Ctrl+C` 会停止本次托管的 OpenSandbox、API、Worker 和前端，但保留基础容器及数据，便于下次快速启动。若 OpenSandbox 已在运行且密钥匹配，启动器会直接复用。
 

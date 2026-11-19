@@ -84,6 +84,7 @@ export type ExternalAgentRun = {
   approval_mode?: AgentApprovalMode
   status: string
   result: string
+  suggested_questions?: string[]
   sources?: AgentRunSource[]
   error: string | null
   progress: ExternalAgentProgressEvent[]

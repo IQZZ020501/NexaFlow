@@ -595,6 +595,9 @@ class AgentRunState(Base):
         JSON, nullable=False, default=list
     )
     result: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    suggested_questions: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     context_summary: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
     )

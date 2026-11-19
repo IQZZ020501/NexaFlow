@@ -421,6 +421,9 @@ def external_run_to_response(run: AgentRun | dict[str, Any]) -> ExternalAgentRun
             value.get("events") or [],
         ),
         sources=knowledge_sources_from_events(value.get("events") or []),
+        suggested_questions=(
+            value.get("suggested_questions", []) if run_status == "succeeded" else []
+        ),
         error=generic_error,
         progress=external_progress_events(value.get("events") or [], run_status),
         created_at=value["created_at"],
