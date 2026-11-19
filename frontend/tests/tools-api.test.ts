@@ -12,7 +12,6 @@ import {
   revokeToolPermission,
   setToolPermission,
   setToolSourceEnabled,
-  updateToolPolicy,
 } from "@/lib/api/tools"
 
 const originalFetch = globalThis.fetch
@@ -124,19 +123,16 @@ describe("unified Tool API", () => {
     ).toBe(true)
   })
 
-  test("pins MCP policy and permissions to tool ids", async () => {
+  test("manages permissions by tool id", async () => {
     const requests = captureRequests()
-    await updateToolPolicy("token", "ws-1", "tool-1", "read_only")
     await listToolPermissions("token", "ws-1", "tool-1")
     await setToolPermission("token", "ws-1", "tool-1", "user-2", "use")
     await revokeToolPermission("token", "ws-1", "tool-1", "user-2")
     expect(requests.map(({ url, method }) => [method, url])).toEqual([
-      ["PUT", "/api/v1/workspaces/ws-1/tools/tool-1/policy"],
       ["GET", "/api/v1/workspaces/ws-1/tools/tool-1/permissions"],
       ["PUT", "/api/v1/workspaces/ws-1/tools/tool-1/permissions/user-2"],
       ["DELETE", "/api/v1/workspaces/ws-1/tools/tool-1/permissions/user-2"],
     ])
-    expect(requests[0]?.body).toEqual({ mode: "read_only" })
-    expect(requests[2]?.body).toEqual({ permission: "use" })
+    expect(requests[1]?.body).toEqual({ permission: "use" })
   })
 })

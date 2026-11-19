@@ -1,6 +1,6 @@
 /* @jsxImportSource react */
 /**
- * DOM-level coverage for the MCP tools page, the MCP/system API clients,
+ * DOM-level coverage for MCP forms, system API clients,
  * and the system display helpers.
  *
  * Session is mocked (mutating the shared mock session object per test);
@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { act } from "react"
 
-import { McpToolsPage, buildMcpServerCreatePayload, type McpForm } from "@/components/tools/mcp-tools-page"
+import { buildMcpServerCreatePayload, type McpForm } from "@/components/tools/mcp-form"
 import { SystemShell } from "@/components/system/system-shell"
 import { LanguageProvider } from "@/contexts/language-provider"
 import {
@@ -22,7 +22,6 @@ import {
   getUserRoleLabel,
 } from "@/components/system/system-utils"
 import type { MeResponse, User } from "@/lib/api/auth"
-import type { McpServer } from "@/lib/api/mcp"
 import {
   addWorkspaceMember,
   addTeamMember,
@@ -34,12 +33,12 @@ import {
   deleteTeam,
   deleteUser,
   deleteWorkspace,
-  listAuditLogs,
+  listAuditLogsPage,
   listAllWorkspaceMembers,
   listTeams,
   listTeamMembers,
   listUsers,
-  listWorkspaceAuditLogs,
+  listWorkspaceAuditLogsPage,
   listWorkspaceMembers,
   listWorkspaces,
   removeTeamMember,
@@ -63,7 +62,6 @@ import {
   renderPage,
   screen,
   waitFor,
-  within,
   type FetchHandler,
 } from "./helpers/dom"
 
@@ -116,11 +114,6 @@ const adminUser: User = {
 
 const adminMe: MeResponse = { user: adminUser, memberships: [] }
 
-const memberMe: MeResponse = {
-  user: { ...adminUser, id: "u-2", username: "member", name: "Member", is_global_admin: false },
-  memberships: [{ workspace_id: "ws-1", role: "member" }],
-}
-
 function setSession(overrides: {
   me?: MeResponse | null
   token?: string | null
@@ -132,19 +125,6 @@ function setSession(overrides: {
     overrides.selectedWorkspaceId === undefined ? "ws-1" : overrides.selectedWorkspaceId
 }
 
-function withNotifySpy() {
-  const calls: Array<[string, string]> = []
-  sessionState.notify = (kind, message) => {
-    calls.push([kind, message])
-  }
-  return calls
-}
-
-async function respondToConfirm(label: string) {
-  const dialog = await screen.findByRole("dialog", { name: "确认操作" })
-  fireEvent.click(within(dialog).getByRole("button", { name: label }))
-}
-
 beforeEach(() => {
   handler = () => jsonResponse([], 200)
 })
@@ -152,64 +132,6 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-function mcpServer(overrides: Partial<McpServer> = {}): McpServer {
-  return {
-    id: "mcp-1",
-    workspace_id: "ws-1",
-    name: "Release tools",
-    transport: "streamable_http",
-    url: "https://mcp.example.com/mcp",
-    stdio_command: null,
-    tools: [
-      {
-        name: "web_search",
-        description: "Search the web",
-        input_schema: {},
-        annotations: null,
-        definition_hash: "h1",
-        policy_mode: "approval_required",
-      },
-      {
-        name: "no_desc",
-        description: "",
-        input_schema: {},
-        annotations: null,
-        definition_hash: "h2",
-        policy_mode: "disabled",
-      },
-    ],
-    status: "active",
-    has_bearer_token: true,
-    bearer_token_hint: "tav…",
-    last_error: null,
-    created_by_user_id: "u-1",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-01T00:00:00Z",
-    ...overrides,
-  }
-}
-
-const stdioServer = mcpServer({
-  id: "mcp-stdio",
-  name: "Local tools",
-  transport: "stdio",
-  url: null,
-  stdio_command: "/usr/local/bin/node server.js",
-  has_bearer_token: false,
-  bearer_token_hint: null,
-  last_error: "connection reset by peer",
-  tools: [
-    {
-      name: "local_tool",
-      description: "Runs locally",
-      input_schema: {},
-      annotations: null,
-      definition_hash: "h3",
-      policy_mode: "read_only",
-    },
-  ],
-})
 
 const user: User = {
   id: "u-1",
@@ -254,26 +176,6 @@ const auditLog: AuditLog = {
   details: { email: "x@app.local" },
   created_at: "2026-08-02T00:00:00Z",
 }
-
-// Controllable IntersectionObserver so the infinite-scroll hook can be
-// triggered deterministically from the test.
-let ioTrigger: ((entries: IntersectionObserverEntry[]) => void) | null = null
-class FakeIntersectionObserver {
-  root: Element | null = null
-  rootMargin = ""
-  thresholds: ReadonlyArray<number> = []
-  constructor(callback: (entries: IntersectionObserverEntry[]) => void) {
-    ioTrigger = callback
-  }
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-  takeRecords(): IntersectionObserverEntry[] {
-    return []
-  }
-}
-;(globalThis as { IntersectionObserver: unknown }).IntersectionObserver =
-  FakeIntersectionObserver
 
 // ---------------------------------------------------------------------------
 // MCP create payload builders
@@ -361,436 +263,6 @@ describe("MCP create payloads", () => {
     for (let i = 0; i < 33; i++) manyEnv[`K${i}`] = "v"
     expect(buildMcpServerCreatePayload(stdio(JSON.stringify({ command: "x", args: [], env: manyEnv })))).toBeNull()
     expect(buildMcpServerCreatePayload(stdio("x".repeat(65_537)))).toBeNull()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// McpToolsPage rendering and interactions
-// ---------------------------------------------------------------------------
-
-describe("McpToolsPage", () => {
-  test("returns nothing without a session token or user", () => {
-    setSession({ token: null })
-    const { container } = renderPage(<McpToolsPage />)
-    expect(container.firstChild).toBeNull()
-
-    setSession({ token: null, me: null })
-    const { container: container2 } = renderPage(<McpToolsPage />)
-    expect(container2.firstChild).toBeNull()
-  })
-
-  test("shows a loading state while fetching servers", async () => {
-    setSession()
-    let resolveList!: (response: Response) => void
-    handler = () =>
-      new Promise<Response>((resolve) => {
-        resolveList = resolve
-      })
-    renderPage(<McpToolsPage />)
-    expect(screen.getByText("正在加载")).toBeTruthy()
-    resolveList(jsonResponse([mcpServer()]))
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-  })
-
-  test("lists servers with tools, badges and details", async () => {
-    setSession()
-    handler = () => jsonResponse([mcpServer(), stdioServer])
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    expect(screen.getAllByText("2 个工具").length).toBe(1)
-    expect(screen.getByText("1 个工具")).toBeTruthy()
-    expect(screen.getByText("Streamable HTTP")).toBeTruthy()
-    expect(screen.getByText("tav…")).toBeTruthy()
-    expect(screen.getByText("stdio 命令：/usr/local/bin/node server.js")).toBeTruthy()
-    expect(screen.getByText("connection reset by peer")).toBeTruthy()
-    // two servers, no more pages
-    expect(screen.getByText("已加载全部")).toBeTruthy()
-    // open tool list details
-    fireEvent.click(screen.getAllByText("查看工具列表")[0])
-    expect(screen.getByText("web_search")).toBeTruthy()
-    expect(screen.getByText("Search the web")).toBeTruthy()
-    expect(screen.queryByLabelText("工具执行策略")).toBeNull()
-    expect(screen.queryByText("只读自动执行")).toBeNull()
-    expect(screen.queryByText("每次调用前审批")).toBeNull()
-  })
-
-  test("lets members add their own MCP servers", async () => {
-    setSession({ me: memberMe })
-    handler = () => jsonResponse([])
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    expect(screen.queryAllByRole("button", { name: "添加 MCP Server" }).length).toBeGreaterThan(0)
-  })
-
-  test("members can manage their own connections without per-tool policies", async () => {
-    setSession({ me: memberMe })
-    handler = () => jsonResponse([mcpServer()])
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    expect(screen.getByLabelText("刷新工具")).toBeTruthy()
-    expect(screen.getByLabelText("删除 MCP Server")).toBeTruthy()
-    expect(screen.queryByLabelText("工具执行策略")).toBeNull()
-  })
-
-  test("reports list errors through notifications", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    handler = () => jsonResponse({ detail: "unreachable" }, 502)
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    expect(notifications).toEqual([["error", "unreachable"]])
-  })
-
-  test("loads more servers when the end sentinel intersects", async () => {
-    setSession()
-    const batch1 = Array.from({ length: 50 }, (_, i) =>
-      mcpServer({ id: `mcp-${i}`, name: `Server ${i}` })
-    )
-    const batch2 = Array.from({ length: 5 }, (_, i) =>
-      mcpServer({ id: `more-${i}`, name: `More ${i}` })
-    )
-    let resolveMore!: (response: Response) => void
-    handler = (url) => {
-      if (url.includes("offset=50")) {
-        return new Promise<Response>((resolve) => {
-          resolveMore = resolve
-        })
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse(batch1)
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Server 0")).toBeTruthy())
-    expect(screen.queryByText("More 0")).toBeNull()
-    ioTrigger?.([{ isIntersecting: true } as IntersectionObserverEntry])
-    await waitFor(() => expect(screen.getByText("正在加载")).toBeTruthy())
-    // A second intersection while the batch is in flight is ignored.
-    ioTrigger?.([{ isIntersecting: true } as IntersectionObserverEntry])
-    resolveMore(jsonResponse(batch2))
-    await waitFor(() => expect(screen.getByText("More 0")).toBeTruthy())
-    await waitFor(() => expect(screen.getByText("已加载全部")).toBeTruthy())
-  })
-
-  test("does not load more servers without a selected workspace", async () => {
-    setSession({ selectedWorkspaceId: null })
-    const notifications = withNotifySpy()
-    const calls: string[] = []
-    handler = (url) => {
-      calls.push(url)
-      if (url.includes("/mcp-servers")) return jsonResponse([])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    ioTrigger?.([{ isIntersecting: true } as IntersectionObserverEntry])
-    await waitFor(() =>
-      expect(calls.some((call) => call.includes("offset=50"))).toBe(false)
-    )
-    expect(notifications).toEqual([])
-  })
-
-  test("reports errors when loading more servers fails", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: string[] = []
-    const batch1 = Array.from({ length: 50 }, (_, i) =>
-      mcpServer({ id: `mcp-${i}`, name: `Server ${i}` })
-    )
-    handler = (url) => {
-      calls.push(url)
-      if (url.includes("offset=50")) {
-        return jsonResponse({ detail: "more failed" }, 500)
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse(batch1)
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(
-      () => expect(screen.getByText("Server 0")).toBeTruthy(),
-      { timeout: 5000 }
-    )
-    ioTrigger?.([{ isIntersecting: true } as IntersectionObserverEntry])
-    // The failed page request must actually have been issued...
-    await waitFor(
-      () => expect(calls.some((call) => call.includes("offset=50"))).toBe(true),
-      { timeout: 5000 }
-    )
-    // ...before the error notification lands.
-    await waitFor(
-      () => expect(notifications).toEqual([["error", "more failed"]]),
-      { timeout: 5000 }
-    )
-    // The first batch stays and the list is not marked complete.
-    expect(screen.getByText("Server 0")).toBeTruthy()
-    expect(screen.queryByText("已加载全部")).toBeNull()
-  })
-
-  test("creates a streamable_http server through the dialog", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (init?.method === "POST") {
-        return jsonResponse(mcpServer({ id: "mcp-new", name: "My server", url: "https://example.com/mcp" }))
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse([])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    expect(screen.getByText("连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。")).toBeTruthy()
-
-    // preset fills the form
-    fireEvent.click(screen.getByText("Tavily"))
-    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe("Tavily")
-    expect((screen.getByLabelText("MCP 地址") as HTMLInputElement).value).toBe("https://mcp.tavily.com/mcp")
-    expect(screen.getByText("需要 Token")).toBeTruthy()
-
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "My server" } })
-    fireEvent.change(screen.getByLabelText("MCP 地址"), { target: { value: "https://example.com/mcp" } })
-    fireEvent.change(screen.getByLabelText("Bearer Token（可选）"), { target: { value: "secret" } })
-
-    const dialog = screen.getByRole("dialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "添加 MCP Server" }))
-    await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true))
-    const post = calls.find((c) => c.init?.method === "POST")!
-    expect(post.url).toBe("/api/v1/workspaces/ws-1/mcp-servers")
-    expect(JSON.parse(post.init!.body as string)).toEqual({
-      name: "My server",
-      transport: "streamable_http",
-      url: "https://example.com/mcp",
-      bearer_token: "secret",
-    })
-    expect(notifications).toEqual([["success", "MCP Server 已添加"]])
-    await waitFor(() => expect(screen.getByText("My server")).toBeTruthy())
-    expect(screen.queryByRole("dialog")).toBeNull()
-  })
-
-  test("submit stays disabled until the form is valid", async () => {
-    setSession()
-    handler = (url) => (url.includes("/mcp-servers") ? jsonResponse([]) : jsonResponse(null, 404))
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    const dialog = screen.getByRole("dialog")
-    const submit = within(dialog).getByRole("button", { name: "添加 MCP Server" }) as HTMLButtonElement
-    expect(submit.disabled).toBe(true)
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Only name" } })
-    expect(submit.disabled).toBe(true)
-    fireEvent.change(screen.getByLabelText("MCP 地址"), { target: { value: "https://example.com/mcp" } })
-    expect(submit.disabled).toBe(false)
-    // cancel resets the form and closes the dialog
-    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }))
-    expect(screen.queryByRole("dialog")).toBeNull()
-  })
-
-  test("reports create errors and keeps the dialog open", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    handler = (url, init) => {
-      if (init?.method === "POST") return jsonResponse({ detail: "connection refused" }, 500)
-      if (url.includes("/mcp-servers")) return jsonResponse([])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Broken" } })
-    fireEvent.change(screen.getByLabelText("MCP 地址"), { target: { value: "https://example.com/mcp" } })
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "添加 MCP Server" }))
-    await waitFor(() => expect(notifications).toEqual([["error", "connection refused"]]))
-    expect(screen.getByRole("dialog")).toBeTruthy()
-  })
-
-  test("registers a stdio server with a JSON config", async () => {
-    setSession()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (init?.method === "POST") return jsonResponse(mcpServer({ id: "mcp-local", name: "Local" }))
-      if (url.includes("/mcp-servers")) return jsonResponse([])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("radio")[2]) // stdio
-    expect(screen.queryByLabelText("MCP 地址")).toBeNull()
-    expect(screen.queryByLabelText("Bearer Token（可选）")).toBeNull()
-    const textarea = screen.getByLabelText("stdio 配置（JSON）") as HTMLTextAreaElement
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Local" } })
-
-    fireEvent.change(textarea, { target: { value: "{not json" } })
-    await waitFor(() => expect(screen.getByText("请输入有效的 stdio JSON 配置。")).toBeTruthy())
-    expect(
-      (within(screen.getByRole("dialog")).getByRole("button", { name: "添加 MCP Server" }) as HTMLButtonElement)
-        .disabled
-    ).toBe(true)
-
-    fireEvent.change(textarea, {
-      target: {
-        value: JSON.stringify({
-          command: "/usr/bin/node",
-          args: ["server.js"],
-          cwd: "/srv",
-          env: { KEY: "v" },
-          transport: "stdio",
-        }),
-      },
-    })
-    await waitFor(() => expect(screen.getByText("stdio 配置加密保存，不返回明文。命令和目录指向执行镜像；出站域名须在部署白名单内。")).toBeTruthy())
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "添加 MCP Server" }))
-    await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true))
-    const post = calls.find((c) => c.init?.method === "POST")!
-    expect(JSON.parse(post.init!.body as string)).toEqual({
-      name: "Local",
-      transport: "stdio",
-      stdio_config: { command: "/usr/bin/node", args: ["server.js"], cwd: "/srv", env: { KEY: "v" } },
-    })
-  })
-
-  test("registers an SSE server and switches transport placeholders", async () => {
-    setSession()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (init?.method === "POST") return jsonResponse(mcpServer({ id: "mcp-sse", name: "SSE Server" }))
-      if (url.includes("/mcp-servers")) return jsonResponse([])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    expect((screen.getByLabelText("MCP 地址") as HTMLInputElement).placeholder).toBe("https://mcp.example.com/mcp")
-    fireEvent.click(screen.getAllByRole("radio")[1]) // SSE
-    expect((screen.getByLabelText("MCP 地址") as HTMLInputElement).placeholder).toBe("https://mcp.example.com/sse")
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "SSE Server" } })
-    fireEvent.change(screen.getByLabelText("MCP 地址"), { target: { value: "https://mcp.example.com/sse" } })
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "添加 MCP Server" }))
-    await waitFor(() => expect(calls.some((c) => c.init?.method === "POST")).toBe(true))
-    const body = JSON.parse(calls.find((c) => c.init?.method === "POST")!.init!.body as string)
-    expect(body).toEqual({
-      name: "SSE Server",
-      transport: "sse",
-      url: "https://mcp.example.com/sse",
-    })
-  })
-
-  test("refreshes a server's tools", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (url.endsWith("/mcp-servers/mcp-1/refresh")) {
-        return jsonResponse(mcpServer({ tools: [mcpServer().tools[0]] }))
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("2 个工具")).toBeTruthy())
-    fireEvent.click(screen.getByLabelText("刷新工具"))
-    await waitFor(() => expect(screen.getByText("1 个工具")).toBeTruthy())
-    expect(notifications).toEqual([["success", "MCP 工具列表已刷新"]])
-    expect(calls.some((c) => c.url.endsWith("/mcp-servers/mcp-1/refresh") && c.init?.method === "POST")).toBe(true)
-  })
-
-  test("reports refresh errors", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    handler = (url) => {
-      if (url.endsWith("/mcp-servers/mcp-1/refresh")) return jsonResponse({ detail: "refresh failed" }, 500)
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    fireEvent.click(screen.getByLabelText("刷新工具"))
-    await waitFor(() => expect(notifications).toEqual([["error", "refresh failed"]]))
-    expect(screen.getByText("2 个工具")).toBeTruthy()
-  })
-
-  test("deletes a server after confirmation", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (init?.method === "DELETE") return jsonResponse(null, 204)
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    fireEvent.click(screen.getByLabelText("删除 MCP Server"))
-    const dialog = await screen.findByRole("dialog", { name: "确认操作" })
-    expect(dialog.textContent).toContain("确定删除 MCP Server“Release tools”吗？")
-    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }))
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    expect(calls.some((c) => c.url.endsWith("/mcp-servers/mcp-1") && c.init?.method === "DELETE")).toBe(true)
-    expect(notifications).toEqual([["success", "MCP Server 已删除"]])
-  })
-
-  test("keeps the server when deletion is cancelled or fails", async () => {
-    setSession()
-    const notifications = withNotifySpy()
-    const calls: Array<{ url: string; init?: RequestInit }> = []
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("Release tools")).toBeTruthy())
-    fireEvent.click(screen.getByLabelText("删除 MCP Server"))
-    await respondToConfirm("取消")
-    expect(calls.some((c) => c.init?.method === "DELETE")).toBe(false)
-    expect(screen.getByText("Release tools")).toBeTruthy()
-
-    // delete failure reports the error and keeps the server
-    handler = (url, init) => {
-      calls.push({ url, init })
-      if (init?.method === "DELETE") return jsonResponse({ detail: "gone" }, 500)
-      if (url.includes("/mcp-servers")) return jsonResponse([mcpServer()])
-      return jsonResponse(null, 404)
-    }
-    fireEvent.click(screen.getByLabelText("删除 MCP Server"))
-    await respondToConfirm("删除")
-    await waitFor(() => expect(notifications).toEqual([["error", "gone"]]))
-    expect(screen.getByText("Release tools")).toBeTruthy()
-  })
-
-  test("shows the saving state while connecting", async () => {
-    setSession()
-    let resolveCreate!: (response: Response) => void
-    handler = (url, init) => {
-      if (init?.method === "POST") {
-        return new Promise<Response>((resolve) => {
-          resolveCreate = resolve
-        })
-      }
-      if (url.includes("/mcp-servers")) return jsonResponse([])
-      return jsonResponse(null, 404)
-    }
-    renderPage(<McpToolsPage />)
-    await waitFor(() => expect(screen.getByText("还没有 MCP Server")).toBeTruthy())
-    fireEvent.click(screen.getAllByRole("button", { name: "添加 MCP Server" })[0])
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy())
-    fireEvent.change(screen.getByLabelText("名称"), { target: { value: "Slow" } })
-    fireEvent.change(screen.getByLabelText("MCP 地址"), { target: { value: "https://example.com/mcp" } })
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "添加 MCP Server" }))
-    await waitFor(() => expect(screen.getByText("连接并发现中")).toBeTruthy())
-    resolveCreate(jsonResponse(mcpServer({ id: "mcp-slow", name: "Slow" })))
-    await waitFor(() => expect(screen.getByText("Slow")).toBeTruthy())
-    expect(screen.queryByRole("dialog")).toBeNull()
   })
 })
 
@@ -946,8 +418,8 @@ describe("system API client", () => {
 
   test("audit log endpoints", async () => {
     const calls = recordRequests(() => jsonResponse([auditLog]))
-    await expect(listAuditLogs("tok")).resolves.toEqual([auditLog])
-    await expect(listWorkspaceAuditLogs("tok", "w-1")).resolves.toEqual([auditLog])
+    await expect(listAuditLogsPage("tok")).resolves.toMatchObject({ items: [auditLog] })
+    await expect(listWorkspaceAuditLogsPage("tok", "w-1")).resolves.toMatchObject({ items: [auditLog] })
     expect(calls.map((c) => c.url)).toEqual([
       "/api/v1/admin/audit-logs",
       "/api/v1/workspaces/w-1/audit-logs",
@@ -960,7 +432,7 @@ describe("system API client", () => {
       if (url === "/api/v1/workspaces") return jsonResponse({ detail: [{ msg: "name required" }, "raw item"] }, 422)
       return new Response("boom text", { status: 500 })
     }
-    await expect(listAuditLogs("tok")).rejects.toThrow("forbidden")
+    await expect(listAuditLogsPage("tok")).rejects.toThrow("forbidden")
     await expect(listWorkspaces("tok")).rejects.toThrow("name required; raw item")
     // A non-JSON error body fails while parsing the payload.
     await expect(listTeams("tok", "w-1")).rejects.toThrow(/boom/)

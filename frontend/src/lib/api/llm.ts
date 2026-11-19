@@ -85,25 +85,6 @@ export function listModelProviderCatalog(token: string, modelType?: string) {
   })
 }
 
-export type ModelTypeOption = {
-  key: string
-  value: string
-}
-
-/**
- * Lists the model types supported by a model provider.
- *
- * @param token - Authentication token for the request
- * @param provider - The provider whose supported model types to retrieve
- * @returns The provider's supported model types
- */
-export function listModelProviderModelTypes(token: string, provider: string) {
-  return request<ModelTypeOption[]>(
-    `/api/v1/model-providers/model-types?provider=${encodeURIComponent(provider)}`,
-    { token }
-  )
-}
-
 /**
  * Lists the base models available from a provider for a model type.
  *

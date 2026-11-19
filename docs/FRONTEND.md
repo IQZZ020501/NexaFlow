@@ -107,7 +107,6 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/components/tools/builtin-tool-icon.tsx` — 内置工具/Skill 图标映射
 - `frontend/src/components/tools/tool-permissions-dialog.tsx` — 同工作空间成员搜索及 `view/use/none` 授权管理
 - `frontend/src/components/tools/tool-picker.tsx` — Agent 共用 Tool picker：搜索、键盘选择、固定 Tool/Version 引用与失效状态
-- `frontend/src/components/tools/mcp-tools-page.tsx` — 旧 MCP 专页兼容组件；生产 `/app/tools` 不再使用，仅保留既有回归覆盖
 
 **workflows/**（Workflow 画布与公开对话）
 - `frontend/src/components/workflows/workflow-canvas.tsx`、`workflow-node.tsx`、`workflow-edge.tsx`、`workflow-node-palette.tsx` — React Flow 画布、节点/连线与节点面板
@@ -168,9 +167,6 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 **ui/**（shadcn 基础组件）
 - `frontend/src/components/ui/button.tsx`、`input.tsx`、`label.tsx`、`card.tsx`、`card-more-menu.tsx`、`dialog.tsx`、`dropdown-menu.tsx`、`field.tsx`、`icon-button.tsx`、`avatar.tsx`、`badge.tsx`、`tooltip.tsx`、`resource-card.tsx`、`spec.tsx`（键值展示小部件）
 
-**pages/**
-- `frontend/src/components/pages/placeholder-page.tsx` — 功能占位页（当前无调用方，仅保留导出）
-
 ### contexts/（全局状态）
 
 - `frontend/src/contexts/app-providers.tsx` — 组合 Language/Theme/Session/MessageCenter Provider
@@ -191,7 +187,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/lib/api-client.ts` — fetch 封装：`apiUrl`/`listQuery`、`request`/`requestPage`（`X-Total-Count` 分页信封）/`requestBlob`、JSON/FormData、Bearer token、`ApiError` 归一化与 `NEXT_PUBLIC_API_BASE_URL` 基址覆盖
 - `frontend/src/lib/agent-views.ts`、`knowledge-views.ts` — 详情深路由契约（`AGENT_DETAIL_VIEWS`、`appViewPath`、`parseAgentDetailView` 等）
 - `frontend/src/lib/knowledge-upload-route.ts` — 上传路由状态 URL 序列化/校验
-- `frontend/src/lib/pages.ts` — 四大功能页布局元数据目录
+- `frontend/src/lib/pages.ts` — 桌面与移动端导航共用的四大功能页名称、图标和键
 - `frontend/src/lib/storage.ts` — localStorage 键常量
 - `frontend/src/lib/utils.ts` — `cn()` class 合并
 - `frontend/src/lib/dom.ts` — dropdown 事件来源判定

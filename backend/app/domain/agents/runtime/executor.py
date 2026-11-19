@@ -96,33 +96,12 @@ async def run_agent(
     max_tool_calls: int = MAX_AGENT_TOOL_CALLS,
     session: AgentSession | None = None,
     execution_deadline_at: datetime | None = None,
-    max_knowledge_calls: int = 6,
-    max_knowledge_rounds: int = 3,
-    max_no_progress_rounds: int = 2,
-    adaptive_retrieval: bool = False,
-    knowledge_min_evidence_items: int = 0,
-    knowledge_require_source_diversity: bool = False,
-    max_model_tokens: int | None = None,
-    grounding_mode: str | None = None,
-    initial_evidence: list[dict[str, Any]] | None = None,
 ) -> AgentExecutionResult:
     """Run a model/tool loop independently of any configured capability.
 
-    Legacy retrieval, grounding and cumulative token-budget arguments are
-    accepted as no-ops for old callers. Global turn, tool-call and timeout
-    circuit breakers remain; model usage is recorded rather than capped here.
+    Turn, tool-call and timeout circuit breakers apply to every capability;
+    model usage is recorded rather than capped cumulatively here.
     """
-    del (
-        max_knowledge_calls,
-        max_knowledge_rounds,
-        max_no_progress_rounds,
-        adaptive_retrieval,
-        knowledge_min_evidence_items,
-        knowledge_require_source_diversity,
-        max_model_tokens,
-        grounding_mode,
-        initial_evidence,
-    )
     initial_state: AgentState = (
         deserialize_agent_state(checkpoint)
         if checkpoint

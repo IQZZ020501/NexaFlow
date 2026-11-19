@@ -22,14 +22,14 @@ import {
   listAllSystemLogs,
   listAllWorkspaceAuditLogs,
   listAllWorkspaceMembers,
-  listAuditLogs,
+  listAuditLogsPage,
   listSessions,
-  listSystemLogs,
+  listSystemLogsPage,
   listTeamMembers,
   listTeams,
   listUserSessions,
   listUsers,
-  listWorkspaceAuditLogs,
+  listWorkspaceAuditLogsPage,
   listWorkspaceInvitations,
   listWorkspaceMembers,
   listWorkspaces,
@@ -373,9 +373,9 @@ describe("audit and system logs", () => {
     created_at: "2026-08-19T00:00:00Z",
   }
 
-  test("listAuditLogs includes every defined filter", async () => {
+  test("listAuditLogsPage includes every defined filter", async () => {
     install(() => jsonResponse([log]))
-    await listAuditLogs(TOKEN, {
+    await listAuditLogsPage(TOKEN, {
       limit: 10,
       offset: 5,
       workspace_id: "ws-1",
@@ -392,29 +392,29 @@ describe("audit and system logs", () => {
     )
   })
 
-  test("listAuditLogs drops empty filter values", async () => {
+  test("listAuditLogsPage drops empty filter values", async () => {
     install(() => jsonResponse([log]))
-    await listAuditLogs(TOKEN, { action: "", search: undefined, from: "" })
+    await listAuditLogsPage(TOKEN, { action: "", search: undefined, from: "" })
     expectCall("/api/v1/admin/audit-logs")
   })
 
-  test("listAuditLogs works without filters", async () => {
+  test("listAuditLogsPage works without filters", async () => {
     install(() => jsonResponse([log]))
-    await listAuditLogs(TOKEN)
+    await listAuditLogsPage(TOKEN)
     expectCall("/api/v1/admin/audit-logs")
   })
 
-  test("listWorkspaceAuditLogs scopes the query to the workspace", async () => {
+  test("listWorkspaceAuditLogsPage scopes the query to the workspace", async () => {
     install(() => jsonResponse([log]))
-    await listWorkspaceAuditLogs(TOKEN, "ws-1", { action: "team.create" })
+    await listWorkspaceAuditLogsPage(TOKEN, "ws-1", { action: "team.create" })
     expectCall(
       "/api/v1/workspaces/ws-1/audit-logs?action=team.create"
     )
   })
 
-  test("listSystemLogs serializes log filters", async () => {
+  test("listSystemLogsPage serializes log filters", async () => {
     install(() => jsonResponse([{ ...log, id: "sys-1" }]))
-    await listSystemLogs(TOKEN, {
+    await listSystemLogsPage(TOKEN, {
       level: "error",
       event: "auth.login_failed",
       status_code: 500,

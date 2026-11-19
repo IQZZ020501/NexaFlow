@@ -283,25 +283,6 @@ export function deleteToolSource(
 }
 
 /**
- * Updates the policy mode for a workspace tool.
- *
- * @param mode - The policy mode to apply to the tool
- * @returns The updated tool details
- */
-export function updateToolPolicy(
-  token: string,
-  workspaceId: string,
-  toolId: string,
-  mode: ToolPolicyMode
-) {
-  return request<ToolDetail>(toolsPath(workspaceId, `/${toolId}/policy`), {
-    method: "PUT",
-    token,
-    body: JSON.stringify({ mode }),
-  })
-}
-
-/**
  * Lists users who have permission to access a tool.
  *
  * @param toolId - The identifier of the tool whose permissions are listed

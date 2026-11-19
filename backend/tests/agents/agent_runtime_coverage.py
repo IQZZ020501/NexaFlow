@@ -524,25 +524,7 @@ def assert_agent_tool_construction() -> None:
     assert is_parallel_safe(tool) is True
 
 
-def assert_legacy_tool_protocol_compatibility() -> None:
-    pptx_schema = {
-        "type": "object",
-        "properties": {
-            "filename": {"type": "string"},
-            "presentation": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "subtitle": {"type": "string"},
-                    "slides": {"type": "array", "minItems": 1},
-                },
-                "required": ["title", "slides"],
-                "additionalProperties": False,
-            },
-        },
-        "required": ["filename", "presentation"],
-        "additionalProperties": False,
-    }
+def assert_tool_protocol_envelopes_and_text_filtering() -> None:
     captured: list[dict[str, Any]] = []
 
     async def execute(arguments: str) -> AgentToolResult:
@@ -550,74 +532,43 @@ def assert_legacy_tool_protocol_compatibility() -> None:
         return AgentToolResult(content="ok", summary="ok")
 
     tool = create_agent_tool(
-        name="pptx_skill",
-        description="PPTX",
-        parameters=pptx_schema,
+        name="echo",
+        description="Echo",
+        parameters={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
         execute=execute,
     )
-    result = asyncio.run(
-        tool.ainvoke(
-            {
-                "arguments": {
-                    "filename": "lesson.pptx",
-                    "file_title": "标题",
-                    "file_subtitle": "副标题",
-                    "slides": [{"type": "hero"}],
-                }
-            }
-        )
-    )
-    assert result.is_error is False
-    assert captured[0]["presentation"]["title"] == "标题"
-    assert captured[0]["presentation"]["slides"] == [{"type": "hero"}]
-    nested = asyncio.run(
-        tool.ainvoke(
-            {
-                "arguments": json.dumps(
-                    {
-                        "filename": "lesson.pptx",
-                        "presentation": {
-                            "title": "标题",
-                            "slides": [{"type": "hero"}],
-                        },
-                    },
-                    ensure_ascii=False,
-                )
-            }
-        )
-    )
-    assert nested.is_error is False
+    for arguments in ({"text": "hello"}, json.dumps({"text": "hello"})):
+        result = asyncio.run(tool.ainvoke({"arguments": arguments}))
+        assert result.is_error is False
+    assert captured == [{"text": "hello"}, {"text": "hello"}]
 
-    invalid = asyncio.run(
-        tool.ainvoke(
-            {
-                "filename": "lesson.pptx",
-                "presentation": {"title": "标题"},
-            }
-        )
-    )
+    invalid = asyncio.run(tool.ainvoke({"other": "hello"}))
     assert invalid.is_error is True
-    assert "slides" in invalid.content
+    assert "text" in invalid.content
+    assert len(captured) == 2
 
     dsml = (
-        '<|DSML|function_calls><|DSML|invoke name="pptx_skill">'
-        '<|DSML|parameter name="filename" string="true">lesson.pptx'
-        "</|DSML|parameter>"
-        '<|DSML|parameter name="file_title" string="true">标题'
+        '<|DSML|function_calls><|DSML|invoke name="echo">'
+        '<|DSML|parameter name="text" string="true">hello'
         "</|DSML|parameter>"
         "</|DSML|invoke></|DSML|function_calls>"
     )
     completion = graph_module.model_completion(AIMessage(content=dsml))
     assert completion.content == ""
     assert len(completion.tool_calls) == 1
-    assert completion.tool_calls[0].name == "pptx_skill"
+    assert completion.tool_calls[0].name == "echo"
     assert "<|DSML|" not in completion.content
 
     spaced_dsml = dsml.replace("<|DSML|", "<| | DSML | |")
     spaced_completion = graph_module.model_completion(AIMessage(content=spaced_dsml))
     assert spaced_completion.content == ""
     assert len(spaced_completion.tool_calls) == 1
-    assert spaced_completion.tool_calls[0].name == "pptx_skill"
+    assert spaced_completion.tool_calls[0].name == "echo"
 
     text_filter = graph_module.ModelTextStreamFilter()
     assert text_filter.push("hello <|D") == "hello "
@@ -875,8 +826,6 @@ def assert_graph_error_branches() -> None:
             [{"role": "user", "content": "hi"}],
             [knowledge_tool],
             max_tool_calls=12,
-            max_knowledge_calls=1,
-            max_knowledge_rounds=1,
         )
         assert result.content == "Answer after multiple knowledge searches."
         assert len(executed_calls) == 12, executed_calls
@@ -1153,7 +1102,6 @@ def assert_executor_checkpoint_paths() -> None:
                 grounding_status="pending",
                 evidence_packets=[{"chunk_id": "chunk-1", "content": "evidence"}],
             ),
-            grounding_mode="agentic",
         )
         assert result.content == "draft answer"
         assert not hasattr(result, "grounding_status")
@@ -4151,40 +4099,14 @@ async def assert_durable_execution_paths(
     ).hexdigest()[:8]
     holder.model = RuntimeModelStub(
         [
-            tool_completion(mcp_name_inject, "call-inject-1", '{"topic": "x"}'),
+            tool_completion(
+                mcp_name_inject,
+                "call-inject-1",
+                json.dumps({"arguments": {"topic": "x"}, "requires_approval": False}),
+            ),
             ok_completion("Injected output ignored."),
         ]
     )
-    async with get_session_factory()() as db:
-        # Drive the MCP tool as read-only (auto approval, external_read) so
-        # the injection run executes without an interactive approval. This
-        # must happen before the run is prepared: tool snapshots are captured
-        # at prepare time.
-        inject_tool = next(
-            item
-            for item in await tool_repository.list_tools(db, workspace_id)
-            if item.kind == "mcp"
-        )
-        inject_policy = await tool_repository.get_tool_policy(
-            db,
-            workspace_id,
-            inject_tool.id,
-        )
-        assert inject_policy is not None
-        expected_revision = inject_policy.revision
-        inject_policy.revision += 1
-        inject_policy.approval = "auto"
-        inject_policy.effect = "external_read"
-        inject_policy.updated_at = utc_now()
-        assert (
-            await tool_repository.update_tool_policy_if_revision(
-                db,
-                inject_policy,
-                expected_revision,
-            )
-            is not None
-        )
-        await db.commit()
     run, _ = await prepare_console_run(
         workspace_id,
         agent_id,
@@ -4193,8 +4115,8 @@ async def assert_durable_execution_paths(
     )
     run.mcp_tools = [{"server_id": mcp_server_id, "tool_name": "lookup_release"}]
     run.knowledge_base_ids = []
-    # The tool policy set above is what approves this call; the run default
-    # would otherwise stop for interactive consent on every non-pure tool.
+    # Let the model authorize this routine read through the current MCP
+    # approval envelope, without relying on a per-tool policy override.
     run.application_snapshot["approval_mode"] = "ask_risky"
     async with get_session_factory()() as db:
         await agent_repository.save_agent_run(db, run)
@@ -4284,27 +4206,6 @@ async def assert_durable_execution_paths(
         assert injected in result_text
     finally:
         tool_adapters.call_mcp_tool = original_call_inject
-        async with get_session_factory()() as db:
-            restored_policy = await tool_repository.get_tool_policy(
-                db,
-                workspace_id,
-                inject_tool.id,
-            )
-            assert restored_policy is not None
-            restored_revision = restored_policy.revision
-            restored_policy.revision += 1
-            restored_policy.approval = "each_call"
-            restored_policy.effect = "unknown"
-            restored_policy.updated_at = utc_now()
-            assert (
-                await tool_repository.update_tool_policy_if_revision(
-                    db,
-                    restored_policy,
-                    restored_revision,
-                )
-                is not None
-            )
-            await db.commit()
 
     # -- run timeout (781) --
     short_settings = dataclasses.replace(settings, agent_run_timeout_seconds=0.2)
@@ -5442,8 +5343,6 @@ async def assert_agent_tool_runtime_paths(
     mcp_server_id: str,
 ) -> None:
     """Direct coverage of app/application/agent_tool_runtime.py branches."""
-    import dataclasses as dc
-
     from app.application.agents.tools import runtime as atr
     from app.domain.agents.runtime import (
         AgentExecutionPaused,
@@ -5488,8 +5387,7 @@ async def assert_agent_tool_runtime_paths(
         "Tool runtime paths",
     )
     run.depth = 1
-    # These assertions cover policy-driven consent, so the run must let the
-    # frozen Tool policy decide instead of the run default asking every time.
+    # Exercise both model decisions in the current per-call MCP approval mode.
     run.application_snapshot["approval_mode"] = "ask_risky"
     assert run.tool_snapshots
     snapshot = tool_snapshot_from_payload(run.tool_snapshots[0])
@@ -5584,18 +5482,6 @@ async def assert_agent_tool_runtime_paths(
     assert invalid is not None and invalid.is_error
     assert "parameters are invalid" in invalid.content
 
-    auto_snapshot = dc.replace(
-        snapshot,
-        approval="auto",
-        effect="external_read",
-    )
-    auto_runtime = atr.UnifiedAgentToolRuntime(
-        run,
-        [auto_snapshot],
-        "worker-tool-2",
-        settings,
-        asyncio.Event(),
-    )
     original_execute = atr.execute_tool_invocation
 
     async def busy_execute(*_args, **_kwargs):
@@ -5604,14 +5490,14 @@ async def assert_agent_tool_runtime_paths(
     atr.execute_tool_invocation = busy_execute
     try:
         try:
-            await auto_runtime.before(
+            await runtime.before(
                 1,
                 {
                     "id": "call-busy-2",
-                    "name": auto_snapshot.function_name,
+                    "name": snapshot.function_name,
                     "arguments": '{"topic": "x"}',
                 },
-                {},
+                {"model_requires_approval": "false"},
                 {"topic": "x"},
             )
         except AgentToolBusy as exc:
@@ -5636,14 +5522,14 @@ async def assert_agent_tool_runtime_paths(
     atr.execute_tool_invocation = uncertain_execute
     try:
         try:
-            await auto_runtime.before(
+            await runtime.before(
                 1,
                 {
                     "id": "call-uncertain",
-                    "name": auto_snapshot.function_name,
+                    "name": snapshot.function_name,
                     "arguments": '{"topic": "x"}',
                 },
-                {},
+                {"model_requires_approval": "false"},
                 {"topic": "x"},
             )
         except AgentRunnerError as exc:
@@ -5668,14 +5554,14 @@ async def assert_agent_tool_runtime_paths(
     atr.execute_tool_invocation = approval_execute
     try:
         try:
-            await auto_runtime.before(
+            await runtime.before(
                 1,
                 {
                     "id": "call-approval-required",
-                    "name": auto_snapshot.function_name,
+                    "name": snapshot.function_name,
                     "arguments": '{"topic": "x"}',
                 },
-                {},
+                {"model_requires_approval": "false"},
                 {"topic": "x"},
             )
         except AgentRunnerError as exc:
@@ -5690,14 +5576,14 @@ async def assert_agent_tool_runtime_paths(
     atr.execute_tool_invocation = approval_execute
     try:
         try:
-            await auto_runtime.before(
+            await runtime.before(
                 1,
                 {
                     "id": "call-pause",
-                    "name": auto_snapshot.function_name,
+                    "name": snapshot.function_name,
                     "arguments": '{"topic": "x"}',
                 },
-                {},
+                {"model_requires_approval": "false"},
                 {"topic": "x"},
             )
         except AgentExecutionPaused as exc:
@@ -6587,7 +6473,7 @@ async def assert_orphaned_stream_observes_recovery(
 def main() -> None:
     assert_usage_normalization()
     assert_agent_tool_construction()
-    assert_legacy_tool_protocol_compatibility()
+    assert_tool_protocol_envelopes_and_text_filtering()
     assert_callback_safety()
     assert_graph_error_branches()
     assert_executor_checkpoint_paths()

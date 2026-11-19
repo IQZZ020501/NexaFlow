@@ -5854,22 +5854,14 @@ def test_canonical_mcp_policy_allows_owner_read_only_attestation() -> None:
         assert deleted.status_code == 204, deleted.text
 
 
-def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
-    from tests.support import settings as test_settings
-
+def test_tool_worker_executes_and_retries_busy_invocations() -> None:
     from app.application.tools.runtime.service import ToolInvocationBusy
-    from app.infra.tools import dispatch as tool_dispatch
     from app.tasks.tools import jobs as tool_tasks
 
     original_configure = tool_tasks.configure_task_worker
     original_execute = tool_tasks.execute_tool_invocation
-    original_send_task = tool_dispatch.celery_app.send_task
-    original_log_error = tool_dispatch.log_error
-    original_broker_url = tool_dispatch.celery_app.conf.broker_url
-    original_eager = tool_dispatch.celery_app.conf.task_always_eager
     try:
         tool_tasks.configure_task_worker = lambda _settings: None
-        tool_dispatch.log_error = lambda *args, **kwargs: None
         calls: list[tuple[str, str]] = []
 
         async def execute(invocation_id, _settings, worker_task_id):
@@ -5914,38 +5906,9 @@ def test_tool_tasks_never_execute_inline_and_recover_queued_tests() -> None:
         else:
             raise AssertionError("A busy Tool invocation must be retried.")
 
-        dispatched: list[dict] = []
-        tool_dispatch.celery_app.conf.task_always_eager = True
-        tool_dispatch.celery_app.send_task = lambda *args, **kwargs: dispatched.append(
-            {"task": args[0], **kwargs}
-        )
-        asyncio.run(
-            tool_dispatch.enqueue_tool_invocation("invocation-5", test_settings())
-        )
-        assert dispatched == [
-            {
-                "task": "app.tools.run",
-                "args": ("invocation-5",),
-                "shadow": "运行工具",
-            }
-        ]
-        assert tool_dispatch.celery_app.conf.task_always_eager is True
-        assert calls == [("invocation-1", "tool-worker-1")]
-
-        def unavailable(**_kwargs):
-            raise OSError("broker unavailable")
-
-        tool_dispatch.celery_app.send_task = unavailable
-        asyncio.run(
-            tool_dispatch.enqueue_tool_invocation("invocation-6", test_settings())
-        )
     finally:
         tool_tasks.configure_task_worker = original_configure
         tool_tasks.execute_tool_invocation = original_execute
-        tool_dispatch.celery_app.send_task = original_send_task
-        tool_dispatch.log_error = original_log_error
-        tool_dispatch.celery_app.conf.broker_url = original_broker_url
-        tool_dispatch.celery_app.conf.task_always_eager = original_eager
 
 
 def test_tool_boundaries_reject_unsafe_payloads() -> None:
@@ -6132,7 +6095,7 @@ def main() -> None:
     test_generated_artifact_rejects_source_as_docx()
     test_generated_artifact_downloads_common_formats()
     test_canonical_mcp_policy_allows_owner_read_only_attestation()
-    test_tool_tasks_never_execute_inline_and_recover_queued_tests()
+    test_tool_worker_executes_and_retries_busy_invocations()
     test_tool_tasks_are_registered()
     test_tool_boundaries_reject_unsafe_payloads()
     from tests.tools.lifecycle import main as test_tool_lifecycle

@@ -734,15 +734,7 @@ export const en = {
   还没有应用: "No apps yet",
   "创建应用后，可以编排对话、检索和工具调用流程。":
     "Create an app to orchestrate chat, retrieval, and tool-calling flows.",
-  查看模板: "View templates",
-  "配置应用名称和描述。": "Configure the app name and description.",
-  应用名称: "App name",
-  "例如：客服助手": "Example: Support assistant",
-  应用描述: "App description",
-  "例如：面向客服团队的业务助手":
-    "Example: Business assistant for the support team",
   负责人: "Owner",
-  "例如：运营团队": "Example: Operations team",
   知识库: "Knowledge",
   知识库检索: "Knowledge retrieval",
   目录: "Folders",
@@ -773,15 +765,7 @@ export const en = {
   还没有知识库: "No knowledge bases yet",
   "创建知识库后，你可以上传文档、配置检索方式，并让应用调用这些知识。":
     "Create a knowledge base to upload documents, configure retrieval, and let apps use it.",
-  查看示例: "View examples",
-  "配置知识库名称、描述和默认数据源。":
-    "Configure the knowledge base name, description, and default data source.",
   知识库名称: "Knowledge base name",
-  "例如：产品文档": "Example: Product docs",
-  知识库描述: "Knowledge base description",
-  "例如：产品资料与常见问题": "Example: Product materials and FAQs",
-  数据源: "Data source",
-  "例如：本地文档": "Example: Local documents",
   模型: "Models",
   "按模型维度接入供应商、基础模型和访问凭据。":
     "Connect providers, base models, and credentials at the model level.",
@@ -790,15 +774,10 @@ export const en = {
   没有匹配的模型: "No matching models",
   "接入模型后，应用可以使用它进行对话、检索增强和工具调用。":
     "Connect a model so apps can use it for chat, retrieval augmentation, and tool calling.",
-  查看配置: "View configuration",
   "配置供应商、基础模型、API URL 和 API Key。":
     "Configure provider, base model, API URL, and API Key.",
-  "配置供应商、基础模型和连接凭据。":
-    "Configure provider, base model, and connection credentials.",
   供应商: "Provider",
-  "例如：OpenAI": "Example: OpenAI",
   模型名称: "Model name",
-  "例如：gpt-4.1": "Example: gpt-4.1",
   "API URL": "API URL",
   "API Key": "API Key",
   "API Version": "API version",
@@ -807,7 +786,6 @@ export const en = {
   "AWS Access Key ID": "AWS access key ID",
   "AWS Secret Access Key": "AWS secret access key",
   "AWS Session Token": "AWS session token",
-  "sk-...": "sk-...",
   编辑: "Edit",
   删除: "Delete",
   更多: "More",
@@ -870,8 +848,6 @@ export const en = {
   更新模型配置: "Update model config",
   删除模型配置: "Delete model config",
   工具: "Tools",
-  "管理外部 API、内部服务和可被应用调用的工具能力。":
-    "Manage external APIs, internal services, and tool capabilities apps can call.",
   "添加工具和技能": "Add tools and Skills",
   "添加 MCP 工具或技能": "Add MCP tools or Skills",
   "按 MCP 服务添加工具，或选择已发布的技能；需要审批的调用会暂停等待确认。":
@@ -1008,16 +984,6 @@ export const en = {
     "Ask directly and the Agent will use its configured knowledge bases and tools as needed.",
   "配置工作流的默认模型；知识库、工具和 Agent 由节点选择。":
     "Configure the default Workflow model. Knowledge bases, tools, and Agents are selected on nodes.",
-  "添加工具后，应用可以调用外部系统完成查询、写入和自动化动作。":
-    "Add a tool so apps can call external systems for reads, writes, and automation.",
-  "配置工具名称、描述和调用地址。":
-    "Configure the tool name, description, and endpoint.",
-  工具名称: "Tool name",
-  "例如：订单查询": "Example: Order lookup",
-  工具描述: "Tool description",
-  "例如：查询订单状态": "Example: Query order status",
-  调用地址: "Endpoint",
-  "https://api.example.com/orders": "https://api.example.com/orders",
   添加成员: "Add member",
   移除成员: "Remove member",
   更新成员角色: "Update member role",
