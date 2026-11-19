@@ -508,7 +508,7 @@ describe("workspace analytics", () => {
     expect(link.closest("nav")).toBeTruthy()
   })
 
-  test("shows the shared memory entry in an ordinary user's avatar menu", async () => {
+  test("shows system management in an ordinary user's avatar menu", async () => {
     const ordinary = makeSession()
     ordinary.me!.user.is_global_admin = false
     ordinary.me!.user.workspaces = [
@@ -522,9 +522,9 @@ describe("workspace analytics", () => {
       screen.getByRole("button", { name: "打开用户菜单" })
     )
     const menu = await screen.findByRole("menu")
-    const memoryLink = within(menu).getByRole("menuitem", { name: "记忆" })
-    expect(memoryLink.getAttribute("href")).toBe("/app/memories")
-    expect(within(menu).queryByRole("menuitem", { name: "系统管理" })).toBeNull()
+    const systemLink = within(menu).getByRole("menuitem", { name: "系统管理" })
+    expect(systemLink.getAttribute("href")).toBe("/system/teams")
+    expect(within(menu).queryByRole("menuitem", { name: "记忆" })).toBeNull()
   })
 
   test("provides every navigation entry in the compact menu", async () => {

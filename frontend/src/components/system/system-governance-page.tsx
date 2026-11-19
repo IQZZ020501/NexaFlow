@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ActivityIcon,
+  BrainIcon,
   Building2Icon,
   CheckCircle2Icon,
   ClipboardIcon,
@@ -95,6 +96,7 @@ const navItems: Array<{
   label:
     | "工作空间"
     | "团队"
+    | "记忆"
     | "用户管理"
     | "审计日志"
     | "系统运行"
@@ -108,6 +110,7 @@ const navItems: Array<{
   { href: "/system/teams", label: "团队", icon: UsersIcon },
   { href: "/system/users", label: "用户管理", icon: UserCogIcon },
   { href: "/system/audit", label: "审计日志", icon: HistoryIcon },
+  { href: "/system/memories", label: "记忆", icon: BrainIcon },
   { href: "/system/operations", label: "系统运行", icon: ActivityIcon },
   { href: "/system/email", label: "SMTP 邮件", icon: MailIcon },
   { href: "/system/identity", label: "企业登录", icon: LogInIcon },

@@ -1,5 +1,5 @@
-import { UserMemoryPage } from "@/components/agents/agent-memory-page"
+import { redirect } from "next/navigation"
 
 export default function MemoriesPage() {
-  return <UserMemoryPage />
+  redirect("/system/memories")
 }

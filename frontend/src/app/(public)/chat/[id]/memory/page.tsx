@@ -6,5 +6,5 @@ export default async function MemoryPage({
   params: Promise<{ id: string }>
 }) {
   await params
-  redirect("/app/memories")
+  redirect("/system/memories")
 }

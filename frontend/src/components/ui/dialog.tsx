@@ -3,6 +3,8 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+const DialogContentContext = React.createContext(false)
+
 /**
  * Provides the root context for a dialog and its associated components.
  *
@@ -72,7 +74,9 @@ function DialogContent({
         )}
         {...props}
       >
-        {children}
+        <DialogContentContext.Provider value={true}>
+          {children}
+        </DialogContentContext.Provider>
       </DialogPrimitive.Content>
     </DialogPortal>
   )
@@ -148,6 +152,7 @@ function DialogDescription({
 export {
   Dialog,
   DialogContent,
+  DialogContentContext,
   DialogDescription,
   DialogFooter,
   DialogHeader,

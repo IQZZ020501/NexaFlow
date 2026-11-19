@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { UserMemoryPage } from "@/components/agents/agent-memory-page"
 import type { MemoryProfile } from "@/lib/api/memories"
@@ -149,4 +150,60 @@ test("recovers from a failed profile load", async () => {
   fireEvent.click(screen.getByRole("button", { name: "重试" }))
   await screen.findByText("Prefer concise Chinese")
   expect(screen.queryByRole("alert")).toBeNull()
+})
+
+test("keeps the memory draft open when dropdown triggers are clicked twice", async () => {
+  const user = userEvent.setup()
+  renderPage(<UserMemoryPage />)
+  await user.click(await screen.findByRole("button", { name: "添加记忆" }))
+  const editor = screen.getByRole("dialog", { name: "添加记忆" })
+  fireEvent.change(within(editor).getByLabelText("记忆主题"), {
+    target: { value: "Working preferences" },
+  })
+  fireEvent.change(within(editor).getByLabelText("记忆内容"), {
+    target: { value: "Keep this unsaved draft" },
+  })
+
+  for (const name of ["沟通与工作偏好", "个人记忆"]) {
+    const trigger = within(editor).getByRole("button", { name })
+    await user.click(trigger)
+    expect(await screen.findByRole("menu")).toBeTruthy()
+    await user.click(trigger)
+    expect(screen.getByRole("dialog", { name: "添加记忆" })).toBe(editor)
+    expect(screen.queryByRole("menu")).toBeNull()
+    expect(
+      (within(editor).getByLabelText("记忆主题") as HTMLInputElement).value
+    ).toBe("Working preferences")
+    expect(
+      (within(editor).getByLabelText("记忆内容") as HTMLTextAreaElement).value
+    ).toBe("Keep this unsaved draft")
+  }
+})
+
+test("keeps memory drafts while selecting items and dismisses menus before the dialog", async () => {
+  const user = userEvent.setup()
+  renderPage(<UserMemoryPage />)
+  await user.click(await screen.findByRole("button", { name: "添加记忆" }))
+  const editor = screen.getByRole("dialog", { name: "添加记忆" })
+  const subject = within(editor).getByLabelText("记忆主题") as HTMLInputElement
+  await user.type(subject, "Keep draft")
+
+  await user.click(within(editor).getByRole("button", { name: "沟通与工作偏好" }))
+  await user.click(await screen.findByRole("menuitem", { name: "明确背景" }))
+  expect(screen.getByRole("dialog", { name: "添加记忆" })).toBe(editor)
+  expect(subject.value).toBe("Keep draft")
+
+  const category = within(editor).getByRole("button", { name: "明确背景" })
+  await user.click(category)
+  await user.click(subject)
+  expect(screen.queryByRole("menu")).toBeNull()
+  expect(screen.getByRole("dialog", { name: "添加记忆" })).toBe(editor)
+
+  await user.click(category)
+  await user.keyboard("{Escape}")
+  expect(screen.queryByRole("menu")).toBeNull()
+  expect(screen.getByRole("dialog", { name: "添加记忆" })).toBe(editor)
+  expect(subject.value).toBe("Keep draft")
+  await user.keyboard("{Escape}")
+  expect(screen.queryByRole("dialog")).toBeNull()
 })

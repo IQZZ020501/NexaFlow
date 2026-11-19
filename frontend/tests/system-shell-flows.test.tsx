@@ -160,6 +160,24 @@ const adminMe: MeResponse = {
   user: adminUser,
   memberships: [{ workspace_id: "ws-1", role: "admin" }],
 }
+const ordinaryMe: MeResponse = {
+  user: {
+    ...alice,
+    workspaces: [
+      { id: "ws-1", name: "Test Workspace", is_default: true, role: "member" },
+    ],
+    teams: [
+      {
+        id: "t-1",
+        workspace_id: "ws-1",
+        name: "Team One",
+        is_default: false,
+        role: "member",
+      },
+    ],
+  },
+  memberships: [{ workspace_id: "ws-1", role: "member" }],
+}
 const wsMembers: WorkspaceMember[] = [
   { user: alice, role: "admin" },
   { user: carol, role: "member" },
@@ -284,22 +302,92 @@ describe("SystemShell access control", () => {
     expect(view2.container.firstChild).toBeNull()
   })
 
-  test("redirects a user without system access to the app", () => {
-    const plainMe: MeResponse = {
-      user: {
-        ...alice,
-        id: "u-9",
-        username: "plain",
-        name: "Plain User",
-        workspaces: [],
-        teams: [],
-      },
-      memberships: [],
+  test("lets ordinary members view teams without management actions", () => {
+    setSession({ me: ordinaryMe })
+    renderPage(<SystemShell activeTab="teams" />)
+
+    expect(screen.getByText("Team One")).toBeTruthy()
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "团队",
+      "记忆",
+    ])
+    for (const name of [
+      "新建团队",
+      "管理团队成员",
+      "编辑团队",
+      "归档团队",
+      "恢复团队",
+      "永久删除团队",
+    ]) {
+      expect(screen.queryByRole("button", { name })).toBeNull()
     }
-    setSession({ me: plainMe })
-    const { container } = renderPage(<SystemShell activeTab="workspaces" />)
+    for (const name of [
+      "系统运行",
+      "SMTP 邮件",
+      "企业登录",
+      "工作空间治理",
+      "会话安全",
+    ]) {
+      expect(screen.queryByRole("link", { name })).toBeNull()
+    }
+    expect(replacements).toEqual([])
+  })
+
+  test.each(["workspaces", "users", "audit", "permissions"] as const)(
+    "redirects ordinary members from %s to teams",
+    (activeTab) => {
+      setSession({ me: ordinaryMe })
+      const { container } = renderPage(<SystemShell activeTab={activeTab} />)
+      expect(container.firstChild).toBeNull()
+      expect(replacements).toEqual(["/system/teams"])
+    }
+  )
+
+  test("opens shared memories directly for ordinary members", async () => {
+    const testWindow = window as typeof window & {
+      happyDOM: { setURL: (url: string) => void }
+    }
+    testWindow.happyDOM.setURL("https://nexaflow.example/system/memories")
+    setSession({ me: ordinaryMe })
+    const requests: string[] = []
+    handler = (url) => {
+      requests.push(url)
+      if (url === "/api/v1/workspaces/ws-1/memories") {
+        return jsonResponse({ enabled: true, automatic: false, items: [] })
+      }
+      if (url === "/api/v1/workspaces/ws-1/memories/projects") {
+        return jsonResponse({ items: [] })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    renderPage(<SystemShell activeTab="memories" />)
+    const panel = await screen.findByRole("tabpanel", { name: "记忆" })
+    expect(await within(panel).findByLabelText(/^使用长期记忆/)).toBeTruthy()
+    expect(
+      screen.getByRole("tab", { name: "记忆" }).getAttribute("aria-selected")
+    ).toBe("true")
+    expect(panel.className).toContain("lg:overflow-y-auto")
+    expect(requests.toSorted()).toEqual([
+      "/api/v1/workspaces/ws-1/memories",
+      "/api/v1/workspaces/ws-1/memories/projects",
+    ])
+    expect(replacements).toEqual([])
+
+    fireEvent.click(screen.getByRole("tab", { name: "团队" }))
+    expect(window.location.pathname).toBe("/system/teams")
+    expect(screen.getByText("Team One")).toBeTruthy()
+    expect(screen.queryByRole("tabpanel", { name: "记忆" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("tab", { name: "记忆" }))
+    expect(window.location.pathname).toBe("/system/memories")
+    expect(await screen.findByLabelText(/^使用长期记忆/)).toBeTruthy()
+  })
+
+  test("keeps unauthenticated memory pages empty", () => {
+    setSession({ me: null, token: null })
+    const { container } = renderPage(<SystemShell activeTab="memories" />)
     expect(container.firstChild).toBeNull()
-    expect(replacements).toEqual(["/app/apps"])
   })
 
   test("redirects the users tab when the user cannot manage users", () => {
@@ -403,7 +491,13 @@ describe("workspaces tab", () => {
     expect(screen.getByText("Second Space")).toBeTruthy()
     expect(screen.queryByText("暂无工作空间")).toBeNull()
 
-    for (const label of ["工作空间", "团队", "用户管理", "审计日志"]) {
+    for (const label of [
+      "工作空间",
+      "团队",
+      "用户管理",
+      "审计日志",
+      "记忆",
+    ]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy()
     }
     for (const label of [

@@ -8,6 +8,7 @@ import {
   waitForElementToBeRemoved,
   within,
 } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { PublicAgentChat } from "@/components/agents/public-agent-chat"
 import type { ChatProject } from "@/lib/api/public-chat-projects"
 import { ApiError } from "@/lib/api-client"
@@ -334,6 +335,36 @@ test("edits project names and sources without changing existing instructions", a
   expect(screen.getByLabelText("请输入问题")).toBeTruthy()
   expect(screen.getByRole("heading", { name: "Updated research" })).toBeTruthy()
 }, 10000)
+
+test("keeps the project editor open when its upload menu trigger is clicked twice", async () => {
+  const user = userEvent.setup()
+  renderPage(<PublicAgentChat agentId={agentId} initialProjectId={projectId} />)
+  const dialog = await editProject()
+  const trigger = within(dialog).getByRole("button", { name: "上传资料" })
+  await waitFor(() =>
+    expect((trigger as HTMLButtonElement).disabled).toBe(false)
+  )
+  fireEvent.change(within(dialog).getByLabelText("项目名称"), {
+    target: { value: "Unsaved project name" },
+  })
+
+  await user.click(trigger)
+  expect(await screen.findByRole("menu")).toBeTruthy()
+  await user.click(trigger)
+  expect(screen.getByRole("dialog", { name: "编辑项目" })).toBe(dialog)
+  expect(screen.queryByRole("menu")).toBeNull()
+  expect(
+    (within(dialog).getByLabelText("项目名称") as HTMLInputElement).value
+  ).toBe("Unsaved project name")
+
+  await user.click(trigger)
+  await user.click(await screen.findByRole("menuitem", { name: "上传文件夹" }))
+  expect(screen.queryByRole("menu")).toBeNull()
+  expect(screen.getByRole("dialog", { name: "编辑项目" })).toBe(dialog)
+  expect(
+    (within(dialog).getByLabelText("项目名称") as HTMLInputElement).value
+  ).toBe("Unsaved project name")
+})
 
 test("uploads a selected project folder with its relative paths intact", async () => {
   extra = (url, init) => {

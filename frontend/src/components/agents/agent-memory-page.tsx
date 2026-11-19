@@ -201,7 +201,7 @@ function MemoryPageContent({ workspaceId }: { workspaceId: string | null }) {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6">
+    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold">{t("记忆与个性化")}</h1>
         <Button
@@ -574,6 +574,6 @@ function MemoryPageContent({ workspaceId }: { workspaceId: string | null }) {
         notification={notification}
         onDismiss={() => setNotification(null)}
       />
-    </main>
+    </div>
   )
 }

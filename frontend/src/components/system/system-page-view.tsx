@@ -36,6 +36,8 @@ import { GlobalUsersPanel } from "@/components/system/panels/global-users-panel"
 import { TeamsPanel } from "@/components/system/panels/teams-panel"
 import { WorkspacesPanel } from "@/components/system/panels/workspaces-panel"
 import { WorkspaceUsersPanel } from "@/components/system/panels/workspace-users-panel"
+import { UserMemoryPage } from "@/components/agents/agent-memory-page"
+import { getUserRoleKey } from "@/components/system/system-utils"
 import {
   ResourcePermissionNavGroup,
   ResourcePermissionsPage,
@@ -292,6 +294,7 @@ export function SystemPageView({
   teamMembersDialogProps,
 }: SystemPageViewProps) {
   const { t } = useLanguage()
+  const hasAdminRole = getUserRoleKey(me.user) !== "member"
   const navRef = React.useRef<HTMLDivElement | null>(null)
 
   React.useEffect(() => {
@@ -350,7 +353,7 @@ export function SystemPageView({
               </button>
             )
           })}
-          <div className="my-1 border-t" />
+          {hasAdminRole ? <div className="my-1 border-t" /> : null}
           {canManageSelectedWorkspace(me, selectedWorkspaceId) ? (
             <ResourcePermissionNavGroup
               activeType={
@@ -400,17 +403,30 @@ export function SystemPageView({
               <span>{t("工作空间治理")}</span>
             </Link>
           ) : null}
-          <Link
-            href="/system/security"
-            className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
-          >
-            <KeyRoundIcon className="size-4 shrink-0" />
-            <span>{t("会话安全")}</span>
-          </Link>
+          {hasAdminRole ? (
+            <Link
+              href="/system/security"
+              className="flex min-w-32 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-sm:min-h-11 max-sm:snap-start lg:min-w-0"
+            >
+              <KeyRoundIcon className="size-4 shrink-0" />
+              <span>{t("会话安全")}</span>
+            </Link>
+          ) : null}
         </div>
       </aside>
 
       <div className="min-w-0 lg:h-full lg:min-h-0 lg:overflow-hidden">
+        {activeSystemTab === "memories" ? (
+          <div
+            id="system-panel-memories"
+            role="tabpanel"
+            aria-labelledby="system-tab-memories"
+            className="min-w-0 rounded-xl border bg-background lg:h-full lg:overflow-y-auto"
+          >
+            <UserMemoryPage />
+          </div>
+        ) : null}
+
         {activeSystemTab === "permissions" ? (
           <ResourcePermissionsPage type={resourcePermissionType} />
         ) : null}

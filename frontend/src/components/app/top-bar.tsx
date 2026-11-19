@@ -3,7 +3,6 @@
 import * as React from "react"
 import {
   BarChart3Icon,
-  BrainIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   Building2Icon,
@@ -123,10 +122,6 @@ export function TopBar() {
   const featurePages = getPages(t)
   const isAnalyticsActive = pathname.startsWith("/system/analytics")
   const canAccessAnalytics = canAccessWorkspaceAnalytics(me)
-  const canAccessSystem =
-    me.user.is_global_admin ||
-    me.user.workspaces.some((workspace) => workspace.role === "admin") ||
-    me.user.teams.some((team) => team.role === "admin")
   const canManageAnnouncements =
     me.user.is_global_admin ||
     me.user.workspaces.some((workspace) => workspace.role === "admin")
@@ -362,19 +357,11 @@ export function TopBar() {
                     {t("修改密码")}
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link href="/app/memories">
-                      <BrainIcon />
-                      {t("记忆")}
+                    <Link href={systemHref}>
+                      <SettingsIcon />
+                      {t("系统管理")}
                     </Link>
                   </DropdownMenuItem>
-                  {canAccessSystem ? (
-                    <DropdownMenuItem asChild>
-                      <Link href={systemHref}>
-                        <SettingsIcon />
-                        {t("系统管理")}
-                      </Link>
-                    </DropdownMenuItem>
-                  ) : null}
                   {canManageAnnouncements ? (
                     <DropdownMenuItem asChild>
                       <Link href="/system/announcements">

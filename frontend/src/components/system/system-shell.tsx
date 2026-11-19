@@ -1,6 +1,7 @@
 import * as React from "react"
 import {
   Building2Icon,
+  BrainIcon,
   HistoryIcon,
   UserCogIcon,
   UsersIcon,
@@ -77,6 +78,7 @@ import type { SystemPageSize } from "@/components/system/pagination-footer"
 export type SystemTab =
   | "workspaces"
   | "teams"
+  | "memories"
   | "users"
   | "audit"
   | "permissions"
@@ -98,53 +100,29 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
     setCurrentTab(activeTab)
   }, [activeTab])
 
-  const canAccessSystem = Boolean(
-    session.me &&
-    (session.me.user.is_global_admin ||
-      session.me.user.workspaces.some(
-        (workspace) => workspace.role === "admin"
-      ) ||
-      session.me.user.teams.some((team) => team.role === "admin"))
+  const canAccessWorkspaces = Boolean(
+    session.me && getUserRoleKey(session.me.user) !== "member"
   )
   const canAccessUsers = Boolean(
     session.me?.user.is_global_admin ||
       getMembershipRole(session.me, session.selectedWorkspaceId) === "admin"
   )
+  const canAccessTab =
+    currentTab === "workspaces"
+      ? canAccessWorkspaces
+      : currentTab === "users" ||
+          currentTab === "audit" ||
+          currentTab === "permissions"
+        ? canAccessUsers
+        : true
 
   React.useEffect(() => {
-    if (!session.me) {
-      return
-    }
-
-    if (!canAccessSystem) {
-      router.replace("/app/apps")
-      return
-    }
-
-    if (
-      (currentTab === "users" &&
-        !session.isSessionLoading &&
-        !canAccessUsers) ||
-      (currentTab === "audit" &&
-        !session.me?.user.is_global_admin &&
-        getMembershipRole(session.me, session.selectedWorkspaceId) !== "admin") ||
-      (currentTab === "permissions" &&
-        !session.isSessionLoading &&
-        !canAccessUsers)
-    ) {
+    if (session.me && !session.isSessionLoading && !canAccessTab) {
       router.replace("/system/teams")
     }
-  }, [
-    canAccessSystem,
-    canAccessUsers,
-    currentTab,
-    router,
-    session.isSessionLoading,
-    session.me,
-    session.selectedWorkspaceId,
-  ])
+  }, [canAccessTab, router, session.isSessionLoading, session.me])
 
-  if (!session.me || !session.token || !canAccessSystem) {
+  if (!session.me || !session.token || !canAccessTab) {
     return null
   }
 
@@ -367,11 +345,15 @@ function SystemPageContent({
     label: string
     icon: React.ElementType
   }[] = [
-    {
-      key: "workspaces",
-      label: t("工作空间"),
-      icon: Building2Icon,
-    },
+    ...(getUserRoleKey(me.user) !== "member"
+      ? [
+          {
+            key: "workspaces" as const,
+            label: t("工作空间"),
+            icon: Building2Icon,
+          },
+        ]
+      : []),
     {
       key: "teams",
       label: t("团队"),
@@ -395,6 +377,11 @@ function SystemPageContent({
           },
         ]
       : []),
+    {
+      key: "memories",
+      label: t("记忆"),
+      icon: BrainIcon,
+    },
   ]
 
   const loadUsers = React.useCallback(async () => {

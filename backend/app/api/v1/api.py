@@ -27,8 +27,8 @@ from app.api.v1.tools import routes as tools
 from app.api.v1.tools import sources as tool_sources
 from app.api.v1.workflows import access as workflow_access
 from app.api.v1.workflows import routes as workflows
-from app.api.v1.workspaces import routes as workspaces
 from app.api.v1.workspaces import memories as workspace_memories
+from app.api.v1.workspaces import routes as workspaces
 
 api_router = APIRouter(prefix="/api/v1")
 
