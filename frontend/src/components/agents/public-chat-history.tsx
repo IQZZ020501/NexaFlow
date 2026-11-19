@@ -91,11 +91,11 @@ export function PublicChatHistory({
     return (
       <div
         key={conversation.conversation_id}
-        className={`group flex min-w-0 items-center gap-1 rounded-md transition-colors hover:bg-muted ${grouped ? "px-1 py-0.5" : "px-2 py-1.5"} ${activeConversationId === conversation.conversation_id ? "bg-muted" : ""}`}
+        className={`group flex min-w-0 items-center gap-1 rounded-md py-0.5 transition-colors hover:bg-muted ${grouped ? "px-1" : "px-2"} ${activeConversationId === conversation.conversation_id ? "bg-muted" : ""}`}
       >
         <button
           type="button"
-          className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="min-w-0 flex-1 rounded-md px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-current={
             activeConversationId === conversation.conversation_id
               ? "page"
@@ -105,9 +105,6 @@ export function PublicChatHistory({
         >
           <span className="block truncate text-sm font-medium">
             {conversation.question || t("新对话")}
-          </span>
-          <span className="mt-1 block truncate text-xs text-muted-foreground">
-            {conversation.result || t("等待回答")}
           </span>
         </button>
         <DropdownMenu modal={false}>
@@ -309,7 +306,7 @@ export function PublicChatHistory({
                     </button>
                   </div>
                   {open ? (
-                    <div className="mt-1 ml-3 space-y-1 border-l border-border/60 pl-2">
+                    <div className="mt-1 ml-3 space-y-0.5 border-l border-border/60 pl-2">
                       {items.length ? (
                         items.map((item) => row(item, true))
                       ) : (
@@ -334,7 +331,7 @@ export function PublicChatHistory({
             <HistoryIcon className="size-3.5" />
             <span>{t("历史记录")}</span>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {ordinary.map((item) => row(item))}
             {!ordinary.length ? (
               <p className="px-2 py-4 text-center text-xs text-muted-foreground">

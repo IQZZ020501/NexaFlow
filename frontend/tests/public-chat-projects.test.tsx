@@ -123,7 +123,7 @@ test("selects a project through a durable route without reading its other conver
   expect(screen.getByRole("heading", { name: "Research" })).toBeTruthy()
   expect(requests.some(({ url }) => url.includes("/runs?"))).toBe(false)
   fireEvent.click(
-    screen.getByRole("button", { name: "Existing conversation 等待回答" })
+    screen.getByRole("button", { name: "Existing conversation" })
   )
   await waitFor(() =>
     expect(
@@ -360,7 +360,7 @@ test("dissolves a project and preserves its conversation in ordinary history", a
   )
   await screen.findByRole("heading", { name: "Assistant" })
   expect(
-    screen.getByRole("button", { name: "Existing conversation 等待回答" })
+    screen.getByRole("button", { name: "Existing conversation" })
   ).toBeTruthy()
   expect(window.location.pathname).toBe(`/chat/${agentId}`)
   expect(window.location.search).toBe("?conversation_id=conversation-1")
