@@ -9,12 +9,14 @@ import {
   DownloadIcon,
   EllipsisIcon,
   FolderIcon,
+  FolderMinusIcon,
   HistoryIcon,
   LoaderCircleIcon,
   MessageSquarePlusIcon,
   PlusIcon,
   SearchIcon,
   Settings2Icon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -22,6 +24,7 @@ import { IconButton } from "@/components/ui/icon-button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
@@ -64,8 +67,14 @@ function ProjectMenu({
           <EllipsisIcon />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44 min-w-0">
+      <DropdownMenuContent
+        side="right"
+        align="start"
+        sideOffset={6}
+        className="w-max max-w-48 min-w-36"
+      >
         <DropdownMenuItem
+          className="text-xs"
           onSelect={() => {
             if (triggerRef.current) onEdit(project, triggerRef.current)
           }}
@@ -73,13 +82,17 @@ function ProjectMenu({
           <Settings2Icon />
           {t("编辑")}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onToggleArchive(project)}>
+        <DropdownMenuItem
+          className="text-xs"
+          onSelect={() => onToggleArchive(project)}
+        >
           {project.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
           {project.archived ? t("恢复项目") : t("归档项目")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
+          className="text-xs"
           onSelect={() => onDissolve(project)}
         >
           <XIcon />
@@ -191,60 +204,69 @@ export function PublicChatHistory({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            side="bottom"
-            align="center"
-            sideOffset={4}
-            className="w-44 min-w-0 rounded-md p-1"
+            side="right"
+            align="start"
+            sideOffset={6}
+            className="w-max max-w-48 min-w-40"
           >
             <DropdownMenuItem
-              className="h-8 px-2 py-1 text-xs [&_svg]:size-3.5"
+              className="text-xs"
               disabled={pending}
               onSelect={() => onExport(conversation.conversation_id)}
             >
-              <DownloadIcon />
+              <DownloadIcon aria-hidden="true" />
               {t("导出对话")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t("移入项目")}
-            </DropdownMenuLabel>
-            {projects
-              .filter(
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs">
+                {t("移入项目")}
+              </DropdownMenuLabel>
+              {projects
+                .filter(
+                  (project) =>
+                    !project.archived && project.id !== conversation.project_id
+                )
+                .map((project) => (
+                  <DropdownMenuItem
+                    key={project.id}
+                    className="text-xs"
+                    onSelect={() =>
+                      onMove(conversation.conversation_id, project.id)
+                    }
+                  >
+                    <FolderIcon aria-hidden="true" />
+                    <span className="truncate">{project.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              {!projects.some(
                 (project) =>
                   !project.archived && project.id !== conversation.project_id
-              )
-              .map((project) => (
-                <DropdownMenuItem
-                  key={project.id}
-                  onSelect={() =>
-                    onMove(conversation.conversation_id, project.id)
-                  }
-                >
-                  <span className="truncate">{project.name}</span>
+              ) ? (
+                <DropdownMenuItem className="text-xs" disabled>
+                  <FolderIcon aria-hidden="true" />
+                  {t("暂无可选项目")}
                 </DropdownMenuItem>
-              ))}
-            {!projects.some(
-              (project) =>
-                !project.archived && project.id !== conversation.project_id
-            ) ? (
-              <DropdownMenuItem disabled>{t("暂无可选项目")}</DropdownMenuItem>
-            ) : null}
-
-            {conversation.project_id ? (
-              <DropdownMenuItem
-                disabled={pending}
-                onSelect={() => onMove(conversation.conversation_id, null)}
-              >
-                {t("移出项目")}
-              </DropdownMenuItem>
-            ) : null}
+              ) : null}
+              {conversation.project_id ? (
+                <DropdownMenuItem
+                  className="text-xs"
+                  disabled={pending}
+                  onSelect={() => onMove(conversation.conversation_id, null)}
+                >
+                  <FolderMinusIcon aria-hidden="true" />
+                  {t("移出项目")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              className="h-8 px-2 py-1 text-xs"
+              className="text-xs"
               disabled={pending}
               onSelect={() => onDelete(conversation.conversation_id)}
             >
+              <Trash2Icon aria-hidden="true" className="text-destructive" />
               {t("删除对话")}
             </DropdownMenuItem>
           </DropdownMenuContent>
