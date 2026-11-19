@@ -286,6 +286,9 @@ describe("workspace analytics", () => {
     ).toBeTruthy()
     expect(within(inventoryCard).getByText("文档 12 · 片段 340")).toBeTruthy()
     expect(within(inventoryCard).getByText("MCP 3 · 内置 4")).toBeTruthy()
+    expect(
+      within(inventoryCard).getByText(/每个 MCP 服务计为一个工具/)
+    ).toBeTruthy()
 
     const toolUsageCard = screen
       .getByText("工具调用")

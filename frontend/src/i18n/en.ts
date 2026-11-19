@@ -113,8 +113,8 @@ export const en = {
   "还没有可用的技能": "No Skills available yet",
   "统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。":
     "Current resources across the entire workspace, independent of the date filter. Personal lists show only resources you can access.",
-  "工具按内置工具（含技能）和 MCP 子工具计数，仅统计当前工具目录中的资源。":
-    "Tools count built-in tools (including Skills) and individual MCP tools currently listed in the tool catalog.",
+  "工具按内置工具（含技能）和 MCP 服务计数，每个 MCP 服务计为一个工具。":
+    "Tools count built-in tools (including Skills) and MCP servers, with each MCP server counted as one tool.",
   "文件超过大小限制，请缩小后重试":
     "The file exceeds the size limit. Reduce its size and retry.",
   名称不能为空或仅包含空格:
