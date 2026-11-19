@@ -125,6 +125,12 @@ function manageSourceTools(name: string) {
   fireEvent.click(screen.getByRole("menuitem", { name: "管理工具" }))
 }
 
+function openSkillMenu(name: string) {
+  const trigger = screen.getByRole("button", { name: `管理技能 ${name}` })
+  fireEvent.pointerDown(trigger)
+  fireEvent.click(trigger)
+}
+
 describe("ToolsPage", () => {
   test("groups shared MCP operations without connection details or child cards even when searching", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -225,13 +231,8 @@ describe("ToolsPage", () => {
     })
     expect(screen.getByText("没有匹配的技能")).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText("搜索名称、描述或来源"), { target: { value: "" } })
-    fireEvent.click(
-      within(
-        screen
-          .getByRole("button", { name: "Research package" })
-          .closest("article")!
-      ).getByRole("button", { name: "删除" })
-    )
+    openSkillMenu("Research package")
+    fireEvent.click(screen.getByRole("menuitem", { name: "删除" }))
     const confirm = await screen.findByRole("dialog", { name: "确认操作" })
     fireEvent.click(within(confirm).getByRole("button", { name: "删除" }))
     await waitFor(() => expect(deleted).toBe(true))
@@ -272,12 +273,17 @@ describe("ToolsPage", () => {
       return jsonResponse([])
     }) as typeof fetch
     renderPage(<ToolsPage initialKind="builtin" />)
-    fireEvent.click(await screen.findByRole("button", { name: "停用" }))
-    fireEvent.click(await screen.findByRole("button", { name: "启用" }))
-    await screen.findByRole("button", { name: "停用" })
+    await screen.findByRole("button", { name: "Toggle package" })
+    openSkillMenu("Toggle package")
+    fireEvent.click(screen.getByRole("menuitem", { name: "停用" }))
+    await screen.findByText("已停用")
+    openSkillMenu("Toggle package")
+    fireEvent.click(screen.getByRole("menuitem", { name: "启用" }))
+    await screen.findByText("草稿")
     expect(status).toBe("active")
     fail = true
-    fireEvent.click(screen.getByRole("button", { name: "停用" }))
+    openSkillMenu("Toggle package")
+    fireEvent.click(screen.getByRole("menuitem", { name: "停用" }))
     await waitFor(() =>
       expect(notifications).toContain("Skill update rejected")
     )

@@ -957,6 +957,7 @@ export const en = {
   工具来源已启用: "Tool source enabled",
   工具来源已禁用: "Tool source disabled",
   "管理工具 {name}": "Manage tool {name}",
+  "管理技能 {name}": "Manage skill {name}",
   查看详情: "View details",
   删除来源: "Delete source",
   "删除来源“{name}”？该来源下的全部工具都会被移除。":
