@@ -110,7 +110,7 @@ export function AnalyticsInventoryPanel({
         <CardTitle>{t("资产概览")}</CardTitle>
         <CardDescription>
           {t("统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。")}
-          {" "}{t("工具按内置工具（含内置 Skills）和 MCP 子工具计数，仅统计当前工具目录中的资源。")}
+          {" "}{t("工具按内置工具（含技能）和 MCP 子工具计数，仅统计当前工具目录中的资源。")}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid min-w-0 grid-cols-1 gap-3 px-5 sm:grid-cols-2 lg:grid-cols-4">

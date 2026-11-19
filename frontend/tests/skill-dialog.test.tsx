@@ -28,7 +28,7 @@ describe("SkillDialog", () => {
       />
     )
 
-    fireEvent.change(screen.getByLabelText("选择 Skill 文件"), {
+    fireEvent.change(screen.getByLabelText("选择技能文件"), {
       target: { files: [new File(["zip"], "research.zip")] },
     })
 
@@ -53,7 +53,7 @@ describe("SkillDialog", () => {
       ).toBe("research")
     )
     expect(
-      (screen.getByRole("button", { name: "导入 Skill" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "导入技能" }) as HTMLButtonElement)
         .disabled
     ).toBe(false)
   })
@@ -109,14 +109,14 @@ describe("SkillDialog", () => {
     }) as typeof fetch
     let closed = false
     renderPage(<SkillDialog open token="test" workspaceId="ws-1" onSaved={() => undefined} onOpenChange={(value) => { closed = !value }} />)
-    const input = screen.getByLabelText("选择 Skill 文件")
+    const input = screen.getByLabelText("选择技能文件")
     fireEvent.change(input, { target: { files: [new File([new Uint8Array(2 * 1024 * 1024 + 1)], "large.zip")] } })
-    expect(screen.getByRole("alert").textContent).toBe("Skill 包不能超过 2 MiB")
+    expect(screen.getByRole("alert").textContent).toBe("技能包不能超过 2 MiB")
     expect(imports).toBe(0)
     fireEvent.change(input, { target: { files: [new File(["bad"], "bad.zip")] } })
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Malformed package"))
     expect(imports).toBe(1)
-    expect((screen.getByRole("button", { name: "导入 Skill" }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole("button", { name: "导入技能" }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole("button", { name: "取消" }))
     expect(closed).toBe(true)
   })
@@ -133,7 +133,7 @@ describe("SkillDialog", () => {
     let saved = 0
     let closed = false
     renderPage(<SkillDialog open token="test" workspaceId="ws-1" onSaved={() => saved++} onOpenChange={(value) => { closed = !value }} />)
-    fireEvent.change(screen.getByLabelText("选择 Skill 文件"), { target: { files: [new File(["zip"], "research.zip")] } })
+    fireEvent.change(screen.getByLabelText("选择技能文件"), { target: { files: [new File(["zip"], "research.zip")] } })
     await waitFor(() => expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe("research"))
     fireEvent.click(screen.getByRole("button", { name: "保存并发布" }))
     await waitFor(() => expect(closed).toBe(true))

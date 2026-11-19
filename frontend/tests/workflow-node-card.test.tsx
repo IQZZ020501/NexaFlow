@@ -667,7 +667,7 @@ describe("WorkflowNodeCard", () => {
         config: { prompt: "x" },
       })
     )
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Weather" }))
     expect(updates.at(-1)?.config.tools).toEqual([
       { tool_id: "tool-1", version_id: "version-1" },
@@ -686,14 +686,14 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Weather" }))
     expect(removals.at(-1)?.config.tools).toEqual([])
   })
 
   test("LLM node lists no available tools", () => {
     renderNode(nodeData("llm", { config: { prompt: "x" } }))
-    expect(screen.getByText("添加 MCP 工具或 Skills")).toBeTruthy()
+    expect(screen.getByText("添加 MCP 工具或技能")).toBeTruthy()
   })
 
   test("LLM node shows unavailable tools and MCP switches", async () => {
@@ -1458,7 +1458,7 @@ describe("WorkflowNodeCard", () => {
     )
     expect(screen.queryByText("Search tracks")).toBeNull()
     expect(screen.queryByText("Get lyrics")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Music" }))
     expect(updates.at(-1)?.config.tools).toEqual([
       { tool_id: "search", version_id: "version-1" },
@@ -1477,7 +1477,7 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     expect(
       (screen.getByRole("checkbox", { name: "Music" }) as HTMLInputElement)
         .disabled
@@ -1514,7 +1514,7 @@ describe("WorkflowNodeCard", () => {
         },
       })
     )
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     expect(
       (screen.getByRole("checkbox", { name: "Music" }) as HTMLInputElement)
         .disabled

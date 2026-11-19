@@ -72,7 +72,7 @@ describe("Workflow capability picker", () => {
   test("opens from the plus button, groups MCP operations, and binds published scripts", () => {
     renderPage(<Harness />)
     expect(screen.queryByRole("checkbox")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     const dialog = screen.getByRole("dialog")
     expect(
       within(dialog).getAllByRole("checkbox", { name: "音乐" })
@@ -121,7 +121,7 @@ describe("Workflow capability picker", () => {
         }}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "音乐" }))
     expect(JSON.parse(screen.getByTestId("selection").textContent!)).toEqual({
       tools: [
@@ -131,7 +131,7 @@ describe("Workflow capability picker", () => {
       skills: [{ skill_id: "skill", version_id: "skill-v1" }],
     })
     fireEvent.change(
-      screen.getByRole("textbox", { name: "搜索工具或 Skills" }),
+      screen.getByRole("textbox", { name: "搜索工具或技能" }),
       { target: { value: "表格" } }
     )
     expect(screen.queryByRole("checkbox", { name: "音乐" })).toBeNull()
@@ -151,7 +151,7 @@ describe("Workflow capability picker", () => {
         }}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "添加工具和 Skills" }))
+    fireEvent.click(screen.getByRole("button", { name: "添加工具和技能" }))
     const dialog = screen.getByRole("dialog")
     expect(
       (
@@ -176,7 +176,7 @@ describe("Workflow capability picker", () => {
         }}
       />
     )
-    for (const name of ["添加工具和 Skills", "移除 音乐", "移除 表格计算"])
+    for (const name of ["添加工具和技能", "移除 音乐", "移除 表格计算"])
       expect(
         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled
       ).toBe(true)

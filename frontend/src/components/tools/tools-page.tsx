@@ -104,7 +104,7 @@ import { isRegularTool } from "@/lib/tool-visibility"
 import { cn } from "@/lib/utils"
 
 const catalogTabs = [
-  { kind: "builtin", label: "Skills" },
+  { kind: "builtin", label: "技能" },
   { kind: "mcp", label: "MCP" },
 ] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
 
@@ -327,23 +327,26 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     displayToolName
   )
   const isSkillsTab = Boolean(initialKind) && activeKind === "builtin"
-  const filteredWorkspaceSkills = workspaceSkills.filter(
-    (skill) =>
-      !query ||
-      `${skill.name} ${skill.description}`.toLowerCase().includes(query)
-  )
-  const builtinSkillTools = sortToolResources(
-    tools.filter(
-      (tool) =>
-        isBuiltinSkillTool(tool.function_name) &&
-        (!query ||
-          `${displayToolName(tool)} ${displayToolDescription(tool)}`
-            .toLowerCase()
-            .includes(query))
-    ),
+  const filteredSkills = sortToolResources<ToolSummary | AgentSkill>(
+    [
+      ...tools.filter(
+        (tool) =>
+          isBuiltinSkillTool(tool.function_name) &&
+          (!query ||
+            `${displayToolName(tool)} ${displayToolDescription(tool)}`
+              .toLowerCase()
+              .includes(query))
+      ),
+      ...workspaceSkills.filter(
+        (skill) =>
+          !query ||
+          `${skill.name} ${skill.description}`.toLowerCase().includes(query)
+      ),
+    ],
     toolSortKey,
     locale,
-    displayToolName
+    (skill) =>
+      "function_name" in skill ? displayToolName(skill) : skill.name
   )
   const builtinTools = filteredTools.filter(
     (tool) => tool.kind === "builtin" && !isBuiltinSkillTool(tool.function_name)
@@ -538,7 +541,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
     if (
       !(await confirmAction({
         description: t(
-          "删除 Skill“{name}”？删除后无法再调用，历史版本和执行记录会保留。",
+          "删除技能“{name}”？删除后无法再调用，历史版本和执行记录会保留。",
           { name: skill.name }
         ),
         confirmLabel: t("删除"),
@@ -557,7 +560,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         setSkillDialogOpen(false)
         setEditingSkill(undefined)
       }
-      message("success", t("Skill 已删除"))
+      message("success", t("技能已删除"))
     } catch (cause) {
       message("error", getErrorMessage(cause, t))
     } finally {
@@ -780,7 +783,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">{t("工具")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("管理自己的 MCP 与 Skills；共享给你的资源可按授权使用。")}
+            {t("管理自己的 MCP 与技能；共享给你的资源可按授权使用。")}
           </p>
         </div>
         <DropdownMenu>
@@ -798,7 +801,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => setSkillDialogOpen(true)}>
               <SparklesIcon />
-              {t("Skills")}
+              {t("技能")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -1071,14 +1074,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
             </Button>
           </div>
         ) : isSkillsTab ? (
-          query &&
-          builtinSkillTools.length === 0 &&
-          builtinTools.length === 0 &&
-          filteredWorkspaceSkills.length === 0 ? (
-            <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-              {t("没有匹配的工具")}
-            </div>
-          ) : (
+          builtinTools.length || filteredSkills.length ? (
             <div className="space-y-8">
               {builtinTools.length ? (
                 <section aria-labelledby="builtin-tools-heading">
@@ -1118,86 +1114,61 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                   </div>
                 </section>
               ) : null}
-              <section aria-labelledby="builtin-skills-heading">
-                <div className="mb-3 flex items-center gap-2">
-                  <h2
-                    id="builtin-skills-heading"
-                    className="text-sm font-semibold"
-                  >
-                    {t("内置 Skills")}
-                  </h2>
-                  <Badge variant="secondary">{builtinSkillTools.length}</Badge>
-                </div>
-                {builtinSkillTools.length ? (
-                  <div className={resourceCardGridClass}>
-                    {builtinSkillTools.map((tool) => (
-                      <ResourceCard
-                        key={tool.id}
-                        as="article"
-                        interactive
-                        onActivate={() => void openDetail(tool)}
-                      >
-                        <div className="flex min-w-0 gap-3">
-                          <ResourceCardIcon>
-                            <BuiltinToolIcon
-                              functionName={tool.function_name}
-                              className="size-5"
-                            />
-                          </ResourceCardIcon>
-                          <div className="min-w-0">
-                            <ResourceCardTitle as="h3">
-                              {displayToolName(tool)}{" "}
-                              <span className="font-normal text-muted-foreground">
-                                {t("Skill")}
-                              </span>
-                            </ResourceCardTitle>
+              {filteredSkills.length ? (
+                <div className={resourceCardGridClass}>
+                  {filteredSkills.map((skill) => {
+                    if ("function_name" in skill) {
+                      const tool = skill
+                      return (
+                        <ResourceCard
+                          key={tool.id}
+                          as="article"
+                          interactive
+                          onActivate={() => void openDetail(tool)}
+                        >
+                          <div className="flex min-w-0 gap-3">
+                            <ResourceCardIcon>
+                              <BuiltinToolIcon
+                                functionName={tool.function_name}
+                                className="size-5"
+                              />
+                            </ResourceCardIcon>
+                            <div className="min-w-0">
+                              <ResourceCardTitle as="h3">
+                                {displayToolName(tool)}
+                              </ResourceCardTitle>
+                            </div>
                           </div>
-                        </div>
-                        <p className="mt-3 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                          {displayToolDescription(tool) || t("暂无描述")}
-                        </p>
-                      </ResourceCard>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex min-h-24 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
-                    {t("没有匹配的工具")}
-                  </div>
-                )}
-              </section>
-              <section aria-labelledby="workspace-skills-heading">
-                <div className="mb-3 flex items-center gap-2">
-                  <h2
-                    id="workspace-skills-heading"
-                    className="text-sm font-semibold"
-                  >
-                    {t("自定义 Skills")}
-                  </h2>
-                  <Badge variant="secondary">
-                    {filteredWorkspaceSkills.length}
-                  </Badge>
-                </div>
-                {filteredWorkspaceSkills.length ? (
-                  <div className={resourceCardGridClass}>
-                    {filteredWorkspaceSkills.map((skill) => (
+                          <p className="mt-3 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                            {displayToolDescription(tool) || t("暂无描述")}
+                          </p>
+                        </ResourceCard>
+                      )
+                    }
+                    return (
                       <ResourceCard
                         key={skill.id}
                         as="article"
                         className="gap-0"
                       >
-                        <Button
-                          variant="ghost"
-                          className="h-auto max-w-full min-w-0 justify-start px-0 py-0 text-left text-sm font-semibold [overflow-wrap:anywhere] break-words whitespace-normal"
-                          onClick={() => {
-                            setEditingSkill(skill)
-                            setSkillDialogOpen(true)
-                          }}
-                        >
-                          {skill.name}
-                        </Button>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <ResourceCardIcon>
+                            <SparklesIcon className="size-5" />
+                          </ResourceCardIcon>
+                          <Button
+                            variant="ghost"
+                            className="h-auto max-w-full min-w-0 shrink justify-start px-0 py-0 text-left text-sm font-semibold [overflow-wrap:anywhere] break-words whitespace-normal"
+                            onClick={() => {
+                              setEditingSkill(skill)
+                              setSkillDialogOpen(true)
+                            }}
+                          >
+                            {skill.name}
+                          </Button>
+                        </div>
                         <p
                           title={skill.description}
-                          className="mt-1 line-clamp-2 text-sm break-words text-muted-foreground"
+                          className="mt-3 line-clamp-2 text-sm leading-5 break-words text-muted-foreground"
                         >
                           {skill.description}
                         </p>
@@ -1257,29 +1228,29 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                           ) : null}
                         </div>
                       </ResourceCard>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
-                    <p className="font-medium">
-                      {workspaceSkills.length
-                        ? t("没有匹配的 Skill")
-                        : t("还没有可用的 Skill")}
-                    </p>
-                    <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                      {t("从添加工具新建或导入 Skill。")}
-                    </p>
-                    <Button
-                      className="mt-4"
-                      type="button"
-                      onClick={() => setSkillDialogOpen(true)}
-                    >
-                      <SparklesIcon />
-                      {t("新建 Skill")}
-                    </Button>
-                  </div>
-                )}
-              </section>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : query ? (
+            <div className="flex min-h-52 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
+              {t("没有匹配的技能")}
+            </div>
+          ) : (
+            <div className="flex min-h-36 flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 px-6 text-center">
+              <p className="font-medium">{t("还没有可用的技能")}</p>
+              <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                {t("从添加工具新建或导入技能。")}
+              </p>
+              <Button
+                className="mt-4"
+                type="button"
+                onClick={() => setSkillDialogOpen(true)}
+              >
+                <SparklesIcon />
+                {t("新建技能")}
+              </Button>
             </div>
           )
         ) : catalogTools.length === 0 && catalogSources.length === 0 ? (
@@ -1492,7 +1463,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                         ? displayToolName(detailTarget)
                         : t("工具详情")}{" "}
                     <span className="text-sm font-normal text-muted-foreground">
-                      {t("Skill")}
+                      {t("技能")}
                     </span>
                   </DialogTitle>
                   <DialogDescription className="mt-1 leading-6 [overflow-wrap:anywhere]">

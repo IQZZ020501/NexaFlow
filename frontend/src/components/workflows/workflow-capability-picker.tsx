@@ -92,7 +92,7 @@ export function WorkflowCapabilityPicker({
           size="icon"
           variant="ghost"
           className="size-6"
-          aria-label={t("添加工具和 Skills")}
+          aria-label={t("添加工具和技能")}
           disabled={readOnly}
           onClick={() => {
             setSearch("")
@@ -173,7 +173,7 @@ export function WorkflowCapabilityPicker({
         })}
         {!value.tools.length && !value.skills.length ? (
           <p className="py-1 font-normal text-muted-foreground">
-            {t("添加 MCP 工具或 Skills")}
+            {t("添加 MCP 工具或技能")}
           </p>
         ) : null}
       </div>
@@ -184,16 +184,16 @@ export function WorkflowCapabilityPicker({
           onPointerDown={(event) => event.stopPropagation()}
         >
           <DialogHeader>
-            <DialogTitle>{t("添加工具和 Skills")}</DialogTitle>
+            <DialogTitle>{t("添加工具和技能")}</DialogTitle>
             <DialogDescription>
               {t(
-                "按 MCP 服务添加工具，或选择已发布的 Skill；需要审批的调用会暂停等待确认。"
+                "按 MCP 服务添加工具，或选择已发布的技能；需要审批的调用会暂停等待确认。"
               )}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label={t("搜索工具或 Skills")}
-            placeholder={t("搜索工具或 Skills")}
+            aria-label={t("搜索工具或技能")}
+            placeholder={t("搜索工具或技能")}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -202,7 +202,7 @@ export function WorkflowCapabilityPicker({
               [
                 ["all", "全部工具"],
                 ["mcp", "MCP 工具"],
-                ["skills", "Skills"],
+                ["skills", "技能"],
               ] as const
             ).map(([key, label]) => (
               <Button
@@ -357,7 +357,7 @@ export function WorkflowCapabilityPicker({
                               : "未发布"
                           )
                         : limit
-                          ? t("最多选择 4 个 Skills")
+                          ? t("最多选择 4 个技能")
                           : skill.description}
                     </span>
                   </span>
@@ -366,7 +366,7 @@ export function WorkflowCapabilityPicker({
             })}
             {!visibleGroups.length && !visibleSkills.length ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                {t("没有匹配的工具或 Skills")}
+                {t("没有匹配的工具或技能")}
               </p>
             ) : null}
           </div>

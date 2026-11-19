@@ -208,13 +208,13 @@ describe("ToolsPage", () => {
       Boolean(screen.queryByRole("button", { name: "Research package" }))
     ).toBe(true)
     fireEvent.click(screen.getByRole("button", { name: "Research package" }))
-    await screen.findByRole("heading", { name: "编辑 Skill" })
+    await screen.findByRole("heading", { name: "编辑技能" })
     expect(screen.getByText(/assets\/data.bin/)).toBeTruthy()
     expect(screen.getByText("已发布版本：1")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "保存草稿" }))
     await waitFor(() =>
       expect(
-        Boolean(screen.queryByRole("heading", { name: "编辑 Skill" }))
+        Boolean(screen.queryByRole("heading", { name: "编辑技能" }))
       ).toBe(false)
     )
     expect(
@@ -223,7 +223,7 @@ describe("ToolsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("搜索名称、描述或来源"), {
       target: { value: "no-match" },
     })
-    expect(screen.getByText("没有匹配的工具")).toBeTruthy()
+    expect(screen.getByText("没有匹配的技能")).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText("搜索名称、描述或来源"), { target: { value: "" } })
     fireEvent.click(
       within(
@@ -301,7 +301,7 @@ describe("ToolsPage", () => {
         : jsonResponse([])) as typeof fetch
     renderPage(<ToolsPage initialKind="builtin" />)
     fireEvent.click(await screen.findByRole("button", { name: "View package" }))
-    await screen.findByRole("heading", { name: "编辑 Skill" })
+    await screen.findByRole("heading", { name: "编辑技能" })
     expect(
       (screen.getByLabelText("显示名称") as HTMLInputElement).disabled
     ).toBe(true)
@@ -310,7 +310,7 @@ describe("ToolsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }))
     await waitFor(() =>
       expect(
-        Boolean(screen.queryByRole("heading", { name: "编辑 Skill" }))
+        Boolean(screen.queryByRole("heading", { name: "编辑技能" }))
       ).toBe(false)
     )
   })
@@ -533,7 +533,7 @@ describe("ToolsPage", () => {
     }) as typeof fetch
 
     renderPage(<ToolsPage initialKind="builtin" />)
-    await screen.findByRole("heading", { name: "内置 Skills" })
+    await screen.findByText("生成 PDF")
     expect(screen.queryByRole("button", { name: "批量管理" })).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "MCP" }))
@@ -593,13 +593,13 @@ describe("ToolsPage", () => {
 
     renderPage(<ToolsPage initialKind="builtin" />)
     await screen.findByText("生成 PDF")
-    expect(screen.getByRole("heading", { name: "内置 Skills" })).toBeTruthy()
-    expect(screen.getByRole("heading", { name: "自定义 Skills" })).toBeTruthy()
-    expect(screen.getByText("还没有可用的 Skill")).toBeTruthy()
+    expect(screen.queryByRole("heading", { name: "内置技能" })).toBeNull()
+    expect(screen.queryByRole("heading", { name: "自定义技能" })).toBeNull()
+    expect(screen.queryByText("还没有可用的技能")).toBeNull()
     const searchToolbar = screen.getByRole("search")
     expect(within(searchToolbar).getByRole("searchbox")).toBeTruthy()
     expect(
-      within(searchToolbar).getByRole("button", { name: "Skills" })
+      within(searchToolbar).getByRole("button", { name: "技能" })
     ).toBeTruthy()
     expect(screen.queryByText("Remote lookup")).toBeNull()
     expect(screen.queryByText("Owned formatter")).toBeNull()
@@ -616,6 +616,72 @@ describe("ToolsPage", () => {
 
     expect(screen.queryByRole("button", { name: "Python" })).toBeNull()
     expect(screen.queryByText("当前时间")).toBeNull()
+  })
+
+  test("searches and sorts all Skills together in one grid", async () => {
+    const pdf = tool({
+      id: "pdf-tool",
+      kind: "builtin",
+      function_name: "pdf_skill",
+      created_at: "2026-09-02T00:00:00Z",
+      updated_at: "2026-09-01T00:00:00Z",
+    })
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.includes("/tools?")) return jsonResponse([pdf])
+      if (url.includes("/agent-skills?")) {
+        return jsonResponse([
+          {
+            id: "research-skill",
+            name: "A research package",
+            description: "Research PDF documents",
+            status: "active",
+            current_version_number: 1,
+            can_manage: true,
+            created_at: "2026-09-01T00:00:00Z",
+            updated_at: "2026-09-02T00:00:00Z",
+          },
+        ])
+      }
+      return jsonResponse([])
+    }) as typeof fetch
+    renderPage(<ToolsPage initialKind="builtin" />)
+
+    const researchCard = (
+      await screen.findByRole("button", { name: "A research package" })
+    ).closest("article")!
+    const pdfCard = screen.getByText("生成 PDF").closest("article")!
+    const grid = researchCard.parentElement!
+    const names = () =>
+      Array.from(grid.children).map(
+        (card) => card.querySelector("h3, button")?.textContent
+      )
+    expect(pdfCard.parentElement).toBe(grid)
+    expect(names()).toEqual(["A research package", "生成 PDF"])
+
+    const sortTrigger = screen.getByRole("button", { name: "排序" })
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "创建时间" }))
+    expect(names()).toEqual(["生成 PDF", "A research package"])
+    fireEvent.pointerDown(sortTrigger)
+    fireEvent.click(await screen.findByRole("menuitem", { name: "名称" }))
+    expect(names()).toEqual(["生成 PDF", "A research package"])
+
+    const search = screen.getByRole("searchbox")
+    fireEvent.change(search, { target: { value: "PDF" } })
+    expect(grid.children).toHaveLength(2)
+    fireEvent.change(search, { target: { value: "research" } })
+    expect(grid.children).toHaveLength(1)
+    expect(screen.queryByText("生成 PDF")).toBeNull()
+    fireEvent.change(search, { target: { value: "生成" } })
+    expect(grid.children).toHaveLength(1)
+    expect(screen.getByText("生成 PDF")).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "A research package" })
+    ).toBeNull()
+    fireEvent.change(search, { target: { value: "missing" } })
+    expect(screen.getByText("没有匹配的技能")).toBeTruthy()
+    expect(screen.queryByText("还没有可用的技能")).toBeNull()
   })
 
   test("hides image generation, bash and the Skill installer from the Tool catalog", async () => {
@@ -711,11 +777,11 @@ describe("ToolsPage", () => {
     fireEvent.click(trigger)
     expect(screen.queryByText("Python 工具")).toBeNull()
     expect(screen.getByText("MCP Server")).toBeTruthy()
-    fireEvent.click(screen.getByRole("menuitem", { name: "Skills" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "技能" }))
     expect(
-      await screen.findByRole("heading", { name: "创建 Skill" })
+      await screen.findByRole("heading", { name: "创建技能" })
     ).toBeTruthy()
-    expect(screen.getByRole("button", { name: /导入 Skill/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /导入技能/ })).toBeTruthy()
     expect(screen.getByLabelText("技能指令")).toBeTruthy()
     expect(screen.getByRole("button", { name: "保存并发布" })).toBeTruthy()
   })
@@ -1102,7 +1168,7 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage />)
     fireEvent.click((await screen.findByText("生成 PDF")).closest("article")!)
     expect(
-      await screen.findByRole("heading", { name: "生成 PDF Skill" })
+      await screen.findByRole("heading", { name: "生成 PDF 技能" })
     ).toBeTruthy()
     expect(
       await screen.findByRole("heading", { name: "PDF operations" })

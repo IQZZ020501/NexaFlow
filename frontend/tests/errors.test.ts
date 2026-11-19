@@ -50,8 +50,8 @@ describe("API error localization", () => {
     ],
     [
       "Agent Skill name already exists.",
-      "Skill 名称已存在",
-      "Skill 名稱已存在",
+      "技能名称已存在",
+      "技能名稱已存在",
       "Skill name already exists",
     ],
     [

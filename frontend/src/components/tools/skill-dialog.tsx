@@ -59,7 +59,7 @@ export function SkillDialog({
 
   async function importFile(file: File) {
     if (file.size > 2 * 1024 * 1024) {
-      setError(t("Skill 包不能超过 2 MiB"))
+      setError(t("技能包不能超过 2 MiB"))
       return
     }
     setBusyAction("import")
@@ -137,9 +137,9 @@ export function SkillDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{skill ? t("编辑 Skill") : t("创建 Skill")}</DialogTitle>
+          <DialogTitle>{skill ? t("编辑技能") : t("创建技能")}</DialogTitle>
           <DialogDescription>
-            {t("Skill 是按需加载的指令与文件包，不会自动生成或授权外部工具。")}
+            {t("技能是按需加载的指令与文件包，不会自动生成或授权外部工具。")}
           </DialogDescription>
         </DialogHeader>
         <input
@@ -147,7 +147,7 @@ export function SkillDialog({
           type="file"
           accept=".md,.zip"
           className="sr-only"
-          aria-label={t("选择 Skill 文件")}
+          aria-label={t("选择技能文件")}
           disabled={busy || Boolean(readOnly)}
           onChange={(event) => {
             const file = event.target.files?.[0]
@@ -218,7 +218,7 @@ export function SkillDialog({
               ) : (
                 <UploadIcon />
               )}
-              {t(busyAction === "import" ? "导入中" : "导入 Skill")}
+              {t(busyAction === "import" ? "导入中" : "导入技能")}
             </Button>
           ) : null}
           <Button
