@@ -43,7 +43,7 @@ flowchart TD
 | tools | 工具目录、策略与统一调用账本；`tools/__init__.py`、`tools/runtime/service.py` 等 |
 | agent_skills | Skill 包、固定版本加载、脚本与依赖安装；`agent_skills/__init__.py` 及专门的能力入口 |
 | knowledge | 知识库和文档生命周期、检索；`knowledge/{documents,retrieval}/service.py` |
-| projects | 对话文件持久化及运行时工作区；`projects/{service,runtime}.py` |
+| projects | 对话文件持久化、公开 Agent 个人项目及运行时工作区；`projects/{service,chat,runtime}.py` |
 | artifacts | 生成物存储、授权下载、工作区文件；`artifacts/{service,workspace}.py` |
 | models | 注册模型与配置管理；`models/service.py` |
 | identity | 用户、登录、会话、邀请、找回密码、企业身份；`identity/` 各用例服务 |

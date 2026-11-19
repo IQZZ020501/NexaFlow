@@ -30,6 +30,7 @@ export type AgentRunAttachment = Omit<AgentUpload, "id" | "category"> & {
 
 export type PublicAgentConversation = {
   conversation_id: string
+  project_id?: string | null
   question: string
   status: string
   result: string

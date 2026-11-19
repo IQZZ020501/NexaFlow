@@ -16,10 +16,12 @@ export function AgentFilePicker({
   disabled,
   onFiles,
   t,
+  label,
 }: {
   disabled: boolean
   onFiles: (files: File[]) => void
   t: TFunction
+  label?: string
 }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
@@ -61,14 +63,19 @@ export function AgentFilePicker({
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="rounded-md text-muted-foreground hover:text-foreground"
-            aria-label={t("添加附件")}
-            title={t("添加附件")}
+            variant={label ? "outline" : "ghost"}
+            size={label ? "sm" : "icon-sm"}
+            className={
+              label
+                ? undefined
+                : "rounded-md text-muted-foreground hover:text-foreground"
+            }
+            aria-label={label ?? t("添加附件")}
+            title={label ?? t("添加附件")}
             disabled={disabled}
           >
             <PlusIcon />
+            {label}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="top" sideOffset={6}>

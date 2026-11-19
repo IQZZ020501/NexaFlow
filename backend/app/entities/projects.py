@@ -41,3 +41,29 @@ class ProjectRunState:
     file_heads: dict = field(default_factory=dict)
     dependency_locks: dict = field(default_factory=dict)
     updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ChatProject:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    agent_id: str = ""
+    owner_user_id: str = ""
+    file_tree_id: str = ""
+    name: str = ""
+    instructions: str = ""
+    archived: bool = False
+    dissolved_at: datetime | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ChatConversation:
+    id: str = field(default_factory=new_id)
+    workspace_id: str = ""
+    agent_id: str = ""
+    owner_user_id: str = ""
+    conversation_id: str = field(default_factory=new_id)
+    project_id: str | None = None
+    created_at: datetime = field(default_factory=utc_now)

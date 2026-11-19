@@ -25,6 +25,7 @@ SUITES = (
     "artifacts.quality",
     "projects.api",
     "projects.runtime",
+    "projects.chat",
     "agents.evaluation",
     "agents.evaluation_files",
     "tools.unit",

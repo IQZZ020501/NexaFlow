@@ -393,15 +393,15 @@ function ConversationHistory({
             aria-label={t("搜索历史记录")}
           />
         </div>
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
           {filteredConversations.map((item) => (
             <div
               key={item.conversation_id}
-              className={`group flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
+              className={`group flex items-center gap-1 rounded-md px-2 py-0.5 hover:bg-muted ${conversationId === item.conversation_id ? "bg-muted" : ""}`}
             >
               <button
                 type="button"
-                className="min-w-0 flex-1 rounded-md px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="min-w-0 flex-1 rounded-md px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-current={
                   conversationId === item.conversation_id ? "page" : undefined
                 }
@@ -409,9 +409,6 @@ function ConversationHistory({
               >
                 <span className="block truncate text-sm font-medium">
                   {conversationLabel(item.inputs, t("工作流运行"))}
-                </span>
-                <span className="mt-1 block truncate text-xs text-muted-foreground">
-                  {conversationResult(item.outputs, t("等待回答"))}
                 </span>
               </button>
               <DropdownMenu modal={false}>

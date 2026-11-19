@@ -999,6 +999,9 @@ async def regenerate_external_agent_run(
         access_source,
         consumer_id,
     )
+    from app.application.projects.chat import require_writable_conversation
+
+    await require_writable_conversation(db, source)
     regenerated = await regenerate_agent_run_from_source(
         db,
         source,
@@ -1148,24 +1151,48 @@ async def list_public_agent_conversations(
     agent_id: str,
     consumer_id: str,
 ) -> PublicAgentConversationListResponse:
-    await get_published_agent_context(db, agent_id)
+    from app.infra.db.repositories.projects import chat as chat_repository
+
+    context = await get_published_agent_context(db, agent_id)
+    memberships = await chat_repository.list_conversations(
+        db, context.agent.workspace_id, agent_id, consumer_id
+    )
+    projects_by_conversation = {
+        item.conversation_id: item.project_id for item in memberships
+    }
     rows = await agent_repository.list_consumer_conversations(
         db, agent_id, "public", consumer_id
     )
-    return PublicAgentConversationListResponse(
-        items=[
-            PublicAgentConversationResponse(
-                conversation_id=row.conversation_id,
-                question=row.goal,
-                status=row.status,
-                result=clean_model_text(str(row.result or "")),
-                run_count=row.run_count,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            for row in rows
-        ]
+    items = [
+        PublicAgentConversationResponse(
+            conversation_id=row.conversation_id,
+            project_id=projects_by_conversation.get(row.conversation_id),
+            question=row.goal,
+            status=row.status,
+            result=clean_model_text(str(row.result or "")),
+            run_count=row.run_count,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+    ]
+    known = {item.conversation_id for item in items}
+    items.extend(
+        PublicAgentConversationResponse(
+            conversation_id=item.conversation_id,
+            project_id=item.project_id,
+            question="",
+            status="empty",
+            result="",
+            run_count=0,
+            created_at=item.created_at,
+            updated_at=item.created_at,
+        )
+        for item in memberships
+        if item.conversation_id not in known
     )
+    items.sort(key=lambda item: item.updated_at.isoformat(), reverse=True)
+    return PublicAgentConversationListResponse(items=items)
 
 
 async def delete_public_agent_conversation(
@@ -1174,7 +1201,12 @@ async def delete_public_agent_conversation(
     consumer_id: str,
     conversation_id: str,
 ) -> None:
+    from app.infra.db.repositories.projects import chat as chat_repository
+
     await get_published_agent_context(db, agent_id)
+    membership = await chat_repository.get_conversation(
+        db, agent_id, consumer_id, conversation_id
+    )
     deleted, active = await agent_repository.delete_consumer_conversation(
         db, agent_id, "public", consumer_id, conversation_id
     )
@@ -1183,8 +1215,11 @@ async def delete_public_agent_conversation(
             status.HTTP_409_CONFLICT,
             "Cannot delete a conversation while it is running.",
         )
-    if not deleted:
+    if not deleted and membership is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found.")
+    await chat_repository.delete_conversation(
+        db, agent_id, consumer_id, conversation_id
+    )
     await db.commit()
 
 

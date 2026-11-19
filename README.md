@@ -31,6 +31,7 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 | MCP 与统一工具 | 内置与 MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
 | Skills | 导入 `SKILL.md` 或 ZIP 技能包，按需加载指令、参考文件和 Python/JavaScript 脚本；固定版本绑定到 Agent，脚本依赖安装需逐次审批。 |
 | 文件与图片生成 | 内置 Word、PDF、Excel、PPTX 文件渲染工具，可按需接入生图模型；HTML、PDF、DOCX、XLSX、PPTX 在聊天右侧预览，查看文件时可以继续对话。 |
+| 公开对话项目 | 在已发布 Agent 的聊天中创建个人项目，组织多段对话、共用项目说明和只读资料；支持移动对话、保存生成文件、归档与恢复。 |
 | 模型接入 | 当前提供 22 个供应商目录项，包括 OpenAI、Anthropic、Bedrock、Azure OpenAI、Gemini、DeepSeek、阿里云百炼、Kimi、Ollama、vLLM 和自定义 OpenAI 兼容服务；支持对话、视觉、向量、重排和生图模型，具体类型取决于供应商。 |
 | 团队与管理 | 多工作空间、团队和资源级授权，审计日志、公告与消息中心、SMTP 邮件、企业登录及会话管理；界面支持简体中文、繁体中文、英文和多种外观设置。 |
 

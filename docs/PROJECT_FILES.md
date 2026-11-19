@@ -1,6 +1,16 @@
 # 对话文件
 
-控制台和公开 Agent 对话都支持直接上传文件、文件夹或 ZIP。上传后直接提问，无须创建项目或选择绑定；独立项目页面和管理 API 已移除。浏览器文件夹选择和目录拖入保留相对路径，单独选择的 ZIP 在导入时展开并保留内部路径；文件夹和 ZIP 内嵌的 ZIP 作为原始文件保留。普通文档仍提供有界文本摘录，原始文件同时进入对话文件树，Agent 可按需读取、修改和运行脚本。
+控制台和公开 Agent 对话都支持直接上传文件、文件夹或 ZIP。上传后直接提问，无须创建项目或选择绑定；旧版后台独立文件项目页面和管理 API 已移除。浏览器文件夹选择和目录拖入保留相对路径，单独选择的 ZIP 在导入时展开并保留内部路径；文件夹和 ZIP 内嵌的 ZIP 作为原始文件保留。普通文档仍提供有界文本摘录，原始文件同时进入对话文件树，Agent 可按需读取、修改和运行脚本。
+
+## 公开 Agent 个人项目
+
+登录用户可以在已发布 Agent 的聊天侧栏创建项目，将多段对话归入同一项目，并设置项目说明和上传共享资料。项目限定于当前 workspace、Agent 和用户，仅所有者可见；工作流公开聊天暂不提供项目。项目有稳定入口 `/chat/{agent_id}/projects/{project_id}`，可直接打开或刷新，具体对话通过 `conversation_id` 查询参数定位。
+
+项目说明和共享文件版本在每个 Run 创建时冻结，后续修改从下一次发送起生效。共享资料恢复到只读的 `/project/sources/{project_id}/`，可以复制到当前对话的 `/workspace/project/` 再编辑；各段对话的历史、可编辑文件和生成文件仍独立。项目说明不会提升 Agent 权限或授予新工具。界面支持在右侧查看说明、预览资料，以及将当前对话生成的文件显式保存为项目资料；复用已有文件配额、路径检查和隔离预览机制。
+
+已有对话可移入、移出项目，运行中的对话需先完成。归档项目保留全部内容，恢复后可继续发送和修改资料；解散项目会把对话移回普通历史记录，并保留历史回答、生成文件和 Run 引用的不可变资料版本。删除单段对话不会删除项目共享资料。
+
+`202611190002` 迁移增加 `chat_projects` 和 `chat_conversations`，元数据与资料文件树分别保存；应用删除时统一清理，资料历史随 workspace 删除。公开项目 API 位于 `/api/v1/public/agents/{agent_id}/projects`，对话归属通过 `/conversations/{conversation_id}/project` 修改，均要求登录及对应已发布应用的访问权限。
 
 ## 保存与隔离
 
@@ -28,4 +38,4 @@
 
 ## 检查入口
 
-从 `backend/` 运行 `uv run python -m tests.projects.api`、`uv run python -m tests.projects.migration` 和 `uv run python -m tests.projects.runtime`，覆盖 ZIP 导入、路径及配额、真实上传/Run 持久化、公开用户隔离、跨 Run 恢复、旧字节保留、失租拒写和删除清理。新约束需应用迁移，执行镜像需包含当前 `sandbox/command.py`；标准 `make dev` 会根据输入变化构建镜像并执行迁移。前端入口与目录路径覆盖在 `frontend/tests/agent-file-picker.test.tsx` 及 Agent 对话套件。执行 guest 的文件恢复和工作树导出由 `sandbox/command_tests.py` 覆盖；这些测试不代表 Kata 隔离验收。
+从 `backend/` 运行 `uv run python -m tests.projects.api`、`uv run python -m tests.projects.migration`、`uv run python -m tests.projects.runtime` 和 `uv run python -m tests.projects.chat`，覆盖 ZIP 导入、路径及配额、真实上传/Run 持久化、公开用户隔离、项目生命周期、不可变共享资料、跨 Run 恢复、旧字节保留、失租拒写和删除清理。新约束需应用迁移，执行镜像需包含当前 `sandbox/command.py`；标准 `make dev` 会根据输入变化构建镜像并执行迁移。前端入口与目录路径覆盖在 `frontend/tests/agent-file-picker.test.tsx`、`frontend/tests/public-chat-projects.test.tsx` 及 Agent 对话套件。执行 guest 的文件恢复和工作树导出由 `sandbox/command_tests.py` 覆盖；这些测试不代表 Kata 隔离验收。

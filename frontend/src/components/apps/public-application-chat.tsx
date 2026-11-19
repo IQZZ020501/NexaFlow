@@ -13,6 +13,7 @@ import { useSession } from "@/contexts/session-context"
 import { ApiError } from "@/lib/api-client"
 import { getPublicAgentProfile } from "@/lib/api/public-agents"
 import { getPublicWorkflowProfile } from "@/lib/api/public-workflows"
+import { publicChatUrl } from "@/lib/api/public-chat-projects"
 
 /**
  * Loads and renders the public chat for an agent or workflow application.
@@ -23,9 +24,11 @@ import { getPublicWorkflowProfile } from "@/lib/api/public-workflows"
 export function PublicApplicationChat({
   applicationId,
   initialConversationId,
+  initialProjectId = null,
 }: {
   applicationId: string
   initialConversationId: string | null
+  initialProjectId?: string | null
 }) {
   const router = useRouter()
   const { t } = useLanguage()
@@ -38,11 +41,20 @@ export function PublicApplicationChat({
 
   React.useEffect(() => {
     if (!isSessionRestored || token) return
-    const next = initialConversationId
-      ? `/chat/${applicationId}?conversation_id=${encodeURIComponent(initialConversationId)}`
-      : `/chat/${applicationId}`
+    const next = publicChatUrl(
+      applicationId,
+      initialConversationId,
+      initialProjectId
+    )
     router.replace(`/login?next=${encodeURIComponent(next)}`)
-  }, [applicationId, initialConversationId, isSessionRestored, router, token])
+  }, [
+    applicationId,
+    initialConversationId,
+    initialProjectId,
+    isSessionRestored,
+    router,
+    token,
+  ])
 
   React.useEffect(() => {
     if (!token) return
@@ -51,6 +63,7 @@ export function PublicApplicationChat({
       .then(() => active && setKind("agent"))
       .catch((error: unknown) => {
         if (!(error instanceof ApiError) || error.status !== 404) throw error
+        if (initialProjectId) throw error
         return getPublicWorkflowProfile(applicationId, token).then(
           () => active && setKind("workflow")
         )
@@ -66,14 +79,16 @@ export function PublicApplicationChat({
     return () => {
       active = false
     }
-  }, [applicationId, attempt, token])
+  }, [applicationId, attempt, initialProjectId, token])
 
   if (kind === "agent") {
     return (
       <>
         <PublicAgentChat
+          key={`${applicationId}:${token}`}
           agentId={applicationId}
           initialConversationId={initialConversationId}
+          initialProjectId={initialProjectId}
         />
         <OperationNotification
           notification={notification}

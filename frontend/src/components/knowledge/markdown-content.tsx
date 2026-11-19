@@ -189,7 +189,11 @@ export function ArtifactDownloadLink({
     setIsDownloading(true)
     setFailed(false)
     try {
-      const stable = /^\/api\/v1\/artifacts\/[a-f0-9-]+\/content$/i.test(href)
+      const stable =
+        /^\/api\/v1\/artifacts\/[a-f0-9-]+\/content$/i.test(href) ||
+        /^\/api\/v1\/public\/agents\/[a-f0-9-]+\/projects\/[a-f0-9-]+\/files\/[a-f0-9-]+\/content$/i.test(
+          href
+        )
       const blob = await requestBlob(
         stable ? href : "/api/v1/artifacts/download",
         {

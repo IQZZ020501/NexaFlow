@@ -66,6 +66,8 @@ from app.domain.platform.models import (  # noqa: F401  # noqa: F401  # noqa: F4
 )
 from app.domain.projects.models import (  # noqa: F401
     AgentProject,
+    ChatConversation,
+    ChatProject,
     ProjectFileVersion,
     ProjectRunState,
 )

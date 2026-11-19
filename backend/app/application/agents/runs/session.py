@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.agents.runs.service import get_agent_run_entity
 from app.application.agents.tools.builder import session_inputs_to_response
+from app.application.projects.chat import require_writable_conversation
 from app.entities.identity import User
 from app.entities.runs import AgentRun
 from app.infra.db.repositories.runs.session_inputs import enqueue_session_input
@@ -17,6 +18,7 @@ from app.schemas.agents.contracts import (
 async def append_session_input(
     db: AsyncSession, run: AgentRun, payload: AgentSessionInputRequest
 ) -> AgentSessionInputResponse:
+    await require_writable_conversation(db, run)
     try:
         stored = await enqueue_session_input(
             db,
