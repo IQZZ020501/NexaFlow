@@ -10,9 +10,6 @@ from app.api.deps import (
 )
 from app.application.tools import integrations
 from app.schemas.tools.integrations import (
-    IntegrationApplicationProvider,
-    IntegrationApplicationRequest,
-    IntegrationApplicationResponse,
     IntegrationAuthorizeResponse,
     IntegrationCallbackRequest,
     IntegrationProvider,
@@ -28,34 +25,6 @@ Context = Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)]
 @router.get("", response_model=list[IntegrationResponse])
 async def list_integrations(context: Context, db: DbSessionDep):
     return await integrations.list_integrations(db, context.workspace.id, context.user)
-
-
-@router.get("/{provider}/application", response_model=IntegrationApplicationResponse)
-async def get_application(
-    provider: IntegrationApplicationProvider, context: Context, db: DbSessionDep
-):
-    return await integrations.application_status(
-        db, context.workspace.id, context.user, context.membership_role, provider
-    )
-
-
-@router.put("/{provider}/application", response_model=IntegrationApplicationResponse)
-async def configure_application(
-    provider: IntegrationApplicationProvider,
-    payload: IntegrationApplicationRequest,
-    context: Context,
-    db: DbSessionDep,
-    settings: AppSettingsDep,
-):
-    return await integrations.configure(
-        db,
-        context.workspace.id,
-        context.user,
-        context.membership_role,
-        provider,
-        payload,
-        settings,
-    )
 
 
 @router.post("/{provider}/authorize", response_model=IntegrationAuthorizeResponse)

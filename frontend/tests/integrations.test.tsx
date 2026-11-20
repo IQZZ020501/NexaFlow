@@ -119,13 +119,9 @@ afterEach(() => {
   window.open = originalOpen
 })
 
-function catalog(canConfigure = false) {
+function catalog() {
   return renderPage(
-    <IntegrationsCatalog
-      token="token"
-      workspaceId={workspace}
-      canConfigure={canConfigure}
-    />
+    <IntegrationsCatalog token="token" workspaceId={workspace} />
   )
 }
 
@@ -251,7 +247,7 @@ test("failed uninstall keeps the existing installation visible", async () => {
 test("Dida installs without application credentials for both members and administrators", async () => {
   installations[0] = { ...installations[0]!, configured: false }
   for (const canConfigure of [false, true]) {
-    const view = catalog(canConfigure)
+    const view = catalog()
     const dida = within(await card())
     expect(dida.queryByRole("button", { name: "配置 滴答清单" })).toBeNull()
     fireEvent.click(dida.getByRole("button", { name: "安装" }))
@@ -272,43 +268,213 @@ test("Dida installs without application credentials for both members and adminis
   )
 })
 
-test("Feishu members get configuration guidance while administrators can save its application", async () => {
+test("Feishu opens the official personal-app flow without application configuration", async () => {
   installations[1] = { ...installations[1]!, configured: false }
-  const view = catalog()
+  const fetch = globalThis.fetch
+  globalThis.fetch = (async (input, init) =>
+    String(input).endsWith("/feishu/authorize")
+      ? jsonResponse({
+          authorization_url: "https://open.feishu.cn/page/cli?user_code=code",
+          state: state.replace("dida", "feishu"),
+          mode: "device",
+          phase: "application",
+          poll_seconds: 5,
+          expires_in: 600,
+        })
+      : fetch(input, init)) as typeof fetch
+  catalog()
   fireEvent.click(
     within(await card("飞书")).getByRole("button", { name: "安装" })
-  )
-  expect(notifications).toEqual([
-    ["error", "请联系空间管理员配置此集成的开发者应用。"],
-  ])
-  expect(screen.queryByRole("button", { name: "配置 飞书" })).toBeNull()
-  view.unmount()
-  catalog(true)
-  fireEvent.click(
-    within(await card("飞书")).getByRole("button", { name: "安装" })
-  )
-  const clientId = await screen.findByLabelText("应用 Client ID")
-  await waitFor(() =>
-    expect((clientId as HTMLInputElement).value).toBe("existing-client")
   )
   expect(
-    (screen.getByLabelText("应用 Client Secret") as HTMLInputElement).value
-  ).toBe("")
-  fireEvent.change(clientId, { target: { value: "new-client" } })
-  fireEvent.change(screen.getByLabelText("应用 Client Secret"), {
-    target: { value: "new-private-secret" },
-  })
-  fireEvent.submit(clientId.closest("form")!)
-  await waitFor(() =>
-    expect(requests.some((request) => request.method === "PUT")).toBe(true)
-  )
-  expect(requests.find((request) => request.method === "PUT")?.body).toEqual({
-    client_id: "new-client",
-    client_secret: "new-private-secret",
-    scopes: ["tasks:read", "tasks:write"],
-  })
+    await screen.findByText(
+      "请在飞书或 Lark 页面创建个人应用，完成后继续授权你的账号。无需填写应用凭据。"
+    )
+  ).toBeTruthy()
+  expect(screen.queryByLabelText("应用 Client ID")).toBeNull()
+  expect(screen.queryByRole("button", { name: "配置 飞书" })).toBeNull()
+  expect(
+    screen.getByRole("link", { name: "前往授权" }).getAttribute("href")
+  ).toBe("https://open.feishu.cn/page/cli?user_code=code")
   expect(window.location.assign).not.toHaveBeenCalled()
   expect(screen.queryByText("已安装")).toBeNull()
+  expect(requests.some((request) => request.url.endsWith("/application"))).toBe(
+    false
+  )
+})
+
+test("Feishu advances from personal-app setup to user login before installing", async () => {
+  const fetch = globalThis.fetch
+  const realSetTimeout = globalThis.setTimeout
+  const popup = {
+    location: { href: "about:blank" },
+    closed: false,
+    close: mock(() => {}),
+    focus: mock(() => {}),
+    opener: window,
+  }
+  window.open = mock(() => popup as unknown as Window)
+  let finishLogin = false
+  let polls = 0
+  const feishuState = state.replace("dida", "feishu")
+  const login = {
+    authorization_url: "https://accounts.feishu.cn/device",
+    state: feishuState,
+    mode: "device",
+    phase: "login",
+    poll_seconds: 5,
+    expires_in: 240,
+  }
+  globalThis.setTimeout = ((
+    callback: TimerHandler,
+    delay?: number,
+    ...args: unknown[]
+  ) =>
+    realSetTimeout(
+      callback,
+      delay === 5000 && String(callback).includes("poll") ? 15 : delay,
+      ...args
+    )) as typeof setTimeout
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input)
+    if (url.endsWith("/feishu/authorize"))
+      return jsonResponse({
+        ...login,
+        phase: "application",
+        authorization_url: "https://open.feishu.cn/page/cli?user_code=visible",
+      })
+    if (url.endsWith("/feishu/callback")) {
+      polls += 1
+      return jsonResponse({
+        ...installations[1],
+        status: finishLogin ? "connected" : "disconnected",
+        authorization: polls === 1 ? login : null,
+      })
+    }
+    return fetch(input, init)
+  }) as typeof fetch
+  try {
+    catalog()
+    fireEvent.click(
+      within(await card("飞书")).getByRole("button", { name: "安装" })
+    )
+    await screen.findByText(
+      "个人应用已创建，请继续登录飞书或 Lark 并授权个人数据访问。不支持豆包账号。"
+    )
+    expect(popup.opener).toBe(window)
+    expect(popup.location.href).toBe("https://accounts.feishu.cn/device")
+    expect(
+      screen.getByRole("link", { name: "前往授权" }).getAttribute("href")
+    ).toBe(login.authorization_url)
+    expect(
+      within(
+        screen.getByRole("article", { name: "飞书", hidden: true })
+      ).getByText("未安装")
+    ).toBeTruthy()
+    finishLogin = true
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("article", { name: "飞书" })).getByText(
+          "已安装"
+        )
+      ).toBeTruthy()
+    )
+    expect(notifications).toContainEqual(["success", "集成已安装"])
+    expect(popup.close).toHaveBeenCalledTimes(1)
+    expect(window.location.assign).not.toHaveBeenCalled()
+  } finally {
+    globalThis.setTimeout = realSetTimeout
+  }
+})
+
+test("Feishu keeps the second authorization link when the platform isolates its window", async () => {
+  const fetch = globalThis.fetch
+  const realSetTimeout = globalThis.setTimeout
+  const popup = {
+    location: {
+      get href() {
+        return "https://open.feishu.cn/page/cli?user_code=visible"
+      },
+      set href(url: string) {
+        if (url.startsWith("https://accounts.feishu.cn"))
+          throw new DOMException("Blocked navigation", "SecurityError")
+      },
+    },
+    closed: false,
+    close: mock(() => {}),
+    opener: null,
+  }
+  window.open = mock(() => popup as unknown as Window)
+  let finishLogin = false
+  let polls = 0
+  const feishuState = state.replace("dida", "feishu")
+  const login = {
+    authorization_url: "https://accounts.feishu.cn/device",
+    state: feishuState,
+    mode: "device",
+    phase: "login",
+    poll_seconds: 5,
+    expires_in: 240,
+  }
+  globalThis.setTimeout = ((
+    callback: TimerHandler,
+    delay?: number,
+    ...args: unknown[]
+  ) =>
+    realSetTimeout(
+      callback,
+      delay === 5000 && String(callback).includes("poll") ? 15 : delay,
+      ...args
+    )) as typeof setTimeout
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input)
+    if (url.endsWith("/feishu/authorize"))
+      return jsonResponse({
+        ...login,
+        phase: "application",
+        authorization_url: "https://open.feishu.cn/page/cli?user_code=visible",
+      })
+    if (url.endsWith("/feishu/callback")) {
+      polls += 1
+      return jsonResponse({
+        ...installations[1],
+        status: finishLogin ? "connected" : "disconnected",
+        authorization: polls === 1 ? login : null,
+      })
+    }
+    return fetch(input, init)
+  }) as typeof fetch
+  try {
+    catalog()
+    fireEvent.click(
+      within(await card("飞书")).getByRole("button", { name: "安装" })
+    )
+    await screen.findByText(
+      "个人应用已创建，请继续登录飞书或 Lark 并授权个人数据访问。不支持豆包账号。"
+    )
+    expect(popup.location.href).toContain("https://open.feishu.cn/page/cli")
+    expect(
+      screen.getByRole("link", { name: "前往授权" }).getAttribute("href")
+    ).toBe(login.authorization_url)
+    expect(
+      within(
+        screen.getByRole("article", { name: "飞书", hidden: true })
+      ).getByText("未安装")
+    ).toBeTruthy()
+    finishLogin = true
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("article", { name: "飞书" })).getByText(
+          "已安装"
+        )
+      ).toBeTruthy()
+    )
+    expect(notifications).toContainEqual(["success", "集成已安装"])
+    expect(notifications.some(([kind]) => kind === "error")).toBe(false)
+    expect(window.location.assign).not.toHaveBeenCalled()
+  } finally {
+    globalThis.setTimeout = realSetTimeout
+  }
 })
 
 test("a completed request from the previous workspace cannot redirect the current account context", async () => {
@@ -459,15 +625,15 @@ test("installed integration operations are selectable as one localized Agent cap
 
 test("integration operation labels follow all three interface languages", () => {
   for (const [language, expected] of [
-    ["zh-Hans", "发送飞书消息"],
-    ["zh-Hant", "傳送飛書訊息"],
-    ["en", "Send Feishu message"],
+    ["zh-Hans", "执行飞书操作"],
+    ["zh-Hant", "執行飛書操作"],
+    ["en", "Perform Feishu operation"],
   ] as const) {
     const t: TFunction = (key, values) =>
       translate(language as Language, key, values)
-    expect(
-      integrationToolName(`feishu_send_message_${"a".repeat(32)}`, t)
-    ).toBe(expected)
+    expect(integrationToolName(`feishu_write_api_${"a".repeat(32)}`, t)).toBe(
+      expected
+    )
   }
 })
 

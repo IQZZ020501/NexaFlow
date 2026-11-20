@@ -33,8 +33,7 @@ export function IntegrationOAuthCallbackPage() {
         const values = new URLSearchParams(originalQuery.current)
         const state = values.get("state") ?? ""
         const code = values.get("code")
-        const match =
-          /^([0-9a-f-]{36})\.(dida|feishu)\.[A-Za-z0-9_-]{43}$/.exec(state)
+        const match = /^([0-9a-f-]{36})\.(dida)\.[A-Za-z0-9_-]{43}$/.exec(state)
         if (!match || !code || values.has("error"))
           throw new Error(t("授权未完成，集成尚未安装。"))
         const result = await completeIntegrationAuthorization(

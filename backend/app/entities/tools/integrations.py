@@ -5,18 +5,6 @@ from app.entities.defaults import new_id, utc_now
 
 
 @dataclass
-class IntegrationApplication:
-    id: str = field(default_factory=new_id)
-    workspace_id: str = ""
-    provider: str = ""
-    client_id: str = ""
-    client_secret_ciphertext: str = ""
-    scopes: list[str] = field(default_factory=list)
-    revision: int = 1
-    updated_at: datetime = field(default_factory=utc_now)
-
-
-@dataclass
 class IntegrationConnection:
     id: str = field(default_factory=new_id)
     workspace_id: str = ""

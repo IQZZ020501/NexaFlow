@@ -152,37 +152,6 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
                     await client.exchange_tokens("dida", "client", secret, **values)
         self.assertEqual(self.requests, [])
 
-    async def test_feishu_exchanges_code_and_refresh_through_registered_application(
-        self,
-    ):
-        self.response = httpx2.Response(200, json={"access_token": "access"})
-        await client.exchange_tokens(
-            "feishu",
-            "client",
-            "secret",
-            grant_type="authorization_code",
-            code="short-code",
-            code_verifier="pkce-verifier",
-            redirect_uri="https://app.example/callback",
-        )
-        request = self.requests[0]
-        values = json.loads(request.content)
-        self.assertEqual(
-            str(request.url), "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
-        )
-        self.assertEqual(values["client_secret"], "secret")
-        self.assertEqual(values["code_verifier"], "pkce-verifier")
-        await client.exchange_tokens(
-            "feishu",
-            "client",
-            "secret",
-            grant_type="refresh_token",
-            refresh_token="refresh",
-        )
-        self.assertEqual(
-            json.loads(self.requests[1].content)["grant_type"], "refresh_token"
-        )
-
     async def test_tencent_device_authorization_uses_official_json_contract(self):
         self.response = httpx2.Response(
             200, json={"code": 0, "data": {"auth_code": "user-code"}}
@@ -215,24 +184,6 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
             {"projectId": "work", "title": "Task"},
         )
         await client.call_integration(
-            "feishu",
-            "send_message",
-            {"open_id": "user", "text": "Message"},
-            {"access_token": "private-token"},
-            "same-invocation",
-        )
-        await client.call_integration(
-            "feishu",
-            "send_message",
-            {"open_id": "user", "text": "Message"},
-            {"access_token": "private-token"},
-            "same-invocation",
-        )
-        self.assertEqual(
-            json.loads(self.requests[1].content)["uuid"],
-            json.loads(self.requests[2].content)["uuid"],
-        )
-        await client.call_integration(
             "tencent_meeting",
             "list_meetings",
             {},
@@ -243,8 +194,8 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
             },
             "invocation",
         )
-        self.assertEqual(self.requests[3].headers["AccessToken"], "meeting-token")
-        self.assertEqual(self.requests[3].headers["OpenId"], "owner")
+        self.assertEqual(self.requests[1].headers["AccessToken"], "meeting-token")
+        self.assertEqual(self.requests[1].headers["OpenId"], "owner")
 
     async def test_tencent_reads_use_the_device_and_source_bound_to_authorization(self):
         credentials = {
@@ -303,18 +254,6 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
                     "Integration authorization expired. Please install again.",
                 )
                 self.assertEqual(len(self.requests), before + 1)
-
-    async def test_rejects_resource_path_injection_before_dispatch(self):
-        for identifier in ("../other", "x/y", "x?token=y", "x%2Fy"):
-            with self.assertRaises(IntegrationProviderError):
-                await client.call_integration(
-                    "feishu",
-                    "read_document",
-                    {"document_id": identifier},
-                    {"access_token": "token"},
-                    "invocation",
-                )
-        self.assertEqual(self.requests, [])
 
     async def test_errors_are_sanitized_and_write_uncertainty_is_preserved(self):
         for status, uncertain in ((401, False), (403, False), (500, True)):

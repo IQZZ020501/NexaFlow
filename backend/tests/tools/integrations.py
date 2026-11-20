@@ -203,42 +203,22 @@ def main():
             json={"site_url": "https://nexaflow.example", "enabled": False},
         )
         assert site.status_code == 200, site.text
-        for provider in ("feishu",):
-            app = {
-                "client_id": f"{provider}-client",
-                "client_secret": "private-application-secret",
-            }
-            assert (
-                client.put(
-                    root + f"/{provider}/application", headers=owner, json=app
-                ).status_code
-                == 403
-            )
-            configured = client.put(
-                root + f"/{provider}/application", headers=admin, json=app
-            )
-            assert configured.status_code == 200, configured.text
-            assert "private-application-secret" not in configured.text
-            assert (
-                configured.json()["redirect_uri"]
-                == "https://nexaflow.example/app/tools/integrations/callback"
-            )
-        assert (
-            client.get(root + "/feishu/application", headers=owner).status_code == 403
-        )
-        for headers in (admin, owner):
-            assert (
-                client.get(root + "/dida/application", headers=headers).status_code
-                == 422
-            )
-            assert (
-                client.put(
-                    root + "/dida/application",
-                    headers=headers,
-                    json={"client_id": "old-client", "client_secret": "old-secret"},
-                ).status_code
-                == 422
-            )
+        for provider in ("dida", "feishu"):
+            for headers in (admin, owner):
+                assert (
+                    client.get(
+                        root + f"/{provider}/application", headers=headers
+                    ).status_code
+                    == 404
+                )
+                assert (
+                    client.put(
+                        root + f"/{provider}/application",
+                        headers=headers,
+                        json={"client_id": "old-client", "client_secret": "old-secret"},
+                    ).status_code
+                    == 404
+                )
 
         def begin(provider="dida"):
             response = client.post(root + f"/{provider}/authorize", headers=owner)
@@ -345,7 +325,7 @@ def main():
                 headers=admin,
                 json={"client_id": "new-client"},
             ).status_code
-            == 422
+            == 404
         )
         source_id = installed.json()["source_id"]
         connection = asyncio.run(assert_encryption(workspace_id, owner_id, "dida"))
@@ -575,44 +555,6 @@ def main():
         ):
             assert complete(authorization).status_code == 409
         assert client.get(root, headers=owner).json()[0]["status"] == "disconnected"
-
-        # Feishu uses PKCE and retains only server-side refresh credentials.
-        exchange.return_value = {
-            "access_token": "feishu-access",
-            "refresh_token": "feishu-refresh",
-            "expires_in": 3600,
-        }
-        feishu = begin("feishu")
-        query = parse_qs(urlparse(feishu["authorization_url"]).query)
-        assert query["code_challenge_method"] == ["S256"]
-        assert complete(feishu, "feishu").json()["status"] == "connected"
-        expired = asyncio.run(expire(workspace_id, owner_id, "feishu"))
-        exchange.return_value = {
-            "access_token": "feishu-access-new",
-            "refresh_token": "feishu-refresh-new",
-            "expires_in": 3600,
-        }
-
-        async def refresh_grant():
-            async with get_session_factory()() as db:
-                return await service.credentials(
-                    db, expired.id, workspace_id, owner_id, expired.generation, settings
-                )
-
-        assert asyncio.run(refresh_grant())["access_token"] == "feishu-access-new"
-        assert exchange.call_args.kwargs["grant_type"] == "refresh_token"
-        asyncio.run(expire(workspace_id, owner_id, "feishu", lease=True))
-        try:
-            asyncio.run(refresh_grant())
-            raise AssertionError(
-                "an expired refresh lease must require fresh authorization"
-            )
-        except provider_api.IntegrationProviderError:
-            pass
-        assert (
-            client.get(root, headers=owner).json()[1]["status"]
-            == "reauthorization_required"
-        )
 
         # Tencent's official device authorization opens the platform login page;
         # an empty polling result is pending, never a successful installation.

@@ -2,6 +2,17 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Invalid integration arguments.":
+    "集成参数无效，请检查资源标识、时间和操作参数。",
+  "Invalid integration resource identifier.":
+    "集成参数无效，请检查资源标识、时间和操作参数。",
+  "Invalid integration arguments. Inspect the operation schema before calling it.":
+    "集成参数无效，请检查资源标识、时间和操作参数。",
+  "Integration operation requires the matching read or write tool.":
+    "集成参数无效，请检查资源标识、时间和操作参数。",
+  "Integration tool definition changed. Update tools and select this integration again.":
+    "工具已更新，请在 Agent 中取消并重新勾选此集成，然后保存。",
+
   "Integration authorization origin is not allowed.":
     "当前访问地址不可用于授权，请从 NexaFlow 网站重新登录。",
   "Invalid integration operation arguments.":
@@ -9,11 +20,6 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Configure the administrator-managed public site URL before connecting OAuth.":
     "请先由系统管理员配置公开站点地址。",
   "Integration not found.": "当前用户尚未安装此集成，请重新安装。",
-  "Ask a workspace administrator to configure this integration's application first.":
-    "请联系空间管理员配置此集成的开发者应用。",
-  "Uninstall this integration before changing its application configuration.":
-    "请先卸载此集成，再修改应用配置。",
-  "Integration application credentials are required.": "集成应用凭据不能为空",
   "This integration is already installed. Uninstall it before connecting another account.":
     "此集成已安装，请先卸载再连接其他账号。",
   "Integration authorization was cancelled. Please install again.":

@@ -2,10 +2,11 @@
 
 
 class IntegrationProviderError(RuntimeError):
-    def __init__(self, message, *, uncertain=False, unauthorized=False):
+    def __init__(self, message, *, uncertain=False, unauthorized=False, reason=None):
         super().__init__(message)
         self.uncertain = uncertain
         self.unauthorized = unauthorized
+        self.reason = reason
 
 
 def authorization_url(provider, client_id, redirect_uri, state, verifier, scopes):
@@ -28,6 +29,12 @@ async def exchange_tokens(provider, client_id, client_secret, **values):
 
 async def device_authorization(action, credentials):
     from app.adapters.integrations.client import device_authorization as request
+
+    return await request(action, credentials)
+
+
+async def feishu_authorization(action, credentials):
+    from app.adapters.integrations.client import feishu_authorization as request
 
     return await request(action, credentials)
 

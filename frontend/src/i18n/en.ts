@@ -1,6 +1,18 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "授权范围（空格分隔）": "Scopes (separated by spaces)",
+
+  "连接飞书或 Lark，管理消息、邮件、日历、文档、表格、会议、任务和审批等。":
+    "Connect Feishu or Lark to manage messages, mail, calendars, documents, tables, meetings, tasks, approvals and more.",
+  "请在飞书或 Lark 页面创建个人应用，完成后继续授权你的账号。无需填写应用凭据。":
+    "Create a personal app on Feishu or Lark, then authorize your account. No application credentials need to be entered.",
+  "个人应用已创建，请继续登录飞书或 Lark 并授权个人数据访问。不支持豆包账号。":
+    "Your personal app is ready. Sign in to Feishu or Lark and authorize access to your personal data. Doubao accounts are not supported.",
+  查找飞书操作: "Find Feishu operations",
+  查看飞书操作参数: "Inspect Feishu operation parameters",
+  读取飞书数据: "Read Feishu data",
+  执行飞书操作: "Perform Feishu operation",
   "当前访问地址不可用于授权，请从 NexaFlow 网站重新登录。":
     "This address cannot be used for authorization. Sign in again from the NexaFlow website.",
   按会议号查询腾讯会议: "Find Tencent meeting by code",
@@ -106,29 +118,13 @@ export const en = {
   腾讯会议: "Tencent Meeting",
   "管理任务、清单和标签，记录习惯与专注，查询日历和倒数日。":
     "Manage tasks, lists and tags; track habits and focus; read calendars and countdowns.",
-  "读取已授权的云文档，以你的身份发送消息。":
-    "Read authorized cloud documents and send messages as you.",
   "查询即将开始和进行中的会议，查看会议详情。":
     "List upcoming and ongoing meetings and read their details.",
-  "配置 {name}": "Configure {name}",
-  "管理员配置开发者应用后，成员可分别登录自己的账号完成安装。":
-    "Once an administrator configures the developer application, members can install it by signing in to their own accounts.",
-  "应用 Client ID": "Application Client ID",
-  "应用 Client Secret": "Application Client Secret",
-  "留空保留已保存的密钥。": "Leave blank to keep the saved secret.",
-  "密钥会加密保存，之后不会返回明文。":
-    "Secrets are stored encrypted and never returned in plain text.",
-  "OAuth 回调地址": "OAuth redirect URL",
-  "在平台开发者后台登记此回调地址，并开通下列权限。":
-    "Register this redirect URL and enable the permissions below in the developer console.",
   "请先由系统管理员配置公开站点地址。":
     "Ask a system administrator to configure the public site URL first.",
-  打开开发者平台: "Open developer console",
   "授权已超时，请重新安装。": "Authorization timed out. Please install again.",
   集成已安装: "Integration installed",
   集成已卸载: "Integration uninstalled",
-  "请联系空间管理员配置此集成的开发者应用。":
-    "Ask a workspace administrator to configure this integration’s developer application.",
   "卸载 {name}？": "Uninstall {name}?",
   "卸载后将清除本地授权信息，并停止使用此账号执行新的工具调用。":
     "Uninstalling removes stored credentials and stops new tool calls using this account.",
@@ -142,7 +138,6 @@ export const en = {
   安装: "Install",
   重新认证: "Reauthorize",
   未找到匹配的集成: "No matching integrations",
-  应用配置已保存: "Application configuration saved",
   "安装 {name}": "Install {name}",
   "请在平台页面登录并确认授权，完成后会自动更新安装状态。":
     "Sign in and authorize on the provider’s page. The installation status will update automatically.",
@@ -153,9 +148,6 @@ export const en = {
   "授权完成，集成已安装。":
     "Authorization completed. The integration is installed.",
   返回集成: "Back to integrations",
-  "请先卸载此集成，再修改应用配置。":
-    "Uninstall this integration before changing its application configuration.",
-  集成应用凭据不能为空: "Integration application credentials are required.",
   "此集成已安装，请先卸载再连接其他账号。":
     "This integration is already installed. Uninstall it before connecting another account.",
   "授权已取消，请重新安装。":
@@ -369,7 +361,6 @@ export const en = {
   客户端密钥: "Client secret",
   "密钥加密保存；断开连接后需要重新填写。":
     "The secret is encrypted. Enter it again after disconnecting.",
-  "授权范围（空格分隔）": "Scopes (separated by spaces)",
   "使用已注册的 OAuth 客户端，填写服务提供方的授权、令牌与撤销地址。连接会使用 PKCE。":
     "Use a registered OAuth client and enter the provider’s authorization, token, and revocation endpoints. The connection uses PKCE.",
   "授权由连接创建者管理。获准使用此来源的工具会使用这份连接。":
@@ -1718,6 +1709,8 @@ export const en = {
   MCP: "MCP",
   "选择的 MCP 工具展示在这里": "Selected MCP tools appear here",
   完成: "Done",
+  操作已完成: "Integration operation completed.",
+  已读取工具结果: "Stored Tool result read.",
   API: "API",
   概览: "Overview",
   "此 Agent 未发布或不可访问。": "This Agent is unpublished or unavailable.",

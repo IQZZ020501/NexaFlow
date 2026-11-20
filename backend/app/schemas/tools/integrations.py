@@ -1,14 +1,19 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from app.schemas.time import AppDateTime
 
 IntegrationProvider = Literal["dida", "feishu", "tencent_meeting"]
-IntegrationApplicationProvider = Literal["feishu"]
-_Text = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
-]
+
+
+class IntegrationAuthorizeResponse(BaseModel):
+    authorization_url: str
+    state: str
+    mode: Literal["redirect", "device"]
+    poll_seconds: int = 5
+    phase: Literal["application", "login"] | None = None
+    expires_in: int = 300
 
 
 class IntegrationResponse(BaseModel):
@@ -17,29 +22,7 @@ class IntegrationResponse(BaseModel):
     configured: bool
     expires_at: AppDateTime | None
     source_id: str | None
-
-
-class IntegrationApplicationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    client_id: _Text
-    client_secret: (
-        Annotated[str, StringConstraints(min_length=1, max_length=8000)] | None
-    ) = None
-    scopes: list[_Text] = Field(default_factory=list, max_length=32)
-
-
-class IntegrationApplicationResponse(BaseModel):
-    client_id: str
-    has_client_secret: bool
-    scopes: list[str]
-    redirect_uri: str
-
-
-class IntegrationAuthorizeResponse(BaseModel):
-    authorization_url: str
-    state: str
-    mode: Literal["redirect", "device"]
-    poll_seconds: int = 5
+    authorization: IntegrationAuthorizeResponse | None = None
 
 
 class IntegrationCallbackRequest(BaseModel):

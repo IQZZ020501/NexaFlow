@@ -14,8 +14,9 @@ export const integrationCatalog = [
     provider: "feishu",
     name: "飞书",
     icon: "/feishu.svg",
-    description: "读取已授权的云文档，以你的身份发送消息。",
-    documentation: "https://open.feishu.cn/app",
+    description:
+      "连接飞书或 Lark，管理消息、邮件、日历、文档、表格、会议、任务和审批等。",
+    documentation: "https://www.feishu.cn/feishu-cli",
   },
   {
     provider: "tencent_meeting",
@@ -135,6 +136,11 @@ const operationLabels: Record<string, TranslationKey> = {
   dida_list_tasks: "读取滴答待办",
   dida_create_task: "创建滴答任务",
   dida_complete_task: "完成滴答任务",
+  feishu_list_operations: "查找飞书操作",
+  feishu_describe_operation: "查看飞书操作参数",
+  feishu_read_api: "读取飞书数据",
+  feishu_write_api: "执行飞书操作",
+  // Preserve translated labels in immutable invocation history.
   feishu_read_document: "读取飞书文档",
   feishu_send_message: "发送飞书消息",
   tencent_meeting_list_meetings: "查看腾讯会议列表",

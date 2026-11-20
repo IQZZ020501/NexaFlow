@@ -9,9 +9,8 @@ from urllib.parse import urlencode
 
 import httpx2
 
-from app.adapters.integrations import dida
+from app.adapters.integrations import dida, feishu
 from app.adapters.integrations.tencent import READ_ONLY_POST_OPERATIONS, build_request
-from app.adapters.integrations.validation import resource_identifier as _identifier
 from app.adapters.mcp.client import (
     _hardened_http_client_factory,
     validate_mcp_destination,
@@ -32,6 +31,7 @@ async def _request(
     limit=_LIMIT,
     provider=None,
     side_effecting=None,
+    oauth_pending=False,
 ):
     writing = method != "GET" if side_effecting is None else side_effecting
     try:
@@ -56,6 +56,21 @@ async def _request(
                 error_info = (
                     result.get("error_info") if isinstance(result, dict) else None
                 )
+                if (
+                    oauth_pending
+                    and response.status_code in (200, 400)
+                    and isinstance(result, dict)
+                ):
+                    return result
+                if (
+                    provider == "feishu"
+                    and isinstance(result, dict)
+                    and result.get("code") in (99991663, 99991668, 99991677)
+                ):
+                    raise IntegrationProviderError(
+                        "Integration authorization expired. Please install again.",
+                        unauthorized=True,
+                    )
                 if (
                     provider == "tencent_meeting"
                     and isinstance(error_info, dict)
@@ -103,8 +118,6 @@ def authorization_url(provider, client_id, redirect_uri, state, verifier, scopes
     }
     if provider == "dida":
         endpoint = "https://dida365.com/oauth/authorize"
-    elif provider == "feishu":
-        endpoint = "https://open.feishu.cn/open-apis/authen/v1/authorize"
     else:
         raise IntegrationProviderError("Unsupported integration provider.")
     query.update(
@@ -162,16 +175,13 @@ async def exchange_tokens(provider, client_id, client_secret, **values):
             )
         values["client_id"] = client_id
         url = "https://api.dida365.com/oauth/token"
-    elif provider == "feishu":
-        values.update(client_id=client_id, client_secret=client_secret)
-        url = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
     else:
         raise IntegrationProviderError("Unsupported integration provider.")
     result = await _request(
         "POST",
         url,
         headers=headers,
-        **({"body": values} if provider == "feishu" else {"data": values}),
+        data=values,
         limit=64 * 1024,
     )
     if (
@@ -210,27 +220,20 @@ async def device_authorization(action, credentials):
     return response["data"]
 
 
+async def feishu_authorization(action, credentials):
+    return await feishu.authorize(action, credentials, _request)
+
+
 async def call_integration(provider, operation, arguments, credentials, request_id):
     if provider == "dida":
         return await dida.call_integration(operation, arguments, credentials, _request)
+    if provider == "feishu":
+        return await feishu.call_integration(
+            operation, arguments, credentials, request_id, _request
+        )
     headers = {"Authorization": f"Bearer {credentials['access_token']}"}
     method, body, query = "GET", None, {}
-    if provider == "feishu":
-        base = "https://open.feishu.cn/open-apis"
-        if operation == "read_document":
-            path = f"/docx/v1/documents/{_identifier(arguments['document_id'])}/raw_content"
-        elif operation == "send_message":
-            method, path = "POST", "/im/v1/messages"
-            query = {"receive_id_type": "open_id"}
-            body = {
-                "receive_id": _identifier(arguments["open_id"]),
-                "msg_type": "text",
-                "content": json.dumps({"text": arguments["text"]}, ensure_ascii=False),
-                "uuid": hashlib.sha256(request_id.encode()).hexdigest()[:32],
-            }
-        else:
-            raise IntegrationProviderError("Unsupported integration operation.")
-    elif provider == "tencent_meeting":
+    if provider == "tencent_meeting":
         base = "https://api.meeting.qq.com"
         headers = {
             "AccessToken": credentials["access_token"],
@@ -258,9 +261,7 @@ async def call_integration(provider, operation, arguments, credentials, request_
             provider == "tencent_meeting" and operation in READ_ONLY_POST_OPERATIONS
         ),
     )
-    if isinstance(result, dict) and (
-        result.get("error_info") or provider == "feishu" and result.get("code", 0) != 0
-    ):
+    if isinstance(result, dict) and result.get("error_info"):
         raise IntegrationProviderError(
             "Integration request failed. Check the account authorization and application permissions."
         )

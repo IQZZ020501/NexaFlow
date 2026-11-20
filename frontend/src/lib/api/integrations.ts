@@ -1,25 +1,21 @@
 import { request } from "@/lib/api-client"
 
 export type IntegrationProvider = "dida" | "feishu" | "tencent_meeting"
-export type IntegrationApplicationProvider = "feishu"
 export type Integration = {
   provider: IntegrationProvider
   status: "disconnected" | "connected" | "reauthorization_required"
   configured: boolean
   expires_at: string | null
   source_id: string | null
-}
-export type IntegrationApplication = {
-  client_id: string
-  has_client_secret: boolean
-  scopes: string[]
-  redirect_uri: string
+  authorization?: IntegrationAuthorization | null
 }
 export type IntegrationAuthorization = {
   authorization_url: string
   state: string
   mode: "redirect" | "device"
   poll_seconds: number
+  phase?: "application" | "login" | null
+  expires_in?: number
 }
 
 function path(workspaceId: string, suffix = "") {
@@ -28,29 +24,6 @@ function path(workspaceId: string, suffix = "") {
 
 export function listIntegrations(token: string, workspaceId: string) {
   return request<Integration[]>(path(workspaceId), { token })
-}
-
-export function getIntegrationApplication(
-  token: string,
-  workspaceId: string,
-  provider: IntegrationApplicationProvider
-) {
-  return request<IntegrationApplication>(
-    path(workspaceId, `/${provider}/application`),
-    { token }
-  )
-}
-
-export function configureIntegrationApplication(
-  token: string,
-  workspaceId: string,
-  provider: IntegrationApplicationProvider,
-  payload: { client_id: string; client_secret?: string; scopes: string[] }
-) {
-  return request<IntegrationApplication>(
-    path(workspaceId, `/${provider}/application`),
-    { token, method: "PUT", body: JSON.stringify(payload) }
-  )
 }
 
 export function authorizeIntegration(

@@ -213,6 +213,9 @@ function processSummary(
       value: Number(legacyKnowledgeMatch[1]),
     })
   }
+  if (event.summary === "Integration operation completed.")
+    return t("操作已完成")
+  if (event.summary === "Stored Tool result read.") return t("已读取工具结果")
   return event.summary
 }
 

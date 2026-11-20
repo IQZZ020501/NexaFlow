@@ -1,5 +1,6 @@
 """Owner-scoped OAuth installation and disconnect, with fenced callbacks."""
 
+import asyncio
 import hashlib
 import json
 import secrets
@@ -10,15 +11,14 @@ from fastapi import HTTPException
 
 from app.domain.tools.catalog.service import canonical_definition_hash
 from app.domain.tools.integrations.catalog import OPERATIONS, PROVIDERS
+from app.domain.tools.integrations.feishu_catalog import FEISHU_CATALOG_REVISION
 from app.domain.tools.integrations.redirects import browser_redirect_uri
 from app.entities.defaults import new_id, utc_now
 from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 from app.entities.tools.integrations import (
-    IntegrationApplication,
     IntegrationAuthorization,
     IntegrationConnection,
 )
-from app.infra.db.repositories.email import smtp
 from app.infra.db.repositories.tools import integrations as repository
 from app.infra.db.repositories.tools import repository as tools
 from app.infra.db.repositories.workspaces import repository as workspaces
@@ -52,82 +52,21 @@ def unseal(value, settings):
     )
 
 
-async def redirect_uri(db):
-    site = await smtp.get(db)
-    return (
-        site.site_url.rstrip("/") + "/app/tools/integrations/callback"
-        if site and site.site_url
-        else ""
-    )
-
-
-async def application_status(db, workspace_id, provider):
-    definition = provider_definition(provider)
-    if provider != "feishu":
-        raise HTTPException(422, "This integration needs no application configuration.")
-    app = await repository.application(db, workspace_id, provider)
-    return {
-        "client_id": app.client_id if app else "",
-        "has_client_secret": bool(app and app.client_secret_ciphertext),
-        "scopes": app.scopes if app else definition["scopes"],
-        "redirect_uri": await redirect_uri(db),
-    }
-
-
-async def configure(db, workspace_id, provider, payload, settings):
-    provider_definition(provider)
-    if provider != "feishu":
-        raise HTTPException(
-            422,
-            "This integration needs no application configuration.",
-        )
-    await workspaces.lock_workspace(db, workspace_id)
-    if await repository.has_connections(db, workspace_id, provider):
-        raise HTTPException(
-            409,
-            "Uninstall this integration before changing its application configuration.",
-        )
-    app = await repository.application(db, workspace_id, provider, lock=True)
-    if app is None:
-        app = IntegrationApplication(workspace_id=workspace_id, provider=provider)
-    else:
-        app.revision += 1
-    app.client_id = payload.client_id
-    if payload.client_secret is not None:
-        app.client_secret_ciphertext = seal(
-            {"client_secret": payload.client_secret}, settings
-        )
-    if not app.client_secret_ciphertext:
-        raise HTTPException(422, "Integration application credentials are required.")
-    app.scopes = list(dict.fromkeys(payload.scopes or PROVIDERS[provider]["scopes"]))
-    app.updated_at = utc_now()
-    await repository.save_application(db, app)
-    await db.commit()
-    return await application_status(db, workspace_id, provider)
-
-
-def _application_matches(provider, app, connection):
-    if provider == "feishu":
-        return bool(app and app.revision == connection.application_revision)
+def _application_matches(provider, connection):
     # Zero means this authorization is independent of a configured application.
-    # Retired Dida confidential-client connections must authorize again.
-    return provider != "dida" or connection.application_revision == 0
+    # Retired manually configured Feishu/Dida grants must authorize again.
+    return provider not in ("dida", "feishu") or connection.application_revision == 0
 
 
 async def status(db, workspace_id, user_id, provider):
     provider_definition(provider)
-    app = (
-        await repository.application(db, workspace_id, provider)
-        if provider == "feishu"
-        else None
-    )
     connection = await repository.connection(db, workspace_id, user_id, provider)
     state = connection.status if connection else "disconnected"
     if (
         connection
         and state == "connected"
         and (
-            not _application_matches(provider, app, connection)
+            not _application_matches(provider, connection)
             or connection.access_expires_at
             and utc(connection.access_expires_at) <= utc_now()
             and not connection.refreshable
@@ -137,8 +76,7 @@ async def status(db, workspace_id, user_id, provider):
     return {
         "provider": provider,
         "status": state,
-        "configured": provider != "feishu"
-        or bool(app and app.client_secret_ciphertext),
+        "configured": True,
         "expires_at": connection.access_expires_at if connection else None,
         "source_id": connection.source_id
         if connection and state != "disconnected"
@@ -165,26 +103,9 @@ async def _archive_source(db, connection):
 async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=None):
     provider_definition(provider)
     await workspaces.lock_workspace(db, workspace_id)
-    app = (
-        await repository.application(db, workspace_id, provider)
-        if provider == "feishu"
-        else None
-    )
-    if provider == "feishu" and (not app or not app.client_secret_ciphertext):
-        raise HTTPException(
-            409,
-            "Ask a workspace administrator to configure this integration's application first.",
-        )
     callback_uri = (
-        browser_redirect_uri(settings, browser_origin)
-        if provider == "dida"
-        else await redirect_uri(db)
+        browser_redirect_uri(settings, browser_origin) if provider == "dida" else ""
     )
-    if provider != "tencent_meeting" and not callback_uri:
-        raise HTTPException(
-            422,
-            "Configure the administrator-managed public site URL before connecting OAuth.",
-        )
     connection = await repository.connection(
         db, workspace_id, actor.id, provider, lock=True
     )
@@ -194,7 +115,7 @@ async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=N
         )
     if (
         connection.status == "connected"
-        and _application_matches(provider, app, connection)
+        and _application_matches(provider, connection)
         and not (
             connection.access_expires_at
             and utc(connection.access_expires_at) <= utc_now()
@@ -207,7 +128,7 @@ async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=N
         )
     await _archive_source(db, connection)
     connection.generation += 1
-    connection.application_revision = app.revision if app else 0
+    connection.application_revision = 0
     connection.secrets_ciphertext = ""
     connection.refreshable = False
     connection.access_expires_at = None
@@ -222,13 +143,44 @@ async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=N
         connection_id=connection.id,
         state_hash=hashlib.sha256(state.encode()).hexdigest(),
         generation=connection.generation,
-        status="registering" if provider == "dida" else "pending",
+        status="registering" if provider in ("dida", "feishu") else "pending",
         redirect_uri=callback_uri,
         secrets_ciphertext=seal({"verifier": verifier}, settings),
         expires_at=utc_now() + timedelta(minutes=5),
     )
     await repository.save_authorization(db, attempt)
     await db.commit()
+    if provider == "feishu":
+        try:
+            response = await provider_api.feishu_authorization("start", {})
+        except provider_api.IntegrationProviderError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        current = await repository.connection_by_id(db, connection.id, lock=True)
+        current_attempt = await repository.authorization(
+            db, attempt.state_hash, lock=True
+        )
+        if (
+            not current
+            or current.generation != attempt.generation
+            or not current_attempt
+            or current_attempt.status != "registering"
+            or utc(current_attempt.expires_at) <= utc_now()
+        ):
+            raise HTTPException(
+                409, "Integration authorization was cancelled. Please install again."
+            )
+        authorization = response["authorization"]
+        current_attempt.status = "pending"
+        current_attempt.secrets_ciphertext = seal(response["credentials"], settings)
+        current_attempt.expires_at = utc_now() + timedelta(
+            seconds=authorization["expires_in"]
+        )
+        current_attempt.next_poll_at = utc_now() + timedelta(
+            seconds=authorization["poll_seconds"]
+        )
+        await repository.save_authorization(db, current_attempt)
+        await db.commit()
+        return {**authorization, "state": state}
     if provider == "tencent_meeting":
         device_id = secrets.token_hex(32)
         try:
@@ -290,8 +242,6 @@ async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=N
         )
         await repository.save_authorization(db, current_attempt)
         await db.commit()
-    else:
-        client_id, scopes = app.client_id, app.scopes
     url = provider_api.authorization_url(
         provider, client_id, callback_uri, state, verifier, scopes
     )
@@ -305,34 +255,47 @@ async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=N
 
 def accept_tokens(connection, response, settings, previous=None):
     previous = previous or {}
+
+    def invalid(field):
+        value = response.get(field)
+        return provider_api.IntegrationProviderError(
+            "Integration returned invalid authorization data.",
+            reason=f"invalid_token_field:{field}:{type(value).__name__}",
+        )
+
     if (
         not isinstance(response.get("token_type", "bearer"), str)
         or response.get("token_type", "bearer").lower() != "bearer"
     ):
-        raise provider_api.IntegrationProviderError(
-            "Integration returned invalid authorization data."
-        )
+        raise invalid("token_type")
     token = response.get("access_token")
     refresh = response.get("refresh_token", previous.get("refresh_token"))
     if connection.provider == "dida":
         refresh = None
-    for value in (token, refresh):
+    token_limit = 64 * 1024 if connection.provider == "feishu" else 8000
+    for field, value in (("access_token", token), ("refresh_token", refresh)):
         if value is not None and (
             not isinstance(value, str)
-            or not 1 <= len(value) <= 8000
+            or not 1 <= len(value) <= token_limit
             or any(ord(c) <= 32 for c in value)
         ):
-            raise provider_api.IntegrationProviderError(
-                "Integration returned invalid authorization data."
-            )
+            raise invalid(field)
     if not token:
-        raise provider_api.IntegrationProviderError(
-            "Integration returned invalid authorization data."
-        )
+        raise invalid("access_token")
     credentials = {
         "access_token": token,
         **({"refresh_token": refresh} if refresh else {}),
     }
+    if connection.provider == "feishu":
+        for key in ("brand", "client_id", "client_secret"):
+            value = previous.get(key)
+            if (
+                not isinstance(value, str)
+                or not value
+                or any(ord(char) <= 32 for char in value)
+            ):
+                raise invalid(key)
+            credentials[key] = value
     if connection.provider == "tencent_meeting":
         for key in ("open_id", "sdk_id"):
             value = response.get(key, previous.get(key))
@@ -358,9 +321,7 @@ def accept_tokens(connection, response, settings, previous=None):
     if lifetime is not None and (
         type(lifetime) is not int or not 1 <= lifetime <= 366 * 86400
     ):
-        raise provider_api.IntegrationProviderError(
-            "Integration returned invalid authorization data."
-        )
+        raise invalid("expires_in")
     connection.secrets_ciphertext = seal(credentials, settings)
     connection.refreshable = bool(refresh) and connection.provider != "dida"
     connection.access_expires_at = (
@@ -406,6 +367,8 @@ async def install_tools(db, connection):
             "operation": operation["name"],
             "generation": connection.generation,
         }
+        if connection.provider == "feishu":
+            spec["catalog_revision"] = FEISHU_CATALOG_REVISION
         digest = canonical_definition_hash(
             {"operation": operation, "execution_spec": spec}
         )
@@ -486,18 +449,13 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
     attempt = await repository.authorization(
         db, hashlib.sha256(payload.state.encode()).hexdigest(), lock=True
     )
-    app = (
-        await repository.application(db, workspace_id, provider)
-        if provider == "feishu"
-        else None
-    )
     if (
         not connection
         or not attempt
         or attempt.connection_id != connection.id
         or attempt.generation != connection.generation
         or utc(attempt.expires_at) <= utc_now()
-        or not _application_matches(provider, app, connection)
+        or not _application_matches(provider, connection)
     ):
         raise HTTPException(
             400,
@@ -509,9 +467,12 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
         raise HTTPException(
             409, "Integration authorization was already used. Please install again."
         )
-    if provider == "tencent_meeting" and utc(attempt.next_poll_at) > utc_now():
+    if (
+        provider in ("tencent_meeting", "feishu")
+        and utc(attempt.next_poll_at) > utc_now()
+    ):
         return await status(db, workspace_id, actor.id, provider)
-    if provider != "tencent_meeting" and not payload.code:
+    if provider == "dida" and not payload.code:
         raise HTTPException(422, "Integration authorization code is required.")
     values = unseal(attempt.secrets_ciphertext, settings)
     attempt.status, attempt.secrets_ciphertext = "processing", ""
@@ -520,19 +481,13 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
     try:
         if provider == "tencent_meeting":
             response = await provider_api.device_authorization("poll", values)
+        elif provider == "feishu":
+            response = await provider_api.feishu_authorization("poll", values)
         else:
-            client_id, client_secret = (
-                (values["client_id"], "")
-                if provider == "dida"
-                else (
-                    app.client_id,
-                    unseal(app.client_secret_ciphertext, settings)["client_secret"],
-                )
-            )
             response = await provider_api.exchange_tokens(
                 provider,
-                client_id,
-                client_secret,
+                values["client_id"],
+                "",
                 grant_type="authorization_code",
                 code=payload.code,
                 redirect_uri=attempt.redirect_uri,
@@ -544,19 +499,32 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
                 ),
             )
         current = await repository.connection_by_id(db, connection.id, lock=True)
-        current_app = (
-            await repository.application(db, workspace_id, provider)
-            if provider == "feishu"
-            else None
-        )
         if (
             not current
             or current.generation != attempt.generation
-            or not _application_matches(provider, current_app, current)
+            or not _application_matches(provider, current)
         ):
             raise HTTPException(
                 409, "Integration authorization was cancelled. Please install again."
             )
+        if provider == "feishu" and response.get("pending"):
+            next_values = response["credentials"]
+            attempt.status = "pending"
+            attempt.secrets_ciphertext = seal(next_values, settings)
+            attempt.next_poll_at = utc_now() + timedelta(
+                seconds=next_values["poll_seconds"]
+            )
+            authorization = response.get("authorization")
+            if authorization:
+                attempt.expires_at = utc_now() + timedelta(
+                    seconds=authorization["expires_in"]
+                )
+            await repository.save_authorization(db, attempt)
+            await db.commit()
+            result = await status(db, workspace_id, actor.id, provider)
+            if authorization:
+                result["authorization"] = {**authorization, "state": payload.state}
+            return result
         if provider == "tencent_meeting" and not response.get("open_id"):
             attempt.status = "pending"
             attempt.secrets_ciphertext = seal(values, settings)
@@ -570,8 +538,27 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
         await repository.save_authorization(db, attempt)
         await db.commit()
         return await status(db, workspace_id, actor.id, provider)
-    except provider_api.IntegrationProviderError as exc:
+    except (provider_api.IntegrationProviderError, asyncio.CancelledError) as exc:
         await db.rollback()
+        failed = await repository.authorization(db, attempt.state_hash, lock=True)
+        if (
+            failed
+            and failed.generation == attempt.generation
+            and failed.status == "processing"
+        ):
+            failed.status = "failed"
+            failed.secrets_ciphertext = seal(
+                {
+                    "failure_reason": getattr(exc, "reason", None)
+                    or type(exc).__name__,
+                    "stage": values.get("stage"),
+                },
+                settings,
+            )
+            await repository.save_authorization(db, failed)
+            await db.commit()
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         raise HTTPException(502, str(exc)) from exc
 
 
@@ -606,12 +593,7 @@ async def credentials(db, connection_id, workspace_id, user_id, generation, sett
         raise provider_api.IntegrationProviderError(
             "Integration is not installed for this user. Please install again."
         )
-    app = (
-        await repository.application(db, workspace_id, connection.provider)
-        if connection.provider == "feishu"
-        else None
-    )
-    if not _application_matches(connection.provider, app, connection):
+    if not _application_matches(connection.provider, connection):
         raise provider_api.IntegrationProviderError(
             "Integration application changed. Please install again."
         )
@@ -655,13 +637,7 @@ async def credentials(db, connection_id, workspace_id, user_id, generation, sett
                 },
             )
         else:
-            response = await provider_api.exchange_tokens(
-                connection.provider,
-                app.client_id,
-                unseal(app.client_secret_ciphertext, settings)["client_secret"],
-                grant_type="refresh_token",
-                refresh_token=values["refresh_token"],
-            )
+            response = await provider_api.feishu_authorization("refresh", values)
         current = await repository.connection_by_id(db, connection_id, lock=True)
         if (
             not current

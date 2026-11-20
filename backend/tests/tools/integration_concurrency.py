@@ -16,7 +16,6 @@ from app.domain.tools.integrations.models import IntegrationConnection as Connec
 from app.domain.tools.models import ToolSource, ToolVersion
 from app.entities.defaults import new_id, utc_now
 from app.entities.tools.integrations import (
-    IntegrationApplication,
     IntegrationConnection,
 )
 from app.infra.db.repositories.tools import integrations as repository
@@ -44,22 +43,11 @@ async def check(configuration):
             )
             db.add(Workspace(id=workspace_id, name=label, slug=label))
             await db.flush()
-            await repository.save_application(
-                db,
-                IntegrationApplication(
-                    workspace_id=workspace_id,
-                    provider="feishu",
-                    client_id="test-client",
-                    client_secret_ciphertext=service.seal(
-                        {"client_secret": "test-only"}, configuration
-                    ),
-                ),
-            )
             connection = IntegrationConnection(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 provider="feishu",
-                application_revision=1,
+                application_revision=0,
                 generation=1,
             )
             service.accept_tokens(
@@ -70,6 +58,11 @@ async def check(configuration):
                     "expires_in": 3600,
                 },
                 configuration,
+                {
+                    "brand": "feishu",
+                    "client_id": "test-client",
+                    "client_secret": "test-only",
+                },
             )
             connection.access_expires_at = utc_now() - timedelta(seconds=1)
             await repository.save_connection(db, connection)
@@ -96,7 +89,7 @@ async def check(configuration):
             }
 
         refresh = AsyncMock(side_effect=slow_refresh)
-        with patch.object(service.provider_api, "exchange_tokens", refresh):
+        with patch.object(service.provider_api, "feishu_authorization", refresh):
             results = await asyncio.gather(
                 *(read_grant() for _ in range(8)), return_exceptions=True
             )
@@ -128,7 +121,9 @@ async def check(configuration):
             }
 
         with patch.object(
-            service.provider_api, "exchange_tokens", AsyncMock(side_effect=late_refresh)
+            service.provider_api,
+            "feishu_authorization",
+            AsyncMock(side_effect=late_refresh),
         ):
             pending = asyncio.create_task(read_grant())
             await asyncio.wait_for(started.wait(), 5)
@@ -156,6 +151,11 @@ async def check(configuration):
                     "expires_in": 3600,
                 },
                 configuration,
+                {
+                    "brand": "feishu",
+                    "client_id": "test-client",
+                    "client_secret": "test-only",
+                },
             )
             saved.access_expires_at = utc_now() - timedelta(seconds=1)
             saved.refresh_owner = new_id()
@@ -164,7 +164,7 @@ async def check(configuration):
             await db.commit()
             connection = saved
         with patch.object(
-            service.provider_api, "exchange_tokens", AsyncMock()
+            service.provider_api, "feishu_authorization", AsyncMock()
         ) as replay:
             try:
                 await read_grant()

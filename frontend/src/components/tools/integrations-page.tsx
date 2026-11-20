@@ -2,16 +2,10 @@
 
 import * as React from "react"
 import Image from "next/image"
-import {
-  CheckIcon,
-  LoaderCircleIcon,
-  SearchIcon,
-  Settings2Icon,
-} from "lucide-react"
+import { CheckIcon, LoaderCircleIcon, SearchIcon } from "lucide-react"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { ToolsCatalogTabs } from "@/components/tools/catalog-tabs"
-import { IntegrationApplicationDialog } from "@/components/tools/integration-application-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,7 +16,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { IconButton } from "@/components/ui/icon-button"
 import { Input } from "@/components/ui/input"
 import {
   ResourceCard,
@@ -40,11 +33,9 @@ import {
   syncIntegrationTools,
   uninstallIntegration,
   type Integration,
-  type IntegrationApplicationProvider,
   type IntegrationAuthorization,
   type IntegrationProvider,
 } from "@/lib/api/integrations"
-import { getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { integrationCatalog, integrationName } from "@/lib/integrations"
 
@@ -60,10 +51,6 @@ export function IntegrationsPage() {
       key={`${me.user.id}:${selectedWorkspaceId}`}
       token={token}
       workspaceId={selectedWorkspaceId}
-      canConfigure={
-        me.user.is_global_admin ||
-        getMembershipRole(me, selectedWorkspaceId) === "admin"
-      }
     />
   )
 }
@@ -71,11 +58,9 @@ export function IntegrationsPage() {
 export function IntegrationsCatalog({
   token,
   workspaceId,
-  canConfigure,
 }: {
   token: string
   workspaceId: string
-  canConfigure: boolean
 }) {
   const { t } = useLanguage()
   const { notify } = useSession()
@@ -85,8 +70,6 @@ export function IntegrationsCatalog({
   const [error, setError] = React.useState<string | null>(null)
   const [query, setQuery] = React.useState("")
   const [busy, setBusy] = React.useState<IntegrationProvider | null>(null)
-  const [configuration, setConfiguration] =
-    React.useState<IntegrationApplicationProvider | null>(null)
   const [device, setDevice] = React.useState<DeviceAuthorization | null>(null)
   const popup = React.useRef<Window | null>(null)
   const active = React.useRef(true)
@@ -128,11 +111,24 @@ export function IntegrationsCatalog({
     )
   }
 
+  const navigatePopup = React.useCallback((url: string, focus = false) => {
+    try {
+      if (popup.current && !popup.current.closed) {
+        popup.current.location.href = url
+        if (focus) popup.current.focus()
+      }
+    } catch {
+      // Provider isolation can block window navigation. Keep the dialog's
+      // authorization link available so the next step can still complete.
+      popup.current = null
+    }
+  }, [])
+
   React.useEffect(() => {
     if (!device) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
-    const deadline = Date.now() + 5 * 60 * 1000
+    const deadline = Date.now() + (device.expires_in ?? 300) * 1000
     async function poll() {
       try {
         if (Date.now() >= deadline)
@@ -144,7 +140,10 @@ export function IntegrationsCatalog({
           { state: device!.state }
         )
         if (cancelled || !active.current) return
-        if (result.status === "connected") {
+        if (result.authorization) {
+          setDevice({ ...result.authorization, provider: device!.provider })
+          navigatePopup(result.authorization.authorization_url, true)
+        } else if (result.status === "connected") {
           replaceIntegration(result)
           setDevice(null)
           setBusy(null)
@@ -176,20 +175,18 @@ export function IntegrationsCatalog({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [device, token, workspaceId, notify, t])
+  }, [device, token, workspaceId, notify, t, navigatePopup])
 
   async function install(integration: Integration) {
     if (actionPending.current) return
-    if (integration.provider === "feishu" && !integration.configured) {
-      if (canConfigure) setConfiguration(integration.provider)
-      else notify("error", t("请联系空间管理员配置此集成的开发者应用。"))
-      return
-    }
     actionPending.current = true
     setBusy(integration.provider)
-    if (integration.provider === "tencent_meeting") {
+    if (integration.provider !== "dida") {
       popup.current = window.open("about:blank", "_blank")
-      if (popup.current) popup.current.opener = null
+      // Feishu advances this same window from app setup to account consent.
+      // Disowning it here makes browsers reject the second cross-site navigation.
+      if (popup.current && integration.provider !== "feishu")
+        popup.current.opener = null
     }
     try {
       const authorization = await authorizeIntegration(
@@ -203,8 +200,7 @@ export function IntegrationsCatalog({
       }
       if (authorization.mode === "device") {
         setDevice({ ...authorization, provider: integration.provider })
-        if (popup.current)
-          popup.current.location.href = authorization.authorization_url
+        navigatePopup(authorization.authorization_url)
       } else {
         window.location.assign(authorization.authorization_url)
       }
@@ -346,15 +342,6 @@ export function IntegrationsCatalog({
                       {t(entry.name)}
                     </ResourceCardTitle>
                   </div>
-                  {canConfigure && entry.provider === "feishu" ? (
-                    <IconButton
-                      label={t("配置 {name}", { name: t(entry.name) })}
-                      onClick={() => setConfiguration(entry.provider)}
-                      disabled={Boolean(busy)}
-                    >
-                      <Settings2Icon />
-                    </IconButton>
-                  ) : null}
                 </ResourceCardHeader>
                 <p className="mt-3 min-h-10 text-sm leading-5 text-muted-foreground">
                   {t(entry.description)}
@@ -425,19 +412,6 @@ export function IntegrationsCatalog({
           ) : null}
         </div>
       )}
-      {configuration ? (
-        <IntegrationApplicationDialog
-          key={configuration}
-          provider={configuration}
-          token={token}
-          workspaceId={workspaceId}
-          onClose={() => setConfiguration(null)}
-          onSaved={() => {
-            notify("success", t("应用配置已保存"))
-            void load()
-          }}
-        />
-      ) : null}
       {device ? (
         <Dialog
           open
@@ -453,7 +427,13 @@ export function IntegrationsCatalog({
                 })}
               </DialogTitle>
               <DialogDescription>
-                {t("请在平台页面登录并确认授权，完成后会自动更新安装状态。")}
+                {t(
+                  device.phase === "application"
+                    ? "请在飞书或 Lark 页面创建个人应用，完成后继续授权你的账号。无需填写应用凭据。"
+                    : device.phase === "login"
+                      ? "个人应用已创建，请继续登录飞书或 Lark 并授权个人数据访问。不支持豆包账号。"
+                      : "请在平台页面登录并确认授权，完成后会自动更新安装状态。"
+                )}
               </DialogDescription>
             </DialogHeader>
             <p

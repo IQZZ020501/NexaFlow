@@ -1,5 +1,6 @@
 import asyncio
 
+from app.domain.tools.integrations.feishu_catalog import FEISHU_CATALOG_REVISION
 from app.domain.tools.integrations.service import credentials, require_reauthorization
 from app.domain.tools.results import prepare_mcp_result
 from app.entities.defaults import utc_now
@@ -18,6 +19,13 @@ class IntegrationToolAdapter:
         spec = snapshot.execution_spec
         dispatched = False
         try:
+            if (
+                spec["provider"] == "feishu"
+                and spec.get("catalog_revision") != FEISHU_CATALOG_REVISION
+            ):
+                raise IntegrationProviderError(
+                    "Integration tool definition changed. Update tools and select this integration again."
+                )
             async with get_session_factory()() as db:
                 grant = await credentials(
                     db,
