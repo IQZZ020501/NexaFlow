@@ -21,6 +21,7 @@ import {
   fireEvent,
   jsonResponse,
   makeSession,
+  mockNextImage,
   mockNextLink,
   mockNextNavigation,
   mockUseSession,
@@ -42,6 +43,7 @@ const session = makeSession({
 })
 mockUseSession(session)
 mockNextNavigation(navigation)
+mockNextImage()
 mockNextLink()
 const originalAssign = window.location.assign
 const originalOpen = window.open

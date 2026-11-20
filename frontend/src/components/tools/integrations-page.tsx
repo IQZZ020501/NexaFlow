@@ -1,14 +1,12 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import {
   CheckIcon,
-  ListTodoIcon,
   LoaderCircleIcon,
-  MessageSquareIcon,
   SearchIcon,
   Settings2Icon,
-  VideoIcon,
 } from "lucide-react"
 
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
@@ -327,12 +325,6 @@ export function IntegrationsCatalog({
             const installed = integration?.status === "connected"
             const needsAuthorization =
               integration?.status === "reauthorization_required"
-            const Icon =
-              entry.provider === "dida"
-                ? ListTodoIcon
-                : entry.provider === "feishu"
-                  ? MessageSquareIcon
-                  : VideoIcon
             return (
               <ResourceCard
                 key={entry.provider}
@@ -341,7 +333,14 @@ export function IntegrationsCatalog({
               >
                 <ResourceCardHeader>
                   <div className="flex min-w-0 items-center gap-3">
-                    <Icon className="size-6 shrink-0" aria-hidden="true" />
+                    <Image
+                      src={entry.icon}
+                      alt=""
+                      aria-hidden="true"
+                      width={24}
+                      height={24}
+                      className="size-6 shrink-0 object-contain"
+                    />
                     <ResourceCardTitle as="h2">
                       {t(entry.name)}
                     </ResourceCardTitle>

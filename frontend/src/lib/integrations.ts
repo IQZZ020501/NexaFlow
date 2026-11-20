@@ -5,18 +5,23 @@ export const integrationCatalog = [
   {
     provider: "dida",
     name: "滴答清单",
+    // https://cncdn.dida365.com/web/static/img/apple-touch-icon-180x180.png
+    icon: "/integration-icons/dida.png",
     description: "查询清单和待办，创建任务并标记完成。",
     documentation: "https://developer.dida365.com/manage",
   },
   {
     provider: "feishu",
     name: "飞书",
+    icon: "/feishu.svg",
     description: "读取已授权的云文档，以你的身份发送消息。",
     documentation: "https://open.feishu.cn/app",
   },
   {
     provider: "tencent_meeting",
     name: "腾讯会议",
+    // https://cdn.meeting.tencent.com/assets/next-website/logo128.png
+    icon: "/integration-icons/tencent-meeting.png",
     description:
       "管理会议、受邀成员和录制，读取纪要、转写及参会报告，查询通讯录并执行会中控制。",
     documentation: "https://meeting.tencent.com/ai-tab/ai-cli/",
@@ -24,6 +29,7 @@ export const integrationCatalog = [
 ] as const satisfies readonly {
   provider: IntegrationProvider
   name: TranslationKey
+  icon: string
   description: TranslationKey
   documentation: string
 }[]
