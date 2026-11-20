@@ -112,7 +112,7 @@ class ToolRef:
             raise ValueError("Tool references require tool and version IDs.")
 
 
-ToolKind = Literal["builtin", "mcp"]
+ToolKind = Literal["builtin", "mcp", "integration"]
 ToolApproval = Literal["auto", "each_call", "disabled"]
 ToolEffect = Literal["pure", "external_read", "external_write", "unknown"]
 

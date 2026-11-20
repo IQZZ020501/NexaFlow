@@ -3,6 +3,7 @@
 import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 
 import * as React from "react"
+import { integrationToolName } from "@/lib/integrations"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
@@ -233,6 +234,7 @@ function effectiveProcessStatus(
 function processToolName(event: AgentRun["events"][number], t: TFunction) {
   return (
     builtinToolDisplayName(event.tool_name, t) ??
+    integrationToolName(event.tool_name, t) ??
     (event.tool_label || event.tool_name)
   )
 }

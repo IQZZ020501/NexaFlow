@@ -29,6 +29,7 @@ import { ResourceFolderPickerDialog } from "@/components/resource-folders/resour
 import { ResourceFolderTree } from "@/components/resource-folders/resource-folder-tree"
 import { useResourceFolders } from "@/components/resource-folders/use-resource-folders"
 import { BuiltinToolIcon } from "@/components/tools/builtin-tool-icon"
+import { ToolsCatalogTabs } from "@/components/tools/catalog-tabs"
 import { McpSourceDialog } from "@/components/tools/mcp-source-dialog"
 import { McpOAuthDialog } from "@/components/tools/mcp-oauth"
 import { McpLongTasksDialog } from "@/components/tools/mcp-long-tasks"
@@ -101,10 +102,6 @@ import { groupTools } from "@/lib/tool-groups"
 import { isRegularTool } from "@/lib/tool-visibility"
 import { cn } from "@/lib/utils"
 
-const catalogTabs = [
-  { kind: "builtin", label: "技能" },
-  { kind: "mcp", label: "MCP" },
-] as const satisfies ReadonlyArray<{ kind: ToolKind; label: string }>
 
 type ToolSortKey = "updated_at" | "created_at" | "name"
 
@@ -744,31 +741,10 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                 onMove={() => setIsBatchMoveOpen(true)}
               />
               {initialKind ? (
-                <div
-                  role="group"
-                  aria-label={t("工具")}
-                  className="grid w-fit shrink-0 grid-cols-2 gap-0.5 rounded-lg bg-muted/70 p-0.5 max-sm:w-full sm:h-[var(--theme-control-large-height)]"
-                >
-                  {catalogTabs.map((tab) => {
-                    const isActive = activeKind === tab.kind
-
-                    return (
-                      <button
-                        key={tab.kind}
-                        type="button"
-                        aria-pressed={isActive}
-                        className={`inline-flex min-w-18 items-center justify-center rounded-md px-3 text-sm font-medium whitespace-nowrap transition-[background-color,color,box-shadow] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background motion-reduce:transition-none max-sm:h-11 ${
-                          isActive
-                            ? "bg-background text-foreground shadow-xs"
-                            : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
-                        }`}
-                        onClick={() => setActiveKind(tab.kind)}
-                      >
-                        {t(tab.label)}
-                      </button>
-                    )
-                  })}
-                </div>
+                <ToolsCatalogTabs
+                  activeKind={activeKind}
+                  onKindChange={setActiveKind}
+                />
               ) : null}
             </div>
           ) : null}

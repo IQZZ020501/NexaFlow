@@ -1,6 +1,136 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  按会议号查询腾讯会议: "Find Tencent meeting by code",
+  查看腾讯历史会议: "List ended Tencent meetings",
+  搜索腾讯会议: "Search Tencent meetings",
+  创建腾讯会议: "Create Tencent meeting",
+  更新腾讯会议: "Update Tencent meeting",
+  取消腾讯会议: "Cancel Tencent meeting",
+  查看腾讯会议受邀成员: "List Tencent meeting invitees",
+  添加腾讯会议受邀成员: "Add Tencent meeting invitees",
+  移除腾讯会议受邀成员: "Remove Tencent meeting invitees",
+  替换腾讯会议邀请名单: "Replace Tencent meeting invitees",
+  搜索腾讯会议录制: "Search Tencent recordings",
+  获取腾讯录制下载地址: "Get Tencent recording download links",
+  读取腾讯录制纪要: "Read Tencent recording minutes",
+  读取腾讯会议待办: "Read Tencent meeting action items",
+  读取腾讯会议转写: "Read Tencent meeting transcript",
+  搜索腾讯会议转写: "Search Tencent meeting transcript",
+  读取腾讯转写段落: "Read Tencent transcript paragraphs",
+  读取腾讯录制时间轴: "Read Tencent recording timeline",
+  通过分享链接读取腾讯纪要: "Read Tencent minutes by share link",
+  通过分享链接读取腾讯转写: "Read Tencent transcript by share link",
+  查看腾讯会议参会报告: "Read Tencent meeting attendance",
+  查看腾讯会议等候室记录: "Read Tencent waiting-room attendance",
+  导出腾讯会议参会明细: "Export Tencent meeting attendance",
+  查看腾讯会议导出结果: "Read Tencent attendance export result",
+  搜索腾讯会议通讯录: "Search Tencent Meeting contacts",
+  按邮箱查询腾讯会议成员: "Look up Tencent members by email",
+  按手机号查询腾讯会议成员: "Look up Tencent members by phone",
+  呼叫腾讯会议成员入会: "Call members into Tencent meeting",
+  移出腾讯会议成员: "Remove members from Tencent meeting",
+  管理腾讯会议等候室: "Manage Tencent meeting waiting room",
+  搜索腾讯会议纪要: "Search Tencent meeting minutes",
+  读取腾讯会议纪要: "Read Tencent meeting minutes",
+  读取腾讯实时会议纪要: "Read live Tencent meeting minutes",
+  更新工具: "Update tools",
+  "工具已更新，请在 Agent 中取消并重新勾选此集成，然后保存。":
+    "Tools updated. Uncheck and reselect this integration in your Agent, then save.",
+  "集成参数无效，请检查会议标识、时间和操作参数。":
+    "Invalid integration arguments. Check the meeting identifier, times, and operation parameters.",
+  "管理会议、受邀成员和录制，读取纪要、转写及参会报告，查询通讯录并执行会中控制。":
+    "Manage meetings, invitees and recordings; read minutes, transcripts and attendance; search contacts and control ongoing meetings.",
+  查看滴答清单: "View Dida365 lists",
+  读取滴答待办: "Read Dida365 tasks",
+  创建滴答任务: "Create Dida365 task",
+  完成滴答任务: "Complete Dida365 task",
+  读取飞书文档: "Read Feishu document",
+  发送飞书消息: "Send Feishu message",
+  查看腾讯会议列表: "List Tencent meetings",
+  读取腾讯会议详情: "Read Tencent meeting details",
+  正在加载集成: "Loading integrations",
+  集成: "Integrations",
+  滴答清单: "Dida365",
+  腾讯会议: "Tencent Meeting",
+  "查询清单和待办，创建任务并标记完成。":
+    "Read task lists, create tasks, and mark them complete.",
+  "读取已授权的云文档，以你的身份发送消息。":
+    "Read authorized cloud documents and send messages as you.",
+  "查询即将开始和进行中的会议，查看会议详情。":
+    "List upcoming and ongoing meetings and read their details.",
+  "配置 {name}": "Configure {name}",
+  "管理员配置开发者应用后，成员可分别登录自己的账号完成安装。":
+    "Once an administrator configures the developer application, members can install it by signing in to their own accounts.",
+  "应用 Client ID": "Application Client ID",
+  "应用 Client Secret": "Application Client Secret",
+  "留空保留已保存的密钥。": "Leave blank to keep the saved secret.",
+  "密钥会加密保存，之后不会返回明文。":
+    "Secrets are stored encrypted and never returned in plain text.",
+  "OAuth 回调地址": "OAuth redirect URL",
+  "在平台开发者后台登记此回调地址，并开通下列权限。":
+    "Register this redirect URL and enable the permissions below in the developer console.",
+  "请先由系统管理员配置公开站点地址。":
+    "Ask a system administrator to configure the public site URL first.",
+  打开开发者平台: "Open developer console",
+  "授权已超时，请重新安装。": "Authorization timed out. Please install again.",
+  集成已安装: "Integration installed",
+  集成已卸载: "Integration uninstalled",
+  "请联系空间管理员配置此集成的开发者应用。":
+    "Ask a workspace administrator to configure this integration’s developer application.",
+  "卸载 {name}？": "Uninstall {name}?",
+  "卸载后将清除本地授权信息，并停止使用此账号执行新的工具调用。":
+    "Uninstalling removes stored credentials and stops new tool calls using this account.",
+  "连接你的第三方账号，为 Agent 安装所需的集成。":
+    "Connect your accounts to install the integrations your Agent needs.",
+  搜索集成: "Search integrations",
+  已安装: "Installed",
+  需要重新认证: "Reauthorization required",
+  未安装: "Not installed",
+  卸载: "Uninstall",
+  安装: "Install",
+  重新认证: "Reauthorize",
+  未找到匹配的集成: "No matching integrations",
+  应用配置已保存: "Application configuration saved",
+  "安装 {name}": "Install {name}",
+  "请在平台页面登录并确认授权，完成后会自动更新安装状态。":
+    "Sign in and authorize on the provider’s page. The installation status will update automatically.",
+  等待平台授权: "Waiting for authorization",
+  "授权未完成，集成尚未安装。":
+    "Authorization was not completed. The integration is not installed.",
+  安装集成: "Install integration",
+  "授权完成，集成已安装。":
+    "Authorization completed. The integration is installed.",
+  返回集成: "Back to integrations",
+  "请先卸载此集成，再修改应用配置。":
+    "Uninstall this integration before changing its application configuration.",
+  集成应用凭据不能为空: "Integration application credentials are required.",
+  "此集成已安装，请先卸载再连接其他账号。":
+    "This integration is already installed. Uninstall it before connecting another account.",
+  "授权已取消，请重新安装。":
+    "Authorization was cancelled. Please install again.",
+  "平台授权失败，请重新安装。":
+    "Provider authorization failed. Please install again.",
+  "平台返回的授权信息无效，请重新安装。":
+    "The provider returned invalid authorization data. Please install again.",
+  "平台请求失败，请检查账号授权和应用权限。":
+    "The provider request failed. Check account authorization and application permissions.",
+  "暂时无法连接集成服务，请稍后重试。":
+    "The integration service is unreachable. Please try again later.",
+  "集成授权无效或已过期，请重新安装。":
+    "Integration authorization is invalid or expired. Please install again.",
+  "此授权已使用，请重新安装。":
+    "This authorization was already used. Please install again.",
+  "个人集成账号不能共享，请分别登录自己的账号。":
+    "Personal integration accounts cannot be shared. Connect your own account.",
+  "当前用户尚未安装此集成，请重新安装。":
+    "This integration is not installed for the current user. Please install again.",
+  "集成授权已过期，请重新认证。":
+    "Integration authorization expired. Please reauthorize.",
+  "集成应用配置已变更，请重新认证。":
+    "Integration application configuration changed. Please reauthorize.",
+  "集成操作超时，请核对平台结果后再重试。":
+    "The integration operation timed out. Check the provider’s result before retrying.",
   已过期: "Expired",
   "记忆与个性化": "Memory and personalization",
   记忆: "Memory",

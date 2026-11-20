@@ -20,6 +20,7 @@ from app.api.v1.knowledge import routes as knowledge
 from app.api.v1.models import routes as models
 from app.api.v1.resource_folders import routes as resource_folders
 from app.api.v1.teams import routes as teams
+from app.api.v1.tools import integrations
 from app.api.v1.tools import mcp as mcp_servers
 from app.api.v1.tools import oauth as mcp_oauth
 from app.api.v1.tools import remote_tasks as mcp_tasks
@@ -56,6 +57,7 @@ api_router.include_router(knowledge_retrieval.router)
 api_router.include_router(models.router)
 api_router.include_router(resource_folders.router)
 api_router.include_router(mcp_servers.router)
+api_router.include_router(integrations.router)
 api_router.include_router(mcp_oauth.router)
 api_router.include_router(mcp_tasks.router)
 api_router.include_router(tool_sources.router)

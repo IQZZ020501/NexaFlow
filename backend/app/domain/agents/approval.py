@@ -50,8 +50,8 @@ def agent_tool_requires_approval(
     if mode == "full_access":
         return False
     if mode == "always_ask":
-        return snapshot.kind == "mcp" or snapshot.effect != "pure"
-    if snapshot.kind == "mcp" and model_decides_mcp:
+        return snapshot.kind in {"mcp", "integration"} or snapshot.effect != "pure"
+    if snapshot.kind in {"mcp", "integration"} and model_decides_mcp:
         return model_requires_approval is not False
     return snapshot.approval == TOOL_APPROVAL_EACH_CALL
 

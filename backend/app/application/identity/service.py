@@ -459,6 +459,9 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     )
     await queue_upload_cleanups(db, uploaded_by_user_id=user.id)
     await delete_owned_mcp_servers_for_user(db, user.id, actor)
+    from app.infra.db.repositories.tools.integrations import archive_user_sources
+
+    await archive_user_sources(db, user.id)
     await user_repository.delete_user_graph(db, user.id)
     await db.commit()
 

@@ -620,6 +620,19 @@ async def _validate_live_state(
         ), None
 
     server = None
+    if snapshot.kind == "integration":
+        from app.infra.db.repositories.tools import integrations
+
+        connection = await integrations.connection_by_id(db, snapshot.execution_spec.get("connection_id"))
+        if (
+            connection is None
+            or connection.workspace_id != invocation.workspace_id
+            or connection.user_id != invocation.execution_user_id
+            or connection.source_id != source.id
+            or connection.generation != snapshot.execution_spec.get("generation")
+            or connection.status != "connected"
+        ):
+            return _failure("integration_unavailable", "Integration is not installed for this user. Please install again."), None
     if snapshot.kind == "mcp":
         server = (
             await mcp_repository.get_mcp_server_by_id(db, source.mcp_server_id)

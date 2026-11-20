@@ -748,7 +748,7 @@ def build_unified_agent_tool(
         kind=snapshot.kind,
         parallel_safe=snapshot.parallel_safe,
         definition_hash=snapshot.definition_hash,
-        model_decides_approval=model_decides_approval and snapshot.kind == "mcp",
+        model_decides_approval=model_decides_approval and snapshot.kind in {"mcp", "integration"},
     )
 
 

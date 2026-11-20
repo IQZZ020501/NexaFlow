@@ -17,7 +17,7 @@ def tool_catalog_conditions(
     return (
         tool.workspace_id == workspace_id,
         tool.status != "archived",
-        tool.kind.in_(("builtin", "mcp")),
+        tool.kind.in_(("builtin", "mcp", "integration")),
         or_(
             tool.kind != "builtin",
             tool.function_name.not_in(excluded),

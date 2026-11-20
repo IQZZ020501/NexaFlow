@@ -2,6 +2,44 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Invalid integration operation arguments.":
+    "集成参数无效，请检查会议标识、时间和操作参数。",
+  "Configure the administrator-managed public site URL before connecting OAuth.":
+    "请先由系统管理员配置公开站点地址。",
+  "Integration not found.": "当前用户尚未安装此集成，请重新安装。",
+  "Ask a workspace administrator to configure this integration's application first.":
+    "请联系空间管理员配置此集成的开发者应用。",
+  "Uninstall this integration before changing its application configuration.":
+    "请先卸载此集成，再修改应用配置。",
+  "Integration application credentials are required.": "集成应用凭据不能为空",
+  "This integration is already installed. Uninstall it before connecting another account.":
+    "此集成已安装，请先卸载再连接其他账号。",
+  "Integration authorization was cancelled. Please install again.":
+    "授权已取消，请重新安装。",
+  "Integration authorization failed. Please authorize again.":
+    "平台授权失败，请重新安装。",
+  "Integration returned invalid authorization data.":
+    "平台返回的授权信息无效，请重新安装。",
+  "Integration request failed. Check the account authorization and application permissions.":
+    "平台请求失败，请检查账号授权和应用权限。",
+  "Integration service could not be reached.":
+    "暂时无法连接集成服务，请稍后重试。",
+  "Integration response was unavailable.": "暂时无法连接集成服务，请稍后重试。",
+  "Integration authorization is invalid or expired. Please install again.":
+    "集成授权无效或已过期，请重新安装。",
+  "Integration authorization was already used. Please install again.":
+    "此授权已使用，请重新安装。",
+  "Personal integration connections cannot be shared.":
+    "个人集成账号不能共享，请分别登录自己的账号。",
+  "Integration is not installed for this user. Please install again.":
+    "当前用户尚未安装此集成，请重新安装。",
+  "Integration authorization expired. Please install again.":
+    "集成授权已过期，请重新认证。",
+  "Integration application changed. Please install again.":
+    "集成应用配置已变更，请重新认证。",
+  "Integration authorization changed. Please install again.":
+    "集成授权无效或已过期，请重新安装。",
+  "Integration operation timed out.": "集成操作超时，请核对平台结果后再重试。",
   "Memory not found.": "记忆不存在或不可访问",
   "Memory key already exists.": "已有相同主题的记忆，请编辑现有条目",
   "Memory limit reached.": "最多保存 100 条记忆，请先删除不再需要的条目",

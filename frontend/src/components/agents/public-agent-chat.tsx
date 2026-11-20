@@ -22,6 +22,7 @@ import {
   mergeAgentProcessSnapshot,
 } from "@/lib/agent-process-stream"
 import { useRouter } from "next/navigation"
+import { integrationToolName } from "@/lib/integrations"
 import {
   BotIcon,
   BrainIcon,
@@ -136,7 +137,9 @@ export function publicToolName(
 ) {
   const fallback = event.tool_label || event.tool_name || ""
   return t
-    ? (builtinToolDisplayName(event.tool_name || "", t) ?? fallback)
+    ? (builtinToolDisplayName(event.tool_name || "", t) ??
+        integrationToolName(event.tool_name || "", t) ??
+        fallback)
     : fallback
 }
 
@@ -414,7 +417,9 @@ function PublicPendingToolCall({
     count: null,
     tool_name: call.tool_name,
     tool_kind:
-      call.tool_kind === "knowledge" || call.tool_kind === "mcp"
+      call.tool_kind === "knowledge" ||
+      call.tool_kind === "mcp" ||
+      call.tool_kind === "integration"
         ? call.tool_kind
         : "unknown",
     server_name: call.server_name,

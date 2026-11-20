@@ -264,7 +264,7 @@ class AgentRunEventResponse(BaseModel):
     summary: str
     call_id: str = ""
     tool_label: str = ""
-    tool_kind: Literal["knowledge", "builtin", "python", "mcp", "unknown"] = (
+    tool_kind: Literal["knowledge", "builtin", "python", "mcp", "integration", "unknown"] = (
         "unknown"
     )
     server_name: str = ""
@@ -339,7 +339,7 @@ class AgentToolCallResponse(BaseModel):
     call_id: str
     turn: int
     tool_name: str
-    tool_kind: Literal["knowledge", "builtin", "python", "mcp", "unknown"]
+    tool_kind: Literal["knowledge", "builtin", "python", "mcp", "integration", "unknown"]
     server_name: str
     arguments: dict[str, Any]
     status: Literal[
@@ -429,7 +429,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
     reasoning: str = ""
     tool_name: str = ""
     tool_label: str = ""
-    tool_kind: Literal["knowledge", "mcp", "unknown"] = "unknown"
+    tool_kind: Literal["knowledge", "mcp", "integration", "unknown"] = "unknown"
     server_name: str = ""
     input: dict[str, Any] = Field(default_factory=dict)
     output: Any = None

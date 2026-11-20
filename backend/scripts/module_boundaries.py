@@ -76,6 +76,7 @@ PUBLIC_INTERFACES = {
     "tools": {
         "app.application.tools",
         "app.application.tools.oauth",
+        "app.application.tools.integrations",
         "app.application.tools.remote_task_configuration",
         "app.application.tools.runtime.service",
     },
