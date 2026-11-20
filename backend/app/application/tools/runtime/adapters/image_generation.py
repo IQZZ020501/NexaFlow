@@ -13,6 +13,7 @@ from app.domain.models.runtime import (
     build_model_runtime_snapshot,
     require_model_runtime_snapshot,
 )
+from app.entities.defaults import to_app_timezone
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
 from app.infra.db.repositories.tools import repository as tool_repository
@@ -157,7 +158,7 @@ async def generate_image_artifact(
             "mime_type": link.media_type,
             "download_url": link.download_url,
             "preview_url": f"{link.download_url}/preview",
-            "expires_at": link.expires_at.isoformat(),
+            "expires_at": to_app_timezone(link.expires_at).isoformat(),
             "size_bytes": link.size_bytes,
         },
         summary="Image generated.",

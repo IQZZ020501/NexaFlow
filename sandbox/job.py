@@ -198,7 +198,7 @@ async def mcp_request(request):
             command=config["command"],
             args=config.get("args", []),
             cwd=config.get("cwd"),
-            env=config.get("env", {}),
+            env={"TZ": "Asia/Shanghai", **config.get("env", {})},
         )
     )
     async with Client(
@@ -309,6 +309,7 @@ def execute(request):
             "PATH": f"{Path(sys.executable).parent}:/usr/local/bin:/usr/bin:/bin",
             "HOME": temporary,
             "LANG": "C.UTF-8",
+            "TZ": "Asia/Shanghai",
             "PYTHONDONTWRITEBYTECODE": "1",
             "OPENBLAS_NUM_THREADS": "1",
             "OMP_NUM_THREADS": "1",

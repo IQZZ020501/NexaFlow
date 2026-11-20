@@ -47,15 +47,16 @@ import {
   type MessageItem,
   type MessageSeverity,
 } from "@/lib/api/messages"
+import { formatDateTime } from "@/lib/display"
 import { cn } from "@/lib/utils"
 
 function formatMessageTime(value: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, {
+  return formatDateTime(value, locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value))
+  })
 }
 
 function severityClass(severity: MessageSeverity) {

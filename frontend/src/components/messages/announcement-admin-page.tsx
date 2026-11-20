@@ -71,18 +71,16 @@ import {
   type AnnouncementScope,
   type AnnouncementSeverity,
 } from "@/lib/api/announcements"
-import { displayWorkspaceName } from "@/lib/display"
+import {
+  appDateTimeInputToIso,
+  displayWorkspaceName,
+  formatDateTime,
+  toAppDateTimeInput,
+} from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { cn } from "@/lib/utils"
 
 const severities: AnnouncementSeverity[] = ["info", "warning", "critical"]
-
-function toLocalDateTimeInput(value: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 16)
-}
 
 function statusVariant(status: Announcement["status"]) {
   if (status === "published") return "default" as const
@@ -316,7 +314,7 @@ export function AnnouncementAdminPage() {
     setBody(item.body)
     setSeverity(item.severity)
     setPinned(item.pinned)
-    setExpiresAt(toLocalDateTimeInput(item.expires_at))
+    setExpiresAt(item.expires_at ? toAppDateTimeInput(item.expires_at) : "")
     titleInputRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "start",
@@ -340,7 +338,7 @@ export function AnnouncementAdminPage() {
         body: body.trim(),
         severity,
         pinned,
-        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+        expires_at: expiresAt ? appDateTimeInputToIso(expiresAt) : null,
       }
       if (editingId) {
         await updateAnnouncement(
@@ -855,10 +853,14 @@ export function AnnouncementAdminPage() {
                       <Badge variant="outline">{t("置顶")}</Badge>
                     ) : null}
                     <span>
-                      {new Intl.DateTimeFormat(language, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }).format(new Date(selectedAnnouncement.updated_at))}
+                      {formatDateTime(
+                        selectedAnnouncement.updated_at,
+                        language,
+                        {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }
+                      )}
                     </span>
                   </DialogDescription>
                 </DialogHeader>

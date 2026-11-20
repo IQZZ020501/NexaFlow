@@ -1,8 +1,7 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field, field_validator
 
 from app.entities.identity.user import User
+from app.schemas.time import AppDateTime
 
 
 class LoginRequest(BaseModel):
@@ -19,9 +18,9 @@ class TokenResponse(BaseModel):
 
 class RefreshSessionResponse(BaseModel):
     id: str
-    created_at: datetime
-    last_used_at: datetime
-    expires_at: datetime
+    created_at: AppDateTime
+    last_used_at: AppDateTime
+    expires_at: AppDateTime
     user_agent: str | None
     ip_address: str | None
     is_current: bool = False
@@ -78,7 +77,7 @@ class UserResponse(BaseModel):
     is_global_admin: bool
     must_change_password: bool
     is_active: bool
-    created_at: datetime
+    created_at: AppDateTime
     workspaces: list[UserWorkspaceResponse] = Field(default_factory=list)
     teams: list[UserTeamResponse] = Field(default_factory=list)
 

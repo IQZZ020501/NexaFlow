@@ -1,8 +1,11 @@
 """Pure system-email templates."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape
 from urllib.parse import urlsplit
+
+from app.entities.defaults import to_app_timezone
 
 EMAIL_KINDS = {
     "workspace_invitation",
@@ -249,7 +252,9 @@ def render_email(kind: str, payload: dict[str, object]) -> RenderedEmail:
         )
 
     changed_by = _required(payload, "changed_by")
-    changed_at = _required(payload, "changed_at")
+    changed_at = to_app_timezone(
+        datetime.fromisoformat(_required(payload, "changed_at"))
+    ).isoformat(sep=" ", timespec="seconds")
     subject = "NexaFlow 密码已修改 / NexaFlow password changed"
     paragraphs = [
         f"{name}，你的 NexaFlow 密码已于 {changed_at} 修改（方式：{changed_by}）。",

@@ -1,7 +1,9 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from app.schemas.time import AppDateTime
 
 
 class ModelTypeOptionResponse(BaseModel):
@@ -67,8 +69,8 @@ class RegisteredModelResponse(BaseModel):
     meta: dict[str, Any]
     request_params: dict[str, Any]
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class RegisteredModelCreateRequest(BaseModel):

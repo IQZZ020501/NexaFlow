@@ -41,6 +41,7 @@ import {
   type UserMemory,
 } from "@/lib/api/memories"
 import { publicChatUrl } from "@/lib/api/public-chat-projects"
+import { formatDate } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import type { AppNotification } from "@/lib/notifications"
 import { languageLocales, type TranslationKey } from "@/i18n"
@@ -385,7 +386,7 @@ function MemoryPageContent({ workspaceId }: { workspaceId: string | null }) {
                               : "自动提取"
                         )}
                         {item.expires_at
-                          ? ` · ${new Date(item.expires_at).toLocaleDateString(languageLocales[language])} ${t(new Date(item.expires_at).getTime() <= Date.now() ? "已过期" : "到期")}`
+                          ? ` · ${formatDate(item.expires_at, languageLocales[language])} ${t(new Date(item.expires_at).getTime() <= Date.now() ? "已过期" : "到期")}`
                           : ""}
                       </p>
                       {item.source_quote && (
@@ -516,7 +517,8 @@ function MemoryPageContent({ workspaceId }: { workspaceId: string | null }) {
                 <Choice
                   label={
                     editor.draft.expires_at
-                      ? new Date(editor.draft.expires_at).toLocaleDateString(
+                      ? formatDate(
+                          editor.draft.expires_at,
                           languageLocales[language]
                         )
                       : t("长期保留")

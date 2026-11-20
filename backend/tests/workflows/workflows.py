@@ -894,7 +894,7 @@ def test_workflow_context_batches_prior_node_executions() -> None:
             ]
         }
         start_time = datetime.fromisoformat(workflow_globals["start_time"])
-        assert start_time.utcoffset() == timedelta(0)
+        assert start_time.utcoffset() == timedelta(hours=8)
         assert workflow_globals["time"] == start_time.strftime("%Y-%m-%d %H:%M:%S")
 
     asyncio.run(check())

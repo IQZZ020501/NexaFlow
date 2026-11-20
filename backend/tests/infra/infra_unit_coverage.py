@@ -2627,7 +2627,7 @@ def test_session_configuration() -> None:
             )
             create_engine.assert_called_once_with(
                 postgres_url,
-                connect_args={"application_name": "nexaflow-api"},
+                connect_args={"application_name": "nexaflow-api", "options": "-c timezone=UTC"},
                 pool_pre_ping=True,
             )
 
@@ -2638,7 +2638,7 @@ def test_session_configuration() -> None:
             )
             create_engine.assert_called_once_with(
                 postgres_url,
-                connect_args={"application_name": "nexaflow-worker"},
+                connect_args={"application_name": "nexaflow-worker", "options": "-c timezone=UTC"},
                 poolclass=NullPool,
             )
 

@@ -1,9 +1,10 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.time import AppDateTime
 from app.schemas.tools.contracts import ToolRefSchema
 
 
@@ -86,13 +87,13 @@ class AgentResponse(BaseModel):
     current_published_version_id: str | None = None
     has_unpublished_changes: bool
     published_by_user_id: str | None
-    published_at: datetime | None
+    published_at: AppDateTime | None
     created_by_user_id: str
     created_by_name: str | None = None
     created_by_username: str | None = None
     can_edit: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class AgentCreateRequest(BaseModel):
@@ -272,7 +273,7 @@ class AgentRunEventResponse(BaseModel):
     output: Any = None
     duration_ms: int = 0
     reasoning: str = ""
-    created_at: datetime | None = Field(
+    created_at: AppDateTime | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -325,13 +326,13 @@ class AgentRunResponse(BaseModel):
     grounding_status: str = Field(default="not_started", deprecated=True)
     grounding_meta: dict[str, Any] = Field(default_factory=dict, deprecated=True)
     feedback: Literal["positive", "negative"] | None = None
-    feedback_updated_at: datetime | None = None
+    feedback_updated_at: AppDateTime | None = None
     last_error: str | None
-    planned_at: datetime | None
-    started_at: datetime | None
-    finished_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
+    planned_at: AppDateTime | None
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
+    created_at: AppDateTime
+    updated_at: AppDateTime
     trace_id: str = ""
 
 
@@ -354,9 +355,9 @@ class AgentToolCallResponse(BaseModel):
     ]
     approval_required: bool
     last_error: str | None
-    approved_at: datetime | None
-    started_at: datetime | None
-    finished_at: datetime | None
+    approved_at: AppDateTime | None
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
 
 
 class AgentApiCredentialCreateRequest(BaseModel):
@@ -370,9 +371,9 @@ class AgentApiCredentialResponse(BaseModel):
     name: str
     hint: str
     created_by_user_id: str
-    last_used_at: datetime | None
-    revoked_at: datetime | None
-    created_at: datetime
+    last_used_at: AppDateTime | None
+    revoked_at: AppDateTime | None
+    created_at: AppDateTime
 
 
 class AgentApiCredentialListResponse(BaseModel):
@@ -435,7 +436,7 @@ class ExternalAgentProgressEventResponse(BaseModel):
     output: Any = None
     input_truncated: bool = False
     hits: list[ExternalAgentKnowledgeHitResponse] = Field(default_factory=list)
-    created_at: datetime | None = Field(
+    created_at: AppDateTime | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -461,12 +462,12 @@ class ExternalAgentRunResponse(BaseModel):
     )
     error: str | None
     progress: list[ExternalAgentProgressEventResponse]
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-    updated_at: datetime
+    created_at: AppDateTime
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
+    updated_at: AppDateTime
     feedback: Literal["positive", "negative"] | None = None
-    feedback_updated_at: datetime | None = None
+    feedback_updated_at: AppDateTime | None = None
 
 
 class ExternalAgentRunListResponse(BaseModel):
@@ -483,8 +484,8 @@ class PublicAgentConversationResponse(BaseModel):
     status: str
     result: str
     run_count: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class PublicAgentConversationListResponse(BaseModel):
@@ -505,11 +506,11 @@ class AgentLogResponse(BaseModel):
     last_error: str | None
     model_usage: dict[str, Any] = Field(default_factory=dict)
     feedback: Literal["positive", "negative"] | None = None
-    feedback_updated_at: datetime | None = None
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-    updated_at: datetime
+    feedback_updated_at: AppDateTime | None = None
+    created_at: AppDateTime
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
+    updated_at: AppDateTime
 
 
 class AgentLogListResponse(BaseModel):
@@ -523,8 +524,8 @@ class AgentConversationUserResponse(BaseModel):
     consumer_id: str
     access_source: Literal["console", "public", "api"]
     display_name: str
-    first_seen_at: datetime
-    last_seen_at: datetime
+    first_seen_at: AppDateTime
+    last_seen_at: AppDateTime
     conversation_count: int
     run_count: int
 

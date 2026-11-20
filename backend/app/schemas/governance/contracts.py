@@ -1,9 +1,9 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.entities.defaults import APP_TIMEZONE_NAME
+from app.schemas.time import AppDateTime
 
 
 class WorkspaceGovernanceResponse(BaseModel):
@@ -13,7 +13,7 @@ class WorkspaceGovernanceResponse(BaseModel):
     alert_threshold_percent: int
     retention_days: int | None
     timezone: Literal["Asia/Shanghai"]
-    updated_at: datetime
+    updated_at: AppDateTime
 
 
 class WorkspaceGovernanceUpdateRequest(BaseModel):
@@ -38,7 +38,7 @@ class WorkspaceInventoryResponse(BaseModel):
     active_runs: int
     failed_runs_24h: int
     failed_tasks_24h: int
-    updated_at: datetime
+    updated_at: AppDateTime
 
 
 class HealthComponent(BaseModel):
@@ -51,4 +51,4 @@ class AdminHealthResponse(BaseModel):
     components: dict[str, HealthComponent]
     pending_tasks: int
     failed_logs_24h: int
-    checked_at: datetime
+    checked_at: AppDateTime

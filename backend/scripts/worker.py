@@ -120,6 +120,7 @@ async def resolve_deployment_keys(settings: Settings) -> dict[str, str]:
 
 
 def main() -> None:
+    os.environ["TZ"] = "Asia/Shanghai"
     role_name, concurrency, celery_arguments = parse_worker_arguments(sys.argv[1:])
     role = worker_role(role_name)
     settings = Settings.from_env(require_bootstrap=False)

@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.schemas.time import AppDateTime
 
 
 class WorkspaceInvitationCreateRequest(BaseModel):
@@ -32,9 +33,9 @@ class WorkspaceInvitationResponse(BaseModel):
     email: str | None = None
     name: str | None = None
     role: str
-    expires_at: datetime
-    accepted_at: datetime | None
-    created_at: datetime
+    expires_at: AppDateTime
+    accepted_at: AppDateTime | None
+    created_at: AppDateTime
     token: str | None = None
     invite_url: str | None = None
     email_delivery_status: Literal[

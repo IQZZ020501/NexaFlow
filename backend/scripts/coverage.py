@@ -37,6 +37,7 @@ SUITES = (
     "platform.unit",
     "infra.unit",
     "infra.logger",
+    "infra.timezone",
     "infra.mcp_transports",
     "infra.infra_unit_coverage",
     "infra.architecture",

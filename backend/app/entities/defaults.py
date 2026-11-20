@@ -20,3 +20,10 @@ def new_id() -> str:
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def to_app_timezone(value: datetime) -> datetime:
+    """Render an instant in China Standard Time; legacy naive storage is UTC."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(APP_TIMEZONE)

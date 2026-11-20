@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from app.schemas.time import AppDateTime
 
 IntegrationProvider = Literal["dida", "feishu", "tencent_meeting"]
 _Text = Annotated[
@@ -13,7 +14,7 @@ class IntegrationResponse(BaseModel):
     provider: IntegrationProvider
     status: Literal["disconnected", "connected", "reauthorization_required"]
     configured: bool
-    expires_at: datetime | None
+    expires_at: AppDateTime | None
     source_id: str | None
 
 

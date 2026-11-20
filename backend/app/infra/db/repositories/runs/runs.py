@@ -50,7 +50,7 @@ from app.entities.agents import (
     AgentPublicationVersion as AgentPublicationVersionEntity,
 )
 from app.entities.agents import AgentToolCall as AgentToolCallEntity
-from app.entities.defaults import utc_now
+from app.entities.defaults import to_app_timezone, utc_now
 from app.entities.runs import AgentRun as AgentRunEntity
 from app.entities.runs import AgentRunEvent as AgentRunEventEntity
 from app.entities.tools import ToolInvocation as ToolInvocationEntity
@@ -200,7 +200,7 @@ def _with_answer_ready_timestamp(
         return event
     return {
         **event,
-        "event": {**process_event, "created_at": created_at.isoformat()},
+        "event": {**process_event, "created_at": to_app_timezone(created_at).isoformat()},
     }
 
 async def _run_event_projections(

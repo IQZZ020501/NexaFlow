@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import subprocess
 import sys
@@ -60,7 +61,8 @@ def main() -> int:
                 str(args.port),
                 "--timeout-graceful-shutdown",
                 str(GRACEFUL_SHUTDOWN_SECONDS),
-            ]
+            ],
+            env={**os.environ, "TZ": "Asia/Shanghai"},
         )
         return api.wait()
     except KeyboardInterrupt:

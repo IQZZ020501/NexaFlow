@@ -209,8 +209,24 @@ describe("AnnouncementAdminPage", () => {
     )
   })
 
+  test("accepts Shanghai wall time during a browser daylight-saving gap", async () => {
+    listAnnouncementItems = [
+      { ...announcement, expires_at: "2031-03-09T02:30:00+08:00" },
+    ]
+    renderPage(<AnnouncementAdminPage />)
+    await screen.findByText("Maintenance")
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }))
+    const expiration = screen.getByRole("button", { name: "公告过期时间" })
+    expect(expiration.textContent).toContain("02:30")
+    fireEvent.click(screen.getByRole("button", { name: "保存公告" }))
+    await waitFor(() => expect(updateAnnouncementCalls).toHaveLength(1))
+    expect(updateAnnouncementCalls[0]?.expires_at).toBe(
+      "2031-03-09T02:30:00+08:00"
+    )
+  })
+
   test("creates announcements with an expiration and allows clearing it", async () => {
-    setSystemTime(new Date(2031, 2, 1, 10, 0))
+    setSystemTime(new Date("2031-03-01T10:00:00+08:00"))
     renderPage(<AnnouncementAdminPage />)
 
     await screen.findByText("Maintenance")
@@ -239,7 +255,7 @@ describe("AnnouncementAdminPage", () => {
 
     await waitFor(() => expect(createAnnouncementCalls).toHaveLength(1))
     expect(createAnnouncementCalls[0]?.expires_at).toBe(
-      new Date("2031-03-02T14:45").toISOString()
+      "2031-03-02T14:45:00+08:00"
     )
 
     fireEvent.click(screen.getByRole("button", { name: "编辑" }))
@@ -247,6 +263,7 @@ describe("AnnouncementAdminPage", () => {
       name: "公告过期时间",
     })
     expect(expiration.textContent).toContain("2030")
+    expect(expiration.textContent).toContain("12:30")
     fireEvent.click(expiration)
     const editingDatePicker = await screen.findByRole("dialog")
     fireEvent.click(

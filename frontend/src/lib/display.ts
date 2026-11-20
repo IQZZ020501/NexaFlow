@@ -32,17 +32,55 @@ export function initials(name: string) {
  * @param locale - The locale used for formatting
  * @returns The localized date and 24-hour time representation
  */
-export function formatDateTime(value: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, {
+export function formatDateTime(
+  value: string,
+  locale: string,
+  options: Intl.DateTimeFormatOptions = {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false,
+  }
+) {
+  return new Intl.DateTimeFormat(locale, {
+    ...options,
+    hourCycle: "h23",
     timeZone: APP_TIME_ZONE,
   }).format(new Date(value))
+}
+
+export function formatDate(value: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    timeZone: APP_TIME_ZONE,
+  }).format(new Date(value))
+}
+
+/** Converts an instant to the wall-clock value used by Shanghai date pickers. */
+export function toAppDateTimeInput(value: string | Date) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: APP_TIME_ZONE,
+    })
+      .formatToParts(typeof value === "string" ? new Date(value) : value)
+      .map(({ type, value }) => [type, value])
+  )
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`
+}
+
+/** Date-picker values are China Standard Time, regardless of browser timezone. */
+export function appDateTimeInputToIso(value: string) {
+  return `${value}:00+08:00`
 }
 
 export function formatUserIdentity(

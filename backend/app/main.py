@@ -14,6 +14,7 @@ from app.infra.observability.logger import get_logger, setup_logging
 from app.infra.observability.system_log import record_system_log
 from app.infra.runtime.event_loop import configure_windows_event_loop_policy
 from app.infra.runtime.request_body_limit import RequestBodyLimitMiddleware
+from app.infra.runtime.timezone import configure_process_timezone
 from app.infra.security.keyring import initialize_secret_keys
 
 logger = get_logger(__name__)
@@ -21,6 +22,7 @@ logger = get_logger(__name__)
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env(require_bootstrap=False)
+    configure_process_timezone()
     setup_logging(level=settings.log_level)
     configure_windows_event_loop_policy()
     configure_database(settings)

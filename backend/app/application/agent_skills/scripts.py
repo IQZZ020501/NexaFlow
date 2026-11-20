@@ -9,6 +9,7 @@ from app.application.agent_skills.dependencies import (
 )
 from app.application.agent_skills.execution import load_authorized_run_skill
 from app.domain.artifacts.services import artifact_format_from_filename
+from app.entities.defaults import to_app_timezone
 from app.infra.db.repositories.tools import repository as tool_repository
 from app.infra.db.session import get_session_factory
 from app.infra.sandbox.client import (
@@ -158,7 +159,7 @@ async def execute_skill_script(settings, arguments, context):
                 "format": link.format,
                 "download_url": link.download_url,
                 "size_bytes": link.size_bytes,
-                "expires_at": link.expires_at.isoformat(),
+                "expires_at": to_app_timezone(link.expires_at).isoformat(),
                 "mime_type": link.media_type,
             }
         ]

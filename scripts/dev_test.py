@@ -383,6 +383,7 @@ class InfrastructureConfigurationTests(unittest.TestCase):
             database["environment"]["POSTGRES_PASSWORD"], "local$$credential"
         )
         self.assertEqual(database["ports"], ["127.0.0.1:15432:5432"])
+        self.assertEqual(database["environment"]["TZ"], "Asia/Shanghai")
         self.assertEqual(database["container_name"], "nexaflow-db")
         self.assertNotIn("networks", database)
         self.assertNotIn("deployment-only", json.dumps(config))

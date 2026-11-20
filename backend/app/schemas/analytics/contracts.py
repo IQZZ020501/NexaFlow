@@ -1,7 +1,9 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from app.schemas.time import AppDateTime
 
 
 class AnalyticsCountComparison(BaseModel):
@@ -104,7 +106,7 @@ class WorkspaceAnalyticsRankings(BaseModel):
 class WorkspaceAnalyticsFrequentQuestion(BaseModel):
     question: str
     count: int
-    latest_at: datetime
+    latest_at: AppDateTime
 
 
 class WorkspaceAnalyticsInventoryApplications(BaseModel):
@@ -160,7 +162,7 @@ class WorkspaceAnalyticsMetadata(BaseModel):
     previous_from_date: date
     previous_to_date: date
     end_exclusive: Literal[True]
-    generated_at: datetime
+    generated_at: AppDateTime
 
 
 class WorkspaceAnalyticsResponse(BaseModel):

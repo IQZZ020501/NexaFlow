@@ -1,9 +1,9 @@
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.time import AppDateTime
 
 
 class KnowledgeBaseResponse(BaseModel):
@@ -16,8 +16,8 @@ class KnowledgeBaseResponse(BaseModel):
     embedding_model_id: str | None
     reranker_model_id: str | None
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
     permission: str
 
 
@@ -77,8 +77,8 @@ class KnowledgeAttachmentResponse(BaseModel):
     size_bytes: int
     status: str
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 KnowledgeImportMode = Literal["document", "qa"]
@@ -104,8 +104,8 @@ class KnowledgeDocumentResponse(BaseModel):
     chunk_count: int = 0
     last_error: str | None = None
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class KnowledgeDocumentStatusUpdateRequest(BaseModel):
@@ -154,8 +154,8 @@ class KnowledgeDocumentChunkResponse(BaseModel):
     vector_id: str | None = None
     status: str
     images: list[KnowledgeAssetResponse] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class KnowledgeDocumentParagraphProblemRequest(BaseModel):
@@ -183,10 +183,10 @@ class KnowledgeTaskResponse(BaseModel):
     processed_items: int
     last_error: str | None = None
     created_by_user_id: str
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    started_at: AppDateTime | None = None
+    finished_at: AppDateTime | None = None
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class KnowledgeTaskBulkDeleteRequest(BaseModel):
@@ -275,8 +275,8 @@ class KnowledgeEvaluationCaseResponse(BaseModel):
     question: str
     expected_document_ids: list[str]
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class KnowledgeEvaluationRunRequest(BaseModel):
@@ -299,7 +299,7 @@ class KnowledgeEvaluationResultResponse(BaseModel):
     latency_ms: float
     trace: dict[str, Any]
     error: str | None
-    created_at: datetime
+    created_at: AppDateTime
 
 
 class KnowledgeEvaluationSummaryResponse(BaseModel):

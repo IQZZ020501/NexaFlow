@@ -429,6 +429,7 @@ def infrastructure_configuration(values: dict[str, str]) -> dict:
         key: values.get(key, "nexaflow").replace("$", "$$")
         for key in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD")
     }
+    database["environment"]["TZ"] = "Asia/Shanghai"
     database["healthcheck"]["test"] = [
         "CMD-SHELL",
         'PGAPPNAME=nexaflow-healthcheck pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"',
@@ -645,10 +646,12 @@ def start_stack(
         if key in values:
             backend_env[key] = values[key]
     backend_env["PYTHONUNBUFFERED"] = "1"
+    backend_env["TZ"] = "Asia/Shanghai"
     public_process_env = os.environ.copy()
     for key in SENSITIVE_BACKEND_ENV_KEYS:
         public_process_env.pop(key, None)
     public_process_env["PYTHONUNBUFFERED"] = "1"
+    public_process_env["TZ"] = "Asia/Shanghai"
     api_url = f"http://127.0.0.1:{api_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
     public_process_env["NEXAFLOW_API_PROXY"] = api_url

@@ -167,6 +167,7 @@ def test_email_templates() -> None:
         assert "background-color:#4f46e5" in rendered.html_body
         if kind == "password_changed":
             assert "<a " not in rendered.html_body
+            assert "2026-08-20 20:00:00+08:00" in rendered.text_body
         else:
             assert "<a " in rendered.html_body
             assert payload["url"] in rendered.text_body

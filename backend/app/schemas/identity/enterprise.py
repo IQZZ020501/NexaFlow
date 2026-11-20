@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from app.schemas.time import AppDateTime
 
 EnterpriseProvider = Literal["feishu", "dingtalk", "wecom"]
 
@@ -28,7 +29,7 @@ class EnterpriseConnectionResponse(BaseModel):
     client_secret_hint: str | None
     callback_url: str
     login_url: str
-    updated_at: datetime
+    updated_at: AppDateTime
 
 
 class PublicEnterpriseConnectionResponse(BaseModel):
@@ -63,5 +64,5 @@ class EnterpriseIdentityResponse(BaseModel):
     display_name: str
     email: str | None
     status: str
-    last_login_at: datetime | None
-    created_at: datetime
+    last_login_at: AppDateTime | None
+    created_at: AppDateTime

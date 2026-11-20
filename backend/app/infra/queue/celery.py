@@ -7,10 +7,12 @@ import threading
 from celery import Celery, Task
 from celery.signals import after_setup_logger, task_failure, task_postrun
 
+from app.entities.defaults import APP_TIMEZONE_NAME
 from app.infra.config.settings import Settings
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, setup_logging
 from app.infra.runtime.event_loop import configure_windows_event_loop_policy
+from app.infra.runtime.timezone import configure_process_timezone
 
 logger = get_logger("celery")
 
@@ -132,6 +134,7 @@ def collect_task_garbage(*, sender=None, **kwargs) -> None:
 
 def create_celery_app() -> Celery:
     settings = Settings.from_env(require_bootstrap=False)
+    configure_process_timezone()
     setup_logging(level=settings.log_level)
     configure_windows_event_loop_policy()
     app = Celery(
@@ -151,6 +154,8 @@ def create_celery_app() -> Celery:
         ],
     )
     app.conf.update(
+        timezone=APP_TIMEZONE_NAME,
+        enable_utc=True,
         accept_content=["json"],
         task_acks_late=True,
         task_ignore_result=True,

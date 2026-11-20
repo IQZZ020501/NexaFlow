@@ -12,6 +12,7 @@ RUN uv sync --no-dev --no-install-project --frozen
 
 FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91
 ENV PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Asia/Shanghai \
     PYTHONUNBUFFERED=1 \
     PATH=/opt/nexaflow/.venv/bin:$PATH
 RUN apt-get update \
@@ -24,6 +25,7 @@ RUN apt-get update \
         libreoffice-impress \
         libreoffice-writer \
         libreoffice-calc \
+        tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 65532 nexaflow \
     && useradd --uid 65532 --gid 65532 --no-create-home nexaflow

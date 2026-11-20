@@ -9,11 +9,20 @@ or from an upstream service (`external`).
 
 import logging
 import sys
+from datetime import datetime
 from typing import Any
+
+from app.entities.defaults import APP_TIMEZONE
 
 PROJECT_NAME = "NexaFlow"
 
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(project)s | %(name)s | %(message)s"
+
+
+class _AppTimeFormatter(logging.Formatter):
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        value = datetime.fromtimestamp(record.created, APP_TIMEZONE)
+        return value.strftime(datefmt) if datefmt else value.isoformat(sep=" ", timespec="milliseconds")
 
 
 class _ProjectNameFilter(logging.Filter):
@@ -41,7 +50,7 @@ def setup_logging(level: int | str = logging.INFO) -> None:
         handler.close()
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.setFormatter(_AppTimeFormatter(LOG_FORMAT))
     handler.addFilter(_ProjectNameFilter())
     root.addHandler(handler)
     root.setLevel(level)

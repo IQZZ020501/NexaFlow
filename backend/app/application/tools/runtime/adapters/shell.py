@@ -16,7 +16,7 @@ from app.domain.agent_skills.paths import skill_mount_name
 from app.domain.agents.models import AGENT_RUN_RUNNING_STATUSES
 from app.domain.artifacts.services import artifact_format_from_filename
 from app.domain.tools.results import prepare_shell_result
-from app.entities.defaults import utc_now
+from app.entities.defaults import to_app_timezone, utc_now
 from app.infra.db.repositories.agents import repository as runs
 from app.infra.db.session import get_session_factory
 from app.ports.execution import ExecutionError, build_execution_platform
@@ -148,7 +148,7 @@ async def execute_shell(settings, arguments, context):
                 "format": link.format,
                 "download_url": link.download_url,
                 "size_bytes": link.size_bytes,
-                "expires_at": link.expires_at.isoformat(),
+                "expires_at": to_app_timezone(link.expires_at).isoformat(),
                 "mime_type": link.media_type,
             }
         )

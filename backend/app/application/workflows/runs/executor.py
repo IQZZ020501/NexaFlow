@@ -60,7 +60,7 @@ from app.domain.workflows.runtime.engine import (
     WorkflowEngineState,
     WorkflowInputRequired,
 )
-from app.entities.defaults import new_id, utc_now
+from app.entities.defaults import new_id, to_app_timezone, utc_now
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
 from app.entities.runs import AgentRun
@@ -163,7 +163,7 @@ async def _workflow_context(
                 histories[execution.node_id].append(
                     {"question": item.goal, "answer": answer}
                 )
-    now = utc_now()
+    now = to_app_timezone(utc_now())
     return (
         {
             "time": now.strftime("%Y-%m-%d %H:%M:%S"),

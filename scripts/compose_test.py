@@ -80,6 +80,15 @@ class ComposeTests(unittest.TestCase):
         self.assertNotIn(None, names)
         self.assertNotEqual(*names)
 
+    def test_services_use_china_standard_time(self) -> None:
+        for name in ("app", "migrate", "db", "redis", "qdrant", "opensandbox"):
+            self.assertEqual(self.config["services"][name]["environment"]["TZ"], "Asia/Shanghai")
+        self.assertEqual(self.supervisor.environment("frontend")["TZ"], "Asia/Shanghai")
+        command = self.config["services"]["db"]["command"]
+        self.assertIn("timezone=Asia/Shanghai", command)
+        self.assertIn("log_timezone=Asia/Shanghai", command)
+        self.assertIn("shared_preload_libraries=pg_search", command)
+
     def test_execd_preload_matches_generated_and_deployed_configuration(self) -> None:
         image = self.config["services"]["execd-image"]["image"]
         deployed = tomllib.loads(self.config["configs"]["opensandbox"]["content"])
@@ -97,6 +106,7 @@ class ComposeTests(unittest.TestCase):
             cwd=ROOT, check=True, capture_output=True, text=True,
         )
         worker = json.loads(rendered.stdout)["services"]["agent-worker"]
+        self.assertEqual(worker["environment"]["TZ"], "Asia/Shanghai")
         self.assertIn("--role=agents", worker["command"])
         self.assertNotIn("--beat", worker["command"])
         self.assertNotIn("container_name", worker)

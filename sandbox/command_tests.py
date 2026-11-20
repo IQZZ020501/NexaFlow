@@ -43,6 +43,11 @@ class CommandTests(unittest.TestCase):
     def run_command(self, text, timeout=2):
         return command.execute({"command": text, "timeout_seconds": timeout}, python_binary=sys.executable)
 
+    def test_commands_use_china_standard_time(self):
+        result = self.run_command("date +%z")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["stdout"].strip(), "+0800")
+
     def test_nonzero_and_timeout_are_results(self):
         result = self.run_command("printf 'failed'; exit 7")
         self.assertTrue(result["ok"])
