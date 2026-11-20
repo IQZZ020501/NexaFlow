@@ -1,10 +1,11 @@
 """HTTP contract checks without sending credentials to external providers."""
 
 import base64
+import hashlib
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import httpx2
 
@@ -40,26 +41,116 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.destination.stop)
         self.addCleanup(self.transport.stop)
 
-    async def test_dida_exchanges_form_code_with_confidential_client_auth(self):
+    async def test_dida_registers_a_public_client_for_the_web_callback(self):
+        redirect_uri = "https://nexaflow.example/app/tools/integrations/callback"
+        self.response = httpx2.Response(
+            201,
+            json={
+                "client_id": "registered-public-client",
+                "token_endpoint_auth_method": "none",
+                "redirect_uris": [redirect_uri],
+            },
+        )
+        result = await client.register_public_client(
+            "dida", redirect_uri, ["tasks:read", "tasks:write"]
+        )
+        self.assertEqual(result, "registered-public-client")
+        request = self.requests[0]
+        self.assertEqual(str(request.url), "https://api.dida365.com/oauth/register")
+        self.assertNotIn("authorization", request.headers)
+        self.assertEqual(
+            json.loads(request.content),
+            {
+                "client_name": "NexaFlow",
+                "redirect_uris": [redirect_uri],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"],
+                "token_endpoint_auth_method": "none",
+                "scope": "tasks:read tasks:write",
+            },
+        )
+
+    async def test_dida_rejects_invalid_or_confidential_registrations(self):
+        callback = "https://nexaflow.example/callback"
+        registration = {
+            "client_id": "registered",
+            "token_endpoint_auth_method": "none",
+            "redirect_uris": [callback],
+        }
+        for changes in (
+            {"client_id": ""},
+            {"client_id": "x\nunsafe"},
+            {"client_id": "x" * 257},
+            {"token_endpoint_auth_method": "client_secret_basic"},
+            {"redirect_uris": ["http://localhost:8766/callback"]},
+        ):
+            with self.subTest(changes=changes):
+                self.response = httpx2.Response(201, json={**registration, **changes})
+                with self.assertRaises(IntegrationProviderError):
+                    await client.register_public_client(
+                        "dida", callback, ["tasks:read", "tasks:write"]
+                    )
+
+    async def test_dida_exchanges_pkce_code_without_a_client_secret(self):
         self.response = httpx2.Response(200, json={"access_token": "access"})
         await client.exchange_tokens(
             "dida",
             "client",
-            "secret",
+            "",
             grant_type="authorization_code",
             code="short-code",
-            code_verifier="unused",
+            code_verifier="private-verifier",
+            redirect_uri="https://nexaflow.example/callback",
         )
         request = self.requests[0]
-        self.assertEqual(str(request.url), "https://dida365.com/oauth/token")
-        self.assertEqual(
-            base64.b64decode(request.headers["authorization"].split()[1]),
-            b"client:secret",
-        )
+        self.assertEqual(str(request.url), "https://api.dida365.com/oauth/token")
+        self.assertNotIn("authorization", request.headers)
         self.assertEqual(
             parse_qs(request.content.decode()),
-            {"grant_type": ["authorization_code"], "code": ["short-code"]},
+            {
+                "grant_type": ["authorization_code"],
+                "code": ["short-code"],
+                "client_id": ["client"],
+                "code_verifier": ["private-verifier"],
+                "redirect_uri": ["https://nexaflow.example/callback"],
+            },
         )
+        query = parse_qs(
+            urlparse(
+                client.authorization_url(
+                    "dida",
+                    "client",
+                    "https://nexaflow.example/callback",
+                    "state",
+                    "private-verifier",
+                    ["tasks:read", "tasks:write"],
+                )
+            ).query
+        )
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        self.assertEqual(
+            query["code_challenge"],
+            [
+                base64.urlsafe_b64encode(hashlib.sha256(b"private-verifier").digest())
+                .rstrip(b"=")
+                .decode()
+            ],
+        )
+        self.assertNotIn("code_verifier", query)
+
+    async def test_dida_has_no_confidential_client_or_non_pkce_fallback(self):
+        for secret, values in (
+            (
+                "old-secret",
+                {"grant_type": "authorization_code", "code_verifier": "verifier"},
+            ),
+            ("", {"grant_type": "authorization_code"}),
+            ("", {"grant_type": "refresh_token", "code_verifier": "verifier"}),
+        ):
+            with self.subTest(secret=secret, values=values):
+                with self.assertRaises(IntegrationProviderError):
+                    await client.exchange_tokens("dida", "client", secret, **values)
+        self.assertEqual(self.requests, [])
 
     async def test_feishu_exchanges_code_and_refresh_through_registered_application(
         self,
@@ -121,7 +212,7 @@ class ProviderContracts(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private-token", str(request.url))
         self.assertEqual(
             json.loads(request.content),
-            {"projectId": "work", "title": "Task", "content": ""},
+            {"projectId": "work", "title": "Task"},
         )
         await client.call_integration(
             "feishu",

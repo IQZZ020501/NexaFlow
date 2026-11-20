@@ -1,6 +1,7 @@
 import { request } from "@/lib/api-client"
 
 export type IntegrationProvider = "dida" | "feishu" | "tencent_meeting"
+export type IntegrationApplicationProvider = "feishu"
 export type Integration = {
   provider: IntegrationProvider
   status: "disconnected" | "connected" | "reauthorization_required"
@@ -32,7 +33,7 @@ export function listIntegrations(token: string, workspaceId: string) {
 export function getIntegrationApplication(
   token: string,
   workspaceId: string,
-  provider: IntegrationProvider
+  provider: IntegrationApplicationProvider
 ) {
   return request<IntegrationApplication>(
     path(workspaceId, `/${provider}/application`),
@@ -43,7 +44,7 @@ export function getIntegrationApplication(
 export function configureIntegrationApplication(
   token: string,
   workspaceId: string,
-  provider: IntegrationProvider,
+  provider: IntegrationApplicationProvider,
   payload: { client_id: string; client_secret?: string; scopes: string[] }
 ) {
   return request<IntegrationApplication>(

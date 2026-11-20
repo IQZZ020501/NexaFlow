@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 
 from app.api.deps import (
     AppSettingsDep,
@@ -10,6 +10,7 @@ from app.api.deps import (
 )
 from app.application.tools import integrations
 from app.schemas.tools.integrations import (
+    IntegrationApplicationProvider,
     IntegrationApplicationRequest,
     IntegrationApplicationResponse,
     IntegrationAuthorizeResponse,
@@ -31,7 +32,7 @@ async def list_integrations(context: Context, db: DbSessionDep):
 
 @router.get("/{provider}/application", response_model=IntegrationApplicationResponse)
 async def get_application(
-    provider: IntegrationProvider, context: Context, db: DbSessionDep
+    provider: IntegrationApplicationProvider, context: Context, db: DbSessionDep
 ):
     return await integrations.application_status(
         db, context.workspace.id, context.user, context.membership_role, provider
@@ -40,7 +41,7 @@ async def get_application(
 
 @router.put("/{provider}/application", response_model=IntegrationApplicationResponse)
 async def configure_application(
-    provider: IntegrationProvider,
+    provider: IntegrationApplicationProvider,
     payload: IntegrationApplicationRequest,
     context: Context,
     db: DbSessionDep,
@@ -63,9 +64,15 @@ async def authorize_integration(
     context: Context,
     db: DbSessionDep,
     settings: AppSettingsDep,
+    origin: Annotated[str | None, Header(max_length=2048)] = None,
 ):
     return await integrations.authorize(
-        db, context.workspace.id, context.user, provider, settings
+        db,
+        context.workspace.id,
+        context.user,
+        provider,
+        settings,
+        browser_origin=origin,
     )
 
 

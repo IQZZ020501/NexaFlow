@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.domain.tools.catalog.service import canonical_definition_hash
 from app.domain.tools.integrations.catalog import OPERATIONS, PROVIDERS
+from app.domain.tools.integrations.redirects import browser_redirect_uri
 from app.entities.defaults import new_id, utc_now
 from app.entities.tools import Tool, ToolPolicy, ToolSource, ToolVersion
 from app.entities.tools.integrations import (
@@ -62,6 +63,8 @@ async def redirect_uri(db):
 
 async def application_status(db, workspace_id, provider):
     definition = provider_definition(provider)
+    if provider != "feishu":
+        raise HTTPException(422, "This integration needs no application configuration.")
     app = await repository.application(db, workspace_id, provider)
     return {
         "client_id": app.client_id if app else "",
@@ -73,10 +76,10 @@ async def application_status(db, workspace_id, provider):
 
 async def configure(db, workspace_id, provider, payload, settings):
     provider_definition(provider)
-    if provider == "tencent_meeting":
+    if provider != "feishu":
         raise HTTPException(
             422,
-            "This integration uses device authorization and needs no application configuration.",
+            "This integration needs no application configuration.",
         )
     await workspaces.lock_workspace(db, workspace_id)
     if await repository.has_connections(db, workspace_id, provider):
@@ -103,17 +106,28 @@ async def configure(db, workspace_id, provider, payload, settings):
     return await application_status(db, workspace_id, provider)
 
 
+def _application_matches(provider, app, connection):
+    if provider == "feishu":
+        return bool(app and app.revision == connection.application_revision)
+    # Zero means this authorization is independent of a configured application.
+    # Retired Dida confidential-client connections must authorize again.
+    return provider != "dida" or connection.application_revision == 0
+
+
 async def status(db, workspace_id, user_id, provider):
     provider_definition(provider)
-    app = await repository.application(db, workspace_id, provider)
+    app = (
+        await repository.application(db, workspace_id, provider)
+        if provider == "feishu"
+        else None
+    )
     connection = await repository.connection(db, workspace_id, user_id, provider)
     state = connection.status if connection else "disconnected"
     if (
         connection
         and state == "connected"
         and (
-            provider != "tencent_meeting"
-            and (not app or app.revision != connection.application_revision)
+            not _application_matches(provider, app, connection)
             or connection.access_expires_at
             and utc(connection.access_expires_at) <= utc_now()
             and not connection.refreshable
@@ -123,7 +137,7 @@ async def status(db, workspace_id, user_id, provider):
     return {
         "provider": provider,
         "status": state,
-        "configured": provider == "tencent_meeting"
+        "configured": provider != "feishu"
         or bool(app and app.client_secret_ciphertext),
         "expires_at": connection.access_expires_at if connection else None,
         "source_id": connection.source_id
@@ -148,16 +162,24 @@ async def _archive_source(db, connection):
                 await tools.save_tool(db, tool)
 
 
-async def begin(db, workspace_id, actor, provider, settings):
+async def begin(db, workspace_id, actor, provider, settings, *, browser_origin=None):
     provider_definition(provider)
     await workspaces.lock_workspace(db, workspace_id)
-    app = await repository.application(db, workspace_id, provider)
-    if provider != "tencent_meeting" and (not app or not app.client_secret_ciphertext):
+    app = (
+        await repository.application(db, workspace_id, provider)
+        if provider == "feishu"
+        else None
+    )
+    if provider == "feishu" and (not app or not app.client_secret_ciphertext):
         raise HTTPException(
             409,
             "Ask a workspace administrator to configure this integration's application first.",
         )
-    callback_uri = await redirect_uri(db)
+    callback_uri = (
+        browser_redirect_uri(settings, browser_origin)
+        if provider == "dida"
+        else await redirect_uri(db)
+    )
     if provider != "tencent_meeting" and not callback_uri:
         raise HTTPException(
             422,
@@ -170,10 +192,14 @@ async def begin(db, workspace_id, actor, provider, settings):
         connection = IntegrationConnection(
             workspace_id=workspace_id, user_id=actor.id, provider=provider
         )
-    if connection.status == "connected" and not (
-        connection.access_expires_at
-        and utc(connection.access_expires_at) <= utc_now()
-        and not connection.refreshable
+    if (
+        connection.status == "connected"
+        and _application_matches(provider, app, connection)
+        and not (
+            connection.access_expires_at
+            and utc(connection.access_expires_at) <= utc_now()
+            and not connection.refreshable
+        )
     ):
         raise HTTPException(
             409,
@@ -196,6 +222,7 @@ async def begin(db, workspace_id, actor, provider, settings):
         connection_id=connection.id,
         state_hash=hashlib.sha256(state.encode()).hexdigest(),
         generation=connection.generation,
+        status="registering" if provider == "dida" else "pending",
         redirect_uri=callback_uri,
         secrets_ciphertext=seal({"verifier": verifier}, settings),
         expires_at=utc_now() + timedelta(minutes=5),
@@ -235,8 +262,38 @@ async def begin(db, workspace_id, actor, provider, settings):
             "mode": "device",
             "poll_seconds": 5,
         }
+    if provider == "dida":
+        scopes = PROVIDERS[provider]["scopes"]
+        try:
+            client_id = await provider_api.register_public_client(
+                provider, callback_uri, scopes
+            )
+        except provider_api.IntegrationProviderError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        current = await repository.connection_by_id(db, connection.id, lock=True)
+        current_attempt = await repository.authorization(
+            db, attempt.state_hash, lock=True
+        )
+        if (
+            not current
+            or current.generation != attempt.generation
+            or not current_attempt
+            or current_attempt.status != "registering"
+            or utc(current_attempt.expires_at) <= utc_now()
+        ):
+            raise HTTPException(
+                409, "Integration authorization was cancelled. Please install again."
+            )
+        current_attempt.status = "pending"
+        current_attempt.secrets_ciphertext = seal(
+            {"verifier": verifier, "client_id": client_id}, settings
+        )
+        await repository.save_authorization(db, current_attempt)
+        await db.commit()
+    else:
+        client_id, scopes = app.client_id, app.scopes
     url = provider_api.authorization_url(
-        provider, app.client_id, callback_uri, state, verifier, app.scopes
+        provider, client_id, callback_uri, state, verifier, scopes
     )
     return {
         "authorization_url": url,
@@ -257,6 +314,8 @@ def accept_tokens(connection, response, settings, previous=None):
         )
     token = response.get("access_token")
     refresh = response.get("refresh_token", previous.get("refresh_token"))
+    if connection.provider == "dida":
+        refresh = None
     for value in (token, refresh):
         if value is not None and (
             not isinstance(value, str)
@@ -392,6 +451,16 @@ async def install_tools(db, connection):
         )
         tool.updated_at = utc_now()
         await tools.save_tool(db, tool)
+    operation_names = {
+        operation["name"] for operation in OPERATIONS[connection.provider]
+    }
+    for tool in await tools.list_tools_by_source(
+        db, connection.workspace_id, source.id
+    ):
+        if tool.stable_key not in operation_names and tool.status != "archived":
+            tool.status, tool.availability = "archived", "unavailable"
+            tool.updated_at = utc_now()
+            await tools.save_tool(db, tool)
     await repository.save_connection(db, connection)
 
 
@@ -417,15 +486,18 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
     attempt = await repository.authorization(
         db, hashlib.sha256(payload.state.encode()).hexdigest(), lock=True
     )
-    app = await repository.application(db, workspace_id, provider)
+    app = (
+        await repository.application(db, workspace_id, provider)
+        if provider == "feishu"
+        else None
+    )
     if (
         not connection
         or not attempt
         or attempt.connection_id != connection.id
         or attempt.generation != connection.generation
         or utc(attempt.expires_at) <= utc_now()
-        or provider != "tencent_meeting"
-        and (not app or app.revision != connection.application_revision)
+        or not _application_matches(provider, app, connection)
     ):
         raise HTTPException(
             400,
@@ -449,24 +521,38 @@ async def complete(db, workspace_id, actor, provider, payload, settings):
         if provider == "tencent_meeting":
             response = await provider_api.device_authorization("poll", values)
         else:
+            client_id, client_secret = (
+                (values["client_id"], "")
+                if provider == "dida"
+                else (
+                    app.client_id,
+                    unseal(app.client_secret_ciphertext, settings)["client_secret"],
+                )
+            )
             response = await provider_api.exchange_tokens(
                 provider,
-                app.client_id,
-                unseal(app.client_secret_ciphertext, settings)["client_secret"],
+                client_id,
+                client_secret,
                 grant_type="authorization_code",
                 code=payload.code,
                 redirect_uri=attempt.redirect_uri,
                 code_verifier=values["verifier"],
+                **(
+                    {"scope": " ".join(PROVIDERS[provider]["scopes"])}
+                    if provider == "dida"
+                    else {}
+                ),
             )
         current = await repository.connection_by_id(db, connection.id, lock=True)
-        current_app = await repository.application(db, workspace_id, provider)
+        current_app = (
+            await repository.application(db, workspace_id, provider)
+            if provider == "feishu"
+            else None
+        )
         if (
             not current
             or current.generation != attempt.generation
-            or provider != "tencent_meeting"
-            and (
-                not current_app or current_app.revision != current.application_revision
-            )
+            or not _application_matches(provider, current_app, current)
         ):
             raise HTTPException(
                 409, "Integration authorization was cancelled. Please install again."
@@ -520,10 +606,12 @@ async def credentials(db, connection_id, workspace_id, user_id, generation, sett
         raise provider_api.IntegrationProviderError(
             "Integration is not installed for this user. Please install again."
         )
-    app = await repository.application(db, workspace_id, connection.provider)
-    if connection.provider != "tencent_meeting" and (
-        not app or app.revision != connection.application_revision
-    ):
+    app = (
+        await repository.application(db, workspace_id, connection.provider)
+        if connection.provider == "feishu"
+        else None
+    )
+    if not _application_matches(connection.provider, app, connection):
         raise provider_api.IntegrationProviderError(
             "Integration application changed. Please install again."
         )

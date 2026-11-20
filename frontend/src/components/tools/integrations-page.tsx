@@ -40,6 +40,7 @@ import {
   syncIntegrationTools,
   uninstallIntegration,
   type Integration,
+  type IntegrationApplicationProvider,
   type IntegrationAuthorization,
   type IntegrationProvider,
 } from "@/lib/api/integrations"
@@ -85,7 +86,7 @@ export function IntegrationsCatalog({
   const [query, setQuery] = React.useState("")
   const [busy, setBusy] = React.useState<IntegrationProvider | null>(null)
   const [configuration, setConfiguration] =
-    React.useState<IntegrationProvider | null>(null)
+    React.useState<IntegrationApplicationProvider | null>(null)
   const [device, setDevice] = React.useState<DeviceAuthorization | null>(null)
   const popup = React.useRef<Window | null>(null)
   const active = React.useRef(true)
@@ -179,7 +180,7 @@ export function IntegrationsCatalog({
 
   async function install(integration: Integration) {
     if (actionPending.current) return
-    if (!integration.configured) {
+    if (integration.provider === "feishu" && !integration.configured) {
       if (canConfigure) setConfiguration(integration.provider)
       else notify("error", t("请联系空间管理员配置此集成的开发者应用。"))
       return
@@ -345,7 +346,7 @@ export function IntegrationsCatalog({
                       {t(entry.name)}
                     </ResourceCardTitle>
                   </div>
-                  {canConfigure && entry.provider !== "tencent_meeting" ? (
+                  {canConfigure && entry.provider === "feishu" ? (
                     <IconButton
                       label={t("配置 {name}", { name: t(entry.name) })}
                       onClick={() => setConfiguration(entry.provider)}

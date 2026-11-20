@@ -1,5 +1,6 @@
 """The installed capability surface is explicit and independent of credentials."""
 
+from app.domain.tools.integrations.dida_catalog import DIDA_OPERATIONS
 from app.domain.tools.integrations.tencent_catalog import TENCENT_OPERATIONS
 
 PROVIDERS = {
@@ -35,37 +36,7 @@ def _operation(name, description, properties, required=(), *, write=False):
 
 
 OPERATIONS = {
-    "dida": [
-        _operation(
-            "list_projects", "List the connected user's Dida365 task lists.", {}
-        ),
-        _operation(
-            "list_tasks",
-            "Read tasks in a Dida365 list.",
-            {"project_id": _string()},
-            ["project_id"],
-        ),
-        _operation(
-            "create_task",
-            "Create a task in the connected user's Dida365 list. due_date uses yyyy-MM-dd'T'HH:mm:ssZ.",
-            {
-                "project_id": _string(),
-                "title": _string(500),
-                "content": _string(8000),
-                "due_date": _string(64),
-                "time_zone": _string(128),
-            },
-            ["project_id", "title"],
-            write=True,
-        ),
-        _operation(
-            "complete_task",
-            "Mark a Dida365 task as completed.",
-            {"project_id": _string(), "task_id": _string()},
-            ["project_id", "task_id"],
-            write=True,
-        ),
-    ],
+    "dida": DIDA_OPERATIONS,
     "feishu": [
         _operation(
             "read_document",

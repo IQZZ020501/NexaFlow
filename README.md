@@ -29,7 +29,7 @@ Agent 通过通用模型与工具循环完成任务，按需使用知识检索�
 | 知识库与 RAG | 支持文档与 QA 导入、智能层级分段、规范化 Markdown 预览、Qdrant 向量与 `pg_search` BM25 混合检索、RRF/可选重排、引用和检索评测。 |
 | 可视化工作流 | React Flow 画布支持模型、知识检索、分类、条件、表单、变量、工具与已发布 Agent 等节点，提供草稿调试、版本管理和节点执行记录。 |
 | MCP 与统一工具 | 内置与 MCP 工具共享版本、授权和调用账本。MCP 支持 Streamable HTTP、SSE 和 stdio；远程凭据与 stdio 配置加密保存。 |
-| 第三方应用集成 | 滴答清单、飞书和腾讯会议默认未安装，用户通过平台登录授权安装并可卸载；腾讯会议提供会议管理、录制、纪要与转写、参会报告、通讯录及会中控制共 35 项工具，已安装账号可更新工具目录；账号连接按用户与工作空间隔离，详见[集成配置](docs/INTEGRATIONS.md)。 |
+| 第三方应用集成 | 滴答清单、飞书和腾讯会议默认未安装，用户通过平台登录授权安装并可卸载；滴答对齐官方 DIDA CLI 的 50 项业务工具，腾讯会议提供会议管理、录制、纪要与转写等 35 项工具，已安装账号可更新工具目录；账号连接按用户与工作空间隔离，详见[集成配置](docs/INTEGRATIONS.md)。 |
 | Skills | 导入 `SKILL.md` 或 ZIP 技能包，按需加载指令、参考文件和 Python/JavaScript 脚本；固定版本绑定到 Agent，脚本依赖安装需逐次审批。 |
 | 文件与图片生成 | 内置 Word、PDF、Excel、PPTX 文件渲染工具，可按需接入生图模型；HTML、PDF、DOCX、XLSX、PPTX 在聊天右侧预览，查看文件时可以继续对话。 |
 | 公开对话项目 | 在已发布 Agent 的聊天中创建个人项目，组织多段对话、共用项目说明和只读资料；支持移动对话、保存生成文件、归档与恢复。 |
@@ -174,6 +174,8 @@ make dev
 启动完成后访问 <http://localhost:3000>；API 健康检查和文档分别位于 <http://localhost:8000/health> 与 <http://localhost:8000/docs>。按 `Ctrl+C` 会停止本次托管的 OpenSandbox、API、Worker 和前端，但保留基础容器及数据，便于下次快速启动。若 OpenSandbox 已在运行且密钥匹配，启动器会直接复用。
 
 默认端口被其他开发进程占用时，可用一次性的 `NEXAFLOW_DEV_API_PORT=8001 NEXAFLOW_DEV_FRONTEND_PORT=3001 make dev` 启动；前端代理会自动指向对应 API 端口。
+
+开发启动器会将实际前端地址传给后端作为 `PUBLIC_APP_URL`，供浏览器 OAuth 等回调使用；显式设置该环境变量时保留配置值。滴答清单点击「安装」即可在浏览器登录，无需另填 SMTP 站点地址或应用凭据。
 
 `bun run dev` 和 `bun run build` 会自动构建 PDF/Office 预览所需的本地静态资源。开发期间只修改文件预览器时，在 `frontend/` 运行 `bun run build:file-preview` 刷新资源。
 

@@ -1,8 +1,10 @@
 """Real HTTP routes and ledger, with isolated simulated provider grants."""
 
 import asyncio
+import base64
 import hashlib
 from copy import deepcopy
+from dataclasses import replace
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
@@ -37,10 +39,12 @@ from app.schemas.agents.contracts import (
 )
 
 
-async def saved_snapshot(workspace_id, user_id, source_id):
+async def saved_snapshot(workspace_id, user_id, source_id, stable_key="list_projects"):
     async with get_session_factory()() as db:
         source = await tools.get_tool_source(db, workspace_id, source_id)
-        tool = (await tools.list_tools_by_source(db, workspace_id, source_id))[0]
+        tool = await tools.get_tool_by_source_key(
+            db, workspace_id, source_id, stable_key
+        )
         version = await tools.get_tool_version(
             db, workspace_id, tool.current_version_id
         )
@@ -75,7 +79,10 @@ async def assert_encryption(workspace_id, user_id, provider):
             )
         )
         connection = await connections.connection(db, workspace_id, user_id, provider)
-        assert "private-application-secret" not in app.client_secret_ciphertext
+        if provider == "dida":
+            assert app is None, "Dida must not need a manually configured application"
+        else:
+            assert "private-application-secret" not in app.client_secret_ciphertext
         assert "private-user-token" not in connection.secrets_ciphertext
         return connection
 
@@ -93,7 +100,7 @@ async def expire(workspace_id, user_id, provider, *, lease=False):
 
 
 def main():
-    settings = support.settings()
+    settings = replace(support.settings(), public_app_url="https://nexaflow.example")
     exchange = AsyncMock(
         return_value={
             "access_token": "private-user-token",
@@ -102,9 +109,12 @@ def main():
         }
     )
     device_api = AsyncMock(return_value={"auth_code": "device-user-code"})
+    registration = AsyncMock(return_value="registered-public-client")
     with (
+        patch.object(support, "settings", return_value=settings),
         patch.object(provider_api, "exchange_tokens", exchange),
         patch.object(provider_api, "device_authorization", device_api),
+        patch.object(provider_api, "register_public_client", registration),
         test_client() as client,
     ):
         admin_token, workspace_id = activate_admin(client)
@@ -129,15 +139,71 @@ def main():
         assert catalog.status_code == 200, catalog.text
         assert len(catalog.json()) == 3
         assert {entry["status"] for entry in catalog.json()} == {"disconnected"}
-        assert not client.post(root + "/dida/authorize", headers=owner).is_success
+        assert catalog.json()[0]["configured"] is True
         assert exchange.await_count == 0
+        assert registration.await_count == 0
+        # Dida opens browser OAuth with no SMTP site URL or application setup.
+        browser_login = client.post(root + "/dida/authorize", headers=owner)
+        assert browser_login.status_code == 200, browser_login.text
+        callback = "https://nexaflow.example/app/tools/integrations/callback"
+        assert parse_qs(urlparse(browser_login.json()["authorization_url"]).query)[
+            "redirect_uri"
+        ] == [callback]
+        assert registration.call_args.args == (
+            "dida",
+            callback,
+            ["tasks:read", "tasks:write"],
+        )
+        assert exchange.await_count == 0
+        assert client.get(root, headers=owner).json()[0]["status"] == "disconnected"
+        calls = registration.await_count
+        for origin in (
+            "https://attacker.example",
+            "null",
+            "https://nexaflow.example/path",
+        ):
+            response = client.post(
+                root + "/dida/authorize", headers={**owner, "Origin": origin}
+            )
+            assert response.status_code == 400, response.text
+        assert registration.await_count == calls, (
+            "untrusted origins must not register a client"
+        )
+        spoofed_host = client.post(
+            root + "/dida/authorize",
+            headers={
+                **owner,
+                "Host": "attacker.example",
+                "X-Forwarded-Host": "attacker.example",
+                "X-Forwarded-Proto": "http",
+                "Origin": "https://nexaflow.example",
+            },
+        )
+        assert spoofed_host.status_code == 200, spoofed_host.text
+        assert parse_qs(urlparse(spoofed_host.json()["authorization_url"]).query)[
+            "redirect_uri"
+        ] == [callback]
+        client.app.state.settings = replace(
+            settings, public_app_url="http://127.0.0.1:3001", environment="development"
+        )
+        try:
+            local_login = client.post(
+                root + "/dida/authorize",
+                headers={**owner, "Origin": "http://localhost:3001"},
+            )
+            assert local_login.status_code == 200, local_login.text
+            assert parse_qs(urlparse(local_login.json()["authorization_url"]).query)[
+                "redirect_uri"
+            ] == ["http://localhost:3001/app/tools/integrations/callback"]
+        finally:
+            client.app.state.settings = settings
         site = client.patch(
             "/api/v1/admin/smtp",
             headers=admin,
             json={"site_url": "https://nexaflow.example", "enabled": False},
         )
         assert site.status_code == 200, site.text
-        for provider in ("dida", "feishu"):
+        for provider in ("feishu",):
             app = {
                 "client_id": f"{provider}-client",
                 "client_secret": "private-application-secret",
@@ -160,6 +226,19 @@ def main():
         assert (
             client.get(root + "/feishu/application", headers=owner).status_code == 403
         )
+        for headers in (admin, owner):
+            assert (
+                client.get(root + "/dida/application", headers=headers).status_code
+                == 422
+            )
+            assert (
+                client.put(
+                    root + "/dida/application",
+                    headers=headers,
+                    json={"client_id": "old-client", "client_secret": "old-secret"},
+                ).status_code
+                == 422
+            )
 
         def begin(provider="dida"):
             response = client.post(root + f"/{provider}/authorize", headers=owner)
@@ -173,17 +252,90 @@ def main():
                 json={"state": authorization["state"], "code": "temporary-code"},
             )
 
+        with patch.object(
+            provider_api,
+            "register_public_client",
+            AsyncMock(
+                side_effect=provider_api.IntegrationProviderError(
+                    "Integration authorization failed. Please authorize again."
+                )
+            ),
+        ):
+            assert (
+                client.post(root + "/dida/authorize", headers=owner).status_code == 502
+            )
+            assert client.get(root, headers=owner).json()[0]["status"] == "disconnected"
+
+        async def late_registration(*_args):
+            async with get_session_factory()() as db:
+                actor = type("Actor", (), {"id": owner_id})()
+                await service.uninstall(db, workspace_id, actor, "dida")
+            return "late-client"
+
+        with patch.object(
+            provider_api,
+            "register_public_client",
+            AsyncMock(side_effect=late_registration),
+        ):
+            assert (
+                client.post(root + "/dida/authorize", headers=owner).status_code == 409
+            )
+            assert client.get(root, headers=owner).json()[0]["status"] == "disconnected"
+
         authorization = begin()
         query = parse_qs(urlparse(authorization["authorization_url"]).query)
+        assert registration.call_args.args == (
+            "dida",
+            "https://nexaflow.example/app/tools/integrations/callback",
+            ["tasks:read", "tasks:write"],
+        )
+        assert query["client_id"] == ["registered-public-client"]
+        assert query["redirect_uri"] == [
+            "https://nexaflow.example/app/tools/integrations/callback"
+        ]
+        assert query["code_challenge_method"] == ["S256"]
+
+        async def read_verifier():
+            async with get_session_factory()() as db:
+                attempt = await connections.authorization(
+                    db, hashlib.sha256(authorization["state"].encode()).hexdigest()
+                )
+                values = service.unseal(attempt.secrets_ciphertext, settings)
+                assert values["client_id"] == "registered-public-client"
+                assert values["verifier"] not in attempt.secrets_ciphertext
+                return values["verifier"]
+
+        verifier = asyncio.run(read_verifier())
+        assert query["code_challenge"] == [
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+            .rstrip(b"=")
+            .decode()
+        ]
         assert query["state"] == [authorization["state"]]
         assert query["scope"] == ["tasks:read tasks:write"]
         assert "private-application-secret" not in authorization["authorization_url"]
         assert complete(authorization, headers=other).status_code == 400
         assert exchange.await_count == 0
-        installed = complete(authorization)
+        legacy_dida = deepcopy(
+            [
+                operation
+                for operation in OPERATIONS["dida"]
+                if operation["name"]
+                in {"list_projects", "get_project_data", "create_task", "complete_task"}
+            ]
+        )
+        next(
+            operation
+            for operation in legacy_dida
+            if operation["name"] == "get_project_data"
+        )["name"] = "list_tasks"
+        with patch.dict(OPERATIONS, {"dida": legacy_dida}):
+            installed = complete(authorization)
         assert installed.status_code == 200, installed.text
         assert installed.json()["status"] == "connected"
         assert exchange.await_count == 1
+        assert exchange.call_args.args == ("dida", "registered-public-client", "")
+        assert exchange.call_args.kwargs["code_verifier"] == verifier
         assert complete(authorization).status_code == 200
         assert exchange.await_count == 1, "callbacks must not exchange a code twice"
         assert client.post(root + "/dida/authorize", headers=owner).status_code == 409
@@ -193,17 +345,75 @@ def main():
                 headers=admin,
                 json={"client_id": "new-client"},
             ).status_code
-            == 409
+            == 422
         )
         source_id = installed.json()["source_id"]
         connection = asyncio.run(assert_encryption(workspace_id, owner_id, "dida"))
         tools_root = f"/api/v1/workspaces/{workspace_id}/tools"
+
+        async def dida_catalog_state():
+            async with get_session_factory()() as db:
+                entries = await tools.list_tools_by_source(db, workspace_id, source_id)
+                versions = {
+                    tool.stable_key: [
+                        version.id
+                        for version in await tools.list_tool_versions(
+                            db, workspace_id, tool.id
+                        )
+                    ]
+                    for tool in entries
+                }
+                active = {
+                    tool.stable_key for tool in entries if tool.status == "active"
+                }
+                for tool in entries:
+                    if tool.stable_key == "list_tasks":
+                        assert (
+                            tool.status == "archived"
+                            and tool.availability == "unavailable"
+                        )
+                    elif tool.status == "active":
+                        operation = next(
+                            item
+                            for item in OPERATIONS["dida"]
+                            if item["name"] == tool.stable_key
+                        )
+                        policy = await tools.get_tool_policy(db, workspace_id, tool.id)
+                        assert policy.effect == (
+                            "external_write" if operation["write"] else "external_read"
+                        )
+                        assert policy.approval == (
+                            "each_call" if operation["write"] else "auto"
+                        )
+                        assert policy.parallel_safe == (not operation["write"])
+                        assert policy.allowed_access_sources == ["console"]
+                        assert not policy.workflow_callable
+                saved = await connections.connection(db, workspace_id, owner_id, "dida")
+                assert saved.generation == connection.generation
+                assert saved.secrets_ciphertext == connection.secrets_ciphertext
+                return active, versions
+
+        sync_url = root + "/dida/sync"
+        for headers in (admin, other):
+            assert client.post(sync_url, headers=headers).status_code == 409
+        auth_calls = exchange.await_count
+        assert client.post(sync_url, headers=owner).status_code == 200
+        active_tools, dida_versions = asyncio.run(dida_catalog_state())
+        assert active_tools == {operation["name"] for operation in OPERATIONS["dida"]}
+        assert "list_tasks" in dida_versions, (
+            "historical versions remain available for audit"
+        )
+        assert client.post(sync_url, headers=owner).status_code == 200
+        assert asyncio.run(dida_catalog_state()) == (active_tools, dida_versions)
+        assert exchange.await_count == auth_calls, (
+            "tool updates must preserve the account authorization"
+        )
         owned_tools = [
             entry
             for entry in client.get(tools_root, headers=owner).json()
             if entry["kind"] == "integration"
         ]
-        assert len(owned_tools) == 4
+        assert len(owned_tools) == len(OPERATIONS["dida"])
         for headers in (admin, other):
             assert not [
                 entry
@@ -282,6 +492,45 @@ def main():
 
         asyncio.run(assert_removed())
 
+        async def restore_retired_confidential_connection():
+            async with get_session_factory()() as db:
+                db.add(
+                    IntegrationApplication(
+                        workspace_id=workspace_id,
+                        provider="dida",
+                        client_id="retired-manual-client",
+                        client_secret_ciphertext=service.seal(
+                            {"client_secret": "retired-application-secret"}, settings
+                        ),
+                        scopes=["tasks:read", "tasks:write"],
+                        revision=1,
+                    )
+                )
+                saved = await connections.connection(db, workspace_id, owner_id, "dida")
+                saved.application_revision = 1
+                saved.status = "connected"
+                saved.secrets_ciphertext = service.seal(
+                    {"access_token": "retired-token"}, settings
+                )
+                await connections.save_connection(db, saved)
+                await db.commit()
+                try:
+                    await service.credentials(
+                        db, saved.id, workspace_id, owner_id, saved.generation, settings
+                    )
+                    raise AssertionError(
+                        "retired confidential-client grants must be rejected"
+                    )
+                except provider_api.IntegrationProviderError:
+                    pass
+
+        asyncio.run(restore_retired_confidential_connection())
+        assert (
+            client.get(root, headers=owner).json()[0]["status"]
+            == "reauthorization_required"
+        )
+        assert client.post(root + "/dida/sync", headers=owner).status_code == 409
+
         authorization = begin()
         with patch.object(
             provider_api,
@@ -297,6 +546,9 @@ def main():
         assert client.get(root, headers=owner).json()[0]["status"] == "disconnected"
         authorization = begin()
         assert complete(authorization).status_code == 200
+        assert exchange.call_args.args == ("dida", "registered-public-client", ""), (
+            "retired application credentials must not be reused"
+        )
         reinstalled = asyncio.run(saved_snapshot(workspace_id, owner_id, source_id))
         assert reinstalled.definition_hash != snapshot.definition_hash
         asyncio.run(expire(workspace_id, owner_id, "dida"))
@@ -458,7 +710,9 @@ def main():
             "catalog updates must not exchange credentials"
         )
         meeting_snapshot = asyncio.run(
-            saved_snapshot(workspace_id, owner_id, installed["source_id"])
+            saved_snapshot(
+                workspace_id, owner_id, installed["source_id"], "list_meetings"
+            )
         )
         with patch(
             "app.application.tools.runtime.adapters.integration.call_integration",

@@ -14,6 +14,12 @@ def authorization_url(provider, client_id, redirect_uri, state, verifier, scopes
     return build(provider, client_id, redirect_uri, state, verifier, scopes)
 
 
+async def register_public_client(provider, redirect_uri, scopes):
+    from app.adapters.integrations.client import register_public_client as register
+
+    return await register(provider, redirect_uri, scopes)
+
+
 async def exchange_tokens(provider, client_id, client_secret, **values):
     from app.adapters.integrations.client import exchange_tokens as exchange
 

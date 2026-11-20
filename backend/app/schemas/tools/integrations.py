@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from app.schemas.time import AppDateTime
 
 IntegrationProvider = Literal["dida", "feishu", "tencent_meeting"]
+IntegrationApplicationProvider = Literal["feishu"]
 _Text = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
 ]

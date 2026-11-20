@@ -654,6 +654,9 @@ def start_stack(
     public_process_env["TZ"] = "Asia/Shanghai"
     api_url = f"http://127.0.0.1:{api_port}"
     frontend_url = f"http://127.0.0.1:{frontend_port}"
+    backend_env["PUBLIC_APP_URL"] = (
+        os.environ.get("PUBLIC_APP_URL") or values.get("PUBLIC_APP_URL") or frontend_url
+    ).rstrip("/")
     public_process_env["NEXAFLOW_API_PROXY"] = api_url
     public_process_env["PORT"] = str(frontend_port)
 

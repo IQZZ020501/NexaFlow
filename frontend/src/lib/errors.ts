@@ -2,8 +2,10 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Integration authorization origin is not allowed.":
+    "当前访问地址不可用于授权，请从 NexaFlow 网站重新登录。",
   "Invalid integration operation arguments.":
-    "集成参数无效，请检查会议标识、时间和操作参数。",
+    "集成参数无效，请检查资源标识、时间和操作参数。",
   "Configure the administrator-managed public site URL before connecting OAuth.":
     "请先由系统管理员配置公开站点地址。",
   "Integration not found.": "当前用户尚未安装此集成，请重新安装。",
@@ -24,6 +26,8 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
     "平台请求失败，请检查账号授权和应用权限。",
   "Integration service could not be reached.":
     "暂时无法连接集成服务，请稍后重试。",
+  "Integration change could not be confirmed. Check the platform result before retrying.":
+    "无法确认集成更改是否生效，请核对平台结果后再重试。",
   "Integration response was unavailable.": "暂时无法连接集成服务，请稍后重试。",
   "Integration authorization is invalid or expired. Please install again.":
     "集成授权无效或已过期，请重新安装。",

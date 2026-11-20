@@ -248,17 +248,45 @@ test("failed uninstall keeps the existing installation visible", async () => {
   expect(within(await card()).getByText("已安装")).toBeTruthy()
 })
 
-test("members get configuration guidance while administrators can save an application without installing it", async () => {
+test("Dida installs without application credentials for both members and administrators", async () => {
   installations[0] = { ...installations[0]!, configured: false }
+  for (const canConfigure of [false, true]) {
+    const view = catalog(canConfigure)
+    const dida = within(await card())
+    expect(dida.queryByRole("button", { name: "配置 滴答清单" })).toBeNull()
+    fireEvent.click(dida.getByRole("button", { name: "安装" }))
+    await waitFor(() =>
+      expect(window.location.assign).toHaveBeenCalledTimes(canConfigure ? 2 : 1)
+    )
+    expect(screen.queryByLabelText("应用 Client ID")).toBeNull()
+    expect(screen.queryByLabelText("应用 Client Secret")).toBeNull()
+    expect(screen.queryByRole("dialog")).toBeNull()
+    view.unmount()
+  }
+  expect(notifications).toEqual([])
+  expect(requests.filter((request) => request.method === "POST")).toHaveLength(
+    2
+  )
+  expect(requests.some((request) => request.url.endsWith("/application"))).toBe(
+    false
+  )
+})
+
+test("Feishu members get configuration guidance while administrators can save its application", async () => {
+  installations[1] = { ...installations[1]!, configured: false }
   const view = catalog()
-  fireEvent.click(within(await card()).getByRole("button", { name: "安装" }))
+  fireEvent.click(
+    within(await card("飞书")).getByRole("button", { name: "安装" })
+  )
   expect(notifications).toEqual([
     ["error", "请联系空间管理员配置此集成的开发者应用。"],
   ])
-  expect(screen.queryByRole("button", { name: "配置 滴答清单" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "配置 飞书" })).toBeNull()
   view.unmount()
   catalog(true)
-  fireEvent.click(within(await card()).getByRole("button", { name: "安装" }))
+  fireEvent.click(
+    within(await card("飞书")).getByRole("button", { name: "安装" })
+  )
   const clientId = await screen.findByLabelText("应用 Client ID")
   await waitFor(() =>
     expect((clientId as HTMLInputElement).value).toBe("existing-client")
@@ -441,6 +469,89 @@ test("integration operation labels follow all three interface languages", () => 
       integrationToolName(`feishu_send_message_${"a".repeat(32)}`, t)
     ).toBe(expected)
   }
+})
+
+test("Dida CLI capabilities use translated names for every business area", () => {
+  for (const [operation, hans, hant, en] of [
+    ["update_task", "更新滴答任务", "更新滴答任務", "Update Dida365 task"],
+    [
+      "get_project_data",
+      "读取滴答清单数据",
+      "讀取滴答清單資料",
+      "Read Dida365 list data",
+    ],
+    [
+      "list_project_groups",
+      "查看滴答清单文件夹",
+      "檢視滴答清單資料夾",
+      "List Dida365 folders",
+    ],
+    ["rename_tag", "重命名滴答标签", "重新命名滴答標籤", "Rename Dida365 tag"],
+    [
+      "create_habit_checkin",
+      "滴答习惯打卡",
+      "滴答習慣打卡",
+      "Check in to Dida365 habit",
+    ],
+    [
+      "create_focus",
+      "创建滴答专注记录",
+      "建立滴答專注記錄",
+      "Create Dida365 focus record",
+    ],
+    [
+      "query_calendar_events",
+      "查询滴答日历事件",
+      "查詢滴答日曆事件",
+      "Query Dida365 calendar events",
+    ],
+    [
+      "list_countdowns",
+      "查看滴答倒数日",
+      "檢視滴答倒數日",
+      "List Dida365 countdowns",
+    ],
+  ]) {
+    for (const [language, expected] of [
+      ["zh-Hans", hans],
+      ["zh-Hant", hant],
+      ["en", en],
+    ] as const) {
+      const t: TFunction = (key, values) => translate(language, key, values)
+      expect(
+        integrationToolName(`dida_${operation}_${"a".repeat(32)}`, t)
+      ).toBe(expected)
+    }
+  }
+})
+
+test("installed Dida accounts replace the old catalog without repeating authorization", async () => {
+  installations[0] = {
+    ...installations[0]!,
+    status: "connected",
+    source_id: "dida-source",
+  }
+  catalog()
+  const dida = within(await card())
+  expect(
+    dida.getByText("管理任务、清单和标签，记录习惯与专注，查询日历和倒数日。")
+  ).toBeTruthy()
+  fireEvent.click(dida.getByRole("button", { name: "更新工具" }))
+  await waitFor(() =>
+    expect(notifications).toEqual([
+      ["success", "工具已更新，请在 Agent 中取消并重新勾选此集成，然后保存。"],
+    ])
+  )
+  expect(requests.filter((request) => request.method === "POST")).toEqual([
+    {
+      url: `/api/v1/workspaces/${workspace}/integrations/dida/sync`,
+      method: "POST",
+      body: null,
+    },
+  ])
+  expect(dida.getByText("已安装")).toBeTruthy()
+  expect(window.open).not.toHaveBeenCalled()
+  expect(window.location.assign).not.toHaveBeenCalled()
 })
 
 test("installed Tencent accounts can update tools without starting platform authorization", async () => {

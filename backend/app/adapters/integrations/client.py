@@ -5,10 +5,11 @@ import hashlib
 import json
 import secrets
 import time
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 import httpx2
 
+from app.adapters.integrations import dida
 from app.adapters.integrations.tencent import READ_ONLY_POST_OPERATIONS, build_request
 from app.adapters.integrations.validation import resource_identifier as _identifier
 from app.adapters.mcp.client import (
@@ -104,28 +105,63 @@ def authorization_url(provider, client_id, redirect_uri, state, verifier, scopes
         endpoint = "https://dida365.com/oauth/authorize"
     elif provider == "feishu":
         endpoint = "https://open.feishu.cn/open-apis/authen/v1/authorize"
-        query.update(
-            code_challenge=base64.urlsafe_b64encode(
-                hashlib.sha256(verifier.encode()).digest()
-            )
-            .rstrip(b"=")
-            .decode(),
-            code_challenge_method="S256",
-        )
     else:
         raise IntegrationProviderError("Unsupported integration provider.")
+    query.update(
+        code_challenge=base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode()).digest()
+        )
+        .rstrip(b"=")
+        .decode(),
+        code_challenge_method="S256",
+    )
     return endpoint + "?" + urlencode(query)
+
+
+async def register_public_client(provider, redirect_uri, scopes):
+    if provider != "dida":
+        raise IntegrationProviderError("Unsupported integration provider.")
+    # Published at https://dida365.com/.well-known/oauth-authorization-server.
+    result = await _request(
+        "POST",
+        "https://api.dida365.com/oauth/register",
+        body={
+            "client_name": "NexaFlow",
+            "redirect_uris": [redirect_uri],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "scope": " ".join(scopes),
+        },
+        limit=64 * 1024,
+    )
+    client_id = result.get("client_id") if isinstance(result, dict) else None
+    if (
+        not isinstance(client_id, str)
+        or not 1 <= len(client_id) <= 256
+        or any(ord(char) <= 32 for char in client_id)
+        or result.get("token_endpoint_auth_method") != "none"
+        or result.get("redirect_uris") != [redirect_uri]
+    ):
+        raise IntegrationProviderError(
+            "Integration authorization failed. Please authorize again."
+        )
+    return client_id
 
 
 async def exchange_tokens(provider, client_id, client_secret, **values):
     headers = {"Accept": "application/json"}
     if provider == "dida":
-        encoded = base64.b64encode(
-            f"{quote(client_id, safe='')}:{quote(client_secret, safe='')}".encode()
-        ).decode()
-        headers["Authorization"] = f"Basic {encoded}"
-        values.pop("code_verifier", None)
-        url = "https://dida365.com/oauth/token"
+        if (
+            client_secret
+            or not values.get("code_verifier")
+            or values.get("grant_type") != "authorization_code"
+        ):
+            raise IntegrationProviderError(
+                "Integration authorization failed. Please authorize again."
+            )
+        values["client_id"] = client_id
+        url = "https://api.dida365.com/oauth/token"
     elif provider == "feishu":
         values.update(client_id=client_id, client_secret=client_secret)
         url = "https://open.feishu.cn/open-apis/authen/v2/oauth/token"
@@ -175,32 +211,11 @@ async def device_authorization(action, credentials):
 
 
 async def call_integration(provider, operation, arguments, credentials, request_id):
+    if provider == "dida":
+        return await dida.call_integration(operation, arguments, credentials, _request)
     headers = {"Authorization": f"Bearer {credentials['access_token']}"}
     method, body, query = "GET", None, {}
-    if provider == "dida":
-        base = "https://api.dida365.com/open/v1"
-        if operation == "list_projects":
-            path = "/project"
-        elif operation == "list_tasks":
-            path = f"/project/{_identifier(arguments['project_id'])}/data"
-        elif operation == "create_task":
-            method, path = "POST", "/task"
-            body = {
-                "projectId": _identifier(arguments["project_id"]),
-                "title": arguments["title"],
-                "content": arguments.get("content", ""),
-            }
-            if arguments.get("due_date"):
-                body.update(
-                    dueDate=arguments["due_date"],
-                    timeZone=arguments.get("time_zone", "Asia/Shanghai"),
-                )
-        elif operation == "complete_task":
-            method = "POST"
-            path = f"/project/{_identifier(arguments['project_id'])}/task/{_identifier(arguments['task_id'])}/complete"
-        else:
-            raise IntegrationProviderError("Unsupported integration operation.")
-    elif provider == "feishu":
+    if provider == "feishu":
         base = "https://open.feishu.cn/open-apis"
         if operation == "read_document":
             path = f"/docx/v1/documents/{_identifier(arguments['document_id'])}/raw_content"

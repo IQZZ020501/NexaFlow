@@ -1,6 +1,8 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  "当前访问地址不可用于授权，请从 NexaFlow 网站重新登录。":
+    "This address cannot be used for authorization. Sign in again from the NexaFlow website.",
   按会议号查询腾讯会议: "Find Tencent meeting by code",
   查看腾讯历史会议: "List ended Tencent meetings",
   搜索腾讯会议: "Search Tencent meetings",
@@ -37,10 +39,59 @@ export const en = {
   更新工具: "Update tools",
   "工具已更新，请在 Agent 中取消并重新勾选此集成，然后保存。":
     "Tools updated. Uncheck and reselect this integration in your Agent, then save.",
-  "集成参数无效，请检查会议标识、时间和操作参数。":
-    "Invalid integration arguments. Check the meeting identifier, times, and operation parameters.",
+  "集成参数无效，请检查资源标识、时间和操作参数。":
+    "Invalid integration arguments. Check the resource identifier, times, and operation parameters.",
   "管理会议、受邀成员和录制，读取纪要、转写及参会报告，查询通讯录并执行会中控制。":
     "Manage meetings, invitees and recordings; read minutes, transcripts and attendance; search contacts and control ongoing meetings.",
+  读取滴答偏好: "Read Dida365 preferences",
+  读取滴答任务: "Read Dida365 task",
+  更新滴答任务: "Update Dida365 task",
+  批量完成滴答任务: "Complete Dida365 tasks in batch",
+  删除滴答任务: "Delete Dida365 task",
+  移动滴答任务: "Move Dida365 tasks",
+  分配滴答任务: "Assign Dida365 task",
+  取消分配滴答任务: "Unassign Dida365 task",
+  查看滴答已完成任务: "List completed Dida365 tasks",
+  筛选滴答任务: "Filter Dida365 tasks",
+  搜索滴答任务: "Search Dida365 tasks",
+  查看滴答任务评论: "List Dida365 task comments",
+  添加滴答任务评论: "Add Dida365 task comment",
+  删除滴答任务评论: "Delete Dida365 task comment",
+  读取滴答清单详情: "Read Dida365 list details",
+  读取滴答清单数据: "Read Dida365 list data",
+  查看滴答清单成员: "List Dida365 list members",
+  创建滴答清单: "Create Dida365 list",
+  更新滴答清单: "Update Dida365 list",
+  删除滴答清单: "Delete Dida365 list",
+  查看滴答清单文件夹: "List Dida365 folders",
+  创建滴答清单文件夹: "Create Dida365 folder",
+  更新滴答清单文件夹: "Update Dida365 folder",
+  删除滴答清单文件夹: "Delete Dida365 folder",
+  查看滴答看板列: "List Dida365 columns",
+  创建滴答看板列: "Create Dida365 column",
+  更新滴答看板列: "Update Dida365 column",
+  查看滴答标签: "List Dida365 tags",
+  创建滴答标签: "Create Dida365 tag",
+  更新滴答标签: "Update Dida365 tag",
+  重命名滴答标签: "Rename Dida365 tag",
+  删除滴答标签: "Delete Dida365 tag",
+  读取滴答专注记录: "Read Dida365 focus record",
+  查看滴答专注记录: "List Dida365 focus records",
+  创建滴答专注记录: "Create Dida365 focus record",
+  更新滴答专注记录: "Update Dida365 focus record",
+  删除滴答专注记录: "Delete Dida365 focus record",
+  读取滴答习惯: "Read Dida365 habit",
+  查看滴答习惯分区: "List Dida365 habit sections",
+  查看滴答习惯: "List Dida365 habits",
+  创建滴答习惯: "Create Dida365 habit",
+  更新滴答习惯: "Update Dida365 habit",
+  滴答习惯打卡: "Check in to Dida365 habit",
+  查看滴答习惯打卡: "Read Dida365 habit check-ins",
+  查看滴答日历账号: "List Dida365 calendar accounts",
+  查询滴答日历事件: "Query Dida365 calendar events",
+  查看滴答倒数日: "List Dida365 countdowns",
+  "无法确认集成更改是否生效，请核对平台结果后再重试。":
+    "The integration change could not be confirmed. Check the platform result before retrying.",
   查看滴答清单: "View Dida365 lists",
   读取滴答待办: "Read Dida365 tasks",
   创建滴答任务: "Create Dida365 task",
@@ -53,8 +104,8 @@ export const en = {
   集成: "Integrations",
   滴答清单: "Dida365",
   腾讯会议: "Tencent Meeting",
-  "查询清单和待办，创建任务并标记完成。":
-    "Read task lists, create tasks, and mark them complete.",
+  "管理任务、清单和标签，记录习惯与专注，查询日历和倒数日。":
+    "Manage tasks, lists and tags; track habits and focus; read calendars and countdowns.",
   "读取已授权的云文档，以你的身份发送消息。":
     "Read authorized cloud documents and send messages as you.",
   "查询即将开始和进行中的会议，查看会议详情。":

@@ -24,7 +24,7 @@ import {
   configureIntegrationApplication,
   getIntegrationApplication,
   type IntegrationApplication,
-  type IntegrationProvider,
+  type IntegrationApplicationProvider,
 } from "@/lib/api/integrations"
 import { getErrorMessage } from "@/lib/errors"
 import { integrationCatalog, integrationName } from "@/lib/integrations"
@@ -36,7 +36,7 @@ export function IntegrationApplicationDialog({
   onClose,
   onSaved,
 }: {
-  provider: IntegrationProvider
+  provider: IntegrationApplicationProvider
   token: string
   workspaceId: string
   onClose: () => void

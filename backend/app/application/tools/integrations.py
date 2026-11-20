@@ -28,8 +28,12 @@ async def configure(db, workspace_id, actor, role, provider, payload, settings):
     return await service.configure(db, workspace_id, provider, payload, settings)
 
 
-async def authorize(db, workspace_id, actor, provider, settings):
-    return await service.begin(db, workspace_id, actor, provider, settings)
+async def authorize(
+    db, workspace_id, actor, provider, settings, *, browser_origin=None
+):
+    return await service.begin(
+        db, workspace_id, actor, provider, settings, browser_origin=browser_origin
+    )
 
 
 async def callback(db, workspace_id, actor, provider, payload, settings):
