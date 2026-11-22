@@ -30,6 +30,14 @@ _WECOM_USER_URL = "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo"
 _MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024
 
 
+def _provider_code(payload: dict[str, Any]) -> int | None:
+    for key in ("code", "errcode"):
+        value = payload.get(key)
+        if type(value) is int:
+            return value
+    return None
+
+
 def build_authorization_url(
     connection: EnterpriseIdentityConnection,
     redirect_uri: str,
@@ -91,8 +99,7 @@ async def _request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         raise EnterpriseProviderError(
             "Enterprise identity provider returned invalid data."
         )
-    provider_code = payload.get("code", payload.get("errcode"))
-    provider_code = provider_code if type(provider_code) is int else None
+    provider_code = _provider_code(payload)
     feishu_error = url in {
         _FEISHU_TOKEN_URL,
         _FEISHU_USER_URL,
@@ -108,12 +115,14 @@ async def _request_json(method: str, url: str, **kwargs: Any) -> dict[str, Any]:
     return payload
 
 
-def _required_text(payload: dict[str, Any], key: str) -> str:
+def _required_text(
+    payload: dict[str, Any], key: str, *, operation: str = "principal"
+) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value:
         raise EnterpriseProviderError(
             "Enterprise identity provider response is incomplete.",
-            operation="principal",
+            operation=operation,
             missing_field=key,
         )
     return value
@@ -174,12 +183,24 @@ async def _wecom_access_token(
                 )
                 if payload.get("errcode") not in (None, 0):
                     raise EnterpriseProviderError(
-                        "WeCom rejected the application credentials."
+                        "WeCom rejected the application credentials.",
+                        operation=urlsplit(_WECOM_TOKEN_URL).path,
+                        http_status=200,
+                        provider_code=_provider_code(payload),
                     )
-                token = _required_text(payload, "access_token")
+                token = _required_text(
+                    payload,
+                    "access_token",
+                    operation=urlsplit(_WECOM_TOKEN_URL).path,
+                )
                 expires_in = payload.get("expires_in")
                 if type(expires_in) is not int or expires_in <= 0:
-                    raise EnterpriseProviderError("WeCom token expiration is invalid.")
+                    raise EnterpriseProviderError(
+                        "WeCom token expiration is invalid.",
+                        operation=urlsplit(_WECOM_TOKEN_URL).path,
+                        http_status=200,
+                        missing_field="expires_in",
+                    )
                 await cache.set(
                     cache_key,
                     encrypt_secret(token, secret_key),
@@ -187,7 +208,9 @@ async def _wecom_access_token(
                 )
                 return token
     except (RedisError, OSError, TimeoutError) as exc:
-        raise EnterpriseProviderError("WeCom token cache is unavailable.") from exc
+        raise EnterpriseProviderError(
+            "WeCom token cache is unavailable.", operation="wecom-token-cache"
+        ) from exc
 
 
 async def resolve_external_principal(
@@ -214,7 +237,9 @@ async def resolve_external_principal(
         user = await _request_json(
             "GET",
             _FEISHU_USER_URL,
-            headers={"Authorization": f"Bearer {_required_text(token, 'access_token')}"},
+            headers={
+                "Authorization": f"Bearer {_required_text(token, 'access_token')}"
+            },
         )
         data = user.get("data")
         if not isinstance(data, dict):
@@ -272,9 +297,22 @@ async def resolve_external_principal(
                 params={"access_token": access_token, "code": code},
             )
         if user.get("errcode") not in (None, 0):
-            raise EnterpriseProviderError("WeCom rejected the authorization code.")
+            raise EnterpriseProviderError(
+                "WeCom rejected the authorization code.",
+                operation=urlsplit(_WECOM_USER_URL).path,
+                http_status=200,
+                provider_code=_provider_code(user),
+            )
+        if not isinstance(user.get("userid"), str) or not user["userid"]:
+            raise EnterpriseProviderError(
+                "WeCom did not return an enterprise member ID.",
+                operation=urlsplit(_WECOM_USER_URL).path,
+                http_status=200,
+                provider_code=_provider_code(user),
+                missing_field="userid",
+            )
         return ExternalPrincipal(
-            subject_id=_required_text(user, "userid"),
+            subject_id=user["userid"],
             tenant_id=connection.tenant_id,
             display_name="",
         )

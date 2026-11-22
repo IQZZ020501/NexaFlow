@@ -1,6 +1,7 @@
 import asyncio
 import json
 from dataclasses import replace
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urljoin, urlsplit
@@ -24,6 +25,8 @@ from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
 )
+from app.infra.security.keyring import application_secret_key
+from app.infra.security.secrets import encrypt_secret
 from app.ports.enterprise_identity import (
     resolve_external_principal as resolve_external_principal_via_port,
 )
@@ -263,6 +266,69 @@ async def _test_wecom_token_cache() -> None:
         assert not invalid_cache.values
 
 
+async def _test_wecom_error_diagnostics() -> None:
+    connection = EnterpriseIdentityConnection(
+        provider="wecom", tenant_id="diagnostic-corp", agent_id="1000002"
+    )
+    runtime_settings = settings()
+    callback = "https://app.example.com/callback"
+
+    async def failed_login(cache, response):
+        with (
+            patch("redis.asyncio.Redis.from_url", return_value=cache),
+            patch(
+                "app.adapters.identity.enterprise._request_json",
+                new=AsyncMock(return_value=response),
+            ),
+        ):
+            try:
+                await resolve_external_principal(
+                    connection,
+                    "diagnostic-secret",
+                    "diagnostic-code",
+                    callback,
+                    settings=runtime_settings,
+                )
+            except EnterpriseProviderError as exc:
+                return exc
+        raise AssertionError("The failed WeCom login should retain safe diagnostics.")
+
+    credential_error = await failed_login(_WeComRedis(), {"errcode": 40013})
+    assert credential_error.operation == "/cgi-bin/gettoken"
+    assert credential_error.http_status == 200
+    assert credential_error.provider_code == 40013
+    assert "diagnostic-secret" not in str(credential_error)
+
+    user_error_cache = _WeComRedis()
+    credential_id = sha256(
+        f"{connection.tenant_id}\0diagnostic-secret".encode()
+    ).hexdigest()
+    cache_key = f"nexaflow:enterprise-login:wecom-token:{credential_id}"
+    user_error_cache.values[cache_key] = encrypt_secret(
+        "diagnostic-access-token",
+        application_secret_key(runtime_settings),
+    )
+    user_error_cache.expires_at[cache_key] = 7200
+    authorization_error = await failed_login(user_error_cache, {"errcode": 40029})
+    assert authorization_error.operation == "/cgi-bin/auth/getuserinfo"
+    assert authorization_error.http_status == 200
+    assert authorization_error.provider_code == 40029
+    assert "diagnostic-access-token" not in str(authorization_error)
+
+    member_error_cache = _WeComRedis()
+    member_error_cache.values[cache_key] = encrypt_secret(
+        "diagnostic-access-token",
+        application_secret_key(runtime_settings),
+    )
+    member_error_cache.expires_at[cache_key] = 7200
+    member_error = await failed_login(
+        member_error_cache, {"errcode": 0, "openid": "external-contact"}
+    )
+    assert member_error.operation == "/cgi-bin/auth/getuserinfo"
+    assert member_error.missing_field == "userid"
+    assert member_error.provider_code == 0
+
+
 def _start(client, connection_id: str, provider: str = "feishu") -> tuple[str, str]:
     response = client.get(
         f"/api/v1/auth/enterprise/{connection_id}/start?next=/app/agents",
@@ -344,6 +410,7 @@ def _test_login_origin(client) -> None:
 
 def main() -> None:
     asyncio.run(_test_wecom_token_cache())
+    asyncio.run(_test_wecom_error_diagnostics())
     assert safe_next_path("/app/agents") == "/app/agents"
     assert safe_next_path("https://evil.example") == "/app/apps"
     assert safe_next_path("//evil.example") == "/app/apps"
@@ -1094,6 +1161,40 @@ def main() -> None:
         )
         assert wecom_config.status_code == 200, wecom_config.text
         assert wecom_config.json()["client_id"] == "wecom-corp"
+        wecom_error_state, _ = _start(
+            client, wecom_config.json()["id"], provider="wecom"
+        )
+        with patch(
+            "app.application.identity.enterprise.resolve_external_principal",
+            new=AsyncMock(
+                side_effect=EnterpriseProviderError(
+                    "raw provider text must not be logged",
+                    operation="/cgi-bin/gettoken",
+                    http_status=200,
+                    provider_code=40013,
+                )
+            ),
+        ):
+            failed_wecom = client.get(
+                "/api/v1/auth/enterprise/callback/wecom"
+                f"?state={wecom_error_state}&code=wecom-error-code",
+                follow_redirects=False,
+            )
+        assert "error=provider_error" in failed_wecom.headers["location"]
+        wecom_failure_logs = client.get(
+            "/api/v1/admin/system-logs?event=enterprise_identity.login_failed",
+            headers=headers,
+        )
+        assert wecom_failure_logs.status_code == 200, wecom_failure_logs.text
+        assert wecom_failure_logs.json()[0]["details"] == {
+            "provider": "wecom",
+            "operation": "/cgi-bin/gettoken",
+            "http_status": 200,
+            "provider_code": 40013,
+            "missing_field": None,
+        }
+        assert "wecom-error-code" not in wecom_failure_logs.text
+        assert "raw provider text" not in wecom_failure_logs.text
 
         dingtalk_config = client.put(
             f"{base}/connections/dingtalk",
