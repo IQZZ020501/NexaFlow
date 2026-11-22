@@ -275,7 +275,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(LOGGED_OUT_KEY, "1")
     void endSession().catch(() => undefined)
     clearSession()
-  }, [clearSession])
+    notify("success", tRef.current("已退出登录"))
+  }, [clearSession, notify])
 
   React.useEffect(() => {
     let isCurrent = true
@@ -309,6 +310,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           payload.must_change_password,
           payload.expires_in
         )
+        if (initialPathnameRef.current === "/auth/complete") {
+          notify("success", tRef.current("登录成功"))
+        }
       })
       .catch((error: unknown) => {
         if (
@@ -494,6 +498,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     expiresIn: number
   ) {
     applyAccessToken(nextToken, nextMustChangePassword, expiresIn)
+    notify("success", t("登录成功"))
   }
 
   function handleSelectWorkspace(workspaceId: string) {

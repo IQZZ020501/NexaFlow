@@ -31,6 +31,7 @@ export function SkillDialog({
   workspaceId,
   skill,
   onSaved,
+  onMessage,
   returnFocusRef,
 }: {
   open: boolean
@@ -39,6 +40,7 @@ export function SkillDialog({
   workspaceId: string
   skill?: AgentSkill
   onSaved: () => void
+  onMessage: (kind: "success" | "error", message: string) => void
   returnFocusRef?: React.RefObject<HTMLElement | null>
 }) {
   const { t } = useLanguage()
@@ -111,9 +113,12 @@ export function SkillDialog({
         await publishAgentSkill(token, workspaceId, saved.id)
         onSaved()
       }
+      onMessage("success", t(publish ? "技能已发布" : "技能草稿已保存"))
       onOpenChange(false)
     } catch (cause) {
-      setError(getErrorMessage(cause, t))
+      const message = getErrorMessage(cause, t)
+      setError(message)
+      onMessage("error", message)
     } finally {
       setBusyAction(null)
     }

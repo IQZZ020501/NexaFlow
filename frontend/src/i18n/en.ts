@@ -1,6 +1,28 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  登录成功: "Signed in successfully",
+  已退出登录: "Signed out",
+  技能草稿已保存: "Skill draft saved",
+  技能已发布: "Skill published",
+  技能已停用: "Skill disabled",
+  技能已启用: "Skill enabled",
+  "OAuth 配置已保存": "OAuth configuration saved",
+  "OAuth 连接已断开": "OAuth connection disconnected",
+  长任务契约已保存: "Long task contract saved",
+  已恢复普通调用: "Ordinary calls restored",
+  评测用例已保存: "Evaluation case saved",
+  评测用例已删除: "Evaluation case deleted",
+  评测记录已删除: "Evaluation record deleted",
+  已提交评测任务: "Evaluation task submitted",
+  对话已删除: "Conversation deleted",
+  对话已移入项目: "Conversation moved into project",
+  对话已移出项目: "Conversation moved out of project",
+  项目已创建: "Project created",
+  项目已解散: "Project dissolved",
+  项目资料已上传: "Project files uploaded",
+  项目资料已移除: "Project file removed",
+  全部消息已标为已读: "All messages marked as read",
   "授权范围（空格分隔）": "Scopes (separated by spaces)",
 
   "连接飞书或 Lark，管理消息、邮件、日历、文档、表格、会议、任务和审批等。":

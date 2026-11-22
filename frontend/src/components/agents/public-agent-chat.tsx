@@ -1355,6 +1355,7 @@ export function PublicAgentChat({
           publicChatUrl(agentId, conversationId, projectId)
         )
       }
+      notify("success", t(projectId ? "对话已移入项目" : "对话已移出项目"))
     } catch (error) {
       notify("error", getErrorMessage(error, t))
     } finally {
@@ -1419,6 +1420,7 @@ export function PublicAgentChat({
           publicChatUrl(agentId, conversationRef.current)
         )
       }
+      notify("success", t("项目已解散"))
     } catch (error) {
       notify("error", getErrorMessage(error, t))
     } finally {
@@ -1508,6 +1510,7 @@ export function PublicAgentChat({
         if (nextId) selectConversation(nextId)
         else startNewConversation()
       }
+      notify("success", t("对话已删除"))
     } catch (error) {
       setSendError(getErrorMessage(error, t))
     } finally {
@@ -2619,6 +2622,7 @@ export function PublicAgentChat({
             token={token}
             onClose={() => setEditingProjectId(null)}
             onSave={handleSaveProject}
+            onMessage={notify}
             onReturnFocus={() => {
               const opener = projectSettingsRef.current?.isConnected
                 ? projectSettingsRef.current
@@ -2646,6 +2650,7 @@ export function PublicAgentChat({
               projectData.setProjects((current) => [project, ...current])
               startNewConversation(project.id)
               setIsHistoryOpen(false)
+              notify("success", t("项目已创建"))
             }}
           />
         ) : null}

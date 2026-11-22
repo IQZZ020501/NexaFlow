@@ -3173,6 +3173,7 @@ function KnowledgeBasePageContent({
                 documents={documents}
                 canEdit={canEditDocuments}
                 reportError={reportError}
+                onMessage={notify}
               />
             ) : null}
 

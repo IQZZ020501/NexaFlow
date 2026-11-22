@@ -1073,6 +1073,14 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
                                         }
                                       )
                                       await load()
+                                      message(
+                                        "success",
+                                        t(
+                                          skill.status === "active"
+                                            ? "技能已停用"
+                                            : "技能已启用"
+                                        )
+                                      )
                                     } catch (cause) {
                                       message(
                                         "error",
@@ -1218,6 +1226,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           serverId={oauthSource.mcp_server_id}
           onClose={() => setOAuthSource(null)}
           onChanged={() => void load()}
+          onMessage={message}
         />
       ) : null}
       {taskSource?.mcp_server_id ? (
@@ -1228,6 +1237,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
           serverId={taskSource.mcp_server_id}
           onClose={() => setTaskSource(null)}
           onChanged={() => void load()}
+          onMessage={message}
         />
       ) : null}
       <SkillDialog
@@ -1241,6 +1251,7 @@ export function ToolsPage({ initialKind }: { initialKind?: ToolKind } = {}) {
         workspaceId={workspaceId}
         skill={editingSkill}
         onSaved={() => void load()}
+        onMessage={message}
         returnFocusRef={addToolTriggerRef}
       />
       <ToolPermissionsDialog

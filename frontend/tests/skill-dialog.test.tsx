@@ -1,5 +1,5 @@
 /* @jsxImportSource react */
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { SkillDialog } from "@/components/tools/skill-dialog"
 import { fireEvent, jsonResponse, renderPage, screen, waitFor } from "./helpers/dom"
 
@@ -11,6 +11,12 @@ const definition = {
   guardrails: { allow_external_reads: false, allow_external_writes: false, require_approval_for_external_writes: true },
 }
 
+const messages: Array<[string, string]> = []
+const onMessage = (kind: string, message: string) => {
+  messages.push([kind, message])
+}
+afterEach(() => { messages.length = 0 })
+
 describe("SkillDialog", () => {
   test("shows import progress without marking publication as busy", async () => {
     let finish!: (response: Response) => void
@@ -20,6 +26,7 @@ describe("SkillDialog", () => {
       })) as unknown as typeof fetch
     renderPage(
       <SkillDialog
+        onMessage={onMessage}
         open
         token="test"
         workspaceId="ws-1"
@@ -67,6 +74,7 @@ describe("SkillDialog", () => {
     let saved = false
     renderPage(
       <SkillDialog
+        onMessage={onMessage}
         open
         token="test"
         workspaceId="ws-1"
@@ -98,6 +106,7 @@ describe("SkillDialog", () => {
     ).toBeNull()
     finish(jsonResponse({ id: "skill-1" }))
     await waitFor(() => expect(saved).toBe(true))
+    expect(messages).toEqual([["success", "技能草稿已保存"]])
   })
 
   test("rejects oversized imports locally and leaves server import errors retryable", async () => {
@@ -108,7 +117,7 @@ describe("SkillDialog", () => {
       return jsonResponse({ detail: "Malformed package" }, 422)
     }) as typeof fetch
     let closed = false
-    renderPage(<SkillDialog open token="test" workspaceId="ws-1" onSaved={() => undefined} onOpenChange={(value) => { closed = !value }} />)
+    renderPage(<SkillDialog onMessage={onMessage} open token="test" workspaceId="ws-1" onSaved={() => undefined} onOpenChange={(value) => { closed = !value }} />)
     const input = screen.getByLabelText("选择技能文件")
     fireEvent.change(input, { target: { files: [new File([new Uint8Array(2 * 1024 * 1024 + 1)], "large.zip")] } })
     expect(screen.getByRole("alert").textContent).toBe("技能包不能超过 2 MiB")
@@ -132,7 +141,7 @@ describe("SkillDialog", () => {
     }) as typeof fetch
     let saved = 0
     let closed = false
-    renderPage(<SkillDialog open token="test" workspaceId="ws-1" onSaved={() => saved++} onOpenChange={(value) => { closed = !value }} />)
+    renderPage(<SkillDialog onMessage={onMessage} open token="test" workspaceId="ws-1" onSaved={() => saved++} onOpenChange={(value) => { closed = !value }} />)
     fireEvent.change(screen.getByLabelText("选择技能文件"), { target: { files: [new File(["zip"], "research.zip")] } })
     await waitFor(() => expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe("research"))
     fireEvent.click(screen.getByRole("button", { name: "保存并发布" }))
@@ -141,6 +150,7 @@ describe("SkillDialog", () => {
     const create = calls.find((call) => call.url.endsWith("/agent-skills"))!
     expect((create.body as { definition: typeof definition }).definition.files["scripts/main.py"]).toBe("cHJpbnQoMSk=")
     expect(calls.filter((call) => call.url.endsWith("/publish"))).toHaveLength(1)
+    expect(messages).toEqual([["success", "技能已发布"]])
   })
 
   test("retains the saved draft ID when publishing fails", async () => {
@@ -153,14 +163,19 @@ describe("SkillDialog", () => {
       if (url.endsWith("/agent-skills")) creates++
       return jsonResponse({ id: "skill-1" })
     }) as typeof fetch
-    renderPage(<SkillDialog open token="test" workspaceId="ws-1" onSaved={() => undefined} onOpenChange={() => undefined} />)
+    renderPage(<SkillDialog onMessage={onMessage} open token="test" workspaceId="ws-1" onSaved={() => undefined} onOpenChange={() => undefined} />)
     fireEvent.change(screen.getByLabelText("显示名称"), { target: { value: "research" } })
     fireEvent.change(screen.getByLabelText("描述"), { target: { value: "Research tasks" } })
     fireEvent.change(screen.getByLabelText("技能指令"), { target: { value: "Do the task." } })
     fireEvent.click(screen.getByRole("button", { name: "保存并发布" }))
     await screen.findByRole("alert")
+    expect(messages).toEqual([["error", "failed publication"]])
     fireEvent.click(screen.getByRole("button", { name: "保存并发布" }))
     await waitFor(() => expect(publishes).toBe(2))
     expect(creates).toBe(1)
+    await waitFor(() => expect(messages).toEqual([
+      ["error", "failed publication"],
+      ["success", "技能已发布"],
+    ]))
   })
 })

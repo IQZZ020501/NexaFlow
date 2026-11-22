@@ -59,9 +59,15 @@ const queuedTask = {
   updated_at: "2026-01-01T00:00:00Z",
 }
 
+const messages: Array<[string, string]> = []
+const onMessage = (kind: string, message: string) => {
+  messages.push([kind, message])
+}
+
 afterEach(() => {
   cleanup()
   resetFetch()
+  messages.length = 0
 })
 
 describe("knowledge evaluation", () => {
@@ -172,6 +178,7 @@ describe("knowledge evaluation", () => {
     const errors: unknown[] = []
     renderPage(
       <KnowledgeEvaluation
+        onMessage={onMessage}
         token="token"
         workspaceId="ws-1"
         knowledgeBaseId="kb-1"
@@ -229,6 +236,10 @@ describe("knowledge evaluation", () => {
       similarity: 0.6,
     })
     expect(errors).toEqual([])
+    expect(messages).toEqual([
+      ["success", "评测用例已保存"],
+      ["success", "已提交评测任务"],
+    ])
   })
 
   test("loads history, deletes a case, and reopens a run", async () => {
@@ -278,6 +289,7 @@ describe("knowledge evaluation", () => {
 
     renderPage(
       <KnowledgeEvaluation
+        onMessage={onMessage}
         token="token"
         workspaceId="ws-1"
         knowledgeBaseId="kb-1"
@@ -311,6 +323,10 @@ describe("knowledge evaluation", () => {
       screen.getByRole("button", { name: /^删除$/ }),
     )
     await waitFor(() => expect(deleteRunRequests).toBe(1))
+    await waitFor(() => expect(messages).toEqual([
+      ["success", "评测用例已删除"],
+      ["success", "评测记录已删除"],
+    ]))
   })
 
   test("keeps the delete dialog open when deleting a case fails", async () => {
@@ -333,6 +349,7 @@ describe("knowledge evaluation", () => {
 
     renderPage(
       <KnowledgeEvaluation
+        onMessage={onMessage}
         token="token"
         workspaceId="ws-1"
         knowledgeBaseId="kb-1"
@@ -350,5 +367,6 @@ describe("knowledge evaluation", () => {
     await waitFor(() => expect(deleteCaseRequests).toBe(1))
     expect(screen.getByText("删除后无法恢复。")).toBeTruthy()
     expect(errors).toHaveLength(1)
+    expect(messages).toEqual([])
   })
 })

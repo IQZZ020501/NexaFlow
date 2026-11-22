@@ -211,6 +211,7 @@ export function EditChatProjectDialog({
   onSave,
   onReturnFocus,
   onPreview,
+  onMessage,
 }: {
   project: ChatProject
   agentId: string
@@ -219,6 +220,7 @@ export function EditChatProjectDialog({
   onSave: (project: ChatProject) => Promise<void>
   onReturnFocus: () => void
   onPreview: (artifact: PreviewArtifact, opener: HTMLButtonElement) => void
+  onMessage: (kind: "success" | "error", message: string) => void
 }) {
   const { t } = useLanguage()
   const preview = React.useContext(AgentArtifactPreviewContext)
@@ -354,6 +356,7 @@ export function EditChatProjectDialog({
                         )
                       ).items
                     )
+                    onMessage("success", t("项目资料已上传"))
                   })
                 }
               />
@@ -424,6 +427,7 @@ export function EditChatProjectDialog({
                             setFiles((current) =>
                               current.filter((item) => item.id !== file.id)
                             )
+                            onMessage("success", t("项目资料已移除"))
                           })
                         }
                       >
