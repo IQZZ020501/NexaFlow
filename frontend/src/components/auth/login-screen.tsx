@@ -1,5 +1,4 @@
 import DingtalkOutlined from "@ant-design/icons/es/icons/DingtalkOutlined"
-import WechatWorkOutlined from "@ant-design/icons/es/icons/WechatWorkOutlined"
 import * as React from "react"
 import { LoaderCircleIcon } from "lucide-react"
 import Image from "next/image"
@@ -47,10 +46,12 @@ function EnterpriseProviderIcon({
     )
   }
   return (
-    <WechatWorkOutlined
-      aria-hidden="true"
+    <Image
+      src="/wecom.png"
+      alt=""
+      width={20}
+      height={20}
       data-provider-icon={provider}
-      className="text-xl text-[#07c160]"
     />
   )
 }
