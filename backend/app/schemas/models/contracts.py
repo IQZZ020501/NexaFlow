@@ -55,6 +55,8 @@ class ModelCredentialFieldResponse(BaseModel):
 class RegisteredModelResponse(BaseModel):
     id: str
     workspace_id: str
+    visibility: Literal["personal", "workspace"]
+    can_manage: bool
     folder_id: str | None
     name: str
     provider: str
@@ -74,6 +76,7 @@ class RegisteredModelResponse(BaseModel):
 
 
 class RegisteredModelCreateRequest(BaseModel):
+    visibility: Literal["personal", "workspace"] | None = None
     name: str = Field(min_length=1, max_length=120)
     provider: str = Field(min_length=1, max_length=80)
     provider_type: str = Field(default="openai_compatible", min_length=1, max_length=40)
@@ -85,6 +88,7 @@ class RegisteredModelCreateRequest(BaseModel):
 
 
 class RegisteredModelUpdateRequest(BaseModel):
+    visibility: Literal["personal", "workspace"] | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
     provider: str | None = Field(default=None, min_length=1, max_length=80)
     provider_type: str | None = Field(default=None, min_length=1, max_length=40)

@@ -27,9 +27,10 @@ from app.domain.applications.definitions import default_workflow_graph, graph_ha
 from app.domain.audit.services import record_audit_log
 from app.domain.knowledge.service import (
     get_knowledge_base,
+    get_knowledge_model,
     require_knowledge_base_permission,
 )
-from app.domain.models.registered import RegisteredModel
+from app.domain.models.access import can_use_model, require_shared_model
 from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshot_map,
     resolve_application_tool_snapshots,
@@ -44,6 +45,7 @@ from app.entities.agents import Agent, AgentPublicationVersion
 from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
+from app.entities.models import RegisteredModel
 from app.entities.tools import ToolRef, ToolSnapshot
 from app.entities.workflows import WorkflowDefinition
 from app.infra.db.repositories.agents import repository as agent_repository
@@ -409,9 +411,15 @@ async def get_agent_model(
     db: AsyncSession,
     workspace_id: str,
     model_id: str,
+    *,
+    user_id: str | None = None,
 ) -> RegisteredModel:
     model = await model_repository.get_registered_model_by_id(db, model_id)
-    if model is None or model.workspace_id != workspace_id:
+    if (
+        model is None
+        or model.workspace_id != workspace_id
+        or not can_use_model(model, user_id)
+    ):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Agent model not found.")
     if model.model_type != "LLM":
         raise HTTPException(
@@ -427,9 +435,15 @@ async def get_agent_image_model(
     db: AsyncSession,
     workspace_id: str,
     model_id: str,
+    *,
+    user_id: str | None = None,
 ) -> RegisteredModel:
     model = await model_repository.get_registered_model_by_id(db, model_id)
-    if model is None or model.workspace_id != workspace_id:
+    if (
+        model is None
+        or model.workspace_id != workspace_id
+        or not can_use_model(model, user_id)
+    ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "Agent image model not found."
         )
@@ -621,9 +635,13 @@ async def create_agent(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Agent Skills can only be attached to Agent applications.",
         )
-    model = await get_agent_model(db, workspace_id, payload.model_id)
+    model = await get_agent_model(db, workspace_id, payload.model_id, user_id=actor.id)
     image_model_id = (
-        (await get_agent_image_model(db, workspace_id, payload.image_model_id)).id
+        (
+            await get_agent_image_model(
+                db, workspace_id, payload.image_model_id, user_id=actor.id
+            )
+        ).id
         if payload.image_model_id
         else None
     )
@@ -767,7 +785,17 @@ async def apply_agent_publication(
                 status.HTTP_409_CONFLICT,
                 "Disabled agents cannot be published.",
             )
-        await get_agent_model(db, agent.workspace_id, agent.model_id)
+        require_shared_model(
+            await get_agent_model(
+                db, agent.workspace_id, agent.model_id, user_id=actor.id
+            )
+        )
+        if agent.image_model_id:
+            require_shared_model(
+                await get_agent_image_model(
+                    db, agent.workspace_id, agent.image_model_id, user_id=actor.id
+                )
+            )
         publication_bindings = (
             await agent_repository.list_binding_map(db, [agent.id])
         )[agent.id]
@@ -778,6 +806,19 @@ async def apply_agent_publication(
             actor,
             workspace_role,
         )
+        for knowledge_base_id in publication_bindings:
+            knowledge_base = await get_knowledge_base(
+                db, agent.workspace_id, knowledge_base_id
+            )
+            for model_id, model_type in (
+                (knowledge_base.embedding_model_id, "EMBEDDING"),
+                (knowledge_base.reranker_model_id, "RERANKER"),
+            ):
+                model = await get_knowledge_model(
+                    db, agent.workspace_id, model_id, model_type, user_id=actor.id
+                )
+                if model is not None:
+                    require_shared_model(model)
         publication_tools = await resolve_application_tool_snapshots(
             db,
             agent.workspace_id,
@@ -934,7 +975,11 @@ async def update_agent(
         configuration_changed = configuration_changed or instructions != agent.instructions
         agent.instructions = instructions
     if payload.model_id is not None and payload.model_id != agent.model_id:
-        agent.model_id = (await get_agent_model(db, agent.workspace_id, payload.model_id)).id
+        agent.model_id = (
+            await get_agent_model(
+                db, agent.workspace_id, payload.model_id, user_id=actor.id
+            )
+        ).id
         configuration_changed = True
     if "image_model_id" in details:
         # PATCH semantics: an explicit null clears the selection and falls back
@@ -949,6 +994,7 @@ async def update_agent(
                     db,
                     agent.workspace_id,
                     requested_image_model_id,
+                    user_id=actor.id,
                 )
             ).id
             configuration_changed = True

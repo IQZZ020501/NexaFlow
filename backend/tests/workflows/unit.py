@@ -783,7 +783,125 @@ def test_workflow_skill_guide_derives_bash_and_rejects_conflicting_versions() ->
     asyncio.run(check())
 
 
+def test_keyword_workflow_does_not_require_private_embedding_access() -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.domain.workflows.definitions.service import validate_workflow_resources
+
+    async def check():
+        knowledge_base = SimpleNamespace(
+            id="kb",
+            workspace_id="workspace",
+            status="active",
+            created_by_user_id="owner",
+            embedding_model_id="private-embedding",
+            reranker_model_id=None,
+        )
+
+        async def resolve(_db, _workspace_id, model_id, _model_type, **_kwargs):
+            if model_id == "private-embedding":
+                raise HTTPException(422, "Knowledge model not found.")
+            return None
+
+        with (
+            patch(
+                "app.domain.workflows.definitions.service.get_agent_model",
+                new=AsyncMock(return_value=SimpleNamespace(visibility="workspace")),
+            ),
+            patch(
+                "app.domain.workflows.definitions.service.get_knowledge_model",
+                new=AsyncMock(side_effect=resolve),
+            ) as models,
+            patch(
+                "app.domain.workflows.definitions.service.knowledge_base_repository.list_knowledge_bases_with_user_grants",
+                new=AsyncMock(return_value=[(knowledge_base, None)]),
+            ),
+            patch(
+                "app.domain.workflows.definitions.service.effective_permission",
+                return_value="view",
+            ),
+        ):
+            for modes in (
+                ("keywords",),
+                ("embedding",),
+                ("blend",),
+                ("keywords", "embedding"),
+            ):
+                nodes = [
+                    {
+                        "id": "start",
+                        "data": {"type": "start", "title": "Start", "config": {}},
+                    }
+                ]
+                for index, mode in enumerate(modes):
+                    nodes.append(
+                        {
+                            "id": f"knowledge-{index}",
+                            "data": {
+                                "type": "knowledge",
+                                "title": "Knowledge",
+                                "config": {
+                                    "query": "question",
+                                    "knowledge_base_ids": ["kb"],
+                                    "search_mode": mode,
+                                },
+                            },
+                        }
+                    )
+                nodes.append(
+                    {
+                        "id": "end",
+                        "data": {
+                            "type": "end",
+                            "title": "End",
+                            "config": {"outputs": {"result": "done"}},
+                        },
+                    }
+                )
+                graph = {
+                    "nodes": [
+                        {**node, "position": {"x": index * 200, "y": 0}}
+                        for index, node in enumerate(nodes)
+                    ],
+                    "edges": [
+                        {
+                            "id": f"edge-{index}",
+                            "source": nodes[index]["id"],
+                            "target": nodes[index + 1]["id"],
+                        }
+                        for index in range(len(nodes) - 1)
+                    ],
+                }
+                for shared_only in (False, True):
+                    models.reset_mock()
+                    try:
+                        await validate_workflow_resources(
+                            object(),
+                            SimpleNamespace(workspace_id="workspace", model_id="chat"),
+                            graph,
+                            SimpleNamespace(id="viewer"),
+                            "member",
+                            shared_models_only=shared_only,
+                        )
+                    except HTTPException as exc:
+                        assert modes != ("keywords",), (
+                            "Keyword lookup must not use embeddings"
+                        )
+                        assert exc.status_code == 422
+                    else:
+                        assert modes == ("keywords",), (
+                            "Vector lookup must enforce model access"
+                        )
+                        assert all(
+                            call.args[2] != "private-embedding"
+                            for call in models.await_args_list
+                        )
+
+    asyncio.run(check())
+
+
 def main() -> None:
+    test_keyword_workflow_does_not_require_private_embedding_access()
     test_workflow_uses_canonical_tool_refs()
     test_workflow_legacy_tools_normalize_to_one_canonical_node_contract()
     test_workflow_selects_only_exact_bound_tool_versions()

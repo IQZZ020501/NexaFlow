@@ -91,6 +91,9 @@ async def queue_tool_invocation(
             db,
             context.workspace_id,
             context.image_model_id,
+            user_id=context.execution_user_id
+            if context.access_source == "console"
+            else None,
         )
     payload = {
         "tool_snapshot": tool_snapshot_payload(snapshot),

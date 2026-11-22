@@ -6,6 +6,7 @@ from app.domain.agents.access.permissions import require_agent_edit
 from app.domain.agents.service import get_agent
 from app.domain.knowledge.bases.permissions import require_knowledge_base_permission
 from app.domain.knowledge.bases.service import get_knowledge_base
+from app.domain.models.access import require_model_management
 from app.domain.tools.access.permissions import require_managed_tool
 from app.entities.identity.user import User
 from app.entities.resource_folders.models import ResourceFolder
@@ -317,11 +318,10 @@ async def _move_resources(
             resource = await get_agent(db, workspace_id, resource_id)
             require_agent_edit(resource, actor)
         elif resource_type == "model":
-            if workspace_role != "admin" and not actor.is_global_admin:
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace admin required.")
             resource = await model_registry.get_registered_model_by_id(db, resource_id)
             if resource is None or resource.workspace_id != workspace_id:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found.")
+            require_model_management(resource, actor.id, workspace_role)
         else:
             resource = await require_managed_tool(
                 db,

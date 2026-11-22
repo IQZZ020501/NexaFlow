@@ -7,9 +7,10 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     String,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,7 +27,27 @@ class RegisteredModel(Base):
             ["resource_folders.workspace_id", "resource_folders.id"],
             name="fk_model_folder_workspace",
         ),
-        UniqueConstraint("workspace_id", "name", name="uq_model_registry_model_workspace_name"),
+        CheckConstraint(
+            "visibility IN ('personal', 'workspace')",
+            name="ck_model_visibility",
+        ),
+        Index(
+            "uq_model_workspace_name",
+            "workspace_id",
+            "name",
+            unique=True,
+            postgresql_where=text("visibility = 'workspace'"),
+            sqlite_where=text("visibility = 'workspace'"),
+        ),
+        Index(
+            "uq_model_personal_owner_name",
+            "workspace_id",
+            "created_by_user_id",
+            "name",
+            unique=True,
+            postgresql_where=text("visibility = 'personal'"),
+            sqlite_where=text("visibility = 'personal'"),
+        ),
         CheckConstraint(
             "provider_type IN ('openai_compatible', 'anthropic', 'bedrock', "
             "'azure_openai', 'deepseek', 'google_genai', 'ollama')",
@@ -44,6 +65,9 @@ class RegisteredModel(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), nullable=False, index=True)
+    visibility: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="workspace", server_default="workspace"
+    )
     folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     provider: Mapped[str] = mapped_column(String(80), nullable=False, index=True)

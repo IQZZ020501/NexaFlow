@@ -518,6 +518,8 @@ def build_knowledge_search_tool(
     actor: User,
     workspace_role: str | None,
     settings: Settings,
+    *,
+    shared_models_only: bool = False,
 ) -> StructuredTool:
     knowledge_base_ids = [knowledge_base.id for knowledge_base in knowledge_bases]
 
@@ -610,6 +612,7 @@ def build_knowledge_search_tool(
                             similarity=payload.similarity,
                         ),
                         settings,
+                        user_id=None if shared_models_only else actor.id,
                     )
                 except HTTPException:
                     failed_sources += 1

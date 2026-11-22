@@ -11,16 +11,18 @@ from app.adapters.llm.credentials import (
     legacy_credential_config,
 )
 from app.adapters.llm.providers import PROVIDER_CATALOG
-from app.domain.models.registered import RegisteredModel
 from app.entities.defaults import utc_now
+from app.entities.models import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import secret_hint
 from app.ports.llm import (
+    PUBLIC_ENDPOINT_CREDENTIAL,
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
     test_model_connection,
+    validate_member_model_connection,
 )
 
 ACTIVE_STATUS = "active"
@@ -88,6 +90,24 @@ MODEL_TYPE_ALIASES = {
     "reranker": "RERANKER",
     "image": "IMAGE",
 }
+
+
+async def member_connection_credentials(provider_type, credentials, request_params):
+    try:
+        async with asyncio.timeout(10):
+            await asyncio.to_thread(
+                validate_member_model_connection,
+                provider_type,
+                credentials,
+                request_params,
+            )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT, "Model connection test timed out."
+        ) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    return {**credentials, PUBLIC_ENDPOINT_CREDENTIAL: "true"}
 
 
 def provider_catalog_entry(provider: str) -> dict[str, Any]:

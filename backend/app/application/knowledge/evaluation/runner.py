@@ -140,6 +140,7 @@ async def run_evaluation_task(
                     similarity=payload.similarity,
                 ),
                 settings,
+                user_id=task.created_by_user_id,
             )
             ensure_knowledge_task_lease(lease_lost)
             returned_document_ids = list(

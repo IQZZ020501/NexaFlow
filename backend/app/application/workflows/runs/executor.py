@@ -43,7 +43,7 @@ from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.domain.models.registered import RegisteredModel
+from app.domain.models.access import can_use_model
 from app.domain.tools.runtime import tool_snapshot_payload
 from app.domain.workflows.resources import (
     load_workflow_agent_snapshots,
@@ -63,6 +63,7 @@ from app.domain.workflows.runtime.engine import (
 from app.entities.defaults import new_id, to_app_timezone, utc_now
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
+from app.entities.models import RegisteredModel
 from app.entities.runs import AgentRun
 from app.entities.tools import ToolSnapshot
 from app.entities.workflows import WorkflowNodeExecution, WorkflowRunDetail
@@ -245,7 +246,14 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
             and node.data.config.get("model_id")
         )
         models = {
-            model_id: await get_agent_model(db, run.workspace_id, model_id)
+            model_id: await get_agent_model(
+                db,
+                run.workspace_id,
+                model_id,
+                user_id=run.execution_user_id
+                if run.access_source == "console"
+                else None,
+            )
             for model_id in model_ids
         }
         for node in graph.nodes:
@@ -260,6 +268,10 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
                 or model.workspace_id != run.workspace_id
                 or model.model_type != "RERANKER"
                 or model.status != "active"
+                or not can_use_model(
+                    model,
+                    run.execution_user_id if run.access_source == "console" else None,
+                )
             ):
                 raise WorkflowEngineError("Workflow reranker model is unavailable.")
             models[model_id] = model

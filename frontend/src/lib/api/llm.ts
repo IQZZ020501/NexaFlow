@@ -38,7 +38,11 @@ export type ModelCredentialField = {
   default_value: unknown
 }
 
+export type ModelVisibility = "personal" | "workspace"
+
 export type RegisteredModel = {
+  visibility: ModelVisibility
+  can_manage: boolean
   id: string
   workspace_id: string
   folder_id?: string | null
@@ -60,6 +64,7 @@ export type RegisteredModel = {
 }
 
 export type RegisteredModelPayload = {
+  visibility?: ModelVisibility
   name: string
   provider: string
   provider_type: string
@@ -134,6 +139,7 @@ export function listRegisteredModels(
     offset?: number
     folderId?: string | null
     sort?: "updated_at" | "created_at" | "name"
+    visibility?: ModelVisibility
   } = {}
 ) {
   const params = new URLSearchParams(
@@ -144,6 +150,9 @@ export function listRegisteredModels(
   }
   if (options.sort) {
     params.set("sort", options.sort)
+  }
+  if (options.visibility) {
+    params.set("visibility", options.visibility)
   }
   const query = params.toString()
   return request<RegisteredModel[]>(

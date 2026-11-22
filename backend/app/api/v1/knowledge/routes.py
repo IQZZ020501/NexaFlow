@@ -404,7 +404,9 @@ async def test_workspace_knowledge_base_models(
         context.user,
         {"edit"},
     )
-    return await test_knowledge_base_models(db, knowledge_base, payload, settings)
+    return await test_knowledge_base_models(
+        db, knowledge_base, payload, settings, user_id=context.user.id
+    )
 
 
 @router.get("/{knowledge_base_id}/tasks", response_model=list[KnowledgeTaskResponse])

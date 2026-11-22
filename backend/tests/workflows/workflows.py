@@ -763,6 +763,8 @@ def test_workflow_resource_validation_batches_knowledge_bases() -> None:
             (
                 SimpleNamespace(
                     id=knowledge_base_id,
+                    embedding_model_id=None,
+                    reranker_model_id=None,
                     workspace_id="workspace-1",
                     created_by_user_id=owner,
                     status=status,
@@ -1018,7 +1020,7 @@ def test_workflow_knowledge_node_limits_and_joins_results() -> None:
                 "base-1": SimpleNamespace(id="base-1"),
                 "base-2": SimpleNamespace(id="base-2"),
             },
-            run=SimpleNamespace(workspace_id="workspace-1"),
+            run=SimpleNamespace(workspace_id="workspace-1", access_source="console"),
             actor=SimpleNamespace(),
             workspace_role="member",
             settings=SimpleNamespace(),
@@ -1177,7 +1179,7 @@ def test_workflow_knowledge_node_maxkb_settings_and_truncation() -> None:
     async def run() -> None:
         scope = SimpleNamespace(
             knowledge_bases={"base-1": SimpleNamespace(id="base-1")},
-            run=SimpleNamespace(workspace_id="workspace-1"),
+            run=SimpleNamespace(workspace_id="workspace-1", access_source="console"),
             actor=SimpleNamespace(),
             workspace_role="member",
             settings=SimpleNamespace(),

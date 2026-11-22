@@ -22,7 +22,9 @@ from app.domain.knowledge.service import (
 )
 from app.domain.knowledge.service import (
     effective_permission,
+    get_knowledge_model,
 )
+from app.domain.models.access import can_use_model, require_shared_model
 from app.domain.tools.access.bindings import (
     resolve_application_tool_snapshots,
     resolve_tool_refs_for_actor,
@@ -186,6 +188,7 @@ async def prepare_workflow_resources(
     *,
     require_complete_graph: bool = True,
     binding_application_id: str | None = None,
+    shared_models_only: bool = False,
 ) -> tuple[WorkflowGraph, list[ToolSnapshot], dict[str, Any], str]:
     """Validate and freeze every Workflow Tool before it is persisted or run."""
     if require_complete_graph:
@@ -196,6 +199,7 @@ async def prepare_workflow_resources(
             actor,
             workspace_role,
             binding_application_id=binding_application_id,
+            shared_models_only=shared_models_only,
         )
     else:
         try:
@@ -329,6 +333,7 @@ async def validate_workflow_resources(
     workspace_role: str | None,
     default_model_id: str | None = None,
     binding_application_id: str | None = None,
+    shared_models_only: bool = False,
 ) -> WorkflowGraph:
     try:
         parsed = validate_graph(graph)
@@ -338,6 +343,7 @@ async def validate_workflow_resources(
     knowledge_base_ids, mcp_tools = workflow_resource_references(parsed)
     model_ids = {default_model_id or agent.model_id}
     reranker_model_ids: set[str] = set()
+    embedding_knowledge_base_ids: set[str] = set()
     for node in parsed.nodes:
         config = node.data.config
         if node.data.type == "end":
@@ -355,9 +361,20 @@ async def validate_workflow_resources(
             reranker_model_ids.add(
                 RerankerNodeConfig.model_validate(config).reranker_model_id
             )
+        elif node.data.type == "knowledge":
+            knowledge_config = KnowledgeNodeConfig.model_validate(config)
+            if knowledge_config.search_mode != "keywords":
+                embedding_knowledge_base_ids.update(
+                    knowledge_config.resolved_knowledge_base_ids
+                )
 
+    model_user_id = actor.id
     for model_id in model_ids:
-        await get_agent_model(db, agent.workspace_id, model_id)
+        model = await get_agent_model(
+            db, agent.workspace_id, model_id, user_id=model_user_id
+        )
+        if shared_models_only:
+            require_shared_model(model)
     for model_id in reranker_model_ids:
         model = await get_registered_model_by_id(db, model_id)
         if (
@@ -365,17 +382,22 @@ async def validate_workflow_resources(
             or model.workspace_id != agent.workspace_id
             or model.model_type != "RERANKER"
             or model.status != "active"
+            or not can_use_model(model, model_user_id)
         ):
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Workflow reranker model is unavailable.",
             )
-    knowledge_rows = await knowledge_base_repository.list_knowledge_bases_with_user_grants(
-        db,
-        agent.workspace_id,
-        knowledge_base_ids,
-        actor.id,
-        KNOWLEDGE_RESOURCE_TYPE,
+        if shared_models_only:
+            require_shared_model(model)
+    knowledge_rows = (
+        await knowledge_base_repository.list_knowledge_bases_with_user_grants(
+            db,
+            agent.workspace_id,
+            knowledge_base_ids,
+            actor.id,
+            KNOWLEDGE_RESOURCE_TYPE,
+        )
     )
     knowledge_by_id = {
         knowledge_base.id: (knowledge_base, grant)
@@ -389,14 +411,25 @@ async def validate_workflow_resources(
                 "Knowledge base not found.",
             )
         knowledge_base, grant = row
-        if (
-            effective_permission(
-                knowledge_base,
-                actor,
-                grant,
-            )
-            not in {"view", "edit"}
+        for model_id, model_type in (
+            (knowledge_base.embedding_model_id, "EMBEDDING"),
+            (knowledge_base.reranker_model_id, "RERANKER"),
         ):
+            if (
+                model_type == "EMBEDDING"
+                and knowledge_base_id not in embedding_knowledge_base_ids
+            ):
+                continue
+            model = await get_knowledge_model(
+                db, agent.workspace_id, model_id, model_type, user_id=model_user_id
+            )
+            if shared_models_only and model is not None:
+                require_shared_model(model)
+        if effective_permission(
+            knowledge_base,
+            actor,
+            grant,
+        ) not in {"view", "edit"}:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 "Knowledge base access denied.",
@@ -558,15 +591,19 @@ async def publish_definition(
     )
     if definition is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow definition not found.")
-    graph, snapshots, resource_snapshot, resource_hash = (
-        await prepare_workflow_resources(
-            db,
-            agent,
-            definition.graph,
-            actor,
-            workspace_role,
-            binding_application_id=agent.id,
-        )
+    (
+        graph,
+        snapshots,
+        resource_snapshot,
+        resource_hash,
+    ) = await prepare_workflow_resources(
+        db,
+        agent,
+        definition.graph,
+        actor,
+        workspace_role,
+        binding_application_id=agent.id,
+        shared_models_only=True,
     )
     serialized = graph.model_dump(by_alias=True, mode="json")
     version = WorkflowVersion(

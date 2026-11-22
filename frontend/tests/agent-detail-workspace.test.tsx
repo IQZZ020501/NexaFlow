@@ -53,6 +53,8 @@ function model(id: string, name: string): RegisteredModel {
     credential: {},
     api_base: "",
     has_api_key: true,
+    visibility: "workspace",
+    can_manage: true,
     api_key_hint: null,
     meta: {},
     created_by_user_id: "u-1",

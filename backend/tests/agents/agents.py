@@ -1098,7 +1098,7 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
             )
         ]
 
-    async def fake_retrieve(_db, knowledge_base, payload, settings):
+    async def fake_retrieve(_db, knowledge_base, payload, settings, *, user_id=None):
         hits = await fake_query(_db, knowledge_base, payload, settings)
         return KnowledgeQueryInspectResponse(
             hits=hits,
@@ -1185,7 +1185,7 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
             rerank_score=1.0 if knowledge_base.id == "base-applied" else None,
         )
 
-    async def fake_retrieve(_db, knowledge_base, payload, _settings):
+    async def fake_retrieve(_db, knowledge_base, payload, _settings, *, user_id=None):
         retrieve_calls.append(
             (
                 knowledge_base.id,
@@ -3967,6 +3967,8 @@ def main() -> None:
         knowledge_base,
         payload,
         settings,
+        *,
+        user_id=None,
     ) -> KnowledgeQueryInspectResponse:
         hits = await fake_query_knowledge_base(db, knowledge_base, payload, settings)
         return KnowledgeQueryInspectResponse(

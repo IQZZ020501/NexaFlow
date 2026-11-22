@@ -62,7 +62,6 @@ from app.domain.agents.service import (
     accessible_agent_knowledge_bases,
     get_agent_model,
 )
-from app.domain.models.registered import RegisteredModel
 from app.domain.tools.mcp.service import (
     ResolvedMcpTool,
     effective_mcp_tool_policy_mode,
@@ -76,6 +75,7 @@ from app.entities.agents import AgentToolCall
 from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
+from app.entities.models import RegisteredModel
 from app.entities.runs import AgentRun
 from app.entities.tools import McpToolPolicy, ToolSnapshot
 from app.infra.agents.live_stream import AgentLiveStreamPublisher
@@ -576,7 +576,12 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         if actor is None or not actor.is_active:
             raise AgentRunnerError("Agent run user is unavailable.")
         context = await build_workspace_context(db, actor, run.workspace_id)
-        model = await get_agent_model(db, run.workspace_id, run.model_id)
+        model = await get_agent_model(
+            db,
+            run.workspace_id,
+            run.model_id,
+            user_id=run.execution_user_id if run.access_source == "console" else None,
+        )
         try:
             require_model_runtime_snapshot(model, run.model_runtime_snapshot)
         except ValueError as exc:
@@ -835,6 +840,7 @@ async def _execute_claimed_agent_run(
             scope.actor,
             scope.workspace_role,
             settings,
+            shared_models_only=run.access_source != "console",
         )
         if scope.knowledge_bases
         else None

@@ -2033,17 +2033,19 @@ async def assert_knowledge_tool_paths(
             distance=0.2,
         )
 
-    async def succeed_retrieve(_db, knowledge_base, payload, _settings):
+    async def succeed_retrieve(
+        _db, knowledge_base, payload, _settings, *, user_id=None
+    ):
         return knowledge_inspect_result(
             knowledge_base,
             payload,
             [hit_for(knowledge_base.id)],
         )
 
-    async def fail_retrieve(_db, knowledge_base, _payload, _settings):
+    async def fail_retrieve(_db, knowledge_base, _payload, _settings, *, user_id=None):
         raise HTTPException(status_code=503, detail="source unavailable")
 
-    async def empty_retrieve(_db, knowledge_base, payload, _settings):
+    async def empty_retrieve(_db, knowledge_base, payload, _settings, *, user_id=None):
         return knowledge_inspect_result(knowledge_base, payload)
 
     original_retrieve = agent_tools.retrieve_knowledge_base
@@ -2099,7 +2101,9 @@ async def assert_knowledge_tool_paths(
         assert found.evidence_ids == frozenset({f"chunk-{rerank_kb_id}"})
 
         # Provider fallback is reported by detailed retrieval without a second pass.
-        async def fallback_retrieve(_db, knowledge_base, payload, _settings):
+        async def fallback_retrieve(
+            _db, knowledge_base, payload, _settings, *, user_id=None
+        ):
             return knowledge_inspect_result(
                 knowledge_base,
                 payload,
@@ -2122,7 +2126,9 @@ async def assert_knowledge_tool_paths(
 
         # mixed failure -> partial_failure: one source errors, the
         # healthy one returns no hits, so no evidence is available.
-        async def partial_retrieve(_db, knowledge_base, payload, _settings):
+        async def partial_retrieve(
+            _db, knowledge_base, payload, _settings, *, user_id=None
+        ):
             if knowledge_base.id == rerank_kb_id:
                 raise HTTPException(status_code=503, detail="source unavailable")
             return knowledge_inspect_result(knowledge_base, payload)
@@ -2149,7 +2155,9 @@ async def assert_knowledge_tool_paths(
         assert missing.output["hits"] == []
 
         # selection stops at the requested limit (269, 271)
-        async def two_hits_retrieve(_db, knowledge_base, payload, _settings):
+        async def two_hits_retrieve(
+            _db, knowledge_base, payload, _settings, *, user_id=None
+        ):
             hits = [
                 KnowledgeQueryHitResponse(
                     chunk_id=f"chunk-{knowledge_base.id}-0",
@@ -3701,7 +3709,9 @@ async def assert_create_agent_run_paths(
     actor = await get_admin_actor()
     original_retrieve = agent_tools.retrieve_knowledge_base
 
-    async def no_hits_retrieve(_db, knowledge_base, payload, _settings):
+    async def no_hits_retrieve(
+        _db, knowledge_base, payload, _settings, *, user_id=None
+    ):
         return knowledge_inspect_result(knowledge_base, payload)
 
     agent_tools.retrieve_knowledge_base = no_hits_retrieve
@@ -3817,7 +3827,7 @@ async def assert_durable_execution_paths(
     original_retrieve = agent_tools.retrieve_knowledge_base
     query_calls: list[str] = []
 
-    async def fake_retrieve(_db, knowledge_base, payload, _settings):
+    async def fake_retrieve(_db, knowledge_base, payload, _settings, *, user_id=None):
         query_calls.append(payload.query)
         return knowledge_inspect_result(
             knowledge_base,

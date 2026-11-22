@@ -63,7 +63,14 @@ async def extract_memories(job_id, settings):
             if item.project_id in {"", project_id}
         ][:50]
         try:
-            registered = await get_agent_model(db, run.workspace_id, run.model_id)
+            registered = await get_agent_model(
+                db,
+                run.workspace_id,
+                run.model_id,
+                user_id=run.execution_user_id
+                if run.access_source == "console"
+                else None,
+            )
             model = build_chat_model(settings, registered, timeout=35)
             await db.commit()
             params = (registered.meta or {}).get("request_params") or {}

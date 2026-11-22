@@ -812,7 +812,7 @@ def main() -> None:
         member_create_denied = client.post(
             models_url(workspace_id),
             headers=auth_headers(member_token),
-            json=model_payload(model_base_url),
+            json={**model_payload(model_base_url), "visibility": "workspace"},
         )
         assert member_create_denied.status_code == 403, member_create_denied.text
 

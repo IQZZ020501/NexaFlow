@@ -3,15 +3,20 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import AsyncIterator, Iterator
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+import anthropic
+import httpx
 from anthropic import AnthropicError
 from botocore.config import Config as BotocoreConfig
 from botocore.exceptions import BotoCoreError, ClientError
+from google.genai import Client as GoogleClient
 from google.genai.errors import APIError as GoogleAPIError
+from google.genai.types import HttpOptions
 from langchain_anthropic import ChatAnthropic
 from langchain_aws import BedrockEmbeddings, BedrockRerank, ChatBedrockConverse
 from langchain_core.embeddings import Embeddings
@@ -45,6 +50,13 @@ from app.adapters.llm.credentials import (
     decrypt_credential_secrets,
     legacy_credential_config,
 )
+from app.adapters.llm.network import (
+    PUBLIC_ENDPOINT_CREDENTIAL,
+    public_async_client,
+    public_client,
+    public_client_options,
+    public_transport,
+)
 
 if TYPE_CHECKING:
     from app.domain.models.registered import RegisteredModel
@@ -56,6 +68,7 @@ from app.ports.llm import (
     DEFAULT_MODEL_REQUEST_PARAMS,
     MODEL_REQUEST_PARAMS_META_KEY,
     MODEL_TRUNCATED_META_KEY,
+    PUBLIC_ENDPOINT_POLICY,
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
@@ -178,7 +191,25 @@ class _ProviderErrorChatMixin(BaseChatModel):
 
 
 class AnthropicChatModel(_ProviderErrorChatMixin, ChatAnthropic):
-    pass
+    public_endpoint_only: bool = False
+
+    @cached_property
+    def _client(self):
+        if self.public_endpoint_only:
+            return anthropic.Client(
+                **self._client_params,
+                http_client=public_client(self.default_request_timeout or 60),
+            )
+        return super()._client
+
+    @cached_property
+    def _async_client(self):
+        if self.public_endpoint_only:
+            return anthropic.AsyncClient(
+                **self._client_params,
+                http_client=public_async_client(self.default_request_timeout or 60),
+            )
+        return super()._async_client
 
 
 class BedrockChatModel(_ProviderErrorChatMixin, ChatBedrockConverse):
@@ -336,9 +367,12 @@ class OpenAICompatibleEmbeddings(CheckedEmbeddings):
         api_key: str,
         model_name: str,
         timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
+        *,
+        client_options: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             OpenAIEmbeddings(
+                **(client_options or {}),
                 model=model_name,
                 api_key=api_key,
                 base_url=openai_compatible_base(api_base),
@@ -361,6 +395,7 @@ class OpenAICompatibleReranker:
         self.api_key = api_key
         self.model_name = model_name
         self.timeout = timeout
+        self.public_endpoint_only = False
 
     def rerank(self, query: str, documents: list[str]) -> list[dict[str, Any]]:
         payload = {"model": self.model_name, "query": query, "documents": documents}
@@ -374,13 +409,24 @@ class OpenAICompatibleReranker:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
-                if response.status < 200 or response.status >= 300:
-                    raise ModelProviderStatusError(response.status)
-                body = response.read().decode()
+            if self.public_endpoint_only:
+                with public_client(self.timeout) as client:
+                    response = client.post(
+                        f"{self.api_base}/rerank",
+                        json=payload,
+                        headers=dict(request.header_items()),
+                    )
+                    if not 200 <= response.status_code < 300:
+                        raise ModelProviderStatusError(response.status_code)
+                    body = response.text
+            else:
+                with urlopen(request, timeout=self.timeout) as response:
+                    if response.status < 200 or response.status >= 300:
+                        raise ModelProviderStatusError(response.status)
+                    body = response.read().decode()
         except HTTPError as exc:
             raise ModelProviderStatusError(exc.code) from exc
-        except (OSError, TimeoutError, URLError) as exc:
+        except (OSError, TimeoutError, URLError, httpx.HTTPError) as exc:
             raise _model_provider_error(exc) from exc
         try:
             data = json.loads(body)
@@ -446,10 +492,12 @@ def _bedrock_credentials(
         "region_name": _required(credentials, "region_name"),
         "aws_access_key_id": _secret(access_key),
         "aws_secret_access_key": _secret(secret_key),
-        "aws_session_token": _secret(
-            _optional(credentials, "aws_session_token")
-        ),
-        "config": _bedrock_config(timeout),
+        "aws_session_token": _secret(_optional(credentials, "aws_session_token")),
+        "config": _bedrock_config(timeout).merge(
+            BotocoreConfig(ignore_configured_endpoint_urls=True)
+        )
+        if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
+        else _bedrock_config(timeout),
     }
 
 
@@ -466,6 +514,39 @@ def _bedrock_model_arn(model_name: str, region_name: str) -> str:
     return f"arn:{partition}:bedrock:{region_name}::foundation-model/{model_name}"
 
 
+def _public_google_client(credentials, timeout):
+    if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) != "true":
+        return None
+    return GoogleClient(
+        vertexai=False,
+        api_key=_required(credentials, "api_key"),
+        http_options=HttpOptions(
+            base_url=_optional(credentials, "api_base"),
+            api_version=_optional(credentials, "api_version"),
+            timeout=int(timeout * 1000),
+            httpx_client=public_client(timeout),
+            httpx_async_client=public_async_client(timeout),
+        ),
+    )
+
+
+def _ollama_public_options(credentials):
+    if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) != "true":
+        return {}
+    return {
+        "sync_client_kwargs": {
+            "transport": public_transport(),
+            "trust_env": False,
+            "follow_redirects": False,
+        },
+        "async_client_kwargs": {
+            "transport": public_transport(asynchronous=True),
+            "trust_env": False,
+            "follow_redirects": False,
+        },
+    }
+
+
 def build_chat_model(
     provider_type: str,
     credentials: dict[str, str],
@@ -478,6 +559,7 @@ def build_chat_model(
     request_params = request_params or {}
     if provider_type == "openai_compatible":
         return OpenAICompatibleChatModel(
+            **public_client_options(credentials, timeout),
             model=model_name,
             api_key=_openai_api_key(credentials),
             base_url=openai_compatible_base(_required(credentials, "api_base")),
@@ -488,6 +570,7 @@ def build_chat_model(
         )
     if provider_type == "anthropic":
         return AnthropicChatModel(
+            public_endpoint_only=credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true",
             model_name=model_name,
             api_key=_required(credentials, "api_key"),
             base_url=_optional(credentials, "api_base"),
@@ -506,6 +589,7 @@ def build_chat_model(
         )
     if provider_type == "azure_openai":
         return AzureChatModel(
+            **public_client_options(credentials, timeout),
             model=model_name,
             azure_deployment=model_name,
             azure_endpoint=_required(credentials, "azure_endpoint"),
@@ -517,6 +601,7 @@ def build_chat_model(
         )
     if provider_type == "deepseek":
         return DeepSeekChatModel(
+            **public_client_options(credentials, timeout),
             model=model_name,
             api_key=_required(credentials, "api_key"),
             base_url=openai_compatible_base(_required(credentials, "api_base")),
@@ -525,7 +610,12 @@ def build_chat_model(
             **request_params,
         )
     if provider_type == "google_genai":
-        return GoogleChatModel(
+        chat_model = GoogleChatModel(
+            **(
+                {"vertexai": False}
+                if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
+                else {}
+            ),
             model=model_name,
             api_key=_required(credentials, "api_key"),
             base_url=_optional(credentials, "api_base"),
@@ -534,11 +624,16 @@ def build_chat_model(
             retries=0,
             **request_params,
         )
+        if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true":
+            chat_model.client.close()
+            chat_model.client = _public_google_client(credentials, timeout)
+        return chat_model
     if provider_type == "ollama":
         return OllamaChatModel(
             model=model_name,
             base_url=_required(credentials, "api_base"),
             client_kwargs={"timeout": timeout},
+            **_ollama_public_options(credentials),
             **request_params,
         )
     raise ModelProviderError("Model provider type is not supported.")
@@ -557,6 +652,7 @@ def build_embeddings(
             _openai_api_key(credentials),
             model_name,
             timeout,
+            client_options=public_client_options(credentials, timeout),
         )
     if provider_type == "bedrock":
         return CheckedEmbeddings(
@@ -569,6 +665,7 @@ def build_embeddings(
     if provider_type == "azure_openai":
         return CheckedEmbeddings(
             AzureOpenAIEmbeddings(
+                **public_client_options(credentials, timeout),
                 model=model_name,
                 azure_deployment=model_name,
                 azure_endpoint=_required(credentials, "azure_endpoint"),
@@ -580,8 +677,13 @@ def build_embeddings(
             )
         )
     if provider_type == "google_genai":
-        return CheckedEmbeddings(
+        embedding = CheckedEmbeddings(
             GoogleGenerativeAIEmbeddings(
+                **(
+                    {"vertexai": False}
+                    if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
+                    else {}
+                ),
                 model=model_name,
                 api_key=_required(credentials, "api_key"),
                 base_url=_optional(credentials, "api_base"),
@@ -589,12 +691,17 @@ def build_embeddings(
                 request_options={"timeout": timeout},
             )
         )
+        if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true":
+            embedding._delegate.client.close()
+            embedding._delegate.client = _public_google_client(credentials, timeout)
+        return embedding
     if provider_type == "ollama":
         return CheckedEmbeddings(
             OllamaEmbeddings(
                 model=model_name,
                 base_url=_required(credentials, "api_base"),
                 client_kwargs={"timeout": timeout},
+                **_ollama_public_options(credentials),
             )
         )
     raise ModelProviderError("Embedding provider type is not supported.")
@@ -608,12 +715,16 @@ def build_reranker(
     timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
 ) -> Reranker:
     if provider_type == "openai_compatible":
-        return OpenAICompatibleReranker(
+        reranker = OpenAICompatibleReranker(
             _required(credentials, "api_base"),
             _openai_api_key(credentials),
             model_name,
             timeout,
         )
+        reranker.public_endpoint_only = (
+            credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
+        )
+        return reranker
     if provider_type == "bedrock":
         bedrock_credentials = _bedrock_credentials(credentials, timeout)
         region_name = bedrock_credentials["region_name"]
@@ -652,7 +763,10 @@ def _registered_model_credentials(
         )
     except (ValueError, json.JSONDecodeError) as exc:
         raise ModelProviderError("Stored model credentials are invalid.") from exc
-    return {**config, **secrets}
+    credentials = {**config, **secrets}
+    if (model.meta or {}).get(PUBLIC_ENDPOINT_POLICY) is True:
+        credentials[PUBLIC_ENDPOINT_CREDENTIAL] = "true"
+    return credentials
 
 
 def _build_registered_chat_model(

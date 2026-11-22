@@ -1,5 +1,7 @@
 "use client"
 
+import { ModelScopeLabel } from "@/components/llm/model-scope-label"
+
 import * as React from "react"
 import type { ComponentType } from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
@@ -1967,6 +1969,7 @@ function NodeConfigFields({
                         className="shrink-0"
                       />
                       <span className="min-w-0 truncate">{model.name}</span>
+                          <ModelScopeLabel visibility={model.visibility} />
                     </span>
                     {model.id === config.model_id ? (
                       <span className="text-primary">✓</span>
@@ -2353,7 +2356,7 @@ function NodeConfigFields({
                       updateConfig({ model_id: model.id || null })
                     }
                   >
-                    <span className="truncate">{model.name}</span>
+                    <span className="flex min-w-0 items-center gap-2"><span className="truncate">{model.name}</span>{"visibility" in model ? <ModelScopeLabel visibility={model.visibility} /> : null}</span>
                     {model.id === String(config.model_id ?? "") ? (
                       <CheckIcon className="text-primary" />
                     ) : null}
@@ -2622,7 +2625,7 @@ function NodeConfigFields({
                       updateConfig({ reranker_model_id: model.id })
                     }
                   >
-                    {model.name}
+                    <span className="flex min-w-0 items-center gap-2"><span className="truncate">{model.name}</span><ModelScopeLabel visibility={model.visibility} /></span>
                     {selectedReranker?.id === model.id ? <CheckIcon /> : null}
                   </DropdownMenuItem>
                 ))}

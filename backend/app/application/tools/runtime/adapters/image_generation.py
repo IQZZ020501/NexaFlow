@@ -8,12 +8,13 @@ from app.domain.artifacts.services import (
     MAX_ARTIFACT_BYTES,
     artifact_filename_from_label,
 )
-from app.domain.models.registered import RegisteredModel
+from app.domain.models.access import can_use_model
 from app.domain.models.runtime import (
     build_model_runtime_snapshot,
     require_model_runtime_snapshot,
 )
 from app.entities.defaults import to_app_timezone
+from app.entities.models import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
 from app.infra.db.repositories.tools import repository as tool_repository
@@ -26,11 +27,14 @@ from app.ports.tools import (
 )
 
 
-def _validate_image_model(model: RegisteredModel, workspace_id: str) -> None:
+def _validate_image_model(
+    model: RegisteredModel, workspace_id: str, user_id: str | None = None
+) -> None:
     if (
         getattr(model, "workspace_id", None) != workspace_id
         or getattr(model, "model_type", None) != "IMAGE"
         or getattr(model, "status", None) != "active"
+        or not can_use_model(model, user_id)
     ):
         raise ValueError(
             "The queued image model is no longer active in this workspace."
@@ -48,13 +52,17 @@ async def build_image_model_resource_snapshot(
     db: AsyncSession,
     workspace_id: str,
     image_model_id: str | None = None,
+    *,
+    user_id: str | None = None,
 ) -> dict[str, object]:
     if image_model_id:
         model = await model_repository.get_registered_model_by_id(db, image_model_id)
         if model is None:
             raise ValueError("The selected image model is no longer available.")
     else:
-        models = await model_repository.list_active_image_models(db, workspace_id)
+        models = await model_repository.list_active_image_models(
+            db, workspace_id, user_id=user_id
+        )
         if not models:
             raise ValueError(
                 "Configure an active OpenAI-compatible image model in this workspace first."
@@ -62,7 +70,7 @@ async def build_image_model_resource_snapshot(
         if len(models) != 1:
             raise ValueError("Keep exactly one image model active in this workspace.")
         model = models[0]
-    _validate_image_model(model, workspace_id)
+    _validate_image_model(model, workspace_id, user_id)
     return {"image_model": build_model_runtime_snapshot(model)}
 
 
@@ -81,7 +89,11 @@ async def generate_image_artifact(
         model = await model_repository.get_registered_model_by_id(db, model_id)
     if model is None:
         raise ValueError("The queued image model is no longer available.")
-    _validate_image_model(model, context.workspace_id)
+    _validate_image_model(
+        model,
+        context.workspace_id,
+        context.execution_user_id if context.access_source == "console" else None,
+    )
     try:
         require_model_runtime_snapshot(model, image_model_snapshot)
     except ValueError as exc:

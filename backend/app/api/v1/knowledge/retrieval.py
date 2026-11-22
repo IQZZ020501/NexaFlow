@@ -50,7 +50,9 @@ async def query_workspace_knowledge_base(
         context.user,
         {"view", "edit"},
     )
-    return await query_knowledge_base(db, knowledge_base, payload, settings)
+    return await query_knowledge_base(
+        db, knowledge_base, payload, settings, user_id=context.user.id
+    )
 
 
 @router.post(
@@ -75,4 +77,6 @@ async def inspect_workspace_knowledge_base(
         context.user,
         {"view", "edit"},
     )
-    return await retrieve_knowledge_base(db, knowledge_base, payload, settings)
+    return await retrieve_knowledge_base(
+        db, knowledge_base, payload, settings, user_id=context.user.id
+    )

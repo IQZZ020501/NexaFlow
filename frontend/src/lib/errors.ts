@@ -2,6 +2,19 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
+  "Published applications require workspace-shared models.": "发布应用需要使用工作空间共享模型",
+  "Agent model not found.": "所选模型不存在或当前用户无权使用",
+  "Agent image model not found.": "所选模型不存在或当前用户无权使用",
+  "Model not found.": "所选模型不存在或当前用户无权使用",
+  "Member model endpoints must use public network addresses.": "成员接入的模型仅支持公网地址",
+  "Member model parameters cannot override connection settings.": "模型参数不能覆盖连接设置",
+  "Personal Bedrock models require explicit AWS credentials.": "个人Bedrock模型必须填写AWS访问凭据",
+  "Personal Bedrock models require the official regional endpoint.": "个人Bedrock模型仅支持官方区域接口",
+  "Invalid Bedrock region.": "Bedrock区域无效",
+  "Invalid member model endpoint.": "模型连接地址无效",
+  "Model management access denied.": "无权管理此模型",
+  "Workspace admin required to create shared models.": "只有工作空间管理员可以创建共享模型",
+  "Model visibility cannot be changed. Create a separate model instead.": "使用范围创建后不可更改，如需其他范围请重新接入。",
   "Invalid integration arguments.":
     "集成参数无效，请检查资源标识、时间和操作参数。",
   "Invalid integration resource identifier.":

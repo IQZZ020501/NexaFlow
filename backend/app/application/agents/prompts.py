@@ -20,8 +20,9 @@ async def generate_agent_instructions(
     workspace_id: str,
     payload: AgentInstructionsGenerateRequest,
     settings: Settings,
+    user_id: str | None = None,
 ) -> AgentInstructionsGenerateResponse:
-    model = await get_agent_model(db, workspace_id, payload.model_id)
+    model = await get_agent_model(db, workspace_id, payload.model_id, user_id=user_id)
     try:
         chat_model = build_chat_model(
             settings,

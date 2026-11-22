@@ -1,5 +1,7 @@
 "use client"
 
+import { ModelScopeLabel } from "@/components/llm/model-scope-label"
+
 import * as React from "react"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
@@ -364,6 +366,7 @@ export function AgentConfigFields({
                             className="shrink-0"
                           />
                           <span className="min-w-0 truncate">{model.name}</span>
+                          <ModelScopeLabel visibility={model.visibility} />
                         </span>
                         {model.id === form.modelId ? (
                           <CheckIcon className="text-primary" />
@@ -420,6 +423,7 @@ export function AgentConfigFields({
                             className="shrink-0"
                           />
                           <span className="min-w-0 truncate">{model.name}</span>
+                          <ModelScopeLabel visibility={model.visibility} />
                         </span>
                         {model.id === selectedImageModel?.id ? (
                           <CheckIcon className="text-primary" />

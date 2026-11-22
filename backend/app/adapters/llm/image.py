@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from openai import AsyncOpenAI, OpenAIError
 
+from app.adapters.llm.network import PUBLIC_ENDPOINT_CREDENTIAL, public_async_client
 from app.adapters.llm.runtime import (
     _model_provider_error,
     _openai_api_key,
@@ -105,6 +106,18 @@ async def generate_registered_image(
                 MIN_IMAGE_REQUEST_TIMEOUT_SECONDS,
             ),
             max_retries=0,
+            **(
+                {
+                    "http_client": public_async_client(
+                        max(
+                            settings.model_request_timeout_seconds,
+                            MIN_IMAGE_REQUEST_TIMEOUT_SECONDS,
+                        )
+                    )
+                }
+                if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
+                else {}
+            ),
         ) as client:
             response = await client.images.generate(**request)
     except OpenAIError as exc:

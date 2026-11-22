@@ -306,6 +306,7 @@ async def generate_workspace_agent_instructions(
         context.workspace.id,
         payload,
         settings,
+        user_id=context.user.id,
     )
 
 
