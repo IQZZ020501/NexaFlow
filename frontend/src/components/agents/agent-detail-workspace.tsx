@@ -3,6 +3,7 @@
 import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 
 import * as React from "react"
+import { integrationToolName } from "@/lib/integrations"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
@@ -212,6 +213,9 @@ function processSummary(
       value: Number(legacyKnowledgeMatch[1]),
     })
   }
+  if (event.summary === "Integration operation completed.")
+    return t("操作已完成")
+  if (event.summary === "Stored Tool result read.") return t("已读取工具结果")
   return event.summary
 }
 
@@ -233,6 +237,7 @@ function effectiveProcessStatus(
 function processToolName(event: AgentRun["events"][number], t: TFunction) {
   return (
     builtinToolDisplayName(event.tool_name, t) ??
+    integrationToolName(event.tool_name, t) ??
     (event.tool_label || event.tool_name)
   )
 }

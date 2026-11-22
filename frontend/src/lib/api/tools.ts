@@ -2,7 +2,7 @@ import { listQuery, request } from "@/lib/api-client"
 import type { User } from "@/lib/api/auth"
 import type { McpOAuthConfiguration } from "@/lib/api/mcp"
 
-export type ToolKind = "builtin" | "mcp"
+export type ToolKind = "builtin" | "mcp" | "integration"
 
 export type ToolRef = {
   tool_id: string

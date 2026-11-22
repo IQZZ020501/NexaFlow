@@ -92,8 +92,11 @@ async def _vision_text_extractor(
     db: AsyncSession,
     workspace_id: str,
     settings: Settings,
+    user_id: str | None = None,
 ) -> ImageTextExtractor:
-    model = await get_default_knowledge_model(db, workspace_id, "VISION")
+    model = await get_default_knowledge_model(
+        db, workspace_id, "VISION", user_id=user_id
+    )
     if model is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -284,7 +287,7 @@ async def _upload_files(
         category == "image" and "/" not in filename
         for _upload, filename, category in prepared_uploads
     ):
-        await _vision_text_extractor(db, agent.workspace_id, settings)
+        await _vision_text_extractor(db, agent.workspace_id, settings, user_id)
 
     storage = create_object_storage(settings.knowledge_storage_dir, settings=settings)
     stored: list[WorkflowUpload] = []
@@ -467,7 +470,7 @@ async def _resolve_workflow_files(
     if extract_text:
         storage = create_object_storage(settings.knowledge_storage_dir, settings=settings)
         image_text_extractor = (
-            await _vision_text_extractor(db, agent.workspace_id, settings)
+            await _vision_text_extractor(db, agent.workspace_id, settings, user_id)
             if any(item.category == "image" for item in ordered)
             else None
         )
@@ -612,7 +615,7 @@ async def _resolve_agent_file_text(
     except (OSError, ObjectTooLargeError) as exc:
         raise HTTPException(422, "Agent upload could not be read.") from exc
     image_text_extractor = (
-        await _vision_text_extractor(db, agent.workspace_id, settings)
+        await _vision_text_extractor(db, agent.workspace_id, settings, user_id)
         if any(
             item.category == "image" and "/" not in item.filename for item in ordered
         )

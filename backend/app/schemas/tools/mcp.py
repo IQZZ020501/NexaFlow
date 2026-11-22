@@ -1,8 +1,8 @@
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.time import AppDateTime
 from app.schemas.tools.oauth import McpOAuthConfiguration
 
 
@@ -31,8 +31,8 @@ class McpServerResponse(BaseModel):
     bearer_token_hint: str | None
     last_error: str | None
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class McpStdioConfigRequest(BaseModel):
@@ -86,4 +86,4 @@ class McpToolPolicyResponse(BaseModel):
     definition_hash: str
     mode: Literal["approval_required", "read_only", "disabled"]
     reviewed_by_user_id: str | None
-    reviewed_at: datetime | None
+    reviewed_at: AppDateTime | None

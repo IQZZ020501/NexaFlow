@@ -13,6 +13,7 @@ from app.application.tools.runtime.adapters._common import (
     _redirect_legacy_artifact_path,
 )
 from app.domain.artifacts.services import artifact_format_from_filename
+from app.entities.defaults import to_app_timezone
 from app.entities.tools import ToolKind, ToolSnapshot
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_session_factory
@@ -260,7 +261,7 @@ class BuiltinToolAdapter:
                 "previous_artifact_id": link.previous_artifact_id,
                 "inspection": link.inspection,
                 "download_url": link.download_url,
-                "expires_at": link.expires_at.isoformat(),
+                "expires_at": to_app_timezone(link.expires_at).isoformat(),
                 "size_bytes": link.size_bytes,
             }
             result_data = {

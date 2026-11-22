@@ -518,6 +518,8 @@ def build_knowledge_search_tool(
     actor: User,
     workspace_role: str | None,
     settings: Settings,
+    *,
+    shared_models_only: bool = False,
 ) -> StructuredTool:
     knowledge_base_ids = [knowledge_base.id for knowledge_base in knowledge_bases]
 
@@ -610,6 +612,7 @@ def build_knowledge_search_tool(
                             similarity=payload.similarity,
                         ),
                         settings,
+                        user_id=None if shared_models_only else actor.id,
                     )
                 except HTTPException:
                     failed_sources += 1
@@ -748,7 +751,7 @@ def build_unified_agent_tool(
         kind=snapshot.kind,
         parallel_safe=snapshot.parallel_safe,
         definition_hash=snapshot.definition_hash,
-        model_decides_approval=model_decides_approval and snapshot.kind == "mcp",
+        model_decides_approval=model_decides_approval and snapshot.kind in {"mcp", "integration"},
     )
 
 

@@ -15,9 +15,10 @@ from app.domain.knowledge.bases.permissions import (
     require_knowledge_base_permission,
 )
 from app.domain.knowledge.storage.cleanup import create_knowledge_storage_cleanup
-from app.domain.models.registered import RegisteredModel
+from app.domain.models.access import can_use_model
 from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
+from app.entities.models import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
@@ -80,14 +81,21 @@ async def get_knowledge_model(
     model_type: str,
     *,
     use_default: bool = False,
+    user_id: str | None = None,
 ) -> RegisteredModel | None:
     model_id = normalize_optional_model_id(model_id)
     if model_id is None:
         if use_default:
-            return await get_default_knowledge_model(db, workspace_id, model_type)
+            return await get_default_knowledge_model(
+                db, workspace_id, model_type, user_id=user_id
+            )
         return None
     model = await model_repository.get_registered_model_by_id(db, model_id)
-    if model is None or model.workspace_id != workspace_id:
+    if (
+        model is None
+        or model.workspace_id != workspace_id
+        or not can_use_model(model, user_id)
+    ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Knowledge model not found.",
@@ -109,8 +117,12 @@ async def get_default_knowledge_model(
     db: AsyncSession,
     workspace_id: str,
     model_type: str,
+    *,
+    user_id: str | None = None,
 ) -> RegisteredModel | None:
-    models = await model_repository.list_registered_models(db, workspace_id)
+    models = await model_repository.list_registered_models(
+        db, workspace_id, user_id=user_id
+    )
     return next(
         (
             model
@@ -208,12 +220,14 @@ async def create_knowledge_base(
         payload.embedding_model_id,
         "EMBEDDING",
         use_default=True,
+        user_id=actor.id,
     )
     reranker_model = await get_knowledge_model(
         db,
         workspace_id,
         payload.reranker_model_id,
         "RERANKER",
+        user_id=actor.id,
     )
     knowledge_base = KnowledgeBase(
         workspace_id=workspace_id,
@@ -297,6 +311,7 @@ async def update_knowledge_base(
             knowledge_base.workspace_id,
             payload.embedding_model_id,
             "EMBEDDING",
+            user_id=actor.id,
         )
         knowledge_base.embedding_model_id = embedding_model.id if embedding_model else None
     if "reranker_model_id" in details:
@@ -305,6 +320,7 @@ async def update_knowledge_base(
             knowledge_base.workspace_id,
             payload.reranker_model_id,
             "RERANKER",
+            user_id=actor.id,
         )
         knowledge_base.reranker_model_id = reranker_model.id if reranker_model else None
 
@@ -373,6 +389,8 @@ async def test_knowledge_base_models(
     knowledge_base: KnowledgeBase,
     payload: KnowledgeModelTestRequest,
     settings: Settings,
+    *,
+    user_id: str | None = None,
 ) -> KnowledgeModelTestResponse:
     embedding_model = await get_knowledge_model(
         db,
@@ -380,6 +398,7 @@ async def test_knowledge_base_models(
         knowledge_base.embedding_model_id,
         "EMBEDDING",
         use_default=True,
+        user_id=user_id,
     )
     if embedding_model is None:
         raise HTTPException(
@@ -391,6 +410,7 @@ async def test_knowledge_base_models(
         knowledge_base.workspace_id,
         knowledge_base.reranker_model_id,
         "RERANKER",
+        user_id=user_id,
     )
     return await asyncio.to_thread(
         run_knowledge_model_test,

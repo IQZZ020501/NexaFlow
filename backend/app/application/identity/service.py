@@ -20,6 +20,7 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.agent_skills import repository as agent_skill_repository
 from app.infra.db.repositories.email import delivery as email_repository
 from app.infra.db.repositories.identity import users as user_repository
+from app.infra.db.repositories.models import registry as model_repository
 from app.infra.db.repositories.teams import repository as team_repository
 from app.infra.db.repositories.tools import bindings as tool_bindings_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
@@ -459,6 +460,10 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     )
     await queue_upload_cleanups(db, uploaded_by_user_id=user.id)
     await delete_owned_mcp_servers_for_user(db, user.id, actor)
+    from app.infra.db.repositories.tools.integrations import archive_user_sources
+
+    await archive_user_sources(db, user.id)
+    await model_repository.retire_personal_models_for_user(db, user.id)
     await user_repository.delete_user_graph(db, user.id)
     await db.commit()
 

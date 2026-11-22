@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.schemas.time import AppDateTime
 
 MemoryCategory = Literal["preference", "background", "goal", "project"]
 
@@ -16,7 +17,7 @@ class MemoryWriteRequest(BaseModel):
     key: str = Field(min_length=1, max_length=80)
     content: str = Field(min_length=1, max_length=600)
     project_id: str = Field(default="", max_length=36)
-    expires_at: datetime | None = None
+    expires_at: AppDateTime | None = None
 
     @field_validator("key", "content")
     @classmethod
@@ -41,7 +42,7 @@ class MemoryResponse(MemoryWriteRequest):
     source_quote: str
     source_conversation_id: str | None = None
     source_agent_id: str | None = None
-    updated_at: datetime
+    updated_at: AppDateTime
 
 
 class MemoryProfileResponse(MemoryPreferencesRequest):

@@ -29,7 +29,10 @@ def configure_database(settings: Settings, *, worker_process: bool = False) -> N
         }
     elif settings.database_url.startswith("postgresql+psycopg://"):
         kwargs["connect_args"] = {
-            "application_name": "nexaflow-worker" if worker_process else "nexaflow-api"
+            "application_name": "nexaflow-worker" if worker_process else "nexaflow-api",
+            # Persistence and immutable snapshot fingerprints stay canonical;
+            # public schemas render these instants in China Standard Time.
+            "options": "-c timezone=UTC",
         }
         if worker_process:
             # Autoscaled worker processes should not retain idle connections.

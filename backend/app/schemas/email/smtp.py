@@ -1,8 +1,9 @@
-from datetime import datetime
 from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.time import AppDateTime
 
 SmtpSecurity = Literal["none", "starttls", "ssl"]
 
@@ -64,7 +65,7 @@ class SmtpSettingsResponse(BaseModel):
     password_hint: str | None
     configured: bool
     identity_configured: bool
-    updated_at: datetime
+    updated_at: AppDateTime
 
 
 class SmtpSettingsUpdateRequest(BaseModel):

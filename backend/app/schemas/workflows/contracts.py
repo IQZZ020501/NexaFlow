@@ -1,6 +1,5 @@
 import json
 import re
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from jinja2 import Environment, TemplateSyntaxError
@@ -8,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.agent_skills.contracts import AgentSkillRefSchema
 from app.schemas.agents.contracts import AgentInteractionConfig, AgentToolCallResponse
+from app.schemas.time import AppDateTime
 from app.schemas.tools.contracts import ToolRefSchema
 
 JINJA_ENV = Environment()
@@ -448,8 +448,8 @@ class WorkflowDefinitionResponse(BaseModel):
     graph: WorkflowGraph
     graph_hash: str
     updated_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class WorkflowDefinitionUpdateRequest(BaseModel):
@@ -477,7 +477,7 @@ class WorkflowVersionResponse(BaseModel):
     graph: WorkflowGraph
     graph_hash: str
     published_by_user_id: str
-    created_at: datetime
+    created_at: AppDateTime
 
 
 class WorkflowVersionListResponse(BaseModel):
@@ -529,8 +529,8 @@ class WorkflowNodeExecutionResponse(BaseModel):
     outputs: dict[str, Any]
     model_usage: dict[str, Any]
     error: str | None
-    started_at: datetime | None
-    finished_at: datetime | None
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
     duration_ms: int | None
 
 
@@ -559,14 +559,14 @@ class WorkflowRunResponse(BaseModel):
     token_usage: int
     last_error: str | None
     trace_id: str
-    started_at: datetime | None
-    finished_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
+    created_at: AppDateTime
+    updated_at: AppDateTime
     pending_form: WorkflowPendingForm | None = None
     tool_calls: list[AgentToolCallResponse] = Field(default_factory=list)
     feedback: Literal["positive", "negative"] | None = None
-    feedback_updated_at: datetime | None = None
+    feedback_updated_at: AppDateTime | None = None
 
 
 class WorkflowNodeExecutionListResponse(BaseModel):
@@ -588,8 +588,8 @@ class PublicWorkflowConversationResponse(BaseModel):
     outputs: dict[str, Any]
     status: str
     run_count: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class PublicWorkflowConversationListResponse(BaseModel):
@@ -639,14 +639,14 @@ class ExternalWorkflowRunResponse(BaseModel):
     status: str
     error: str | None
     progress: list[ExternalWorkflowProgressEventResponse] = Field(default_factory=list)
-    created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-    updated_at: datetime
+    created_at: AppDateTime
+    started_at: AppDateTime | None
+    finished_at: AppDateTime | None
+    updated_at: AppDateTime
     pending_form: WorkflowPendingForm | None = None
     tool_calls: list[AgentToolCallResponse] = Field(default_factory=list)
     feedback: Literal["positive", "negative"] | None = None
-    feedback_updated_at: datetime | None = None
+    feedback_updated_at: AppDateTime | None = None
 
 
 class ExternalWorkflowRunListResponse(BaseModel):

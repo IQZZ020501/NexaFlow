@@ -31,7 +31,6 @@ from app.domain.knowledge.service import (
     get_knowledge_model,
     knowledge_object_storage,
 )
-from app.domain.models.registered import RegisteredModel
 from app.entities.defaults import new_id, utc_now
 from app.entities.identity.user import User
 from app.entities.knowledge import (
@@ -63,6 +62,7 @@ from app.entities.knowledge import (
     KnowledgeDocumentParentChunk,
     KnowledgeTask,
 )
+from app.entities.models import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.observability.logger import get_logger
@@ -305,13 +305,16 @@ def parse_task_options_from_task(task: KnowledgeTask) -> dict[str, Any]:
     return parse_task_options(KnowledgeDocumentParseRequest(**{**DEFAULT_PARSE_OPTIONS, **task.options}))
 
 
-async def resolve_embedding_model(db: AsyncSession, knowledge_base: KnowledgeBase) -> RegisteredModel | None:
+async def resolve_embedding_model(
+    db: AsyncSession, knowledge_base: KnowledgeBase, *, user_id: str | None = None
+) -> RegisteredModel | None:
     embedding_model = await get_knowledge_model(
         db,
         knowledge_base.workspace_id,
         knowledge_base.embedding_model_id,
         "EMBEDDING",
         use_default=True,
+        user_id=user_id,
     )
     if embedding_model is not None and knowledge_base.embedding_model_id is None:
         knowledge_base.embedding_model_id = embedding_model.id
@@ -569,7 +572,9 @@ async def create_knowledge_task(
         raise HTTPException(status.HTTP_409_CONFLICT, "Knowledge task is already running.")
     if task_type in {TASK_INDEX, TASK_REBUILD_INDEX}:
         had_embedding_model = knowledge_base.embedding_model_id is not None
-        embedding_model = await resolve_embedding_model(db, knowledge_base)
+        embedding_model = await resolve_embedding_model(
+            db, knowledge_base, user_id=actor.id
+        )
         if embedding_model is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,

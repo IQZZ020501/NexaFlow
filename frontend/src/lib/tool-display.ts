@@ -1,5 +1,6 @@
 import type { TFunction } from "@/i18n"
 import { artifactContentUrl } from "@/lib/agent-artifacts"
+import { integrationSourceName, integrationToolName } from "@/lib/integrations"
 
 export function executionWaitSummary(output: unknown, t: TFunction) {
   const reason = (output as { resource_wait?: { reason?: string } } | null)
@@ -253,7 +254,11 @@ export function withArtifactDownloadLinks(
  * @returns The localized display name for built-in tools or the tool's configured display name
  */
 export function toolDisplayName(tool: DisplayableTool, t: TFunction) {
-  return builtinToolDisplayName(tool.function_name, t) ?? tool.display_name
+  return (
+    builtinToolDisplayName(tool.function_name, t) ??
+    integrationToolName(tool.function_name, t) ??
+    tool.display_name
+  )
 }
 
 /**
@@ -264,6 +269,8 @@ export function toolDisplayName(tool: DisplayableTool, t: TFunction) {
  * @returns The localized description for a built-in tool or the tool's configured description
  */
 export function toolDisplayDescription(tool: DisplayableTool, t: TFunction) {
+  const integrationLabel = integrationToolName(tool.function_name, t)
+  if (integrationLabel) return integrationLabel
   if (tool.function_name === "bash") {
     return t("在 Run 的私有沙箱中执行命令，保留文件并生成可下载的结果。")
   }
@@ -305,5 +312,9 @@ export function toolSourceDisplayName(
   t: TFunction
 ) {
   if (source.kind === "builtin") return t("内置")
+  if (source.kind === "integration") {
+    const key = integrationSourceName(source.name)
+    if (key) return t(key)
+  }
   return source.name
 }

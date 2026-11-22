@@ -1,8 +1,10 @@
 import asyncio
 import json
+from dataclasses import replace
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 from tests.support import activate_admin, auth_headers, settings, test_client
 
@@ -23,6 +25,8 @@ from app.infra.security.enterprise_login_rate_limit import (
     EnterpriseLoginRateLimitExceeded,
     EnterpriseLoginRateLimitUnavailable,
 )
+from app.infra.security.keyring import application_secret_key
+from app.infra.security.secrets import encrypt_secret
 from app.ports.enterprise_identity import (
     resolve_external_principal as resolve_external_principal_via_port,
 )
@@ -37,16 +41,16 @@ def _raises(error_type, callback):
 
 
 class _ProviderResponse:
-    def __init__(self, payload, *, chunks: list[bytes] | None = None) -> None:
+    def __init__(
+        self, payload, *, chunks: list[bytes] | None = None, status_code: int = 200
+    ) -> None:
         self.chunks = chunks or [json.dumps(payload).encode()]
+        self.status_code = status_code
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, *_args):
-        return None
-
-    def raise_for_status(self) -> None:
         return None
 
     async def aiter_bytes(self, *, chunk_size: int):
@@ -72,6 +76,259 @@ class _ProviderClient:
         return self.response
 
 
+class _WeComRedis:
+    def __init__(self) -> None:
+        self.values = {}
+        self.expires_at = {}
+        self.locks = {}
+        self.now = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def get(self, key):
+        if self.expires_at.get(key, 0) <= self.now:
+            return None
+        return self.values.get(key)
+
+    async def set(self, key, value, *, ex):
+        self.values[key] = value
+        self.expires_at[key] = self.now + ex
+
+    def lock(self, key, *, timeout, blocking_timeout):
+        assert timeout > blocking_timeout > 0
+        return self.locks.setdefault(key, asyncio.Lock())
+
+
+async def _test_wecom_token_cache() -> None:
+    cache = _WeComRedis()
+    connection = EnterpriseIdentityConnection(
+        provider="wecom", tenant_id="cache-corp", agent_id="1000002"
+    )
+    token_requests = []
+    user_requests = []
+    rejected_tokens = set()
+
+    async def request(_method, url, **kwargs):
+        if url.endswith("/gettoken"):
+            token_requests.append(kwargs["params"])
+            await asyncio.sleep(0)
+            return {
+                "errcode": 0,
+                "access_token": f"cached-token-{len(token_requests)}",
+                "expires_in": 7200,
+            }
+        user_requests.append(kwargs["params"])
+        if kwargs["params"]["access_token"] in rejected_tokens:
+            return {"errcode": 42001}
+        return {"errcode": 0, "userid": "cache-user"}
+
+    async def login(code, *, secret="cache-secret", target=connection):
+        return await resolve_external_principal(
+            target,
+            secret,
+            code,
+            "https://app.example.com/callback",
+            settings=settings(),
+        )
+
+    with (
+        patch("redis.asyncio.Redis.from_url", return_value=cache),
+        patch("app.adapters.identity.enterprise._request_json", new=request),
+    ):
+        for code in ("first-code", "second-code"):
+            principal = await login(code)
+            assert principal.subject_id == "cache-user"
+        assert len(token_requests) == 1, (
+            "Repeated logins must share the WeCom application token."
+        )
+        assert [item["code"] for item in user_requests] == ["first-code", "second-code"]
+        assert len(cache.values) == 1
+        key, encrypted = next(iter(cache.values.items()))
+        assert "cache-secret" not in key and "cache-corp" not in key
+        assert "cached-token" not in encrypted
+        assert cache.expires_at[key] == 7140
+
+        # The credential scope is shared by separate workspace connections.
+        await login(
+            "other-connection",
+            target=EnterpriseIdentityConnection(
+                provider="wecom", tenant_id="cache-corp", agent_id="1000003"
+            ),
+        )
+        assert len(token_requests) == 1
+
+        cache.now = 7140
+        await asyncio.gather(*(login(f"concurrent-{i}") for i in range(8)))
+        assert len(token_requests) == 2, (
+            "Only one instance should refresh an expired token."
+        )
+        assert all(
+            item["access_token"] == "cached-token-2" for item in user_requests[-8:]
+        )
+
+        await login("rotated-secret", secret="new-cache-secret")
+        assert len(token_requests) == 3
+        await login(
+            "other-corp",
+            target=EnterpriseIdentityConnection(
+                provider="wecom", tenant_id="other-corp"
+            ),
+        )
+        assert len(token_requests) == 4
+
+        rejected_tokens.add("cached-token-2")
+        await asyncio.gather(*(login(f"revoked-{i}") for i in range(8)))
+        assert len(token_requests) == 5, "Revoked tokens should be refreshed once."
+        assert user_requests[-1]["access_token"] == "cached-token-5"
+
+        # Invalid cached ciphertext is replaced without using it as a bearer token.
+        cache.values[key] = "damaged-ciphertext"
+        await login("damaged-cache")
+        assert len(token_requests) == 6
+
+        for response in ({"errcode": 0, "openid": "external-user"}, {"errcode": 40029}):
+            failed_request = AsyncMock(return_value=response)
+            with patch(
+                "app.adapters.identity.enterprise._request_json", new=failed_request
+            ):
+                try:
+                    await login("invalid-code")
+                except EnterpriseProviderError:
+                    pass
+                else:
+                    raise AssertionError(
+                        "External users and invalid codes must be rejected."
+                    )
+            assert failed_request.await_count == 1, (
+                "One-time code failures must not be retried."
+            )
+
+        failed_request = AsyncMock(
+            side_effect=[
+                {"errcode": 40014},
+                {"errcode": 0, "access_token": "still-invalid", "expires_in": 7200},
+                {"errcode": 40014},
+            ]
+        )
+        with patch(
+            "app.adapters.identity.enterprise._request_json", new=failed_request
+        ):
+            try:
+                await login("repeated-token-failure")
+            except EnterpriseProviderError:
+                pass
+            else:
+                raise AssertionError(
+                    "Repeated token rejection must fail after one refresh."
+                )
+        assert failed_request.await_count == 3
+
+        cache.get = AsyncMock(side_effect=OSError("cache offline"))
+        failed_request = AsyncMock()
+        with patch(
+            "app.adapters.identity.enterprise._request_json", new=failed_request
+        ):
+            try:
+                await login("cache-offline")
+            except EnterpriseProviderError:
+                pass
+            else:
+                raise AssertionError(
+                    "Cache failures must not trigger an uncached token refresh."
+                )
+        failed_request.assert_not_awaited()
+
+    for expiration in (None, True, 0, -1, "7200"):
+        invalid_cache = _WeComRedis()
+        with (
+            patch("redis.asyncio.Redis.from_url", return_value=invalid_cache),
+            patch(
+                "app.adapters.identity.enterprise._request_json",
+                new=AsyncMock(
+                    return_value={
+                        "errcode": 0,
+                        "access_token": "invalid-expiration",
+                        "expires_in": expiration,
+                    }
+                ),
+            ),
+        ):
+            try:
+                await login("invalid-expiration")
+            except EnterpriseProviderError:
+                pass
+            else:
+                raise AssertionError("Invalid token expiration must be rejected.")
+        assert not invalid_cache.values
+
+
+async def _test_wecom_error_diagnostics() -> None:
+    connection = EnterpriseIdentityConnection(
+        provider="wecom", tenant_id="diagnostic-corp", agent_id="1000002"
+    )
+    runtime_settings = settings()
+    callback = "https://app.example.com/callback"
+
+    async def failed_login(cache, response):
+        with (
+            patch("redis.asyncio.Redis.from_url", return_value=cache),
+            patch(
+                "app.adapters.identity.enterprise._request_json",
+                new=AsyncMock(return_value=response),
+            ),
+        ):
+            try:
+                await resolve_external_principal(
+                    connection,
+                    "diagnostic-secret",
+                    "diagnostic-code",
+                    callback,
+                    settings=runtime_settings,
+                )
+            except EnterpriseProviderError as exc:
+                return exc
+        raise AssertionError("The failed WeCom login should retain safe diagnostics.")
+
+    credential_error = await failed_login(_WeComRedis(), {"errcode": 40013})
+    assert credential_error.operation == "/cgi-bin/gettoken"
+    assert credential_error.http_status == 200
+    assert credential_error.provider_code == 40013
+    assert "diagnostic-secret" not in str(credential_error)
+
+    user_error_cache = _WeComRedis()
+    credential_id = sha256(
+        f"{connection.tenant_id}\0diagnostic-secret".encode()
+    ).hexdigest()
+    cache_key = f"nexaflow:enterprise-login:wecom-token:{credential_id}"
+    user_error_cache.values[cache_key] = encrypt_secret(
+        "diagnostic-access-token",
+        application_secret_key(runtime_settings),
+    )
+    user_error_cache.expires_at[cache_key] = 7200
+    authorization_error = await failed_login(user_error_cache, {"errcode": 40029})
+    assert authorization_error.operation == "/cgi-bin/auth/getuserinfo"
+    assert authorization_error.http_status == 200
+    assert authorization_error.provider_code == 40029
+    assert "diagnostic-access-token" not in str(authorization_error)
+
+    member_error_cache = _WeComRedis()
+    member_error_cache.values[cache_key] = encrypt_secret(
+        "diagnostic-access-token",
+        application_secret_key(runtime_settings),
+    )
+    member_error_cache.expires_at[cache_key] = 7200
+    member_error = await failed_login(
+        member_error_cache, {"errcode": 0, "openid": "external-contact"}
+    )
+    assert member_error.operation == "/cgi-bin/auth/getuserinfo"
+    assert member_error.missing_field == "userid"
+    assert member_error.provider_code == 0
+
+
 def _start(client, connection_id: str, provider: str = "feishu") -> tuple[str, str]:
     response = client.get(
         f"/api/v1/auth/enterprise/{connection_id}/start?next=/app/agents",
@@ -81,11 +338,79 @@ def _start(client, connection_id: str, provider: str = "feishu") -> tuple[str, s
     query = parse_qs(urlsplit(response.headers["location"]).query)
     assert query["state"][0]
     if provider == "feishu":
-        assert query["code_challenge_method"] == ["S256"]
+        assert "code_challenge" not in query
+        assert "code_challenge_method" not in query
     return query["state"][0], response.headers["location"]
 
 
+def _test_login_origin(client) -> None:
+    canonical_origin = "http://127.0.0.1:3000"
+    config = replace(client.app.state.settings, public_app_url=canonical_origin)
+    principal = ExternalPrincipal(
+        subject_id="origin-test-member",
+        tenant_id="tenant_test",
+        display_name="Origin Test",
+    )
+    with patch.object(client.app.state, "settings", config):
+        for entry_origin in ("http://localhost:3000", canonical_origin):
+            client.cookies.clear()
+            discovered = client.get(
+                f"{entry_origin}/api/v1/auth/enterprise/connections",
+                headers={
+                    "x-forwarded-host": "untrusted.example",
+                    "x-forwarded-proto": "https",
+                },
+            )
+            connection = next(
+                item
+                for item in discovered.json()["connections"]
+                if item["provider"] == "feishu"
+            )
+            start_url = urljoin(entry_origin, connection["start_url"])
+            started = client.get(
+                start_url, params={"next": "/app/agents"}, follow_redirects=False
+            )
+            query = parse_qs(urlsplit(started.headers["location"]).query)
+            resolver = AsyncMock(return_value=principal)
+            with patch(
+                "app.application.identity.enterprise.resolve_external_principal",
+                new=resolver,
+            ):
+                completed = client.get(
+                    query["redirect_uri"][0],
+                    params={"state": query["state"][0], "code": "origin-test-code"},
+                    follow_redirects=False,
+                )
+            assert urlsplit(completed.headers["location"]).path == "/auth/complete", (
+                "Opening the login page at localhost must not lose the nonce on a 127.0.0.1 callback.",
+                completed.headers["location"],
+            )
+            assert "nexaflow_sso_nonce=" in completed.request.headers.get("cookie", "")
+            assert start_url.startswith(canonical_origin + "/api/v1/auth/enterprise/")
+            assert "next=%2Fapp%2Fagents" in completed.headers["location"]
+            assert resolver.await_count == 1
+
+            # Canonicalizing the entry must preserve the browser binding check.
+            started = client.get(start_url, follow_redirects=False)
+            query = parse_qs(urlsplit(started.headers["location"]).query)
+            client.cookies.clear()
+            resolver.reset_mock()
+            with patch(
+                "app.application.identity.enterprise.resolve_external_principal",
+                new=resolver,
+            ):
+                rejected = client.get(
+                    query["redirect_uri"][0],
+                    params={"state": query["state"][0], "code": "missing-nonce-code"},
+                    follow_redirects=False,
+                )
+            assert "error=invalid_state" in rejected.headers["location"]
+            resolver.assert_not_awaited()
+
+
 def main() -> None:
+    asyncio.run(_test_wecom_token_cache())
+    asyncio.run(_test_wecom_error_diagnostics())
     assert safe_next_path("/app/agents") == "/app/agents"
     assert safe_next_path("https://evil.example") == "/app/apps"
     assert safe_next_path("//evil.example") == "/app/apps"
@@ -105,22 +430,13 @@ def main() -> None:
     feishu_query = parse_qs(
         urlsplit(
             build_authorization_url(
-                feishu, "https://app.example.com/callback", "state", "challenge"
+                feishu, "https://app.example.com/callback", "state"
             )
         ).query
     )
-    assert feishu_query["code_challenge_method"] == ["S256"]
-    feishu_qr_url = build_authorization_url(
-        feishu,
-        "https://app.example.com/callback",
-        "feishu_qr.state",
-        "unused",
-        feishu_qr=True,
-    )
-    assert urlsplit(feishu_qr_url).netloc == "passport.feishu.cn"
-    feishu_qr_query = parse_qs(urlsplit(feishu_qr_url).query)
-    assert feishu_qr_query["state"] == ["feishu_qr.state"]
-    assert "code_challenge" not in feishu_qr_query
+    assert "code_challenge_method" not in feishu_query
+    assert "code_challenge" not in feishu_query
+    assert feishu_query["redirect_uri"] == ["https://app.example.com/callback"]
     with patch(
         "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(
@@ -136,14 +452,31 @@ def main() -> None:
                 },
             ]
         ),
-    ):
+    ) as feishu_requests:
         resolved = asyncio.run(
             resolve_external_principal(
-                feishu, "secret", "code", "https://app.example.com/callback", "verifier"
+                feishu,
+                "secret",
+                "code",
+                "https://app.example.com/callback",
+                settings=settings(),
             )
         )
     assert resolved.subject_id == "ou-feishu"
     assert resolved.email == "fei@example.com"
+    assert feishu_requests.await_args_list[0].args == (
+        "POST", "https://accounts.feishu.cn/oauth/v3/token"
+    )
+    assert feishu_requests.await_args_list[0].kwargs["data"] == {
+        "grant_type": "authorization_code",
+        "client_id": "fei-client",
+        "client_secret": "secret",
+        "code": "code",
+        "redirect_uri": "https://app.example.com/callback",
+    }
+    assert feishu_requests.await_args_list[1].args == (
+        "GET", "https://open.feishu.cn/open-apis/authen/v1/user_info"
+    )
     delegated = AsyncMock(
         return_value=ExternalPrincipal(
             subject_id="ou-delegated",
@@ -161,7 +494,7 @@ def main() -> None:
                 "secret",
                 "code",
                 "https://app.example.com/callback",
-                "verifier",
+                settings=settings(),
             )
         )
     assert resolved.subject_id == "ou-delegated"
@@ -171,40 +504,8 @@ def main() -> None:
         "secret",
         "code",
         "https://app.example.com/callback",
-        "verifier",
     )
-    qr_requests = AsyncMock(
-        side_effect=[
-            {"access_token": "qr-token"},
-            {
-                "open_id": "ou-feishu-qr",
-                "tenant_key": "fei-tenant",
-                "name": "Feishu QR User",
-            },
-        ]
-    )
-    with patch(
-        "app.adapters.identity.enterprise._request_json",
-        new=qr_requests,
-    ):
-        resolved = asyncio.run(
-            resolve_external_principal(
-                feishu,
-                "secret",
-                "code",
-                "https://app.example.com/callback",
-                "unused",
-                feishu_qr=True,
-            )
-        )
-    assert resolved.subject_id == "ou-feishu-qr"
-    assert qr_requests.await_args_list[0].args[1] == (
-        "https://passport.feishu.cn/suite/passport/oauth/token"
-    )
-    assert "code_verifier" not in qr_requests.await_args_list[0].kwargs["data"]
-    assert qr_requests.await_args_list[1].args[1] == (
-        "https://passport.feishu.cn/suite/passport/oauth/userinfo"
-    )
+    assert delegated.await_args.kwargs["settings"] == settings()
     with patch(
         "app.adapters.identity.enterprise._request_json",
         new=AsyncMock(return_value={}),
@@ -213,7 +514,11 @@ def main() -> None:
             EnterpriseProviderError,
             lambda: asyncio.run(
                 resolve_external_principal(
-                    feishu, "secret", "code", "https://app.example.com/callback", "verifier"
+                    feishu,
+                    "secret",
+                    "code",
+                    "https://app.example.com/callback",
+                    settings=settings(),
                 )
             ),
         )
@@ -225,7 +530,11 @@ def main() -> None:
             EnterpriseProviderError,
             lambda: asyncio.run(
                 resolve_external_principal(
-                    feishu, "secret", "code", "https://app.example.com/callback", "verifier"
+                    feishu,
+                    "secret",
+                    "code",
+                    "https://app.example.com/callback",
+                    settings=settings(),
                 )
             ),
         )
@@ -233,13 +542,17 @@ def main() -> None:
     unsupported = EnterpriseIdentityConnection(provider="unknown")
     _raises(
         EnterpriseProviderError,
-        lambda: build_authorization_url(unsupported, "https://app.example.com", "state", "challenge"),
+        lambda: build_authorization_url(unsupported, "https://app.example.com", "state"),
     )
     _raises(
         EnterpriseProviderError,
         lambda: asyncio.run(
             resolve_external_principal(
-                unsupported, "secret", "code", "https://app.example.com", "verifier"
+                unsupported,
+                "secret",
+                "code",
+                "https://app.example.com",
+                settings=settings(),
             )
         ),
     )
@@ -276,6 +589,36 @@ def main() -> None:
             lambda: asyncio.run(_request_json("GET", "https://provider.example")),
         )
 
+    for http_status in (200, 400):
+        with patch(
+            "app.adapters.identity.enterprise.httpx2.AsyncClient",
+            return_value=_ProviderClient(
+                _ProviderResponse(
+                    {"code": 20071, "error_description": "secret=must-not-be-recorded"},
+                    status_code=http_status,
+                )
+            ),
+        ):
+            failure = _raises(
+                EnterpriseProviderError,
+                lambda: asyncio.run(
+                    _request_json("POST", "https://accounts.feishu.cn/oauth/v3/token")
+                ),
+            )
+        assert failure.http_status == http_status
+        assert failure.provider_code == 20071
+        assert failure.operation == "/oauth/v3/token"
+        assert "must-not-be-recorded" not in str(failure)
+
+    # WeCom's caller needs explicit token errors to trigger its bounded refresh.
+    with patch(
+        "app.adapters.identity.enterprise.httpx2.AsyncClient",
+        return_value=_ProviderClient(_ProviderResponse({"errcode": 42001})),
+    ):
+        assert asyncio.run(
+            _request_json("GET", "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo")
+        ) == {"errcode": 42001}
+
     rate_limit._client = SimpleNamespace(eval=AsyncMock(return_value=[61, 0]))
     exceeded = _raises(
         EnterpriseLoginRateLimitExceeded,
@@ -295,7 +638,7 @@ def main() -> None:
     dingtalk_query = parse_qs(
         urlsplit(
             build_authorization_url(
-                dingtalk, "https://app.example.com/callback", "state", "challenge"
+                dingtalk, "https://app.example.com/callback", "state"
             )
         ).query
     )
@@ -311,7 +654,7 @@ def main() -> None:
     wecom_query = parse_qs(
         urlsplit(
             build_authorization_url(
-                wecom, "https://app.example.com/callback", "state", "challenge"
+                wecom, "https://app.example.com/callback", "state"
             )
         ).query
     )
@@ -329,7 +672,11 @@ def main() -> None:
     ):
         resolved = asyncio.run(
             resolve_external_principal(
-                dingtalk, "secret", "code", "https://app.example.com/callback", "verifier"
+                dingtalk,
+                "secret",
+                "code",
+                "https://app.example.com/callback",
+                settings=settings(),
             )
         )
     assert resolved.subject_id == "union-id"
@@ -347,53 +694,78 @@ def main() -> None:
             EnterpriseProviderError,
             lambda: asyncio.run(
                 resolve_external_principal(
-                    dingtalk, "secret", "code", "https://app.example.com/callback", "verifier"
+                    dingtalk,
+                    "secret",
+                    "code",
+                    "https://app.example.com/callback",
+                    settings=settings(),
                 )
             ),
         )
 
-    with patch(
-        "app.adapters.identity.enterprise._request_json",
-        new=AsyncMock(
-            side_effect=[
-                {"errcode": 0, "access_token": "token"},
-                {"errcode": 0, "userid": "wecom-user"},
-            ]
+    with (
+        patch("redis.asyncio.Redis.from_url", return_value=_WeComRedis()),
+        patch(
+            "app.adapters.identity.enterprise._request_json",
+            new=AsyncMock(
+                side_effect=[
+                    {"errcode": 0, "access_token": "token", "expires_in": 7200},
+                    {"errcode": 0, "userid": "wecom-user"},
+                ]
+            ),
         ),
     ):
         resolved = asyncio.run(
             resolve_external_principal(
-                wecom, "secret", "code", "https://app.example.com/callback", "verifier"
+                wecom,
+                "secret",
+                "code",
+                "https://app.example.com/callback",
+                settings=settings(),
             )
         )
     assert resolved.subject_id == "wecom-user"
     assert resolved.tenant_id == "wecom-corp"
-    with patch(
-        "app.adapters.identity.enterprise._request_json",
-        new=AsyncMock(return_value={"errcode": 40013}),
-    ):
-        _raises(
-            EnterpriseProviderError,
-            lambda: asyncio.run(
-                resolve_external_principal(
-                    wecom, "secret", "code", "https://app.example.com/callback", "verifier"
-                )
-            ),
-        )
-    with patch(
-        "app.adapters.identity.enterprise._request_json",
-        new=AsyncMock(
-            side_effect=[
-                {"errcode": 0, "access_token": "token"},
-                {"errcode": 40029},
-            ]
+    with (
+        patch("redis.asyncio.Redis.from_url", return_value=_WeComRedis()),
+        patch(
+            "app.adapters.identity.enterprise._request_json",
+            new=AsyncMock(return_value={"errcode": 40013}),
         ),
     ):
         _raises(
             EnterpriseProviderError,
             lambda: asyncio.run(
                 resolve_external_principal(
-                    wecom, "secret", "code", "https://app.example.com/callback", "verifier"
+                    wecom,
+                    "secret",
+                    "code",
+                    "https://app.example.com/callback",
+                    settings=settings(),
+                )
+            ),
+        )
+    with (
+        patch("redis.asyncio.Redis.from_url", return_value=_WeComRedis()),
+        patch(
+            "app.adapters.identity.enterprise._request_json",
+            new=AsyncMock(
+                side_effect=[
+                    {"errcode": 0, "access_token": "token", "expires_in": 7200},
+                    {"errcode": 40029},
+                ]
+            ),
+        ),
+    ):
+        _raises(
+            EnterpriseProviderError,
+            lambda: asyncio.run(
+                resolve_external_principal(
+                    wecom,
+                    "secret",
+                    "code",
+                    "https://app.example.com/callback",
+                    settings=settings(),
                 )
             ),
         )
@@ -488,7 +860,9 @@ def main() -> None:
                 "id": connection["id"],
                 "provider": "feishu",
                 "name": "Company Feishu",
-                "start_url": f"/api/v1/auth/enterprise/{connection['id']}/start",
+                "start_url": (
+                    f"{settings().public_app_url}/api/v1/auth/enterprise/{connection['id']}/start"
+                ),
             }
         ]
         public_without_workspace = client.get("/api/v1/auth/enterprise/connections")
@@ -501,36 +875,18 @@ def main() -> None:
 
         state, authorize_url = _start(client, connection["id"])
         assert urlsplit(authorize_url).netloc == "accounts.feishu.cn"
+        assert parse_qs(urlsplit(authorize_url).query)["redirect_uri"] == [
+            connection["callback_url"]
+        ]
         principal = ExternalPrincipal(
             subject_id="ou_external",
             tenant_id="tenant_test",
             display_name="Enterprise User",
             email="untrusted@example.com",
         )
-        qr_prepared = client.post(
-            f"/api/v1/auth/enterprise/{connection['id']}/qr?next=/app/agents"
-        )
-        assert qr_prepared.status_code == 200, qr_prepared.text
-        qr_authorize_url = qr_prepared.json()["authorization_url"]
-        assert urlsplit(qr_authorize_url).netloc == "passport.feishu.cn"
-        qr_query = parse_qs(urlsplit(qr_authorize_url).query)
-        assert qr_query["state"][0].startswith("feishu_qr.")
-        assert "code_challenge" not in qr_query
-        qr_resolver = AsyncMock(return_value=principal)
-        with patch(
-            "app.application.identity.enterprise.resolve_external_principal",
-            new=qr_resolver,
-        ):
-            qr_login = client.get(
-                "/api/v1/auth/enterprise/callback/feishu"
-                f"?state={qr_query['state'][0]}&code=qr-code",
-                follow_redirects=False,
-            )
-        assert qr_login.status_code == 303, qr_login.text
-        assert qr_resolver.await_args.kwargs["feishu_qr"] is True
-        configured_connection = client.get(f"{base}/connections", headers=headers).json()[0]
-        assert configured_connection["tenant_id"] == "tenant_test"
-        state, _ = _start(client, connection["id"])
+        assert client.post(
+            f"/api/v1/auth/enterprise/{connection['id']}/qr"
+        ).status_code == 404
         with patch(
             "app.application.identity.enterprise.resolve_external_principal",
             new=AsyncMock(return_value=principal),
@@ -634,13 +990,32 @@ def main() -> None:
         provider_error_state, _ = _start(client, connection["id"])
         with patch(
             "app.application.identity.enterprise.resolve_external_principal",
-            new=AsyncMock(side_effect=EnterpriseProviderError("failed")),
+            new=AsyncMock(
+                side_effect=EnterpriseProviderError(
+                    "must-not-log-this-provider-description",
+                    operation="/oauth/v3/token",
+                    http_status=400,
+                    provider_code=20049,
+                )
+            ),
         ):
             provider_error = client.get(
                 f"/api/v1/auth/enterprise/callback/feishu?state={provider_error_state}&code=code",
                 follow_redirects=False,
             )
         assert "error=provider_error" in provider_error.headers["location"]
+        failure_logs = client.get(
+            "/api/v1/admin/system-logs?event=enterprise_identity.login_failed", headers=headers
+        )
+        assert failure_logs.status_code == 200, failure_logs.text
+        assert failure_logs.json()[0]["details"] == {
+            "provider": "feishu",
+            "operation": "/oauth/v3/token",
+            "http_status": 400,
+            "provider_code": 20049,
+            "missing_field": None,
+        }
+        assert "must-not-log" not in failure_logs.text
 
         wrong_tenant_state, _ = _start(client, connection["id"])
         with patch(
@@ -786,6 +1161,40 @@ def main() -> None:
         )
         assert wecom_config.status_code == 200, wecom_config.text
         assert wecom_config.json()["client_id"] == "wecom-corp"
+        wecom_error_state, _ = _start(
+            client, wecom_config.json()["id"], provider="wecom"
+        )
+        with patch(
+            "app.application.identity.enterprise.resolve_external_principal",
+            new=AsyncMock(
+                side_effect=EnterpriseProviderError(
+                    "raw provider text must not be logged",
+                    operation="/cgi-bin/gettoken",
+                    http_status=200,
+                    provider_code=40013,
+                )
+            ),
+        ):
+            failed_wecom = client.get(
+                "/api/v1/auth/enterprise/callback/wecom"
+                f"?state={wecom_error_state}&code=wecom-error-code",
+                follow_redirects=False,
+            )
+        assert "error=provider_error" in failed_wecom.headers["location"]
+        wecom_failure_logs = client.get(
+            "/api/v1/admin/system-logs?event=enterprise_identity.login_failed",
+            headers=headers,
+        )
+        assert wecom_failure_logs.status_code == 200, wecom_failure_logs.text
+        assert wecom_failure_logs.json()[0]["details"] == {
+            "provider": "wecom",
+            "operation": "/cgi-bin/gettoken",
+            "http_status": 200,
+            "provider_code": 40013,
+            "missing_field": None,
+        }
+        assert "wecom-error-code" not in wecom_failure_logs.text
+        assert "raw provider text" not in wecom_failure_logs.text
 
         dingtalk_config = client.put(
             f"{base}/connections/dingtalk",
@@ -860,6 +1269,7 @@ def main() -> None:
             "dingtalk",
             "wecom",
         }
+        _test_login_origin(client)
 
 
 if __name__ == "__main__":

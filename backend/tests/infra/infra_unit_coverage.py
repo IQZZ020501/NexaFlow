@@ -958,6 +958,7 @@ def test_stored_model_credentials_fallbacks() -> None:
                     RegisteredModelUpdateRequest(status="disabled"),
                     User(id="user-1"),
                     runtime_settings,
+                    workspace_role="admin",
                 )
             ),
             HTTPException,
@@ -2627,7 +2628,7 @@ def test_session_configuration() -> None:
             )
             create_engine.assert_called_once_with(
                 postgres_url,
-                connect_args={"application_name": "nexaflow-api"},
+                connect_args={"application_name": "nexaflow-api", "options": "-c timezone=UTC"},
                 pool_pre_ping=True,
             )
 
@@ -2638,7 +2639,7 @@ def test_session_configuration() -> None:
             )
             create_engine.assert_called_once_with(
                 postgres_url,
-                connect_args={"application_name": "nexaflow-worker"},
+                connect_args={"application_name": "nexaflow-worker", "options": "-c timezone=UTC"},
                 poolclass=NullPool,
             )
 
@@ -4435,9 +4436,10 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
     runtime_settings = settings()
     response_model = _make_model_entity(workspace_id, admin_id)
     response_model.id = "model-response-1"
+    response_model.visibility = "workspace"
     response_model.created_at = utc_now()
     response_model.updated_at = utc_now()
-    response = app_models.model_to_response(response_model)
+    response = app_models.model_to_response(response_model, actor, "admin")
     assert response.name == "DeepSeek Chat"
     assert response.has_api_key is True
     assert response.credential["api_key"] == "****1234"
@@ -4457,7 +4459,8 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
     legacy_model.id = "model-response-2"
     legacy_model.created_at = utc_now()
     legacy_model.updated_at = utc_now()
-    legacy_response = app_models.model_to_response(legacy_model)
+    legacy_model.visibility = "workspace"
+    legacy_response = app_models.model_to_response(legacy_model, actor, "admin")
     assert legacy_response.api_base == "https://api.anthropic.com"
 
     catalog = app_models.list_provider_catalog()
@@ -4514,9 +4517,13 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
             409,
         )
 
-        model = await app_models.get_registered_model(db, workspace_id, created_id)
+        model = await app_models.get_registered_model(
+            db, workspace_id, created_id, actor
+        )
         assert model.id == created_id
-        await expect_http_error_async(app_models.get_registered_model(db, workspace_id, "missing"), 404)
+        await expect_http_error_async(
+            app_models.get_registered_model(db, workspace_id, "missing", actor), 404
+        )
         db.add(WorkspaceOrm(id="other-ws", name="Other WS", slug="other-ws", is_default=False))
         await db.commit()
         cross_model = _make_model_entity("other-ws", admin_id, name="Cross")
@@ -4524,11 +4531,13 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
         await db.commit()
         await db.refresh(cross_model)
         await expect_http_error_async(
-            app_models.get_registered_model(db, workspace_id, cross_model.id),
+            app_models.get_registered_model(db, workspace_id, cross_model.id, actor),
             404,
         )
 
-        listed = await app_models.list_registered_models(db, workspace_id)
+        listed = await app_models.list_registered_models(
+            db, workspace_id, actor=actor, workspace_role="admin"
+        )
         assert [item.name for item in listed] == ["Unit Created Model"]
 
         # empty model name -> 422
@@ -4566,38 +4575,50 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
             RegisteredModelUpdateRequest(status="disabled"),
             actor,
             runtime_settings,
+            workspace_role="admin",
         )
         assert updated.status == "disabled"
 
         # update: rotate api key
-        model = await app_models.get_registered_model(db, workspace_id, created_id)
+        model = await app_models.get_registered_model(
+            db, workspace_id, created_id, actor
+        )
         rotated = await app_models.update_registered_model(
             db,
             model,
             RegisteredModelUpdateRequest(credential={"api_key": "sk-rotated-9999"}),
             actor,
             runtime_settings,
+            workspace_role="admin",
         )
         assert rotated.credential["api_key"] == "****9999"
 
         # update: change provider (fresh credentials path)
-        model = await app_models.get_registered_model(db, workspace_id, created_id)
+        model = await app_models.get_registered_model(
+            db, workspace_id, created_id, actor
+        )
         swapped = await app_models.update_registered_model(
             db,
             model,
             RegisteredModelUpdateRequest(
                 provider="model_custom_provider",
                 provider_type="openai_compatible",
-                credential={"api_base": "https://api.example.com", "api_key": "sk-swap-1234"},
+                credential={
+                    "api_base": "https://api.example.com",
+                    "api_key": "sk-swap-1234",
+                },
             ),
             actor,
             runtime_settings,
+            workspace_role="admin",
         )
         assert swapped.provider_type == "openai_compatible"
         assert swapped.api_base == "https://api.example.com"
 
         # update: empty model name -> 422
-        model = await app_models.get_registered_model(db, workspace_id, created_id)
+        model = await app_models.get_registered_model(
+            db, workspace_id, created_id, actor
+        )
         await expect_http_error_async(
             app_models.update_registered_model(
                 db,
@@ -4605,6 +4626,7 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
                 RegisteredModelUpdateRequest(model_name="   "),
                 actor,
                 runtime_settings,
+                workspace_role="admin",
             ),
             422,
         )
@@ -4617,6 +4639,7 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
                 RegisteredModelUpdateRequest(provider_type="anthropic"),
                 actor,
                 runtime_settings,
+                workspace_role="admin",
             ),
             422,
         )
@@ -4635,8 +4658,11 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
             ),
             actor,
             runtime_settings,
+            workspace_role="admin",
         )
-        model = await app_models.get_registered_model(db, workspace_id, created_id)
+        model = await app_models.get_registered_model(
+            db, workspace_id, created_id, actor
+        )
         await expect_http_error_async(
             app_models.update_registered_model(
                 db,
@@ -4644,13 +4670,14 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
                 RegisteredModelUpdateRequest(name="Second Model"),
                 actor,
                 runtime_settings,
+                workspace_role="admin",
             ),
             409,
         )
 
-        await app_models.delete_registered_model(db, model, actor)
+        await app_models.delete_registered_model(db, model, actor, "admin")
         await expect_http_error_async(
-            app_models.get_registered_model(db, workspace_id, created_id),
+            app_models.get_registered_model(db, workspace_id, created_id, actor),
             404,
         )
 
@@ -4659,7 +4686,12 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
     mocked_db.add = MagicMock()
     mocked_db.scalar.return_value = None
     mocked_db.commit.side_effect = IntegrityError("dup", {}, Exception())
-    entity = _make_model_entity(workspace_id, admin_id, name="Conflict Model")
+    from app.entities.models import RegisteredModel as ModelEntity
+    from app.infra.db.mapping import to_entity
+
+    entity = to_entity(
+        ModelEntity, _make_model_entity(workspace_id, admin_id, name="Conflict Model")
+    )
     await expect_http_error_async(
         app_models.create_registered_model(mocked_db, workspace_id, create_payload, actor, runtime_settings),
         409,
@@ -4674,13 +4706,16 @@ async def db_application_models_tests(workspace_id: str, admin_id: str, actor: U
             RegisteredModelUpdateRequest(status="disabled"),
             actor,
             runtime_settings,
+            workspace_role="admin",
         ),
         409,
     )
     mocked_db3 = AsyncMock()
     mocked_db3.add = MagicMock()
     mocked_db3.commit.side_effect = IntegrityError("in-use", {}, Exception())
-    await expect_http_error_async(app_models.delete_registered_model(mocked_db3, entity, actor), 409)
+    await expect_http_error_async(
+        app_models.delete_registered_model(mocked_db3, entity, actor, "admin"), 409
+    )
 
 
 async def db_repositories_mcp_tests(workspace_id: str, admin_id: str) -> None:

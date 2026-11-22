@@ -46,6 +46,8 @@ def evaluate_tool_authorization(
             permission=None,
         )
     is_owner = tool.created_by_user_id == actor.id
+    if tool.kind == "integration" and not is_owner:
+        return ToolAuthorization(access=ToolAccess(can_view=False, can_use=False, can_manage=False), permission=None)
     grant_permission: ToolGrant | None = None
     if grant is not None and grant.permission in TOOL_GRANT_PERMISSIONS:
         grant_permission = cast(ToolGrant, grant.permission)
@@ -178,6 +180,8 @@ async def upsert_tool_permission(
         lock=True,
     )
     validate_tool_permission(permission)
+    if tool.kind == "integration":
+        raise HTTPException(422, "Personal integration connections cannot be shared.")
     target = await repository.get_active_workspace_member(
         db,
         workspace_id,

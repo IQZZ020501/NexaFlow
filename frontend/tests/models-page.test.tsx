@@ -32,6 +32,8 @@ function model(overrides: Partial<RegisteredModel>): RegisteredModel {
     credential: {},
     api_base: "https://models.example.com/v1",
     has_api_key: false,
+    visibility: "workspace",
+    can_manage: true,
     api_key_hint: null,
     meta: {},
     created_by_user_id: "u-1",
@@ -42,6 +44,7 @@ function model(overrides: Partial<RegisteredModel>): RegisteredModel {
 }
 
 beforeEach(() => {
+  Object.assign(session, makeSession())
   modelListUrls.length = 0
   globalThis.fetch = ((input: RequestInfo | URL) => {
     const url = String(input)
@@ -132,6 +135,146 @@ beforeEach(() => {
 })
 
 describe("LlmPage", () => {
+  test("members can add personal models and only manage their own cards", async () => {
+    session.me.user.is_global_admin = false
+    session.me.memberships[0].role = "member"
+    let submitted: Record<string, unknown> | undefined
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/models")) {
+        if (init?.method === "POST") {
+          submitted = JSON.parse(String(init.body))
+          return Promise.resolve(
+            jsonResponse(
+              model({
+                id: "created-mine",
+                visibility: "personal",
+                name: "Mine",
+              })
+            )
+          )
+        }
+        return Promise.resolve(
+          jsonResponse([
+            model({ visibility: "personal", name: "Mine" }),
+            model({ id: "shared", name: "Shared", can_manage: false }),
+          ])
+        )
+      }
+      return originalFetch(input, init)
+    }) as typeof fetch
+    renderPage(<LlmPage />)
+    const mine = (await screen.findByText("Mine")).closest<HTMLElement>(
+      "[data-slot='resource-card']"
+    )!
+    const shared = screen
+      .getByText("Shared")
+      .closest<HTMLElement>("[data-slot='resource-card']")!
+    expect(within(mine).getByRole("button", { name: "编辑" })).toBeTruthy()
+    expect(within(shared).queryByRole("button", { name: "编辑" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "批量管理" }))
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2)
+    expect(within(shared).queryByRole("checkbox")).toBeNull()
+    expect(shared.getAttribute("role")).not.toBe("button")
+
+    fireEvent.click(screen.getByRole("button", { name: "接入模型" }))
+    fireEvent.click(await screen.findByRole("button", { name: /Custom/ }))
+    const dialog = await screen.findByRole("dialog", { name: "接入模型" })
+    expect(within(dialog).getByText("仅自己")).toBeTruthy()
+    expect(within(dialog).queryByRole("radio")).toBeNull()
+    expect(within(dialog).queryByText("工作空间共享")).toBeNull()
+    fireEvent.change(within(dialog).getByLabelText("名称"), {
+      target: { value: "Mine" },
+    })
+    fireEvent.change(
+      within(dialog).getByRole("textbox", { name: "基础模型" }),
+      { target: { value: "alpha-chat" } }
+    )
+    fireEvent.submit(dialog.querySelector("form")!)
+    await waitFor(() => expect(submitted?.visibility).toBe("personal"))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  test("administrators choose personal or workspace scope, defaulting to personal", async () => {
+    let submitted: Record<string, unknown> | undefined
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST" && String(input).includes("/models")) {
+        submitted = JSON.parse(String(init.body))
+        return Promise.resolve(
+          jsonResponse(
+            model({ id: "created-team", name: "Team", visibility: "workspace" })
+          )
+        )
+      }
+      return originalFetch(input, init)
+    }) as typeof fetch
+    renderPage(<LlmPage />)
+    await screen.findByText("Alpha")
+    fireEvent.click(screen.getByRole("button", { name: "接入模型" }))
+    fireEvent.click(await screen.findByRole("button", { name: /Custom/ }))
+    const dialog = await screen.findByRole("dialog", { name: "接入模型" })
+    const personal = within(dialog).getByRole("radio", {
+      name: /仅自己/,
+    }) as HTMLInputElement
+    const shared = within(dialog).getByRole("radio", {
+      name: /工作空间共享/,
+    }) as HTMLInputElement
+    expect(personal.checked).toBe(true)
+    fireEvent.click(shared)
+    expect(shared.checked).toBe(true)
+    fireEvent.change(within(dialog).getByLabelText("名称"), {
+      target: { value: "Team" },
+    })
+    fireEvent.change(
+      within(dialog).getByRole("textbox", { name: "基础模型" }),
+      { target: { value: "alpha-chat" } }
+    )
+    fireEvent.submit(dialog.querySelector("form")!)
+    await waitFor(() => expect(submitted?.visibility).toBe("workspace"))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  test("filters scope on the server and keeps the scope fixed when editing", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes("/models")) {
+        modelListUrls.push(url)
+        return Promise.resolve(
+          jsonResponse(
+            url.includes("visibility=personal")
+              ? [model({ visibility: "personal", name: "Mine" })]
+              : [model({})]
+          )
+        )
+      }
+      return originalFetch(input, init)
+    }) as typeof fetch
+    renderPage(<LlmPage />)
+    await screen.findByText("Alpha")
+    fireEvent.click(screen.getByRole("button", { name: "我的模型" }))
+    const heading = await screen.findByText("Mine")
+    expect(screen.queryByText("Alpha")).toBeNull()
+    expect(
+      modelListUrls.some((url) => url.includes("visibility=personal"))
+    ).toBe(true)
+    expect(
+      screen
+        .getByRole("button", { name: "我的模型" })
+        .getAttribute("aria-pressed")
+    ).toBe("true")
+    const card = heading.closest<HTMLElement>("[data-slot='resource-card']")!
+    fireEvent.click(within(card).getByRole("button", { name: "编辑" }))
+    const dialog = await screen.findByRole("dialog", { name: "编辑模型" })
+    expect(within(dialog).queryByRole("radio")).toBeNull()
+    expect(
+      within(dialog).getByText(
+        "使用范围创建后不可更改，如需其他范围请重新接入。"
+      )
+    ).toBeTruthy()
+  })
+
   test("sorts models and filters them by directory", async () => {
     renderPage(<LlmPage />)
 

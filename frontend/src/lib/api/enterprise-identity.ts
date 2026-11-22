@@ -15,10 +15,6 @@ export type PublicEnterpriseConnections = {
   connections: PublicEnterpriseConnection[]
 }
 
-export type EnterpriseQrLogin = {
-  authorization_url: string
-}
-
 export type EnterpriseConnection = {
   id: string
   workspace_id: string
@@ -56,14 +52,6 @@ export function listPublicEnterpriseConnections(workspaceId?: string) {
     : ""
   return request<PublicEnterpriseConnections>(
     `/api/v1/auth/enterprise/connections${query}`
-  )
-}
-
-export function prepareEnterpriseQrLogin(connectionId: string, next?: string) {
-  const query = next ? `?next=${encodeURIComponent(next)}` : ""
-  return request<EnterpriseQrLogin>(
-    `/api/v1/auth/enterprise/${encodeURIComponent(connectionId)}/qr${query}`,
-    { method: "POST" }
   )
 }
 

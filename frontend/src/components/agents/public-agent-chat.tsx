@@ -22,6 +22,7 @@ import {
   mergeAgentProcessSnapshot,
 } from "@/lib/agent-process-stream"
 import { useRouter } from "next/navigation"
+import { integrationToolName } from "@/lib/integrations"
 import {
   BotIcon,
   BrainIcon,
@@ -136,7 +137,9 @@ export function publicToolName(
 ) {
   const fallback = event.tool_label || event.tool_name || ""
   return t
-    ? (builtinToolDisplayName(event.tool_name || "", t) ?? fallback)
+    ? (builtinToolDisplayName(event.tool_name || "", t) ??
+        integrationToolName(event.tool_name || "", t) ??
+        fallback)
     : fallback
 }
 
@@ -414,7 +417,9 @@ function PublicPendingToolCall({
     count: null,
     tool_name: call.tool_name,
     tool_kind:
-      call.tool_kind === "knowledge" || call.tool_kind === "mcp"
+      call.tool_kind === "knowledge" ||
+      call.tool_kind === "mcp" ||
+      call.tool_kind === "integration"
         ? call.tool_kind
         : "unknown",
     server_name: call.server_name,
@@ -1350,6 +1355,7 @@ export function PublicAgentChat({
           publicChatUrl(agentId, conversationId, projectId)
         )
       }
+      notify("success", t(projectId ? "对话已移入项目" : "对话已移出项目"))
     } catch (error) {
       notify("error", getErrorMessage(error, t))
     } finally {
@@ -1414,6 +1420,7 @@ export function PublicAgentChat({
           publicChatUrl(agentId, conversationRef.current)
         )
       }
+      notify("success", t("项目已解散"))
     } catch (error) {
       notify("error", getErrorMessage(error, t))
     } finally {
@@ -1503,6 +1510,7 @@ export function PublicAgentChat({
         if (nextId) selectConversation(nextId)
         else startNewConversation()
       }
+      notify("success", t("对话已删除"))
     } catch (error) {
       setSendError(getErrorMessage(error, t))
     } finally {
@@ -2614,6 +2622,7 @@ export function PublicAgentChat({
             token={token}
             onClose={() => setEditingProjectId(null)}
             onSave={handleSaveProject}
+            onMessage={notify}
             onReturnFocus={() => {
               const opener = projectSettingsRef.current?.isConnected
                 ? projectSettingsRef.current
@@ -2641,6 +2650,7 @@ export function PublicAgentChat({
               projectData.setProjects((current) => [project, ...current])
               startNewConversation(project.id)
               setIsHistoryOpen(false)
+              notify("success", t("项目已创建"))
             }}
           />
         ) : null}

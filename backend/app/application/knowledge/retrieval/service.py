@@ -102,6 +102,7 @@ async def _rerank_hits(
     query: str,
     hits: list[tuple[KnowledgeDocumentChunk, RankedHit]],
     settings: Settings,
+    user_id: str | None = None,
 ) -> tuple[list[tuple[KnowledgeDocumentChunk, RankedHit]], RerankStatus]:
     if knowledge_base.reranker_model_id is None:
         return hits, "not_configured"
@@ -113,6 +114,7 @@ async def _rerank_hits(
             knowledge_base.workspace_id,
             knowledge_base.reranker_model_id,
             "RERANKER",
+            user_id=user_id,
         )
     except HTTPException:
         return hits, "fallback"
@@ -141,6 +143,8 @@ async def retrieve_knowledge_base(
     knowledge_base: KnowledgeBase,
     payload: KnowledgeQueryRequest,
     settings: Settings,
+    *,
+    user_id: str | None = None,
 ) -> KnowledgeQueryInspectResponse:
     """Run production retrieval once and return hits plus bounded diagnostics."""
     started_at = time.perf_counter()
@@ -153,7 +157,9 @@ async def retrieve_knowledge_base(
     candidate_started_at = time.perf_counter()
     embedding_model = None
     if use_vector:
-        embedding_model = await resolve_embedding_model(db, knowledge_base)
+        embedding_model = await resolve_embedding_model(
+            db, knowledge_base, user_id=user_id
+        )
         if embedding_model is None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -209,6 +215,7 @@ async def retrieve_knowledge_base(
         payload.query,
         valid_hits,
         settings,
+        user_id,
     )
     stage_duration_ms["rerank"] = _elapsed_ms(rerank_started_at)
 
@@ -412,8 +419,14 @@ async def query_knowledge_base(
     knowledge_base: KnowledgeBase,
     payload: KnowledgeQueryRequest,
     settings: Settings,
+    *,
+    user_id: str | None = None,
 ) -> list[KnowledgeQueryHitResponse]:
-    return (await retrieve_knowledge_base(db, knowledge_base, payload, settings)).hits
+    return (
+        await retrieve_knowledge_base(
+            db, knowledge_base, payload, settings, user_id=user_id
+        )
+    ).hits
 
 
 __all__ = ["query_knowledge_base", "retrieve_knowledge_base"]

@@ -77,6 +77,11 @@ from app.domain.projects.models import (  # noqa: F401
     ProjectRunState,
 )
 from app.domain.resource_folders.models import ResourceFolder  # noqa: F401
+from app.domain.tools.integrations.models import (  # noqa: F401
+    IntegrationApplication,
+    IntegrationAuthorization,
+    IntegrationConnection,
+)
 from app.domain.tools.mcp.oauth_models import (  # noqa: F401
     McpOAuthAttempt,
     McpOAuthConnection,

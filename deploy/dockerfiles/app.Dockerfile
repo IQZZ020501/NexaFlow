@@ -25,6 +25,7 @@ RUN bun run build
 
 FROM python:3.11-slim-bookworm@sha256:2e32f7d302adc1c37428355c1e646897c0c53f4fd60b6a551245fb90ee129f91 AS runtime
 ENV NODE_ENV=production \
+    TZ=Asia/Shanghai \
     NEXT_TELEMETRY_DISABLED=1 \
     PATH=/app/.venv/bin:$PATH
 RUN apt-get update \
@@ -32,6 +33,7 @@ RUN apt-get update \
         ca-certificates \
         libatomic1 \
         libstdc++6 \
+        tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=backend-builder /app/.venv /app/.venv

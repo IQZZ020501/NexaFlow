@@ -1349,7 +1349,7 @@ def exercise_workspace_analytics() -> None:
             {
                 "question": "How do I deploy?",
                 "count": 3,
-                "latest_at": "2026-08-04T00:00:00Z",
+                "latest_at": "2026-08-04T08:00:00+08:00",
             }
         ]
         assert payload["metadata"] == {

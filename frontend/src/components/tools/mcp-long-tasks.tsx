@@ -33,12 +33,14 @@ export function McpLongTasksDialog({
   serverId,
   onClose,
   onChanged,
+  onMessage,
 }: {
   token: string
   workspaceId: string
   serverId: string
   onClose: () => void
   onChanged: () => void
+  onMessage: (kind: "success" | "error", message: string) => void
 }) {
   const { t } = useLanguage()
   const [configuration, setConfiguration] =
@@ -77,8 +79,11 @@ export function McpLongTasksDialog({
       )
       setConfiguration(saved)
       onChanged()
+      onMessage("success", t(remove ? "已恢复普通调用" : "长任务契约已保存"))
     } catch (error) {
-      setError(getErrorMessage(error, t))
+      const message = getErrorMessage(error, t)
+      setError(message)
+      onMessage("error", message)
     } finally {
       setBusy(false)
     }

@@ -143,12 +143,14 @@ export function McpOAuthDialog({
   serverId,
   onClose,
   onChanged,
+  onMessage,
 }: {
   token: string
   workspaceId: string
   serverId: string
   onClose: () => void
   onChanged: () => void
+  onMessage: (kind: "success" | "error", message: string) => void
 }) {
   const { t } = useLanguage()
   const [status, setStatus] = React.useState<api.McpOAuthStatus | null>(null)
@@ -197,7 +199,9 @@ export function McpOAuthDialog({
     try {
       await action()
     } catch (error) {
-      setError(getErrorMessage(error, t))
+      const message = getErrorMessage(error, t)
+      setError(message)
+      onMessage("error", message)
     } finally {
       setBusy(false)
     }
@@ -248,6 +252,7 @@ export function McpOAuthDialog({
                     client_secret: "",
                   })
                   onChanged()
+                  onMessage("success", t("OAuth 配置已保存"))
                 })
               }}
             >
@@ -299,6 +304,7 @@ export function McpOAuthDialog({
                           client_secret: "",
                         })
                         onChanged()
+                        onMessage("success", t("OAuth 连接已断开"))
                       })
                     }
                   >

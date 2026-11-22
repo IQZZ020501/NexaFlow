@@ -27,6 +27,8 @@ import {
   PlusIcon,
   SearchIcon,
   Trash2Icon,
+  UserRoundIcon,
+  UsersRoundIcon,
 } from "lucide-react"
 import { formatDateTime, getMembershipRole } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
@@ -91,6 +93,7 @@ import type {
   BaseModelOption,
   ModelCredentialField,
   ModelProviderCatalog,
+  ModelVisibility,
   RegisteredModel,
 } from "@/lib/api/llm"
 import { languageLocales, type TFunction, type TranslationKey } from "@/i18n"
@@ -185,6 +188,7 @@ const PROVIDER_BRAND_ICONS: Record<string, ProviderBrandIcon> = {
 }
 
 type ModelForm = {
+  visibility: ModelVisibility
   id: string | null
   name: string
   provider: string
@@ -202,6 +206,7 @@ type ModelSortKey = "updated_at" | "created_at" | "name"
 const DEFAULT_LLM_REQUEST_PARAMS = "{}"
 
 const EMPTY_MODEL_FORM: ModelForm = {
+  visibility: "personal",
   id: null,
   name: "",
   provider: "",
@@ -231,11 +236,15 @@ export function LlmPage() {
   const [modelsHasMore, setModelsHasMore] = React.useState(true)
   const [isModelsLoadingMore, setIsModelsLoadingMore] = React.useState(false)
   const modelsLoadingRef = React.useRef(false)
+  const modelsRequestId = React.useRef(0)
   const [baseModels, setBaseModels] = React.useState<BaseModelOption[]>([])
   const [credentialFields, setCredentialFields] = React.useState<
     ModelCredentialField[]
   >([])
   const [selectedProvider, setSelectedProvider] = React.useState("")
+  const [visibilityFilter, setVisibilityFilter] = React.useState<
+    "all" | ModelVisibility
+  >("all")
   const [search, setSearch] = React.useState("")
   const [modelSortKey, setModelSortKey] =
     React.useState<ModelSortKey>("updated_at")
@@ -257,7 +266,7 @@ export function LlmPage() {
   const baseModelRequestId = React.useRef(0)
 
   const workspaceRole = getMembershipRole(me, selectedWorkspaceId)
-  const canManage = workspaceRole === "admin"
+  const canCreateShared = workspaceRole === "admin"
 
   const reportError = React.useCallback(
     (error: unknown) => {
@@ -292,6 +301,7 @@ export function LlmPage() {
   }, [reportError, token])
 
   const loadModels = React.useCallback(async () => {
+    const requestId = ++modelsRequestId.current
     if (!token) {
       setModels([])
       return
@@ -310,17 +320,23 @@ export function LlmPage() {
         offset: 0,
         folderId: resourceFolders.selectedFolderId ?? undefined,
         sort: modelSortKey,
+        visibility: visibilityFilter === "all" ? undefined : visibilityFilter,
       })
+      if (requestId !== modelsRequestId.current) return
       setModels(batch)
       setModelsHasMore(batch.length === CARD_BATCH_SIZE)
     } catch (error) {
+      if (requestId !== modelsRequestId.current) return
       setModels([])
       reportError(error)
     } finally {
-      modelsLoadingRef.current = false
-      setIsModelsLoading(false)
+      if (requestId === modelsRequestId.current) {
+        modelsLoadingRef.current = false
+        setIsModelsLoading(false)
+      }
     }
   }, [
+    visibilityFilter,
     modelSortKey,
     reportError,
     resourceFolders.selectedFolderId,
@@ -336,6 +352,7 @@ export function LlmPage() {
       return
     }
     modelsLoadingRef.current = true
+    const requestId = modelsRequestId.current
     setIsModelsLoadingMore(true)
     try {
       const batch = await listRegisteredModels(token, selectedWorkspaceId, {
@@ -343,16 +360,20 @@ export function LlmPage() {
         offset: models.length,
         folderId: resourceFolders.selectedFolderId ?? undefined,
         sort: modelSortKey,
+        visibility: visibilityFilter === "all" ? undefined : visibilityFilter,
       })
+      if (requestId !== modelsRequestId.current) return
       setModels((current) => [...current, ...batch])
       setModelsHasMore(batch.length === CARD_BATCH_SIZE)
     } catch (error) {
       reportError(error)
     } finally {
-      modelsLoadingRef.current = false
+      if (requestId === modelsRequestId.current)
+        modelsLoadingRef.current = false
       setIsModelsLoadingMore(false)
     }
   }, [
+    visibilityFilter,
     modelSortKey,
     models.length,
     modelsHasMore,
@@ -473,6 +494,8 @@ export function LlmPage() {
   const visibleModels = React.useMemo(() => {
     const query = search.trim().toLowerCase()
     return models.filter((model) => {
+      if (visibilityFilter !== "all" && model.visibility !== visibilityFilter)
+        return false
       if (!isInSelectedFolder(model.folder_id)) {
         return false
       }
@@ -492,10 +515,17 @@ export function LlmPage() {
         .toLowerCase()
         .includes(query)
     })
-  }, [models, providerCatalog, isInSelectedFolder, search, selectedProvider])
-  const movableModelIds = canManage
-    ? visibleModels.map((model) => model.id)
-    : []
+  }, [
+    models,
+    providerCatalog,
+    isInSelectedFolder,
+    search,
+    selectedProvider,
+    visibilityFilter,
+  ])
+  const movableModelIds = visibleModels
+    .filter((model) => model.can_manage)
+    .map((model) => model.id)
 
   if (!token || !me) {
     return null
@@ -510,6 +540,10 @@ export function LlmPage() {
 
     return {
       ...EMPTY_MODEL_FORM,
+      visibility:
+        visibilityFilter === "workspace" && canCreateShared
+          ? "workspace"
+          : "personal",
       provider: provider.provider,
       provider_type: provider.provider_type,
       model_type: provider.model_types[0] ?? "LLM",
@@ -537,6 +571,7 @@ export function LlmPage() {
   function openEditModel(model: RegisteredModel) {
     setModelForm({
       id: model.id,
+      visibility: model.visibility,
       name: model.name,
       provider: model.provider,
       provider_type: model.provider_type,
@@ -620,6 +655,7 @@ export function LlmPage() {
     }
 
     const payload = {
+      visibility: modelForm.visibility,
       name: modelForm.name,
       provider: modelForm.provider,
       provider_type: modelForm.provider_type,
@@ -667,6 +703,12 @@ export function LlmPage() {
           )
         )
       }
+      if (
+        visibilityFilter !== "all" &&
+        visibilityFilter !== modelForm.visibility
+      ) {
+        setVisibilityFilter(modelForm.visibility)
+      }
       setIsDialogOpen(false)
       setIsProviderPickerOpen(false)
       setModelForm(EMPTY_MODEL_FORM)
@@ -711,10 +753,10 @@ export function LlmPage() {
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold">{t("模型")}</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {t("按模型维度接入供应商、基础模型和访问凭据。")}
+            {t("管理自己的模型，或使用工作空间共享模型。")}
           </p>
         </div>
-        {canManage ? (
+        {selectedWorkspaceId ? (
           <Button type="button" className="shrink-0" onClick={openCreateModel}>
             <PlusIcon data-icon="inline-start" />
             {t("接入模型")}
@@ -753,6 +795,41 @@ export function LlmPage() {
             />
           }
         >
+          <div
+            className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1"
+            role="group"
+            aria-label={t("模型范围")}
+          >
+            {(
+              [
+                { value: "all", label: t("全部模型") },
+                { value: "personal", label: t("我的模型") },
+                { value: "workspace", label: t("工作空间共享") },
+              ] as const
+            ).map((scope) => (
+              <Button
+                key={scope.value}
+                type="button"
+                size="sm"
+                variant={
+                  visibilityFilter === scope.value ? "secondary" : "ghost"
+                }
+                className={cn(
+                  "shrink-0",
+                  visibilityFilter === scope.value && "bg-background shadow-sm"
+                )}
+                aria-pressed={visibilityFilter === scope.value}
+                onClick={() => {
+                  setVisibilityFilter(scope.value)
+                  setSelectedModelIds([])
+                  setIsBatchManaging(false)
+                }}
+              >
+                {scope.label}
+              </Button>
+            ))}
+          </div>
+
           <section className="rounded-lg border bg-background p-3 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
@@ -851,10 +928,12 @@ export function LlmPage() {
                   return (
                     <ResourceCard
                       key={model.id}
-                      interactive={isBatchManaging && canManage}
+                      interactive={isBatchManaging && model.can_manage}
                       selected={selected}
                       pressed={
-                        isBatchManaging && canManage ? selected : undefined
+                        isBatchManaging && model.can_manage
+                          ? selected
+                          : undefined
                       }
                       onActivate={() =>
                         setSelectedModelIds((current) =>
@@ -899,6 +978,25 @@ export function LlmPage() {
                               </span>
                             </p>
                             <ResourceCardMeta>
+                              <span className="inline-flex items-center gap-1">
+                                {model.visibility === "personal" ? (
+                                  <UserRoundIcon
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                ) : (
+                                  <UsersRoundIcon
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                )}
+                                {t(
+                                  model.visibility === "personal"
+                                    ? "仅自己"
+                                    : "工作空间共享"
+                                )}
+                              </span>
+                              <span className="mx-1.5">·</span>
                               {t("更新时间")} ·{" "}
                               {formatDateTime(
                                 model.updated_at,
@@ -907,7 +1005,7 @@ export function LlmPage() {
                             </ResourceCardMeta>
                           </div>
                         </div>
-                        {canManage ? (
+                        {model.can_manage ? (
                           <ResourceCardActions>
                             {isBatchManaging ? (
                               <input
@@ -985,15 +1083,27 @@ export function LlmPage() {
             ) : (
               <EmptyState
                 icon={BrainCircuitIcon}
-                title={t("还没有模型")}
+                title={t(
+                  visibilityFilter === "personal"
+                    ? "还没有个人模型"
+                    : visibilityFilter === "workspace"
+                      ? "暂无工作空间共享模型"
+                      : "还没有模型"
+                )}
                 description={t(
-                  "接入模型后，应用可以使用它进行对话、检索增强和工具调用。"
+                  visibilityFilter === "workspace"
+                    ? "管理员接入的共享模型会显示在这里，所有成员均可使用。"
+                    : "接入自己的模型后，即可在应用中选择使用。"
                 )}
                 action={
-                  canManage ? (
+                  selectedWorkspaceId ? (
                     <Button type="button" onClick={openCreateModel}>
                       <PlusIcon data-icon="inline-start" />
-                      {t("接入模型")}
+                      {t(
+                        visibilityFilter === "workspace" && !canCreateShared
+                          ? "接入个人模型"
+                          : "接入模型"
+                      )}
                     </Button>
                   ) : null
                 }
@@ -1070,6 +1180,7 @@ export function LlmPage() {
         providerCatalog={providerCatalog}
         baseModels={baseModels}
         credentialFields={credentialFields}
+        canCreateShared={canCreateShared}
         open={isDialogOpen}
         isSaving={isSaving}
         isBaseModelsLoading={isBaseModelsLoading}
@@ -1244,6 +1355,7 @@ function ProviderIcon({
  */
 function ModelDialog({
   form,
+  canCreateShared,
   providerCatalog,
   baseModels,
   credentialFields,
@@ -1258,6 +1370,7 @@ function ModelDialog({
   onSubmit,
 }: {
   form: ModelForm
+  canCreateShared: boolean
   providerCatalog: ModelProviderCatalog[]
   baseModels: BaseModelOption[]
   credentialFields: ModelCredentialField[]
@@ -1297,6 +1410,92 @@ function ModelDialog({
         </DialogHeader>
         <form onSubmit={onSubmit}>
           <FieldGroup>
+            <fieldset
+              className="min-w-0 space-y-2"
+              disabled={isSaving}
+              aria-describedby="model-visibility-description"
+            >
+              <legend className="mb-2 text-sm font-medium">
+                {t("使用范围")}
+              </legend>
+              {!isEditing && canCreateShared ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(
+                    [
+                      {
+                        value: "personal",
+                        label: t("仅自己"),
+                        description: t("仅你可以查看、使用和管理。"),
+                        Icon: UserRoundIcon,
+                      },
+                      {
+                        value: "workspace",
+                        label: t("工作空间共享"),
+                        description: t("所有成员可使用，由管理员管理。"),
+                        Icon: UsersRoundIcon,
+                      },
+                    ] as const
+                  ).map(({ value, label, description, Icon }) => (
+                    <label
+                      key={value}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors",
+                        form.visibility === value
+                          ? "border-primary bg-primary/5"
+                          : "hover:bg-muted/50"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="model-visibility"
+                        value={value}
+                        checked={form.visibility === value}
+                        onChange={() =>
+                          onFormChange({ ...form, visibility: value })
+                        }
+                        className="mt-1 size-4 accent-primary"
+                      />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5 text-sm font-medium">
+                          <Icon aria-hidden="true" className="size-4" />
+                          {label}
+                        </span>
+                        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                          {description}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm">
+                  {form.visibility === "personal" ? (
+                    <UserRoundIcon
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground"
+                    />
+                  ) : (
+                    <UsersRoundIcon
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground"
+                    />
+                  )}
+                  {t(
+                    form.visibility === "personal" ? "仅自己" : "工作空间共享"
+                  )}
+                </div>
+              )}
+              <FieldDescription id="model-visibility-description">
+                {t(
+                  isEditing
+                    ? "使用范围创建后不可更改，如需其他范围请重新接入。"
+                    : form.visibility === "personal"
+                      ? "保存在当前工作空间，仅你可用；共享或发布应用请使用工作空间共享模型。"
+                      : "向当前工作空间的所有成员开放模型调用，API Key 始终加密保存。"
+                )}
+              </FieldDescription>
+            </fieldset>
+
             <Field>
               <FieldLabel htmlFor="model-name">{t("名称")}</FieldLabel>
               <Input

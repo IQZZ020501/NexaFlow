@@ -35,7 +35,7 @@ async def serve(payload):
     token = payload["token"]
     if not isinstance(token, str) or not 32 <= len(token) <= 128:
         raise ValueError("Invalid bridge token.")
-    transport = stdio_client(StdioServerParameters(command=config["command"], args=config.get("args", []), cwd=config.get("cwd"), env=config.get("env", {})))
+    transport = stdio_client(StdioServerParameters(command=config["command"], args=config.get("args", []), cwd=config.get("cwd"), env={"TZ": "Asia/Shanghai", **config.get("env", {})}))
     async with Client(transport, cache=None, read_timeout_seconds=300) as client:
         async def list_tools(_context, params):
             return await client.list_tools(cursor=params.cursor if params else None, cache_mode="reload")

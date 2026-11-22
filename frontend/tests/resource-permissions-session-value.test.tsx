@@ -55,6 +55,7 @@ test("keeps permission requests when the session value changes identity", async 
       return jsonResponse([
         {
           id: "tool-1",
+          function_name: "tool_one",
           display_name: "Tool One",
           description: "A tool",
           status: "active",

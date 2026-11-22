@@ -137,6 +137,10 @@ jobs:
           uv run python -m tests.tools.tools
           uv run python -m tests.tools.retirement
           uv run python -m tests.tools.personal
+          uv run python -m tests.tools.integrations
+          uv run python -m tests.tools.integration_providers
+          uv run python -m tests.tools.feishu
+          uv run python -m tests.tools.tencent_meeting
 
       - name: Run Skill package and invocation tests
         run: uv run python -m tests.agent_skills.api

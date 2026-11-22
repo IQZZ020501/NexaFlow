@@ -860,6 +860,7 @@ async def execute_workflow_node(
             scope.actor,
             scope.workspace_role,
             scope.settings,
+            shared_models_only=scope.run.access_source != "console",
         )
         result = await tool.ainvoke(
             {

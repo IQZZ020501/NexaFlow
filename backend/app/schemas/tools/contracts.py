@@ -1,13 +1,13 @@
 """Public HTTP schemas for the unified Tool catalog."""
 
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.time import AppDateTime
 
-ToolKind = Literal["builtin", "mcp"]
+ToolKind = Literal["builtin", "mcp", "integration"]
 _ToolId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=36),
@@ -43,8 +43,8 @@ class ToolSourceDetailResponse(ToolSourceSummaryResponse):
     bearer_token_hint: str | None
     last_error: str | None
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
     tool_count: int
 
 
@@ -63,8 +63,8 @@ class ToolSummaryResponse(_PublicToolResponse):
     allowed_access_sources: list[str] | None = None
     source: ToolSourceSummaryResponse
     created_by_user_id: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
     permission: Literal["owner", "admin", "view", "use"] | None
     can_view: bool
     can_use: bool

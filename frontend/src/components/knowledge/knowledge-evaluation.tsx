@@ -51,6 +51,7 @@ type KnowledgeEvaluationProps = {
   documents: KnowledgeDocument[]
   canEdit: boolean
   reportError: (error: unknown) => void
+  onMessage: (kind: "success" | "error", message: string) => void
 }
 
 /**
@@ -81,6 +82,7 @@ export function KnowledgeEvaluation({
   documents,
   canEdit,
   reportError,
+  onMessage,
 }: KnowledgeEvaluationProps) {
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
@@ -230,6 +232,7 @@ export function KnowledgeEvaluation({
         expected_document_ids: expectedDocumentIds,
       })
       setExpectedDocumentIds([])
+      onMessage("success", t("评测用例已保存"))
     } catch (error) {
       reportError(error)
     } finally {
@@ -268,6 +271,10 @@ export function KnowledgeEvaluation({
         await handleDeleteRun(target.item)
       }
       setDeleteTarget(null)
+      onMessage(
+        "success",
+        t(target.type === "case" ? "评测用例已删除" : "评测记录已删除"),
+      )
     } catch (error) {
       reportError(error)
     } finally {
@@ -293,6 +300,7 @@ export function KnowledgeEvaluation({
       setActiveTask(task)
       setSummary(null)
       setRuns((current) => [task, ...current])
+      onMessage("success", t("已提交评测任务"))
     } catch (error) {
       reportError(error)
     } finally {

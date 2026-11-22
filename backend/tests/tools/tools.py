@@ -1720,7 +1720,7 @@ def test_orm_enforces_tenant_scoped_relations_and_legal_states() -> None:
     )
     assert "mcp_server_id IS NOT NULL" in source_kind_sql
     assert "mcp_server_id IS NULL AND status = 'archived'" in source_kind_sql
-    assert "kind IN ('builtin', 'python') AND mcp_server_id IS NULL" in (
+    assert "kind IN ('builtin', 'python', 'integration') AND mcp_server_id IS NULL" in (
         source_kind_sql
     )
     permission_membership_fk = next(

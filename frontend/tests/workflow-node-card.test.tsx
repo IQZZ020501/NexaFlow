@@ -943,7 +943,7 @@ describe("WorkflowNodeCard", () => {
     // Reranker model select (the wrapping label names the trigger 重排模型).
     fireEvent.pointerDown(screen.getByRole("button", { name: "重排模型" }))
     fireEvent.click(screen.getByRole("button", { name: "重排模型" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "BGE Rerank" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /BGE Rerank/ }))
     expect(updates.at(-1)?.config.reranker_model_id).toBe("r-1")
     // Question reference picker.
     fireEvent.pointerDown(screen.getByRole("button", { name: "选择引用变量" }))

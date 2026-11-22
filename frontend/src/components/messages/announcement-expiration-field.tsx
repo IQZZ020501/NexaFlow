@@ -13,6 +13,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import { languageLocales } from "@/i18n"
+import { toAppDateTimeInput } from "@/lib/display"
 import { cn } from "@/lib/utils"
 
 type LocalDateTime = {
@@ -21,6 +22,21 @@ type LocalDateTime = {
   day: number
   hour: number
   minute: number
+}
+
+// Calendar coordinates use UTC getters so the browser's DST cannot alter them.
+function calendarDate(
+  year: number,
+  month: number,
+  day = 1,
+  hour = 0,
+  minute = 0
+) {
+  return new Date(Date.UTC(year, month, day, hour, minute))
+}
+
+function currentCalendarDate() {
+  return new Date(`${toAppDateTimeInput(new Date())}Z`)
 }
 
 const padNumber = (value: number) => String(value).padStart(2, "0")
@@ -37,7 +53,7 @@ function parseLocalDateTime(value: string): LocalDateTime | null {
     hour: Number(hourValue),
     minute: Number(minuteValue),
   }
-  const date = new Date(
+  const date = calendarDate(
     parts.year,
     parts.month - 1,
     parts.day,
@@ -46,11 +62,11 @@ function parseLocalDateTime(value: string): LocalDateTime | null {
   )
 
   if (
-    date.getFullYear() !== parts.year ||
-    date.getMonth() !== parts.month - 1 ||
-    date.getDate() !== parts.day ||
-    date.getHours() !== parts.hour ||
-    date.getMinutes() !== parts.minute
+    date.getUTCFullYear() !== parts.year ||
+    date.getUTCMonth() !== parts.month - 1 ||
+    date.getUTCDate() !== parts.day ||
+    date.getUTCHours() !== parts.hour ||
+    date.getUTCMinutes() !== parts.minute
   ) {
     return null
   }
@@ -63,25 +79,23 @@ function toLocalDateTimeValue(
   hour: number,
   minute: number
 ): string {
-  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}T${padNumber(hour)}:${padNumber(minute)}`
+  return `${date.getUTCFullYear()}-${padNumber(date.getUTCMonth() + 1)}-${padNumber(date.getUTCDate())}T${padNumber(hour)}:${padNumber(minute)}`
 }
 
 function calendarDays(month: Date): Date[] {
-  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1)
-  const firstVisibleDay = new Date(
-    month.getFullYear(),
-    month.getMonth(),
-    1 - firstDay.getDay()
+  const firstDay = calendarDate(month.getUTCFullYear(), month.getUTCMonth(), 1)
+  const firstVisibleDay = calendarDate(
+    month.getUTCFullYear(),
+    month.getUTCMonth(),
+    1 - firstDay.getUTCDay()
   )
 
-  return Array.from(
-    { length: 42 },
-    (_, index) =>
-      new Date(
-        firstVisibleDay.getFullYear(),
-        firstVisibleDay.getMonth(),
-        firstVisibleDay.getDate() + index
-      )
+  return Array.from({ length: 42 }, (_, index) =>
+    calendarDate(
+      firstVisibleDay.getUTCFullYear(),
+      firstVisibleDay.getUTCMonth(),
+      firstVisibleDay.getUTCDate() + index
+    )
   )
 }
 
@@ -100,26 +114,29 @@ export function AnnouncementExpirationField({
   const { language, t } = useLanguage()
   const locale = languageLocales[language]
   const selected = parseLocalDateTime(value)
-  const now = new Date()
+  const now = currentCalendarDate()
   const initialMonth = selected
-    ? new Date(selected.year, selected.month - 1, 1)
-    : new Date(now.getFullYear(), now.getMonth(), 1)
+    ? calendarDate(selected.year, selected.month - 1, 1)
+    : calendarDate(now.getUTCFullYear(), now.getUTCMonth(), 1)
   const [open, setOpen] = React.useState(false)
   const [viewMonth, setViewMonth] = React.useState(initialMonth)
   const [hourDraft, setHourDraft] = React.useState(
-    padNumber(selected?.hour ?? now.getHours())
+    padNumber(selected?.hour ?? now.getUTCHours())
   )
   const [minuteDraft, setMinuteDraft] = React.useState(
-    padNumber(selected?.minute ?? now.getMinutes())
+    padNumber(selected?.minute ?? now.getUTCMinutes())
   )
   const visibleDays = calendarDays(viewMonth)
   const weekdayFormatter = new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
     weekday: "narrow",
   })
   const dateFormatter = new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
     dateStyle: "full",
   })
   const selectedFormatter = new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -131,54 +148,54 @@ export function AnnouncementExpirationField({
   const setOpenState = (nextOpen: boolean) => {
     if (nextOpen) {
       const nextSelected = parseLocalDateTime(value)
-      const current = new Date()
+      const current = currentCalendarDate()
       setViewMonth(
         nextSelected
-          ? new Date(nextSelected.year, nextSelected.month - 1, 1)
-          : new Date(current.getFullYear(), current.getMonth(), 1)
+          ? calendarDate(nextSelected.year, nextSelected.month - 1, 1)
+          : calendarDate(current.getUTCFullYear(), current.getUTCMonth(), 1)
       )
-      setHourDraft(padNumber(nextSelected?.hour ?? current.getHours()))
-      setMinuteDraft(padNumber(nextSelected?.minute ?? current.getMinutes()))
+      setHourDraft(padNumber(nextSelected?.hour ?? current.getUTCHours()))
+      setMinuteDraft(padNumber(nextSelected?.minute ?? current.getUTCMinutes()))
     }
     setOpen(nextOpen)
   }
 
   const selectDate = (date: Date) => {
-    const current = new Date()
+    const current = currentCalendarDate()
     const hour = normalizeTimePart(
       hourDraft,
       23,
-      selected?.hour ?? current.getHours()
+      selected?.hour ?? current.getUTCHours()
     )
     const minute = normalizeTimePart(
       minuteDraft,
       59,
-      selected?.minute ?? current.getMinutes()
+      selected?.minute ?? current.getUTCMinutes()
     )
     setHourDraft(padNumber(hour))
     setMinuteDraft(padNumber(minute))
-    setViewMonth(new Date(date.getFullYear(), date.getMonth(), 1))
+    setViewMonth(calendarDate(date.getUTCFullYear(), date.getUTCMonth(), 1))
     onChange(toLocalDateTimeValue(date, hour, minute))
   }
 
   const commitTime = () => {
-    const current = new Date()
+    const current = currentCalendarDate()
     const hour = normalizeTimePart(
       hourDraft,
       23,
-      selected?.hour ?? current.getHours()
+      selected?.hour ?? current.getUTCHours()
     )
     const minute = normalizeTimePart(
       minuteDraft,
       59,
-      selected?.minute ?? current.getMinutes()
+      selected?.minute ?? current.getUTCMinutes()
     )
     setHourDraft(padNumber(hour))
     setMinuteDraft(padNumber(minute))
     if (selected) {
       onChange(
         toLocalDateTimeValue(
-          new Date(selected.year, selected.month - 1, selected.day),
+          calendarDate(selected.year, selected.month - 1, selected.day),
           hour,
           minute
         )
@@ -187,7 +204,7 @@ export function AnnouncementExpirationField({
   }
 
   const selectedDate = selected
-    ? new Date(
+    ? calendarDate(
         selected.year,
         selected.month - 1,
         selected.day,
@@ -196,13 +213,14 @@ export function AnnouncementExpirationField({
       )
     : null
   const monthLabel = new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
     year: "numeric",
     month: "long",
   }).format(viewMonth)
   const weekdayLabels = Array.from({ length: 7 }, (_, day) =>
-    weekdayFormatter.format(new Date(2026, 8, 6 + day))
+    weekdayFormatter.format(calendarDate(2026, 8, 6 + day))
   )
-  const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
+  const todayKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}`
 
   return (
     <Field className="min-w-0">
@@ -247,9 +265,9 @@ export function AnnouncementExpirationField({
                 title={t("上个月")}
                 onClick={() =>
                   setViewMonth(
-                    new Date(
-                      viewMonth.getFullYear(),
-                      viewMonth.getMonth() - 1,
+                    calendarDate(
+                      viewMonth.getUTCFullYear(),
+                      viewMonth.getUTCMonth() - 1,
                       1
                     )
                   )
@@ -268,9 +286,9 @@ export function AnnouncementExpirationField({
                 title={t("下个月")}
                 onClick={() =>
                   setViewMonth(
-                    new Date(
-                      viewMonth.getFullYear(),
-                      viewMonth.getMonth() + 1,
+                    calendarDate(
+                      viewMonth.getUTCFullYear(),
+                      viewMonth.getUTCMonth() + 1,
                       1
                     )
                   )
@@ -290,14 +308,14 @@ export function AnnouncementExpirationField({
                 </span>
               ))}
               {visibleDays.map((date) => {
-                const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+                const dateKey = `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`
                 const isSelected = Boolean(
                   selected &&
-                  date.getFullYear() === selected.year &&
-                  date.getMonth() === selected.month - 1 &&
-                  date.getDate() === selected.day
+                  date.getUTCFullYear() === selected.year &&
+                  date.getUTCMonth() === selected.month - 1 &&
+                  date.getUTCDate() === selected.day
                 )
-                const isOutside = date.getMonth() !== viewMonth.getMonth()
+                const isOutside = date.getUTCMonth() !== viewMonth.getUTCMonth()
 
                 return (
                   <button
@@ -315,7 +333,7 @@ export function AnnouncementExpirationField({
                         "bg-primary text-primary-foreground ring-0 hover:bg-primary/90"
                     )}
                   >
-                    {date.getDate()}
+                    {date.getUTCDate()}
                   </button>
                 )
               })}
@@ -376,7 +394,7 @@ export function AnnouncementExpirationField({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => selectDate(new Date())}
+                onClick={() => selectDate(currentCalendarDate())}
               >
                 {t("今天")}
               </Button>

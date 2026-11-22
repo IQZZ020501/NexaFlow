@@ -263,7 +263,7 @@ def execute(command, *, python_binary):
             raise ValueError("Invalid project directory.")
         os.chown(project_root, UID, UID)
     env = {"PATH": f"{Path(python_binary).parent}:/usr/local/bin:/usr/bin:/bin", "HOME": str(WORKSPACE), "LANG": "C.UTF-8", "PYTHONDONTWRITEBYTECODE": "1", "NEXAFLOW_OUTPUT_DIR": str(outputs)}
-    env.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
+    env.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", TZ="Asia/Shanghai")
     environments = sorted(path for path in SESSION.glob("[a-f0-9]" * 32) if path.is_dir())
     env["PYTHONPATH"] = os.pathsep.join(str(path / "python") for path in environments)
     env["NODE_PATH"] = os.pathsep.join(str(path / "node/node_modules") for path in environments)

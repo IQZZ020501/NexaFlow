@@ -624,6 +624,33 @@ describe("SessionProvider", () => {
     expect(localStorage.getItem(WORKSPACE_KEY)).toBeNull()
   })
 
+  test("notifies successful password login", async () => {
+    navPathname = "/login"
+    restoreHandler()
+    renderSession()
+    await waitFor(() => expect(screen.getByTestId("restored").textContent).toBe("true"))
+    expect(screen.getByTestId("notif").textContent).toBe("none")
+    fireEvent.click(screen.getByText("login"))
+    await waitFor(() => expect(screen.getByTestId("me").textContent).toBe("admin"))
+    expect(screen.getByTestId("notif").textContent).toBe("success:登录成功")
+  })
+
+  test("notifies successful enterprise login", async () => {
+    navPathname = "/auth/complete"
+    restoreHandler()
+    renderSession()
+    await waitFor(() => expect(screen.getByTestId("me").textContent).toBe("admin"))
+    expect(screen.getByTestId("notif").textContent).toBe("success:登录成功")
+  })
+
+  test("does not report enterprise login success when restoration fails", async () => {
+    navPathname = "/auth/complete"
+    handler = () => jsonResponse({ detail: "no session" }, 401)
+    renderSession()
+    await waitFor(() => expect(screen.getByTestId("restored").textContent).toBe("true"))
+    expect(screen.getByTestId("notif").textContent).toBe("none")
+  })
+
   test("logout clears state and calls the endpoint", async () => {
     const calls = restoreHandler()
     renderSession()
@@ -636,6 +663,7 @@ describe("SessionProvider", () => {
     expect(screen.getByTestId("ws").textContent).toBe("null")
     expect(localStorage.getItem(WORKSPACE_KEY)).toBeNull()
     expect(localStorage.getItem(LEGACY_TOKEN_KEY)).toBeNull()
+    expect(screen.getByTestId("notif").textContent).toBe("success:已退出登录")
   })
 
   test("does not retry session restoration after logout and reload", async () => {

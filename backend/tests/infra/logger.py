@@ -5,6 +5,7 @@ Run from `backend/` with `uv run python -m tests.infra.logger`.
 
 import io
 import logging
+from datetime import UTC, datetime
 from urllib.error import URLError
 
 import tests.support  # noqa: F401  # sets required env before app imports
@@ -97,12 +98,24 @@ def test_log_event_format() -> None:
     assert "| NexaFlow | NexaFlow.tests | lease busy [task_id=t1]" in output
 
 
+def test_log_timestamps_use_shanghai() -> None:
+    setup_logging()
+    handler = logging.getLogger().handlers[0]
+    record = logging.makeLogRecord({
+        "created": datetime(2026, 11, 19, 16, 30, tzinfo=UTC).timestamp(),
+        "msg": "timestamp",
+    })
+    handler.filter(record)
+    assert handler.format(record).startswith("2026-11-20 00:30:00.000+08:00 |")
+
+
 def main() -> None:
     test_setup_logging_idempotent()
     test_get_logger_project_prefix()
     test_classify_error()
     test_log_error_format()
     test_log_event_format()
+    test_log_timestamps_use_shanghai()
     print("logger tests passed")
 
 

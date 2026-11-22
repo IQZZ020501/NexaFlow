@@ -22,8 +22,7 @@ _RESOURCE_MODELS = {
     "tool": Tool,
 }
 
-# Grant-scoped folder types only; models are visible workspace-wide and never
-# carry resource permissions.
+# Models use their personal/workspace visibility instead of resource grants.
 _GRANT_RESOURCE_TYPES = {
     "knowledge": KNOWLEDGE_RESOURCE_TYPE,
     "application": AGENT_RESOURCE_TYPE,
@@ -56,7 +55,7 @@ async def list_visible_resource_folder_ids(
     """Folders holding a resource the viewer owns or was granted.
 
     Mirrors resource authorship and explicit grants, plus builtin tools that
-    every member may use. Models carry no grants, so only their owner matches.
+    every member may use, and workspace-shared models.
     """
     model = _RESOURCE_MODELS[resource_type]
     grant = ResourcePermissionOrm
@@ -66,8 +65,10 @@ async def list_visible_resource_folder_ids(
     )
     grant_type = _GRANT_RESOURCE_TYPES.get(resource_type)
     if grant_type is None:
-        # Models carry no grants, so only their owner matches.
-        visible = [model.created_by_user_id == viewer_id]
+        visible = [
+            model.visibility == "workspace",
+            and_(model.visibility == "personal", model.created_by_user_id == viewer_id),
+        ]
     else:
         statement = statement.outerjoin(
             grant,

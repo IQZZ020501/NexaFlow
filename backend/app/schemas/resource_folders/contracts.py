@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.time import AppDateTime
 
 ResourceFolderType = Literal["knowledge", "application", "model", "tool"]
 
@@ -13,8 +14,8 @@ class ResourceFolderResponse(BaseModel):
     parent_id: str | None
     name: str
     created_by_user_id: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class ResourceFolderCreateRequest(BaseModel):

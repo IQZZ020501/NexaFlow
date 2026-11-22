@@ -1,8 +1,9 @@
 """Public chat project contracts. Project identity never grants execution rights."""
 
-from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.time import AppDateTime
 
 
 class ChatProjectCreate(BaseModel):
@@ -26,8 +27,8 @@ class ChatProjectResponse(BaseModel):
     name: str
     instructions: str
     archived: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class ChatProjectListResponse(BaseModel):

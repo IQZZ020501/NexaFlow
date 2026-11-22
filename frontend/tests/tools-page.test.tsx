@@ -281,6 +281,11 @@ describe("ToolsPage", () => {
       expect(notifications).toContain("Skill update rejected")
     )
     expect(status).toBe("active")
+    expect(notifications).toEqual([
+      "技能已停用",
+      "技能已启用",
+      "Skill update rejected",
+    ])
   })
 
   test("does not offer mutation controls for view-only workspace Skills", async () => {

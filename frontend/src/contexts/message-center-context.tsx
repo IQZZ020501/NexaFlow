@@ -12,6 +12,8 @@ import {
 } from "@/lib/api/messages"
 import { ApiError } from "@/lib/api-client"
 import { useSession } from "@/contexts/session-context"
+import { useLanguage } from "@/contexts/language-provider"
+import { getErrorMessage } from "@/lib/errors"
 
 type MessageCenterContextValue = {
   messages: MessageItem[]
@@ -33,7 +35,9 @@ export function MessageCenterProvider({
 }: {
   children: React.ReactNode
 }) {
-  const { token, selectedWorkspaceId, mustChangePassword } = useSession()
+  const { token, selectedWorkspaceId, mustChangePassword, notify } =
+    useSession()
+  const { t } = useLanguage()
   const [messages, setMessages] = React.useState<MessageItem[]>([])
   const [unreadCount, setUnreadCount] = React.useState(0)
   const [nextExpirationAt, setNextExpirationAt] = React.useState<string | null>(
@@ -143,10 +147,11 @@ export function MessageCenterProvider({
         if (!current) await refresh()
       } catch (nextError) {
         void refresh()
+        notify("error", getErrorMessage(nextError, t))
         throw nextError
       }
     },
-    [messages, refresh, selectedWorkspaceId, token]
+    [messages, notify, refresh, selectedWorkspaceId, t, token]
   )
 
   const markAllRead = React.useCallback(async () => {
@@ -161,11 +166,13 @@ export function MessageCenterProvider({
     setUnreadCount(0)
     try {
       await markAllMessagesRead(token, selectedWorkspaceId)
+      notify("success", t("全部消息已标为已读"))
     } catch (nextError) {
       void refresh()
+      notify("error", getErrorMessage(nextError, t))
       throw nextError
     }
-  }, [refresh, selectedWorkspaceId, token, unreadCount])
+  }, [notify, refresh, selectedWorkspaceId, t, token, unreadCount])
 
   const value = React.useMemo(
     () => ({

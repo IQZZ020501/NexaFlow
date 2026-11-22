@@ -315,7 +315,7 @@ def external_progress_events(
             "knowledge" if event.get("tool_kind") == "knowledge" else "tool"
         )
         tool_kind = str(event.get("tool_kind") or "unknown")
-        if tool_kind not in {"knowledge", "mcp", "unknown"}:
+        if tool_kind not in {"knowledge", "mcp", "integration", "unknown"}:
             tool_kind = "unknown"
         raw_input = event.get("input")
         count = None

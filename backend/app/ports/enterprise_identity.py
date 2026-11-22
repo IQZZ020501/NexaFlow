@@ -13,10 +13,24 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from app.entities.identity.enterprise import EnterpriseIdentityConnection
+    from app.infra.config.settings import Settings
 
 
 class EnterpriseProviderError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str | None = None,
+        http_status: int | None = None,
+        provider_code: int | None = None,
+        missing_field: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.http_status = http_status
+        self.provider_code = provider_code
+        self.missing_field = missing_field
 
 
 @dataclass(frozen=True)
@@ -33,9 +47,6 @@ class EnterpriseIdentityProvider(Protocol):
         connection: EnterpriseIdentityConnection,
         redirect_uri: str,
         state: str,
-        code_challenge: str,
-        *,
-        feishu_qr: bool = False,
     ) -> str: ...
 
     async def resolve_external_principal(
@@ -44,9 +55,8 @@ class EnterpriseIdentityProvider(Protocol):
         client_secret: str,
         code: str,
         redirect_uri: str,
-        code_verifier: str,
         *,
-        feishu_qr: bool = False,
+        settings: Settings,
     ) -> ExternalPrincipal: ...
 
 
@@ -54,9 +64,6 @@ def build_authorization_url(
     connection: EnterpriseIdentityConnection,
     redirect_uri: str,
     state: str,
-    code_challenge: str,
-    *,
-    feishu_qr: bool = False,
 ) -> str:
     from app.adapters.identity.enterprise import (
         build_authorization_url as _build_authorization_url,
@@ -66,8 +73,6 @@ def build_authorization_url(
         connection,
         redirect_uri,
         state,
-        code_challenge,
-        feishu_qr=feishu_qr,
     )
 
 
@@ -76,9 +81,8 @@ async def resolve_external_principal(
     client_secret: str,
     code: str,
     redirect_uri: str,
-    code_verifier: str,
     *,
-    feishu_qr: bool = False,
+    settings: Settings,
 ) -> ExternalPrincipal:
     from app.adapters.identity.enterprise import (
         resolve_external_principal as _resolve_external_principal,
@@ -89,8 +93,7 @@ async def resolve_external_principal(
         client_secret,
         code,
         redirect_uri,
-        code_verifier,
-        feishu_qr=feishu_qr,
+        settings=settings,
     )
 
 

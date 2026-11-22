@@ -1,10 +1,10 @@
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.entities.tools import validate_tool_json_schema
 from app.schemas.identity.contracts import UserResponse
+from app.schemas.time import AppDateTime
 from app.schemas.tools.contracts import ToolRefSchema
 
 
@@ -107,7 +107,7 @@ class AgentSkillVersionResponse(BaseModel):
     definition: AgentSkillDefinition
     definition_hash: str
     published_by_user_id: str
-    created_at: datetime
+    created_at: AppDateTime
 
 
 class AgentSkillResponse(BaseModel):
@@ -124,8 +124,8 @@ class AgentSkillResponse(BaseModel):
     can_manage: bool
     can_use: bool
     created_by_user_id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: AppDateTime
+    updated_at: AppDateTime
 
 
 class AgentSkillPermissionResponse(BaseModel):

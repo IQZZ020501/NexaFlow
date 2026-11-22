@@ -1,6 +1,7 @@
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { ToolDetail, ToolRef, ToolSummary } from "@/lib/api/tools"
 import { toolDisplayName } from "@/lib/tool-display"
+import { integrationSourceName } from "@/lib/integrations"
 
 export type ToolGroup<T extends ToolSummary = ToolSummary> = {
   id: string
@@ -11,7 +12,10 @@ export type ToolGroup<T extends ToolSummary = ToolSummary> = {
 export function groupTools<T extends ToolSummary>(tools: T[]): ToolGroup<T>[] {
   const groups = new Map<string, ToolGroup<T>>()
   for (const tool of tools) {
-    const id = tool.kind === "mcp" ? `mcp:${tool.source.id}` : `tool:${tool.id}`
+    const id =
+      tool.kind !== "builtin"
+        ? `${tool.kind}:${tool.source.id}`
+        : `tool:${tool.id}`
     const group = groups.get(id)
     if (group) group.tools.push(tool)
     else groups.set(id, { id, tools: [tool] })
@@ -21,6 +25,10 @@ export function groupTools<T extends ToolSummary>(tools: T[]): ToolGroup<T>[] {
 
 export function toolGroupName(group: ToolGroup, t: TFunction) {
   const tool = group.tools[0]!
+  if (tool.kind === "integration") {
+    const name = integrationSourceName(tool.source.name)
+    return name ? t(name) : tool.source.name
+  }
   return tool.kind === "mcp" ? tool.source.name : toolDisplayName(tool, t)
 }
 
@@ -57,8 +65,8 @@ export function toolBindingGroups(
   for (const reference of value) {
     const tool = catalog.get(reference.tool_id)
     const id =
-      tool?.kind === "mcp"
-        ? `mcp:${tool.source.id}`
+      tool && tool.kind !== "builtin"
+        ? `${tool.kind}:${tool.source.id}`
         : `tool:${reference.tool_id}`
     const group = groups.get(id)
     if (group) group.references.push(reference)

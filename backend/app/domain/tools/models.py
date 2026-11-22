@@ -53,7 +53,7 @@ class ToolSource(Base):
             sqlite_where=text("created_by_user_id IS NULL"),
         ),
         CheckConstraint(
-            "kind IN ('builtin', 'python', 'mcp')",
+            "kind IN ('builtin', 'python', 'mcp', 'integration')",
             name="ck_tool_sources_kind",
         ),
         CheckConstraint(
@@ -64,7 +64,7 @@ class ToolSource(Base):
             "(kind = 'mcp' AND ((mcp_server_id IS NOT NULL "
             "AND status IN ('active', 'disabled')) OR "
             "(mcp_server_id IS NULL AND status = 'archived'))) OR "
-            "(kind IN ('builtin', 'python') AND mcp_server_id IS NULL)",
+            "(kind IN ('builtin', 'python', 'integration') AND mcp_server_id IS NULL)",
             name="ck_tool_sources_mcp_server_kind",
         ),
     )
@@ -122,7 +122,7 @@ class Tool(Base):
             "source_id", "stable_key", name="uq_tools_source_stable_key"
         ),
         CheckConstraint(
-            "kind IN ('builtin', 'python', 'mcp')",
+            "kind IN ('builtin', 'python', 'mcp', 'integration')",
             name="ck_tools_kind",
         ),
         CheckConstraint(

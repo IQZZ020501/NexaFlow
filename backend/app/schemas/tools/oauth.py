@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.time import AppDateTime
 
 
 class McpOAuthConfiguration(BaseModel):
@@ -40,7 +41,7 @@ class McpOAuthStatus(BaseModel):
     status: Literal[
         "disconnected", "connected", "refreshing", "reauthorization_required"
     ]
-    expires_at: datetime | None = None
+    expires_at: AppDateTime | None = None
     configuration: dict
 
 

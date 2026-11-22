@@ -420,6 +420,7 @@ test("tools tab maps tool rows and updates use-level permissions", async () => {
       return jsonResponse([
         {
           id: "tool-1",
+          function_name: "tool_one",
           display_name: "Tool One",
           description: "A tool",
           status: "active",
@@ -467,6 +468,7 @@ test("tools tab hides tools whose grants the actor cannot manage", async () => {
       return jsonResponse([
         {
           id: "tool-1",
+          function_name: "tool_one",
           display_name: "Tool One",
           description: "A tool",
           status: "active",

@@ -8,7 +8,6 @@ from app.api.deps import (
     get_settings,
     get_workspace_context_from_path,
     require_password_changed,
-    require_workspace_path_role,
 )
 from app.application.models.service import (
     create_registered_model,
@@ -82,6 +81,7 @@ async def list_workspace_models(
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     folder_id: Annotated[str | None, Query(max_length=36)] = None,
+    visibility: Literal["personal", "workspace"] | None = None,
     sort: Annotated[
         Literal["updated_at", "created_at", "name"],
         Query(),
@@ -94,6 +94,9 @@ async def list_workspace_models(
         offset,
         folder_id,
         sort,
+        actor=context.user,
+        workspace_role=context.membership_role,
+        visibility=visibility,
     )
 
 
@@ -104,11 +107,18 @@ async def list_workspace_models(
 )
 async def create_workspace_model(
     payload: RegisteredModelCreateRequest,
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RegisteredModelResponse:
-    return await create_registered_model(db, context.workspace.id, payload, context.user, settings)
+    return await create_registered_model(
+        db,
+        context.workspace.id,
+        payload,
+        context.user,
+        settings,
+        context.membership_role,
+    )
 
 
 @router.get("/workspaces/{workspace_id}/models/{model_id}", response_model=RegisteredModelResponse)
@@ -117,28 +127,30 @@ async def get_workspace_model(
     context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RegisteredModelResponse:
-    model = await get_registered_model(db, context.workspace.id, model_id)
-    return model_to_response(model)
+    model = await get_registered_model(db, context.workspace.id, model_id, context.user)
+    return model_to_response(model, context.user, context.membership_role)
 
 
 @router.patch("/workspaces/{workspace_id}/models/{model_id}", response_model=RegisteredModelResponse)
 async def patch_workspace_model(
     model_id: str,
     payload: RegisteredModelUpdateRequest,
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RegisteredModelResponse:
-    model = await get_registered_model(db, context.workspace.id, model_id)
-    return await update_registered_model(db, model, payload, context.user, settings)
+    model = await get_registered_model(db, context.workspace.id, model_id, context.user)
+    return await update_registered_model(
+        db, model, payload, context.user, settings, context.membership_role
+    )
 
 
 @router.delete("/workspaces/{workspace_id}/models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace_model(
     model_id: str,
-    context: Annotated[WorkspaceContext, Depends(require_workspace_path_role({"admin"}))],
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
-    model = await get_registered_model(db, context.workspace.id, model_id)
-    await delete_registered_model(db, model, context.user)
+    model = await get_registered_model(db, context.workspace.id, model_id, context.user)
+    await delete_registered_model(db, model, context.user, context.membership_role)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

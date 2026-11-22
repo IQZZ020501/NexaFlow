@@ -216,6 +216,7 @@ class JobTests(unittest.TestCase):
                 "import os; from pathlib import Path; "
                 "assert os.environ['OPENBLAS_NUM_THREADS'] == '1'; "
                 "assert os.environ['OMP_NUM_THREADS'] == '1'; "
+                "assert os.environ['TZ'] == 'Asia/Shanghai'; "
                 "assert (Path(os.environ['NEXAFLOW_SKILLS_DIR']) / 'pptx/SKILL.md').is_file(); "
                 "print('guides available')"
             ),
@@ -264,9 +265,10 @@ class JobTests(unittest.TestCase):
             }
             with (
                 patch("mcp.Client", return_value=fake),
-                patch("mcp.client.stdio.stdio_client"),
+                patch("mcp.client.stdio.stdio_client") as transport,
             ):
                 result = await job.mcp_request(request)
+                self.assertEqual(transport.call_args.args[0].env["TZ"], "Asia/Shanghai")
                 self.assertEqual(len(result["tools"]), 2)
                 fake.list_tools.assert_any_await(cursor="page-2", cache_mode="reload")
                 fake.list_tools.side_effect = None

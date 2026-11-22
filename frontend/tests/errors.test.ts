@@ -10,6 +10,13 @@ function tFor(language: Language): TFunction {
 
 describe("API error localization", () => {
   test.each([
+    ["zh-Hans", "当前访问地址不可用于授权，请从 NexaFlow 网站重新登录。"],
+    ["zh-Hant", "目前的存取網址無法用於授權，請從 NexaFlow 網站重新登入。"],
+    ["en", "This address cannot be used for authorization. Sign in again from the NexaFlow website."],
+  ] as const)("localizes browser OAuth origin errors in %s", (language, expected) => {
+    expect(getErrorMessage(new ApiError(400, "Integration authorization origin is not allowed."), tFor(language))).toBe(expected)
+  })
+  test.each([
     "Tool is not available for binding.",
     "Tool version is not available for binding.",
   ])("localizes tool binding failures: %s", (message) => {

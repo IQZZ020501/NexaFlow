@@ -611,6 +611,7 @@ export function PublicWorkflowChat({
       if (conversationId === nextId) {
         selectConversation(refreshed.items[0]?.conversation_id ?? null)
       }
+      notify("success", t("对话已删除"))
     } catch (reason) {
       setError(getErrorMessage(reason, t))
     } finally {

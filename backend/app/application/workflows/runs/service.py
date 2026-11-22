@@ -251,7 +251,14 @@ async def regenerate_workflow_run_from_source(
             execution_user_id=source.execution_user_id,
             access_source=source.access_source,
         )
-        await get_agent_model(db, source.workspace_id, source.model_id)
+        await get_agent_model(
+            db,
+            source.workspace_id,
+            source.model_id,
+            user_id=source.execution_user_id
+            if source.access_source == "console"
+            else None,
+        )
     except (HTTPException, ValueError) as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -597,7 +604,12 @@ async def create_workflow_run(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "External workflow runs cannot use console upload ids.",
         )
-    model = await get_agent_model(db, workspace_id, default_model_id)
+    model = await get_agent_model(
+        db,
+        workspace_id,
+        default_model_id,
+        user_id=actor.id if access_source == "console" else None,
+    )
     now = utc_now()
     run_conversation_id = conversation_id or new_id()
     if conversation_id and await agent_repository.get_active_agent_run(

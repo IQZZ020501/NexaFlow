@@ -53,6 +53,8 @@ function model(
     credential: {},
     api_base: "",
     has_api_key: true,
+    visibility: "workspace",
+    can_manage: true,
     api_key_hint: "sk-…abc",
     meta: {},
     created_by_user_id: "u-1",

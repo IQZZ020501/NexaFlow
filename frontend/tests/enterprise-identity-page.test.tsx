@@ -187,6 +187,11 @@ test("notifies after copying enterprise login addresses", async () => {
     await waitFor(() =>
       expect(screen.getByLabelText("复制回调地址")).toBeTruthy()
     )
+    expect(
+      screen.getByText(
+        "回调由系统自动处理。将此地址复制到开放平台的重定向 URL，扫码确认后会自动返回 NexaFlow。"
+      )
+    ).toBeTruthy()
 
     fireEvent.click(screen.getByLabelText("复制回调地址"))
 
@@ -207,6 +212,59 @@ test("notifies after copying enterprise login addresses", async () => {
     await waitFor(() =>
       expect(notifications).toContainEqual(["error", "复制失败"])
     )
+  } finally {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    })
+  }
+})
+
+test("copies the WeCom callback domain with its port", async () => {
+  const originalClipboard = navigator.clipboard
+  const written: string[] = []
+  Object.defineProperty(navigator, "clipboard", {
+    value: {
+      writeText: async (value: string) => void written.push(value),
+    },
+    configurable: true,
+  })
+  withFetch((url) =>
+    jsonResponse(
+      url.includes("/connections")
+        ? [
+            {
+              ...connection("ws-1", "Company WeCom"),
+              provider: "wecom",
+              client_id: "ww-corp",
+              tenant_id: "ww-corp",
+              agent_id: "1000002",
+              callback_url:
+                "https://nexaflow.example:8443/api/v1/auth/enterprise/callback/wecom",
+            },
+          ]
+        : []
+    )
+  )
+
+  try {
+    renderPage(<EnterpriseIdentityPage />)
+    await waitFor(() => expect(screen.getByText("企业身份绑定")).toBeTruthy())
+    fireEvent.pointerDown(screen.getByRole("button", { name: "选择登录平台" }))
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", {
+        name: "企业微信",
+      })
+    )
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Company WeCom")).toBeTruthy()
+    )
+
+    expect(screen.getByText("授权回调域")).toBeTruthy()
+    expect(screen.getByText("nexaflow.example:8443")).toBeTruthy()
+    fireEvent.click(screen.getByLabelText("复制授权回调域"))
+    await waitFor(() => expect(written).toEqual(["nexaflow.example:8443"]))
+    expect(notifications).toContainEqual(["success", "已复制"])
   } finally {
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,

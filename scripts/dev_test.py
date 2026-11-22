@@ -309,6 +309,32 @@ class DevelopmentLogTests(unittest.TestCase):
 
 
 class DevelopmentPreparationTests(unittest.TestCase):
+    def test_stack_sets_the_actual_frontend_origin_and_preserves_overrides(self) -> None:
+        for values, environment, expected in (
+            ({}, {}, "http://127.0.0.1:3001"),
+            ({"PUBLIC_APP_URL": "https://file.example/"}, {}, "https://file.example"),
+            ({"PUBLIC_APP_URL": "https://file.example"}, {"PUBLIC_APP_URL": "https://env.example/"}, "https://env.example"),
+        ):
+            with (
+                self.subTest(values=values, environment=environment),
+                patch.dict(os.environ, environment, clear=True),
+                patch("scripts.dev._request_status", return_value=200),
+                patch("scripts.dev._port_available", return_value=True),
+                patch("scripts.dev.wait_for_http"),
+                patch("scripts.dev.time.sleep", side_effect=KeyboardInterrupt),
+                patch("scripts.dev.log"),
+                patch("scripts.dev.ManagedProcess.start") as start_mock,
+            ):
+                start_mock.return_value = SimpleNamespace(
+                    process=SimpleNamespace(poll=lambda: None), stop=Mock(),
+                )
+                self.assertEqual(start_stack(
+                    values, local_opensandbox=False, api_port=8001, frontend_port=3001,
+                ), 0)
+                for call in start_mock.call_args_list:
+                    if call.args[0] in {"api", "worker"}:
+                        self.assertEqual(call.kwargs["env"]["PUBLIC_APP_URL"], expected)
+
     @patch("scripts.dev.infrastructure_configuration", return_value={})
     @patch("scripts.dev.ensure_local_image")
     @patch("scripts.dev.run")
@@ -383,6 +409,7 @@ class InfrastructureConfigurationTests(unittest.TestCase):
             database["environment"]["POSTGRES_PASSWORD"], "local$$credential"
         )
         self.assertEqual(database["ports"], ["127.0.0.1:15432:5432"])
+        self.assertEqual(database["environment"]["TZ"], "Asia/Shanghai")
         self.assertEqual(database["container_name"], "nexaflow-db")
         self.assertNotIn("networks", database)
         self.assertNotIn("deployment-only", json.dumps(config))

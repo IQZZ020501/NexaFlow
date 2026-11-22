@@ -474,7 +474,14 @@ async def validate_regeneration_source(
                 "The source publication snapshot changed.",
             )
     try:
-        await get_agent_model(db, source.workspace_id, source.model_id)
+        await get_agent_model(
+            db,
+            source.workspace_id,
+            source.model_id,
+            user_id=source.execution_user_id
+            if source.access_source == "console"
+            else None,
+        )
     except HTTPException as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -1172,7 +1179,12 @@ async def prepare_agent_run(
             )
         publication = agent_publication_from_version(publication_version)
     model_id = publication.model_id if publication else agent.model_id
-    model = await get_agent_model(db, workspace_id, model_id)
+    model = await get_agent_model(
+        db,
+        workspace_id,
+        model_id,
+        user_id=actor.id if access_source == "console" else None,
+    )
     if publication:
         knowledge_base_ids = publication.knowledge_base_ids
         selected_mcp_tools = publication.mcp_tools

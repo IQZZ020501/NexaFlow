@@ -2533,6 +2533,8 @@ def main() -> None:
             _knowledge_base,
             payload,
             _settings,
+            *,
+            user_id=None,
         ) -> KnowledgeQueryInspectResponse:
             evaluation_attempts[payload.query] = (
                 evaluation_attempts.get(payload.query, 0) + 1

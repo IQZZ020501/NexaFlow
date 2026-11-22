@@ -28,6 +28,7 @@ const artifactId = "00000000-0000-4000-8000-000000000003"
 const base = `/api/v1/public/agents/${agentId}`
 const timestamp = "2026-11-19T10:00:00Z"
 const session = makeSession()
+const notifications: Array<[string, string]> = []
 mock.module("@/contexts/session-context", () => ({
   useSession: () => session,
   useOptionalSession: () => session,
@@ -55,6 +56,12 @@ let requests: { url: string; init?: RequestInit }[]
 let extra: (url: string, init?: RequestInit) => Response | null
 const originalFetch = globalThis.fetch
 beforeEach(() => {
+  notifications.length = 0
+  Object.assign(session, {
+    notify: (kind: string, message: string) => {
+      notifications.push([kind, message])
+    },
+  })
   const testWindow = window as unknown as {
     happyDOM: { setURL: (url: string) => void }
   }
@@ -213,6 +220,7 @@ test("creates a project and sends its first question in a server-owned project c
   expect(within(dialog).queryByLabelText("项目说明")).toBeNull()
   fireEvent.click(within(dialog).getByRole("button", { name: "创建项目" }))
   await screen.findByRole("heading", { name: "New research" })
+  expect(notifications).toEqual([["success", "项目已创建"]])
   fireEvent.change(screen.getByLabelText("请输入问题"), {
     target: { value: "Start" },
   })
@@ -312,6 +320,7 @@ test("edits project names and sources without changing existing instructions", a
     target: { files: [new File(["data"], "notes.txt")] },
   })
   await screen.findByText("notes.txt")
+  expect(notifications).toEqual([["success", "项目资料已上传"]])
   await waitFor(() =>
     expect(
       (
@@ -325,6 +334,7 @@ test("edits project names and sources without changing existing instructions", a
     screen.getByRole("button", { name: "移除项目资料：notes.txt" })
   )
   await waitForElementToBeRemoved(() => sources.queryByText("notes.txt"))
+  expect(notifications).toContainEqual(["success", "项目资料已移除"])
   fireEvent.change(sources.getByLabelText("项目名称"), {
     target: { value: "Updated research" },
   })
@@ -464,6 +474,7 @@ test("dissolves a project and preserves its conversation in ordinary history", a
   ).toBeTruthy()
   expect(window.location.pathname).toBe(`/chat/${agentId}`)
   expect(window.location.search).toBe("?conversation_id=conversation-1")
+  expect(notifications).toEqual([["success", "项目已解散"]])
 })
 
 test("archives and dissolves another project without changing the active conversation", async () => {
@@ -546,6 +557,10 @@ test("moves an existing conversation into and out of a project", async () => {
   fireEvent.click(await screen.findByRole("menuitem", { name: "移出项目" }))
   await screen.findByRole("heading", { name: "Assistant" })
   expect(window.location.pathname).toBe(`/chat/${agentId}`)
+  expect(notifications).toEqual([
+    ["success", "对话已移入项目"],
+    ["success", "对话已移出项目"],
+  ])
 })
 
 test("archiving prevents new sends and restoring re-enables them", async () => {

@@ -3,6 +3,8 @@
 import { LoaderCircleIcon, ShieldAlertIcon } from "lucide-react"
 import type { TFunction } from "@/i18n"
 import type { AgentToolCall } from "@/lib/api/agents"
+import { getErrorMessage } from "@/lib/errors"
+import { toolDisplayName, toolSourceDisplayName } from "@/lib/tool-display"
 import { Button } from "@/components/ui/button"
 
 export function InlineToolApproval({
@@ -20,6 +22,18 @@ export function InlineToolApproval({
 }) {
   const isUncertain = call.status === "uncertain"
   const isResolving = resolvingCallId === `${runId}:${call.call_id}`
+  const toolName = toolDisplayName(
+    {
+      function_name: call.tool_name,
+      display_name: call.tool_name,
+      description: "",
+    },
+    t
+  )
+  const serverName = toolSourceDisplayName(
+    { name: call.server_name, kind: call.tool_kind },
+    t
+  )
 
   return (
     <section className="overflow-hidden rounded-lg border border-amber-600/30 bg-background/80">
@@ -32,8 +46,8 @@ export function InlineToolApproval({
             {t(isUncertain ? "工具执行结果不确定" : "工具调用需要确认")}
           </p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {call.tool_name}
-            {call.server_name ? ` @ ${call.server_name}` : ""}
+            {toolName}
+            {call.server_name ? ` @ ${serverName}` : ""}
           </p>
         </div>
         <div className="ml-auto flex shrink-0 gap-1.5">
@@ -64,7 +78,7 @@ export function InlineToolApproval({
       </div>
       {call.last_error ? (
         <p className="border-t px-3 py-2 text-xs leading-5 text-muted-foreground">
-          {call.last_error}
+          {getErrorMessage(new Error(call.last_error), t)}
         </p>
       ) : null}
       <pre className="max-h-28 overflow-auto border-t bg-muted/20 px-3 py-2 font-mono text-[11px] leading-4 break-words whitespace-pre-wrap">

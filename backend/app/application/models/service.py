@@ -16,6 +16,7 @@ from app.application.models.registry import (
     ACTIVE_STATUS,
     apply_model_credentials,
     credential_fields,
+    member_connection_credentials,
     normalize_model_request_params,
     normalize_model_type,
     normalize_provider_credentials,
@@ -28,12 +29,21 @@ from app.application.models.registry import (
     validate_status,
 )
 from app.domain.audit.services import record_audit_log
-from app.domain.models.registered import RegisteredModel
+from app.domain.models.access import (
+    can_manage_model,
+    can_use_model,
+    require_model_management,
+)
 from app.entities.identity.user import User
+from app.entities.models import RegisteredModel
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.models import registry as model_repository
 from app.infra.runtime.validation import normalize_name
-from app.ports.llm import DEFAULT_MODEL_REQUEST_PARAMS, MODEL_REQUEST_PARAMS_META_KEY
+from app.ports.llm import (
+    DEFAULT_MODEL_REQUEST_PARAMS,
+    MODEL_REQUEST_PARAMS_META_KEY,
+    PUBLIC_ENDPOINT_POLICY,
+)
 from app.schemas.models.contracts import (
     BaseModelOptionResponse,
     ModelCredentialFieldResponse,
@@ -45,7 +55,9 @@ from app.schemas.models.contracts import (
 )
 
 
-def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
+def model_to_response(
+    model: RegisteredModel, actor: User, workspace_role: str | None = None
+) -> RegisteredModelResponse:
     config = model.credential_config or legacy_credential_config(
         model.provider_type,
         model.api_base,
@@ -60,6 +72,8 @@ def model_to_response(model: RegisteredModel) -> RegisteredModelResponse:
     return RegisteredModelResponse(
         id=model.id,
         workspace_id=model.workspace_id,
+        visibility=model.visibility,
+        can_manage=can_manage_model(model, actor.id, workspace_role),
         folder_id=model.folder_id,
         name=model.name,
         provider=model.provider,
@@ -134,6 +148,10 @@ async def list_registered_models(
     offset: int = 0,
     folder_id: str | None = None,
     sort: str = "created_at",
+    *,
+    actor: User,
+    workspace_role: str | None = None,
+    visibility: str | None = None,
 ) -> list[RegisteredModelResponse]:
     models = await model_repository.list_registered_models(
         db,
@@ -142,13 +160,21 @@ async def list_registered_models(
         offset,
         folder_id,
         sort,
+        user_id=actor.id,
+        visibility=visibility,
     )
-    return [model_to_response(item) for item in models]
+    return [model_to_response(item, actor, workspace_role) for item in models]
 
 
-async def get_registered_model(db: AsyncSession, workspace_id: str, model_id: str) -> RegisteredModel:
+async def get_registered_model(
+    db: AsyncSession, workspace_id: str, model_id: str, actor: User
+) -> RegisteredModel:
     model = await model_repository.get_registered_model_by_id(db, model_id)
-    if model is None or model.workspace_id != workspace_id:
+    if (
+        model is None
+        or model.workspace_id != workspace_id
+        or not can_use_model(model, actor.id)
+    ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Model not found.")
     return model
 
@@ -158,12 +184,17 @@ async def assert_model_name_available(
     workspace_id: str,
     name: str,
     excluded_model_id: str | None = None,
+    *,
+    visibility: str = "workspace",
+    owner_id: str | None = None,
 ) -> None:
     if await model_repository.find_registered_model_id_by_name(
         db,
         workspace_id,
         name,
         excluded_model_id,
+        visibility=visibility,
+        owner_id=owner_id,
     ):
         raise HTTPException(status.HTTP_409_CONFLICT, "Model name already exists.")
 
@@ -174,9 +205,28 @@ async def create_registered_model(
     payload: RegisteredModelCreateRequest,
     actor: User,
     settings: Settings,
+    workspace_role: str | None = None,
 ) -> RegisteredModelResponse:
+    # Preserve the shared default for older admin clients; the UI always sends
+    # its explicit choice. Members default to their own personal catalog.
+    visibility = payload.visibility or (
+        "workspace"
+        if workspace_role == "admin" or actor.is_global_admin
+        else "personal"
+    )
+    if (
+        visibility == "workspace"
+        and workspace_role != "admin"
+        and not actor.is_global_admin
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Workspace admin required to create shared models.",
+        )
     name = normalize_name(payload.name)
-    await assert_model_name_available(db, workspace_id, name)
+    await assert_model_name_available(
+        db, workspace_id, name, visibility=visibility, owner_id=actor.id
+    )
 
     entry = provider_catalog_entry(payload.provider)
     provider_type = validate_provider_type(payload.provider_type)
@@ -205,9 +255,15 @@ async def create_registered_model(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Model name is required.",
         )
+    restricted_connection = workspace_role != "admin" and not actor.is_global_admin
+    connection_credentials = {**config, **secrets}
+    if restricted_connection:
+        connection_credentials = await member_connection_credentials(
+            provider_type, connection_credentials, request_params
+        )
     capabilities = await test_registered_model(
         provider_type,
-        {**config, **secrets},
+        connection_credentials,
         model_name,
         model_type,
         request_params,
@@ -216,6 +272,7 @@ async def create_registered_model(
 
     model = RegisteredModel(
         workspace_id=workspace_id,
+        visibility=visibility,
         name=name,
         provider=payload.provider,
         provider_type=provider_type,
@@ -227,6 +284,7 @@ async def create_registered_model(
             **payload.meta,
             MODEL_REQUEST_PARAMS_META_KEY: request_params,
             **capabilities,
+            PUBLIC_ENDPOINT_POLICY: restricted_connection,
         },
         created_by_user_id=actor.id,
     )
@@ -238,10 +296,8 @@ async def create_registered_model(
         settings,
         rewrite_secrets=True,
     )
-    db.add(model)
-
     try:
-        await db.flush()
+        model = await model_repository.create_registered_model(db, model)
         record_audit_log(
             db,
             actor,
@@ -257,8 +313,8 @@ async def create_registered_model(
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Model already exists.") from exc
 
-    await db.refresh(model)
-    return model_to_response(model)
+    await model_repository.refresh_registered_model(db, model)
+    return model_to_response(model, actor, workspace_role)
 
 
 async def update_registered_model(
@@ -267,11 +323,25 @@ async def update_registered_model(
     payload: RegisteredModelUpdateRequest,
     actor: User,
     settings: Settings,
+    workspace_role: str | None = None,
 ) -> RegisteredModelResponse:
+    require_model_management(model, actor.id, workspace_role)
+    if payload.visibility is not None and payload.visibility != model.visibility:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Model visibility cannot be changed. Create a separate model instead.",
+        )
     details = payload.model_dump(exclude_unset=True)
     name = normalize_name(payload.name) if payload.name is not None else model.name
     if name != model.name:
-        await assert_model_name_available(db, model.workspace_id, name, model.id)
+        await assert_model_name_available(
+            db,
+            model.workspace_id,
+            name,
+            model.id,
+            visibility=model.visibility,
+            owner_id=model.created_by_user_id,
+        )
 
     provider = payload.provider if payload.provider is not None else model.provider
     entry = provider_catalog_entry(provider)
@@ -334,9 +404,17 @@ async def update_registered_model(
         current_secrets=current_secrets,
         current_hints=current_hints,
     )
+    restricted_connection = bool((model.meta or {}).get(PUBLIC_ENDPOINT_POLICY)) or (
+        workspace_role != "admin" and not actor.is_global_admin
+    )
+    connection_credentials = {**config, **secrets}
+    if restricted_connection:
+        connection_credentials = await member_connection_credentials(
+            provider_type, connection_credentials, request_params
+        )
     capabilities = await test_registered_model(
         provider_type,
-        {**config, **secrets},
+        connection_credentials,
         model_name,
         model_type,
         request_params,
@@ -354,6 +432,7 @@ async def update_registered_model(
         **(payload.meta if payload.meta is not None else (model.meta or {})),
         MODEL_REQUEST_PARAMS_META_KEY: request_params,
         **capabilities,
+        PUBLIC_ENDPOINT_POLICY: restricted_connection,
     }
     apply_model_credentials(
         model,
@@ -384,16 +463,23 @@ async def update_registered_model(
     )
 
     try:
+        model = await model_repository.save_registered_model(db, model)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Model already exists.") from exc
 
-    await db.refresh(model)
-    return model_to_response(model)
+    await model_repository.refresh_registered_model(db, model)
+    return model_to_response(model, actor, workspace_role)
 
 
-async def delete_registered_model(db: AsyncSession, model: RegisteredModel, actor: User) -> None:
+async def delete_registered_model(
+    db: AsyncSession,
+    model: RegisteredModel,
+    actor: User,
+    workspace_role: str | None = None,
+) -> None:
+    require_model_management(model, actor.id, workspace_role)
     record_audit_log(
         db,
         actor,

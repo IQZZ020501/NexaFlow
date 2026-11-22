@@ -1236,7 +1236,33 @@ def test_mcp_result_previews_and_pages_are_bounded_and_lossless() -> None:
     assert len(json.dumps(oversized.payload()).encode()) <= MAX_MCP_RESULT_BYTES
 
 
+def test_integration_browser_redirects_stay_on_the_trusted_frontend() -> None:
+    from app.domain.tools.integrations.redirects import browser_redirect_uri
+
+    settings = SimpleNamespace(public_app_url="https://flow.example/", environment="production")
+    callback = "https://flow.example/app/tools/integrations/callback"
+    assert browser_redirect_uri(settings) == callback
+    assert browser_redirect_uri(settings, "https://FLOW.example:443") == callback
+    for origin in (
+        "https://attacker.example", "https://flow.example.attacker.example",
+        "https://flow.example@attacker.example", "https://attacker@flow.example",
+        "https://flow.example/path", "https://flow.example?return=attacker",
+        "https://flow.example#attacker", "https://flow.example\\@attacker.example",
+        "https://flow.example\n", "null", "", "http://flow.example", "https://flow.example:444",
+        "https://flow.example:99999", "https://flow.example:0",
+    ):
+        expect_http_error(lambda: browser_redirect_uri(settings, origin), 400)
+    local = SimpleNamespace(public_app_url="http://127.0.0.1:3001", environment="development")
+    assert browser_redirect_uri(local, "http://localhost:3001") == "http://localhost:3001/app/tools/integrations/callback"
+    assert browser_redirect_uri(local, "http://[::1]:3001") == "http://[::1]:3001/app/tools/integrations/callback"
+    expect_http_error(lambda: browser_redirect_uri(local, "http://localhost:3000"), 400)
+    expect_http_error(lambda: browser_redirect_uri(local, "http://192.168.1.1:3001"), 400)
+    local.environment = "production"
+    expect_http_error(lambda: browser_redirect_uri(local, "http://localhost:3001"), 400)
+
+
 def main() -> None:
+    test_integration_browser_redirects_stay_on_the_trusted_frontend()
     test_mcp_result_previews_and_pages_are_bounded_and_lossless()
     test_mcp_transport_keeps_complete_bounded_results()
     test_builtin_tool_summary_accepts_system_owner()

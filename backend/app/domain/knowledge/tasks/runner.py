@@ -234,7 +234,9 @@ async def run_index_task(
 ) -> None:
     ensure_knowledge_task_lease(lease_lost)
     had_embedding_model = knowledge_base.embedding_model_id is not None
-    embedding_model = await resolve_embedding_model(db, knowledge_base)
+    embedding_model = await resolve_embedding_model(
+        db, knowledge_base, user_id=actor.id
+    )
     if embedding_model is None:
         raise KnowledgePipelineError("Embedding model is required.")
     if not had_embedding_model:

@@ -13,7 +13,7 @@
 - `deploy/nginx/default.conf` — 可选反向代理：`/api/` 与 `/health` 到 API，前端静态资源带缓存头转发 Next.js
 - `deploy/dockerfiles/app.Dockerfile` — 多阶段业务镜像，API/两个 Worker/前端复用；不含沙箱源码
 - `deploy/dockerfiles/sandbox.Dockerfile` — 独立构建 Python/Node 执行镜像，由 OpenSandbox 按需创建隔离执行容器
-- `deploy/dockerfiles/postgres.Dockerfile` — PostgreSQL 17 + `pg_search` 0.25.2 + `pgvector` 定制镜像
+- `deploy/dockerfiles/postgres.Dockerfile` — PostgreSQL 17 + `pg_search` 0.25.2 + `pgvector` 0.8.6 定制镜像；扩展安装包按架构校验 SHA256，pgvector 的固定包版本从 PostgreSQL 官方归档获取，避免滚动 APT 索引淘汰旧版本导致重建失败
 
 ### scripts/
 

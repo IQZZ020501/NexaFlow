@@ -175,6 +175,16 @@ async def generate_image(
     )
 
 
+PUBLIC_ENDPOINT_POLICY = "public_endpoint_only"
+PUBLIC_ENDPOINT_CREDENTIAL = "_nexaflow_public_endpoint_only"
+
+
+def validate_member_model_connection(provider_type, credentials, request_params):
+    from app.adapters.llm.network import validate_member_connection
+
+    return validate_member_connection(provider_type, credentials, request_params)
+
+
 def test_model_connection(
     provider_type: str,
     credentials: dict[str, str],
@@ -194,6 +204,9 @@ def test_model_connection(
 
 
 __all__ = [
+    "PUBLIC_ENDPOINT_POLICY",
+    "PUBLIC_ENDPOINT_CREDENTIAL",
+    "validate_member_model_connection",
     "DEFAULT_MODEL_REQUEST_PARAMS",
     "MODEL_REQUEST_PARAMS_META_KEY",
     "MODEL_TRUNCATED_META_KEY",

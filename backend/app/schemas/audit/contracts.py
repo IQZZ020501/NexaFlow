@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from app.schemas.time import AppDateTime
 
 
 class AuditLogResponse(BaseModel):
@@ -15,4 +16,4 @@ class AuditLogResponse(BaseModel):
     resource_id: str
     resource_name: str
     details: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime
+    created_at: AppDateTime
