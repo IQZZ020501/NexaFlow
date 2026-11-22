@@ -41,7 +41,6 @@ from app.schemas.identity.enterprise import (
     EnterpriseIdentityBindingRequest,
     EnterpriseIdentityResponse,
     EnterpriseProvider,
-    EnterpriseQrLoginResponse,
     PublicEnterpriseConnectionsResponse,
 )
 
@@ -106,9 +105,10 @@ async def _enforce_rate_limit(request: Request, settings: Settings) -> None:
 @public_router.get("/connections", response_model=PublicEnterpriseConnectionsResponse)
 async def read_public_connections(
     db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
     workspace_id: Annotated[str | None, Query(min_length=1, max_length=36)] = None,
 ) -> PublicEnterpriseConnectionsResponse:
-    return await list_public_connections(db, workspace_id)
+    return await list_public_connections(db, workspace_id, settings=settings)
 
 
 @public_router.get("/{connection_id}/start")
@@ -126,30 +126,6 @@ async def start_enterprise_login(
     response = RedirectResponse(destination, status_code=status.HTTP_302_FOUND)
     _set_nonce_cookie(response, browser_nonce, settings)
     return response
-
-
-@public_router.post("/{connection_id}/qr", response_model=EnterpriseQrLoginResponse)
-async def prepare_enterprise_qr_login(
-    connection_id: str,
-    request: Request,
-    response: Response,
-    settings: Annotated[Settings, Depends(get_settings)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    next_path: Annotated[str | None, Query(alias="next", max_length=2048)] = None,
-    nonce: Annotated[str | None, Cookie(alias=SSO_NONCE_COOKIE)] = None,
-) -> EnterpriseQrLoginResponse:
-    await _enforce_rate_limit(request, settings)
-    browser_nonce = nonce or secrets.token_urlsafe(32)
-    authorization_url = await begin_login(
-        db,
-        connection_id,
-        browser_nonce,
-        next_path,
-        settings,
-        feishu_qr=True,
-    )
-    _set_nonce_cookie(response, browser_nonce, settings)
-    return EnterpriseQrLoginResponse(authorization_url=authorization_url)
 
 
 @public_router.get("/callback/{provider}")

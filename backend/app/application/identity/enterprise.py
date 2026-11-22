@@ -1,5 +1,4 @@
 import secrets
-from base64 import urlsafe_b64encode
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
@@ -44,7 +43,6 @@ from app.schemas.identity.enterprise import (
 )
 
 LOGIN_STATE_TTL_SECONDS = 600
-FEISHU_QR_STATE_PREFIX = "feishu_qr."
 
 
 class EnterpriseLoginRejected(Exception):
@@ -229,7 +227,7 @@ async def upsert_connection(
 
 
 async def list_public_connections(
-    db: AsyncSession, workspace_id: str | None = None
+    db: AsyncSession, workspace_id: str | None = None, *, settings: Settings
 ) -> PublicEnterpriseConnectionsResponse:
     workspace_name = None
     if workspace_id is None:
@@ -249,7 +247,8 @@ async def list_public_connections(
                 id=item.id,
                 provider=item.provider,  # type: ignore[arg-type]
                 name=item.name,
-                start_url=f"/api/v1/auth/enterprise/{item.id}/start",
+                # The browser nonce must be set on the same host as the callback.
+                start_url=f"{_base_url(settings)}/api/v1/auth/enterprise/{item.id}/start",
             )
             for item in connections
         ],
@@ -355,19 +354,13 @@ async def begin_login(
     browser_nonce: str,
     next_path: str | None,
     settings: Settings,
-    *,
-    feishu_qr: bool = False,
 ) -> str:
     connection = await identity_repository.get_connection_by_id(db, connection_id, enabled_only=True)
     if connection is None or await identity_repository.get_active_workspace_name(
         db, connection.workspace_id
     ) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Enterprise login is not available.")
-    if feishu_qr and connection.provider != "feishu":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Enterprise QR login is not available.")
-    raw_state = f"{FEISHU_QR_STATE_PREFIX if feishu_qr else ''}{secrets.token_urlsafe(32)}"
-    code_verifier = secrets.token_urlsafe(64)
-    code_challenge = urlsafe_b64encode(sha256(code_verifier.encode()).digest()).rstrip(b"=").decode()
+    raw_state = secrets.token_urlsafe(32)
     now = utc_now()
     await identity_repository.delete_expired_login_states(db, now)
     await identity_repository.save_login_state(
@@ -376,7 +369,6 @@ async def begin_login(
             connection_id=connection.id,
             state_hash=_digest(raw_state),
             browser_nonce_hash=_digest(browser_nonce),
-            code_verifier_ciphertext=encrypt_secret(code_verifier, application_secret_key(settings)),
             next_path=safe_next_path(next_path),
             expires_at=now + timedelta(seconds=LOGIN_STATE_TTL_SECONDS),
         ),
@@ -386,8 +378,6 @@ async def begin_login(
         connection,
         callback_url(settings, connection.provider),
         raw_state,
-        code_challenge,
-        feishu_qr=feishu_qr,
     )
 
 
@@ -430,10 +420,25 @@ async def complete_login(
             decrypt_secret(connection.client_secret_ciphertext, application_secret_key(settings)),
             code,
             callback_url(settings, provider),
-            decrypt_secret(login_state.code_verifier_ciphertext, application_secret_key(settings)),
-            feishu_qr=raw_state.startswith(FEISHU_QR_STATE_PREFIX),
+            settings=settings,
         )
     except EnterpriseProviderError as exc:
+        record_system_log(
+            db,
+            "error",
+            "enterprise_identity.login_failed",
+            "Enterprise identity provider rejected login.",
+            path=f"/api/v1/auth/enterprise/callback/{provider}",
+            method="GET",
+            details={
+                "provider": provider,
+                "operation": exc.operation,
+                "http_status": exc.http_status,
+                "provider_code": exc.provider_code,
+                "missing_field": exc.missing_field,
+            },
+        )
+        await db.commit()
         raise EnterpriseLoginRejected("provider_error", connection.workspace_id) from exc
 
     connection = await identity_repository.lock_connection_by_id(

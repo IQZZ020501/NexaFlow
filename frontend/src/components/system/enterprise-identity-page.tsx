@@ -229,6 +229,14 @@ export function EnterpriseIdentityPage() {
   const provider = selectedProvider
   const form = forms[provider]
   const current = connections.find((item) => item.provider === provider)
+  const callbackValue = current
+    ? provider === "wecom"
+      ? new URL(current.callback_url).host
+      : current.callback_url
+    : ""
+  const copyCallbackLabel = t(
+    provider === "wecom" ? "复制授权回调域" : "复制回调地址"
+  )
 
   return (
     <div className="grid gap-4 pb-6">
@@ -411,20 +419,29 @@ export function EnterpriseIdentityPage() {
           </div>
           {current ? (
             <div className="grid min-w-0 gap-2 rounded-lg border bg-muted/20 p-3 text-xs md:col-span-2">
-              <div className="font-medium">{t("回调地址")}</div>
+              <div className="font-medium">
+                {t(provider === "wecom" ? "授权回调域" : "回调地址")}
+              </div>
+              <FieldDescription>
+                {t(
+                  provider === "wecom"
+                    ? "回调由系统自动处理。将此域名复制到企业微信应用的 Web 登录授权回调域，并配置应用可信域名。"
+                    : "回调由系统自动处理。将此地址复制到开放平台的重定向 URL，扫码确认后会自动返回 NexaFlow。"
+                )}
+              </FieldDescription>
               <div className="flex min-w-0 items-center gap-2">
                 <code
                   className="min-w-0 flex-1 truncate max-sm:break-all max-sm:whitespace-normal"
-                  title={current.callback_url}
+                  title={callbackValue}
                 >
-                  {current.callback_url}
+                  {callbackValue}
                 </code>
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => void handleCopy(current.callback_url)}
-                  aria-label={t("复制回调地址")}
-                  title={t("复制回调地址")}
+                  onClick={() => void handleCopy(callbackValue)}
+                  aria-label={copyCallbackLabel}
+                  title={copyCallbackLabel}
                 >
                   <CopyIcon />
                 </Button>

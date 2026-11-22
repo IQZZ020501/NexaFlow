@@ -545,10 +545,6 @@ export const en = {
   或使用企业账号登录: "Or use a company account",
   "使用 {provider} 登录": "Continue with {provider}",
   "使用 {provider} 扫码登录": "Scan to sign in with {provider}",
-  请使用飞书扫描二维码完成登录:
-    "Scan the QR code with Feishu to finish signing in",
-  正在加载登录二维码: "Loading sign-in QR code",
-  "二维码加载失败，请重新尝试": "The QR code failed to load. Try again.",
   "企业身份尚未绑定，请联系系统管理员":
     "Your company identity is not linked. Contact a system administrator.",
   "企业身份已停用，请联系系统管理员":
@@ -2362,6 +2358,12 @@ export const en = {
   获取应用凭证: "Get app credentials",
   启用企业登录: "Enable enterprise sign-in",
   回调地址: "Callback URL",
+  授权回调域: "Authorized callback domain",
+  复制授权回调域: "Copy authorized callback domain",
+  "回调由系统自动处理。将此域名复制到企业微信应用的 Web 登录授权回调域，并配置应用可信域名。":
+    "NexaFlow handles the callback automatically. Copy this domain into the WeCom app's Web login callback domain setting and configure its trusted domain.",
+  "回调由系统自动处理。将此地址复制到开放平台的重定向 URL，扫码确认后会自动返回 NexaFlow。":
+    "NexaFlow handles the callback automatically. Copy this URL into the provider's redirect URL setting. After scanning and confirming, you will return to NexaFlow.",
   工作空间登录地址: "Workspace sign-in URL",
   复制回调地址: "Copy callback URL",
   复制登录地址: "Copy sign-in URL",
