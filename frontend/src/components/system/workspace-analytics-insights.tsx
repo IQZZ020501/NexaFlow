@@ -19,7 +19,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
-import { APP_TIME_ZONE, formatTokenCount } from "@/lib/display"
+import { formatTokenCount } from "@/lib/display"
 import {
   distributionTotal,
   formatAnalyticsNumber as formatNumber,
@@ -79,21 +79,6 @@ function formatPercent(value: number | null, locale: string) {
         style: "percent",
         maximumFractionDigits: 1,
       }).format(value)
-}
-
-/**
- * Formats a date-time value for the specified locale.
- *
- * @param value - The date-time value to format
- * @param locale - The locale used for date and time formatting
- * @returns The localized date and time string
- */
-function formatDateTime(value: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: APP_TIME_ZONE,
-  }).format(new Date(value))
 }
 
 /**
@@ -465,10 +450,10 @@ export function AnalyticsRankingPanel({
 }
 
 /**
- * Displays frequently asked workspace questions with occurrence counts and latest occurrence times.
+ * Displays frequently asked workspace questions with occurrence counts.
  *
  * @param items - Questions that meet the reporting threshold
- * @param locale - Locale used to format counts and timestamps
+ * @param locale - Locale used to format counts
  */
 export function FrequentQuestionsPanel({
   items,
@@ -516,14 +501,9 @@ export function FrequentQuestionsPanel({
                 <p className="min-w-0 break-words whitespace-normal">
                   {item.question}
                 </p>
-                <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
-                  <Badge variant="secondary">
-                    {formatNumber(item.count, locale)}
-                  </Badge>
-                  <time className="text-xs text-muted-foreground">
-                    {formatDateTime(item.latest_at, locale)}
-                  </time>
-                </div>
+                <Badge variant="secondary" className="shrink-0 self-start">
+                  {formatNumber(item.count, locale)}
+                </Badge>
               </div>
             ))}
           </div>
