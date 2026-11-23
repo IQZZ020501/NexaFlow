@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import { PublicChatHistory as ConversationHistory } from "@/components/agents/public-chat-history"
 import {
   EditChatProjectDialog,
@@ -1112,7 +1113,10 @@ export function PublicAgentChat({
     mode: "follow_up"
     content: string
   } | null>(null)
-  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const { scrollRef, followOutput } = useAutoFollowScroll({
+    content: runs,
+    resetKey: `${agentId}:${activeConversationId ?? ""}`,
+  })
   const projectSettingsRef = React.useRef<HTMLButtonElement>(null)
   const historyButtonRef = React.useRef<HTMLButtonElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
@@ -1311,11 +1315,6 @@ export function PublicAgentChat({
     t,
     token,
   ])
-
-  React.useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (element) element.scrollTop = element.scrollHeight
-  }, [runs, isRunsLoading])
 
   React.useEffect(() => {
     if (selectedConversation) {
@@ -1828,6 +1827,7 @@ export function PublicAgentChat({
     const runId = activeRunIdRef.current
     const content = question.trim()
     if (!token || !runId || !content || sessionInputBusyRef.current) return
+    followOutput()
 
     const previous = sessionInputRef.current
     const input =
@@ -1886,6 +1886,7 @@ export function PublicAgentChat({
     const nextQuestion = (suggestedQuestion ?? question).trim()
     const currentProfile = profile
     if (!nextQuestion || isSending || !token || !currentProfile) return
+    followOutput()
     if (!suggestedQuestion) setQuestion("")
     setSendError(null)
     setIsSending(true)

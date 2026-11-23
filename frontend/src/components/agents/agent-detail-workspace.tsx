@@ -3,6 +3,7 @@
 import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 
 import * as React from "react"
+import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import { integrationToolName } from "@/lib/integrations"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
@@ -95,6 +96,8 @@ import {
 } from "./artifacts/agent-artifact-preview-context"
 import { AgentArtifactPreviewPanel } from "./artifacts/agent-artifact-previews"
 
+export { isNearScrollBottom } from "@/lib/use-auto-follow-scroll"
+
 type AgentDetailWorkspaceProps = {
   agent: Agent
   form: AgentFormState
@@ -144,28 +147,11 @@ type AgentDetailWorkspaceProps = {
   t: TFunction
 }
 
-const AUTO_FOLLOW_THRESHOLD_PX = 64
-
 export function agentPublicationAction(
   agent: Pick<Agent, "published" | "has_unpublished_changes">
 ) {
   if (!agent.published) return "publish"
   return agent.has_unpublished_changes ? "republish" : "unpublish"
-}
-
-export function isNearScrollBottom(
-  element: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">
-) {
-  return (
-    element.scrollHeight - element.scrollTop - element.clientHeight <=
-    AUTO_FOLLOW_THRESHOLD_PX
-  )
-}
-
-function previewScrollHost(element: HTMLElement) {
-  if (element.getClientRects().length === 0) return null
-  if (element.scrollHeight > element.clientHeight) return element
-  return element.ownerDocument.scrollingElement ?? element
 }
 
 /**
@@ -937,8 +923,11 @@ export function AgentDetailWorkspace({
     `${workspaceId}:${agent.id}:${activeView}:${runs[0]?.conversation_id ?? ""}`
   )
   const hasArtifactPreview = !!artifactPreview.selection
-  const previewScrollRef = React.useRef<HTMLDivElement>(null)
-  const shouldFollowPreviewRef = React.useRef(true)
+  const { scrollRef: previewScrollRef, followOutput } = useAutoFollowScroll({
+    content: runs,
+    resetKey: `${workspaceId}:${agent.id}:${activeView}:${runs[0]?.conversation_id ?? ""}`,
+    pageFallback: true,
+  })
   const tabStripRef = React.useRef<HTMLElement>(null)
   const activeTabRef = React.useRef<HTMLButtonElement | null>(null)
   const fileDrop = useAgentFileDrop(
@@ -948,46 +937,6 @@ export function AgentDetailWorkspace({
     () => notify("error", t("文件夹读取失败，请重试"))
   )
 
-  React.useEffect(() => {
-    const scrollContainer = previewScrollRef.current
-    const view = scrollContainer?.ownerDocument.defaultView
-    if (!scrollContainer || !view) return
-
-    const handlePageScroll = () => {
-      const scrollHost = previewScrollHost(scrollContainer)
-      if (scrollHost && scrollHost !== scrollContainer) {
-        shouldFollowPreviewRef.current = isNearScrollBottom(scrollHost)
-      }
-    }
-    const followContent = () => {
-      if (!shouldFollowPreviewRef.current) return
-      const scrollHost = previewScrollHost(scrollContainer)
-      if (scrollHost) scrollHost.scrollTop = scrollHost.scrollHeight
-    }
-    const resizeObserver = new ResizeObserver(followContent)
-    if (scrollContainer.firstElementChild) {
-      resizeObserver.observe(scrollContainer.firstElementChild)
-    }
-    view.addEventListener("scroll", handlePageScroll, { passive: true })
-    return () => {
-      view.removeEventListener("scroll", handlePageScroll)
-      resizeObserver.disconnect()
-    }
-  }, [])
-
-  React.useLayoutEffect(() => {
-    const scrollContainer = previewScrollRef.current
-    if (!scrollContainer || !shouldFollowPreviewRef.current) return
-
-    const scrollToBottom = () => {
-      if (!shouldFollowPreviewRef.current) return
-      const scrollHost = previewScrollHost(scrollContainer)
-      if (scrollHost) scrollHost.scrollTop = scrollHost.scrollHeight
-    }
-    scrollToBottom()
-    const frame = requestAnimationFrame(scrollToBottom)
-    return () => cancelAnimationFrame(frame)
-  }, [activePanel, isRunsLoading, pendingQuestion, runs])
   const selectedModel = models.find((model) => model.id === form.modelId)
   const visibleRuns = [...runs].reverse()
   const navigationItems = [
@@ -1305,7 +1254,7 @@ export function AgentDetailWorkspace({
                     variant={activePanel === "preview" ? "secondary" : "ghost"}
                     onClick={() => {
                       artifactPreview.close()
-                      shouldFollowPreviewRef.current = true
+                      followOutput()
                       setActivePanel("preview")
                     }}
                   >
@@ -1393,16 +1342,6 @@ export function AgentDetailWorkspace({
                     <div
                       ref={previewScrollRef}
                       className="relative min-h-0 flex-1 overflow-y-auto bg-muted/20"
-                      onScroll={(event) => {
-                        if (
-                          previewScrollHost(event.currentTarget) ===
-                          event.currentTarget
-                        ) {
-                          shouldFollowPreviewRef.current = isNearScrollBottom(
-                            event.currentTarget
-                          )
-                        }
-                      }}
                     >
                       <div
                         className={`mx-auto flex min-h-full w-full max-w-3xl flex-col px-3 py-4 ${hasArtifactPreview ? "sm:px-4" : "sm:px-8 sm:py-8"}`}
@@ -1475,7 +1414,7 @@ export function AgentDetailWorkspace({
                             event.preventDefault()
                             return
                           }
-                          shouldFollowPreviewRef.current = true
+                          followOutput()
                           onAsk(event)
                         }}
                         onDragOver={(event) => {

@@ -3068,6 +3068,50 @@ describe("AgentDetailWorkspace edge behavior", () => {
     expect(screen.getByTitle("添加附件")).toBeTruthy()
   })
 
+  test("keeps the preview reading position across streamed output and completion", async () => {
+    const run = makeRun({ status: "running", result: "First output", events: [] })
+    const content = (result: string, status: AgentRun["status"] = "running") => (
+      <LanguageProvider defaultLanguage="zh-Hans">
+        <Harness activeView="settings" runs={[{ ...run, result, status }]} />
+      </LanguageProvider>
+    )
+    const view = renderPage(<Harness activeView="settings" runs={[run]} />)
+    const host = view.container.querySelector(
+      ".relative.min-h-0.flex-1.overflow-y-auto"
+    ) as HTMLDivElement
+    let height = 1000
+    let top = 800
+    Object.defineProperties(host, {
+      getClientRects: { configurable: true, value: () => [{}] },
+      scrollHeight: { configurable: true, get: () => height },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (value: number) => {
+          top = Math.max(0, Math.min(value, height - 200))
+        },
+      },
+    })
+    fireEvent.scroll(host)
+    fireEvent.wheel(host, { deltaY: -20 })
+    host.scrollTop = 780
+    fireEvent.scroll(host)
+    height = 1200
+    view.rerender(content("First output continued"))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30))
+    })
+    expect(top).toBe(780)
+    view.rerender(content("Completed answer", "succeeded"))
+    expect(top).toBe(780)
+    host.scrollTop = 1000
+    fireEvent.scroll(host)
+    height = 1300
+    view.rerender(content("Next output"))
+    expect(top).toBe(1100)
+  })
+
   test("follows the preview scroll container when it is the scroll host", () => {
     const run = makeRun({ status: "running", result: "", events: [] })
     const { container } = renderPage(

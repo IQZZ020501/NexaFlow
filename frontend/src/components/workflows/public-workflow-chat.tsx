@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -531,7 +532,10 @@ export function PublicWorkflowChat({
   const [error, setError] = React.useState<string | null>(null)
   const streamRef = React.useRef<AbortController | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
-  const conversationScrollRef = React.useRef<HTMLDivElement>(null)
+  const { scrollRef: conversationScrollRef, followOutput } = useAutoFollowScroll({
+    content: runs,
+    resetKey: `${workflowId}:${conversationId ?? ""}`,
+  })
 
   React.useEffect(() => () => streamRef.current?.abort(), [])
 
@@ -565,13 +569,6 @@ export function PublicWorkflowChat({
       active = false
     }
   }, [conversationId, t, token, workflowId])
-
-  React.useLayoutEffect(() => {
-    if (conversationScrollRef.current) {
-      conversationScrollRef.current.scrollTop =
-        conversationScrollRef.current.scrollHeight
-    }
-  }, [runs, runsLoading])
 
   function selectConversation(nextId: string | null) {
     setComposerGeneration((current) => current + 1)
@@ -675,6 +672,7 @@ export function PublicWorkflowChat({
     event.preventDefault()
     const nextQuestion = question.trim()
     if (!token || !profile || running || !nextQuestion) return
+    followOutput()
     setRunning(true)
     setError(null)
     try {
