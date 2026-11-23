@@ -4,7 +4,6 @@ import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 import { AgentToolCallRow } from "@/components/agents/agent-tool-call-row"
 
 import * as React from "react"
-import Link from "next/link"
 import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
@@ -44,6 +43,11 @@ import {
 } from "@/components/agents/agent-prompt-bar"
 import { AgentContextCard } from "@/components/agents/agent-context-card"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
+import {
+  WebhookSecretDialog,
+  type WebhookSecretDisclosure,
+} from "@/components/automations/automation-badges"
+import { AutomationFormDialog } from "@/components/automations/automation-form-dialog"
 import {
   AgentReasoningStep,
   useAgentProcessDisclosure,
@@ -905,6 +909,10 @@ export function AgentDetailWorkspace({
     "config"
   )
   const [isConfigVisible, setIsConfigVisible] = React.useState(true)
+  const [isAutomationDialogOpen, setIsAutomationDialogOpen] =
+    React.useState(false)
+  const [webhookDisclosure, setWebhookDisclosure] =
+    React.useState<WebhookSecretDisclosure | null>(null)
   const artifactPreview = useAgentArtifactPreview(
     `${workspaceId}:${agent.id}:${activeView}:${runs[0]?.conversation_id ?? ""}`
   )
@@ -1097,11 +1105,14 @@ export function AgentDetailWorkspace({
             </>
           ) : null}
           {agent.published && agent.status === "active" ? (
-            <Button variant="outline" asChild>
-              <Link href={`/app/automations?create=1&app_id=${agent.id}`}>
-                <OrbitIcon />
-                <span className="hidden sm:inline">{t("创建自动化")}</span>
-              </Link>
+            <Button
+              type="button"
+              variant="outline"
+              aria-label={t("创建自动化")}
+              onClick={() => setIsAutomationDialogOpen(true)}
+            >
+              <OrbitIcon />
+              <span className="hidden sm:inline">{t("创建自动化")}</span>
             </Button>
           ) : null}
           {agent.can_edit ? (
@@ -1573,6 +1584,25 @@ export function AgentDetailWorkspace({
           </div>
         </div>
       </div>
+      <AutomationFormDialog
+        open={isAutomationDialogOpen}
+        onOpenChange={setIsAutomationDialogOpen}
+        initialAppId={agent.id}
+        onSaved={(saved) => {
+          if ("webhook_secret" in saved && saved.webhook_secret) {
+            setWebhookDisclosure({
+              name: saved.name,
+              webhookUrl: saved.webhook_url,
+              secret: saved.webhook_secret,
+            })
+          }
+        }}
+      />
+      <WebhookSecretDialog
+        disclosure={webhookDisclosure}
+        onClose={() => setWebhookDisclosure(null)}
+        t={t}
+      />
     </AgentArtifactPreviewContext>
   )
 }

@@ -220,8 +220,8 @@ const session = makeSession({
 mockUseSession(session)
 
 const stableRouter = {
-  push: () => undefined,
-  replace: () => undefined,
+  push: mock(() => undefined),
+  replace: mock(() => undefined),
   back: () => undefined,
   forward: () => undefined,
   prefetch: () => undefined,
@@ -272,6 +272,8 @@ const fetchStub = ((url: string, init?: RequestInit) =>
 const originalFetch = globalThis.fetch
 beforeEach(() => {
   globalThis.fetch = fetchStub
+  stableRouter.push.mockClear()
+  stableRouter.replace.mockClear()
 })
 afterEach(() => {
   cleanup()
@@ -451,6 +453,117 @@ test("disables related questions while the Agent configuration has unsaved chang
 })
 
 describe("AgentDetailWorkspace header and navigation", () => {
+  test.each(["create", "webhook", "cancel", "escape"] as const)(
+    "keeps the Agent page and unsaved edits after automation %s",
+    async (action) => {
+      const publishedAgent = makeAgent({
+        published: true,
+        current_published_version_id: "published-1",
+      })
+      const created: Array<Record<string, unknown>> = []
+      routes = [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents`,
+          exact: true,
+          respond: () => jsonResponse([publishedAgent]),
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/${publishedAgent.id}/versions`,
+          respond: () =>
+            jsonResponse({
+              items: [
+                {
+                  id: "published-1",
+                  version_number: 1,
+                  created_at: publishedAgent.created_at,
+                },
+              ],
+            }),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/automations`,
+          respond: (init) => {
+            created.push(JSON.parse(String(init?.body)))
+            return jsonResponse({
+              id: "automation-1",
+              name: "Morning report",
+              webhook_url: "/api/v1/hooks/automations/hook-1",
+              webhook_secret: action === "webhook" ? "test-once-secret" : null,
+            })
+          },
+        },
+      ]
+      renderPage(<Harness agent={publishedAgent} activeView="settings" />)
+      fireEvent.change(screen.getByLabelText("Agent 名称"), {
+        target: { value: "Unsaved Agent name" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "创建自动化" }))
+      const dialog = await screen.findByRole("dialog", { name: "创建自动化" })
+      await waitFor(() =>
+        expect(within(dialog).getByLabelText("发布版本").textContent).toContain(
+          "v1"
+        )
+      )
+      await waitFor(() =>
+        expect(
+          within(dialog).getByLabelText("选择已发布应用").textContent
+        ).toContain(publishedAgent.name)
+      )
+
+      if (action === "cancel") {
+        fireEvent.click(within(dialog).getByRole("button", { name: "取消" }))
+      } else if (action === "escape") {
+        fireEvent.keyDown(dialog, { key: "Escape" })
+      } else {
+        fireEvent.change(within(dialog).getByLabelText("名称"), {
+          target: { value: "Morning report" },
+        })
+        fireEvent.change(within(dialog).getByLabelText("任务提示词"), {
+          target: { value: "Summarize today's updates" },
+        })
+        if (action === "webhook") {
+          fireEvent.pointerDown(within(dialog).getByLabelText("触发方式"))
+          fireEvent.click(
+            await screen.findByRole("menuitem", { name: "Webhook 事件" })
+          )
+        }
+        fireEvent.click(within(dialog).getByRole("button", { name: "创建" }))
+        await waitFor(() => expect(created).toHaveLength(1))
+        expect(created[0]).toMatchObject({
+          target_app_id: publishedAgent.id,
+          publication_version_id: "published-1",
+          trigger_type: action === "webhook" ? "webhook" : "daily",
+        })
+      }
+
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "创建自动化" })).toBeNull()
+      )
+      if (action === "webhook") {
+        const disclosure = await screen.findByRole("dialog", {
+          name: "Webhook 地址与签名密钥",
+        })
+        expect(within(disclosure).getByText("test-once-secret")).toBeTruthy()
+        fireEvent.click(
+          within(disclosure).getByRole("button", { name: "关闭" })
+        )
+      }
+      expect(
+        (screen.getByLabelText("Agent 名称") as HTMLInputElement).value
+      ).toBe("Unsaved Agent name")
+      expect(
+        screen.getByRole("heading", { level: 2, name: "基本信息" })
+      ).toBeTruthy()
+      expect(stableRouter.push).not.toHaveBeenCalled()
+      expect(stableRouter.replace).not.toHaveBeenCalled()
+      if (action === "cancel" || action === "escape")
+        expect(created).toHaveLength(0)
+    }
+  )
+
   test("renders the header with model line and view label", () => {
     renderPage(<Harness />)
     expect(screen.getByText("Research Assistant")).toBeTruthy()
