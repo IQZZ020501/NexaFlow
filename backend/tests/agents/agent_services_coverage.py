@@ -328,6 +328,7 @@ async def exercise_services_http_paths(
             "admin",
         )
         assert created.name == "Direct Create"
+        assert created.tool_group_count == 1
         assert created.knowledge_base_ids == [kb_id]
         assert [item.tool_name for item in created.mcp_tools] == [
             "lookup_release"
@@ -374,12 +375,14 @@ async def exercise_services_http_paths(
             db, workspace_id, actor, limit=10, offset=0
         )
         listed_created = next(item for item in listed if item.id == created.id)
+        assert listed_created.tool_group_count == created.tool_group_count
         assert listed_created.created_by_name
         assert listed_created.created_by_username
         response = await agent_services.get_agent_response(
             db, created_agent, actor
         )
         assert response.id == created.id
+        assert response.tool_group_count == created.tool_group_count
 
         # member-owned agent: non-admin publish must be forbidden (403)
         member_agent = await agent_services.create_agent(
@@ -492,6 +495,7 @@ async def exercise_services_http_paths(
         assert updated.name == "Direct Updated"
         assert updated.knowledge_base_ids == []
         assert updated.mcp_tools == []
+        assert updated.tool_group_count == 0
         assert updated.model_id == second_llm_id
 
         # app_type conflict -> 409

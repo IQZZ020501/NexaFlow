@@ -80,6 +80,7 @@ class AgentResponse(BaseModel):
     image_model_id: str | None = None
     knowledge_base_ids: list[str]
     tools: list[ToolRefSchema] = Field(default_factory=list)
+    tool_group_count: int = Field(default=0, ge=0)
     skills: list[AgentSkillRefSchema] = Field(default_factory=list)
     mcp_tools: list[AgentMcpToolRef] = Field(default_factory=list, deprecated=True)
     status: str

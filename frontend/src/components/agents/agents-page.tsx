@@ -2583,9 +2583,19 @@ export function AgentsPage({
                           />
                           <Spec
                             label={t("工具")}
-                            value={String(
-                              (agent.tools ?? agent.mcp_tools ?? []).length
-                            )}
+                            value={
+                              agent.tool_group_count !== undefined
+                                ? String(agent.tool_group_count)
+                                : agent.tools?.length
+                                  ? "—"
+                                  : String(
+                                      new Set(
+                                        (agent.mcp_tools ?? []).map(
+                                          (tool) => tool.server_id
+                                        )
+                                      ).size
+                                    )
+                            }
                           />
                         </ResourceCardSpecs>
                       </ResourceCardFooter>

@@ -182,6 +182,7 @@ export function makeAgent(overrides: Partial<Agent> = {}): Agent {
     model_id: "model-1",
     knowledge_base_ids: ["knowledge-1"],
     tools: [{ tool_id: "tool-1", version_id: "version-1" }],
+    tool_group_count: 1,
     status: "active",
     published: false,
     has_unpublished_changes: false,
@@ -205,6 +206,7 @@ function makeWorkflow(overrides: Partial<Agent> = {}): Agent {
     model_id: "model-1",
     knowledge_base_ids: [],
     tools: [],
+    tool_group_count: 0,
     published: true,
     ...overrides,
   })
@@ -571,6 +573,20 @@ afterEach(() => {
 })
 
 describe("AgentsPage list view", () => {
+  test("counts tool groups without expanding their child tools", async () => {
+    routes = baseRoutes([makeAgent({
+      tool_group_count: 10,
+      tools: Array.from({ length: 102 }, (_, index) => ({
+        tool_id: `child-${index}`, version_id: `version-${index}`,
+      })),
+    })])
+    renderPage(<AgentsPage />)
+    await screen.findByText("Research Assistant")
+    const card = cardOf("Research Assistant")
+    expect(within(card).getByText("10")).toBeTruthy()
+    expect(within(card).queryByText("102")).toBeNull()
+  })
+
   test("sorts applications and shows their update time", async () => {
     routes = baseRoutes([
       makeAgent({

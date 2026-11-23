@@ -159,6 +159,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     model_id: "model-1",
     knowledge_base_ids: ["knowledge-1"],
     tools: [{ tool_id: "tool-1", version_id: "version-1" }],
+    tool_group_count: 1,
     status: "active",
     published: false,
     has_unpublished_changes: false,
@@ -180,6 +181,7 @@ function makeWorkflow(overrides: Partial<Agent> = {}): Agent {
     model_id: "model-1",
     knowledge_base_ids: [],
     tools: [],
+    tool_group_count: 0,
     published: true,
     ...overrides,
   })

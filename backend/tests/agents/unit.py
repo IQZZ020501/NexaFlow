@@ -2874,6 +2874,31 @@ def test_agent_memory_reports_real_compaction_progress() -> None:
     asyncio.run(check())
 
 
+def test_agent_tool_group_count_query_is_scoped() -> None:
+    from sqlalchemy.dialects import postgresql
+
+    from app.infra.db.repositories.tools import repository
+
+    async def check():
+        db = SimpleNamespace(execute=AsyncMock(return_value=[("app-1", 10)]))
+        counts = await repository.list_application_tool_group_count_map(
+            db, "workspace-1", ["app-1", "app-2"], exclude_tool_ids=("implicit-bash",),
+        )
+        assert counts == {"app-1": 10, "app-2": 0}
+        statement = db.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+        sql = str(statement)
+        assert "count(DISTINCT CASE" in sql
+        assert "application_tool_bindings.workspace_id =" in sql
+        assert "tools.workspace_id = application_tool_bindings.workspace_id" in sql
+        assert "tools.source_id" in sql
+        assert "implicit-bash" in str(statement.params)
+        db.execute.reset_mock()
+        assert await repository.list_application_tool_group_count_map(db, "workspace-1", []) == {}
+        db.execute.assert_not_called()
+
+    asyncio.run(check())
+
+
 def test_agent_memory_query_is_bounded_and_projected() -> None:
     from sqlalchemy.dialects import postgresql
 
@@ -3913,6 +3938,7 @@ def main() -> None:
     test_agent_memory_rolls_up_bounded_history_page()
     test_agent_memory_summary_failure_preserves_history_and_usage()
     test_agent_memory_reports_real_compaction_progress()
+    test_agent_tool_group_count_query_is_scoped()
     test_agent_context_compaction_progress_reaches_stream()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
