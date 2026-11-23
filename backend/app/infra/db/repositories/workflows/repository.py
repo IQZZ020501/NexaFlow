@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.agents.models import (
@@ -401,6 +401,12 @@ async def set_first_run_deadline(
             .where(
                 AgentRunState.run_id == run_id,
                 AgentRunState.worker_task_id == worker_task_id,
+                # Waiting releases the retry attempt, so attempts == 1 alone
+                # cannot distinguish an automation's first claim from a resume.
+                or_(
+                    AgentRunState.access_source != "automation",
+                    WorkflowRunDetail.deadline_at <= AgentRunState.started_at,
+                ),
             )
             .scalar_subquery()
             == 1,

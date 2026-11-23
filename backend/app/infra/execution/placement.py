@@ -93,7 +93,7 @@ class PlacementStore:
                 hashlib.sha256(
                     f"{scope.workspace_id}:{run.access_source}:{run.consumer_id}".encode()
                 ).hexdigest()
-                if run.access_source in {"public", "api"}
+                if run.access_source in {"public", "api", "automation"}
                 else None
             )
             expires = run.deadline_at + timedelta(seconds=60)

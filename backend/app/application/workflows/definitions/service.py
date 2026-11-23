@@ -25,11 +25,13 @@ from app.application.workflows.runs.service import (
     get_workflow_run,
     list_workflow_node_executions,
     list_workflow_runs,
+    prepare_workflow_run,
     regenerate_workflow_run,
     resolve_workflow_tool_approval,
     set_workflow_run_feedback,
     stream_workflow_run,
     submit_workflow_form,
+    workflow_run_response,
 )
 from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
 from app.domain.workflows.definitions.service import (
@@ -68,6 +70,7 @@ __all__ = [
     "list_workflow_node_executions",
     "list_workflow_runs",
     "list_workflow_versions",
+    "prepare_workflow_run",
     "publish_workflow_definition",
     "regenerate_external_workflow_run",
     "regenerate_workflow_run",
@@ -82,6 +85,7 @@ __all__ = [
     "upload_public_workflow_files",
     "upload_workspace_workflow_files",
     "validate_workflow_definition",
+    "workflow_run_response",
     "resolve_workflow_tool_approval",
     "resolve_external_workflow_tool_approval",
 ]

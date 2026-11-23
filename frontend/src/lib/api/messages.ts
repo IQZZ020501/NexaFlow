@@ -1,8 +1,10 @@
 import { apiUrl, request, requestPage, type ApiError } from "@/lib/api-client"
 
 export type MessageSeverity = "info" | "warning" | "critical"
+export type NotificationEventType =
+  "succeeded" | "failed" | "cancelled" | "awaiting_approval" | "awaiting_input"
 
-export type MessageItem = {
+export type AnnouncementMessageItem = {
   id: string
   kind: "announcement"
   scope_type: "global" | "workspace"
@@ -18,13 +20,53 @@ export type MessageItem = {
   created_at: string
 }
 
-export type MessageStreamEvent = {
-  type:
-    "announcement.published" | "announcement.updated" | "announcement.archived"
-  message_id: string
-  scope_type: "global" | "workspace"
-  workspace_id: string | null
+export type TaskNotificationMessageItem = {
+  id: string
+  kind: "notification"
+  scope_type: "personal"
+  workspace_id: string
+  event_type: NotificationEventType
+  title: string
+  body: string
+  severity: MessageSeverity
+  pinned: boolean
+  automation_id: string | null
+  automation_name: string | null
+  execution_id: string | null
+  run_id: string | null
+  target_app_id: string | null
+  target_app_type: "agent" | "workflow" | null
+  trigger_source: "schedule" | "webhook" | "manual" | null
+  metadata: Record<string, unknown>
+  published_at: string
+  expires_at: string | null
+  is_read: boolean
+  read_at: string | null
+  created_at: string
 }
+
+export type MessageItem = AnnouncementMessageItem | TaskNotificationMessageItem
+
+export type MessageStreamEvent =
+  | {
+      type:
+        | "announcement.published"
+        | "announcement.updated"
+        | "announcement.archived"
+      message_id: string
+      scope_type: "global" | "workspace"
+      workspace_id: string | null
+    }
+  | {
+      type: "notification"
+      id: string
+      workspace_id: string
+      event_type: NotificationEventType
+      automation_id: string | null
+      execution_id: string | null
+      run_id: string | null
+      title: string
+    }
 
 export type MessageUnreadSummary = {
   count: number
@@ -84,12 +126,14 @@ export function markAllMessagesRead(token: string, workspaceId: string | null) {
 function streamQuery(
   workspaceId: string | null,
   globalAfter: string | null,
-  workspaceAfter: string | null
+  workspaceAfter: string | null,
+  notificationAfter: string | null
 ) {
   const query = new URLSearchParams()
   if (workspaceId) query.set("workspace_id", workspaceId)
   if (globalAfter) query.set("global_after", globalAfter)
   if (workspaceAfter) query.set("workspace_after", workspaceAfter)
+  if (notificationAfter) query.set("notification_after", notificationAfter)
   return query.toString() ? `?${query.toString()}` : ""
 }
 
@@ -115,7 +159,11 @@ async function consumeMessageStream(
   response: Response,
   signal: AbortSignal,
   onEvent: (event: MessageStreamEvent) => void,
-  cursors: { globalAfter: string | null; workspaceAfter: string | null }
+  cursors: {
+    globalAfter: string | null
+    workspaceAfter: string | null
+    notificationAfter: string | null
+  }
 ) {
   if (!response.body) {
     throw new Error("Message stream did not return a response body.")
@@ -143,6 +191,8 @@ async function consumeMessageStream(
       cursors.globalAfter = eventId.slice("global:".length)
     } else if (eventId.startsWith("workspace:")) {
       cursors.workspaceAfter = eventId.slice("workspace:".length)
+    } else if (eventId.startsWith("user:")) {
+      cursors.notificationAfter = eventId.slice("user:".length)
     }
     onEvent(event)
     eventName = ""
@@ -181,6 +231,7 @@ export async function observeMessageStream(
   const cursors = {
     globalAfter: null as string | null,
     workspaceAfter: null as string | null,
+    notificationAfter: null as string | null,
   }
   let reconnectDelay = 500
 
@@ -191,7 +242,8 @@ export async function observeMessageStream(
           `/api/v1/messages/stream${streamQuery(
             workspaceId,
             cursors.globalAfter,
-            cursors.workspaceAfter
+            cursors.workspaceAfter,
+            cursors.notificationAfter
           )}`
         ),
         {

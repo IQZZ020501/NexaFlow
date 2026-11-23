@@ -747,7 +747,7 @@ def _validate_context(context: ToolInvocationContext) -> None:
             raise ValueError("Tool tests cannot belong to a Run.")
     elif not context.root_run_id or not context.run_id:
         raise ValueError("Application Tool invocations require Run IDs.")
-    if context.access_source not in {"console", "public", "api"}:
+    if context.access_source not in {"console", "public", "api", "automation"}:
         raise ValueError("Tool invocation access source is invalid.")
     if not context.idempotency_key or not context.invocation_id:
         raise ValueError("Tool invocation identity is invalid.")

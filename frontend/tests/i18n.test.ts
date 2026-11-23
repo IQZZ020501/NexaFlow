@@ -38,8 +38,24 @@ describe("i18n", () => {
   })
 
   test("builds localized feature pages", () => {
-    expect(getPages(tFor("zh-Hans"))[0]?.label).toBe("应用")
-    expect(getPages(tFor("zh-Hant"))[0]?.label).toBe("應用")
-    expect(getPages(tFor("en"))[0]?.label).toBe("Apps")
+    expect(
+      getPages(tFor("zh-Hans"))
+        .slice(0, 2)
+        .map((p) => p.label)
+    ).toEqual(["应用", "自动化"])
+    expect(
+      getPages(tFor("zh-Hant"))
+        .slice(0, 2)
+        .map((p) => p.label)
+    ).toEqual(["應用", "自動化"])
+    expect(
+      getPages(tFor("en"))
+        .slice(0, 2)
+        .map((p) => p.label)
+    ).toEqual(["Apps", "Automations"])
+    expect(
+      translate("en", "停机恢复跳过 {value} 次过期调度", { value: 3 })
+    ).toBe("Skipped 3 missed slots during downtime")
+    expect(translate("zh-Hant", "单次定时")).toBe("單次定時")
   })
 })

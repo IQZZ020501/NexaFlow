@@ -2,19 +2,49 @@ import { ApiError } from "@/lib/api-client"
 import { type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
-  "Published applications require workspace-shared models.": "发布应用需要使用工作空间共享模型",
+  "Automation is paused; resume it before manual execution.":
+    "自动化已暂停，请恢复后再执行",
+  "An active execution is already running for this automation.":
+    "该自动化已有未完成的任务",
+  "Skipped because a previous run is still active.":
+    "上一次任务尚未结束，本次已跳过",
+  "Cancelled before run creation.": "任务在开始执行前已取消",
+  "Completed one-time automation cannot be resumed without rescheduling.":
+    "单次任务已完成，请修改执行时间后再启用",
+  "Target application must be published before binding an automation.":
+    "请先发布目标应用",
+  "Target application has been unpublished.": "目标应用已取消发布",
+  "Target application is unavailable or disabled.": "目标应用不可用或已停用",
+  "Application publisher is inactive.": "应用发布者已停用或不再可用",
+  "Automation owner user is inactive or missing.":
+    "自动化所属用户已停用或不存在",
+  "Pinned agent publication version is missing.":
+    "绑定的应用版本已不存在，请重新选择",
+  "Pinned workflow published version is missing.":
+    "绑定的应用版本已不存在，请重新选择",
+  "Automation webhook pending queue is full.": "事件队列已满，请稍后重试",
+  "Automation task input exceeds 4000 characters.":
+    "任务输入超过4000字符，请缩短提示词或提取范围",
+  "Published applications require workspace-shared models.":
+    "发布应用需要使用工作空间共享模型",
   "Agent model not found.": "所选模型不存在或当前用户无权使用",
   "Agent image model not found.": "所选模型不存在或当前用户无权使用",
   "Model not found.": "所选模型不存在或当前用户无权使用",
-  "Member model endpoints must use public network addresses.": "成员接入的模型仅支持公网地址",
-  "Member model parameters cannot override connection settings.": "模型参数不能覆盖连接设置",
-  "Personal Bedrock models require explicit AWS credentials.": "个人Bedrock模型必须填写AWS访问凭据",
-  "Personal Bedrock models require the official regional endpoint.": "个人Bedrock模型仅支持官方区域接口",
+  "Member model endpoints must use public network addresses.":
+    "成员接入的模型仅支持公网地址",
+  "Member model parameters cannot override connection settings.":
+    "模型参数不能覆盖连接设置",
+  "Personal Bedrock models require explicit AWS credentials.":
+    "个人Bedrock模型必须填写AWS访问凭据",
+  "Personal Bedrock models require the official regional endpoint.":
+    "个人Bedrock模型仅支持官方区域接口",
   "Invalid Bedrock region.": "Bedrock区域无效",
   "Invalid member model endpoint.": "模型连接地址无效",
   "Model management access denied.": "无权管理此模型",
-  "Workspace admin required to create shared models.": "只有工作空间管理员可以创建共享模型",
-  "Model visibility cannot be changed. Create a separate model instead.": "使用范围创建后不可更改，如需其他范围请重新接入。",
+  "Workspace admin required to create shared models.":
+    "只有工作空间管理员可以创建共享模型",
+  "Model visibility cannot be changed. Create a separate model instead.":
+    "使用范围创建后不可更改，如需其他范围请重新接入。",
   "Invalid integration arguments.":
     "集成参数无效，请检查资源标识、时间和操作参数。",
   "Invalid integration resource identifier.":
@@ -66,7 +96,8 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Memory not found.": "记忆不存在或不可访问",
   "Memory key already exists.": "已有相同主题的记忆，请编辑现有条目",
   "Memory limit reached.": "最多保存 100 条记忆，请先删除不再需要的条目",
-  "Memory contains sensitive information.": "记忆中不能保存密码、密钥等敏感信息",
+  "Memory contains sensitive information.":
+    "记忆中不能保存密码、密钥等敏感信息",
   "Chat project not found.": "项目不存在或不可访问",
   "Chat project is archived.": "项目已归档，请先恢复项目",
   "Chat project file not found.": "项目资料不存在或已移除",
@@ -78,30 +109,41 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
     "对话运行中，请完成后再移动或解散项目",
   "Name cannot be empty.": "名称不能为空或仅包含空格",
 
-  "Workspace monthly token quota exceeded.": "工作空间本月模型 Token 额度不足，请联系管理员",
+  "Workspace monthly token quota exceeded.":
+    "工作空间本月模型 Token 额度不足，请联系管理员",
   "Artifact workspace path is invalid.": "文件路径无效，请检查文件夹或压缩包",
   "Artifact filename is invalid.": "文件路径无效，请检查文件夹或压缩包",
   "Uploaded file path exceeds 255 characters.": "文件路径过长，最多 255 个字符",
   "Each conversation file must not exceed 5 MiB.": "单个文件不能超过 5 MiB",
   "Each project file must not exceed 5 MiB.": "单个文件不能超过 5 MiB",
-  "Conversation files exceed 64 files or 64 MiB.": "每段对话最多保存 64 个文件、合计 64 MiB",
-  "Project file count exceeds its limit.": "每段对话最多保存 64 个文件、合计 64 MiB",
+  "Conversation files exceed 64 files or 64 MiB.":
+    "每段对话最多保存 64 个文件、合计 64 MiB",
+  "Project file count exceeds its limit.":
+    "每段对话最多保存 64 个文件、合计 64 MiB",
   "Project files exceed 64 MiB.": "每段对话最多保存 64 个文件、合计 64 MiB",
-  "Project paths cannot be both a file and a parent directory.": "上传路径不能同时是文件和文件夹",
-  "Conversation file history exceeds 256 MiB; start a new conversation with the necessary files.": "对话文件历史已满，请新建对话并上传必要文件",
-  "Upload at most 64 files per request.": "每段对话最多保存 64 个文件、合计 64 MiB",
+  "Project paths cannot be both a file and a parent directory.":
+    "上传路径不能同时是文件和文件夹",
+  "Conversation file history exceeds 256 MiB; start a new conversation with the necessary files.":
+    "对话文件历史已满，请新建对话并上传必要文件",
+  "Upload at most 64 files per request.":
+    "每段对话最多保存 64 个文件、合计 64 MiB",
   "Uploaded files contain duplicate paths.": "文件路径重复，请整理后重新上传",
-  "ZIP archive is invalid or unsupported.": "压缩包无效或格式不支持，请使用 ZIP",
+  "ZIP archive is invalid or unsupported.":
+    "压缩包无效或格式不支持，请使用 ZIP",
   "ZIP archive entry size is invalid.": "压缩包无效或格式不支持，请使用 ZIP",
-  "ZIP archive contains links, special files or encrypted entries.": "ZIP 不支持链接、特殊文件或加密条目",
+  "ZIP archive contains links, special files or encrypted entries.":
+    "ZIP 不支持链接、特殊文件或加密条目",
   "ZIP archive contains too many entries.": "ZIP 条目过多，请精简后重试",
   "No usable files were found in the upload.": "未找到可上传的文件",
-  "Environments, dependency caches and Git metadata are not project files.": "文件夹中的依赖、缓存和 Git 数据不会导入",
-  "Uploaded paths cannot be both a file and a directory.": "上传路径不能同时是文件和文件夹",
+  "Environments, dependency caches and Git metadata are not project files.":
+    "文件夹中的依赖、缓存和 Git 数据不会导入",
+  "Uploaded paths cannot be both a file and a directory.":
+    "上传路径不能同时是文件和文件夹",
   "Agent upload is empty.": "文件为空（0 字节），请选择有内容的文件",
   "Agent upload could not be read.": "无法读取该文件。",
   "Agent uploads are too large.": "文件超过大小限制，请缩小后重试",
-  "Conversation upload exceeds its size limit.": "文件超过大小限制，请缩小后重试",
+  "Conversation upload exceeds its size limit.":
+    "文件超过大小限制，请缩小后重试",
   "Document is empty.": "文件为空（0 字节），请选择有内容的文件",
   "Document is too large.": "文件超过大小限制，请缩小后重试",
   "Unsupported document type.": "不支持的文件格式",
@@ -111,21 +153,27 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Knowledge model not found.": "检索模型不存在，请重新选择",
   "Knowledge model is disabled.": "检索模型已停用，请重新选择",
   "Embedding model is required.": "请先配置 Embedding 模型",
-  "Knowledge model test request failed.": "检索模型测试失败，请检查连接配置后重试",
-  "Agent Skill binding permission is no longer valid.": "绑定的技能授权已失效，请重新配置",
-  "Skill execution access is no longer valid.": "绑定的技能授权已失效，请重新配置",
+  "Knowledge model test request failed.":
+    "检索模型测试失败，请检查连接配置后重试",
+  "Agent Skill binding permission is no longer valid.":
+    "绑定的技能授权已失效，请重新配置",
+  "Skill execution access is no longer valid.":
+    "绑定的技能授权已失效，请重新配置",
   "Knowledge model must be embedding.": "请选择 Embedding 类型的模型",
   "Knowledge model must be reranker.": "请选择 Rerank 类型的模型",
   "Knowledge task is already running.": "知识库已有任务运行中，请完成后重试",
   "Agent Skill is disabled.": "技能已停用，请启用后重试",
   "A bound Agent Skill is disabled.": "绑定的技能已停用或已删除，请重新配置",
   "Disabled Agent Skills cannot be published.": "技能已停用，请启用后再发布",
-  "Agent Skill version is not available for binding.": "技能版本不可用，请重新选择",
+  "Agent Skill version is not available for binding.":
+    "技能版本不可用，请重新选择",
   "Tool is not available for binding.": "工具不可用，请刷新工具列表后重新选择",
-  "Tool version is not available for binding.": "工具不可用，请刷新工具列表后重新选择",
+  "Tool version is not available for binding.":
+    "工具不可用，请刷新工具列表后重新选择",
   "Agent Skill publication conflicted.": "技能发布发生冲突，请刷新后重试",
   "Agent Skill publication is invalid.": "技能发布版本无效，请重新发布",
-  "Agent Skill knowledge base is not active.": "技能引用的知识库未启用，请重新配置",
+  "Agent Skill knowledge base is not active.":
+    "技能引用的知识库未启用，请重新配置",
   "SMTP settings are not configured.": "尚未配置 SMTP",
   "SMTP test failed.": "SMTP 测试失败，请检查服务器、端口、加密方式和凭据",
   "SMTP host and sender address are required when enabled.":

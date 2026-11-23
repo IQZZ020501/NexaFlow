@@ -39,16 +39,18 @@ TOOL_INVOCATION_CLAIMABLE_STATUSES = (
 def effective_tool_access_sources(
     allowed_access_sources: tuple[str, ...] | list[str],
 ) -> tuple[str, ...]:
-    """Treat public chat as an interactive extension of console access.
+    """Treat public chat and owner automations as interactive console extensions.
 
     Older immutable Tool snapshots and existing workspace policies may only
-    record ``console``. Public chat has its own authenticated approval flow, so
-    console access also grants public access without widening machine-to-machine
-    API access.
+    record ``console``. Public chat and owner-bound automations preserve user
+    identity and interactive approval without widening machine-to-machine API
+    access.
     """
     sources = list(dict.fromkeys(allowed_access_sources))
-    if "console" in sources and "public" not in sources:
-        sources.append("public")
+    if "console" in sources:
+        for inherited in ("public", "automation"):
+            if inherited not in sources:
+                sources.append(inherited)
     return tuple(sources)
 
 

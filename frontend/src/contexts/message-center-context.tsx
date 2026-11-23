@@ -127,6 +127,19 @@ export function MessageCenterProvider({
     return () => controller.abort()
   }, [mustChangePassword, refresh, selectedWorkspaceId, token])
 
+  React.useEffect(() => {
+    if (!token || mustChangePassword) return
+    const revalidate = () => {
+      if (document.visibilityState === "visible") void refresh()
+    }
+    const timer = window.setInterval(revalidate, 60_000)
+    document.addEventListener("visibilitychange", revalidate)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", revalidate)
+    }
+  }, [mustChangePassword, refresh, token])
+
   const markRead = React.useCallback(
     async (messageId: string) => {
       if (!token) return

@@ -291,7 +291,7 @@ export type AgentApiDocumentation = {
   base_path: string
 }
 
-export type AgentAccessSource = "console" | "public" | "api"
+export type AgentAccessSource = "console" | "public" | "api" | "automation"
 
 export type AgentLog = {
   id: string

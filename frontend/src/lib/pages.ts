@@ -1,6 +1,7 @@
 import {
   BoxesIcon,
   BrainCircuitIcon,
+  OrbitIcon,
   DatabaseIcon,
   WrenchIcon,
 } from "lucide-react"
@@ -12,6 +13,11 @@ const pageDefinitions = [
     key: "apps",
     label: "应用",
     icon: BoxesIcon,
+  },
+  {
+    key: "automations",
+    label: "自动化",
+    icon: OrbitIcon,
   },
   {
     key: "knowledge",

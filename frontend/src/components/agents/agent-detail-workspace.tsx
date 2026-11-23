@@ -3,6 +3,7 @@
 import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 
 import * as React from "react"
+import Link from "next/link"
 import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import { integrationToolName } from "@/lib/integrations"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
@@ -10,6 +11,7 @@ import {
   ArrowLeftIcon,
   BotIcon,
   BrainIcon,
+  OrbitIcon,
   CircleCheckIcon,
   ChevronDownIcon,
   CircleXIcon,
@@ -1126,6 +1128,14 @@ export function AgentDetailWorkspace({
                 )}
               </Button>
             </>
+          ) : null}
+          {agent.published && agent.status === "active" ? (
+            <Button variant="outline" asChild>
+              <Link href={`/app/automations?create=1&app_id=${agent.id}`}>
+                <OrbitIcon />
+                <span className="hidden sm:inline">{t("创建自动化")}</span>
+              </Link>
+            </Button>
           ) : null}
           {agent.can_edit ? (
             <>

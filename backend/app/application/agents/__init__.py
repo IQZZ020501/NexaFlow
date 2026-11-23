@@ -62,6 +62,7 @@ from app.application.uploads.service import (
 from app.domain.agents.access.permissions import (
     list_agent_permissions,
     require_agent_edit,
+    require_agent_view,
     revoke_agent_permission,
     upsert_agent_permission,
 )
@@ -77,6 +78,37 @@ from app.domain.agents.service import (
     list_agents,
     update_agent,
 )
+from app.entities.identity.user import User as _User
+from app.infra.db.repositories.agents import repository as _agent_repository
+from app.schemas.agents.contracts import (
+    AgentPublicationVersionListResponse,
+    AgentPublicationVersionResponse,
+)
+
+
+async def list_agent_publication_versions(
+    db,
+    workspace_id: str,
+    agent_id: str,
+    actor: _User,
+) -> AgentPublicationVersionListResponse:
+    agent = await get_agent(db, workspace_id, agent_id)
+    await require_agent_view(db, agent, actor)
+    versions = await _agent_repository.list_agent_publication_versions(
+        db, workspace_id, agent_id
+    )
+    return AgentPublicationVersionListResponse(
+        items=[
+            AgentPublicationVersionResponse(
+                id=v.id,
+                agent_id=v.agent_id,
+                version_number=v.version_number,
+                published_by_user_id=v.published_by_user_id,
+                created_at=v.created_at,
+            )
+            for v in versions
+        ]
+    )
 
 __all__ = [
     "ACTIVE_STATUS",
@@ -112,6 +144,7 @@ __all__ = [
     "list_agent_conversation_users",
     "list_agent_logs",
     "list_agent_permissions",
+    "list_agent_publication_versions",
     "list_agent_run_tool_calls",
     "list_agent_runs",
     "list_agents",

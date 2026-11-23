@@ -573,6 +573,9 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         if run is None or run.status not in AGENT_RUN_RUNNING_STATUSES:
             raise AgentRunnerError("Agent run is not executable.")
+        from app.application.runs.lifecycle import require_automation_caller_access
+
+        await require_automation_caller_access(db, run)
         actor = await user_repository.get_user_by_id(db, run.execution_user_id)
         if actor is None or not actor.is_active:
             raise AgentRunnerError("Agent run user is unavailable.")

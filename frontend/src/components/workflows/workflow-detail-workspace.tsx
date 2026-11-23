@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import dynamic from "next/dynamic"
 import {
@@ -12,6 +13,7 @@ import {
   LoaderCircleIcon,
   Maximize2Icon,
   Minimize2Icon,
+  OrbitIcon,
   PaperclipIcon,
   PlayIcon,
   SaveIcon,
@@ -1001,6 +1003,14 @@ export function WorkflowDetailWorkspace({
             <span className="hidden sm:inline">
               {agent.can_edit ? t("调试运行") : t("运行已发布版本")}
             </span>
+          </Button>
+        ) : null}
+        {agent.published && agent.status === "active" ? (
+          <Button variant="outline" asChild>
+            <Link href={`/app/automations?create=1&app_id=${agent.id}`}>
+              <OrbitIcon />
+              <span className="hidden sm:inline">{t("创建自动化")}</span>
+            </Link>
           </Button>
         ) : null}
         {canManagePublishing ? (

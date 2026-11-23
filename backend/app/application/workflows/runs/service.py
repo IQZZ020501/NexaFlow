@@ -22,6 +22,7 @@ from app.application.tools.runtime.service import preflight_tool_snapshot
 from app.application.uploads.service import resolve_workspace_workflow_files
 from app.domain.agent_skills.contracts import agent_skill_snapshot_payload
 from app.domain.agents.access.permissions import require_agent_edit, require_agent_view
+from app.domain.agents.approval import AgentApprovalMode
 from app.domain.agents.models import (
     agent_run_display_status,
     agent_run_generation,
@@ -435,14 +436,22 @@ async def _version_for_run(
     workspace_id: str,
     agent_id: str,
     payload: WorkflowRunCreateRequest,
+    *,
+    workflow_version_id: str | None = None,
 ) -> WorkflowVersion | None:
     if payload.source == "draft":
-        if payload.version_number is not None:
+        if payload.version_number is not None or workflow_version_id is not None:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 "Draft runs cannot select a published version.",
             )
         return None
+    if workflow_version_id is not None:
+        versions = await workflow_repository.list_versions(db, workspace_id, agent_id)
+        version = next((item for item in versions if item.id == workflow_version_id), None)
+        if version is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow version not found.")
+        return version
     version = await workflow_repository.get_version(
         db,
         workspace_id,
@@ -454,7 +463,7 @@ async def _version_for_run(
     return version
 
 
-async def create_workflow_run(
+async def prepare_workflow_run(
     db: AsyncSession,
     workspace_id: str,
     agent_id: str,
@@ -465,37 +474,33 @@ async def create_workflow_run(
     *,
     access_source: str = "console",
     consumer_id: str | None = None,
+    requested_by_user_id: str | None = None,
     conversation_id: str | None = None,
     files: list[dict[str, Any]] | None = None,
-) -> WorkflowRunResponse:
-    """
-    Create and queue a workflow run for execution.
-    
-    Parameters:
-    	workspace_id (str): Identifier of the workspace containing the workflow.
-    	agent_id (str): Identifier of the workflow agent.
-    	payload (WorkflowRunCreateRequest): Run input and source configuration.
-    	access_source (str): Origin of the run, such as ``console``, ``public``, or ``api``.
-    	consumer_id (str | None): External consumer identifier for non-console runs.
-    	conversation_id (str | None): Existing conversation identifier to associate with the run.
-    	files (list[dict[str, Any]] | None): Files to include as workflow inputs.
-    
-    Raises:
-    	ValueError: If the access source or required external consumer identifier is invalid.
-    	HTTPException: If the workflow, version, resources, files, permissions, quota, or conversation state prevents execution.
-    
-    Returns:
-    	WorkflowRunResponse: The newly queued workflow run.
-    """
-    if access_source not in {"console", "public", "api"}:
+    extra_inputs: dict[str, Any] | None = None,
+    workflow_version_id: str | None = None,
+    persist: bool = True,
+    approval_mode: AgentApprovalMode = "always_ask",
+) -> tuple[AgentRun, WorkflowRunDetail]:
+    """Prepare a workflow run and its companion detail record."""
+    if access_source not in {"console", "public", "api", "automation"}:
         raise ValueError("Invalid workflow run access source.")
     if access_source != "console" and payload.source != "published":
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "External workflow runs must use a published version.",
         )
-    if access_source != "console" and not consumer_id:
-        raise ValueError("External workflow runs require a consumer id.")
+    if access_source == "automation":
+        effective_requested_by_user_id: str | None = requested_by_user_id or consumer_id
+        if not effective_requested_by_user_id:
+            raise ValueError("Automation workflow runs require a requesting user id.")
+        consumer_id = effective_requested_by_user_id
+    else:
+        if access_source != "console" and not consumer_id:
+            raise ValueError("External workflow runs require a consumer id.")
+        effective_requested_by_user_id = (
+            actor.id if access_source == "console" else None
+        )
     await enforce_workspace_run_quota(db, workspace_id)
     agent = await get_workflow_agent(db, workspace_id, agent_id)
     if payload.source == "draft" and access_source == "console":
@@ -504,8 +509,20 @@ async def create_workflow_run(
         await require_agent_view(db, agent, actor)
     if agent.status != ACTIVE_STATUS:
         raise HTTPException(status.HTTP_409_CONFLICT, "Workflow is disabled.")
+    if access_source == "automation" and (
+        not agent.published
+        or not agent.published_by_user_id
+        or agent.published_at is None
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow is not published.")
     definition = await get_or_create_definition(db, agent, actor, workspace_role)
-    version = await _version_for_run(db, workspace_id, agent_id, payload)
+    version = await _version_for_run(
+        db,
+        workspace_id,
+        agent_id,
+        payload,
+        workflow_version_id=workflow_version_id,
+    )
     graph = version.graph if version is not None else definition.graph
     default_model_id = version.default_model_id if version is not None else agent.model_id
     if version is None:
@@ -626,7 +643,7 @@ async def create_workflow_run(
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,
-        requested_by_user_id=actor.id if access_source == "console" else None,
+        requested_by_user_id=effective_requested_by_user_id,
         execution_user_id=actor.id,
         access_source=access_source,
         consumer_id=consumer_id or actor.id,
@@ -638,6 +655,7 @@ async def create_workflow_run(
         application_snapshot={
             "schema_version": 1,
             "application_type": "workflow",
+            **({"approval_mode": approval_mode} if access_source == "automation" else {}),
             "source": payload.source,
             "graph_hash": graph_hash(parsed),
             "resources": resource_snapshot,
@@ -662,7 +680,10 @@ async def create_workflow_run(
         trace_id=new_id(),
         model_usage={},
     )
-    run_inputs: dict[str, Any] = {"question": payload.question}
+    run_inputs: dict[str, Any] = {}
+    if extra_inputs:
+        run_inputs.update(extra_inputs)
+    run_inputs["question"] = payload.question
     if files:
         run_inputs["files"] = files
         run_inputs["document"] = files
@@ -686,17 +707,50 @@ async def create_workflow_run(
         # Reset from the worker's first claim so queue latency does not consume runtime.
         deadline_at=now,
     )
-    try:
-        run = await agent_repository.create_agent_run(db, run)
-        detail.run_id = run.id
-        detail = await workflow_repository.create_run_detail(db, detail)
-        await db.commit()
-    except IntegrityError as exc:
-        await db.rollback()
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "This workflow conversation already has an active run.",
-        ) from exc
+    if persist:
+        try:
+            run = await agent_repository.create_agent_run(db, run)
+            detail.run_id = run.id
+            detail = await workflow_repository.create_run_detail(db, detail)
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This workflow conversation already has an active run.",
+            ) from exc
+    return run, detail
+
+
+async def create_workflow_run(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    payload: WorkflowRunCreateRequest,
+    actor: User,
+    workspace_role: str | None,
+    settings: Settings,
+    *,
+    access_source: str = "console",
+    consumer_id: str | None = None,
+    conversation_id: str | None = None,
+    files: list[dict[str, Any]] | None = None,
+) -> WorkflowRunResponse:
+    """Create and queue a workflow run for execution."""
+    run, _detail = await prepare_workflow_run(
+        db,
+        workspace_id,
+        agent_id,
+        payload,
+        actor,
+        workspace_role,
+        settings,
+        access_source=access_source,
+        consumer_id=consumer_id,
+        conversation_id=conversation_id,
+        files=files,
+        persist=True,
+    )
     await enqueue_agent_run(run.id, settings, generation="unified")
     current = await agent_repository.get_agent_run_by_id(db, run.id)
     current_detail = await workflow_repository.get_run_detail(db, run.id)
@@ -721,7 +775,7 @@ async def get_workflow_run(
         or detail is None
         or run.workspace_id != workspace_id
         or run.agent_id != agent_id
-        or run.access_source != "console"
+        or run.access_source not in {"console", "automation"}
         or run.consumer_id != actor.id
         or run.requested_by_user_id != actor.id
     ):
@@ -931,11 +985,13 @@ async def resume_workflow_form(
     checkpoint["workflow_form_submissions"] = submissions
     checkpoint.pop("workflow_form", None)
     now = utc_now()
-    deadline_reset = await workflow_repository.reset_waiting_run_deadline(
-        db,
-        run.id,
-        now + timedelta(seconds=settings.agent_run_timeout_seconds),
-    )
+    deadline_reset = True
+    if run.access_source != "automation":
+        deadline_reset = await workflow_repository.reset_waiting_run_deadline(
+            db,
+            run.id,
+            now + timedelta(seconds=settings.agent_run_timeout_seconds),
+        )
     queued = await agent_repository.queue_agent_run_from_input(db, run.id, checkpoint)
     if not deadline_reset or not queued:
         await db.rollback()

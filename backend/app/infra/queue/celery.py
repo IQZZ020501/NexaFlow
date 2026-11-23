@@ -34,6 +34,7 @@ TASK_DISPLAY_NAMES = {
     "app.maintenance.run": "执行周期维护",
     "app.storage.cleanup": "清理持久化文件",
     "app.tools.run": "运行工具",
+    "app.automations.dispatch": "派发自动化执行",
 }
 
 _HIDDEN_MAINTENANCE_TASKS = frozenset({"app.maintenance.run"})
@@ -151,6 +152,7 @@ def create_celery_app() -> Celery:
             "app.tasks.storage.jobs",
             "app.tasks.maintenance.jobs",
             "app.tasks.memories.jobs",
+            "app.tasks.automations.jobs",
         ],
     )
     app.conf.update(

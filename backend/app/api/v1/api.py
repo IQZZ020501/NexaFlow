@@ -11,6 +11,7 @@ from app.api.v1.agents import projects as chat_projects
 from app.api.v1.agents import routes as agents
 from app.api.v1.announcements import routes as announcements
 from app.api.v1.artifacts import routes as artifacts
+from app.api.v1.automations import routes as automations
 from app.api.v1.identity import auth
 from app.api.v1.identity import enterprise as enterprise_identity
 from app.api.v1.knowledge import evaluation as knowledge_evaluation
@@ -71,3 +72,5 @@ api_router.include_router(agent_access.public_router)
 api_router.include_router(agent_access.api_router)
 api_router.include_router(workflow_access.public_router)
 api_router.include_router(workflow_access.api_router)
+api_router.include_router(automations.router)
+api_router.include_router(automations.hooks_router)

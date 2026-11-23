@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.platform.models import RefreshSession as RefreshSessionOrm
@@ -333,8 +333,20 @@ async def find_users_by_identity(
 
 
 async def delete_user_graph(db: AsyncSession, user_id: str) -> None:
+    from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
+    from app.infra.db.repositories.automations.repository import (
+        disable_automations_for_user,
+    )
     from app.infra.db.repositories.memories import delete_user_data
+    from app.infra.db.repositories.notifications import delete_notifications_for_user
 
+    await disable_automations_for_user(db, user_id)
+    await delete_notifications_for_user(db, user_id)
+    await db.execute(
+        update(ToolInvocationOrm)
+        .where(ToolInvocationOrm.approved_by_user_id == user_id)
+        .values(approved_by_user_id=None, approved_at=None)
+    )
     await delete_user_data(db, user_id)
     await delete_refresh_sessions_for_user(db, user_id)
     await db.execute(delete(TeamMembershipOrm).where(TeamMembershipOrm.user_id == user_id))

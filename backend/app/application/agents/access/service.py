@@ -1267,7 +1267,7 @@ async def _consumer_display_names(
     user_ids = [
         consumer_id
         for source, consumer_id in rows
-        if source in {"console", "public"}
+        if source in {"console", "public", "automation"}
     ]
     api_names = {
         credential.id: credential.name

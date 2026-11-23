@@ -9,13 +9,12 @@ import { useSession } from "@/contexts/session-context"
 import { getPages } from "@/lib/pages"
 import { PHONE_NAV_QUERY, useMediaQuery } from "@/lib/use-media-query"
 import { cn } from "@/lib/utils"
-import {
-  canAccessWorkspaceAnalytics,
-} from "@/components/system/system-utils"
+import { canAccessWorkspaceAnalytics } from "@/components/system/system-utils"
 import { BarChart3Icon } from "lucide-react"
 
 const PAGE_HREFS: Record<string, string> = {
   apps: "/app/apps",
+  automations: "/app/automations",
   knowledge: "/app/knowledge",
   models: "/app/models",
   tools: "/app/tools",
@@ -67,7 +66,7 @@ export function MobileTabBar() {
   return (
     <nav
       aria-label={t("主导航")}
-      className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 pb-safe backdrop-blur"
+      className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur"
     >
       <ul className="flex items-stretch justify-around px-1">
         {items.map((item) => {
@@ -87,7 +86,10 @@ export function MobileTabBar() {
                 )}
               >
                 <Icon
-                  className={cn("size-5", isActive ? "text-primary" : undefined)}
+                  className={cn(
+                    "size-5",
+                    isActive ? "text-primary" : undefined
+                  )}
                 />
                 <span className="truncate">{item.label}</span>
               </Link>

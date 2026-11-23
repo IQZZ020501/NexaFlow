@@ -137,6 +137,16 @@ not trigger unrelated cleanup.
   Loading an authorized Skill with `.py` or `.js` files automatically activates
   `run_skill_script` only when that Tool is already in the Run's capability
   catalog; the active loadout persists in the checkpoint.
+- Workspace automations pin published Agent/Workflow versions and freeze inputs at
+  receipt time. `automation_executions` is the deduplicated receipt/dispatch ledger;
+  the existing four Run tables remain authoritative for execution. Lock the
+  automation before its execution receipt. Background Beat recovers dispatches
+  and reconciles per-user `user_notifications`; Redis is only a live update hint.
+  Automation Runs retain caller identity separately from the publication's
+  execution identity, recheck caller access at claim/resume, and never reset the
+  original deadline on approval/form resume. Webhook signatures cover timestamp,
+  event ID and raw body; never put credentials or result bodies in notifications.
+  See `docs/AUTOMATIONS.md` for scope, protocol and validation.
 - Pure unit suites (no DB, no HTTP, no network) for business rules and
   services with mocked ports/repositories live per feature under
   `backend/tests/<feature>/unit.py` (for example `tests.knowledge.unit`); run

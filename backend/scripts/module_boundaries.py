@@ -32,6 +32,9 @@ PUBLIC_INTERFACES = {
         "app.application.audit",
         "app.application.audit.system_logs",
     },
+    "automations": {
+        "app.application.automations",
+    },
     "email": {
         "app.application.email.delivery",
         "app.application.email.smtp",
@@ -53,6 +56,9 @@ PUBLIC_INTERFACES = {
     "memories": {"app.application.memories", "app.application.memories.extraction"},
     "models": {
         "app.application.models.service",
+    },
+    "notifications": {
+        "app.application.notifications",
     },
     "projects": {
         "app.application.projects.chat",
@@ -109,16 +115,24 @@ MODULE_DEPENDENCIES = {
     "announcements": {"workspaces"},
     "artifacts": {"publications", "workspaces"},
     "audit": set(),
+    "automations": {
+        "agents",
+        "artifacts",
+        "notifications",
+        "workflows",
+        "workspaces",
+    },
     "email": set(),
     "governance": set(),
     "identity": {"email"},
     "knowledge": set(),
     "memories": {"projects", "publications"},
     "models": set(),
+    "notifications": {"announcements", "workspaces"},
     "projects": {"artifacts", "publications", "workspaces"},
     "publications": {"workspaces"},
     "resource_folders": set(),
-    "runs": set(),
+    "runs": {"workspaces"},
     "teams": set(),
     "tools": {"agent_skills", "artifacts", "projects"},
     "uploads": set(),

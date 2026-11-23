@@ -162,6 +162,15 @@ async def delete_workspace_member_graph(
 
 
 async def delete_workspace_graph(db: AsyncSession, workspace_id: str) -> None:
+    from app.infra.db.repositories.automations import (
+        delete_automations_for_workspace,
+    )
+    from app.infra.db.repositories.notifications import (
+        delete_notifications_for_workspace,
+    )
+
+    await delete_notifications_for_workspace(db, workspace_id)
+    await delete_automations_for_workspace(db, workspace_id)
     team_ids = select(TeamOrm.id).where(TeamOrm.workspace_id == workspace_id)
     await db.execute(
         delete(TeamMembershipOrm).where(TeamMembershipOrm.team_id.in_(team_ids))

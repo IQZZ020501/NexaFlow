@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,14 @@ def _visible_clauses(
             AnnouncementOrm.expires_at > now,
         ),
     ]
+
+
+def visible_message_ordering_query(workspace_id: str | None, now: datetime):
+    """Shared visibility and ordering projection for the combined inbox."""
+    return select(
+        literal("announcement").label("kind"), AnnouncementOrm.id.label("id"),
+        AnnouncementOrm.pinned.label("pinned"), AnnouncementOrm.published_at.label("published_at"),
+    ).where(*_visible_clauses(workspace_id=workspace_id, now=now))
 
 
 async def create(
@@ -129,6 +137,7 @@ async def list_visible_messages(
     now: datetime,
     limit: int,
     offset: int,
+    message_ids: list[str] | None = None,
 ) -> list[tuple[Announcement, AnnouncementRead | None]]:
     read_join = and_(
         AnnouncementReadOrm.announcement_id == AnnouncementOrm.id,
@@ -138,6 +147,7 @@ async def list_visible_messages(
         select(AnnouncementOrm, AnnouncementReadOrm)
         .outerjoin(AnnouncementReadOrm, read_join)
         .where(*_visible_clauses(workspace_id=workspace_id, now=now))
+        .where(AnnouncementOrm.id.in_(message_ids) if message_ids is not None else True)
         .order_by(
             desc(AnnouncementOrm.pinned),
             desc(AnnouncementOrm.published_at),
