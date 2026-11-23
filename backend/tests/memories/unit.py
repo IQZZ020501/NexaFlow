@@ -90,7 +90,7 @@ class MemoryTests(unittest.TestCase):
         async def check():
             seen = []
 
-            async def prepare(messages, _tools):
+            async def prepare(messages, _tools, **_kwargs):
                 seen.append(messages)
                 return messages, empty_usage()
 
