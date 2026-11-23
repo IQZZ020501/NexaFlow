@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import dynamic from "next/dynamic"
 import {
   ArrowLeftIcon,
@@ -275,7 +276,11 @@ export function WorkflowDetailWorkspace({
   )
   const runAbortRef = React.useRef<AbortController | null>(null)
   const runFileInputRef = React.useRef<HTMLInputElement>(null)
-  const runScrollRef = React.useRef<HTMLDivElement>(null)
+  const { scrollRef: runScrollRef, followOutput } = useAutoFollowScroll({
+    content: currentRun,
+    resetKey: `${agent.id}:${currentRun?.id ?? ""}:${runOpen}`,
+    enabled: runOpen,
+  })
   const addNodeRef = React.useRef<WorkflowNodeAddHandler | null>(null)
   const handleAddNodeReady = React.useCallback(
     (handler: WorkflowNodeAddHandler | null) => {
@@ -310,12 +315,6 @@ export function WorkflowDetailWorkspace({
       : currentRun?.status === "succeeded"
         ? workflowSpeechText(currentRun.outputs)
         : ""
-
-  React.useLayoutEffect(() => {
-    if (runScrollRef.current) {
-      runScrollRef.current.scrollTop = runScrollRef.current.scrollHeight
-    }
-  }, [currentRunOutput, currentRun?.status, runOpen])
 
   const isRunActive = Boolean(
     currentRun && !TERMINAL_STATUSES.has(currentRun.status)
@@ -612,6 +611,7 @@ export function WorkflowDetailWorkspace({
     setRunQuestionInvalid(false)
     if (!runTarget) return
     if (runTarget.source === "draft" && isAppDirty) return
+    followOutput()
     setIsRunning(true)
     try {
       if (runTarget.source === "draft" && isDirty && !(await saveDraft()))

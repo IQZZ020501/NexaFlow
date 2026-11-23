@@ -85,11 +85,11 @@ EXTRACTABLE_DOCUMENT_EXTENSIONS = frozenset(
     }
 )
 MARKDOWN_HEADING_PATTERN = re.compile(
-    r"^\s{0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$"
+    r"^[ \t]{0,3}(#{1,6})[ \t]+(\S[^\r\n]*)$"
 )
 PLAIN_SECTION_HEADING_PATTERN = re.compile(
-    r"^\s*(?P<title>第[〇零一二三四五六七八九十百千万两\d]+"
-    r"(?:编|部|篇|章|节)(?:[ \t]+.*)?)\s*$"
+    r"^[ \t]*(?P<title>第[〇零一二三四五六七八九十百千万两\d]+"
+    r"(?:编|部|篇|章|节)(?:[ \t]+\S[^\r\n]*)?)$"
 )
 EXTRACTED_CJK_SPACE_PATTERN = re.compile(
     r"(?<=[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]) +"
@@ -216,6 +216,10 @@ class KnowledgePipelineError(Exception):
     pass
 
 
+_ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x01\x02")
+_ARCHIVE_READ_CHUNK_BYTES = 64 * 1024
+
+
 def validate_archive(path: Path) -> None:
     if not is_zipfile(path):
         return
@@ -234,31 +238,46 @@ def validate_archive(path: Path) -> None:
                     if member.is_dir():
                         continue
 
-                    state["bytes"] += member.file_size
-                    if state["bytes"] > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                    if member.file_size < 0 or state["bytes"] + member.file_size > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
                         raise KnowledgePipelineError(
                             "Document archive contains too much expanded data."
                         )
 
-                    if Path(member.filename).suffix.lower() not in ARCHIVE_MEMBER_EXTENSIONS:
-                        continue
-                    if depth >= MAX_ARCHIVE_NESTING_DEPTH:
-                        raise KnowledgePipelineError(
-                            "Document archive nesting is too deep."
-                        )
+                    is_known_archive_ext = (
+                        Path(member.filename).suffix.lower() in ARCHIVE_MEMBER_EXTENSIONS
+                    )
+                    actual_size = 0
+                    buffered: bytearray | None = bytearray() if is_known_archive_ext else None
                     with archive.open(member) as nested:
-                        nested_content = nested.read(
-                            MAX_ARCHIVE_UNCOMPRESSED_BYTES + 1
-                        )
-                    if len(nested_content) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
-                        raise KnowledgePipelineError(
-                            "Document archive contains too much expanded data."
-                        )
-                    nested_stream = BytesIO(nested_content)
+                        while True:
+                            remaining = MAX_ARCHIVE_UNCOMPRESSED_BYTES - state["bytes"]
+                            chunk = nested.read(min(_ARCHIVE_READ_CHUNK_BYTES, remaining + 1))
+                            if not chunk:
+                                break
+                            actual_size += len(chunk)
+                            state["bytes"] += len(chunk)
+                            if state["bytes"] > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                                raise KnowledgePipelineError(
+                                    "Document archive contains too much expanded data."
+                                )
+                            if buffered is None and actual_size == len(chunk) and chunk[:4].startswith(_ZIP_MAGIC_PREFIXES):
+                                buffered = bytearray()
+                            if buffered is not None:
+                                buffered.extend(chunk)
+                    if actual_size != member.file_size:
+                        raise KnowledgePipelineError("Document archive is invalid.")
+
+                    if buffered is None:
+                        continue
+                    nested_stream = BytesIO(buffered)
                     if is_zipfile(nested_stream):
+                        if depth >= MAX_ARCHIVE_NESTING_DEPTH:
+                            raise KnowledgePipelineError(
+                                "Document archive nesting is too deep."
+                            )
                         nested_stream.seek(0)
                         inspect(nested_stream, depth + 1)
-        except (BadZipFile, LargeZipFile) as exc:
+        except (BadZipFile, LargeZipFile, RuntimeError) as exc:
             raise KnowledgePipelineError("Document archive is invalid.") from exc
 
     inspect(path, 1)
@@ -685,11 +704,14 @@ def _structural_heading(line: str) -> tuple[int, str] | None:
     span two legal sections. Article lines and numbered list items intentionally
     do not match because the pattern only accepts 编/部/篇/章/节 markers.
     """
-    markdown = MARKDOWN_HEADING_PATTERN.match(line)
+    stripped = line.rstrip(" \t\r\n")
+    markdown = MARKDOWN_HEADING_PATTERN.match(stripped)
     if markdown is not None:
-        return len(markdown.group(1)), markdown.group(2).strip()
+        title = re.sub(r"[ \t]+#+$", "", markdown.group(2)).strip()
+        if title:
+            return len(markdown.group(1)), title
 
-    plain = PLAIN_SECTION_HEADING_PATTERN.match(line)
+    plain = PLAIN_SECTION_HEADING_PATTERN.match(stripped)
     if plain is None:
         return None
     title = plain.group("title").strip()

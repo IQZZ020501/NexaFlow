@@ -10,7 +10,6 @@ import {
   WrenchIcon,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import {
   Card,
   CardContent,
@@ -19,7 +18,6 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { useLanguage } from "@/contexts/language-provider"
-import type { TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import { formatAnalyticsNumber } from "@/components/system/workspace-analytics-metrics"
 import { cn } from "@/lib/utils"
@@ -31,11 +29,6 @@ const TONE_TILE = {
   emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   amber: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
 } as const
-
-const TOOL_KIND_LABELS: Record<string, TranslationKey> = {
-  builtin: "内置工具",
-  mcp: "MCP 工具",
-}
 
 /**
  * Renders one compact statistic with an optional icon and supporting detail.
@@ -164,7 +157,7 @@ export function AnalyticsInventoryPanel({
 }
 
 /**
- * Displays tool invocation volume, success rate, approvals, and the busiest tools.
+ * Displays tool invocation volume, success rate, and approvals.
  *
  * @param usage - Tool usage statistics for the selected period
  * @param locale - Locale used to format counts and percentages
@@ -180,7 +173,6 @@ export function AnalyticsToolUsagePanel({
   const count = (value: number) => formatAnalyticsNumber(value, locale)
   const formatRate = (value: number | null) =>
     value === null ? "—" : `${(value * 100).toFixed(1)}%`
-  const busiest = usage.top_tools[0]?.calls ?? 0
 
   return (
     <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
@@ -192,84 +184,29 @@ export function AnalyticsToolUsagePanel({
           )}
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex min-w-0 flex-col gap-4 px-5">
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatTile
-            icon={WrenchIcon}
-            tone="amber"
-            label={t("调用次数")}
-            value={count(usage.calls.value)}
-            detail={t("上期 {value} 次", {
-              value: count(usage.calls.previous_value),
-            })}
-          />
-          <StatTile
-            icon={ActivityIcon}
-            tone="emerald"
-            label={t("调用成功率")}
-            value={formatRate(usage.success_rate.value)}
-            detail={t("失败 {failed} 次", { failed: count(usage.failed) })}
-          />
-          <StatTile
-            icon={ShieldAlertIcon}
-            tone="violet"
-            label={t("需审批调用")}
-            value={count(usage.approval_required)}
-          />
-        </div>
-        <div className="min-w-0">
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
-            {t("调用最多的工具")}
-            <Badge variant="secondary">{count(usage.top_tools.length)}</Badge>
-          </h3>
-          {usage.top_tools.length ? (
-            <ul className="min-w-0 space-y-2">
-              {usage.top_tools.map((tool) => {
-                const kindLabel = TOOL_KIND_LABELS[tool.kind]
-                return (
-                  <li
-                    key={tool.tool_id}
-                    className="flex min-w-0 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-medium" title={tool.name}>
-                        {tool.name || t("未知工具")}
-                      </span>
-                      {kindLabel ? (
-                        <Badge variant="outline">{t(kindLabel)}</Badge>
-                      ) : null}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-3 tabular-nums">
-                      <span
-                        aria-hidden="true"
-                        className="hidden h-1.5 w-24 overflow-hidden rounded-full bg-muted sm:block"
-                      >
-                        <span
-                          className="block h-full rounded-full bg-primary/70"
-                          style={{
-                            width: `${busiest ? Math.max(6, Math.round((tool.calls / busiest) * 100)) : 0}%`,
-                          }}
-                        />
-                      </span>
-                      <span className="w-10 text-right">
-                        {count(tool.calls)}
-                      </span>
-                      <span className="w-12 text-right text-muted-foreground">
-                        {tool.success_rate === null
-                          ? "—"
-                          : `${Math.round(tool.success_rate * 100)}%`}
-                      </span>
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-              {t("所选范围内暂无工具调用")}
-            </p>
-          )}
-        </div>
+      <CardContent className="grid min-w-0 grid-cols-1 gap-3 px-5 sm:grid-cols-3">
+        <StatTile
+          icon={WrenchIcon}
+          tone="amber"
+          label={t("调用次数")}
+          value={count(usage.calls.value)}
+          detail={t("上期 {value} 次", {
+            value: count(usage.calls.previous_value),
+          })}
+        />
+        <StatTile
+          icon={ActivityIcon}
+          tone="emerald"
+          label={t("调用成功率")}
+          value={formatRate(usage.success_rate.value)}
+          detail={t("失败 {failed} 次", { failed: count(usage.failed) })}
+        />
+        <StatTile
+          icon={ShieldAlertIcon}
+          tone="violet"
+          label={t("需审批调用")}
+          value={count(usage.approval_required)}
+        />
       </CardContent>
     </Card>
   )

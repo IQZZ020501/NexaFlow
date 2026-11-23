@@ -46,8 +46,8 @@ describe("document detail page", () => {
           },
         ])
       }
-      if (url.endsWith("/documents")) {
-        return jsonResponse([
+      if (url.endsWith("/documents/doc-1")) {
+        return jsonResponse(
           {
             id: "doc-1",
             workspace_id: "ws-1",
@@ -68,7 +68,7 @@ describe("document detail page", () => {
             created_at: timestamp,
             updated_at: timestamp,
           },
-        ])
+        )
       }
       if (url.includes("/chunks?")) {
         return jsonResponse([

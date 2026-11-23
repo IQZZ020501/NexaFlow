@@ -40,6 +40,10 @@ class ModelNetworkTests(unittest.TestCase):
                     )
 
     def test_credentials_and_transport_overrides_are_not_inherited(self):
+        from fastapi import HTTPException
+
+        from app.application.models.registry import normalize_model_request_params
+
         with self.assertRaisesRegex(ModelProviderError, "explicit AWS"):
             validate_member_connection("bedrock", {"region_name": "us-east-1"}, {})
         with self.assertRaisesRegex(ModelProviderError, "official regional"):
@@ -56,6 +60,12 @@ class ModelNetworkTests(unittest.TestCase):
         for key in ("client_args", "http_options", "http_client", "vertexai"):
             with self.assertRaisesRegex(ModelProviderError, "override connection"):
                 validate_member_connection("google_genai", {}, {key: {}})
+        for key in ("credentials_profile_name", "bedrock_api_key", "openai_api_base"):
+            with self.assertRaisesRegex(ModelProviderError, "override connection"):
+                validate_member_connection("bedrock", {"region_name": "us-east-1", "aws_access_key_id": "own", "aws_secret_access_key": "own"}, {key: "evil"})
+            with self.assertRaises(HTTPException) as exc_info:
+                normalize_model_request_params({key: "evil"}, "chat")
+            self.assertEqual(exc_info.exception.status_code, 422)
 
     def test_dns_is_checked_at_each_connection_and_only_validated_ips_are_used(self):
         from httpcore import SyncBackend
@@ -78,6 +88,65 @@ class ModelNetworkTests(unittest.TestCase):
                 with self.assertRaises(ModelProviderError):
                     PublicSyncBackend().connect_tcp("model.example.com", 443)
                 connect.assert_not_called()
+
+    def test_public_reranker_rechecks_dns_after_endpoint_validation(self):
+        credentials = {
+            "api_base": "https://models.example.com",
+            "api_key": "own-key",
+            PUBLIC_ENDPOINT_CREDENTIAL: "true",
+        }
+        public_answer = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ]
+        private_answer = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
+        ]
+        with patch(
+            "app.adapters.llm.network.socket.getaddrinfo",
+            side_effect=[public_answer, private_answer],
+        ) as resolve, patch(
+            "app.adapters.llm.runtime.urlopen",
+            side_effect=AssertionError("Public reranker bypassed its checked transport."),
+        ):
+            validate_member_connection("openai_compatible", credentials, {})
+            reranker = build_reranker("openai_compatible", credentials, "rerank")
+            with self.assertRaisesRegex(ModelProviderError, "public network"):
+                reranker.rerank("question", ["document"])
+            self.assertEqual(resolve.call_count, 2)
+
+    def test_public_reranker_preserves_request_and_results(self):
+        import json
+
+        import httpx
+
+        results = [{"index": 0, "relevance_score": 0.9}]
+
+        def respond(request):
+            self.assertEqual(str(request.url), "https://models.example.com/v1/rerank")
+            self.assertEqual(request.headers["authorization"], "Bearer own-key")
+            self.assertEqual(
+                json.loads(request.content),
+                {"model": "rerank", "query": "question", "documents": ["document"]},
+            )
+            return httpx.Response(200, json={"results": results})
+
+        reranker = build_reranker(
+            "openai_compatible",
+            {
+                "api_base": "https://models.example.com",
+                "api_key": "own-key",
+                PUBLIC_ENDPOINT_CREDENTIAL: "true",
+            },
+            "rerank",
+        )
+        with patch(
+            "app.adapters.llm.runtime.public_client",
+            return_value=httpx.Client(transport=httpx.MockTransport(respond)),
+        ), patch(
+            "app.adapters.llm.runtime.urlopen",
+            side_effect=AssertionError("Public reranker bypassed its checked transport."),
+        ):
+            self.assertEqual(reranker.rerank("question", ["document"]), results)
 
     def test_async_backend_pins_tcp_and_clients_ignore_environment_proxies(self):
         from httpcore import AnyIOBackend

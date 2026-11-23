@@ -12,6 +12,11 @@ from collections.abc import Iterator
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.knowledge.documents.pagination import (
+    get_knowledge_document_options,
+    get_knowledge_document_page,
+    get_knowledge_task_page,
+)
 from app.application.knowledge.evaluation.runner import (
     get_evaluation_summary,
     get_latest_evaluation_summary,
@@ -60,6 +65,7 @@ from app.domain.knowledge.service import (
 from app.domain.knowledge.service import (
     upload_knowledge_attachment as upload_knowledge_attachment_record,
 )
+from app.domain.knowledge.tasks.batch import enqueue_index_knowledge_documents
 from app.domain.knowledge.tasks.orchestration import (
     delete_knowledge_task,
     delete_knowledge_tasks,
@@ -138,6 +144,28 @@ async def dispatch_knowledge_task(task_id: str, settings: Settings) -> None:
         ) from exc
 
 
+async def dispatch_knowledge_tasks(task_ids: list[str], settings: Settings) -> None:
+    """Best-effort publish; committed queued tasks remain recoverable by Beat."""
+    from app.infra.queue.celery import publish_task
+
+    for task_id in task_ids:
+        try:
+            if settings.celery_task_always_eager:
+                await enqueue_knowledge_task(task_id, settings)
+            else:
+                await publish_task(
+                    "app.knowledge.run_task", (task_id,), settings=settings
+                )
+        except Exception as exc:
+            log_error(
+                logger,
+                "Knowledge batch dispatch deferred to recovery.",
+                exc,
+                task_id=task_id,
+            )
+            return
+
+
 async def delete_knowledge_document(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -190,6 +218,7 @@ async def list_knowledge_documents_with_counts(
     chunk_counts = await knowledge_base_repository.count_document_chunks(
         db,
         knowledge_base,
+        [document.id for document in documents],
     )
     return [
         document_to_response(document, chunk_count=chunk_counts.get(document.id, 0))
@@ -205,6 +234,7 @@ async def document_response_with_chunk_count(
     chunk_counts = await knowledge_base_repository.count_document_chunks(
         db,
         knowledge_base,
+        [document.id],
     )
     return document_to_response(
         document,
@@ -272,6 +302,8 @@ __all__ = [
     "document_to_response",
     "enqueue_evaluation_run",
     "enqueue_index_knowledge_document",
+    "enqueue_index_knowledge_documents",
+    "dispatch_knowledge_tasks",
     "enqueue_knowledge_storage_cleanup",
     "enqueue_parse_knowledge_document",
     "enqueue_rebuild_knowledge_index",
@@ -280,6 +312,9 @@ __all__ = [
     "get_knowledge_asset_file",
     "get_knowledge_base",
     "get_knowledge_document",
+    "get_knowledge_document_page",
+    "get_knowledge_document_options",
+    "get_knowledge_task_page",
     "get_knowledge_document_markdown_file",
     "get_latest_evaluation_summary",
     "get_knowledge_document_file",

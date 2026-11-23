@@ -57,6 +57,7 @@ from app.schemas.identity.contracts import (
 )
 
 logger = get_logger(__name__)
+_DUMMY_PASSWORD_HASH = hash_password("NexaFlow-Dummy-Timing-Check-1!")
 
 def access_token_response(
     user: User, settings: Settings, refresh_token: str
@@ -219,6 +220,8 @@ async def create_user(
     payload: UserCreateRequest,
     actor: User,
     settings: Settings,
+    *,
+    initial_password: str | None = None,
 ) -> UserPasswordResetResponse:
     team_ids = list(dict.fromkeys(payload.team_ids))
     if team_ids and not payload.workspace_id:
@@ -249,12 +252,12 @@ async def create_user(
                 "Teams must belong to selected workspace.",
             )
 
-    initial_password = settings.managed_user_initial_password
+    resolved_initial_password = initial_password or settings.managed_user_initial_password
     user = User(
         username=normalize_username(payload.username),
         email=normalize_email(payload.email),
         name=normalize_name(payload.name),
-        password_hash=hash_password(initial_password),
+        password_hash=hash_password(resolved_initial_password),
         is_global_admin=payload.is_global_admin,
         must_change_password=True,
     )
@@ -307,7 +310,7 @@ async def create_user(
     user = await user_repository.refresh_user(db, user)
     return UserPasswordResetResponse(
         user=await user_to_response_with_scopes(db, user),
-        initial_password=initial_password,
+        initial_password=resolved_initial_password,
     )
 
 
@@ -504,6 +507,8 @@ async def authenticate_user(
             "Login rate limiter is unavailable.",
         ) from exc
     user = await user_repository.get_active_user_by_username(db, username)
+    if user is None:
+        verify_password(password, _DUMMY_PASSWORD_HASH)
     if user is None or not verify_password(password, user.password_hash):
         log_event(
             logger,

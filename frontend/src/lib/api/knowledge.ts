@@ -108,6 +108,7 @@ export type KnowledgeTask = {
   workspace_id: string
   knowledge_base_id: string
   document_id: string | null
+  document_filename?: string | null
   task_type: string
   status: string
   attempts: number
@@ -121,6 +122,39 @@ export type KnowledgeTask = {
   created_at: string
   updated_at: string
 }
+
+export type KnowledgeDocumentSummary = {
+  total: number
+  indexed: number
+  indexing: number
+  pending: number
+  failed: number
+  processing: number
+}
+
+export type KnowledgeDocumentOption = Pick<
+  KnowledgeDocument, "id" | "filename" | "is_active"
+>
+
+export type KnowledgeDocumentPage = {
+  items: KnowledgeDocument[]
+  total: number
+  summary: KnowledgeDocumentSummary
+  active_rebuild_task: KnowledgeTask | null
+  document_tasks: KnowledgeTask[]
+}
+
+export type KnowledgeTaskPage = {
+  items: KnowledgeTask[]
+  total: number
+  has_processing: boolean
+}
+
+export type KnowledgeDocumentSort =
+  "filename" | "created_at" | "updated_at" | "size_bytes" | "chunk_count"
+
+export type KnowledgeDocumentStatusFilter =
+  "indexed" | "indexing" | "pending" | "failed"
 
 
 export type KnowledgeTaskBulkDeleteResult = {
@@ -369,6 +403,70 @@ export function listKnowledgeDocuments(
   )
 }
 
+export function getKnowledgeDocumentPage(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  options: {
+    limit: number
+    offset: number
+    search?: string
+    status?: KnowledgeDocumentStatusFilter
+    sortBy?: KnowledgeDocumentSort
+    sortDirection?: "asc" | "desc"
+    includeStaged?: boolean
+  }
+) {
+  const params = new URLSearchParams({
+    limit: String(options.limit),
+    offset: String(options.offset),
+  })
+  if (options.search) params.set("search", options.search)
+  if (options.status) params.set("status", options.status)
+  if (options.sortBy) params.set("sort_by", options.sortBy)
+  if (options.sortDirection) params.set("sort_direction", options.sortDirection)
+  if (options.includeStaged) params.set("include_staged", "true")
+  return request<KnowledgeDocumentPage>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/page?${params}`,
+    { token }
+  )
+}
+
+export function getKnowledgeDocument(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  documentId: string
+) {
+  return request<KnowledgeDocument>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`,
+    { token }
+  )
+}
+
+export function getKnowledgeDocumentOptions(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string
+) {
+  return request<KnowledgeDocumentOption[]>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/options`,
+    { token }
+  )
+}
+
+export function getKnowledgeTaskPage(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  options: { limit: number; offset: number }
+) {
+  return request<KnowledgeTaskPage>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/tasks/page${listQuery(options)}`,
+    { token }
+  )
+}
+
 /**
  * Uploads a file attachment to a knowledge base.
  *
@@ -472,6 +570,21 @@ export function parseKnowledgeDocument(
       token,
       body: payload ? JSON.stringify(payload) : undefined,
     }
+  )
+}
+
+export type KnowledgeDocumentIndexScope = "all" | "unsuccessful"
+
+/** Queues all eligible documents in the knowledge base for the chosen scope. */
+export function indexKnowledgeDocuments(
+  token: string,
+  workspaceId: string,
+  knowledgeBaseId: string,
+  scope: KnowledgeDocumentIndexScope
+) {
+  return request<{ queued_count: number }>(
+    `/api/v1/workspaces/${workspaceId}/knowledge-bases/${knowledgeBaseId}/documents/index`,
+    { method: "POST", token, body: JSON.stringify({ scope }) }
   )
 }
 

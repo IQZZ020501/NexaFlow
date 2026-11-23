@@ -74,6 +74,7 @@ from app.infra.db.repositories.tools.bindings import (
     get_application_tool_binding,
     list_application_mcp_reference_map,
     list_application_tool_bindings,
+    list_application_tool_group_count_map,
     list_application_tool_reference_map,
     replace_application_tool_bindings,
     save_application_tool_binding,

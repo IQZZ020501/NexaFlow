@@ -2,7 +2,7 @@
 from dataclasses import fields
 from datetime import datetime
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -123,6 +123,37 @@ async def list_application_tool_reference_map(
             ToolRef(tool_id=tool_id, version_id=version_id)
         )
     return references
+
+async def list_application_tool_group_count_map(
+    db: AsyncSession,
+    workspace_id: str,
+    application_ids: list[str],
+    *,
+    exclude_tool_ids: tuple[str, ...] = (),
+) -> dict[str, int]:
+    if not application_ids:
+        return {}
+    group_key = case(
+        (ToolOrm.kind == "builtin", ToolOrm.id),
+        else_=ToolOrm.kind + ":" + ToolOrm.source_id,
+    )
+    statement = (
+        select(ApplicationToolBindingOrm.application_id, func.count(group_key.distinct()))
+        .join(ToolOrm, and_(
+            ToolOrm.workspace_id == ApplicationToolBindingOrm.workspace_id,
+            ToolOrm.id == ApplicationToolBindingOrm.tool_id,
+        ))
+        .where(
+            ApplicationToolBindingOrm.workspace_id == workspace_id,
+            ApplicationToolBindingOrm.application_id.in_(application_ids),
+            ToolOrm.id.not_in(exclude_tool_ids),
+        )
+        .group_by(ApplicationToolBindingOrm.application_id)
+    )
+    counts = dict.fromkeys(application_ids, 0)
+    counts.update((application_id, count) for application_id, count in await db.execute(statement))
+    return counts
+
 
 async def list_application_mcp_reference_map(
     db: AsyncSession,

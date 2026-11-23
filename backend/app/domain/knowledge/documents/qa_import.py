@@ -7,9 +7,13 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
-from app.domain.knowledge.documents.parsing import KnowledgePipelineError
+from app.domain.knowledge.documents.parsing import (
+    KnowledgePipelineError,
+    validate_archive,
+)
 
 MAX_QA_ROWS = 5_000
+MAX_QA_SCANNED_ROWS = 50_000
 MAX_QA_QUESTION_CHARS = 2_000
 MAX_QA_ANSWER_CHARS = 20_000
 QA_HEADER_ALIASES = {
@@ -84,6 +88,10 @@ def validate_qa_rows(rows: Iterable[Sequence[object]]) -> list[QaRow]:
 
     drafts: list[QaRow] = []
     for row_number, row in iterator:
+        if row_number > MAX_QA_SCANNED_ROWS:
+            raise KnowledgePipelineError(
+                f"QA import exceeds the {MAX_QA_SCANNED_ROWS}-row scan limit."
+            )
         values = [_cell(value) for value in row]
         if not any(values):
             continue
@@ -136,6 +144,7 @@ def extract_qa_rows(filename: str, path: Path) -> list[QaRow]:
         except UnicodeDecodeError as exc:
             raise KnowledgePipelineError("QA CSV must use UTF-8 encoding.") from exc
     if suffix == ".xlsx":
+        validate_archive(path)
         try:
             workbook = load_workbook(path, read_only=True, data_only=True)
             try:

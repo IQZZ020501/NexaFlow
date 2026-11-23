@@ -1,6 +1,7 @@
 /* @jsxImportSource react */
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import {
+  act,
   cleanup,
   fireEvent,
   screen,
@@ -31,6 +32,7 @@ import {
   renderPage,
   type FetchHandler,
 } from "./helpers/dom"
+import { knowledgePageResponse } from "./helpers/knowledge-pages"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -88,6 +90,7 @@ mockNextNavigation({
 let fetchHandler: FetchHandler = () => jsonResponse([])
 const originalFetch = globalThis.fetch
 const originalMatchMedia = window.matchMedia
+const deletedFixtureIds = new Set<string>()
 function installFetchStub() {
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url =
@@ -96,7 +99,14 @@ function installFetchStub() {
         : input instanceof URL
           ? input.toString()
           : input.url
-    return Promise.resolve(fetchHandler(url, init))
+    return Promise.resolve(fetchHandler(url, init)).then(async (response) => {
+      if (response.ok && init?.method === "DELETE") deletedFixtureIds.add(url.split("/").at(-1)!)
+      if (response.ok && init?.method === "POST" && url.endsWith("/tasks/bulk-delete")) {
+        const result = await response.clone().json()
+        for (const id of result.deleted_task_ids ?? []) deletedFixtureIds.add(id)
+      }
+      return knowledgePageResponse(url, response, (path) => fetchHandler(path), deletedFixtureIds)
+    })
   }) as typeof fetch
 }
 installFetchStub()
@@ -148,6 +158,7 @@ afterEach(() => {
   setSystemTime()
   window.matchMedia = originalMatchMedia
   notifications.length = 0
+  deletedFixtureIds.clear()
   pushes.length = 0
   replaces.length = 0
   for (const key of Object.keys(routeParams)) delete routeParams[key]
@@ -1194,6 +1205,138 @@ function renderDetailPage(
 }
 
 describe("KnowledgeBasePage documents tab", () => {
+  test.each([
+    ["向量化未成功的文档", "unsuccessful"],
+    ["向量化全部文档", "all"],
+  ] as const)("queues the whole knowledge base using %s without a selection", async (label, scope) => {
+    const requests: Array<{ url: string; body: unknown }> = []
+    let queued = false
+    fetchHandler = (url, init) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.endsWith("/documents/index") && init?.method === "POST") {
+        requests.push({ url, body: JSON.parse(String(init.body)) })
+        queued = true
+        return jsonResponse({ queued_count: 125 })
+      }
+      if (url.includes("/documents/page?")) return jsonResponse({
+        items: [makeDocument({ status: queued ? "index_queued" : "index_failed", last_error: queued ? null : "old provider error" })],
+        total: 125,
+        summary: { total: 125, indexed: 0, indexing: 0, pending: queued ? 125 : 0, failed: queued ? 0 : 125, processing: queued ? 125 : 0 },
+        active_rebuild_task: null, document_tasks: [],
+      })
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+    await screen.findByText("old provider error")
+    openMenu(screen.getByRole("button", { name: "向量化" }))
+    expect(screen.queryByRole("menuitem", { name: "向量化所选文档" })).toBeNull()
+    fireEvent.click(await screen.findByRole("menuitem", { name: label }))
+    await waitFor(() => expect(requests).toEqual([{
+      url: `/api/v1/workspaces/${WS}/knowledge-bases/${KB_ID}/documents/index`, body: { scope },
+    }]))
+    await waitFor(() => expect(notifications).toContainEqual(["success", "已提交 125 个向量化任务"]))
+    await waitFor(() => expect(screen.queryByText("old provider error")).toBeNull())
+    expect(within(screen.getByRole("group", { name: "待向量化" })).getByText("125")).toBeTruthy()
+  })
+
+  test("reports a whole-base indexing error without clearing the document error", async () => {
+    fetchHandler = (url, init) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.endsWith("/documents/index") && init?.method === "POST") return jsonResponse({ detail: "queue unavailable" }, 503)
+      if (url.includes("/documents")) return jsonResponse([makeDocument({ status: "index_failed", last_error: "old error" })])
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+    await screen.findByText("old error")
+    openMenu(screen.getByRole("button", { name: "向量化" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "向量化未成功的文档" }))
+    await waitFor(() => expect(notifications.some(([kind]) => kind === "error")).toBe(true))
+    expect(screen.getByText("old error")).toBeTruthy()
+  })
+
+  test("uses server totals and searches and paginates beyond the first hundred", async () => {
+    const requested: URL[] = []
+    const summary = { total: 10827, indexed: 391, indexing: 2681, pending: 7755, failed: 0, processing: 10436 }
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents/page?")) {
+        const parsed = new URL(url, "http://test.local")
+        requested.push(parsed)
+        const offset = Number(parsed.searchParams.get("offset"))
+        const search = parsed.searchParams.get("search")
+        return jsonResponse({
+          items: [makeDocument({ id: `doc-${offset}`, filename: search ? "old-law.md" : `page-${offset}.md`, status: "parse_queued" })],
+          total: search ? 1 : 10827, summary, active_rebuild_task: null, document_tasks: [],
+        })
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+    await screen.findByText("共 10827 条")
+    expect(screen.getByText("391 / 10827")).toBeTruthy()
+    expect(screen.getByText("1 / 1083")).toBeTruthy()
+    expect(requested[0]?.searchParams.get("limit")).toBe("10")
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
+    await screen.findByText("page-10.md")
+    expect(requested.at(-1)?.searchParams.get("offset")).toBe("10")
+    fireEvent.change(screen.getByPlaceholderText("按名称搜索"), { target: { value: "old-law" } })
+    await screen.findByText("old-law.md")
+    expect(requested.at(-1)?.searchParams.get("search")).toBe("old-law")
+    expect(requested.at(-1)?.searchParams.get("offset")).toBe("0")
+    expect(screen.getByText("共 1 条")).toBeTruthy()
+    expect(screen.getByText("391 / 10827")).toBeTruthy()
+
+    for (const [label, status] of [
+      ["向量化中", "indexing"],
+      ["待向量化", "pending"],
+      ["失败", "failed"],
+      ["已向量化", "indexed"],
+    ] as const) {
+      openMenu(screen.getByRole("button", { name: "文件状态" }))
+      fireEvent.click(await screen.findByRole("menuitem", { name: label }))
+      await waitFor(() =>
+        expect(requested.at(-1)?.searchParams.get("status")).toBe(status)
+      )
+    }
+    openMenu(screen.getByRole("button", { name: "文件状态" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "全部状态" }))
+    await waitFor(() =>
+      expect(requested.at(-1)?.searchParams.get("status")).toBeNull()
+    )
+  })
+
+  test("ignores a previous document response after the search changes", async () => {
+    let resolveOld: ((response: Response) => void) | undefined
+    const page = (filename: string) => ({
+      items: [makeDocument({ filename })], total: 1,
+      summary: { total: 1, indexed: 1, indexing: 0, pending: 0, failed: 0, processing: 0 },
+      active_rebuild_task: null, document_tasks: [],
+    })
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/documents/page?")) {
+        if (url.includes("search=new")) return jsonResponse(page("new.md"))
+        return new Promise<Response>((resolve) => { resolveOld = resolve })
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage />)
+    await waitFor(() => expect(resolveOld).toBeDefined())
+    fireEvent.change(screen.getByPlaceholderText("按名称搜索"), { target: { value: "new" } })
+    await screen.findByText("new.md")
+    await act(async () => { resolveOld?.(jsonResponse(page("old.md"))) })
+    expect(screen.queryByText("old.md")).toBeNull()
+    expect(screen.getByText("new.md")).toBeTruthy()
+  })
+
   test("switches every knowledge base detail tab without leaving the detail page", async () => {
     const testWindow = window as typeof window & {
       happyDOM: { setURL: (url: string) => void }
@@ -1335,7 +1478,7 @@ describe("KnowledgeBasePage documents tab", () => {
             task_type: "rebuild_index",
             status: "running",
             total_items: 28,
-            processed_items: taskFetches === 1 ? 0 : 7,
+            processed_items: taskFetches <= 2 ? 0 : 7,
           }),
         ])
       }
@@ -1348,7 +1491,7 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(progress.getAttribute("aria-valuenow")).toBe("100")
     fireEvent.click(screen.getByText("重建索引"))
 
-    await waitFor(() => expect(taskFetches).toBe(1))
+    await waitFor(() => expect(taskFetches).toBe(2))
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
       "0"
     )
@@ -1419,13 +1562,13 @@ describe("KnowledgeBasePage documents tab", () => {
     fireEvent.change(screen.getByPlaceholderText("按名称搜索"), {
       target: { value: "beta" },
     })
-    expect(screen.getByText("beta.txt")).toBeTruthy()
+    await screen.findByText("beta.txt")
     expect(screen.queryByText("alpha.md")).toBeNull()
 
     fireEvent.change(screen.getByPlaceholderText("按名称搜索"), {
       target: { value: "zzz" },
     })
-    expect(screen.getByText("没有匹配的文档")).toBeTruthy()
+    await screen.findByText("没有匹配的文档")
   })
 
   test("paginates documents and changes the page size", async () => {
@@ -1443,11 +1586,11 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(screen.getByText("共 12 条")).toBeTruthy()
     })
     expect(screen.getByText("1 / 2")).toBeTruthy()
-    expect(visibleFilenames()).toHaveLength(10)
+    await waitFor(() => expect(visibleFilenames()).toHaveLength(10))
     expect(visibleFilenames()[0]).toBe("file-11.md") // default created_at desc
 
     fireEvent.click(screen.getByText("下一页"))
-    expect(visibleFilenames()).toHaveLength(2)
+    await waitFor(() => expect(visibleFilenames()).toHaveLength(2))
     expect(screen.getByText("2 / 2")).toBeTruthy()
     expect(screen.getByText("file-00.md")).toBeTruthy()
 
@@ -1500,7 +1643,7 @@ describe("KnowledgeBasePage documents tab", () => {
 
     await waitFor(() => expect(deletes).toHaveLength(1))
     await waitFor(() => expect(screen.getByText("1 / 1")).toBeTruthy())
-    expect(screen.getByText("file-10.md")).toBeTruthy()
+    await screen.findByText("file-10.md")
     expect(screen.queryByText("2 / 1")).toBeNull()
   })
 
@@ -1535,15 +1678,15 @@ describe("KnowledgeBasePage documents tab", () => {
 
     await waitFor(() => expect(visibleFilenames().length).toBe(3))
     // Default: created_at desc → c, b, a
-    expect(visibleFilenames()).toEqual(["c.md", "b.md", "a.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["c.md", "b.md", "a.md"]))
 
     fireEvent.click(sortHeaderButton("大小"))
-    expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"]))
     fireEvent.click(sortHeaderButton("大小"))
-    expect(visibleFilenames()).toEqual(["a.md", "c.md", "b.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["a.md", "c.md", "b.md"]))
 
     fireEvent.click(sortHeaderButton("分段"))
-    expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"]))
   })
 
   test("uses the shared dropdown for the document sort field", async () => {
@@ -1557,11 +1700,11 @@ describe("KnowledgeBasePage documents tab", () => {
     await waitFor(() => expect(visibleFilenames().length).toBe(3))
     openMenu(screen.getByRole("button", { name: "排序" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "大小" }))
-    expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["b.md", "c.md", "a.md"]))
 
     openMenu(screen.getByRole("button", { name: "排序" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "大小" }))
-    expect(visibleFilenames()).toEqual(["a.md", "c.md", "b.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["a.md", "c.md", "b.md"]))
   })
 
   test("selects all documents and runs bulk index and delete", async () => {
@@ -1595,7 +1738,8 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(screen.getByText("向量化(2)")).toBeTruthy()
     expect(screen.getByText("删除(2)")).toBeTruthy()
 
-    fireEvent.click(screen.getByText("向量化(2)"))
+    openMenu(screen.getByText("向量化(2)"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "向量化所选文档" }))
     await waitFor(() => {
       expect(
         notifications.some(([, msg]) => msg === "已提交 2 个向量化任务")
@@ -2057,13 +2201,13 @@ describe("KnowledgeBasePage documents tab", () => {
 
     await waitFor(() => expect(visibleFilenames().length).toBe(3))
     // Default: created_at desc → c, b, a
-    expect(visibleFilenames()).toEqual(["c.md", "b.md", "a.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["c.md", "b.md", "a.md"]))
 
     fireEvent.click(sortHeaderButton("更新时间"))
-    expect(visibleFilenames()).toEqual(["a.md", "b.md", "c.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["a.md", "b.md", "c.md"]))
 
     fireEvent.click(sortHeaderButton("更新时间"))
-    expect(visibleFilenames()).toEqual(["c.md", "b.md", "a.md"])
+    await waitFor(() => expect(visibleFilenames()).toEqual(["c.md", "b.md", "a.md"]))
   })
 
   test("opens the document preview from the row menu", async () => {
@@ -2364,6 +2508,36 @@ describe("KnowledgeBasePage documents tab", () => {
 // ---------------------------------------------------------------------------
 
 describe("KnowledgeBasePage tasks tab", () => {
+  test("uses task server totals and document names and polls work outside the visible page", async () => {
+    let requests = 0
+    const offsets: string[] = []
+    fetchHandler = (url) => {
+      if (url.includes("/models")) return jsonResponse(models)
+      if (url.includes("/knowledge-bases?")) return jsonResponse([makeKnowledgeBase()])
+      if (url.includes("/tasks/page?")) {
+        requests += 1
+        const offset = new URL(url, "http://test.local").searchParams.get("offset") ?? "0"
+        offsets.push(offset)
+        return jsonResponse({
+          items: [makeTask({ id: `task-${offset}`, document_id: "old-doc", document_filename: "older-law.md", last_error: `page ${offset}` })],
+          total: 21655, has_processing: true,
+        })
+      }
+      return jsonResponse([])
+    }
+    routeParams.id = KB_ID
+    renderPage(<KnowledgeBasePage initialDetailTab="tasks" />)
+    await screen.findByText("共 21655 条")
+    expect(screen.getByText("1 / 2166")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "older-law.md" }))
+    expect(pushes).toContain(`/app/knowledge/${KB_ID}/documents/old-doc`)
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }))
+    await screen.findByText("page 10")
+    expect(offsets.at(-1)).toBe("10")
+    const afterNavigation = requests
+    await waitFor(() => expect(requests).toBeGreaterThan(afterNavigation), { timeout: 4000 })
+  })
+
   test.each([false, true])(
     "shows linked documents, unavailable documents and execution time (phone: %s)",
     async (phone) => {
@@ -2655,19 +2829,19 @@ describe("KnowledgeBasePage tasks tab", () => {
     fireEvent.click(await screen.findByText("任务"))
     await screen.findByText("共 12 条")
     expect(screen.getByText("1 / 2")).toBeTruthy()
-    expect(screen.getByText("任务记录 00")).toBeTruthy()
+    await screen.findByText("任务记录 00")
     expect(screen.queryByText("任务记录 10")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }))
     expect(screen.getByText("2 / 2")).toBeTruthy()
-    expect(screen.queryByText("任务记录 00")).toBeNull()
-    expect(screen.getByText("任务记录 10")).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText("任务记录 00")).toBeNull())
+    await screen.findByText("任务记录 10")
 
     openMenu(screen.getByRole("button", { name: /每页 10 条/ }))
     fireEvent.click(await screen.findByText("每页 20 条"))
     expect(screen.getByText("1 / 1")).toBeTruthy()
-    expect(screen.getByText("任务记录 00")).toBeTruthy()
-    expect(screen.getByText("任务记录 11")).toBeTruthy()
+    await screen.findByText("任务记录 00")
+    await screen.findByText("任务记录 11")
   })
 
   test("rebuilds the index from the tasks tab", async () => {

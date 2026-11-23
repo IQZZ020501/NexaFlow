@@ -572,6 +572,7 @@ async def exercise_direct_workspace_service_branches(
             settings(),
         )
         assert created_user.user.id
+        assert created_user.initial_password != settings().managed_user_initial_password
 
         original_delete_kbs = workspace_service.delete_workspace_knowledge_bases
 

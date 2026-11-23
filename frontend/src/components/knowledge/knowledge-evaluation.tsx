@@ -31,7 +31,7 @@ import {
   listKnowledgeEvaluationRuns,
 } from "@/lib/api/knowledge"
 import type {
-  KnowledgeDocument,
+  KnowledgeDocumentOption,
   KnowledgeEvaluationCase,
   KnowledgeEvaluationSummary,
   KnowledgeQueryInspectResult,
@@ -48,7 +48,7 @@ type KnowledgeEvaluationProps = {
   token: string
   workspaceId: string
   knowledgeBaseId: string
-  documents: KnowledgeDocument[]
+  documents: KnowledgeDocumentOption[]
   canEdit: boolean
   reportError: (error: unknown) => void
   onMessage: (kind: "success" | "error", message: string) => void

@@ -118,10 +118,9 @@ async def start_enterprise_login(
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     next_path: Annotated[str | None, Query(alias="next", max_length=2048)] = None,
-    nonce: Annotated[str | None, Cookie(alias=SSO_NONCE_COOKIE)] = None,
 ) -> RedirectResponse:
     await _enforce_rate_limit(request, settings)
-    browser_nonce = nonce or secrets.token_urlsafe(32)
+    browser_nonce = secrets.token_urlsafe(32)
     destination = await begin_login(db, connection_id, browser_nonce, next_path, settings)
     response = RedirectResponse(destination, status_code=status.HTTP_302_FOUND)
     _set_nonce_cookie(response, browser_nonce, settings)

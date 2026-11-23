@@ -14,6 +14,7 @@ from langchain_core.messages import (
 from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import StructuredTool
 
+from app.domain.agents.runtime.callbacks import CompactionProgressHandler
 from app.domain.agents.runtime.usage import (
     add_compaction_usage,
     empty_usage,
@@ -152,7 +153,8 @@ class AgentContextManager:
         return count_tokens_approximately(messages, tools=tools, chars_per_token=1.0)
 
     async def prepare(
-        self, messages: list[BaseMessage], tools: list[StructuredTool]
+        self, messages: list[BaseMessage], tools: list[StructuredTool],
+        *, on_compaction: CompactionProgressHandler | None = None,
     ) -> tuple[list[BaseMessage], dict[str, Any]]:
         budget = int(self.context_window * 0.8) - min(4096, self.context_window // 4)
         if self.tokens(messages, tools) <= budget:
@@ -205,40 +207,49 @@ class AgentContextManager:
         usage = empty_usage()
         # The entire compaction shares one timeout and the Run's outer deadline.
         # No old history is removed until every fragment has been summarized.
-        async with asyncio.timeout(60):
-            for fragment in _transcript_chunks(transcript[:cut], source_limit):
-                summary = await self.model.ainvoke(
-                    [prompt, HumanMessage(content=fragment)]
-                )
-                if not isinstance(summary, AIMessage) or not summary.text.strip():
-                    raise ValueError(
-                        "Agent context compaction returned an empty summary."
+        if on_compaction is not None:
+            await on_compaction("running")
+        try:
+            async with asyncio.timeout(60):
+                for fragment in _transcript_chunks(transcript[:cut], source_limit):
+                    summary = await self.model.ainvoke(
+                        [prompt, HumanMessage(content=fragment)]
                     )
-                if normalize_finish_reason(summary.response_metadata) == "length":
-                    raise ValueError("Agent context compaction summary was truncated.")
-                try:
-                    extracted = _validated_memory(json.loads(summary.text))
-                except (TypeError, json.JSONDecodeError) as exc:
-                    raise ValueError(
-                        "Agent context compaction returned invalid JSON."
-                    ) from exc
-                for key in MEMORY_FIELDS:
-                    memory[key] = _latest_unique([*memory[key], *extracted[key]])
-                usage = add_compaction_usage(usage, usage_from_message(summary))
-        encoded_memory = json.dumps(memory, ensure_ascii=False)
-        if len(encoded_memory) > available_chars:
-            raise ValueError(
-                "Agent context memory cannot fit without discarding retained details."
-            )
-        prepared = [
-            *system,
-            HumanMessage(
-                content=MEMORY_PREFIX + encoded_memory,
-                additional_kwargs={MEMORY_MARKER: True},
-            ),
-            *retained,
-        ]
-        if self.tokens(prepared, tools) > budget:
-            raise ValueError("Agent compacted context exceeds the model window.")
+                    if not isinstance(summary, AIMessage) or not summary.text.strip():
+                        raise ValueError(
+                            "Agent context compaction returned an empty summary."
+                        )
+                    if normalize_finish_reason(summary.response_metadata) == "length":
+                        raise ValueError("Agent context compaction summary was truncated.")
+                    try:
+                        extracted = _validated_memory(json.loads(summary.text))
+                    except (TypeError, json.JSONDecodeError) as exc:
+                        raise ValueError(
+                            "Agent context compaction returned invalid JSON."
+                        ) from exc
+                    for key in MEMORY_FIELDS:
+                        memory[key] = _latest_unique([*memory[key], *extracted[key]])
+                    usage = add_compaction_usage(usage, usage_from_message(summary))
+            encoded_memory = json.dumps(memory, ensure_ascii=False)
+            if len(encoded_memory) > available_chars:
+                raise ValueError(
+                    "Agent context memory cannot fit without discarding retained details."
+                )
+            prepared = [
+                *system,
+                HumanMessage(
+                    content=MEMORY_PREFIX + encoded_memory,
+                    additional_kwargs={MEMORY_MARKER: True},
+                ),
+                *retained,
+            ]
+            if self.tokens(prepared, tools) > budget:
+                raise ValueError("Agent compacted context exceeds the model window.")
+        except Exception:
+            if on_compaction is not None:
+                await on_compaction("failed")
+            raise
         self.memory = memory
+        if on_compaction is not None:
+            await on_compaction("succeeded")
         return prepared, usage

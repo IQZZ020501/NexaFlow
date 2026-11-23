@@ -563,7 +563,9 @@ async def execute_workflow_node(
             answer = str(resolve_value("{{" + ".".join(path) + "}}", context))
             inputs = {"fields": [path, description]}
         else:
-            answer = render_reply_template(parsed.content, context)
+            answer = await asyncio.to_thread(
+                render_reply_template, parsed.content, context
+            )
             inputs = {"content": parsed.content}
         return NodeResult(inputs=inputs, outputs={"answer": answer})
     if node_type == "condition":
@@ -790,7 +792,9 @@ async def execute_workflow_node(
         if submitted is None:
             pending = {
                 "runtime_node_id": node.id,
-                "content": render_form_template(parsed.form_content_format, context),
+                "content": await asyncio.to_thread(
+                    render_form_template, parsed.form_content_format, context
+                ),
                 "fields": [
                     field.model_dump(mode="json") for field in parsed.form_field_list
                 ],

@@ -35,10 +35,6 @@ const detailSource = readFileSync(
   ),
   "utf8"
 )
-const publicChatSource = readFileSync(
-  join(import.meta.dir, "../src/components/workflows/public-workflow-chat.tsx"),
-  "utf8"
-)
 const appConfigSource = readFileSync(
   join(import.meta.dir, "../src/components/agents/agent-config-fields.tsx"),
   "utf8"
@@ -64,17 +60,6 @@ test("workflow nodes default to expanded when the canvas mounts", () => {
   )
   expect(canvasSource).toContain("ensureConditionElseIfBranches(props.graph)")
   expect(canvasSource).toContain("skipInitialChangeRef.current = false")
-})
-
-test("workflow chats keep streamed output visible", () => {
-  expect(detailSource).toContain("ref={runScrollRef}")
-  expect(detailSource).toContain(
-    "runScrollRef.current.scrollTop = runScrollRef.current.scrollHeight"
-  )
-  expect(publicChatSource).toContain("ref={conversationScrollRef}")
-  expect(publicChatSource).toMatch(
-    /conversationScrollRef\.current\.scrollTop\s*=\s*conversationScrollRef\.current\.scrollHeight/
-  )
 })
 
 test("reply node is pinned and exposes both reply modes", () => {

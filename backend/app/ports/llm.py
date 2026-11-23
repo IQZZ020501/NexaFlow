@@ -46,9 +46,16 @@ class ModelQuotaExceeded(ModelProviderError):
 
 
 class ModelProviderStatusError(ModelProviderError):
-    def __init__(self, status_code: int, message: str = "") -> None:
+    def __init__(
+        self,
+        status_code: int,
+        message: str = "",
+        *,
+        retry_after: float | None = None,
+    ) -> None:
         self.status_code = status_code
         self.message = message
+        self.retry_after = retry_after
         detail = f"Provider returned status {status_code}"
         if message:
             detail = f"{detail}: {message}"

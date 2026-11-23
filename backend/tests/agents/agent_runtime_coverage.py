@@ -1739,7 +1739,7 @@ async def assert_memory_db_paths(
     async def spaced(index: int) -> Any:
         return base_time + timedelta(minutes=index)
 
-    # 1) over-budget history with <= RECENT_MEMORY_RUNS runs -> fallback fit (250)
+    # 1) a historical turn cannot fit a summary request -> fallback fit.
     history = [
         make_conversation_run(
             workspace_id,
@@ -1777,7 +1777,7 @@ async def assert_memory_db_paths(
             raise AssertionError("compaction should not run")
 
     async with get_session_factory()() as db:
-        registered_model = SimpleNamespace(meta={"context_window_tokens": 32768})
+        registered_model = SimpleNamespace(meta={"context_window_tokens": 8192})
         prepared = await agent_memory.prepare_conversation_memory(
             db,
             current,
@@ -1849,8 +1849,8 @@ async def assert_memory_db_paths(
         )
     assert prepared.messages == []
 
-    # 4) compaction success with > RECENT_MEMORY_RUNS history (298-299, 313-314,
-    #    325-327): six recent runs are kept, older ones are summarized.
+    # 4) compaction preserves recent turns and advances only through the
+    # older prefix covered by the bounded summary request.
     big_history = [
         make_conversation_run(
             workspace_id,
@@ -1883,7 +1883,7 @@ async def assert_memory_db_paths(
     class SummarizingStub:
         profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
-        async def ainvoke(self, _messages):
+        async def ainvoke(self, _messages, **_kwargs):
             return AIMessage(
                 content="Durable summary of the old turns.",
                 usage_metadata={
@@ -1909,7 +1909,7 @@ async def assert_memory_db_paths(
         "Durable summary" in message["content"] for message in prepared.messages
     )
     async with get_session_factory()() as db:
-        anchor = await agent_repository.get_agent_run_by_id(db, big_history[1].id)
+        anchor = await agent_repository.get_agent_run_by_id(db, big_history[4].id)
     assert anchor is not None
     assert anchor.context_summary == "Durable summary of the old turns."
 
@@ -1937,7 +1937,7 @@ async def assert_memory_db_paths(
         class FailingStub:
             profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
-            async def ainvoke(self, _messages):
+            async def ainvoke(self, _messages, **_kwargs):
                 raise RuntimeError("provider exploded")
 
         prepared = await agent_memory.prepare_conversation_memory(
@@ -1957,7 +1957,7 @@ async def assert_memory_db_paths(
         class GoodStub:
             profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
-            async def ainvoke(self, _messages):
+            async def ainvoke(self, _messages, **_kwargs):
                 return AIMessage(content="Another summary.")
 
         original_save = agent_repository.save_conversation_summary
@@ -1976,6 +1976,47 @@ async def assert_memory_db_paths(
         finally:
             agent_repository.save_conversation_summary = original_save
     assert prepared.model_usage["reported_model_calls"] == 0
+
+
+async def assert_compaction_progress_persistence(workspace_id: str, agent_id: str) -> None:
+    from unittest.mock import patch
+
+    from app.application.agents.access.service import external_progress_events
+
+    model = RuntimeModelStub([ok_completion("Answer after compaction.")])
+    run, _ = await prepare_console_run(workspace_id, agent_id, "Compaction progress")
+
+    async def prepare(*_args, on_compaction, **_kwargs):
+        await on_compaction("running")
+        async with get_session_factory()() as db:
+            events = await agent_repository.list_agent_run_events(db, run.id)
+        assert any(
+            item.event.get("event", {}).get("type") == "compaction"
+            and item.event["event"]["status"] == "running"
+            for item in events
+        ), "Compression progress was not durable before preprocessing continued"
+        assert model.requests == []
+        await on_compaction("succeeded")
+        return agent_executor.PreparedConversationMemory(messages=[], model_usage=empty_usage())
+
+    with patch.object(agent_executor, "prepare_conversation_memory", new=prepare), patch.object(
+        agent_executor, "build_chat_model", return_value=model,
+    ):
+        outcome = await agent_executor.run_durable_agent_run(
+            run.id, test_settings(), worker_task_id="worker-compaction-progress",
+        )
+    assert outcome == agent_executor.RUN_FINISHED
+    async with get_session_factory()() as db:
+        current = await agent_repository.get_agent_run_by_id(db, run.id)
+    assert current is not None and current.status == "succeeded"
+    assert current.result == "Answer after compaction."
+    steps = [event for event in current.events if event["type"] == "compaction"]
+    assert len(steps) == 1 and steps[0]["status"] == "succeeded"
+    assert current.events[0]["type"] == "compaction"
+    response = agent_runs.run_to_response(current)
+    assert response.events[0].type == "compaction"
+    public = external_progress_events(current.events, current.status)
+    assert public[0].type == "compaction" and public[0].status == "succeeded"
 
 
 async def async_false_save_conversation_summary(_db, _anchor_run, _summary) -> bool:
@@ -6508,6 +6549,9 @@ def main() -> None:
             )
             asyncio.run(
                 assert_memory_db_paths(workspace_id, resources["agent_id"])
+            )
+            asyncio.run(
+                assert_compaction_progress_persistence(workspace_id, resources["agent_id"])
             )
             asyncio.run(
                 assert_knowledge_tool_paths(

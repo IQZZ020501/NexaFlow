@@ -257,6 +257,12 @@ def external_progress_events(
         stream_metadata: dict[str, Any] = {}
         _copy_external_stream_metadata(event, stream_metadata)
 
+        if event_type == "compaction":
+            upsert(ExternalAgentProgressEventResponse(
+                **stream_metadata, id=_external_progress_id(event),
+                type="compaction", status=event_status, stage=event_status, turn=turn,
+            ))
+            continue
         if event_type == "environment" and summary == "agent.workspace_reset":
             upsert(ExternalAgentProgressEventResponse(
                 **stream_metadata, id=_external_progress_id(event, "environment"),

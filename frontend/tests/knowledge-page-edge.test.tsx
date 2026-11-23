@@ -23,11 +23,18 @@ import {
   mockUseSession,
   render,
   renderPage,
-  setFetch,
+  setFetch as installFetch,
   resetFetch,
   type FetchHandler,
 } from "./helpers/dom"
 import { LanguageProvider } from "@/contexts/language-provider"
+import { knowledgePageResponse } from "./helpers/knowledge-pages"
+
+function setFetch(handler: FetchHandler) {
+  installFetch(async (url, init) =>
+    knowledgePageResponse(url, await handler(url, init), (path) => handler(path))
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures

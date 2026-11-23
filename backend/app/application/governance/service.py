@@ -326,6 +326,9 @@ async def enforce_workspace_run_quota(
     governance = await workspace_governance_repository.get(db, workspace_id)
     if governance is None or governance.daily_run_limit is None:
         return
+    governance = await workspace_governance_repository.get(db, workspace_id, lock=True)
+    if governance is None or governance.daily_run_limit is None:
+        return
     day_start = (
         utc_now()
         .astimezone(APP_TIMEZONE)

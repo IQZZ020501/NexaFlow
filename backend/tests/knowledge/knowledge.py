@@ -1200,6 +1200,9 @@ async def assert_document_open_tasks_failed(
 
 
 def main() -> None:
+    from tests.knowledge.batch_indexing import main as test_batch_indexing
+
+    test_batch_indexing()
     test_keyword_query_does_not_require_embedding_model()
     assert_vector_store_mmr_and_metadata()
     hierarchical_drafts = build_hierarchical_chunks(

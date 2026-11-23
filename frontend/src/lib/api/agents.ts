@@ -33,6 +33,7 @@ export type Agent = {
   image_model_id?: string | null
   knowledge_base_ids: string[]
   tools?: ToolRef[]
+  tool_group_count?: number
   skills?: AgentSkillRef[]
   /** @deprecated Read-only compatibility for responses created before ToolRef. */
   mcp_tools?: AgentMcpToolRef[]
@@ -108,7 +109,7 @@ export type AgentRunEvent = {
   sequence?: number
   live_sequence?: string
   stream_epoch?: string
-  type: "thought" | "tool" | "environment"
+  type: "thought" | "tool" | "environment" | "compaction"
   turn: number
   tool_name: string
   status: "running" | "succeeded" | "failed"

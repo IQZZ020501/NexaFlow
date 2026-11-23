@@ -19,7 +19,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
-import { APP_TIME_ZONE, formatTokenCount } from "@/lib/display"
+import { formatTokenCount } from "@/lib/display"
 import {
   distributionTotal,
   formatAnalyticsNumber as formatNumber,
@@ -79,21 +79,6 @@ function formatPercent(value: number | null, locale: string) {
         style: "percent",
         maximumFractionDigits: 1,
       }).format(value)
-}
-
-/**
- * Formats a date-time value for the specified locale.
- *
- * @param value - The date-time value to format
- * @param locale - The locale used for date and time formatting
- * @returns The localized date and time string
- */
-function formatDateTime(value: string, locale: string) {
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: APP_TIME_ZONE,
-  }).format(new Date(value))
 }
 
 /**
@@ -465,10 +450,10 @@ export function AnalyticsRankingPanel({
 }
 
 /**
- * Displays frequently asked workspace questions with occurrence counts and latest occurrence times.
+ * Displays frequently asked workspace questions with occurrence counts.
  *
  * @param items - Questions that meet the reporting threshold
- * @param locale - Locale used to format counts and timestamps
+ * @param locale - Locale used to format counts
  */
 export function FrequentQuestionsPanel({
   items,
@@ -507,23 +492,21 @@ export function FrequentQuestionsPanel({
         }}
       >
         {visibleItems.length ? (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {visibleItems.map((item) => (
               <div
                 key={item.question}
-                className="flex min-h-14 min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
+                className="flex min-w-0 items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/35"
               >
-                <p className="min-w-0 break-words whitespace-normal">
+                <p className="min-w-0 flex-1 leading-relaxed break-words whitespace-normal">
                   {item.question}
                 </p>
-                <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
-                  <Badge variant="secondary">
-                    {formatNumber(item.count, locale)}
-                  </Badge>
-                  <time className="text-xs text-muted-foreground">
-                    {formatDateTime(item.latest_at, locale)}
-                  </time>
-                </div>
+                <Badge
+                  variant="secondary"
+                  className="min-w-7 shrink-0 justify-center px-2 py-0.5 font-semibold tabular-nums"
+                >
+                  {formatNumber(item.count, locale)}
+                </Badge>
               </div>
             ))}
           </div>

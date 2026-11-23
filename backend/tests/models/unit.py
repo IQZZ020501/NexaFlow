@@ -347,7 +347,118 @@ def test_metered_chat_preserves_context_window_through_binding() -> None:
     assert MeteredChatModel(provider, registered).profile is None
 
 
+def test_embedding_rate_limit_preserves_provider_retry_headers() -> None:
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+    from unittest.mock import Mock
+
+    import httpx
+    from botocore.exceptions import ClientError
+    from openai import APIStatusError
+
+    from app.adapters.llm import runtime
+    from app.ports.llm import ModelProviderStatusError
+
+    now = datetime(2026, 11, 23, tzinfo=UTC)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, _tz=None):
+            return now
+
+    cases = [
+        ({"retry-after": "90"}, 90),
+        ({"retry-after-ms": "1500", "retry-after": "90"}, 1.5),
+        ({"retry-after-ms": "invalid", "retry-after": "90"}, 90),
+        (
+            {"retry-after": format_datetime(now + timedelta(seconds=120), usegmt=True)},
+            120,
+        ),
+        *[({"retry-after": value}, None) for value in ("bad", "NaN", "inf", "-1")],
+        (
+            {"retry-after": format_datetime(now - timedelta(seconds=120), usegmt=True)},
+            None,
+        ),
+        ({}, None),
+    ]
+    with patch.object(runtime, "datetime", Clock), patch.object(runtime, "log_error"):
+        for headers, expected in cases:
+            response = httpx.Response(
+                429,
+                headers=headers,
+                request=httpx.Request("POST", "https://example.invalid/embeddings"),
+            )
+            provider_error = APIStatusError(
+                "TPM limit reached",
+                response=response,
+                body={"message": "TPM limit reached."},
+            )
+            delegate = Mock(embed_documents=Mock(side_effect=provider_error))
+            try:
+                runtime.CheckedEmbeddings(delegate).embed_documents(
+                    ["A legal provision."]
+                )
+            except ModelProviderStatusError as exc:
+                assert exc.status_code == 429
+                assert exc.retry_after == expected
+                assert "TPM limit reached" in str(exc)
+            else:
+                raise AssertionError("provider limit must remain a typed status error")
+        mapped = runtime._model_provider_error(
+            ClientError(
+                {
+                    "Error": {"Code": "Throttling", "Message": "Limit reached"},
+                    "ResponseMetadata": {
+                        "HTTPStatusCode": 429,
+                        "HTTPHeaders": {"retry-after": "75"},
+                    },
+                },
+                "embed",
+            )
+        )
+        assert mapped.retry_after == 75
+
+
+def test_embedding_cooldown_shares_waits_and_falls_back_locally() -> None:
+    from unittest.mock import Mock
+
+    from redis.exceptions import RedisError
+
+    from app.infra.models import embedding_cooldown as cooldown
+
+    settings = SimpleNamespace(
+        celery_task_always_eager=False, celery_broker_url="redis://unused"
+    )
+    client = Mock(pttl=Mock(return_value=2500))
+
+    async def check():
+        with patch.object(cooldown, "_client", return_value=client):
+            assert await cooldown.embedding_cooldown_seconds(settings, "model-1") == 2.5
+            await cooldown.extend_embedding_cooldown(settings, "model-1", 60.001)
+            client.pttl.assert_called_once_with("nexaflow:embedding-cooldown:model-1")
+            client.eval.assert_called_once_with(
+                cooldown._EXTEND_COOLDOWN,
+                1,
+                "nexaflow:embedding-cooldown:model-1",
+                60001,
+            )
+            client.pttl.side_effect = RedisError("offline")
+            client.eval.side_effect = RedisError("offline")
+            assert await cooldown.embedding_cooldown_seconds(settings, "model-1") == 0
+            await cooldown.extend_embedding_cooldown(settings, "model-1", 60)
+        settings.celery_task_always_eager = True
+        with patch.object(
+            cooldown, "_client", side_effect=AssertionError("unexpected Redis access")
+        ):
+            assert await cooldown.embedding_cooldown_seconds(settings, "model-1") == 0
+            await cooldown.extend_embedding_cooldown(settings, "model-1", 60)
+
+    asyncio.run(check())
+
+
 def main() -> None:
+    test_embedding_rate_limit_preserves_provider_retry_headers()
+    test_embedding_cooldown_shares_waits_and_falls_back_locally()
     test_metered_chat_preserves_context_window_through_binding()
     test_reasoning_content_round_trips_in_chat_history()
     test_chat_adapters_normalize_sync_async_and_stream_finish_reasons()

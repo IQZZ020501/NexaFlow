@@ -297,9 +297,8 @@ describe("workspace analytics", () => {
     expect(within(toolUsageCard).getByText("上期 30 次")).toBeTruthy()
     expect(within(toolUsageCard).getByText("90.0%")).toBeTruthy()
     expect(within(toolUsageCard).getByText("失败 4 次")).toBeTruthy()
-    expect(within(toolUsageCard).getByText("tavily_search")).toBeTruthy()
-    expect(within(toolUsageCard).getByText("20")).toBeTruthy()
-    expect(within(toolUsageCard).getByText("90%")).toBeTruthy()
+    expect(within(toolUsageCard).queryByText("调用最多的工具")).toBeNull()
+    expect(within(toolUsageCard).queryByText("tavily_search")).toBeNull()
     // Average run duration renders in seconds instead of milliseconds.
     expect(screen.getByText("12.5 秒")).toBeTruthy()
     expect(screen.queryByText(/毫秒/)).toBeNull()

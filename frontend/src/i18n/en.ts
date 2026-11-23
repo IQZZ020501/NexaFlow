@@ -1,6 +1,11 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  向量化未成功的文档: "Index unsuccessful documents",
+  向量化全部文档: "Index all documents",
+  向量化所选文档: "Index selected documents",
+  没有需要向量化的文档: "No documents need indexing",
+  "仅处理已分段文档，正在处理的文档会自动跳过。": "Only segmented documents are indexed. Documents being processed are skipped.",
   登录成功: "Signed in successfully",
   已退出登录: "Signed out",
   技能草稿已保存: "Skill draft saved",
@@ -1607,6 +1612,9 @@ export const en = {
   已完成分析: "Analysis complete",
   "正在调用 {name}": "Calling {name}",
   正在生成回答: "Generating the answer",
+  正在压缩历史对话: "Compacting conversation history",
+  历史对话已压缩: "Conversation history compacted",
+  历史对话压缩未完成: "Conversation history compaction incomplete",
   执行过程: "Execution process",
   工具执行结果不确定: "Tool outcome is uncertain",
   工具调用需要确认: "Tool call requires approval",

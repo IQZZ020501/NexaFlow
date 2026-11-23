@@ -31,6 +31,17 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+        ],
+      },
+      {
         // Only public viewer assets are readable by the opaque preview iframe.
         source: "/file-preview/:path*",
         headers: [{ key: "Access-Control-Allow-Origin", value: "*" }],

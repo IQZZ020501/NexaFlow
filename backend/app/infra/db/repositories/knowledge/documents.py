@@ -426,8 +426,9 @@ async def delete_document_assets(db: AsyncSession, document_id: str) -> list[str
 async def count_document_chunks(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
+    document_ids: list[str] | None = None,
 ) -> dict[str, int]:
-    result = await db.execute(
+    statement = (
         select(KnowledgeDocumentChunkORM.document_id, func.count())
         .where(
             KnowledgeDocumentChunkORM.workspace_id == knowledge_base.workspace_id,
@@ -435,6 +436,9 @@ async def count_document_chunks(
         )
         .group_by(KnowledgeDocumentChunkORM.document_id)
     )
+    if document_ids is not None:
+        statement = statement.where(KnowledgeDocumentChunkORM.document_id.in_(document_ids))
+    result = await db.execute(statement)
     return dict(result.all())
 
 async def list_document_chunks(

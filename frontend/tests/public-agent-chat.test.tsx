@@ -1663,6 +1663,25 @@ describe("PublicWorkflowChat", () => {
 })
 
 describe("PublicAgentChat", () => {
+  test.each([
+    ["running", "正在压缩历史对话"],
+    ["succeeded", "历史对话已压缩"],
+    ["failed", "历史对话压缩未完成"],
+  ] as const)("renders %s history compaction", async (status, title) => {
+    fetchHandler = agentFetchHandler({
+      history: { items: [run({
+        status: "running", result: "", progress: [{
+          id: "compaction-0", type: "compaction", status, stage: status,
+          turn: 0, count: null, hits: [],
+        }],
+      })] },
+      streamResponses: [() => new Response(new ReadableStream())],
+    })
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    expect(await screen.findByText(title)).toBeTruthy()
+    expect(screen.queryByText("正在生成回答")).toBeNull()
+  })
+
   test("sends a saved related question in the same conversation without sending the draft or files", async () => {
     const submitted: Record<string, unknown>[] = []
     fetchHandler = agentFetchHandler({
@@ -2274,6 +2293,119 @@ describe("PublicAgentChat", () => {
     expect(window.location.pathname).toBe("/chat/agent-1")
     expect(window.location.search).toBe("")
   })
+
+  test.each(["agent", "workflow"])(
+    "keeps the reader's position during %s streaming and follows again at the bottom",
+    async (kind) => {
+      let controller: ReadableStreamDefaultController<Uint8Array>
+      const encoder = new TextEncoder()
+      const stream = new ReadableStream<Uint8Array>({
+        start(value) {
+          controller = value
+        },
+      })
+      const agentHandler = agentFetchHandler({
+        conversations: { items: [conversation("conv-1", "A long answer")] },
+        history: {
+          items: [
+            run({
+              status: "running",
+              result: "First chunk",
+              live_stream_epoch: "w1",
+            }),
+          ],
+        },
+        streamResponses: [() => new Response(stream)],
+      })
+      fetchHandler =
+        kind === "agent"
+          ? agentHandler
+          : (url, init) => {
+              if (url.endsWith("/profile")) return jsonResponse(workflowProfile())
+              if (url.includes("/conversations"))
+                return jsonResponse({ items: [] })
+              if (url.includes("/stream")) return new Response(stream)
+              const current = workflowRun({
+                status: "running",
+                outputs: { result: "First chunk" },
+                live_stream_epoch: "w1",
+              })
+              if (url.includes("/runs") && init?.method === "POST")
+                return jsonResponse(current, 201)
+              if (url.includes("/runs")) return jsonResponse({ items: [current] })
+              return jsonResponse({})
+            }
+      const view = renderPage(
+        kind === "agent" ? (
+          <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+        ) : (
+          <PublicWorkflowChat workflowId="wf-1" />
+        )
+      )
+      try {
+        if (kind === "workflow") {
+          await screen.findByRole("heading", { name: "公开流程" })
+          sendMessage("A long answer")
+        }
+        const answer = await screen.findByText("First chunk")
+        const host = answer.closest(".overflow-y-auto") as HTMLDivElement
+        let height = 1000
+        let top = 800
+        Object.defineProperties(host, {
+          scrollHeight: { configurable: true, get: () => height },
+          clientHeight: { configurable: true, value: 200 },
+          scrollTop: {
+            configurable: true,
+            get: () => top,
+            set: (value: number) => {
+              top = Math.max(0, Math.min(value, height - 200))
+            },
+          },
+        })
+        const emit = (delta: string, sequence: string) =>
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({
+                type: "answer_delta",
+                delta,
+                stream_epoch: "w1",
+                live_sequence: sequence,
+              })}\n`
+            )
+          )
+
+        height = 1200
+        emit(" second chunk", "1-0")
+        await screen.findByText(/second chunk/)
+        await waitFor(() => expect(top).toBe(1000))
+
+        fireEvent.wheel(host, { deltaY: -20 })
+        host.scrollTop = 980
+        fireEvent.scroll(host)
+        height = 1300
+        emit(" third chunk", "2-0")
+        await screen.findByText(/third chunk/)
+        expect(top).toBe(980)
+
+        host.scrollTop = 100
+        fireEvent.scroll(host)
+        height = 1400
+        emit(" fourth chunk", "3-0")
+        await screen.findByText(/fourth chunk/)
+        expect(top).toBe(100)
+
+        host.scrollTop = 1200
+        fireEvent.scroll(host)
+        height = 1500
+        emit(" fifth chunk", "4-0")
+        await screen.findByText(/fifth chunk/)
+        await waitFor(() => expect(top).toBe(1300))
+      } finally {
+        view.unmount()
+        controller!.close()
+      }
+    }
+  )
 
   test("streams a full run and renders the execution timeline", async () => {
     const requests: string[] = []

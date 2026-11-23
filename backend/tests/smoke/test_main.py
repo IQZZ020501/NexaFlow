@@ -130,6 +130,22 @@ def main() -> None:
         assert logged.status_code == 200, logged.text
         assert any(item["message"] == "kaboom" for item in logged.json())
 
+    from dataclasses import replace
+
+    prod_app = create_app(
+        replace(
+            testing_settings(),
+            environment="production",
+            public_app_url="https://nexaflow.example",
+            opensandbox_api_key="",
+        )
+    )
+    asyncio.run(create_schema())
+    with TestClient(prod_app) as prod_client:
+        assert prod_client.get("/docs").status_code == 200
+        assert prod_client.get("/redoc").status_code == 200
+        assert prod_client.get("/openapi.json").status_code == 200
+
 
 if __name__ == "__main__":
     main()

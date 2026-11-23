@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
 import { PublicChatHistory as ConversationHistory } from "@/components/agents/public-chat-history"
 import {
   EditChatProjectDialog,
@@ -513,6 +514,14 @@ function PublicExecutionProcess({
       return t("已停止")
     if (event.type === "environment")
       return t("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")
+    if (event.type === "compaction") {
+      const status = effectiveStatus(event)
+      return t(
+        status === "running" ? "正在压缩历史对话"
+        : status === "succeeded" ? "历史对话已压缩"
+        : "历史对话压缩未完成"
+      )
+    }
     if (event.type === "knowledge") return t("知识库检索")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer" && effectiveStatus(event) === "failed")
@@ -1112,7 +1121,10 @@ export function PublicAgentChat({
     mode: "follow_up"
     content: string
   } | null>(null)
-  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const { scrollRef, followOutput } = useAutoFollowScroll({
+    content: runs,
+    resetKey: `${agentId}:${activeConversationId ?? ""}`,
+  })
   const projectSettingsRef = React.useRef<HTMLButtonElement>(null)
   const historyButtonRef = React.useRef<HTMLButtonElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
@@ -1311,11 +1323,6 @@ export function PublicAgentChat({
     t,
     token,
   ])
-
-  React.useLayoutEffect(() => {
-    const element = scrollRef.current
-    if (element) element.scrollTop = element.scrollHeight
-  }, [runs, isRunsLoading])
 
   React.useEffect(() => {
     if (selectedConversation) {
@@ -1828,6 +1835,7 @@ export function PublicAgentChat({
     const runId = activeRunIdRef.current
     const content = question.trim()
     if (!token || !runId || !content || sessionInputBusyRef.current) return
+    followOutput()
 
     const previous = sessionInputRef.current
     const input =
@@ -1886,6 +1894,7 @@ export function PublicAgentChat({
     const nextQuestion = (suggestedQuestion ?? question).trim()
     const currentProfile = profile
     if (!nextQuestion || isSending || !token || !currentProfile) return
+    followOutput()
     if (!suggestedQuestion) setQuestion("")
     setSendError(null)
     setIsSending(true)

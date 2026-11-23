@@ -107,6 +107,25 @@ function harness(surface: "console" | "public") {
 describe.each(["console", "public"] as const)(
   "%s stream recovery",
   (surface) => {
+    test("updates history compaction in place and keeps its completed state on reconnect", () => {
+      const h = harness(surface)
+      const started = {
+        ...h.thought(0, ""), id: "compaction-0", type: "compaction",
+        summary: "agent.history_compaction_running", stage: "running",
+      }
+      h.merge(h.process(started, 1))
+      expect(h.events()).toHaveLength(1)
+      h.merge(h.process({
+        ...started, status: "succeeded", stage: "succeeded",
+        summary: "agent.history_compaction_succeeded",
+      }, 2))
+      expect(h.events()).toHaveLength(1)
+      expect(h.events()[0].status).toBe("succeeded")
+      h.merge(h.run([{ ...started, sequence: 1 }]))
+      expect(h.events()).toHaveLength(1)
+      expect(h.events()[0].status).toBe("succeeded")
+    })
+
     test("replays completed turns and tool inputs without appending them twice", () => {
       const h = harness(surface)
       h.reset([

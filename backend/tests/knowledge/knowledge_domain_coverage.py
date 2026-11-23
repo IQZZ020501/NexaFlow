@@ -429,12 +429,7 @@ def test_clean_upload_filename() -> None:
         assert exc.status_code == 422
     else:
         raise AssertionError("empty filename must be rejected")
-    try:
-        documents_service.clean_upload_filename("机密报告.pdf")
-    except HTTPException as exc:
-        assert exc.status_code == 422
-    else:
-        raise AssertionError("restricted filename must be rejected")
+    assert documents_service.clean_upload_filename("机密报告.pdf") == "机密报告.pdf"
 
 
 def test_batches_and_task_error_message() -> None:
@@ -782,12 +777,21 @@ def test_api_scenario(model_base_url: str) -> None:
             )
         assert too_large.status_code == 413, too_large.text
 
-        restricted_name = client.post(
+        named_attachment = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
             headers=auth_headers(alice_token),
             files={"file": ("机密文件.txt", b"x", "text/plain")},
         )
-        assert restricted_name.status_code == 422, restricted_name.text
+        assert named_attachment.status_code == 201, named_attachment.text
+        assert named_attachment.json()["filename"] == "机密文件.txt"
+        deleted_attachment = client.delete(
+            knowledge_url(
+                default_workspace_id,
+                f"/{knowledge_base_id}/attachments/{named_attachment.json()['id']}",
+            ),
+            headers=auth_headers(alice_token),
+        )
+        assert deleted_attachment.status_code == 204, deleted_attachment.text
 
         missing_name = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
