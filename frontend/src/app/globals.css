@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "@xyflow/react/dist/style.css";
+@import "../components/agents/beautiful-ui.css";
 
 @keyframes session-loading-bar {
     0% {

@@ -29,6 +29,23 @@ type ToolOutputEvent = {
   output?: unknown
 }
 
+/** Summarizes recognized input fields without surfacing arbitrary credentials. */
+export function toolInputSummary(input?: Record<string, unknown>) {
+  for (const field of ["command", "filename", "relative_path", "path", "query"]) {
+    const value = input?.[field]
+    if (typeof value !== "string" || !value.trim()) continue
+    const characters = Array.from(value.trim().replace(/\s+/g, " "))
+    return {
+      text:
+        characters.length > 96
+          ? `${characters.slice(0, 96).join("")}…`
+          : characters.join(""),
+      isCode: field !== "query",
+    }
+  }
+  return null
+}
+
 const ARTIFACT_URL_PATTERN =
   /(?:https?:\/\/[^\s<>()\x5B\x5D]+)?\/api\/v1\/artifacts\/[A-Za-z0-9._~-]+(?:\/content)?/g
 const IMAGE_PREVIEW_LINK_LINE =
@@ -101,6 +118,40 @@ export function builtinToolDisplayName(functionName: string, t: TFunction) {
   if (functionName === "skill_creator") return t("技能创建")
   if (functionName === "generate_image") return t("图片生成")
   return null
+}
+
+/** Uses short action labels in execution history while catalogs keep their names. */
+export function toolActivityName(
+  tool: { tool_name?: string; tool_label?: string; tool_kind?: string },
+  t: TFunction
+) {
+  const name = tool.tool_name ?? ""
+  if (
+    tool.tool_kind === "knowledge" ||
+    name === "search_knowledge" ||
+    name === "knowledge_retrieval"
+  )
+    return t("查阅知识库")
+  if (name === "bash") return t("运行命令")
+
+  const normalized = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
+  if (
+    /(?:^|_)(?:tavily_search|web_search|search_web)(?:_|$)/.test(normalized)
+  ) {
+    return t("搜索网页")
+  }
+  if (
+    /(?:^|_)(?:tavily_extract|tavily_crawl|fetch|fetch_url|web_fetch)(?:_|$)/.test(
+      normalized
+    )
+  ) {
+    return t("读取网页")
+  }
+  return (
+    builtinToolDisplayName(name, t) ??
+    integrationToolName(name, t) ??
+    (tool.tool_label || name)
+  )
 }
 
 export function withArtifactDownloadLinks(

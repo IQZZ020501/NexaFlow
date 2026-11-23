@@ -1798,8 +1798,8 @@ describe("PublicAgentChat", () => {
     const composer = screen.getByLabelText("请输入问题").closest("form")
     expect(composer?.className).toContain("max-w-3xl")
     expect(composer?.className).toContain("border-input")
-    expect(composer?.className).toContain("bg-muted/20")
-    expect(composer?.className).toContain("shadow-xs")
+    expect(composer?.className).toContain("bg-card")
+    expect(composer?.className).toContain("shadow-sm")
     expect(composer?.closest("main")?.className).toContain("h-dvh")
     expect(composer?.closest("main")?.className).toContain("overflow-hidden")
     expect(composer?.closest("main")?.className).toContain(
@@ -2586,7 +2586,7 @@ describe("PublicAgentChat", () => {
     expect(screen.getByText("已检索 2 个知识片段")).toBeTruthy()
     expect(screen.getByText("已检索 0 个知识片段")).toBeTruthy()
     expect(screen.getByText("Search")).toBeTruthy()
-    expect(screen.getByText("Web search")).toBeTruthy()
+    expect(screen.getByText("搜索网页")).toBeTruthy()
     expect(screen.getAllByText("完成").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText("调用失败")).toBeTruthy()
     expect(screen.getByText("DB Query")).toBeTruthy()
@@ -2600,6 +2600,10 @@ describe("PublicAgentChat", () => {
     expect(screen.getAllByTitle("复制").length).toBe(2)
 
     // Expand the successful knowledge row to reveal its hits.
+    expect(
+      screen.getByRole("button", { name: /已检索 2 个知识片段/ })
+        .querySelector(".lucide-book-open")
+    ).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /已检索 2 个知识片段/ }))
     expect(screen.getByText("doc-1")).toBeTruthy()
     expect(screen.getByText("kb-1")).toBeTruthy()
@@ -2610,7 +2614,12 @@ describe("PublicAgentChat", () => {
     expect(screen.getByText("未检索到相关知识片段")).toBeTruthy()
 
     // Expand the succeeded tool row to reveal input and output.
-    fireEvent.click(screen.getByRole("button", { name: /Web search/ }))
+    expect(
+      screen.getByRole("button", { name: /搜索网页/ })
+        .querySelector(".lucide-search")
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /搜索网页/ }))
+    expect(screen.getByText("web_search")).toBeTruthy()
     expect(screen.getByText("调用输入")).toBeTruthy()
     expect(screen.queryByText(/内容过长已截断/)).toBeNull()
     expect(screen.getByText(/query/)).toBeTruthy()
@@ -3175,7 +3184,7 @@ describe("PublicAgentChat", () => {
     await waitFor(() =>
       expect(screen.queryByText("工具调用需要确认") === null).toBe(true)
     )
-    expect(screen.getByText(/web_search/)).toBeTruthy()
+    expect(screen.getByText("搜索网页")).toBeTruthy()
     expect(
       (screen.getByLabelText("请输入问题") as HTMLTextAreaElement).disabled
     ).toBe(false)
@@ -3191,7 +3200,7 @@ describe("PublicAgentChat", () => {
     const followUp = screen.getByText("然后解释图片")
     const articleText = followUp.closest("article")?.textContent ?? ""
     expect(articleText.indexOf("然后解释图片")).toBeGreaterThan(
-      articleText.indexOf("web_search")
+      articleText.indexOf("搜索网页")
     )
     await waitFor(() => expect(textarea.value).toBe(""))
     expect(screen.getByLabelText("停止生成")).toBeTruthy()
@@ -3287,7 +3296,7 @@ describe("PublicAgentChat", () => {
     emit({ type: "answer_delta", delta: "正在回答租房问题" })
     const answer = await screen.findByText("正在回答租房问题")
     const followUpAnswer = answer.closest(".rounded-2xl") as HTMLElement
-    expect(within(followUpAnswer).getByText("知识库检索")).toBeTruthy()
+    expect(within(followUpAnswer).getByText("查阅知识库")).toBeTruthy()
     expect(within(followUpAnswer).queryByText("图片生成") === null).toBe(true)
     expect(screen.getAllByText("图片生成")).toHaveLength(1)
 

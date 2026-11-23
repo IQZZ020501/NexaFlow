@@ -1,16 +1,15 @@
 "use client"
 
 import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
+import { AgentToolCallRow } from "@/components/agents/agent-tool-call-row"
 
 import * as React from "react"
 import Link from "next/link"
 import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
-import { integrationToolName } from "@/lib/integrations"
 import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
 import {
   ArrowLeftIcon,
   BotIcon,
-  BrainIcon,
   OrbitIcon,
   CircleCheckIcon,
   ChevronDownIcon,
@@ -39,6 +38,11 @@ import { RunActionBar } from "@/components/app/run-action-bar"
 import { AgentSuggestedQuestions } from "@/components/agents/agent-suggested-questions"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import {
+  AgentPromptBar,
+  AgentPromptInput,
+} from "@/components/agents/agent-prompt-bar"
+import { AgentContextCard } from "@/components/agents/agent-context-card"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
 import {
   AgentReasoningStep,
@@ -64,7 +68,7 @@ import type { RegisteredModel } from "@/lib/api/llm"
 import type { ToolSummary } from "@/lib/api/tools"
 import { splitAgentSessionEvents } from "@/lib/agent-session-handoff"
 import {
-  builtinToolDisplayName,
+  toolActivityName,
   withArtifactDownloadLinks,
   executionWaitSummary,
 } from "@/lib/tool-display"
@@ -178,9 +182,11 @@ function processSummary(
   if (event.type === "compaction") {
     const status = effectiveProcessStatus(event, run.status)
     return t(
-      status === "running" ? "正在压缩历史对话"
-      : status === "succeeded" ? "历史对话已压缩"
-      : "历史对话压缩未完成"
+      status === "running"
+        ? "正在压缩历史对话"
+        : status === "succeeded"
+          ? "历史对话已压缩"
+          : "历史对话压缩未完成"
     )
   }
   if (event.summary === "agent.analyzing") return t("正在分析问题")
@@ -231,11 +237,7 @@ function effectiveProcessStatus(
 }
 
 function processToolName(event: AgentRun["events"][number], t: TFunction) {
-  return (
-    builtinToolDisplayName(event.tool_name, t) ??
-    integrationToolName(event.tool_name, t) ??
-    (event.tool_label || event.tool_name)
-  )
+  return toolActivityName(event, t)
 }
 
 function ToolEventDetails({
@@ -248,12 +250,7 @@ function ToolEventDetails({
   t: TFunction
 }) {
   const isPreparing = event.summary === "agent.preparing_tool_call"
-  const [isOpen, setIsOpen] = React.useState(false)
-  const toolName =
-    event.tool_kind === "knowledge"
-      ? t("知识库检索")
-      : processToolName(event, t)
-  const label = toolName
+  const toolName = processToolName(event, t)
   const status = effectiveProcessStatus(event, run.status)
   const detail = isPreparing
     ? null
@@ -268,51 +265,31 @@ function ToolEventDetails({
       : processSummary(event, run, t)
 
   return (
-    <div className="min-w-0">
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 rounded-sm px-1 py-1.5 text-left text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        aria-expanded={isOpen}
-        onClick={() => setIsOpen((current) => !current)}
-      >
-        <span className="flex size-3.5 shrink-0 items-center justify-center">
-          {event.tool_kind === "knowledge" ? (
-            <DatabaseIcon className="size-3.5" />
-          ) : (
-            <BuiltinToolIcon
-              functionName={event.tool_name}
-              className="size-3.5"
-            />
-          )}
-        </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-2 leading-5">
-          <span className="min-w-0 truncate text-xs">
-            {label}
-            {event.server_name ? (
-              <span className="ml-1 font-normal text-muted-foreground">
-                @ {event.server_name}
-              </span>
-            ) : null}
-          </span>
-          {detail ? (
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-              {detail}
-            </span>
-          ) : null}
-        </span>
-        {status === "running" ? (
+    <AgentToolCallRow
+      title={toolName}
+      functionName={event.tool_name}
+      sourceName={event.server_name}
+      input={event.input}
+      detail={detail}
+      icon={
+        <BuiltinToolIcon
+          functionName={event.tool_name}
+          toolKind={event.tool_kind}
+          className="size-3.5"
+        />
+      }
+      statusIcon={
+        status === "running" ? (
           <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
         ) : status === "succeeded" ? (
           <CircleCheckIcon className="size-3.5 shrink-0" />
         ) : (
           <CircleXIcon className="size-3.5 shrink-0 text-destructive" />
-        )}
-        <ChevronDownIcon
-          className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
-        />
-      </button>
-      {isOpen ? (
-        <div className="mt-1 mb-2 ml-6 grid min-w-0 gap-2.5 border-l pl-3 text-xs">
+        )
+      }
+    >
+      {() => (
+        <>
           {event.tool_name === "bash" &&
           event.output &&
           typeof event.output === "object" &&
@@ -339,24 +316,18 @@ function ToolEventDetails({
               event.output &&
               "hits" in event.output &&
               Array.isArray(event.output.hits) ? (
-                <div className="space-y-2">
+                <div className="bui-context-grid">
                   {event.output.hits.map((hit, index) => {
                     const item = hit as Record<string, unknown>
                     return (
-                      <article
+                      <AgentContextCard
                         key={index}
-                        className="rounded-md border bg-background p-2.5"
-                      >
-                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
-                          <span>{String(item.document ?? t("未知文档"))}</span>
-                          <span className="text-muted-foreground">
-                            {String(item.knowledge_base ?? "")}
-                          </span>
-                        </div>
-                        <p className="mt-1.5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground">
-                          {String(item.content ?? "")}
-                        </p>
-                      </article>
+                        title={t("片段 {value}", { value: index + 1 })}
+                        content={String(item.content ?? "")}
+                        document={String(item.document ?? t("未知文档"))}
+                        meta={String(item.knowledge_base ?? "")}
+                        t={t}
+                      />
                     )
                   })}
                 </div>
@@ -369,9 +340,9 @@ function ToolEventDetails({
               )}
             </div>
           ) : null}
-        </div>
-      ) : null}
-    </div>
+        </>
+      )}
+    </AgentToolCallRow>
   )
 }
 
@@ -480,7 +451,6 @@ export function collapsedProcessStatusKey(
   if (runStatus === "awaiting_approval") return "等待工具调用确认"
   return hasActiveToolCall ? "执行过程" : null
 }
-
 
 function PendingToolEvent({
   call,
@@ -726,13 +696,12 @@ function RunExchange({
                 <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
                   {visibleProcessTimeline(completedTimeline, inlineCallIds)
                     .length > 0 ? (
-                    <details className="group mb-4 text-sm">
-                      <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-                        <BrainIcon className="size-3.5" />
+                    <details className="agent-beautiful bui-process group mb-4 text-sm">
+                      <summary className="bui-process-summary">
+                        <ChevronDownIcon aria-hidden="true" />
                         <span className="flex-1">{t("执行过程")}</span>
-                        <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
                       </summary>
-                      <div className="mt-1 ml-1.5 space-y-0.5 border-l border-border/70 pl-3">
+                      <div className="mt-2 space-y-0.5">
                         <ProcessTimelineRows
                           timeline={visibleProcessTimeline(
                             completedTimeline,
@@ -776,16 +745,15 @@ function RunExchange({
           <div className="rounded-2xl rounded-tl-md border bg-background p-4 shadow-xs">
             {hasProcess ? (
               <details
-                className="group mb-4 text-sm"
+                className="agent-beautiful bui-process group mb-4 text-sm"
                 open={isProcessOpen}
                 onToggle={onProcessToggle}
               >
-                <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-                  <BrainIcon className="size-3.5" />
+                <summary className="bui-process-summary">
+                  <ChevronDownIcon aria-hidden="true" />
                   <span className="flex-1">{t("执行过程")}</span>
-                  <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
                 </summary>
-                <div className="mt-1 ml-1.5 space-y-0.5 border-l border-border/70 pl-3">
+                <div className="mt-2 space-y-0.5">
                   <ProcessTimelineRows
                     timeline={visibleTimeline}
                     run={run}
@@ -796,9 +764,7 @@ function RunExchange({
               </details>
             ) : null}
             {!isProcessOpen && inlineToolSteps.length > 0 ? (
-              <div className="mb-3 ml-1.5 space-y-1.5 border-l border-border/70 pl-3">
-                {inlineToolSteps}
-              </div>
+              <div className="mb-3 space-y-1.5">{inlineToolSteps}</div>
             ) : null}
 
             {run.result ? (
@@ -1432,9 +1398,8 @@ export function AgentDetailWorkspace({
                       </div>
                     </div>
 
-                    <div className="shrink-0 border-t bg-background p-2 sm:p-4">
-                      <form
-                        className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                    <div className="shrink-0 bg-background p-2 sm:p-4">
+                      <AgentPromptBar
                         aria-busy={fileDrop.isReadingFiles}
                         onSubmit={(event) => {
                           if (fileDrop.isReadingFiles) {
@@ -1451,7 +1416,7 @@ export function AgentDetailWorkspace({
                         }}
                         onDrop={fileDrop.onDrop}
                       >
-                        <textarea
+                        <AgentPromptInput
                           value={question}
                           onChange={(event) => setQuestion(event.target.value)}
                           onPaste={(event) => {
@@ -1473,7 +1438,6 @@ export function AgentDetailWorkspace({
                               event.currentTarget.form?.requestSubmit()
                             }
                           }}
-                          className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-12 sm:text-sm"
                           placeholder={
                             isDirty
                               ? t("请先保存配置后再调试")
@@ -1490,19 +1454,23 @@ export function AgentDetailWorkspace({
                           maxLength={4000}
                           rows={1}
                         />
-                        <AgentAttachmentList
-                          files={files}
-                          onRemove={(indexToRemove) =>
-                            setFiles((current) =>
-                              current.filter(
-                                (_, index) => index !== indexToRemove
-                              )
-                            )
-                          }
-                          t={t}
-                        />
-                        <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
-                          <div className="flex min-w-0 items-center gap-1">
+                        {files.length > 0 ? (
+                          <div className="bui-prompt-files">
+                            <AgentAttachmentList
+                              files={files}
+                              onRemove={(indexToRemove) =>
+                                setFiles((current) =>
+                                  current.filter(
+                                    (_, index) => index !== indexToRemove
+                                  )
+                                )
+                              }
+                              t={t}
+                            />
+                          </div>
+                        ) : null}
+                        <div className="bui-prompt-toolbar justify-between">
+                          <div className="bui-prompt-attach">
                             <AgentFilePicker
                               disabled={
                                 isDirty ||
@@ -1518,6 +1486,8 @@ export function AgentDetailWorkspace({
                               }
                               t={t}
                             />
+                          </div>
+                          <div className="bui-prompt-actions">
                             <AgentApprovalModeMenu
                               value={approvalMode}
                               onChange={onApprovalModeChange}
@@ -1529,8 +1499,6 @@ export function AgentDetailWorkspace({
                               }
                               t={t}
                             />
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1">
                             <AgentChatSubmitButton
                               isRunning={isAsking}
                               hasInput={Boolean(question.trim())}
@@ -1546,7 +1514,7 @@ export function AgentDetailWorkspace({
                             />
                           </div>
                         </div>
-                      </form>
+                      </AgentPromptBar>
                     </div>
                   </section>
                   <AgentArtifactPreviewPanel />

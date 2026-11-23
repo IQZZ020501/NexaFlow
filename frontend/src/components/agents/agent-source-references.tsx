@@ -6,6 +6,7 @@ import { Popover as PopoverPrimitive } from "radix-ui"
 import type { Components } from "react-markdown"
 
 import { AgentArtifactPreviews } from "@/components/agents/artifacts/agent-artifact-previews"
+import { AgentContextCard } from "@/components/agents/agent-context-card"
 import {
   MarkdownContent,
   MarkdownLink,
@@ -198,14 +199,13 @@ function AgentSourceReference({
         <button
           type="button"
           className={cn(
-            "inline-flex max-w-60 cursor-pointer items-center gap-1.5 rounded-full border border-border/70 bg-secondary px-2.5 py-1 text-xs font-medium text-secondary-foreground shadow-xs transition-colors",
-            "hover:border-foreground/25 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            inline && "mx-1 align-middle"
+            "agent-beautiful bui-source-chip",
+            inline && "bui-source-chip-inline"
           )}
           aria-label={`${t("来源")}：${label}`}
           title={label}
         >
-          <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+          <span className="bui-source-icon" aria-hidden="true">
             <FileTextIcon className="size-2.5" />
           </span>
           <span className="truncate">{displayLabel}</span>
@@ -217,19 +217,22 @@ function AgentSourceReference({
           align="start"
           sideOffset={6}
           collisionPadding={16}
-          className="z-50 max-h-[min(28rem,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-md overflow-y-auto rounded-lg border bg-popover p-4 text-popover-foreground shadow-md outline-none"
+          className="agent-beautiful bui-source-popover"
         >
-          <p className="font-medium break-words">
-            {source.document || t("未知文档")}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {[source.knowledge_base, sourceLocation(source, t)]
+          <AgentContextCard
+            title={
+              source.parent_title ||
+              sourceLocation(source, t) ||
+              source.document ||
+              t("未知文档")
+            }
+            content={source.content}
+            document={source.document || t("未知文档")}
+            meta={[source.knowledge_base, sourceLocation(source, t)]
               .filter(Boolean)
               .join(" · ")}
-          </p>
-          <p className="mt-3 text-sm leading-6 break-words whitespace-pre-wrap">
-            {source.content}
-          </p>
+            t={t}
+          />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
@@ -246,7 +249,10 @@ export function AgentSourceReferences({
   if (!sources?.length) return null
 
   return (
-    <details className="group/sources mt-3" aria-label={t("回答来源")}>
+    <details
+      className="agent-beautiful group/sources mt-3"
+      aria-label={t("回答来源")}
+    >
       <summary className="flex w-fit max-w-full cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
         <FileTextIcon className="size-3.5 shrink-0" aria-hidden="true" />
         <span>{t("回答来源（{count}）", { count: sources.length })}</span>

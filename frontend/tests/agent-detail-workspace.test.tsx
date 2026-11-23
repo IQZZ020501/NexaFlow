@@ -1269,7 +1269,7 @@ describe("AgentDetailWorkspace preview", () => {
         .getByText("正在回答租房问题")
         .closest(".rounded-2xl") as HTMLElement
       expect(within(firstAnswer).getByText("图片生成")).toBeTruthy()
-      expect(within(followUpAnswer).getByText("知识库检索")).toBeTruthy()
+      expect(within(followUpAnswer).getByText("查阅知识库")).toBeTruthy()
       expect(within(followUpAnswer).queryByText("图片生成") === null).toBe(true)
       expect(
         within(followUpAnswer).queryByText("工具调用需要确认") === null
@@ -1593,6 +1593,9 @@ describe("AgentDetailWorkspace preview", () => {
     const reasoning = screen.getByText("Tool reasoning result")
     const preparing = screen.getAllByText("search")[0]!
     expect(
+      preparing.closest("button")!.querySelector(".lucide-search")
+    ).toBeTruthy()
+    expect(
       reasoning.compareDocumentPosition(preparing) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
@@ -1720,8 +1723,9 @@ describe("AgentDetailWorkspace preview", () => {
     const process = screen.getByText("执行过程").closest("details")!
     expect(process.open).toBe(false)
     fireEvent.click(screen.getByText("执行过程"))
-    const button = screen.getByText("命令行").closest("button")!
+    const button = screen.getByText("运行命令").closest("button")!
     expect(button.getAttribute("aria-expanded")).toBe("false")
+    expect(within(button).getByText("printf hello; exit 7")).toBeTruthy()
     fireEvent.click(button)
     const card = button.parentElement!
     expect(within(card).getByText("退出码: 7")).toBeTruthy()
@@ -1759,9 +1763,14 @@ describe("AgentDetailWorkspace preview", () => {
       ],
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
-    expect(screen.getByText("知识库检索")).toBeTruthy()
+    expect(screen.getByText("查阅知识库")).toBeTruthy()
     expect(screen.getByText("已检索 2 个知识片段")).toBeTruthy()
-    fireEvent.click(screen.getByText("知识库检索").closest("button")!)
+    expect(
+      screen.getByText("查阅知识库").closest("button")!
+        .querySelector(".lucide-book-open")
+    ).toBeTruthy()
+    fireEvent.click(screen.getByText("查阅知识库").closest("button")!)
+    expect(screen.getByText("knowledge_retrieval")).toBeTruthy()
     expect(screen.getByText("doc-a")).toBeTruthy()
     expect(screen.getByText("chunk content")).toBeTruthy()
   })
