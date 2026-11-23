@@ -1,3 +1,4 @@
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.platform.models import WorkspaceGovernance as WorkspaceGovernanceOrm
@@ -5,17 +6,31 @@ from app.entities.governance.models import WorkspaceGovernance
 from app.infra.db import mapping
 
 
-async def get(db: AsyncSession, workspace_id: str) -> WorkspaceGovernance | None:
+async def get(
+    db: AsyncSession,
+    workspace_id: str,
+    *,
+    lock: bool = False,
+) -> WorkspaceGovernance | None:
     """
     Retrieve workspace governance data for a workspace.
     
     Parameters:
         workspace_id (str): Identifier of the workspace.
+        lock (bool): Whether to acquire a row-level lock for quota serialization.
     
     Returns:
         WorkspaceGovernance | None: The workspace governance entity, or `None` if no matching governance row exists.
     """
-    row = await db.get(WorkspaceGovernanceOrm, workspace_id)
+    if lock:
+        statement = (
+            select(WorkspaceGovernanceOrm)
+            .where(WorkspaceGovernanceOrm.workspace_id == workspace_id)
+            .with_for_update()
+        )
+        row = (await db.execute(statement)).scalar_one_or_none()
+    else:
+        row = await db.get(WorkspaceGovernanceOrm, workspace_id)
     return mapping.to_entity(WorkspaceGovernance, row) if row is not None else None
 
 

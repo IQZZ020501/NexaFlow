@@ -1225,6 +1225,9 @@ def test_is_private_address() -> None:
     assert is_private_address("240.0.0.1") is True
     assert is_private_address("0.0.0.0") is True
     assert is_private_address("192.168.1.1") is True
+    assert is_private_address("100.64.0.1") is True
+    assert is_private_address("::ffff:100.64.0.1") is True
+    assert is_private_address("fe80::1%eth0") is True
     assert is_private_address("8.8.8.8") is False
     assert is_private_address("93.184.216.34") is False
 
@@ -2352,6 +2355,13 @@ def test_production_requires_a_bounded_secure_execution_plane() -> None:
         public_app_url="https://nexaflow.example",
     )
     production.validate()
+
+    try:
+        replace(production, bootstrap_admin_password="CHANGE_ME_ADMIN_PASSWORD").validate()
+    except (RuntimeError, ValueError) as exc:
+        assert "placeholder" in str(exc).lower()
+    else:
+        raise AssertionError("production Settings.validate() must reject CHANGE_ME_ secrets")
 
     # No host limit: a burst of Runs can exhaust the execution host.
     try:

@@ -52,7 +52,12 @@ async def serve(payload):
 
 
 def main():
-    payload = Path(sys.argv[1]).read_bytes()
+    config_path = Path(sys.argv[1])
+    payload = config_path.read_bytes()
+    try:
+        config_path.unlink()
+    except OSError:
+        pass
     if len(payload) > 256 * 1024:
         raise ValueError("Bridge configuration is too large.")
     asyncio.run(serve(json.loads(payload)))

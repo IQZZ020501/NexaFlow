@@ -71,6 +71,7 @@ function MarkdownImage(
       )}
       loading="lazy"
       decoding="async"
+      referrerPolicy="no-referrer"
       {...restProps}
     />
   )

@@ -330,6 +330,24 @@ class Settings:
             raise RuntimeError("PUBLIC_APP_URL must be an absolute HTTP(S) URL.")
         if public_url.path not in {"", "/"} or public_url.query or public_url.fragment:
             raise RuntimeError("PUBLIC_APP_URL must not include a path, query, or fragment.")
+        if self.environment == "production":
+            for name, value in (
+                ("BOOTSTRAP_ADMIN_PASSWORD", self.bootstrap_admin_password),
+                ("MANAGED_USER_INITIAL_PASSWORD", self.managed_user_initial_password),
+                ("OPENSANDBOX_API_KEY", self.opensandbox_api_key),
+            ):
+                if value.startswith("CHANGE_ME_"):
+                    raise RuntimeError(
+                        f"{name} must not use a template placeholder in production."
+                    )
+            try:
+                db_password = make_url(self.database_url).password or ""
+            except ArgumentError:
+                db_password = ""
+            if db_password.startswith("CHANGE_ME_"):
+                raise RuntimeError(
+                    "POSTGRES_PASSWORD must not use a template placeholder in production."
+                )
         if self.environment == "production" and public_url.scheme != "https":
             raise RuntimeError("PUBLIC_APP_URL must use HTTPS in production.")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:

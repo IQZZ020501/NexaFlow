@@ -63,10 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 method=request.method,
                 status_code=500,
             )
-            forwarded_for = request.headers.get("x-forwarded-for", "")
-            ip_address = forwarded_for.split(",", 1)[0].strip()
-            if not ip_address and request.client:
-                ip_address = request.client.host
+            ip_address = request.client.host if request.client else None
 
             try:
                 async with get_session_factory()() as db:

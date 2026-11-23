@@ -1154,6 +1154,24 @@ async def assert_egress_cleanup_timeout_preserves_result_and_fences_guest():
         record = (await platform.store.for_run("pending-egress", "run-egress"))[0]
         assert record.state == "closing"
         platform.capacity.release.assert_not_awaited()
+
+        # Non-timeout egress cleanup failure must also fence/close the persistent sandbox.
+        failing_guest = sandbox()
+        failing_guest.id = "failing-egress"
+        failing_guest.delete_egress_rules.side_effect = RuntimeError("control plane error")
+        scope2 = execution_scope.set(ExecutionScope("failing-egress", "call2", "run-egress-2"))
+        try:
+            with patch.object(adapter.Sandbox, "create", AsyncMock(return_value=failing_guest)):
+                result2 = await platform.execute(
+                    {"execution_session": "agent_run", "network_domains": ["packages.example"]},
+                    timeout_seconds=1.0, max_output_bytes=1000,
+                )
+            assert result2 == {"ok": True}
+            records2 = await platform.store.for_run("failing-egress", "run-egress-2")
+            assert not records2 or records2[0].state == "closing"
+            failing_guest.destroy.assert_awaited()
+        finally:
+            execution_scope.reset(scope2)
     finally:
         execution_scope.reset(scope)
 

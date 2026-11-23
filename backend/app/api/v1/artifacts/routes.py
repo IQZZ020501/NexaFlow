@@ -50,7 +50,7 @@ def artifact_response(artifact) -> Response:
         headers["ETag"] = f'"{artifact.content_hash}"'
     if artifact.inspection.get("status") == "passed":
         headers["X-NexaFlow-File-Check"] = artifact.inspection["validator"]
-    if artifact.format == "html":
+    if artifact.format in {"html", "htm", "xhtml", "svg"}:
         headers["Content-Security-Policy"] = (
             "sandbox; default-src 'none'; style-src 'unsafe-inline'; "
             "img-src data:; font-src data:; base-uri 'none'; "

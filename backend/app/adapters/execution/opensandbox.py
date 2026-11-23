@@ -225,7 +225,7 @@ class OpenSandboxExecution:
                                 try:
                                     async with asyncio.timeout_at(revoke_deadline):
                                         await self._revoke_egress(sandbox, domains)
-                                except TimeoutError:
+                                except Exception:
                                     await self._close_record(
                                         record, owned=True, deadline=deadline
                                     )
@@ -701,21 +701,16 @@ class OpenSandboxExecution:
             raise ExecutionNotStarted(_UNAVAILABLE) from exc
 
     async def _revoke_egress(self, sandbox, domains) -> None:
-        """Remove the egress a command used; never fail the command for it."""
+        """Remove the egress a command used; raise on failure so caller closes guest."""
         try:
             await sandbox.delete_egress_rules(list(domains))
-        except Exception:
-            logger.warning(
-                "OpenSandbox egress revocation failed",
-                extra={"sandbox_id": sandbox.id, "domains": list(domains)},
-            )
-        try:
             await self._require_enforcement(sandbox, [])
         except Exception:
             logger.warning(
-                "OpenSandbox egress policy verification failed",
-                extra={"sandbox_id": sandbox.id},
+                "OpenSandbox egress revocation failed; closing sandbox",
+                extra={"sandbox_id": sandbox.id, "domains": list(domains)},
             )
+            raise
 
     def _package_root(self, request) -> str:
         environment = request.get("skill_environment")
@@ -836,7 +831,9 @@ class OpenSandboxExecution:
             or "restore_project_files" in request
         )
         protocol = (
-            f"/tmp/nexaflow-protocol/{uuid4().hex}" if command_mode else "/tmp/nexaflow"
+            f"/tmp/nexaflow-protocol/{uuid4().hex}"
+            if command_mode
+            else "/tmp/nexaflow"
         )
         request_path, response_path = (
             f"{protocol}-request.json",

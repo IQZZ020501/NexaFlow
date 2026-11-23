@@ -115,9 +115,12 @@ def _pinned_http_transport(
 
 
 def is_private_address(value: str) -> bool:
-    address = ipaddress.ip_address(value)
+    address = ipaddress.ip_address(value.split("%", 1)[0])
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
     return (
-        address.is_private
+        not address.is_global
+        or address.is_private
         or address.is_loopback
         or address.is_link_local
         or address.is_multicast

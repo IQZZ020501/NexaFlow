@@ -82,10 +82,10 @@ def document_to_response(
 
 def clean_upload_filename(filename: str | None) -> str:
     name = Path(filename or "").name.strip()
-    if not name:
+    if not name or name in {".", ".."} or "\\" in name or "\x00" in name:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Document filename is required.",
+            "Document filename is invalid.",
         )
     if any(marker in name for marker in RESTRICTED_FILENAME_MARKERS):
         raise HTTPException(

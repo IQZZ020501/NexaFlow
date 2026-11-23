@@ -453,6 +453,52 @@ def test_archive_limits_run_before_document_conversion() -> None:
             else:
                 raise AssertionError("oversized archive was converted")
 
+        # Disguised nested zip bomb (ZIP_STORED outer .txt entry wrapping high-ratio inner zip)
+        # and QA .xlsx zip bomb must both be rejected by validate_archive.
+        from zipfile import ZIP_STORED
+
+        from fastapi import HTTPException
+
+        from app.domain.knowledge.documents import qa_import
+        from app.domain.knowledge.documents.service import clean_upload_filename
+
+        inner_bomb = Path(directory) / "inner_bomb.zip"
+        with ZipFile(inner_bomb, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("payload.txt", b"x" * 50000)
+        inner_bomb_bytes = inner_bomb.read_bytes()
+
+        disguised = Path(directory) / "disguised.zip"
+        with ZipFile(disguised, "w", compression=ZIP_STORED) as archive:
+            archive.writestr("inner.txt", inner_bomb_bytes)
+        with patch.object(pipeline, "MAX_ARCHIVE_UNCOMPRESSED_BYTES", 1000, create=True):
+            try:
+                pipeline.validate_archive(disguised)
+            except pipeline.KnowledgePipelineError as exc:
+                assert "expanded data" in str(exc)
+            else:
+                raise AssertionError("disguised nested archive bomb was accepted")
+
+        bad_xlsx = Path(directory) / "qa.xlsx"
+        with ZipFile(bad_xlsx, "w", compression=ZIP_DEFLATED) as archive:
+            archive.writestr("xl/workbook.xml", b"x" * 50000)
+        with patch.object(pipeline, "MAX_ARCHIVE_UNCOMPRESSED_BYTES", 1000, create=True):
+            try:
+                qa_import.extract_qa_rows(bad_xlsx.name, bad_xlsx)
+            except pipeline.KnowledgePipelineError as exc:
+                assert "expanded data" in str(exc)
+            else:
+                raise AssertionError("QA xlsx bypassed validate_archive")
+
+        for unsafe_name in ("a\\b.pdf", "a\x00b.pdf", ".", ".."):
+            try:
+                clean_upload_filename(unsafe_name)
+            except HTTPException as exc:
+                assert exc.status_code == 422
+            else:
+                raise AssertionError(f"unsafe filename accepted: {unsafe_name!r}")
+
+        assert pipeline._structural_heading("# Heading" + " " * 5000) == (1, "Heading")
+
 def test_supported_document_formats_are_accepted() -> None:
     from pathlib import Path
     from tempfile import TemporaryDirectory
