@@ -103,6 +103,7 @@ import type {
   KnowledgeDocumentIndexScope,
   KnowledgeDocumentSummary,
   KnowledgeDocumentSort,
+  KnowledgeDocumentStatusFilter,
   KnowledgeDocumentOption,
   KnowledgeModelTestResult,
   KnowledgeTask,
@@ -163,6 +164,8 @@ import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 type DocumentSortKey =
   "name" | "size_bytes" | "chunk_count" | "created_at" | "updated_at"
 
+type DocumentStatusFilterKey = "all" | KnowledgeDocumentStatusFilter
+
 type KnowledgeBaseSortKey = "updated_at" | "created_at" | "name"
 
 function sortKnowledgeBases(
@@ -192,6 +195,17 @@ const DOCUMENT_SORT_OPTIONS: Array<{
   { key: "chunk_count", label: "分段数" },
   { key: "created_at", label: "创建时间" },
   { key: "updated_at", label: "更新时间" },
+]
+
+const DOCUMENT_STATUS_FILTER_OPTIONS: Array<{
+  key: DocumentStatusFilterKey
+  label: TranslationKey
+}> = [
+  { key: "all", label: "全部状态" },
+  { key: "indexed", label: "已向量化" },
+  { key: "indexing", label: "向量化中" },
+  { key: "pending", label: "待向量化" },
+  { key: "failed", label: "失败" },
 ]
 
 const DOCUMENT_SORT_FIELDS: Record<DocumentSortKey, KnowledgeDocumentSort> = {
@@ -501,6 +515,8 @@ function KnowledgeBasePageContent({
   const [knowledgeBaseSortKey, setKnowledgeBaseSortKey] =
     React.useState<KnowledgeBaseSortKey>("updated_at")
   const [documentSearch, setDocumentSearch] = React.useState("")
+  const [documentStatusFilter, setDocumentStatusFilter] =
+    React.useState<DocumentStatusFilterKey>("all")
   const [documentPage, setDocumentPage] = React.useState(1)
   const [documentPageSize, setDocumentPageSize] =
     React.useState<DocumentPageSize>(10)
@@ -824,6 +840,8 @@ function KnowledgeBasePageContent({
             limit: documentPageSize,
             offset: (documentPage - 1) * documentPageSize,
             search: documentSearch.trim(),
+            status:
+              documentStatusFilter === "all" ? undefined : documentStatusFilter,
             sortBy: DOCUMENT_SORT_FIELDS[documentSortKey],
             sortDirection: documentSortDirection,
           }
@@ -853,6 +871,7 @@ function KnowledgeBasePageContent({
       documentPage,
       documentPageSize,
       documentSearch,
+      documentStatusFilter,
       documentSortDirection,
       documentSortKey,
       reportError,
@@ -989,6 +1008,7 @@ function KnowledgeBasePageContent({
     setSelectedDocumentIds([])
     setDocumentPage(1)
     setDocumentSearch("")
+    setDocumentStatusFilter("all")
     setKnowledgeTasks([])
     setKnowledgeTaskTotal(0)
     setSelectedKnowledgeTaskIds([])
@@ -1152,6 +1172,7 @@ function KnowledgeBasePageContent({
   function openKnowledgeBase(knowledgeBase: KnowledgeBase) {
     setActiveDetailTab("documents")
     setDocumentSearch("")
+    setDocumentStatusFilter("all")
     setSelectedDocumentIds([])
     setSelectedKnowledgeTaskIds([])
     setKnowledgeTasks([])
@@ -2143,36 +2164,56 @@ function KnowledgeBasePageContent({
                             {selectedDocumentCount
                               ? `(${selectedDocumentCount})`
                               : ""}
-                            <ChevronDownIcon data-icon="inline-end" />
+                            <ChevronDownIcon
+                              data-icon="inline-end"
+                              className="text-muted-foreground transition-transform duration-150 [[data-state=open]>&]:rotate-180"
+                            />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
+                        <DropdownMenuContent
+                          align="start"
+                          sideOffset={6}
+                          className="w-56 p-1.5"
+                        >
                           <DropdownMenuItem
+                            className="gap-2.5 rounded-md px-2.5 py-2"
                             onSelect={() =>
                               void handleIndexAllDocuments("unsuccessful")
                             }
                           >
-                            {t("向量化未成功的文档")}
+                            <RotateCcwIcon className="size-4" />
+                            <span>{t("向量化未成功的文档")}</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            className="gap-2.5 rounded-md px-2.5 py-2"
                             onSelect={() => void handleIndexAllDocuments("all")}
                           >
-                            {t("向量化全部文档")}
+                            <DatabaseIcon className="size-4" />
+                            <span>{t("向量化全部文档")}</span>
                           </DropdownMenuItem>
                           {selectedDocumentCount ? (
                             <>
-                              <DropdownMenuSeparator />
+                              <DropdownMenuSeparator className="my-1" />
                               <DropdownMenuItem
+                                className="gap-2.5 rounded-md px-2.5 py-2"
                                 onSelect={() =>
                                   void handleIndexDocuments(selectedDocuments)
                                 }
                               >
-                                {t("向量化所选文档")}
+                                <CircleCheckIcon className="size-4" />
+                                <span className="flex-1">
+                                  {t("向量化所选文档")}
+                                </span>
+                                <span
+                                  aria-hidden="true"
+                                  className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums"
+                                >
+                                  {selectedDocumentCount}
+                                </span>
                               </DropdownMenuItem>
                             </>
                           ) : null}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel className="max-w-64 whitespace-normal text-xs font-normal text-muted-foreground">
+                          <DropdownMenuLabel className="mt-1 rounded-md border border-border/50 bg-muted/40 px-2.5 py-2 text-xs leading-relaxed font-normal whitespace-normal text-pretty text-muted-foreground">
                             {t("仅处理已分段文档，正在处理的文档会自动跳过。")}
                           </DropdownMenuLabel>
                         </DropdownMenuContent>
@@ -2214,8 +2255,8 @@ function KnowledgeBasePageContent({
                           : ""}
                       </Button>
                     </div>
-                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_128px] gap-2 sm:flex sm:items-center">
-                      <div className="relative min-w-0 sm:w-72 xl:w-80">
+                    <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:items-center">
+                      <div className="relative col-span-2 min-w-0 sm:w-64 xl:w-72">
                         <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           value={documentSearch}
@@ -2227,6 +2268,23 @@ function KnowledgeBasePageContent({
                           placeholder={t("按名称搜索")}
                         />
                       </div>
+                      <FilterDropdown
+                        ariaLabel={t("文件状态")}
+                        value={documentStatusFilter}
+                        options={DOCUMENT_STATUS_FILTER_OPTIONS.map(
+                          (option) => ({
+                            value: option.key,
+                            label: t(option.label),
+                          })
+                        )}
+                        className="h-9 sm:w-32"
+                        onChange={(value) => {
+                          setDocumentStatusFilter(
+                            value as DocumentStatusFilterKey
+                          )
+                          setDocumentPage(1)
+                        }}
+                      />
                       <FilterDropdown
                         ariaLabel={t("排序")}
                         value={documentSortKey}

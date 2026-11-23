@@ -202,6 +202,7 @@ class KnowledgeTaskResponse(BaseModel):
 
 
 KnowledgeDocumentSort = Literal["filename", "created_at", "updated_at", "size_bytes", "chunk_count"]
+KnowledgeDocumentStatusFilter = Literal["indexed", "indexing", "pending", "failed"]
 
 
 class KnowledgeDocumentSummaryResponse(BaseModel):

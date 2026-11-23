@@ -8,6 +8,9 @@ from app.domain.knowledge.models import KnowledgeDocumentChunk as ChunkOrm
 from app.domain.knowledge.models import KnowledgeTask as TaskOrm
 from app.entities.knowledge import (
     DOCUMENT_DELETED_STATUS,
+    DOCUMENT_INDEX_QUEUED_STATUS,
+    DOCUMENT_INDEXED_STATUS,
+    DOCUMENT_INDEXING_STATUS,
     DOCUMENT_STAGED_META_KEY,
     TASK_CANCELLING_STATUS,
     TASK_QUEUED_STATUS,
@@ -29,6 +32,7 @@ async def document_page(
     limit: int,
     offset: int,
     search: str,
+    status: str | None = None,
     sort_by: str,
     sort_direction: str,
     include_staged: bool,
@@ -53,6 +57,29 @@ async def document_page(
         scope.append(
             func.lower(DocumentOrm.filename).contains(
                 search.strip().lower(), autoescape=True
+            )
+        )
+    if status == "indexed":
+        scope.append(DocumentOrm.status == DOCUMENT_INDEXED_STATUS)
+    elif status == "indexing":
+        scope.append(
+            DocumentOrm.status.in_(
+                (DOCUMENT_INDEX_QUEUED_STATUS, DOCUMENT_INDEXING_STATUS)
+            )
+        )
+    elif status == "failed":
+        scope.append(DocumentOrm.status.like("%\\_failed", escape="\\"))
+    elif status == "pending":
+        scope.append(
+            and_(
+                DocumentOrm.status.not_in(
+                    (
+                        DOCUMENT_INDEXED_STATUS,
+                        DOCUMENT_INDEX_QUEUED_STATUS,
+                        DOCUMENT_INDEXING_STATUS,
+                    )
+                ),
+                ~DocumentOrm.status.like("%\\_failed", escape="\\"),
             )
         )
     total = await db.scalar(select(func.count()).select_from(DocumentOrm).where(*scope))

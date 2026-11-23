@@ -149,6 +149,29 @@ def main():
         ).json()
         assert found["total"] == 1 and found["summary"]["total"] == 125
         assert found["items"][0]["id"] == "doc-0"
+        for status_filter, expected_total, expected_prefix in (
+            ("indexed", 100, "indexed"),
+            ("indexing", 10, "index_queued"),
+            ("pending", 10, "parse_queued"),
+            ("failed", 5, "parse_failed"),
+        ):
+            filtered_page = client.get(
+                f"{url}/documents/page?status={status_filter}", headers=headers
+            ).json()
+            assert filtered_page["total"] == expected_total, (
+                status_filter,
+                filtered_page["total"],
+            )
+            assert filtered_page["summary"]["total"] == 125
+            assert all(
+                item["status"] == expected_prefix for item in filtered_page["items"]
+            )
+        assert (
+            client.get(
+                f"{url}/documents/page?status=invalid", headers=headers
+            ).status_code
+            == 422
+        )
         assert (
             client.get(f"{url}/documents/page?search=%25", headers=headers).json()[
                 "total"

@@ -153,6 +153,9 @@ export type KnowledgeTaskPage = {
 export type KnowledgeDocumentSort =
   "filename" | "created_at" | "updated_at" | "size_bytes" | "chunk_count"
 
+export type KnowledgeDocumentStatusFilter =
+  "indexed" | "indexing" | "pending" | "failed"
+
 
 export type KnowledgeTaskBulkDeleteResult = {
   deleted_task_ids: string[]
@@ -408,6 +411,7 @@ export function getKnowledgeDocumentPage(
     limit: number
     offset: number
     search?: string
+    status?: KnowledgeDocumentStatusFilter
     sortBy?: KnowledgeDocumentSort
     sortDirection?: "asc" | "desc"
     includeStaged?: boolean
@@ -418,6 +422,7 @@ export function getKnowledgeDocumentPage(
     offset: String(options.offset),
   })
   if (options.search) params.set("search", options.search)
+  if (options.status) params.set("status", options.status)
   if (options.sortBy) params.set("sort_by", options.sortBy)
   if (options.sortDirection) params.set("sort_direction", options.sortDirection)
   if (options.includeStaged) params.set("include_staged", "true")

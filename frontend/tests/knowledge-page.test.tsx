@@ -1291,6 +1291,24 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(requested.at(-1)?.searchParams.get("offset")).toBe("0")
     expect(screen.getByText("共 1 条")).toBeTruthy()
     expect(screen.getByText("391 / 10827")).toBeTruthy()
+
+    for (const [label, status] of [
+      ["向量化中", "indexing"],
+      ["待向量化", "pending"],
+      ["失败", "failed"],
+      ["已向量化", "indexed"],
+    ] as const) {
+      openMenu(screen.getByRole("button", { name: "文件状态" }))
+      fireEvent.click(await screen.findByRole("menuitem", { name: label }))
+      await waitFor(() =>
+        expect(requested.at(-1)?.searchParams.get("status")).toBe(status)
+      )
+    }
+    openMenu(screen.getByRole("button", { name: "文件状态" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "全部状态" }))
+    await waitFor(() =>
+      expect(requested.at(-1)?.searchParams.get("status")).toBeNull()
+    )
   })
 
   test("ignores a previous document response after the search changes", async () => {

@@ -47,12 +47,30 @@ export async function knowledgePageResponse(
         summary.processing += 1
     }
     const search = (parsed.searchParams.get("search") ?? "").toLowerCase()
+    const status = parsed.searchParams.get("status")
     const field = (parsed.searchParams.get("sort_by") ??
       "created_at") as keyof KnowledgeDocument
     const direction =
       parsed.searchParams.get("sort_direction") === "asc" ? 1 : -1
+    const matchesStatus = (item: KnowledgeDocument) => {
+      if (!status) return true
+      if (status === "indexed") return item.status === "indexed"
+      if (status === "indexing")
+        return ["index_queued", "indexing"].includes(item.status)
+      if (status === "failed") return item.status.endsWith("_failed")
+      if (status === "pending")
+        return (
+          item.status !== "indexed" &&
+          !["index_queued", "indexing"].includes(item.status) &&
+          !item.status.endsWith("_failed")
+        )
+      return true
+    }
     const filtered = documents
-      .filter((item) => item.filename.toLowerCase().includes(search))
+      .filter(
+        (item) =>
+          item.filename.toLowerCase().includes(search) && matchesStatus(item)
+      )
       .sort((a, b) => {
         const left = a[field],
           right = b[field]

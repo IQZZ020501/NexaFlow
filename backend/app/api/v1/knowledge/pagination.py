@@ -21,6 +21,7 @@ from app.schemas.knowledge.contracts import (
     KnowledgeDocumentPageResponse,
     KnowledgeDocumentResponse,
     KnowledgeDocumentSort,
+    KnowledgeDocumentStatusFilter,
     KnowledgeTaskPageResponse,
 )
 
@@ -35,6 +36,7 @@ async def read_document_page(
     limit: Annotated[int, Query(ge=1, le=200)] = 10,
     offset: Annotated[int, Query(ge=0)] = 0,
     search: Annotated[str, Query(max_length=255)] = "",
+    status: KnowledgeDocumentStatusFilter | None = None,
     sort_by: KnowledgeDocumentSort = "created_at",
     sort_direction: Literal["asc", "desc"] = "desc",
     include_staged: bool = False,
@@ -49,6 +51,7 @@ async def read_document_page(
         limit=limit,
         offset=offset,
         search=search,
+        status=status,
         sort_by=sort_by,
         sort_direction=sort_direction,
         include_staged=include_staged,
