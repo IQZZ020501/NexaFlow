@@ -5,6 +5,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from app.domain.agents.runtime.callbacks import CompactionProgressHandler
 from app.domain.agents.runtime.capabilities import CATALOG_MARKER, CapabilityRegistry
 from app.domain.agents.runtime.context import AgentContextManager
 from app.domain.agents.runtime.references import (
@@ -62,7 +63,9 @@ class AgentSession:
             "final_answer": "",
         }, True
 
-    async def prepare_turn(self, state: AgentState) -> AgentState:
+    async def prepare_turn(
+        self, state: AgentState, *, on_compaction: CompactionProgressHandler | None = None
+    ) -> AgentState:
         self.capabilities.restore(state.get("harness") or {})
         messages = await self.capabilities.extensions.prepare_context(
             [
@@ -89,7 +92,7 @@ class AgentSession:
         if self.context is not None:
             self.context.restore(harness.get("context_memory"))
             messages, compaction_usage = await self.context.prepare(
-                messages, self.capabilities.tools
+                messages, self.capabilities.tools, on_compaction=on_compaction
             )
             # Compaction may replace the projection with prose. Always restore
             # the authoritative projection from the checkpoint, exactly once.

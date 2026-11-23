@@ -173,6 +173,14 @@ function processSummary(
     return t("已停止")
   if (event.type === "environment")
     return t("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")
+  if (event.type === "compaction") {
+    const status = effectiveProcessStatus(event, run.status)
+    return t(
+      status === "running" ? "正在压缩历史对话"
+      : status === "succeeded" ? "历史对话已压缩"
+      : "历史对话压缩未完成"
+    )
+  }
   if (event.summary === "agent.analyzing") return t("正在分析问题")
   if (event.summary === "agent.reviewing_tool_results")
     return t("正在整理工具结果")
@@ -589,6 +597,9 @@ function RunExchange({
         toolCalls
       )
   const hasProcess = visibleTimeline.length > 0 || inlineToolCalls.length > 0
+  const hasActiveCompaction = visibleTimeline.some(
+    ({ event }) => event.type === "compaction" && event.status === "running"
+  )
   const hasActiveToolCall =
     !runCancelled &&
     (inlineToolCalls.length > 0 ||
@@ -802,6 +813,12 @@ function RunExchange({
                   ? getErrorMessage(new Error(run.last_error), t)
                   : t("Agent 未返回结果")}
               </p>
+            ) : hasActiveCompaction && run.status === "running" ? (
+              isProcessOpen ? null : (
+                <p className="text-sm text-muted-foreground">
+                  {t("正在压缩历史对话")}
+                </p>
+              )
             ) : (run.status === "awaiting_approval" || hasActiveToolCall) &&
               isProcessOpen ? null : collapsedProcessStatus ? (
               <p className="text-sm text-muted-foreground">

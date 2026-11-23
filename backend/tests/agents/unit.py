@@ -2525,9 +2525,9 @@ def test_agent_memory_compacts_old_turns() -> None:
             return None
 
     class FakeModel:
-        profile: ClassVar[dict[str, int]] = {"max_input_tokens": 4096}
+        profile: ClassVar[dict[str, int]] = {"max_input_tokens": 32768}
 
-        async def ainvoke(self, _messages):
+        async def ainvoke(self, _messages, **_kwargs):
             return AIMessage(
                 content="Stable summary",
                 usage_metadata={
@@ -2567,7 +2567,7 @@ def test_agent_memory_compacts_old_turns() -> None:
         agent_memory.agent_repository.list_conversation_memory_runs = original_list
         agent_memory.agent_repository.save_conversation_summary = original_save
 
-    assert saved == [("run-0", "Stable summary")]
+    assert saved == [("run-5", "Stable summary")]
     assert requested_limits == [agent_memory.MAX_MEMORY_RUNS]
     assert prepared.messages[0]["content"].endswith("Stable summary")
     assert prepared.model_usage["compaction"]["total_tokens"] == 24
@@ -2576,11 +2576,303 @@ def test_agent_memory_compacts_old_turns() -> None:
     assert [message["role"] for message in tight] == ["user", "assistant"]
     assert agent_memory._approx_tokens(tight) <= 128
     assert agent_memory._memory_budget(
-        [{"role": "user", "content": "x" * 5000}],
+        [{"role": "user", "content": "x" * 40000}],
         [],
         SimpleNamespace(meta={}),
         FakeModel(),
     ) == 0
+
+def test_agent_memory_reuses_history_with_large_context() -> None:
+    from app.application.agents.runs import memory as agent_memory
+    from app.entities.runs import AgentRun
+
+    history = [
+        AgentRun(id=f"run-{index}", status="succeeded", goal=f"q{index}", result="中" * 3000)
+        for index in range(8)
+    ]
+    model = SimpleNamespace(
+        profile={"max_input_tokens": 1_000_000},
+        ainvoke=AsyncMock(),
+    )
+    with patch.object(
+        agent_memory.agent_repository, "list_conversation_memory_runs",
+        new=AsyncMock(return_value=(None, history)),
+    ), patch.object(
+        agent_memory.agent_repository, "save_conversation_summary", new=AsyncMock(),
+    ) as save:
+        prepared = asyncio.run(agent_memory.prepare_conversation_memory(
+            AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+            [{"role": "system", "content": "rules"}], [],
+        ))
+    model.ainvoke.assert_not_awaited()
+    save.assert_not_awaited()
+    assert prepared.messages == agent_memory._flatten(history)
+    assert prepared.model_usage["model_calls"] == 0
+
+
+def test_agent_memory_compaction_leaves_headroom() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application.agents.runs import memory as agent_memory
+    from app.entities.runs import AgentRun
+
+    async def check():
+        history = [
+            AgentRun(id=f"run-{index}", status="succeeded", goal=f"q{index}", result="中" * 3000)
+            for index in range(8)
+        ]
+        anchor = None
+
+        async def list_runs(_db, _run, *, limit):
+            return anchor, history
+
+        async def save_summary(_db, run, summary):
+            nonlocal anchor, history
+            anchor = SimpleNamespace(context_summary=summary)
+            history = history[next(i for i, item in enumerate(history) if item.id == run.id) + 1:]
+            return True
+
+        model = SimpleNamespace(
+            profile={"max_input_tokens": 32768},
+            ainvoke=AsyncMock(return_value=AIMessage(content="Important constraints. " * 50)),
+        )
+        registered = SimpleNamespace(meta={}, provider_type="deepseek")
+        base = [{"role": "system", "content": "rules"}]
+        with patch.object(
+            agent_memory.agent_repository, "list_conversation_memory_runs", new=list_runs,
+        ), patch.object(
+            agent_memory.agent_repository, "save_conversation_summary", new=save_summary,
+        ):
+            prepared = await agent_memory.prepare_conversation_memory(
+                AsyncMock(), AgentRun(goal="continue"), registered, model, base, [],
+            )
+            budget = agent_memory._memory_budget(base, [], registered, model)
+            assert agent_memory._approx_tokens(prepared.messages) <= budget // 2
+            assert prepared.messages[-1]["content"] == "中" * 3000
+            assert model.ainvoke.await_count == 1
+            history.append(AgentRun(id="next", status="succeeded", goal="q next", result="中" * 3000))
+            reused = await agent_memory.prepare_conversation_memory(
+                AsyncMock(), AgentRun(goal="continue again"), registered, model, base, [],
+            )
+            assert model.ainvoke.await_count == 1, "Next message recompressed the existing summary"
+            assert reused.messages[0]["content"].endswith(anchor.context_summary)
+            assert reused.messages[-1]["content"] == "中" * 3000
+            assert reused.model_usage["model_calls"] == 0
+
+    asyncio.run(check())
+
+
+def test_agent_memory_summary_options_match_provider() -> None:
+    from copy import deepcopy
+
+    from langchain_core.messages import AIMessage
+
+    from app.application.agents.runs import memory as agent_memory
+    from app.entities.runs import AgentRun
+
+    async def check():
+        history = [
+            AgentRun(id=f"run-{index}", status="succeeded", goal="q", result="a" * 3000)
+            for index in range(8)
+        ]
+        for provider, parameters, output_key in (
+            ("deepseek", {"extra_body": {"thinking": {"type": "enabled"}, "custom": True}}, "max_tokens"),
+            ("google_genai", {}, "max_output_tokens"),
+            ("ollama", {}, "num_predict"),
+            ("openai_compatible", {"max_completion_tokens": 512}, "max_completion_tokens"),
+            ("anthropic", {"max_tokens": 512}, "max_tokens"),
+        ):
+            original = deepcopy(parameters)
+            model = SimpleNamespace(
+                profile={"max_input_tokens": 32768},
+                ainvoke=AsyncMock(return_value=AIMessage(content="Concise summary.")),
+            )
+            with patch.object(
+                agent_memory.agent_repository, "list_conversation_memory_runs",
+                new=AsyncMock(return_value=(None, history)),
+            ), patch.object(
+                agent_memory.agent_repository, "save_conversation_summary", new=AsyncMock(return_value=True),
+            ):
+                await agent_memory.prepare_conversation_memory(
+                    AsyncMock(), AgentRun(goal="continue"),
+                    SimpleNamespace(meta={"request_params": parameters}, provider_type=provider),
+                    model, [{"role": "system", "content": "rules"}], [],
+                )
+            options = model.ainvoke.call_args.kwargs
+            assert 0 < options.get(output_key, 0) <= parameters.get(output_key, 4096), options
+            if provider == "deepseek":
+                assert options["extra_body"] == {"thinking": {"type": "disabled"}, "custom": True}
+            assert parameters == original, "Summary options changed the main model configuration"
+
+    asyncio.run(check())
+
+
+def test_agent_memory_rolls_up_bounded_history_page() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application.agents.runs import memory as agent_memory
+    from app.entities.runs import AgentRun
+
+    history = [
+        AgentRun(id=f"run-{index}", status="succeeded", goal=f"q{index}", result="short answer")
+        for index in range(agent_memory.MAX_MEMORY_RUNS)
+    ]
+    model = SimpleNamespace(
+        profile={"max_input_tokens": 1_000_000},
+        ainvoke=AsyncMock(return_value=AIMessage(content="Constraints from the oldest turns.")),
+    )
+    with patch.object(
+        agent_memory.agent_repository, "list_conversation_memory_runs",
+        new=AsyncMock(return_value=(None, history)),
+    ), patch.object(
+        agent_memory.agent_repository, "save_conversation_summary", new=AsyncMock(return_value=True),
+    ) as save:
+        prepared = asyncio.run(agent_memory.prepare_conversation_memory(
+            AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+            [{"role": "system", "content": "rules"}], [],
+        ))
+    assert model.ainvoke.await_count == 1
+    assert save.call_args.args[1].id == history[-7].id
+    assert prepared.messages[0]["content"].endswith("Constraints from the oldest turns.")
+    assert prepared.messages[-1]["content"] == "short answer"
+
+
+def test_agent_memory_summary_failure_preserves_history_and_usage() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application.agents.runs import memory as agent_memory
+    from app.entities.runs import AgentRun
+
+    async def check():
+        history = [
+            AgentRun(id=f"run-{index}", status="succeeded", goal="q", result="中" * 3000)
+            for index in range(8)
+        ]
+        for content, metadata, saved in (
+            ("Incomplete summary", {"finish_reason": "length"}, True),
+            ("", {}, True),
+            ("s" * 12001, {}, True),
+            ("Valid summary", {}, False),
+        ):
+            response = AIMessage(
+                content=content, response_metadata=metadata,
+                usage_metadata={"input_tokens": 20, "output_tokens": 4, "total_tokens": 24},
+            )
+            model = SimpleNamespace(profile={"max_input_tokens": 32768}, ainvoke=AsyncMock(return_value=response))
+            with patch.object(
+                agent_memory.agent_repository, "list_conversation_memory_runs",
+                new=AsyncMock(return_value=(SimpleNamespace(context_summary="Retain earlier constraints"), history)),
+            ), patch.object(
+                agent_memory.agent_repository, "save_conversation_summary", new=AsyncMock(return_value=saved),
+            ) as save:
+                prepared = await agent_memory.prepare_conversation_memory(
+                    AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+                    [{"role": "system", "content": "rules"}], [],
+                )
+            assert prepared.messages[0]["content"].endswith("Retain earlier constraints")
+            assert prepared.messages[-1]["content"] == "中" * 3000
+            assert prepared.model_usage["compaction"]["total_tokens"] == 24
+            if saved:
+                save.assert_not_awaited()
+
+        async def slow(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        model.ainvoke.side_effect = slow
+        with patch.object(
+            agent_memory.agent_repository, "list_conversation_memory_runs",
+            new=AsyncMock(return_value=(None, history)),
+        ), patch.object(
+            agent_memory.agent_repository, "save_conversation_summary", new=AsyncMock(),
+        ) as save:
+            model.ainvoke.reset_mock()
+            skipped = await agent_memory.prepare_conversation_memory(
+                AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+                [{"role": "system", "content": "rules"}], [], timeout_seconds=0,
+            )
+            assert skipped.messages[-1]["content"] == "中" * 3000
+            model.ainvoke.assert_not_awaited()
+            fallback = await agent_memory.prepare_conversation_memory(
+                AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+                [{"role": "system", "content": "rules"}], [], timeout_seconds=0.001,
+            )
+            assert fallback.messages[-1]["content"] == "中" * 3000
+            assert fallback.model_usage["model_calls"] == 0
+            save.assert_not_awaited()
+            model.ainvoke.side_effect = asyncio.CancelledError()
+            try:
+                await agent_memory.prepare_conversation_memory(
+                    AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+                    [{"role": "system", "content": "rules"}], [],
+                )
+            except asyncio.CancelledError:
+                pass
+            else:
+                raise AssertionError("Worker cancellation must propagate")
+
+    asyncio.run(check())
+
+
+def test_agent_memory_reports_real_compaction_progress() -> None:
+    from langchain_core.messages import AIMessage
+
+    from app.application.agents.access.service import external_progress_events
+    from app.application.agents.runs import memory as agent_memory
+    from app.entities.runs import AgentRun
+
+    async def check():
+        history = [
+            AgentRun(id=f"run-{i}", status="succeeded", goal="q", result="a" * 3000)
+            for i in range(8)
+        ]
+        stages = []
+
+        async def progress(status):
+            stages.append(status)
+
+        async def summarize(*args, **kwargs):
+            assert stages == ["running"], "Compression started before its progress event"
+            return AIMessage(content="Concise summary.")
+
+        model = SimpleNamespace(profile={"max_input_tokens": 32768}, ainvoke=AsyncMock(side_effect=summarize))
+        with patch.object(
+            agent_memory.agent_repository, "list_conversation_memory_runs",
+            new=AsyncMock(return_value=(None, history)),
+        ), patch.object(
+            agent_memory.agent_repository, "save_conversation_summary", new=AsyncMock(return_value=True),
+        ):
+            for failure in (None, RuntimeError("provider unavailable")):
+                stages.clear()
+                model.ainvoke.side_effect = failure or summarize
+                await agent_memory.prepare_conversation_memory(
+                    AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+                    [{"role": "system", "content": "rules"}], [], on_compaction=progress,
+                )
+                assert stages == ["running", "failed" if failure else "succeeded"]
+            stages.clear()
+            model.profile = {"max_input_tokens": 1_000_000}
+            await agent_memory.prepare_conversation_memory(
+                AsyncMock(), AgentRun(goal="continue"), SimpleNamespace(meta={}), model,
+                [{"role": "system", "content": "rules"}], [], on_compaction=progress,
+            )
+            assert stages == [], "Reusing history showed a fake compression step"
+
+        from app.domain.agents.runtime.callbacks import compaction_event
+
+        for status in ("running", "succeeded", "failed"):
+            event = compaction_event(0, status)
+            projected = external_progress_events([{
+                **event, "reasoning": "private summary", "input": {"messages": "private history"},
+                "output": "private output", "sequence": 12,
+            }], "running")
+            assert len(projected) == 1
+            public = projected[0].model_dump()
+            assert public["type"] == "compaction" and public["status"] == status
+            assert public["stage"] == status and public["sequence"] == 12
+            assert "private" not in str(public)
+
+    asyncio.run(check())
+
 
 def test_agent_memory_query_is_bounded_and_projected() -> None:
     from sqlalchemy.dialects import postgresql
@@ -3274,6 +3566,62 @@ def test_context_compaction_reads_middle_history_and_restores_constraints() -> N
     assert messages[3].content == "a" * 5000 + "\n" + marker + "\n" + "b" * 5000
 
 
+def test_agent_context_compaction_progress_reaches_stream() -> None:
+    from langchain_core.messages import AIMessage, AIMessageChunk
+
+    from app.domain.agents.runtime import AgentRunnerError, run_agent
+    from app.domain.agents.runtime.capabilities import CapabilityRegistry
+    from app.domain.agents.runtime.context import MEMORY_FIELDS, AgentContextManager
+    from app.domain.agents.runtime.extensions import ExtensionRuntime
+    from app.domain.agents.runtime.session import AgentSession
+
+    async def check():
+        events = []
+        messages = [
+            {"role": "system", "content": "Trusted rules"},
+            {"role": "user", "content": "Older question " + "x" * 3000},
+            {"role": "assistant", "content": "Older answer " + "y" * 3000},
+            *[{"role": "user", "content": f"Continue {i}"} for i in range(6)],
+        ]
+        model = SimpleNamespace(ainvoke=AsyncMock(return_value=AIMessage(
+            content=json.dumps({key: [] for key in MEMORY_FIELDS})
+        )))
+
+        async def stream(_messages):
+            assert [item["event"]["status"] for item in events if item.get("event", {}).get("type") == "compaction"] == ["running", "succeeded"]
+            yield AIMessageChunk(content="Answer")
+
+        async def record(event):
+            events.append(event)
+
+        model.astream = stream
+        model.bind_tools = lambda _tools: model
+        registry = CapabilityRegistry(ExtensionRuntime([]), [])
+        await run_agent(
+            model, messages, [], on_event=record,
+            session=AgentSession(registry, AgentContextManager(model, 4096)),
+        )
+        progress = [item["event"] for item in events if item.get("event", {}).get("type") == "compaction"]
+        assert [item["status"] for item in progress] == ["running", "succeeded"]
+        assert all(item["turn"] == 1 and not item["reasoning"] for item in progress)
+        assert all("Older" not in str(item) for item in progress)
+
+        events.clear()
+        model.ainvoke.side_effect = ValueError("Compaction failed")
+        try:
+            await run_agent(
+                model, messages, [], on_event=record,
+                session=AgentSession(registry, AgentContextManager(model, 4096)),
+            )
+        except AgentRunnerError:
+            pass
+        else:
+            raise AssertionError("A failed context compaction continued the run")
+        assert [item["event"]["status"] for item in events] == ["running", "failed"]
+
+    asyncio.run(check())
+
+
 def test_structured_context_memory_checkpoint_and_failure_atomicity() -> None:
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -3559,6 +3907,13 @@ def main() -> None:
     test_knowledge_tool_message_keeps_every_selected_hit()
     test_agent_image_model_selection_is_frozen_and_validated()
     test_agent_memory_compacts_old_turns()
+    test_agent_memory_reuses_history_with_large_context()
+    test_agent_memory_compaction_leaves_headroom()
+    test_agent_memory_summary_options_match_provider()
+    test_agent_memory_rolls_up_bounded_history_page()
+    test_agent_memory_summary_failure_preserves_history_and_usage()
+    test_agent_memory_reports_real_compaction_progress()
+    test_agent_context_compaction_progress_reaches_stream()
     test_agent_memory_query_is_bounded_and_projected()
     test_mcp_server_to_response()
     test_unified_mcp_policy_projection_fails_closed_and_honors_kill_switch()

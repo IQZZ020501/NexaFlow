@@ -108,7 +108,7 @@ export type AgentRunEvent = {
   sequence?: number
   live_sequence?: string
   stream_epoch?: string
-  type: "thought" | "tool" | "environment"
+  type: "thought" | "tool" | "environment" | "compaction"
   turn: number
   tool_name: string
   status: "running" | "succeeded" | "failed"

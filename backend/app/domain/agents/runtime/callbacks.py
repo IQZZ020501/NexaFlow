@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from app.domain.agents.runtime.tools import AgentToolResult
 
@@ -16,6 +16,25 @@ SENSITIVE_FIELD_PARTS = (
 )
 
 AgentEventHandler = Callable[[dict[str, Any]], Awaitable[None]]
+CompactionStatus = Literal["running", "succeeded", "failed"]
+CompactionProgressHandler = Callable[[CompactionStatus], Awaitable[None]]
+
+
+def compaction_event(turn: int, status: CompactionStatus) -> dict[str, Any]:
+    return {
+        "type": "compaction",
+        "turn": turn,
+        "tool_name": "",
+        "status": status,
+        "summary": f"agent.history_compaction_{status}",
+        "call_id": "",
+        "tool_label": "",
+        "tool_kind": "unknown",
+        "server_name": "",
+        "input": {},
+        "output": None,
+        "reasoning": "",
+    }
 
 
 def safe_event_value(

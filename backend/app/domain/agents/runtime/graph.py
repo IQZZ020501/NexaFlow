@@ -23,7 +23,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
 from app.domain.agents.runtime.budget import RUNTIME_STATUS_MARKER, runtime_status
-from app.domain.agents.runtime.callbacks import NexaFlowCallback, safe_event_value
+from app.domain.agents.runtime.callbacks import (
+    NexaFlowCallback,
+    compaction_event,
+    safe_event_value,
+)
 from app.domain.agents.runtime.session import AgentSession
 from app.domain.agents.runtime.state import AgentState, PendingToolCall
 from app.domain.agents.runtime.tools import (
@@ -498,9 +502,12 @@ async def agent_node(
         ],
     }
 
+    async def record_compaction(status):
+        await runtime.context.callback.process(compaction_event(state["turn"] + 1, status))
+
     if runtime.context.session is not None:
         try:
-            state = await runtime.context.session.prepare_turn(state)
+            state = await runtime.context.session.prepare_turn(state, on_compaction=record_compaction)
         except ValueError as exc:
             raise AgentRunnerError(str(exc)) from exc
 

@@ -514,6 +514,14 @@ function PublicExecutionProcess({
       return t("已停止")
     if (event.type === "environment")
       return t("执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失")
+    if (event.type === "compaction") {
+      const status = effectiveStatus(event)
+      return t(
+        status === "running" ? "正在压缩历史对话"
+        : status === "succeeded" ? "历史对话已压缩"
+        : "历史对话压缩未完成"
+      )
+    }
     if (event.type === "knowledge") return t("知识库检索")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer" && effectiveStatus(event) === "failed")

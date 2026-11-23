@@ -56,6 +56,7 @@ from app.domain.agents.runtime import (
     run_agent,
     safe_event_value,
 )
+from app.domain.agents.runtime.callbacks import compaction_event
 from app.domain.agents.runtime.state import PendingToolCall
 from app.domain.agents.runtime.usage import merge_usage
 from app.domain.agents.service import (
@@ -943,6 +944,17 @@ async def _execute_claimed_agent_run(
         skill_context=skill_execution_context(scope.skill_snapshots),
     )
     memory = PreparedConversationMemory(messages=[], model_usage=empty_usage())
+    compaction_status = None
+
+    async def record_compaction(status):
+        nonlocal compaction_status
+        event = compaction_event(0, status)
+        sequence = await _append_event(
+            run, {"type": "process", "event": event}, worker_task_id=worker_task_id
+        )
+        _upsert_process_event(process_events, event, sequence=sequence)
+        compaction_status = status
+
     if not run.checkpoint:
         memory_timeout = min(60.0, _remaining_run_seconds(run_deadline))
         try:
@@ -955,9 +967,12 @@ async def _execute_claimed_agent_run(
                     base_messages,
                     tools,
                     timeout_seconds=memory_timeout,
+                    on_compaction=record_compaction,
                 )
                 await memory_db.commit()
         except Exception as exc:
+            if compaction_status in {"running", "succeeded"}:
+                await record_compaction("failed")
             # A summary is an optimization; a failed compaction must not lose the
             # current request. The durable transcript remains available for retry.
             log_error(

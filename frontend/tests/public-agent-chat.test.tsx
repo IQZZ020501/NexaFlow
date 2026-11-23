@@ -1663,6 +1663,25 @@ describe("PublicWorkflowChat", () => {
 })
 
 describe("PublicAgentChat", () => {
+  test.each([
+    ["running", "正在压缩历史对话"],
+    ["succeeded", "历史对话已压缩"],
+    ["failed", "历史对话压缩未完成"],
+  ] as const)("renders %s history compaction", async (status, title) => {
+    fetchHandler = agentFetchHandler({
+      history: { items: [run({
+        status: "running", result: "", progress: [{
+          id: "compaction-0", type: "compaction", status, stage: status,
+          turn: 0, count: null, hits: [],
+        }],
+      })] },
+      streamResponses: [() => new Response(new ReadableStream())],
+    })
+    renderPage(<PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />)
+    expect(await screen.findByText(title)).toBeTruthy()
+    expect(screen.queryByText("正在生成回答")).toBeNull()
+  })
+
   test("sends a saved related question in the same conversation without sending the draft or files", async () => {
     const submitted: Record<string, unknown>[] = []
     fetchHandler = agentFetchHandler({

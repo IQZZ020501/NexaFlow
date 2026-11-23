@@ -1484,6 +1484,25 @@ describe("AgentDetailWorkspace preview", () => {
     expect(screen.getAllByText("正在生成回答").length).toBeGreaterThan(0)
   })
 
+  test.each([
+    ["running", "正在压缩历史对话"],
+    ["succeeded", "历史对话已压缩"],
+    ["failed", "历史对话压缩未完成"],
+  ] as const)("renders %s history compaction", (status, title) => {
+    renderPage(
+      <Harness activeView="settings" runs={[makeRun({
+        status: "running", result: "", events: [{
+          type: "compaction", turn: 0, tool_name: "", status,
+          summary: `agent.history_compaction_${status}`, call_id: "",
+          tool_label: "", tool_kind: "unknown", server_name: "",
+          input: {}, output: null, duration_ms: 0,
+        }],
+      })]} />
+    )
+    expect(screen.getByText(title)).toBeTruthy()
+    if (status === "running") expect(screen.queryByText("正在生成回答")).toBeNull()
+  })
+
   test("renders process timeline with thought and tool events", () => {
     const run = makeRun({
       status: "running",
