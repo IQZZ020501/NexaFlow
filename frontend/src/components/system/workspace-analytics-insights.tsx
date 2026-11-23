@@ -492,16 +492,19 @@ export function FrequentQuestionsPanel({
         }}
       >
         {visibleItems.length ? (
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {visibleItems.map((item) => (
               <div
                 key={item.question}
-                className="flex min-h-14 min-w-0 flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-start sm:justify-between"
+                className="flex min-w-0 items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/35"
               >
-                <p className="min-w-0 break-words whitespace-normal">
+                <p className="min-w-0 flex-1 leading-relaxed break-words whitespace-normal">
                   {item.question}
                 </p>
-                <Badge variant="secondary" className="shrink-0 self-start">
+                <Badge
+                  variant="secondary"
+                  className="min-w-7 shrink-0 justify-center px-2 py-0.5 font-semibold tabular-nums"
+                >
                   {formatNumber(item.count, locale)}
                 </Badge>
               </div>
