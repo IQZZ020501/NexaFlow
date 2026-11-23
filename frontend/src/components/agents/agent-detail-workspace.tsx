@@ -73,6 +73,7 @@ import {
   executionWaitSummary,
 } from "@/lib/tool-display"
 import { isRegularTool } from "@/lib/tool-visibility"
+import { toolBindingGroups } from "@/lib/tool-groups"
 import { getErrorMessage } from "@/lib/errors"
 
 import { AgentConfigFields } from "./agent-config-fields"
@@ -1279,12 +1280,18 @@ export function AgentDetailWorkspace({
                         <span className="flex items-center gap-1.5">
                           <WrenchIcon className="size-3.5" />
                           {
-                            form.tools.filter((reference) => {
-                              const tool = tools.find(
-                                (item) => item.id === reference.tool_id
-                              )
-                              return !tool || isRegularTool(tool.function_name)
-                            }).length
+                            toolBindingGroups(
+                              form.tools.filter((reference) => {
+                                const tool = tools.find(
+                                  (item) => item.id === reference.tool_id
+                                )
+                                return (
+                                  !tool || isRegularTool(tool.function_name)
+                                )
+                              }),
+                              tools,
+                              t
+                            ).length
                           }
                         </span>
                       </div>

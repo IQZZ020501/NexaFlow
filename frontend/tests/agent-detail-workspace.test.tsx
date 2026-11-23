@@ -292,6 +292,7 @@ function LanguageProviderWrap({ children }: { children: React.ReactNode }) {
 
 type HarnessProps = {
   agent?: Agent
+  tools?: ToolSummary[]
   runs?: AgentRun[]
   toolCallsByRun?: Record<string, AgentToolCall[]>
   resolvingCallId?: string | null
@@ -359,7 +360,7 @@ function Harness(props: HarnessProps = {}) {
       setForm={setForm}
       models={models}
       knowledgeBases={knowledgeBases}
-      tools={tools}
+      tools={props.tools ?? tools}
       runs={props.runs ?? []}
       toolCallsByRun={props.toolCallsByRun ?? {}}
       resolvingCallId={props.resolvingCallId ?? null}
@@ -597,6 +598,65 @@ describe("AgentDetailWorkspace header and navigation", () => {
 })
 
 describe("AgentDetailWorkspace preview", () => {
+  test("counts tool groups in the settings header like the tool section", () => {
+    const baseTool = tool()
+    const catalog: ToolSummary[] = [
+      baseTool,
+      { ...baseTool, id: "mcp-read", function_name: "read" },
+      ...["lookup", "create"].map((name): ToolSummary => ({
+        ...baseTool,
+        id: `integration-${name}`,
+        kind: "integration",
+        function_name: name,
+        source: {
+          id: "integration-1",
+          name: "feishu",
+          kind: "integration",
+          transport: null,
+        },
+      })),
+      ...[
+        "web_search",
+        "web_fetch",
+        "generate_image",
+        "bash",
+        "install_skill_dependencies",
+      ].map((name): ToolSummary => ({
+        ...baseTool,
+        id: name,
+        kind: "builtin",
+        function_name: name,
+        source: {
+          id: "builtin-1",
+          name: "builtin",
+          kind: "builtin",
+          transport: null,
+        },
+      })),
+    ]
+    renderPage(
+      <Harness
+        activeView="settings"
+        tools={catalog}
+        agent={makeAgent({
+          tools: [
+            ...catalog.map((item) => ({
+              tool_id: item.id,
+              version_id: item.current_version_id!,
+            })),
+            { tool_id: "unavailable-tool", version_id: "old-version" },
+          ],
+        })}
+      />
+    )
+    const header = screen.getByRole("heading", {
+      name: "基本信息",
+      level: 2,
+    }).parentElement!.parentElement!
+    expect(within(header).getByText("5")).toBeTruthy()
+    expect(screen.getByText("5 个工具")).toBeTruthy()
+  })
+
   test("switches between stopping and sending as the running draft changes", async () => {
     let submitted = 0
     let cancelled = false
