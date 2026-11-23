@@ -1,6 +1,11 @@
 import type { TranslationKey } from "./zh-hans"
 
 export const en = {
+  向量化未成功的文档: "Index unsuccessful documents",
+  向量化全部文档: "Index all documents",
+  向量化所选文档: "Index selected documents",
+  没有需要向量化的文档: "No documents need indexing",
+  "仅处理已分段文档，正在处理的文档会自动跳过。": "Only segmented documents are indexed. Documents being processed are skipped.",
   登录成功: "Signed in successfully",
   已退出登录: "Signed out",
   技能草稿已保存: "Skill draft saved",

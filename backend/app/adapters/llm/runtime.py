@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -124,6 +127,34 @@ def _provider_status_code(exc: Exception) -> int | None:
     return None
 
 
+def _provider_retry_after(exc: Exception) -> float | None:
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if isinstance(exc, ClientError):
+        headers = exc.response.get("ResponseMetadata", {}).get("HTTPHeaders")
+    if not headers:
+        return None
+    for header, scale in (("retry-after-ms", 0.001), ("retry-after", 1)):
+        value = headers.get(header)
+        if value is None:
+            continue
+        try:
+            seconds = float(value) * scale
+        except (ValueError, TypeError):
+            if header != "retry-after":
+                continue
+            try:
+                retry_at = parsedate_to_datetime(value)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=UTC)
+                seconds = (retry_at - datetime.now(UTC)).total_seconds()
+            except (ValueError, TypeError, OverflowError):
+                continue
+        if math.isfinite(seconds) and seconds >= 0:
+            return seconds
+    return None
+
+
 def _model_provider_error(exc: Exception) -> ModelProviderError:
     log_error(logger, "LLM provider request failed.", exc)
     current: BaseException | None = exc
@@ -139,10 +170,16 @@ def _model_provider_error(exc: Exception) -> ModelProviderError:
             return ModelProviderTimeoutError("Model request timed out.")
         current = current.__cause__ or current.__context__
     if isinstance(exc, APIStatusError):
-        return ModelProviderStatusError(exc.status_code, _api_error_detail(exc))
+        return ModelProviderStatusError(
+            exc.status_code,
+            _api_error_detail(exc),
+            retry_after=_provider_retry_after(exc),
+        )
     status_code = _provider_status_code(exc)
     if status_code is not None:
-        return ModelProviderStatusError(status_code)
+        return ModelProviderStatusError(
+            status_code, retry_after=_provider_retry_after(exc)
+        )
     return ModelProviderError("Model request failed.")
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, timedelta
@@ -58,8 +59,13 @@ from app.infra.config.settings import Settings
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.db.session import get_session_factory
+from app.infra.models.embedding_cooldown import (
+    embedding_cooldown_seconds,
+    extend_embedding_cooldown,
+)
 from app.infra.observability.errors import log_error
 from app.infra.observability.logger import get_logger, log_event
+from app.ports.llm import ModelProviderStatusError
 from app.ports.vector_store import (
     VectorChunk,
     delete_vectors,
@@ -72,6 +78,9 @@ TASK_LEASE_SECONDS = 300
 TASK_LEASE_RENEW_SECONDS = 30
 TASK_RUN_BUSY = "busy"
 TASK_RUN_FINISHED = "finished"
+EMBED_BATCH_MAX_BYTES = 16_384
+EMBEDDING_MAX_RATE_LIMIT_RETRIES = 3
+EMBEDDING_RATE_LIMIT_WAIT_BUDGET = 450.0
 
 EvaluationTaskRunner = Callable[
     [
@@ -107,8 +116,33 @@ async def persist_owned_knowledge_task_progress(
     task.lease_expires_at = lease_expires_at
 
 
-def batches(items: list[VectorChunk], size: int) -> list[list[VectorChunk]]:
-    return [items[index : index + size] for index in range(0, len(items), size)]
+def batches(
+    items: list[VectorChunk], size: int, *, max_bytes: int | None = None
+) -> list[list[VectorChunk]]:
+    if max_bytes is None:
+        return [items[index : index + size] for index in range(0, len(items), size)]
+    result: list[list[VectorChunk]] = []
+    batch: list[VectorChunk] = []
+    byte_count = 0
+    for item in items:
+        item_bytes = len(item.content.encode("utf-8"))
+        if batch and (len(batch) >= size or byte_count + item_bytes > max_bytes):
+            result.append(batch)
+            batch = []
+            byte_count = 0
+        batch.append(item)
+        byte_count += item_bytes
+    if batch:
+        result.append(batch)
+    return result
+
+
+async def wait_for_embedding_retry(seconds: float, lease_lost: asyncio.Event) -> None:
+    try:
+        await asyncio.wait_for(lease_lost.wait(), timeout=seconds)
+    except TimeoutError:
+        pass
+    ensure_knowledge_task_lease(lease_lost)
 
 
 async def get_task_scope(
@@ -320,16 +354,57 @@ async def run_index_task(
         )
         for chunk in chunks
     ]
-    for vector_batch in batches(vector_chunks, EMBED_BATCH_SIZE):
-        ensure_knowledge_task_lease(lease_lost)
-        await asyncio.to_thread(
-            upsert_vectors,
-            settings,
-            knowledge_base.id,
-            knowledge_base.workspace_id,
-            embedding_model,
-            vector_batch,
-        )
+    remaining_wait = EMBEDDING_RATE_LIMIT_WAIT_BUDGET
+    for vector_batch in batches(
+        vector_chunks, EMBED_BATCH_SIZE, max_bytes=EMBED_BATCH_MAX_BYTES
+    ):
+        for attempt in range(EMBEDDING_MAX_RATE_LIMIT_RETRIES + 1):
+            while cooldown := await embedding_cooldown_seconds(
+                settings, embedding_model.id
+            ):
+                delay = cooldown + random.uniform(0, 5)
+                if delay > remaining_wait:
+                    raise ModelProviderStatusError(
+                        429, "Embedding cooldown exceeded retry budget."
+                    )
+                await wait_for_embedding_retry(delay, lease_lost)
+                remaining_wait -= delay
+            ensure_knowledge_task_lease(lease_lost)
+            try:
+                await asyncio.to_thread(
+                    upsert_vectors,
+                    settings,
+                    knowledge_base.id,
+                    knowledge_base.workspace_id,
+                    embedding_model,
+                    vector_batch,
+                )
+                break
+            except ModelProviderStatusError as exc:
+                if exc.status_code != 429:
+                    raise
+                delay = max(
+                    exc.retry_after or 0, min(240, 60 * 2**attempt)
+                ) + random.uniform(0, 5)
+                await extend_embedding_cooldown(
+                    settings, embedding_model.id, min(delay, 86400)
+                )
+                if (
+                    attempt == EMBEDDING_MAX_RATE_LIMIT_RETRIES
+                    or delay > remaining_wait
+                ):
+                    raise
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "Embedding provider rate limited; retrying current batch.",
+                    task_id=task.id,
+                    model_id=embedding_model.id,
+                    retry=attempt + 1,
+                    retry_after_seconds=round(delay, 2),
+                )
+                await wait_for_embedding_retry(delay, lease_lost)
+                remaining_wait -= delay
         ensure_knowledge_task_lease(lease_lost)
         task.processed_items += len(vector_batch)
         await persist_owned_knowledge_task_progress(db, task)

@@ -18,6 +18,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -162,9 +163,10 @@ def test_knowledge_writes_recheck_locked_owner() -> None:
         knowledge_kb.knowledge_base_repository.lock_knowledge_base = original_lock
         knowledge_kb.permission_repository.get_user_grant = original_grant
 
-def test_clean_upload_filename_sanitizes_path_and_classification() -> None:
+def test_clean_upload_filename_sanitizes_paths_and_allows_classification_words() -> None:
     assert clean_upload_filename("../../etc/passwd") == "passwd"
-    expect_http_error(lambda: clean_upload_filename("报告-机密.docx"), 422)
+    for filename in ("保守国家秘密法.md", "报告-机密.docx", "绝密文件.pdf"):
+        assert clean_upload_filename(filename) == filename
     expect_http_error(lambda: clean_upload_filename("   "), 422)
     assert clean_upload_filename("photo.png") == "photo.png"
 
@@ -1804,12 +1806,211 @@ def test_knowledge_base_to_response() -> None:
     assert response.permission == "edit"
 
 
+@contextmanager
+def index_task_scope(*, contents=None, outcomes=None, wait_effect=None, cooldowns=None):
+    from unittest.mock import AsyncMock, Mock
+
+    from app.domain.knowledge.tasks import runner
+    from app.entities.knowledge import (
+        KnowledgeDocument,
+        KnowledgeDocumentChunk,
+        KnowledgeTask,
+    )
+
+    knowledge_base = KnowledgeBase(
+        id="kb-1", workspace_id="ws-1", embedding_model_id="embedding-1"
+    )
+    document = KnowledgeDocument(id="doc-1", filename="guide.md", status="parsed")
+    chunks = [
+        KnowledgeDocumentChunk(
+            id=f"chunk-{index}", document_id=document.id, content=content
+        )
+        for index, content in enumerate(contents or ["A legal provision."])
+    ]
+    task = KnowledgeTask(id="task-1", document_id=document.id, task_type="index")
+    db = SimpleNamespace(commit=AsyncMock())
+    progress = []
+    upsert = Mock(side_effect=outcomes)
+    lease_lost = asyncio.Event()
+    wait = AsyncMock(side_effect=wait_effect)
+    with (
+        patch.object(
+            runner,
+            "resolve_embedding_model",
+            AsyncMock(return_value=SimpleNamespace(id="embedding-1")),
+        ),
+        patch.multiple(
+            runner.knowledge_base_repository,
+            list_indexable_chunks=AsyncMock(return_value=chunks),
+            get_knowledge_document_by_id=AsyncMock(return_value=document),
+            list_parent_chunks_by_ids=AsyncMock(return_value=[]),
+            refresh_knowledge_document=AsyncMock(return_value=document),
+            save_knowledge_document=AsyncMock(),
+            save_knowledge_document_chunk=AsyncMock(),
+            save_knowledge_task=AsyncMock(
+                side_effect=lambda _db, current: progress.append(
+                    current.processed_items
+                )
+            ),
+        ),
+        patch.object(runner, "upsert_vectors", upsert),
+        patch.object(runner, "record_audit_log"),
+        patch.object(runner, "wait_for_embedding_retry", wait),
+        patch.object(
+            runner,
+            "embedding_cooldown_seconds",
+            AsyncMock(side_effect=cooldowns, return_value=0),
+        ),
+        patch.object(runner, "extend_embedding_cooldown", AsyncMock()) as share,
+        patch.object(runner.random, "uniform", return_value=0),
+    ):
+        yield SimpleNamespace(
+            run=lambda: runner.run_index_task(
+                db,
+                task,
+                knowledge_base,
+                document,
+                User(id="user-1", username="user"),
+                SimpleNamespace(celery_task_always_eager=True),
+                lease_lost,
+            ),
+            task=task,
+            document=document,
+            chunks=chunks,
+            upsert=upsert,
+            wait=wait,
+            progress=progress,
+            lease_lost=lease_lost,
+            share=share,
+        )
+
+
+def test_index_task_recovers_from_provider_tpm_limit() -> None:
+    from app.domain.knowledge.tasks.runner import EMBED_BATCH_MAX_BYTES
+    from app.ports.llm import ModelProviderStatusError
+
+    limited = ModelProviderStatusError(
+        429,
+        '{"message": "Request was rejected due to rate limiting. '
+        'Details: TPM limit reached.", "data": null}',
+        retry_after=75,
+    )
+    with index_task_scope(
+        contents=["法" * (EMBED_BATCH_MAX_BYTES // 3)] * 3,
+        outcomes=[None, limited, None, None],
+    ) as scope:
+        asyncio.run(scope.run())
+    assert scope.upsert.call_count == 4
+    assert scope.upsert.call_args_list[1] == scope.upsert.call_args_list[2]
+    assert scope.upsert.call_args_list[0] != scope.upsert.call_args_list[1]
+    assert scope.wait.await_args.args[0] == 75
+    assert scope.progress == [0, 1, 2, 3, 3]
+    assert scope.task.processed_items == 3
+    assert all(chunk.status == "indexed" for chunk in scope.chunks)
+    assert scope.document.status == "indexed"
+    assert scope.document.last_error is None
+
+
+def test_index_task_rate_limit_retries_are_bounded() -> None:
+    from app.ports.llm import ModelProviderStatusError
+
+    for error, expected_calls, expected_waits in (
+        (ModelProviderStatusError(429, "TPM limit reached."), 4, [60, 120, 240]),
+        (ModelProviderStatusError(429, retry_after=600), 1, []),
+        *(
+            (ModelProviderStatusError(status), 1, [])
+            for status in (400, 401, 403, 422, 500)
+        ),
+    ):
+        with index_task_scope(outcomes=error) as scope:
+            try:
+                asyncio.run(scope.run())
+            except ModelProviderStatusError as exc:
+                assert exc is error
+            else:
+                raise AssertionError("persistent provider error must end the task")
+        assert scope.upsert.call_count == expected_calls
+        assert [call.args[0] for call in scope.wait.await_args_list] == expected_waits
+        assert scope.task.processed_items == 0
+        assert scope.chunks[0].status != "indexed"
+        assert scope.progress == [0]
+
+
+def test_index_task_waits_for_other_workers_cooldown() -> None:
+    with index_task_scope(cooldowns=[60, 0]) as scope:
+        asyncio.run(scope.run())
+    assert scope.wait.await_args.args[0] == 60
+    assert scope.upsert.call_count == 1
+    assert scope.task.processed_items == 1
+
+
+def test_index_task_aborts_retry_when_lease_is_lost() -> None:
+    from app.ports.llm import ModelProviderStatusError
+
+    with index_task_scope(outcomes=ModelProviderStatusError(429)) as scope:
+        scope.wait.side_effect = lambda *_: scope.lease_lost.set()
+        try:
+            asyncio.run(scope.run())
+        except KnowledgePipelineError as exc:
+            assert "lease was lost" in str(exc)
+        else:
+            raise AssertionError("lost lease must stop provider retries")
+    assert scope.upsert.call_count == 1
+    assert scope.task.processed_items == 0
+
+
+def test_embedding_retry_wait_releases_event_loop_and_cancels_promptly() -> None:
+    from app.domain.knowledge.tasks.runner import wait_for_embedding_retry
+
+    async def check():
+        lease_lost = asyncio.Event()
+        waiter = asyncio.create_task(wait_for_embedding_retry(60, lease_lost))
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        lease_lost.set()
+        try:
+            await asyncio.wait_for(waiter, timeout=1)
+        except KnowledgePipelineError:
+            pass
+        else:
+            raise AssertionError("lease loss must interrupt the cooldown")
+        await wait_for_embedding_retry(0.001, asyncio.Event())
+
+    asyncio.run(check())
+
+
+def test_embedding_batches_bound_utf8_bytes_without_changing_chunks() -> None:
+    from app.domain.knowledge.tasks.runner import batches
+    from app.ports.vector_store import VectorChunk
+
+    chunks = [
+        VectorChunk(str(index), "doc-1", "guide.md", index, content, {})
+        for index, content in enumerate(["法法", "律", "a" * 20, "x", "y", "z"])
+    ]
+    grouped = batches(chunks, 2, max_bytes=8)
+    assert [[chunk.content for chunk in batch] for batch in grouped] == [
+        ["法法"],
+        ["律"],
+        ["a" * 20],
+        ["x", "y"],
+        ["z"],
+    ]
+    assert [chunk for batch in grouped for chunk in batch] == chunks
+    assert batches([], 64, max_bytes=8) == []
+
+
 def main() -> None:
+    test_index_task_recovers_from_provider_tpm_limit()
+    test_index_task_rate_limit_retries_are_bounded()
+    test_index_task_waits_for_other_workers_cooldown()
+    test_index_task_aborts_retry_when_lease_is_lost()
+    test_embedding_retry_wait_releases_event_loop_and_cancels_promptly()
+    test_embedding_batches_bound_utf8_bytes_without_changing_chunks()
     test_effective_permission_matrix()
     test_validate_permission_rejects_unknown()
     test_normalized_document_artifact_is_content_addressed()
     test_knowledge_writes_recheck_locked_owner()
-    test_clean_upload_filename_sanitizes_path_and_classification()
+    test_clean_upload_filename_sanitizes_paths_and_allows_classification_words()
     test_parse_task_options_validates_boundaries()
     test_markdown_tables_split_only_between_rows_and_repeat_headers()
     test_markdown_table_keeps_single_overlong_row_intact()

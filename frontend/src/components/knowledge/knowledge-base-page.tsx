@@ -58,6 +58,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -79,10 +80,12 @@ import {
   deleteKnowledgeBase,
   downloadKnowledgeDocument,
   indexKnowledgeDocument,
+  indexKnowledgeDocuments,
   listKnowledgeBasePermissions,
   listKnowledgeBases,
-  listKnowledgeDocuments,
-  listKnowledgeTasks,
+  getKnowledgeDocumentPage,
+  getKnowledgeDocumentOptions,
+  getKnowledgeTaskPage,
   parseKnowledgeDocument,
   rebuildKnowledgeIndex,
   retryKnowledgeTask,
@@ -97,6 +100,10 @@ import type {
   KnowledgeBase,
   KnowledgeBaseListItem,
   KnowledgeDocument,
+  KnowledgeDocumentIndexScope,
+  KnowledgeDocumentSummary,
+  KnowledgeDocumentSort,
+  KnowledgeDocumentOption,
   KnowledgeModelTestResult,
   KnowledgeTask,
   ResourcePermission,
@@ -187,7 +194,7 @@ const DOCUMENT_SORT_OPTIONS: Array<{
   { key: "updated_at", label: "更新时间" },
 ]
 
-const DOCUMENT_SORT_FIELDS: Record<DocumentSortKey, keyof KnowledgeDocument> = {
+const DOCUMENT_SORT_FIELDS: Record<DocumentSortKey, KnowledgeDocumentSort> = {
   name: "filename",
   size_bytes: "size_bytes",
   chunk_count: "chunk_count",
@@ -208,24 +215,17 @@ const PROCESSING_TASK_STATUSES: Record<string, true> = {
   cancelling: true,
 }
 
+const EMPTY_DOCUMENT_SUMMARY: KnowledgeDocumentSummary = {
+  total: 0,
+  indexed: 0,
+  indexing: 0,
+  pending: 0,
+  failed: 0,
+  processing: 0,
+}
+
 export const DOCUMENT_PAGE_SIZES = [10, 20, 50, 100] as const
 export type DocumentPageSize = (typeof DOCUMENT_PAGE_SIZES)[number]
-
-/**
- * Returns the items for a one-based page.
- *
- * @param items - The complete ordered collection of items
- * @param page - The one-based page number
- * @param pageSize - The maximum number of items per page
- * @returns The items included in the requested page
- */
-export function paginateDocuments<T>(
-  items: readonly T[],
-  page: number,
-  pageSize: number
-): T[] {
-  return items.slice((page - 1) * pageSize, page * pageSize)
-}
 
 /**
  * Calculates the number of document pages for a result set.
@@ -467,9 +467,23 @@ function KnowledgeBasePageContent({
   const knowledgeBasesOffsetRef = React.useRef(0)
   const deletedKnowledgeBaseIds = React.useRef(new Set<string>())
   const [documents, setDocuments] = React.useState<KnowledgeDocument[]>([])
+  const [documentTotal, setDocumentTotal] = React.useState(0)
+  const [evaluationDocuments, setEvaluationDocuments] = React.useState<
+    KnowledgeDocumentOption[]
+  >([])
+  const [documentSummary, setDocumentSummary] = React.useState(
+    EMPTY_DOCUMENT_SUMMARY
+  )
+  const [documentTasks, setDocumentTasks] = React.useState<KnowledgeTask[]>([])
+  const [activeRebuildIndexTask, setActiveRebuildIndexTask] =
+    React.useState<KnowledgeTask | null>(null)
+  const documentRequestRef = React.useRef(0)
+  const taskRequestRef = React.useRef(0)
   const [knowledgeTasks, setKnowledgeTasks] = React.useState<KnowledgeTask[]>(
     []
   )
+  const [knowledgeTaskTotal, setKnowledgeTaskTotal] = React.useState(0)
+  const [hasProcessingTasks, setHasProcessingTasks] = React.useState(false)
   const [knowledgeTaskNow, setKnowledgeTaskNow] = React.useState(Date.now)
   const documentsById = React.useMemo(
     () => new Map(documents.map((document) => [document.id, document])),
@@ -559,12 +573,6 @@ function KnowledgeBasePageContent({
   const selectedKnowledgeBase =
     knowledgeBases.find((item) => item.id === selectedKnowledgeBaseId) ?? null
   const canEditDocuments = selectedKnowledgeBase?.permission === "edit"
-  const activeRebuildIndexTask = knowledgeTasks.find(
-    (task) =>
-      task.knowledge_base_id === selectedKnowledgeBaseId &&
-      task.task_type === "rebuild_index" &&
-      PROCESSING_TASK_STATUSES[task.status]
-  )
   const selectedEmbeddingModel =
     registeredModels.find(
       (model) => model.id === selectedKnowledgeBase?.embedding_model_id
@@ -601,25 +609,6 @@ function KnowledgeBasePageContent({
   const movableKnowledgeBaseIds = filteredKnowledgeBases
     .filter((knowledgeBase) => knowledgeBase.permission === "edit")
     .map((knowledgeBase) => knowledgeBase.id)
-  const filteredDocuments = React.useMemo(() => {
-    const search = documentSearch.trim().toLowerCase()
-    const matched = search
-      ? documents.filter((document) =>
-          document.filename.toLowerCase().includes(search)
-        )
-      : documents
-    const direction = documentSortDirection === "asc" ? 1 : -1
-    const sortField = DOCUMENT_SORT_FIELDS[documentSortKey]
-    return [...matched].sort((left, right) => {
-      const leftValue = left[sortField]
-      const rightValue = right[sortField]
-      if (typeof leftValue === "string") {
-        return leftValue.localeCompare(String(rightValue)) * direction
-      }
-      return (Number(leftValue) - Number(rightValue)) * direction
-    })
-  }, [documents, documentSearch, documentSortDirection, documentSortKey])
-
   function selectDocumentSort(key: DocumentSortKey) {
     if (documentSortKey === key) {
       cycleDocumentSort(key)
@@ -631,6 +620,7 @@ function KnowledgeBasePageContent({
   }
 
   function cycleDocumentSort(key: DocumentSortKey) {
+    setDocumentPage(1)
     if (documentSortKey === key) {
       setDocumentSortDirection((current) =>
         current === "asc" ? "desc" : "asc"
@@ -643,34 +633,19 @@ function KnowledgeBasePageContent({
     selectedDocumentIds.includes(document.id)
   )
   const selectedDocumentCount = selectedDocuments.length
-  const documentIndexSummary = React.useMemo(() => {
-    const summary = { indexed: 0, indexing: 0, pending: 0, failed: 0 }
-
-    for (const document of documents) {
-      if (document.status === "indexed" && activeRebuildIndexTask) {
-        summary.indexing += 1
-      } else if (document.status === "indexed") {
-        summary.indexed += 1
-      } else if (
-        document.status === "index_queued" ||
-        document.status === "indexing"
-      ) {
-        summary.indexing += 1
-      } else if (document.status.endsWith("_failed")) {
-        summary.failed += 1
-      } else {
-        summary.pending += 1
+  const documentIndexSummary = activeRebuildIndexTask
+    ? {
+        ...documentSummary,
+        indexed: 0,
+        indexing: documentSummary.indexing + documentSummary.indexed,
       }
-    }
-
-    return summary
-  }, [activeRebuildIndexTask, documents])
+    : documentSummary
   const documentIndexProgressCompleted = activeRebuildIndexTask
     ? activeRebuildIndexTask.processed_items
     : documentIndexSummary.indexed
   const documentIndexProgressTotal = activeRebuildIndexTask
     ? activeRebuildIndexTask.total_items
-    : documents.length
+    : documentSummary.total
   const documentIndexProgress = documentIndexProgressTotal
     ? Math.round(
         (documentIndexProgressCompleted / documentIndexProgressTotal) * 100
@@ -679,16 +654,8 @@ function KnowledgeBasePageContent({
   const documentIndexProgressLabel = activeRebuildIndexTask
     ? t("重建索引")
     : t("进度")
-  const visibleDocuments = paginateDocuments(
-    filteredDocuments,
-    documentPage,
-    documentPageSize
-  )
-  const visibleKnowledgeTasks = paginateDocuments(
-    knowledgeTasks,
-    knowledgeTaskPage,
-    knowledgeTaskPageSize
-  )
+  const visibleDocuments = documents
+  const visibleKnowledgeTasks = knowledgeTasks
   const selectedKnowledgeTasks = knowledgeTasks.filter(
     (task) =>
       selectedKnowledgeTaskIds.includes(task.id) &&
@@ -835,8 +802,13 @@ function KnowledgeBasePageContent({
 
   const loadDocuments = React.useCallback(
     async (silent = false) => {
+      const requestId = ++documentRequestRef.current
       if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
         setDocuments([])
+        setDocumentTotal(0)
+        setDocumentSummary(EMPTY_DOCUMENT_SUMMARY)
+        setDocumentTasks([])
+        setActiveRebuildIndexTask(null)
         return
       }
 
@@ -844,31 +816,59 @@ function KnowledgeBasePageContent({
         setIsDocumentLoading(true)
       }
       try {
-        setDocuments(
-          await listKnowledgeDocuments(
-            token,
-            selectedWorkspaceId,
-            selectedKnowledgeBaseId
-          )
+        const result = await getKnowledgeDocumentPage(
+          token,
+          selectedWorkspaceId,
+          selectedKnowledgeBaseId,
+          {
+            limit: documentPageSize,
+            offset: (documentPage - 1) * documentPageSize,
+            search: documentSearch.trim(),
+            sortBy: DOCUMENT_SORT_FIELDS[documentSortKey],
+            sortDirection: documentSortDirection,
+          }
+        )
+        if (requestId !== documentRequestRef.current) return
+        setDocuments(result.items)
+        setDocumentTotal(result.total)
+        setDocumentSummary(result.summary)
+        setDocumentTasks(result.document_tasks)
+        setActiveRebuildIndexTask(result.active_rebuild_task)
+        setSelectedDocumentIds((current) =>
+          current.filter((id) => result.items.some((item) => item.id === id))
         )
       } catch (error) {
-        if (!silent) {
+        if (requestId === documentRequestRef.current && !silent) {
           setDocuments([])
+          setDocumentTotal(0)
           reportError(error)
         }
       } finally {
-        if (!silent) {
+        if (requestId === documentRequestRef.current) {
           setIsDocumentLoading(false)
         }
       }
     },
-    [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token]
+    [
+      documentPage,
+      documentPageSize,
+      documentSearch,
+      documentSortDirection,
+      documentSortKey,
+      reportError,
+      selectedKnowledgeBaseId,
+      selectedWorkspaceId,
+      token,
+    ]
   )
 
   const loadKnowledgeTasks = React.useCallback(
     async (silent = false) => {
+      const requestId = ++taskRequestRef.current
       if (!selectedWorkspaceId || !selectedKnowledgeBaseId) {
         setKnowledgeTasks([])
+        setKnowledgeTaskTotal(0)
+        setHasProcessingTasks(false)
         setSelectedKnowledgeTaskIds([])
         return
       }
@@ -877,13 +877,21 @@ function KnowledgeBasePageContent({
         setIsKnowledgeTaskLoading(true)
       }
       try {
-        const tasks = await listKnowledgeTasks(
+        const result = await getKnowledgeTaskPage(
           token,
           selectedWorkspaceId,
-          selectedKnowledgeBaseId
+          selectedKnowledgeBaseId,
+          {
+            limit: knowledgeTaskPageSize,
+            offset: (knowledgeTaskPage - 1) * knowledgeTaskPageSize,
+          }
         )
+        if (requestId !== taskRequestRef.current) return
+        const tasks = result.items
         setKnowledgeTaskNow(Date.now())
         setKnowledgeTasks(tasks)
+        setKnowledgeTaskTotal(result.total)
+        setHasProcessingTasks(result.has_processing)
         setSelectedKnowledgeTaskIds((current) =>
           current.filter((taskId) =>
             tasks.some(
@@ -893,18 +901,26 @@ function KnowledgeBasePageContent({
           )
         )
       } catch (error) {
-        if (!silent) {
+        if (requestId === taskRequestRef.current && !silent) {
           setKnowledgeTasks([])
+          setKnowledgeTaskTotal(0)
           setSelectedKnowledgeTaskIds([])
           reportError(error)
         }
       } finally {
-        if (!silent) {
+        if (requestId === taskRequestRef.current) {
           setIsKnowledgeTaskLoading(false)
         }
       }
     },
-    [reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token]
+    [
+      knowledgeTaskPage,
+      knowledgeTaskPageSize,
+      reportError,
+      selectedKnowledgeBaseId,
+      selectedWorkspaceId,
+      token,
+    ]
   )
 
   React.useEffect(() => {
@@ -940,6 +956,9 @@ function KnowledgeBasePageContent({
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDocuments()
+    return () => {
+      documentRequestRef.current += 1
+    }
   }, [loadDocuments])
 
   React.useEffect(() => {
@@ -949,6 +968,9 @@ function KnowledgeBasePageContent({
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadKnowledgeTasks()
+    return () => {
+      taskRequestRef.current += 1
+    }
   }, [activeDetailTab, loadKnowledgeTasks])
 
   React.useEffect(() => {
@@ -956,15 +978,51 @@ function KnowledgeBasePageContent({
     setActiveDetailTab(initialDetailTab)
   }, [activeKnowledgeBaseId, initialDetailTab])
 
-  const hasProcessingDocuments = documents.some(
-    (document) => PROCESSING_DOCUMENT_STATUSES[document.status]
-  )
-  const hasProcessingTasks = knowledgeTasks.some(
-    (task) => PROCESSING_TASK_STATUSES[task.status]
-  )
+  React.useEffect(() => {
+    // Reset selection and paging when the resource scope changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDocuments([])
+    setDocumentTotal(0)
+    setDocumentSummary(EMPTY_DOCUMENT_SUMMARY)
+    setDocumentTasks([])
+    setActiveRebuildIndexTask(null)
+    setSelectedDocumentIds([])
+    setDocumentPage(1)
+    setDocumentSearch("")
+    setKnowledgeTasks([])
+    setKnowledgeTaskTotal(0)
+    setSelectedKnowledgeTaskIds([])
+    setKnowledgeTaskPage(1)
+    setHasProcessingTasks(false)
+  }, [selectedKnowledgeBaseId, selectedWorkspaceId])
+
+  React.useEffect(() => {
+    if (
+      activeDetailTab !== "evaluation" ||
+      !selectedWorkspaceId ||
+      !selectedKnowledgeBaseId
+    ) return
+    let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEvaluationDocuments([])
+    void getKnowledgeDocumentOptions(
+      token, selectedWorkspaceId, selectedKnowledgeBaseId
+    )
+      .then((items) => {
+        if (!cancelled) setEvaluationDocuments(items)
+      })
+      .catch((error) => {
+        if (!cancelled) reportError(error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeDetailTab, reportError, selectedKnowledgeBaseId, selectedWorkspaceId, token])
+
+  const hasProcessingDocuments = documentSummary.processing > 0
   const shouldPollTasks =
     (activeDetailTab === "tasks" && hasProcessingTasks) ||
-    activeRebuildIndexTask !== undefined
+    activeRebuildIndexTask !== null
   const hasRunningTaskDuration =
     activeDetailTab === "tasks" &&
     visibleKnowledgeTasks.some(
@@ -990,10 +1048,11 @@ function KnowledgeBasePageContent({
 
     const timer = window.setInterval(() => {
       void loadDocuments(true)
-      void loadKnowledgeTasks(true)
+      if (activeDetailTab === "tasks") void loadKnowledgeTasks(true)
     }, 3000)
     return () => window.clearInterval(timer)
   }, [
+    activeDetailTab,
     hasProcessingDocuments,
     loadDocuments,
     loadKnowledgeTasks,
@@ -1333,6 +1392,31 @@ function KnowledgeBasePageContent({
     }
   }
 
+  async function handleIndexAllDocuments(scope: KnowledgeDocumentIndexScope) {
+    if (!selectedWorkspaceId || !selectedKnowledgeBase) return
+    setIsSubmittingDocumentTask(true)
+    try {
+      const result = await indexKnowledgeDocuments(
+        token,
+        selectedWorkspaceId,
+        selectedKnowledgeBase.id,
+        scope
+      )
+      setSelectedDocumentIds([])
+      await Promise.all([loadDocuments(), loadKnowledgeTasks()])
+      notify(
+        "success",
+        result.queued_count
+          ? t("已提交 {value} 个向量化任务", { value: result.queued_count })
+          : t("没有需要向量化的文档")
+      )
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsSubmittingDocumentTask(false)
+    }
+  }
+
   async function handleDownloadDocument(document: KnowledgeDocument) {
     if (!selectedWorkspaceId || !selectedKnowledgeBase) {
       return
@@ -1416,7 +1500,7 @@ function KnowledgeBasePageContent({
         current.filter((item) => !deletedIds.has(item.id))
       )
       setSelectedDocumentIds([])
-      await loadKnowledgeTasks()
+      await Promise.all([loadDocuments(), loadKnowledgeTasks()])
       notify(
         "success",
         t("已删除 {value} 个文档", { value: selectedDocuments.length })
@@ -1444,7 +1528,8 @@ function KnowledgeBasePageContent({
         task,
         ...current.filter((item) => item.id !== task.id),
       ])
-      await loadKnowledgeTasks()
+      setActiveRebuildIndexTask(task)
+      await Promise.all([loadDocuments(), loadKnowledgeTasks()])
       notify("success", t("已提交重建索引任务"))
     } catch (error) {
       reportError(error)
@@ -1522,6 +1607,7 @@ function KnowledgeBasePageContent({
       setSelectedKnowledgeTaskIds((current) =>
         current.filter((id) => id !== task.id)
       )
+      await loadKnowledgeTasks()
       notify("success", t("已删除任务"))
     } catch (error) {
       reportError(error)
@@ -1565,6 +1651,7 @@ function KnowledgeBasePageContent({
       setSelectedKnowledgeTaskIds((current) =>
         current.filter((taskId) => !deletedIds.has(taskId))
       )
+      await loadKnowledgeTasks()
       notify(
         "success",
         t("已删除 {value} 个任务", { value: result.deleted_task_ids.length })
@@ -1606,7 +1693,7 @@ function KnowledgeBasePageContent({
       setSelectedDocumentIds((current) =>
         current.filter((id) => id !== document.id)
       )
-      await loadKnowledgeTasks()
+      await Promise.all([loadDocuments(), loadKnowledgeTasks()])
       notify("success", t("文档已删除"))
     } catch (error) {
       reportError(error)
@@ -1775,7 +1862,8 @@ function KnowledgeBasePageContent({
     const document = task.document_id
       ? documentsById.get(task.document_id)
       : undefined
-    if (!document) {
+    const filename = task.document_filename ?? document?.filename
+    if (!filename || !task.document_id) {
       return (
         <span className="text-muted-foreground">
           {isDocumentLoading ? "—" : t("文档不可用")}
@@ -1787,14 +1875,14 @@ function KnowledgeBasePageContent({
       <button
         type="button"
         className="block max-w-full truncate text-left outline-none hover:text-primary focus-visible:underline"
-        title={document.filename}
+        title={filename}
         onClick={() =>
           router.push(
-            `/app/knowledge/${task.knowledge_base_id}/documents/${document.id}`
+            `/app/knowledge/${task.knowledge_base_id}/documents/${task.document_id}`
           )
         }
       >
-        {document.filename}
+        {filename}
       </button>
     )
   }
@@ -2029,34 +2117,66 @@ function KnowledgeBasePageContent({
                         <UploadIcon data-icon="inline-start" />
                         {t("上传文档")}
                       </Button>
-                      <Button
-                        type="button"
-                        variant={
-                          selectedDocumentCount ? "secondary" : "outline"
-                        }
-                        className="h-9"
-                        disabled={
-                          !canEditDocuments ||
-                          selectedDocumentCount === 0 ||
-                          isSubmittingDocumentTask
-                        }
-                        onClick={() =>
-                          void handleIndexDocuments(selectedDocuments)
-                        }
-                      >
-                        {isSubmittingDocumentTask ? (
-                          <LoaderCircleIcon
-                            className="animate-spin"
-                            data-icon="inline-start"
-                          />
-                        ) : (
-                          <SlidersHorizontalIcon data-icon="inline-start" />
-                        )}
-                        {t("向量化")}
-                        {selectedDocumentCount
-                          ? `(${selectedDocumentCount})`
-                          : ""}
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant={
+                              selectedDocumentCount ? "secondary" : "outline"
+                            }
+                            className="h-9"
+                            disabled={
+                              !canEditDocuments ||
+                              documentSummary.total === 0 ||
+                              isSubmittingDocumentTask
+                            }
+                          >
+                            {isSubmittingDocumentTask ? (
+                              <LoaderCircleIcon
+                                className="animate-spin"
+                                data-icon="inline-start"
+                              />
+                            ) : (
+                              <SlidersHorizontalIcon data-icon="inline-start" />
+                            )}
+                            {t("向量化")}
+                            {selectedDocumentCount
+                              ? `(${selectedDocumentCount})`
+                              : ""}
+                            <ChevronDownIcon data-icon="inline-end" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start">
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              void handleIndexAllDocuments("unsuccessful")
+                            }
+                          >
+                            {t("向量化未成功的文档")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => void handleIndexAllDocuments("all")}
+                          >
+                            {t("向量化全部文档")}
+                          </DropdownMenuItem>
+                          {selectedDocumentCount ? (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={() =>
+                                  void handleIndexDocuments(selectedDocuments)
+                                }
+                              >
+                                {t("向量化所选文档")}
+                              </DropdownMenuItem>
+                            </>
+                          ) : null}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="max-w-64 whitespace-normal text-xs font-normal text-muted-foreground">
+                            {t("仅处理已分段文档，正在处理的文档会自动跳过。")}
+                          </DropdownMenuLabel>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                       <Button
                         type="button"
                         variant="outline"
@@ -2211,7 +2331,7 @@ function KnowledgeBasePageContent({
                                     <span className="truncate">
                                       {documentStatusText(
                                         document,
-                                        knowledgeTasks,
+                                        documentTasks,
                                         t
                                       )}
                                     </span>
@@ -2332,7 +2452,7 @@ function KnowledgeBasePageContent({
                           <span className="flex size-10 items-center justify-center rounded-lg bg-muted/60">
                             <FileTextIcon className="size-4" />
                           </span>
-                          {t(documents.length ? "没有匹配的文档" : "暂无文档")}
+                          {t(documentSummary.total ? "没有匹配的文档" : "暂无文档")}
                         </li>
                       )}
                     </ul>
@@ -2348,7 +2468,7 @@ function KnowledgeBasePageContent({
                             className="size-4 accent-primary"
                             aria-label={t("选择所有文档")}
                             checked={isAllFilteredDocumentsSelected}
-                            disabled={!filteredDocuments.length}
+                            disabled={!documents.length}
                             onChange={(event) =>
                               toggleAllFilteredDocuments(event.target.checked)
                             }
@@ -2516,7 +2636,7 @@ function KnowledgeBasePageContent({
                                 <span className="truncate">
                                   {documentStatusText(
                                     document,
-                                    knowledgeTasks,
+                                    documentTasks,
                                     t
                                   )}
                                 </span>
@@ -2626,13 +2746,13 @@ function KnowledgeBasePageContent({
                           <span className="flex size-10 items-center justify-center rounded-lg bg-muted/60">
                             <FileTextIcon className="size-4" />
                           </span>
-                          {t(documents.length ? "没有匹配的文档" : "暂无文档")}
+                          {t(documentSummary.total ? "没有匹配的文档" : "暂无文档")}
                         </div>
                       )}
                     </div>
                   </div>
                   <PaginationFooter
-                    total={filteredDocuments.length}
+                    total={documentTotal}
                     page={documentPage}
                     pageSize={documentPageSize}
                     onPageChange={setDocumentPage}
@@ -3152,7 +3272,7 @@ function KnowledgeBasePageContent({
                     )}
                   </div>
                   <PaginationFooter
-                    total={knowledgeTasks.length}
+                    total={knowledgeTaskTotal}
                     page={knowledgeTaskPage}
                     pageSize={knowledgeTaskPageSize}
                     onPageChange={setKnowledgeTaskPage}
@@ -3170,7 +3290,7 @@ function KnowledgeBasePageContent({
                 token={token}
                 workspaceId={selectedKnowledgeBase.workspace_id}
                 knowledgeBaseId={selectedKnowledgeBase.id}
-                documents={documents}
+                documents={evaluationDocuments}
                 canEdit={canEditDocuments}
                 reportError={reportError}
                 onMessage={notify}

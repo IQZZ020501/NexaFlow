@@ -124,6 +124,17 @@ class KnowledgeDocumentParseRequest(BaseModel):
     auto_index: bool = True
 
 
+KnowledgeDocumentIndexScope = Literal["all", "unsuccessful"]
+
+
+class KnowledgeDocumentIndexBatchRequest(BaseModel):
+    scope: KnowledgeDocumentIndexScope
+
+
+class KnowledgeDocumentIndexBatchResponse(BaseModel):
+    queued_count: int
+
+
 class KnowledgeAssetResponse(BaseModel):
     id: str
     kind: Literal["image"]
@@ -175,6 +186,7 @@ class KnowledgeTaskResponse(BaseModel):
     workspace_id: str
     knowledge_base_id: str
     document_id: str | None = None
+    document_filename: str | None = None
     task_type: str
     status: str
     attempts: int
@@ -187,6 +199,38 @@ class KnowledgeTaskResponse(BaseModel):
     finished_at: AppDateTime | None = None
     created_at: AppDateTime
     updated_at: AppDateTime
+
+
+KnowledgeDocumentSort = Literal["filename", "created_at", "updated_at", "size_bytes", "chunk_count"]
+
+
+class KnowledgeDocumentSummaryResponse(BaseModel):
+    total: int = 0
+    indexed: int = 0
+    indexing: int = 0
+    pending: int = 0
+    failed: int = 0
+    processing: int = 0
+
+
+class KnowledgeDocumentPageResponse(BaseModel):
+    items: list[KnowledgeDocumentResponse]
+    total: int
+    summary: KnowledgeDocumentSummaryResponse
+    active_rebuild_task: KnowledgeTaskResponse | None = None
+    document_tasks: list[KnowledgeTaskResponse] = Field(default_factory=list)
+
+
+class KnowledgeDocumentOptionResponse(BaseModel):
+    id: str
+    filename: str
+    is_active: bool
+
+
+class KnowledgeTaskPageResponse(BaseModel):
+    items: list[KnowledgeTaskResponse]
+    total: int
+    has_processing: bool
 
 
 class KnowledgeTaskBulkDeleteRequest(BaseModel):

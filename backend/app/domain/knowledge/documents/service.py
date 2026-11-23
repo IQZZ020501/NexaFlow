@@ -39,7 +39,6 @@ DEFAULT_DOCUMENT_META = {
     "security_level": "PUBLIC",
     DOCUMENT_STAGED_META_KEY: False,
 }
-RESTRICTED_FILENAME_MARKERS = ("秘密", "机密", "绝密")
 
 
 def attachment_to_response(attachment: KnowledgeAttachment) -> KnowledgeAttachmentResponse:
@@ -86,11 +85,6 @@ def clean_upload_filename(filename: str | None) -> str:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Document filename is invalid.",
-        )
-    if any(marker in name for marker in RESTRICTED_FILENAME_MARKERS):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Document filename contains restricted classification.",
         )
     return name[:255]
 

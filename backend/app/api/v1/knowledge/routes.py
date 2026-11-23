@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Body,
     Depends,
     File,
@@ -17,6 +18,7 @@ from app.api.deps import (
     get_settings,
     get_workspace_context_from_path,
 )
+from app.api.v1.knowledge.pagination import router as pagination_router
 from app.application.knowledge.documents.service import (
     create_knowledge_base,
     create_knowledge_documents_from_attachments,
@@ -25,7 +27,9 @@ from app.application.knowledge.documents.service import (
     delete_knowledge_task,
     delete_knowledge_tasks,
     dispatch_knowledge_task,
+    dispatch_knowledge_tasks,
     enqueue_index_knowledge_document,
+    enqueue_index_knowledge_documents,
     enqueue_parse_knowledge_document,
     enqueue_rebuild_knowledge_index,
     get_knowledge_base,
@@ -58,6 +62,8 @@ from app.schemas.knowledge import (
     KnowledgeBaseUpdateRequest,
     KnowledgeDocumentChunkResponse,
     KnowledgeDocumentCreateRequest,
+    KnowledgeDocumentIndexBatchRequest,
+    KnowledgeDocumentIndexBatchResponse,
     KnowledgeDocumentParseRequest,
     KnowledgeDocumentResponse,
     KnowledgeModelTestRequest,
@@ -72,6 +78,7 @@ from app.schemas.knowledge import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/knowledge-bases", tags=["knowledge"])
+router.include_router(pagination_router)
 
 
 @router.get("", response_model=list[KnowledgeBaseListItemResponse])
@@ -353,6 +360,31 @@ async def parse_workspace_knowledge_base_document(
     task = await enqueue_parse_knowledge_document(db, knowledge_base, document, context.user, payload)
     await dispatch_knowledge_task(task.id, settings)
     return task
+
+
+@router.post(
+    "/{knowledge_base_id}/documents/index",
+    response_model=KnowledgeDocumentIndexBatchResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def index_workspace_knowledge_base_documents(
+    knowledge_base_id: str,
+    payload: KnowledgeDocumentIndexBatchRequest,
+    background_tasks: BackgroundTasks,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> KnowledgeDocumentIndexBatchResponse:
+    knowledge_base = await get_knowledge_base(
+        db, context.workspace.id, knowledge_base_id
+    )
+    await require_knowledge_base_permission(db, knowledge_base, context.user, {"edit"})
+    task_ids = await enqueue_index_knowledge_documents(
+        db, knowledge_base, context.user, payload.scope
+    )
+    if task_ids:
+        background_tasks.add_task(dispatch_knowledge_tasks, task_ids, settings)
+    return KnowledgeDocumentIndexBatchResponse(queued_count=len(task_ids))
 
 
 @router.post(

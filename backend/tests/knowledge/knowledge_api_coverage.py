@@ -1517,12 +1517,22 @@ def test_knowledge_api_flow() -> None:
         )
         assert empty_attachment.status_code == 422, empty_attachment.text
 
-        restricted_attachment = client.post(
-            knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
-            headers=auth_headers(alice_token),
-            files={"file": ("机密-guide.txt", b"x", "text/plain")},
-        )
-        assert restricted_attachment.status_code == 422, restricted_attachment.text
+        for filename in ("保守国家秘密法.txt", "机密-guide.txt", "绝密文件.txt"):
+            named_attachment = client.post(
+                knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),
+                headers=auth_headers(alice_token),
+                files={"file": (filename, b"x", "text/plain")},
+            )
+            assert named_attachment.status_code == 201, named_attachment.text
+            assert named_attachment.json()["filename"] == filename
+            deleted_attachment = client.delete(
+                knowledge_url(
+                    default_workspace_id,
+                    f"/{knowledge_base_id}/attachments/{named_attachment.json()['id']}",
+                ),
+                headers=auth_headers(alice_token),
+            )
+            assert deleted_attachment.status_code == 204, deleted_attachment.text
 
         bob_attachment = client.post(
             knowledge_url(default_workspace_id, f"/{knowledge_base_id}/attachments"),

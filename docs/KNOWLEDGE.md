@@ -10,6 +10,12 @@
 - 知识库归档后只读：写操作（上传/解析/索引/重建/改名/授权管理/删除）返回 403，仅创建者可恢复。
 - owner（`created_by_user_id`）可通过 `PUT /knowledge-bases/{id}/owner` 转移给活动工作区成员；转移后原 owner 不再隐式享有 edit。
 
+## 列表与进度
+
+- 管理页通过 `GET /documents/page` 使用 `limit/offset` 分页；`search` 按文件名搜索，`sort_by` 支持文件名、大小、分段数、创建时间和更新时间，`sort_direction` 为 `asc/desc`。响应的 `total` 是筛选后的总数，`summary` 是不受搜索和当前页影响的全库状态统计，另返回当前页文档的进行中任务及全库重建任务。每页只查询对应文档的分段计数。
+- 任务页通过 `GET /tasks/page` 分页，响应包含总数、全库是否仍有进行中任务以及关联文档名；轮询不依赖当前页是否含运行任务。旧 `/documents`、`/tasks` 数组接口保持兼容，默认仍返回 100 条。
+- 文档详情通过 `GET /documents/{document_id}` 直接读取，避免从截断列表查找文档。检索评测按需读取 `/documents/options` 的轻量文档选项，不随列表页切换或轮询全量加载文档元数据。
+
 ## 分层关系
 
 ```text
@@ -28,6 +34,7 @@ api/v1/knowledge（routes/lifecycle/retrieval/evaluation 路由）
 
 - 附件上传 `POST /knowledge-bases/{kb_id}/attachments` 只接受 DOCX、MD、MARKDOWN、PDF、TXT、PPTX、XLSX、XLS、HTML、CSV、JSON、XML、ZIP，并先在服务端按扩展名拒绝其他格式，再将原文件持久化到对象存储（adapter 见 `backend/app/infra/storage/object_storage.py`）并返回 attachment。
 - 文档创建 `POST /documents` 接收 `attachment_ids`、`staged` 和显式 `import_mode`（`document`/`qa`）；事务内消费附件并生成 staged 文档。解析/向量化一律走 Celery 任务（`POST /parse`、`POST /index`）。
+- 文档页「向量化」菜单可选择当前知识库的全部文档、未成功文档或勾选文档。全库入口 `POST /documents/index` 接收 `scope=all|unsuccessful`；`all` 包含已向量化文档，`unsuccessful` 仅选择已分段但尚未成功的文档。两者均跳过未分段、上传草稿、已删除和已有进行中任务的文档，与当前分页、搜索无关。服务端在知识库锁内复核编辑权限，一次事务创建文档索引任务并将对应文档改为 `index_queued`、清除旧错误，再返回 `queued_count` 并后台派发；队列故障时保留排队记录供 Beat 恢复。
 - 普通文档解析在前后端统一默认使用智能分段：`hierarchical`、1200 字符、150 字符重叠、按空行分隔，并依次执行 `trim_lines` 与 `remove_empty_lines`；高级模式仍可显式提交 `flat` 和自定义参数。省略解析请求体与提交空对象的语义一致。
 - QA 模式只接受 UTF-8 CSV 或 XLSX，表头支持 `question/问题`、`answer/答案` 和可选 `source/来源`。每行生成一个 `kind=qa` Child，答案作为返回正文，`question + answer` 作为检索文本；最多 5000 行，问题/答案分别限制为 2000/20000 字符，普通分段参数在该模式下忽略。
 - 图片资产：DOCX 解析时抽取内嵌图片落对象存储（`KnowledgeAsset`/`KnowledgeChunkAsset` 记录），chunk 正文保留原子占位符并用 `images[]` 结构化返回；前端经鉴权接口拉取 blob 渲染，不暴露对象路径。图片不参与向量化。
@@ -52,6 +59,7 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`，Alembic `env.py` 
 
 - 文档删除或停用更新文档状态；对象存储和向量删除意图持久化，失败由 Beat 重试。
 - 知识任务保留 parse/index/rebuild_index/evaluate。排队任务停止后进入 `cancelled`；运行任务先进入 `cancelling`，worker 在租约/批次边界收口。只有终态任务可删除，受支持类型的 `failed/cancelled` 任务可在重试次数范围内重新提交。
+- 向量索引批次同时限制分段数和 UTF-8 文本总量（16 KiB；单个超长分段保持完整、单独请求）。供应商返回 429 时，当前批次最多退避重试三次，默认等待 60 / 120 / 240 秒并加少量随机延迟，且不早于 `Retry-After`；单任务累计等待不超过 450 秒。Redis 为同一注册模型共享冷却期，避免并发任务在冷却期间继续请求；Redis 短暂不可用时仍保留本任务的退避。等待期间继续维护租约并响应停止，重试成功后才更新批次进度。
 - 迁移 `202610250001` 删除图谱表、文档引用表、图设置/评测列、图任务以及结构化图导入文档与文件，并删除专属 Qdrant Profile collections。普通文档、向量 collection 与答案引用保留。
 - 该迁移需要访问 Qdrant 与共享 `KNOWLEDGE_STORAGE_DIR`；Compose 的 migrate 服务挂载知识存储并等待 Qdrant 健康。外部清理失败会中止升级，重试为幂等操作。迁移删除数据，不提供降级恢复；历史迁移文件保留以维持升级链。
 
@@ -70,6 +78,7 @@ ORM 模型集中在 `backend/app/domain/knowledge/models.py`，Alembic `env.py` 
 - `documents/lifecycle.py` — 文档删除/停用生命周期：状态更新与级联清理编排
 - `retrieval.py` — 纯检索算法：RRF 融合、Parent 上下文与 evidence 窗口裁剪、重排结果应用（由 `application/knowledge/retrieval/service.py` 调用）
 - `tasks/orchestration.py` — 解析/索引/重建/评测状态机编排：入队与冲突检测、embedding 模型解析、stop/retry/删除
+- `tasks/batch.py` — 全库向量化范围选择、编辑权限与任务冲突检查、原子批量入队
 - `tasks/runner.py` — 知识任务执行体：租约维护与心跳、parse/index 执行、失败/取消收口、孤儿任务恢复
 - `evaluation/service.py` — 评测用例与运行的业务规则：创建/删除、入队、权限、与重建类任务互斥
 - `evaluation/metrics.py` — 纯检索指标计算（单用例与聚合，含百分位延迟）

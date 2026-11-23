@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import {
   listKnowledgeBases,
   listKnowledgeDocumentChunks,
-  listKnowledgeDocuments,
+  getKnowledgeDocument,
   listKnowledgeTasks,
   loadKnowledgeDocumentMarkdown,
 } from "@/lib/api/knowledge"
@@ -112,13 +112,15 @@ function DocumentDetailPageContent({
     try {
       const [
         bases,
-        documents,
+        loadedDocument,
         documentChunks,
         documentTasks,
         documentMarkdown,
       ] = await Promise.all([
         listKnowledgeBases(token, selectedWorkspaceId),
-        listKnowledgeDocuments(token, selectedWorkspaceId, knowledgeBaseId),
+        getKnowledgeDocument(
+          token, selectedWorkspaceId, knowledgeBaseId, documentId
+        ),
         listKnowledgeDocumentChunks(
           token,
           selectedWorkspaceId,
@@ -146,9 +148,7 @@ function DocumentDetailPageContent({
       setKnowledgeBase(
         bases.find((base) => base.id === knowledgeBaseId) ?? null
       )
-      setDocument(
-        documents.find((item) => item.id === documentId) ?? null
-      )
+      setDocument(loadedDocument)
       setChunks(documentChunks)
       setTasks(documentTasks)
       setMarkdownContent(documentMarkdown)
