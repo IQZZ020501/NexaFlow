@@ -104,6 +104,54 @@ def test_worker_command_consumes_all_application_queues() -> None:
     assert pidfile != worker.worker_pidfile("redis://localhost:6379/1")
 
 
+def test_macos_worker_preserves_system_proxies_before_celery_starts() -> None:
+    import os
+    from unittest.mock import patch
+    from urllib.request import getproxies_environment
+
+    import httpx
+    from celery.apps.worker import Worker
+
+    worker = _load_worker_script()
+    system_proxies = {
+        "http": "http://127.0.0.1:7897",
+        "https": "http://127.0.0.1:7897",
+    }
+
+    def macos_proxies():
+        return getproxies_environment() or system_proxies
+
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch.object(worker, "getproxies", side_effect=macos_proxies),
+        patch("httpx._utils.getproxies", side_effect=macos_proxies),
+    ):
+        worker.preserve_macos_proxy_environment("darwin")
+        Worker.macOS_proxy_detection_workaround(None)
+        assert macos_proxies()["https"] == system_proxies["https"]
+        assert os.environ["celery_dummy_proxy"] == "set_by_celeryd"
+        with httpx.Client() as client:
+            assert {key.pattern for key in client._mounts} >= {"http://", "https://"}
+
+    for platform in ("linux", "win32"):
+        with patch.object(worker, "getproxies") as detect:
+            worker.preserve_macos_proxy_environment(platform)
+            detect.assert_not_called()
+
+    for configured in (
+        {"HTTPS_PROXY": "http://configured.example:8080", "NO_PROXY": "localhost"},
+        {"all_proxy": "http://configured.example:8080"},
+        {"no_proxy": "*"},
+    ):
+        with patch.dict(os.environ, configured, clear=True):
+            worker.preserve_macos_proxy_environment("darwin")
+            assert dict(os.environ) == configured
+
+    with patch.dict(os.environ, {}, clear=True), patch.object(worker, "getproxies", return_value={}):
+        worker.preserve_macos_proxy_environment("darwin")
+        assert not os.environ
+
+
 def test_worker_roles_split_agent_runs_from_background_jobs() -> None:
     worker = _load_worker_script()
     broker = "redis://localhost:6379/0"
@@ -265,6 +313,7 @@ def main() -> None:
     test_coverage_runner_times_out_suites()
     test_celery_worker_pool_is_fork_safe_without_prefork()
     test_worker_command_consumes_all_application_queues()
+    test_macos_worker_preserves_system_proxies_before_celery_starts()
     test_worker_roles_split_agent_runs_from_background_jobs()
     test_task_event_loop_offloads_blocking_calls_to_a_wide_executor()
     test_celery_registers_one_task_per_job_type()

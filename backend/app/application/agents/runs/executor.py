@@ -991,6 +991,10 @@ async def _execute_claimed_agent_run(
         skill_context=skill_execution_context(scope.skill_snapshots),
         context_messages=memory.messages,
     )
+
+    async def tool_progress(event: dict[str, Any]) -> None:
+        await record_event(event)
+
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
             run,
@@ -998,6 +1002,7 @@ async def _execute_claimed_agent_run(
             worker_task_id,
             settings,
             lease_lost,
+            on_event=tool_progress,
         )
         knowledge_ledger = DurableToolLedger(
             run,

@@ -29,6 +29,14 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
     "发布应用需要使用工作空间共享模型",
   "Agent model not found.": "所选模型不存在或当前用户无权使用",
   "Agent image model not found.": "所选模型不存在或当前用户无权使用",
+  "Uncertain tool calls cannot be retried through approval; verify the external state and reject the retry to continue.":
+    "此调用可能已执行，无法通过批准操作重试。请核对结果后选择“不重试并继续”。",
+  "Tool invocation deadline expired.":
+    "工具执行已超时，请先核对外部服务的结果。",
+  "Tool invocation outcome is uncertain after worker recovery.":
+    "工具执行结果无法确认，请先核对外部服务的结果。",
+  "Tool invocation outcome is uncertain after dispatch.":
+    "工具执行结果无法确认，请先核对外部服务的结果。",
   "Model not found.": "所选模型不存在或当前用户无权使用",
   "Member model endpoints must use public network addresses.":
     "成员接入的模型仅支持公网地址",

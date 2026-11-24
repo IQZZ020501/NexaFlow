@@ -24,6 +24,11 @@ from app.domain.agents.runtime import (
     AgentToolResult,
     AgentToolUncertain,
 )
+from app.domain.agents.runtime.callbacks import (
+    AgentEventBus,
+    AgentEventHandler,
+    NexaFlowCallback,
+)
 from app.domain.agents.runtime.state import PendingToolCall
 from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
 from app.entities.defaults import utc_now
@@ -92,6 +97,8 @@ class UnifiedAgentToolRuntime:
         worker_task_id: str,
         settings: Settings,
         lease_lost: asyncio.Event,
+        *,
+        on_event: AgentEventHandler | None = None,
     ) -> None:
         self.run = run
         self.snapshots = {snapshot.function_name: snapshot for snapshot in snapshots}
@@ -100,6 +107,7 @@ class UnifiedAgentToolRuntime:
         self.worker_task_id = worker_task_id
         self.settings = settings
         self.lease_lost = lease_lost
+        self.on_event = on_event
         self.image_model_id = frozen_agent_image_model_id(run)
 
     async def before(
@@ -135,7 +143,8 @@ class UnifiedAgentToolRuntime:
                 run_agent_approval_mode(self.run),
                 snapshot,
                 model_decides_mcp=model_decides_mcp_approval(self.run),
-                model_requires_approval=metadata.get("model_requires_approval") != "false",
+                model_requires_approval=metadata.get("model_requires_approval")
+                != "false",
             ),
         )
         try:
@@ -163,6 +172,22 @@ class UnifiedAgentToolRuntime:
                 invocation_id,
                 "Tool call requires user approval.",
             )
+
+        async def started() -> None:
+            if self.on_event is not None:
+                await self.on_event(
+                    {
+                        "type": "process",
+                        "event": NexaFlowCallback(AgentEventBus()).tool_event(
+                            turn=turn,
+                            tool_name=call["name"],
+                            call_id=call["id"],
+                            metadata=metadata,
+                            input_value=arguments,
+                        ),
+                    }
+                )
+
         try:
             result = await execute_tool_invocation(
                 invocation.id,
@@ -170,6 +195,7 @@ class UnifiedAgentToolRuntime:
                 f"{self.worker_task_id}:{invocation_id}",
                 run_worker_task_id=self.worker_task_id,
                 lease_lost=self.lease_lost,
+                on_started=started if self.on_event is not None else None,
             )
         except ToolInvocationBusy as exc:
             raise AgentToolBusy(call["id"], str(exc), exc.resource_wait) from exc

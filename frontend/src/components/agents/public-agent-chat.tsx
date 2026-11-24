@@ -48,7 +48,7 @@ import {
 } from "@/components/agents/agent-prompt-bar"
 import { AgentContextCard } from "@/components/agents/agent-context-card"
 import { AgentToolCallRow } from "@/components/agents/agent-tool-call-row"
-import { ToolApprovalCard } from "@/components/agents/inline-tool-approval"
+import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 import { AgentSuggestedQuestions } from "@/components/agents/agent-suggested-questions"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
 import {
@@ -257,55 +257,6 @@ function PublicToolEventRow({
   )
 }
 
-function PublicToolApproval({
-  runId,
-  call,
-  resolvingCallId,
-  onDecision,
-  t,
-}: {
-  runId: string
-  call: AgentToolCall
-  resolvingCallId: string | null
-  onDecision: (callId: string, decision: "approve" | "reject") => void
-  t: TFunction
-}) {
-  const isResolving = resolvingCallId === `${runId}:${call.call_id}`
-  return (
-    <ToolApprovalCard
-      title={t("工具调用需要确认")}
-      toolName={call.tool_name}
-      serverName={call.server_name}
-      input={call.arguments}
-      t={t}
-    >
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={isResolving}
-        onClick={() => onDecision(call.call_id, "reject")}
-      >
-        {isResolving ? (
-          <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
-        ) : null}
-        {t("拒绝")}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        disabled={isResolving}
-        onClick={() => onDecision(call.call_id, "approve")}
-      >
-        {isResolving ? (
-          <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />
-        ) : null}
-        {t("批准并执行")}
-      </Button>
-    </ToolApprovalCard>
-  )
-}
-
 export function unrenderedPublicToolCalls(
   progress: ExternalAgentProgressEvent[],
   calls: AgentToolCall[]
@@ -341,16 +292,17 @@ export function visiblePublicToolProgress(
     (event) =>
       !(
         event.type === "tool" &&
-        event.stage === "preparing" &&
+        event.status === "running" &&
         calls.some(
           (call) =>
-            [
-              "pending",
-              "awaiting_approval",
-              "approved",
-              "running",
-              "uncertain",
-            ].includes(call.status) &&
+            (call.status === "uncertain" ||
+              (event.stage === "preparing" &&
+                [
+                  "pending",
+                  "awaiting_approval",
+                  "approved",
+                  "running",
+                ].includes(call.status))) &&
             event.turn === call.turn &&
             event.tool_name === call.tool_name &&
             event.server_name === call.server_name
@@ -1538,6 +1490,7 @@ export function PublicAgentChat({
     decision: "approve" | "reject"
   ) {
     if (!token || resolvingCallId) return
+    setSendError(null)
     setResolvingCallId(`${runId}:${callId}`)
     try {
       const run = await resolvePublicAgentRunToolCall(
@@ -1630,6 +1583,7 @@ export function PublicAgentChat({
     } catch (error) {
       const message = getErrorMessage(error, t)
       setSendError(message)
+      await loadRunToolCalls(runId)
     } finally {
       setResolvingCallId(null)
     }
@@ -2324,7 +2278,7 @@ export function PublicAgentChat({
                                         "awaiting_approval",
                                         "uncertain",
                                       ].includes(call.status) ? (
-                                        <PublicToolApproval
+                                        <InlineToolApproval
                                           key={call.call_id}
                                           runId={run.id}
                                           call={call}

@@ -3021,6 +3021,147 @@ describe("PublicAgentChat", () => {
     await waitFor(() => expect(screen.getByText("运行已取消")).toBeTruthy())
   })
 
+  test("continues an uncertain image call without offering approval or retrying", async () => {
+    const requests: string[] = []
+    let continued = false
+    fetchHandler = agentFetchHandler(
+      {
+        conversations: { items: [conversation("conv-1", "生图任务")] },
+        history: () =>
+          jsonResponse({
+            items: [
+              run({
+                status: continued ? "succeeded" : "awaiting_approval",
+                result: continued ? "已继续处理" : "",
+              }),
+            ],
+            total: 1,
+            offset: 0,
+            limit: 200,
+          }),
+        toolCalls: () =>
+          jsonResponse([
+            {
+              ...TOOL_CALL,
+              tool_name: "generate_image",
+              tool_kind: "builtin",
+              server_name: "",
+              status: "uncertain",
+              last_error: "Tool invocation deadline expired.",
+            },
+          ]),
+        resolveRun: () => {
+          continued = true
+          return jsonResponse(run({ status: "running", result: "" }))
+        },
+        streamResponses: [
+          () =>
+            ndjsonResponse([
+              {
+                type: "complete",
+                sequence: 1,
+                run: run({ status: "succeeded", result: "已继续处理" }),
+              },
+            ]),
+        ],
+      },
+      requests
+    )
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+    await screen.findByText("工具执行结果不确定")
+    expect(screen.queryByRole("button", { name: "批准并执行" })).toBeNull()
+    expect(screen.getByText("等待核对结果")).toBeTruthy()
+    expect(
+      screen.getByText("工具执行已超时，请先核对外部服务的结果。")
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        "调用可能已在外部服务执行，请先核对结果。选择“不重试并继续”可继续对话。"
+      )
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "不重试并继续" }))
+    await screen.findByText("已继续处理")
+    expect(requests.filter((request) => request.endsWith("/reject"))).toHaveLength(1)
+    expect(requests.some((request) => request.endsWith("/approve"))).toBe(false)
+    expect(screen.queryByText("工具执行结果不确定")).toBeNull()
+  })
+
+  test("replaces running image progress when its ledger outcome becomes uncertain", () => {
+    const progress = [
+      toolEvent("image-call", "running", { tool_name: "generate_image" }),
+    ]
+    const calls = [{
+      ...TOOL_CALL,
+      call_id: "image-call",
+      tool_name: "generate_image",
+      server_name: "",
+      status: "uncertain" as const,
+    }]
+    expect(visiblePublicToolProgress(progress, calls)).toEqual([])
+    expect(unrenderedPublicToolCalls(progress, calls)).toEqual(calls)
+  })
+
+  test("refreshes a stale approval after the server reports an uncertain outcome", async () => {
+    const requests: string[] = []
+    let conflicted = false
+    let continued = false
+    fetchHandler = agentFetchHandler(
+      {
+        conversations: { items: [conversation("conv-1", "生图任务")] },
+        history: () =>
+          jsonResponse({
+            items: [
+              run({
+                status: continued ? "succeeded" : "awaiting_approval",
+                result: continued ? "完成" : "",
+              }),
+            ],
+            total: 1,
+            offset: 0,
+            limit: 200,
+          }),
+        toolCalls: () =>
+          jsonResponse([
+            { ...TOOL_CALL, status: conflicted ? "uncertain" : "awaiting_approval" },
+          ]),
+        resolveRun: () => {
+          if (conflicted) {
+            continued = true
+            return jsonResponse(run({ status: "running", result: "" }))
+          }
+          conflicted = true
+          return jsonResponse(
+            {
+              detail:
+                "Uncertain tool calls cannot be retried through approval; verify the external state and reject the retry to continue.",
+            },
+            409
+          )
+        },
+      },
+      requests
+    )
+    renderPage(
+      <PublicAgentChat agentId="agent-1" initialConversationId="conv-1" />
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "批准并执行" }))
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "此调用可能已执行，无法通过批准操作重试。请核对结果后选择“不重试并继续”。"
+      )
+    )
+    await screen.findByText("工具执行结果不确定")
+    expect(screen.queryByRole("button", { name: "批准并执行" })).toBeNull()
+    expect(screen.getByRole("button", { name: "不重试并继续" })).toBeTruthy()
+    expect(requests.filter((request) => request.endsWith("/approve"))).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "不重试并继续" }))
+    await screen.findByText("完成")
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(requests.filter((request) => request.endsWith("/reject"))).toHaveLength(1)
+  })
+
   test("approves a tool call and resumes observing the run", async () => {
     const requests: string[] = []
     let approved = false
@@ -3214,6 +3355,83 @@ describe("PublicAgentChat", () => {
 
     streamController?.close()
   }, 10_000)
+
+  test("updates an approved image call from waiting to running on execution progress", async () => {
+    const imageCall = {
+      ...TOOL_CALL,
+      call_id: "image-call",
+      tool_name: "generate_image",
+      tool_kind: "builtin",
+      server_name: "",
+    } satisfies AgentToolCall
+    const encoder = new TextEncoder()
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    const emit = (event: unknown) =>
+      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+    fetchHandler = agentFetchHandler({
+      conversations: { items: [] },
+      createRun: () =>
+        jsonResponse(run({ status: "running", result: "" }), 201),
+      streamResponses: [
+        () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(value) {
+                controller = value
+                emit({
+                  type: "approval_required",
+                  call_id: imageCall.call_id,
+                  reason: "需要确认",
+                })
+              },
+            })
+          ),
+      ],
+      toolCalls: () => jsonResponse([imageCall]),
+      resolveRun: () => jsonResponse(run({ status: "running", result: "" })),
+    })
+    renderPage(<PublicAgentChat agentId="agent-1" />)
+    await screen.findByText("开始新对话")
+    sendMessage("生成一张图片")
+    fireEvent.click(await screen.findByRole("button", { name: "批准并执行" }))
+    await screen.findByText("等待执行")
+
+    emit({
+      type: "progress",
+      event: toolEvent(imageCall.call_id, "running", {
+        stage: "running",
+        tool_name: imageCall.tool_name,
+        tool_kind: imageCall.tool_kind,
+        input: { filename: "林念全身镜头" },
+      }),
+    })
+    expect(await screen.findByText("运行中")).toBeTruthy()
+    expect(screen.queryByText("等待执行")).toBeNull()
+
+    emit({
+      type: "progress",
+      event: toolEvent(imageCall.call_id, "succeeded", {
+        tool_name: imageCall.tool_name,
+        tool_kind: imageCall.tool_kind,
+      }),
+    })
+    emit({
+      type: "complete",
+      run: run({
+        status: "succeeded",
+        result: "图片已生成，请下载。",
+        progress: [
+          toolEvent(imageCall.call_id, "succeeded", {
+            tool_name: imageCall.tool_name,
+          }),
+        ],
+      }),
+    })
+    expect(await screen.findByText("图片已生成，请下载。")).toBeTruthy()
+    expect(screen.queryByText("运行中")).toBeNull()
+    expect(screen.queryByText("等待执行")).toBeNull()
+    expect(screen.queryByLabelText("停止生成")).toBeNull()
+  })
 
   test("does not revive an approved image call after a streamed RAG handoff", async () => {
     let secondCall = false
@@ -3700,8 +3918,19 @@ describe("PublicAgentChat", () => {
         limit: 200,
       },
       toolCalls: () => jsonResponse([TOOL_CALL]),
-      resolveRun: () => jsonResponse(run({ status: "running", result: "" })),
-      streamResponses: [() => new Response("", { status: 403 })],
+      resolveRun: () =>
+        jsonResponse(run({ id: "run-paused", status: "running", result: "" })),
+      streamResponses: [
+        () =>
+          ndjsonResponse([
+            {
+              type: "complete",
+              sequence: 1,
+              run: run({ id: "run-paused", status: "awaiting_approval", result: "" }),
+            },
+          ]),
+        () => new Response("", { status: 403 }),
+      ],
     })
 
     renderPage(
@@ -3709,6 +3938,8 @@ describe("PublicAgentChat", () => {
     )
     expect(await screen.findByText("工具调用需要确认")).toBeTruthy()
 
+    // Finish the paused stream before testing the newly resumed stream's error.
+    await waitFor(() => expect(screen.queryByLabelText("停止生成")).toBeNull())
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
 
     await waitFor(() =>

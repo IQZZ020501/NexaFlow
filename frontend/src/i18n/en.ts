@@ -1647,6 +1647,15 @@ export const en = {
   搜索网页: "Search the web",
   读取网页: "Read webpage",
   工具执行结果不确定: "Tool outcome is uncertain",
+  等待核对结果: "Check result",
+  "调用可能已在外部服务执行，请先核对结果。选择“不重试并继续”可继续对话。":
+    "This call may already have executed in the external service. Check the result, then select “Continue without retrying” to continue the conversation.",
+  "此调用可能已执行，无法通过批准操作重试。请核对结果后选择“不重试并继续”。":
+    "This call may already have executed and cannot be retried through approval. Check the result, then select “Continue without retrying”.",
+  "工具执行已超时，请先核对外部服务的结果。":
+    "The tool call timed out. Check the result in the external service first.",
+  "工具执行结果无法确认，请先核对外部服务的结果。":
+    "The tool outcome could not be confirmed. Check the result in the external service first.",
   工具调用需要确认: "Tool call requires approval",
   不重试并继续: "Continue without retrying",
   拒绝: "Reject",

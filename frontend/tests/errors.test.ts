@@ -149,4 +149,37 @@ describe("API error localization", () => {
       )
     }
   })
+
+  test.each([
+    [
+      "Uncertain tool calls cannot be retried through approval; verify the external state and reject the retry to continue.",
+      "此调用可能已执行，无法通过批准操作重试。请核对结果后选择“不重试并继续”。",
+      "此呼叫可能已執行，無法透過批准操作重試。請核對結果後選擇「不重試並繼續」。",
+      "This call may already have executed and cannot be retried through approval. Check the result, then select “Continue without retrying”.",
+    ],
+    [
+      "Tool invocation deadline expired.",
+      "工具执行已超时，请先核对外部服务的结果。",
+      "工具執行已逾時，請先核對外部服務的結果。",
+      "The tool call timed out. Check the result in the external service first.",
+    ],
+    ...[
+      "Tool invocation outcome is uncertain after worker recovery.",
+      "Tool invocation outcome is uncertain after dispatch.",
+    ].map((message) => [
+      message,
+      "工具执行结果无法确认，请先核对外部服务的结果。",
+      "工具執行結果無法確認，請先核對外部服務的結果。",
+      "The tool outcome could not be confirmed. Check the result in the external service first.",
+    ]),
+  ])("localizes uncertain tool outcomes: %s", (message, hans, hant, en) => {
+    for (const [language, expected] of [
+      ["zh-Hans", hans],
+      ["zh-Hant", hant],
+      ["en", en],
+    ] as const) {
+      expect(getErrorMessage(new ApiError(409, message), tFor(language))).toBe(expected)
+      expect(getErrorMessage(new Error(message), tFor(language))).toBe(expected)
+    }
+  })
 })

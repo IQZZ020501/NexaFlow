@@ -18,6 +18,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.request import getproxies
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -119,6 +120,20 @@ async def resolve_deployment_keys(settings: Settings) -> dict[str, str]:
     )
 
 
+def preserve_macos_proxy_environment(platform: str = sys.platform) -> None:
+    if platform != "darwin":
+        return
+    # Celery's macOS workaround adds celery_dummy_proxy, which makes urllib
+    # stop falling back to the system proxy settings. Resolve them before
+    # Celery starts so SDK requests use the same route as the API process.
+    # Existing proxy/no_proxy environment choices retain urllib's precedence.
+    for scheme, value in getproxies().items():
+        if scheme in {"http", "https", "all", "no"} and value:
+            key = f"{scheme}_proxy"
+            if key not in os.environ and key.upper() not in os.environ:
+                os.environ[key] = value
+
+
 def main() -> None:
     os.environ["TZ"] = "Asia/Shanghai"
     role_name, concurrency, celery_arguments = parse_worker_arguments(sys.argv[1:])
@@ -128,6 +143,7 @@ def main() -> None:
         raise SystemExit(
             "OPENSANDBOX_API_KEY is required; no host execution fallback is available."
         )
+    preserve_macos_proxy_environment()
     resolved = asyncio.run(resolve_deployment_keys(settings))
     # The Celery process inherits these, so a stored key never depends on this
     # process staying alive or on the .env values still being present.

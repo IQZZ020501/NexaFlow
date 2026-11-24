@@ -17,10 +17,13 @@
 
 - 普通调用和 MCP 长任务均核对 invocation 与所属 Run 的 Worker 身份。Run 状态接受共享的 `running` / `running_v2` 集合；普通调用在 adapter 等待期间续租，失去任一归属或收到 Run 租约丢失信号时通知并取消 adapter。结果写回再次核对归属；只有租约过期而未被接管时，已返回的成功结果仍可保存。
 - Agent API 使用 `ask_risky` 解释审批偏好，包括读取旧 Run 快照时。创建预检和执行前检查继续要求 Tool 策略为 `auto`、effect 为 `pure` 或 `external_read`，且允许 API 访问；需要交互审批的工具在创建时拒绝。Console 和公开聊天仍按用户选择审批。
+- 统一工具领取成功并提交后，Agent 在调用适配器前持久化 `agent.tool_running` 过程事件，Console 和公开聊天据此从「等待执行」更新为「运行中」。待审批、校验失败和终态结果重放不会发出新的开始事件；完成仍以工具账本与 Run 终态为准。
 - bash 按最终 UTF-8 JSON 大小裁剪 stdout/stderr 预览，使整体结果保持在 32 KiB 内，并保留退出码和制品引用。超出预览的结果在 2 MiB 内保存到 `tool_invocations.full_result`，通过同 Run、执行用户和访问来源隔离的 `read_tool_result` 分页读取；沙箱原有的 30 KiB 日志采集上限保持不变。
 - 生图账本记录 `not_started`、`dispatched`、`completed`。请求前在短事务中检查归属并提交派发标记，制品写入在同一归属锁下提交；取消事务与这些边界按 RunState → invocation 顺序锁定。取消发生在模型配置读取期间时，不再派发供应商请求；已派发的请求仍可能收费，取消后返回的图片不会跨过归属检查落库。缺少派发标记的旧记录继续保守判定 `uncertain`。
+- 生图使用 SDK 的 HTTP 响应流接口读取普通 JSON，不请求模型侧流式生图。完整、有界的 JSON 一旦收齐就解码 PNG，不再等待兼容服务结束 chunked 响应；响应与客户端在后台分别限时清理，关闭连接的阻塞或错误不影响已经收到的图片入库。接收大小、Base64 和 PNG 校验、5 MiB 制品上限、Run 归属与取消检查保持生效。日志仅记录关联 ID、模型 ID、阶段、字节数和耗时，不记录提示词、密钥或图片正文；SDK 不自动重试收费请求。
+- macOS 下 Celery 会设置 `celery_dummy_proxy`，使 urllib 不再读取系统代理。`backend/scripts/worker.py` 在此之前解析并继承代理，保持 API 与 Worker 的网络路径一致；已有代理环境设置保留优先级，要求公共端点的模型仍使用禁用环境代理的安全传输。排查「供应商已完成、聊天仍运行中」时同时比较生成耗时、响应头到达和正文传输耗时，不能以供应商成功记录代替本地制品已保存。
 
-`tests.tools.tools` 包含 `tests.tools.lifecycle` 的真实账本时序回归，覆盖续租、Run/invocation 接管、取消发生在生图派发前后、结果重放以及 bash 日志分页与身份隔离。带实际 Run 的 HTTP 长任务首次提交、恢复和 API 只读审批检查由 `tests.tools.remote_tasks` 覆盖。
+`tests.tools.tools` 包含 `tests.tools.lifecycle` 的真实账本时序回归，覆盖续租、Run/invocation 接管、取消发生在生图派发前后、已收到图片但连接未关闭时的落库与幂等重放，以及 bash 日志分页与身份隔离。`tests.tools.image_transport` 使用真实 SDK 和模拟传输验证响应不结束、关闭阻塞/报错、截断、大小限制和日志脱敏，不调用收费服务。带实际 Run 的 HTTP 长任务首次提交、恢复和 API 只读审批检查由 `tests.tools.remote_tasks` 覆盖。
 
 ## 文件身份与授权
 

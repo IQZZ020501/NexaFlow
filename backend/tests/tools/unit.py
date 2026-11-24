@@ -19,6 +19,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 
 import asyncio
 import base64
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -226,6 +227,24 @@ def test_image_tool_queue_freezes_its_model_configuration() -> None:
     assert preapproved.status == "queued"
 
 
+class _ImageResponseContext:
+    status_code = 200
+
+    def __init__(self, generate, arguments):
+        self.generate = generate
+        self.arguments = arguments
+
+    async def __aenter__(self):
+        self.result = await self.generate(**self.arguments)
+        return self
+
+    async def iter_bytes(self):
+        yield json.dumps({"data": [vars(item) for item in self.result.data]}).encode()
+
+    async def close(self):
+        pass
+
+
 def test_image_provider_decodes_only_embedded_png() -> None:
     from app.adapters.llm import image as image_adapter
     from app.ports.llm import ModelProviderError
@@ -237,6 +256,9 @@ def test_image_provider_decodes_only_embedded_png() -> None:
         data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
     )
     images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+    images.with_streaming_response = SimpleNamespace(
+        generate=lambda **arguments: _ImageResponseContext(images.generate, arguments)
+    )
 
     class FakeClient:
         def __init__(self, **options):
@@ -248,10 +270,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
             }
             self.images = images
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
+        async def close(self):
             return None
 
     with (
@@ -431,15 +450,15 @@ def test_image_provider_updates_configured_resolution_extension() -> None:
         data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
     )
     images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+    images.with_streaming_response = SimpleNamespace(
+        generate=lambda **arguments: _ImageResponseContext(images.generate, arguments)
+    )
 
     class FakeClient:
         def __init__(self, **_options):
             self.images = images
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
+        async def close(self):
             return None
 
     with (

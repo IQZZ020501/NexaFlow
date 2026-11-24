@@ -13,6 +13,8 @@ export function ToolApprovalCard({
   toolName,
   serverName,
   input,
+  description,
+  caption,
   error,
   children,
   t,
@@ -21,6 +23,8 @@ export function ToolApprovalCard({
   toolName: string
   serverName?: string
   input: Record<string, unknown>
+  description?: string
+  caption?: string
   error?: string
   children: ReactNode
   t: TFunction
@@ -34,6 +38,11 @@ export function ToolApprovalCard({
           {serverName ? ` @ ${serverName}` : ""}
         </p>
       </div>
+      {description ? (
+        <p className="px-4 pb-3 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      ) : null}
       {error ? (
         <p className="px-4 pb-3 text-xs leading-5 text-destructive">{error}</p>
       ) : null}
@@ -42,7 +51,7 @@ export function ToolApprovalCard({
         <pre className="font-mono">{JSON.stringify(input, null, 2)}</pre>
       </div>
       <div className="bui-approval-footer">
-        <span className="bui-approval-caption">{t("等待确认")}</span>
+        <span className="bui-approval-caption">{caption ?? t("等待确认")}</span>
         <div className="bui-approval-actions">{children}</div>
       </div>
     </section>
@@ -83,6 +92,14 @@ export function InlineToolApproval({
       toolName={toolName}
       serverName={call.server_name ? serverName : undefined}
       input={call.arguments}
+      description={
+        isUncertain
+          ? t(
+              "调用可能已在外部服务执行，请先核对结果。选择“不重试并继续”可继续对话。"
+            )
+          : undefined
+      }
+      caption={isUncertain ? t("等待核对结果") : undefined}
       error={
         call.last_error
           ? getErrorMessage(new Error(call.last_error), t)
