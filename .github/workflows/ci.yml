@@ -120,7 +120,9 @@ jobs:
         run: uv run python -m tests.platform.system_governance
 
       - name: Run identity tests
-        run: uv run python -m tests.identity.identity
+        run: |
+          uv run python -m tests.identity.identity
+          uv run python -m tests.identity.bootstrap_migration
 
       - name: Run workspace tests
         run: uv run python -m tests.platform.workspaces
@@ -132,7 +134,9 @@ jobs:
         run: uv run python -m tests.knowledge.knowledge
 
       - name: Run llm tests
-        run: uv run python -m tests.models.llm
+        run: |
+          uv run python -m tests.models.llm
+          uv run python -m tests.models.network
 
       - name: Run agent tests
         run: |
@@ -207,7 +211,9 @@ jobs:
         run: bun run lint
 
       - name: Test
-        run: bun test --parallel
+        run: |
+          bun test --parallel
+          bun run test:proxy
 
       - name: Build
         run: bun run build

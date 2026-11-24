@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import httpcore
 import httpx
 
+from app.adapters.llm.response_limits import ResponseBudget, active_probe
 from app.ports.llm import PUBLIC_ENDPOINT_CREDENTIAL, ModelProviderError
 
 URL_FIELDS = ("api_base", "azure_endpoint", "endpoint_url")
@@ -122,7 +123,40 @@ def validate_member_connection(provider_type, credentials, request_params):
         public_addresses(parsed.hostname, port)
 
 
+class _DeadlineStream(httpcore.NetworkStream):
+    """Apply the same deadline to header, framing, and body reads at the socket."""
+
+    def __init__(self, stream, budget: ResponseBudget):
+        self.stream = stream
+        self.budget = budget
+
+    def read(self, max_bytes, timeout=None):
+        return self.stream.read(max_bytes, self.budget.remaining_time(timeout))
+
+    def write(self, buffer, timeout=None):
+        self.stream.write(buffer, self.budget.remaining_time(timeout))
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        try:
+            stream = self.stream.start_tls(
+                ssl_context, server_hostname, self.budget.remaining_time(timeout)
+            )
+        except BaseException:
+            self.stream.close()
+            raise
+        return _DeadlineStream(stream, self.budget)
+
+    def get_extra_info(self, info):
+        return self.stream.get_extra_info(info)
+
+    def close(self):
+        self.stream.close()
+
+
 class PublicSyncBackend(httpcore.SyncBackend):
+    def __init__(self, budget: ResponseBudget | None = None):
+        self.budget = budget
+
     def connect_tcp(
         self, host, port, timeout=None, local_address=None, socket_options=None
     ):
@@ -130,9 +164,11 @@ class PublicSyncBackend(httpcore.SyncBackend):
         error = None
         for address in addresses:
             try:
-                return super().connect_tcp(
-                    address, port, timeout, local_address, socket_options
+                remaining = self.budget.remaining_time(timeout) if self.budget else timeout
+                stream = super().connect_tcp(
+                    address, port, remaining, local_address, socket_options
                 )
+                return _DeadlineStream(stream, self.budget) if self.budget else stream
             except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
                 error = exc
         raise error
@@ -160,7 +196,7 @@ class PublicAsyncBackend(httpcore.AnyIOBackend):
         raise httpcore.ConnectError("Model Unix sockets are not allowed.")
 
 
-def public_transport(*, asynchronous=False):
+def public_transport(*, asynchronous=False, budget=None):
     transport = (
         httpx.AsyncHTTPTransport(trust_env=False)
         if asynchronous
@@ -169,18 +205,24 @@ def public_transport(*, asynchronous=False):
     # Same pinned-backend approach as the MCP adapter, for the HTTPX version
     # required by the model SDKs. Covered by actual TCP target regressions.
     transport._pool._network_backend = (
-        PublicAsyncBackend() if asynchronous else PublicSyncBackend()
+        PublicAsyncBackend() if asynchronous else PublicSyncBackend(budget or active_probe.get())
     )
     return transport
 
 
-def public_client(timeout=60):
-    return httpx.Client(
-        transport=public_transport(),
+def public_client(timeout=60, *, budget=None):
+    probe = active_probe.get()
+    budget = budget or probe
+    client = httpx.Client(
+        event_hooks=budget.hooks() if budget else None,
+        transport=public_transport(budget=budget),
         trust_env=False,
         follow_redirects=False,
         timeout=timeout,
     )
+    if probe:
+        probe.resources.callback(client.close)
+    return client
 
 
 def public_async_client(timeout=60):
@@ -194,6 +236,13 @@ def public_async_client(timeout=60):
 
 def public_client_options(credentials, timeout=60):
     if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) != "true":
+        probe = active_probe.get()
+        if probe:
+            client = httpx.Client(
+                timeout=timeout, event_hooks=probe.hooks(), follow_redirects=True
+            )
+            probe.resources.callback(client.close)
+            return {"http_client": client}
         return {}
     return {
         "http_client": public_client(timeout),

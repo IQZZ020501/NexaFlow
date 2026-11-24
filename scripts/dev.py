@@ -43,6 +43,7 @@ SENSITIVE_BACKEND_ENV_KEYS = {
     "MODEL_SECRET_KEY",
     "OPENSANDBOX_API_KEY",
     "POSTGRES_PASSWORD",
+    "BOOTSTRAP_ADMIN_PASSWORD",
 }
 # Values shipped by older .env.example templates; they are never valid keys.
 SECRET_KEY_PLACEHOLDERS = (
@@ -146,6 +147,9 @@ def ensure_env_file() -> dict[str, str]:
         log("[setup] Created .env from .env.example")
 
     values = read_env(ENV_FILE)
+    if not values.get("BOOTSTRAP_ADMIN_PASSWORD") or values["BOOTSTRAP_ADMIN_PASSWORD"] == "NexaFlow@123..":
+        set_env_value(ENV_FILE, "BOOTSTRAP_ADMIN_PASSWORD", f"Nxf!{secrets.token_urlsafe(24)}A1")
+        log("[setup] Generated a private initial admin password in .env")
     # JWT_SECRET_KEY and MODEL_SECRET_KEY are created once and kept in
     # PostgreSQL, so this supervisor must never invent new values: replacing
     # them would invalidate sessions and orphan stored ciphertext. The current

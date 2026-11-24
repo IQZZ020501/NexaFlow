@@ -198,6 +198,8 @@ def test_model_connection(
     model_name: str,
     model_type: str,
     request_params: dict[str, Any] | None = None,
+    *,
+    timeout: float = 60,
 ) -> dict[str, bool]:
     from app.adapters.llm.runtime import test_model_connection as _test
 
@@ -207,6 +209,7 @@ def test_model_connection(
         model_name,
         model_type,
         request_params,
+        timeout=timeout,
     )
 
 

@@ -21,6 +21,7 @@ from scripts.dev import (
     build_inputs_fingerprint,
     development_log_level,
     development_port,
+    ensure_env_file,
     ensure_local_image,
     ensure_local_opensandbox,
     infrastructure_configuration,
@@ -34,6 +35,28 @@ from scripts.dev import (
 
 
 class EnvironmentFileTests(unittest.TestCase):
+    def test_admin_password_is_private_unique_and_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            template = Path(directory) / ".env.example"
+            template.write_text("BOOTSTRAP_ADMIN_PASSWORD=\n", encoding="utf-8")
+            with (
+                patch("scripts.dev.ENV_FILE", path),
+                patch("scripts.dev.ENV_EXAMPLE", template),
+                patch("scripts.dev.log"),
+            ):
+                first = ensure_env_file()["BOOTSTRAP_ADMIN_PASSWORD"]
+                self.assertGreaterEqual(len(first), 32)
+                self.assertEqual(ensure_env_file()["BOOTSTRAP_ADMIN_PASSWORD"], first)
+                path.unlink()
+                second = ensure_env_file()["BOOTSTRAP_ADMIN_PASSWORD"]
+                self.assertNotEqual(first, second)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                set_env_value(path, "BOOTSTRAP_ADMIN_PASSWORD", "NexaFlow@123..")
+                self.assertNotEqual(ensure_env_file()["BOOTSTRAP_ADMIN_PASSWORD"], "NexaFlow@123..")
+                set_env_value(path, "BOOTSTRAP_ADMIN_PASSWORD", "Operator@Chosen123")
+                self.assertEqual(ensure_env_file()["BOOTSTRAP_ADMIN_PASSWORD"], "Operator@Chosen123")
+
     def test_set_env_value_replaces_duplicates_without_changing_other_lines(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / ".env"

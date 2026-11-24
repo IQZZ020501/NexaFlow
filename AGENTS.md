@@ -171,8 +171,12 @@ not trigger unrelated cleanup.
   Worker processes. Do not add per-environment Compose files or a deployment
   wrapper. Root `.env.example` remains the only local-development env template;
   host backend commands use private root `.env`, which is not injected into
-  deployment containers. Bootstrap admin credentials and managed-user initial
-  passwords come from process env values, not Python constants.
+  deployment containers. The first bootstrap admin uses deployment credentials
+  and is fenced once by `bootstrap_state`; newly provisioned managed accounts
+  receive independently generated 24-hour temporary passwords. Local operator
+  account recovery uses the read-only-by-default
+  `backend/scripts/recover_user_password.py` CLI by immutable user ID (never
+  env-driven auto-recovery or role elevation).
   Keep stable runtime policy defaults in `infra/config/settings.py` and omit
   them from the template; keep operator-managed product settings in PostgreSQL.
   Backward-compatible advanced environment overrides may remain supported
@@ -288,9 +292,13 @@ not trigger unrelated cleanup.
   XLSX plus the Python CSV module for UTF-8 CSV. It requires question/answer
   headers, ignores document segmentation settings, and indexes question plus
   answer while returning the answer as chunk content.
-- Workflow custom reply nodes render Jinja2 templates in a sandboxed environment;
+- Workflow custom reply nodes render Jinja2 templates in a sandboxed,
+  resource-limited subprocess (`infra/runtime/workflow_templates.py`), offloaded
+  via `asyncio.to_thread`; syntax inspection avoids constant evaluation,
   undefined variables fail the node, and reference-only replies stringify one
-  selected upstream field.
+  selected upstream field. Linux enforces `RLIMIT_AS`/`RLIMIT_CPU`, Darwin
+  restricts syntax to a non-amplifying subset, and Windows fails closed via a
+  Job Object memory limit.
 - MCP tools use workspace-scoped Streamable HTTP, legacy SSE, or stdio Server
   registrations owned and managed by their creator. Workspace/global admins
   have no implicit access to another user's MCP configuration or custom Skill;

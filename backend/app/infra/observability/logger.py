@@ -33,6 +33,35 @@ class _ProjectNameFilter(logging.Filter):
         return True
 
 
+class _AccessLogFilter(logging.Filter):
+    """Keep status and timing metadata without retaining a credential-bearing URI."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            client, method, _, version, status = record.args
+            record.args = (client, method, "<route>", version, status)
+            return True
+        # Unknown access-log formats must not fall back to logging raw input.
+        return False
+
+
+class _RequestErrorFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info:
+            _, exc, frames = record.exc_info
+            if exc is None:
+                record.exc_info = None
+                return True
+            safe_error = RuntimeError(f"Unhandled {type(exc).__name__}.")
+            record.exc_info = (RuntimeError, safe_error, frames)
+            record.exc_text = None
+        return True
+
+
+_ACCESS_LOG_FILTER = _AccessLogFilter()
+_REQUEST_ERROR_FILTER = _RequestErrorFilter()
+
+
 def setup_logging(level: int | str = logging.INFO) -> None:
     """Install the NexaFlow handler on the root logger.
 
@@ -44,6 +73,8 @@ def setup_logging(level: int | str = logging.INFO) -> None:
     """
     if isinstance(level, str):
         level = logging.getLevelNamesMapping()[level.upper()]
+    logging.getLogger("uvicorn.access").addFilter(_ACCESS_LOG_FILTER)
+    logging.getLogger("uvicorn.error").addFilter(_REQUEST_ERROR_FILTER)
     root = logging.getLogger()
     for handler in list(root.handlers):
         root.removeHandler(handler)

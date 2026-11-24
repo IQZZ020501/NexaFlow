@@ -569,10 +569,9 @@ async def exercise_direct_workspace_service_branches(
                 name="Direct WS User",
             ),
             admin,
-            settings(),
         )
         assert created_user.user.id
-        assert created_user.initial_password != settings().managed_user_initial_password
+        assert created_user.initial_password
 
         original_delete_kbs = workspace_service.delete_workspace_knowledge_bases
 
@@ -818,7 +817,6 @@ async def exercise_direct_identity_edges() -> None:
                     workspace_id="no-such-ws",
                 ),
                 admin_user,
-                settings(),
             )
         except HTTPException as exc:
             expect(exc, 404)
@@ -835,7 +833,6 @@ async def exercise_direct_identity_edges() -> None:
                     workspace_id=archived_ws.id,
                 ),
                 admin_user,
-                settings(),
             )
         except HTTPException as exc:
             expect(exc, 403)
@@ -853,7 +850,6 @@ async def exercise_direct_identity_edges() -> None:
                     team_ids=["no-such-team"],
                 ),
                 admin_user,
-                settings(),
             )
         except HTTPException as exc:
             expect(exc, 404)
@@ -876,7 +872,6 @@ async def exercise_direct_identity_edges() -> None:
                     team_ids=[other_team.id],
                 ),
                 admin_user,
-                settings(),
             )
         except HTTPException as exc:
             expect(exc, 422)
@@ -897,7 +892,6 @@ async def exercise_direct_identity_edges() -> None:
                 team_ids=[host_team.id],
             ),
             admin_user,
-            settings(),
         )
         assert created.initial_password
         assert [item.id for item in created.user.workspaces] == [host_ws.id]
@@ -924,7 +918,6 @@ async def exercise_direct_identity_edges() -> None:
                     name="Dup Username",
                 ),
                 admin_user,
-                settings(),
             )
         except HTTPException as exc:
             expect(exc, 409)
@@ -939,7 +932,6 @@ async def exercise_direct_identity_edges() -> None:
                     name="Dup Email",
                 ),
                 admin_user,
-                settings(),
             )
         except HTTPException as exc:
             expect(exc, 409)

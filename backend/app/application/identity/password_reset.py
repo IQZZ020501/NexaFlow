@@ -151,6 +151,7 @@ async def confirm_password_reset(
     await email_repository.delete_password_reset_deliveries(db, user.id)
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
+    user.initial_password_expires_at = None
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
     user = await user_repository.save_user(db, user)
     delivery_id = await queue_identity_email(

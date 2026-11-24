@@ -1,5 +1,6 @@
 import logging
-from datetime import timedelta
+import secrets
+from datetime import UTC, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -219,9 +220,6 @@ async def create_user(
     db: AsyncSession,
     payload: UserCreateRequest,
     actor: User,
-    settings: Settings,
-    *,
-    initial_password: str | None = None,
 ) -> UserPasswordResetResponse:
     team_ids = list(dict.fromkeys(payload.team_ids))
     if team_ids and not payload.workspace_id:
@@ -252,12 +250,13 @@ async def create_user(
                 "Teams must belong to selected workspace.",
             )
 
-    resolved_initial_password = initial_password or settings.managed_user_initial_password
+    initial_password = f"Nxf!{secrets.token_urlsafe(18)}A1"
     user = User(
         username=normalize_username(payload.username),
         email=normalize_email(payload.email),
         name=normalize_name(payload.name),
-        password_hash=hash_password(resolved_initial_password),
+        password_hash=hash_password(initial_password),
+        initial_password_expires_at=utc_now() + timedelta(hours=24),
         is_global_admin=payload.is_global_admin,
         must_change_password=True,
     )
@@ -310,7 +309,7 @@ async def create_user(
     user = await user_repository.refresh_user(db, user)
     return UserPasswordResetResponse(
         user=await user_to_response_with_scopes(db, user),
-        initial_password=resolved_initial_password,
+        initial_password=initial_password,
     )
 
 
@@ -386,6 +385,7 @@ async def change_user_password(
     now = utc_now()
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
+    user.initial_password_expires_at = None
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
     await email_repository.invalidate_password_reset_tokens(db, user.id, now)
     await email_repository.delete_password_reset_deliveries(db, user.id)
@@ -471,6 +471,15 @@ async def delete_user_permanently(db: AsyncSession, user: User, actor: User) -> 
     await db.commit()
 
 
+def _initial_password_expired(user: User) -> bool:
+    expires_at = user.initial_password_expires_at
+    if not user.must_change_password or expires_at is None:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= utc_now()
+
+
 async def authenticate_user(
     db: AsyncSession,
     username: str,
@@ -509,7 +518,7 @@ async def authenticate_user(
     user = await user_repository.get_active_user_by_username(db, username)
     if user is None:
         verify_password(password, _DUMMY_PASSWORD_HASH)
-    if user is None or not verify_password(password, user.password_hash):
+    if user is None or not verify_password(password, user.password_hash) or _initial_password_expired(user):
         log_event(
             logger,
             logging.WARNING,
@@ -638,7 +647,7 @@ async def change_password(
     if locked_user is None or not locked_user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
     user = locked_user
-    if not current_password or not verify_password(current_password, user.password_hash):
+    if not current_password or not verify_password(current_password, user.password_hash) or _initial_password_expired(user):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
     if verify_password(new_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")
@@ -646,6 +655,7 @@ async def change_password(
     now = utc_now()
     user.password_hash = hash_password(new_password)
     user.must_change_password = False
+    user.initial_password_expires_at = None
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
     await email_repository.invalidate_password_reset_tokens(db, user.id, now)
     await email_repository.delete_password_reset_deliveries(db, user.id)

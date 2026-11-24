@@ -94,16 +94,16 @@ flowchart LR
 | 配置 | 部署前填写 |
 | --- | --- |
 | `postgres-password` | 数据库强密码 |
-| `admin-password` | 首次管理员登录密码 |
-| `managed-user-password` | 管理员新建用户时的初始密码，用户首次登录必须修改 |
+| `admin-password` | 首次管理员登录密码（包含修复的新版本仅对空库首次启动生效） |
+| `managed-user-password` | 当前固定旧镜像兼容项（填独立随机值）；升级到包含源码修复的新发布镜像后由应用忽略，新账号改为逐人生成 24 小时临时密码 |
 | `sandbox-api-key` | 自行生成的随机密钥，无需申请；调用端和 OpenSandbox 服务端自动共用 |
 | `public-app-url` | 用户实际访问的网站地址，如 `http://你的服务器IP:8080`，不带 `/api` 等路径 |
 | `web-port` | `宿主端口:容器端口`，默认 `8080:3000`；按需修改左侧端口，并同步网站地址 |
 | `environment` | HTTP 使用 `development`；配置好 HTTPS 反向代理后使用 `production` |
 
-前四项分别生成独立随机值，可在服务器上分别执行 `openssl rand -hex 32`。只修改值，保留 `&postgres-password` 等 YAML anchor；对应服务会自动共用。替换所有 `CHANGE_ME`，妥善保存修改后的文件，避免提交真实凭据；自行设置的密码中的 `$` 按 Compose 规则写成 `$$`。
+前四项分别生成独立随机值，可在服务器上分别执行 `openssl rand -hex 32`。只修改值，保留 `&postgres-password` 等 YAML anchor；对应服务会自动共用。替换所有 `CHANGE_ME`，妥善保存修改后的文件，避免提交真实凭据；自行设置的密码中的 `$` 按 Compose 规则写成 `$$`。当前仓库 `docker-compose.yml` 中的 `x-images.app` 仍指向已发布的旧镜像 digest，源码中的安全修复需重新构建并发布业务镜像、更新 `x-images.app`（`app` 与 `migrate` 共用）后才会生效；仅拉取现存 digest 不会启用未发布修复。
 
-管理员用户名、邮箱和显示名称可在同一文件的 `x-backend-environment` 中修改 `BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_NAME`。管理员密码仅用于创建初始账号，已有账号请在系统中修改密码。完整配置示例、HTTPS 和升级说明见[单机安装](docs/DEPLOYMENT.md#单机安装)。
+管理员用户名、邮箱和显示名称可在同一文件的 `x-backend-environment` 中修改 `BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_NAME`。管理员密码用于创建初始账号；包含修复的新版本通过 `bootstrap_state` 围栏仅对空库引导，重启不会重置已有密码或重新提升角色（当前默认固定的旧镜像尚未包含该围栏保护）；已有账号请在系统中修改密码。完整配置示例、HTTPS、升级凭据退役/本地运维恢复、反向代理 `X-Forwarded-For` 与限流边界见[单机安装](docs/DEPLOYMENT.md#单机安装)。
 
 ### 2. 拉取并启动
 
@@ -168,7 +168,7 @@ docker compose down
 make dev
 ```
 
-首次运行会自动创建私有 `.env`、生成缺失的本地密钥、同步后端/前端依赖、构建 PostgreSQL 与执行镜像、生成普通 Docker 的 OpenSandbox 开发配置、启动 PostgreSQL/Redis/Qdrant，并应用 Alembic 迁移。后续启动仅在对应镜像不存在或构建输入变化时重新构建；需要显式重跑镜像构建时使用 `make dev-rebuild`。随后由同一终端统一托管 OpenSandbox、API、Celery Worker 与前端，日志带进程前缀。开发配置保存在 `~/.local/share/nexaflow-opensandbox`，不会覆盖已有配置。
+首次运行会自动创建私有 `.env`（权限 `0600`）、生成缺失的本地密钥、同步后端/前端依赖、构建 PostgreSQL 与执行镜像、生成普通 Docker 的 OpenSandbox 开发配置、启动 PostgreSQL/Redis/Qdrant，并应用 Alembic 迁移。当 `.env` 中 `BOOTSTRAP_ADMIN_PASSWORD` 为空或仍为旧模板值 `NexaFlow@123..` 时，`make dev` 会自动生成独立随机初始管理员密码写入私有根 `.env`（查看其中的 `BOOTSTRAP_ADMIN_PASSWORD` 获取）；若数据库已有初始账号，修改 `.env` 不会重置其密码。后续启动仅在对应镜像不存在或构建输入变化时重新构建；需要显式重跑镜像构建时使用 `make dev-rebuild`。随后由同一终端统一托管 OpenSandbox、API、Celery Worker 与前端，日志带进程前缀。开发配置保存在 `~/.local/share/nexaflow-opensandbox`，不会覆盖已有配置。
 
 带级别的运行日志默认仅显示 WARNING、ERROR 和 CRITICAL，启动进度、编译输出与异常堆栈继续显示。需要查看 INFO 日志时，可运行 `LOG_LEVEL=INFO make dev`，或在私有 `.env` 中设置 `LOG_LEVEL=INFO`；命令行环境变量优先。
 
@@ -268,6 +268,7 @@ docker run --rm --network none --read-only --user 65532:65532 \
 ## 安全说明
 
 - API 与内嵌 Beat 的 Worker 必须连接同一 PostgreSQL、Redis、Qdrant，并共享上传存储和加密密钥；不要同时运行第二个 Beat。
+- 受管新账号使用逐人生成的 24 小时临时密码且首次登录必须修改；前置反向代理必须覆写 `X-Forwarded-For` 为真实客户端地址，并精确限定可信代理 IP（勿信任全部来源或共享 NAT），详见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 - 远程 MCP 默认拒绝私网与回环地址；只有明确可信的部署才应启用 `MCP_ALLOW_PRIVATE_NETWORKS`。
 - stdio MCP 在独立 OpenSandbox 内运行；command/cwd 是执行镜像路径，不能读取业务宿主目录。仅注入该集成的环境值，出站域名须由部署 allowlist 批准。
 - bash、文件渲染与 Skill 脚本通过统一 execution port 执行；业务 Worker 无 Docker socket、namespace 特权或本地运行器回退。

@@ -61,7 +61,8 @@ from app.domain.memories.models import (  # noqa: F401
 )
 from app.domain.models.registered import RegisteredModel  # noqa: F401
 from app.domain.notifications.models import UserNotification  # noqa: F401
-from app.domain.platform.models import (  # noqa: F401  # noqa: F401  # noqa: F401
+from app.domain.platform.models import (  # noqa: F401
+    BootstrapState,
     PlatformSecret,
     RefreshSession,
     ResourcePermission,

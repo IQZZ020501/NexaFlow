@@ -26,6 +26,15 @@ from app.entities.email.smtp import SMTP_SETTINGS_ID
 from app.infra.db.base import Base
 
 
+class BootstrapState(Base):
+    """The bootstrap transaction has run once, even if its account is later deleted."""
+
+    __tablename__ = "bootstrap_state"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_bootstrap_state_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -34,6 +43,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    initial_password_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_global_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

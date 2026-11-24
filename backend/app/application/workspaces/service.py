@@ -1,5 +1,4 @@
 import logging
-import secrets
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
@@ -388,11 +387,7 @@ async def create_workspace_user(
     workspace: Workspace,
     payload: WorkspaceUserCreateRequest,
     actor: User,
-    settings: Settings,
 ) -> UserPasswordResetResponse:
-    # Generate a unique per-user temporary password for workspace-scoped user
-    # provisioning so workspace admins never learn the deployment-wide secret.
-    temporary_password = f"Nxf!{secrets.token_urlsafe(12)}A1"
     return await create_user(
         db,
         UserCreateRequest(
@@ -404,8 +399,6 @@ async def create_workspace_user(
             team_ids=[],
         ),
         actor,
-        settings,
-        initial_password=temporary_password,
     )
 
 

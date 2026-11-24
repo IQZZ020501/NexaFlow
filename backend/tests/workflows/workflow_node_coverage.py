@@ -249,6 +249,112 @@ def test_nodes_resolve_value_and_templates() -> None:
     )
 
 
+def test_workflow_template_resource_limits() -> None:
+    import builtins
+    import sys
+    from types import SimpleNamespace
+    from unittest import TestCase
+    from unittest.mock import MagicMock
+
+    from jinja2 import nodes as jinja_nodes
+
+    from app.infra.runtime import workflow_templates as templates
+
+    check = TestCase()
+    # Graph inspection must never evaluate constants (including compile-time
+    # filters or binary expressions) on either Linux or Darwin paths.
+    template = "{% for item in rows %}{{ item | upper }}{{ 'ok' | lower }}{% endfor %}"
+    with patch.object(jinja_nodes.Expr, "as_const", side_effect=AssertionError):
+        templates.template_variables.cache_clear()
+        assert templates.template_variables(template) == {"rows"}
+        with patch.object(templates.sys, "platform", "linux"):
+            templates.template_variables.cache_clear()
+            assert (
+                templates.template_variables(
+                    "{% set x = 'a' * 1000000 %}{% autoescape 'a' * 1000 %}{{ x }}{{ y | upper }}{% endautoescape %}"
+                )
+                == {"y"}
+            )
+    templates.template_variables.cache_clear()
+
+    assert templates.render_template(template, {"rows": ["a", "b"]}) == "AokBok"
+    assert templates.workflow_template_variables("{{ my-node.output }}") == set()
+    with check.assertRaisesRegex(ValueError, "too large"):
+        templates.template_variables("a" * 160_001)
+    with check.assertRaisesRegex(ValueError, "too complex"):
+        templates.template_variables("{% if a %}" * 60 + "x" + "{% endif %}" * 60)
+    with check.assertRaisesRegex(ValueError, "output exceeds"):
+        templates.render_template("{{ value }}", {"value": "字" * (templates.MAX_OUTPUT_BYTES // 3 + 1)})
+    with check.assertRaisesRegex(ValueError, "context exceeds"):
+        templates.render_template("{{ value }}", {"value": "a" * templates.MAX_CONTEXT_BYTES})
+    assert templates.render_template("done", {"unused": "a" * templates.MAX_CONTEXT_BYTES}) == "done"
+
+    # Darwin intentionally restricts template syntax to a non-amplifying subset.
+    with patch.object(templates.sys, "platform", "darwin"):
+        for disallowed in (
+            "{% set x = 1 %}{{ x }}",
+            "{{ 'a' * 10 }}",
+            "{{ x | replace('a', 'b') }}",
+            "{% for x in items recursive %}{{ x }}{% endfor %}",
+        ):
+            templates.template_variables.cache_clear()
+            with check.assertRaisesRegex(ValueError, "memory-limited workflow host"):
+                templates.template_variables(disallowed)
+    templates.template_variables.cache_clear()
+
+    # Windows enforces a Job Object memory limit and fails closed without pywin32.
+    fake_win32api = SimpleNamespace(GetCurrentProcess=lambda: "proc-handle")
+    fake_limits = {"BasicLimitInformation": {"LimitFlags": 0}, "ProcessMemoryLimit": 0}
+    fake_win32job = SimpleNamespace(
+        JobObjectExtendedLimitInformation=9,
+        JOB_OBJECT_LIMIT_PROCESS_MEMORY=0x100,
+        CreateJobObject=MagicMock(return_value="job-handle"),
+        QueryInformationJobObject=MagicMock(return_value=fake_limits),
+        SetInformationJobObject=MagicMock(),
+        AssignProcessToJobObject=MagicMock(),
+    )
+    with (
+        patch.object(templates.os, "name", "nt"),
+        patch.dict(sys.modules, {"win32api": fake_win32api, "win32job": fake_win32job}),
+    ):
+        assert templates._set_process_limits() == "job-handle"
+        assert fake_limits["BasicLimitInformation"]["LimitFlags"] & 0x100
+        assert fake_limits["ProcessMemoryLimit"] == templates.MEMORY_LIMIT
+        fake_win32job.AssignProcessToJobObject.assert_called_once_with("job-handle", "proc-handle")
+
+    real_import = builtins.__import__
+
+    def missing_win32(name, *args, **kwargs):
+        if name in {"win32api", "win32job"}:
+            raise ImportError(f"No module named {name}")
+        return real_import(name, *args, **kwargs)
+
+    with (
+        patch.object(templates.os, "name", "nt"),
+        patch.object(builtins, "__import__", side_effect=missing_win32),
+    ):
+        with check.assertRaises(ImportError):
+            templates._set_process_limits()
+
+    # Non-zero subprocess termination (e.g., OS resource-limit kill) fails closed
+    # and leaves the semaphore healthy for subsequent renders.
+    with patch.object(
+        templates.subprocess,
+        "run",
+        return_value=SimpleNamespace(returncode=-9, stdout=b""),
+    ):
+        with check.assertRaisesRegex(ValueError, "resource limits or is unavailable"):
+            templates.render_template("killed", {})
+    assert templates.render_template("after-kill", {}) == "after-kill"
+
+    # Tighten the test deadline on an ordinary template to exercise actual
+    # child-process cancellation without running a resource-intensive job.
+    with patch.object(templates, "TIMEOUT_SECONDS", 0):
+        with check.assertRaisesRegex(ValueError, "deadline"):
+            templates.render_template("ordinary", {})
+    assert templates.render_template("after", {}) == "after"
+
+
 def test_nodes_reranker_candidates_and_model_params() -> None:
     from app.application.workflows.nodes.executor import (
         _model_call_params,
@@ -4164,6 +4270,7 @@ def test_workflow_access_application_functions_direct() -> None:
 
 def main() -> None:
     test_nodes_resolve_value_and_templates()
+    test_workflow_template_resource_limits()
     test_nodes_reranker_candidates_and_model_params()
     test_nodes_history_messages_and_invoke()
     test_nodes_llm_tool_call_and_loop_branches()

@@ -6,8 +6,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from jinja2 import StrictUndefined, TemplateError
-from jinja2.sandbox import SandboxedEnvironment
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -41,6 +39,7 @@ from app.entities.identity.user import User
 from app.entities.knowledge import KnowledgeBase
 from app.entities.runs import AgentRun
 from app.infra.config.settings import Settings
+from app.infra.runtime.workflow_templates import render_template
 from app.ports.llm import (
     ModelToolCall,
     build_chat_model,
@@ -66,8 +65,6 @@ from app.schemas.workflows.contracts import (
 
 MAX_WORKFLOW_LLM_TOOL_CALLS = 8
 DEFAULT_WORKFLOW_LLM_MAX_TOKENS = 4096
-REPLY_TEMPLATE_ENV = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
-REPLY_TEMPLATE_ENV.globals.clear()
 FORM_PLACEHOLDER_PATTERN = re.compile(r"{{\s*form\s*}}")
 
 
@@ -167,8 +164,8 @@ def render_reply_template(template: str, context: NodeExecutionContext) -> str:
         }
     )
     try:
-        return REPLY_TEMPLATE_ENV.from_string(normalized).render(variables)
-    except TemplateError as exc:
+        return render_template(normalized, variables)
+    except ValueError as exc:
         raise ValueError(f"Invalid workflow reply template: {exc}") from exc
 
 

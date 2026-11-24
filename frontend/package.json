@@ -4,12 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "bun run build:file-preview && next dev",
+    "dev": "bun run build:file-preview && node --require ./scripts/forwarded-peer.cjs ./node_modules/next/dist/bin/next dev",
     "build": "bun run build:file-preview && next build",
     "build:file-preview": "bun scripts/build-file-preview.ts",
-    "start": "next start",
+    "start": "node --require ./scripts/forwarded-peer.cjs ./node_modules/next/dist/bin/next start",
     "lint": "eslint .",
     "test": "bun test --parallel",
+    "test:proxy": "node --test scripts/forwarded-peer.node.cjs",
     "format": "prettier --write \"**/*.{ts,tsx,css,json}\"",
     "typecheck": "tsc --noEmit"
   },
