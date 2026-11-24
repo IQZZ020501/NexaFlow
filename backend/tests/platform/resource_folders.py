@@ -1,17 +1,25 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 from tests.support import activate_admin, activate_user, auth_headers, test_client
 
 from app.domain.models.registered import RegisteredModel
 from app.infra.db.session import get_session_factory
+from app.ports.mcp import McpDiscovery
 
 MEMBER_PASSWORD = "FolderMember@12345."
 
 
-async def create_registered_model(workspace_id: str, user_id: str) -> str:
+async def create_registered_model(
+    workspace_id: str,
+    user_id: str,
+    *,
+    visibility: str = "personal",
+) -> str:
     async with get_session_factory()() as db:
         model = RegisteredModel(
             workspace_id=workspace_id,
+            visibility=visibility,
             name="目录模型",
             provider="model_custom_provider",
             provider_type="openai_compatible",
@@ -265,12 +273,8 @@ def main() -> None:
         )
         assert missing_tool_move.status_code == 404, missing_tool_move.text
 
-        model_id = asyncio.run(
-            create_registered_model(
-                workspace_id,
-                client.get("/api/v1/auth/me", headers=headers).json()["user"]["id"],
-            )
-        )
+        admin_user_id = client.get("/api/v1/auth/me", headers=headers).json()["user"]["id"]
+        model_id = asyncio.run(create_registered_model(workspace_id, admin_user_id))
         model_folder = client.post(
             f"{base}/resource-folders",
             headers=headers,
@@ -396,18 +400,32 @@ def main() -> None:
         assert peer_folders.status_code == 200, peer_folders.text
         assert peer_folders.json() == []
 
-        member_tool = client.post(
-            f"{base}/tools/python",
-            headers=member_headers,
-            json={
-                "display_name": "成员工具",
-                "description": "Member owned tool.",
-                "input_schema": {"type": "object", "properties": {}},
-                "output_schema": {"type": "object", "properties": {}},
-                "code": "result = {'value': inputs['value']}",
-            },
+        discovery = AsyncMock(
+            return_value=McpDiscovery(
+                tools=[
+                    {
+                        "name": "folder_lookup",
+                        "description": "Member owned tool.",
+                        "input_schema": {"type": "object", "properties": {}},
+                    }
+                ]
+            )
         )
-        assert member_tool.status_code == 201, member_tool.text
+        with patch("app.domain.tools.mcp.service.discover_mcp_tools", discovery):
+            member_source = client.post(
+                f"{base}/tool-sources/mcp",
+                headers=member_headers,
+                json={"name": "成员工具", "url": "https://mcp.example.com/mcp"},
+            )
+        assert member_source.status_code == 201, member_source.text
+        discovery.assert_awaited_once()
+        member_tools = client.get(f"{base}/tools", headers=member_headers)
+        assert member_tools.status_code == 200, member_tools.text
+        member_tool_id = next(
+            item["id"]
+            for item in member_tools.json()
+            if item["source"]["id"] == member_source.json()["id"]
+        )
         member_tool_folder = client.post(
             f"{base}/resource-folders",
             headers=member_headers,
@@ -419,7 +437,7 @@ def main() -> None:
             headers=member_headers,
             json={
                 "resource_type": "tool",
-                "resource_id": member_tool.json()["id"],
+                "resource_id": member_tool_id,
                 "folder_id": member_tool_folder.json()["id"],
             },
         )
@@ -437,7 +455,7 @@ def main() -> None:
             headers=member_headers,
             json={
                 "resource_type": "tool",
-                "resource_id": member_tool.json()["id"],
+                "resource_id": member_tool_id,
                 "folder_id": tool_folder.json()["id"],
             },
         )
@@ -583,7 +601,7 @@ def main() -> None:
             json={"name": "成员模型目录", "resource_type": "model", "parent_id": None},
         )
         assert member_model_folder.status_code == 201, member_model_folder.text
-        denied_model_move = client.put(
+        hidden_personal_model_move = client.put(
             f"{base}/resource-folders/resources/move",
             headers=member_headers,
             json={
@@ -592,7 +610,9 @@ def main() -> None:
                 "folder_id": member_model_folder.json()["id"],
             },
         )
-        assert denied_model_move.status_code == 403, denied_model_move.text
+        assert hidden_personal_model_move.status_code == 404, (
+            hidden_personal_model_move.text
+        )
         hidden_model_move = client.put(
             f"{base}/resource-folders/resources/move",
             headers=member_headers,
@@ -617,7 +637,7 @@ def main() -> None:
         assert listed_models.status_code == 200, listed_models.text
         assert listed_models.json()[0]["folder_id"] == model_folder_id
 
-        # Model folders are private to their creator too.
+        # A folder containing only another user's personal model stays hidden.
         member_model_folders = client.get(
             f"{base}/resource-folders?resource_type=model",
             headers=member_headers,
@@ -627,13 +647,54 @@ def main() -> None:
             item["name"] for item in member_model_folders.json()
         ] == ["成员模型目录"]
 
+        shared_model_id = asyncio.run(
+            create_registered_model(workspace_id, admin_user_id, visibility="workspace")
+        )
+        moved_shared_model = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=headers,
+            json={
+                "resource_type": "model",
+                "resource_id": shared_model_id,
+                "folder_id": model_folder_id,
+            },
+        )
+        assert moved_shared_model.status_code == 204, moved_shared_model.text
+        # Sharing reveals the containing folder without granting management.
+        shared_model_folders = client.get(
+            f"{base}/resource-folders?resource_type=model",
+            headers=member_headers,
+        )
+        assert shared_model_folders.status_code == 200, shared_model_folders.text
+        assert {item["name"] for item in shared_model_folders.json()} == {
+            "成员模型目录",
+            "模型目录",
+        }
+        member_models = client.get(f"{base}/models", headers=member_headers)
+        assert member_models.status_code == 200, member_models.text
+        assert {item["id"] for item in member_models.json()} == {shared_model_id}
+        denied_shared_model_move = client.put(
+            f"{base}/resource-folders/resources/move",
+            headers=member_headers,
+            json={
+                "resource_type": "model",
+                "resource_id": shared_model_id,
+                "folder_id": member_model_folder.json()["id"],
+            },
+        )
+        assert denied_shared_model_move.status_code == 403, denied_shared_model_move.text
+
         deleted_model_folder = client.delete(
             f"{base}/resource-folders/{model_folder_id}",
             headers=headers,
         )
         assert deleted_model_folder.status_code == 204, deleted_model_folder.text
         listed_models = client.get(f"{base}/models", headers=headers)
-        assert listed_models.json()[0]["folder_id"] is None
+        assert listed_models.status_code == 200, listed_models.text
+        assert {item["id"]: item["folder_id"] for item in listed_models.json()} == {
+            model_id: None,
+            shared_model_id: None,
+        }
 
 
 if __name__ == "__main__":

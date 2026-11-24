@@ -62,6 +62,7 @@ jobs:
         run: |
           uv run python -m tests.agents.unit
           uv run python -m tests.agents.harness
+          uv run python -m tests.agents.harness_efficiency
           uv run python -m tests.agents.extensions
           uv run python -m tests.agents.reliability
           uv run python -m tests.agent_skills.unit
