@@ -6,7 +6,11 @@ import { Badge } from "@/components/ui/badge"
 import { useLanguage } from "@/contexts/language-provider"
 import { languageLocales } from "@/i18n"
 import type { SystemLog } from "@/lib/api/system"
-import { systemLogEventLabel, systemLogLevelLabel } from "@/lib/constants"
+import {
+  systemLogEventLabel,
+  systemLogLevelLabel,
+  systemLogMessage,
+} from "@/lib/constants"
 import { APP_TIME_ZONE, formatDateTime } from "@/lib/display"
 import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 
@@ -107,7 +111,7 @@ export function SystemLogList({ logs }: SystemLogListProps) {
                     {systemLogEventLabel(log.event, t)}
                   </p>
                   <p className="mt-1 min-w-0 text-xs break-words text-muted-foreground">
-                    {log.message || systemLogEventLabel(log.event, t)}
+                    {systemLogMessage(log, t)}
                   </p>
                   <div className="mt-2 flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">
@@ -163,9 +167,9 @@ export function SystemLogList({ logs }: SystemLogListProps) {
                 </span>
                 <span
                   className="min-w-0 truncate text-muted-foreground"
-                  title={log.message || systemLogEventLabel(log.event, t)}
+                  title={systemLogMessage(log, t)}
                 >
-                  {log.message || systemLogEventLabel(log.event, t)}
+                  {systemLogMessage(log, t)}
                 </span>
                 <span>{log.status_code ?? "—"}</span>
               </div>

@@ -22,6 +22,10 @@ from app.domain.agents.models import (  # noqa: F401
 from app.domain.announcements.models import Announcement, AnnouncementRead  # noqa: F401
 from app.domain.artifacts.models import GeneratedArtifact  # noqa: F401
 from app.domain.audit.models import AuditLog  # noqa: F401
+from app.domain.automations.models import (  # noqa: F401
+    Automation,
+    AutomationExecution,
+)
 from app.domain.email.models import EmailDelivery, PasswordResetToken  # noqa: F401
 from app.domain.execution.models import (  # noqa: F401
     ExecutionPlacement,
@@ -56,6 +60,7 @@ from app.domain.memories.models import (  # noqa: F401
     UserMemory,
 )
 from app.domain.models.registered import RegisteredModel  # noqa: F401
+from app.domain.notifications.models import UserNotification  # noqa: F401
 from app.domain.platform.models import (  # noqa: F401  # noqa: F401  # noqa: F401
     PlatformSecret,
     RefreshSession,

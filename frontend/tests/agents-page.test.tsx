@@ -1598,7 +1598,7 @@ describe("AgentsPage detail view", () => {
     })
 
     await waitFor(() =>
-      expect(screen.getByText("detail unavailable")).toBeTruthy()
+      expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
     )
     await waitFor(() =>
       expect(screen.getByTestId("workflow-agent-count").textContent).toBe("2")
@@ -1610,7 +1610,7 @@ describe("AgentsPage detail view", () => {
     await waitFor(() =>
       expect(screen.getByTestId("workflow-tool-count").textContent).toBe("1")
     )
-    expect(screen.queryByText("detail unavailable")).toBeNull()
+    expect(screen.queryByText("服务暂时不可用，请稍后重试")).toBeNull()
   })
 
   test("loads a deep-linked agent missing from the list", async () => {
@@ -3834,7 +3834,7 @@ describe("AgentsPage run flows", () => {
       ).toBe(true)
     )
     await waitFor(() =>
-      expect(screen.getByText("execution failed")).toBeTruthy()
+      expect(screen.getByText("请求失败")).toBeTruthy()
     )
   })
 

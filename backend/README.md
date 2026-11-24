@@ -38,6 +38,8 @@ make worker
 
 API 和 Worker 必须共用 PostgreSQL、Redis、`KNOWLEDGE_STORAGE_DIR` 和 `QDRANT_URL`。bash、Skill 脚本和 stdio MCP 通过独立 OpenSandbox 执行；业务进程没有宿主执行回退。配置与检查见 [OpenSandbox README](../deploy/opensandbox/README.md)。
 
+macOS 的 Worker 入口会在 Celery 启动前将当前系统 HTTP/HTTPS 代理保留到子进程环境，避免 Celery 的代理检测兼容措施使模型请求意外直连。已有代理和 `no_proxy` 环境设置优先；不会修改系统设置或 `.env`，Linux/Windows 保持原有行为。修改系统代理后需重新启动 Worker。
+
 ## 数据库迁移
 
 在 `backend/` 运行：

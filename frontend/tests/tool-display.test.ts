@@ -5,6 +5,8 @@ import { translate, type Language, type TFunction } from "../src/i18n"
 import {
   toolDisplayDescription,
   toolDisplayName,
+  toolActivityName,
+  toolInputSummary,
   toolSourceDisplayName,
   withArtifactDownloadLinks,
   withArtifactDownloadLinksInContent,
@@ -15,6 +17,73 @@ const translated = (language: Language) =>
   ((key, values) => translate(language, key, values)) as TFunction
 
 describe("tool display helpers", () => {
+  test("uses natural action labels in chat and preserves configured tool names", () => {
+    for (const [language, knowledge, command] of [
+      ["zh-Hans", "查阅知识库", "运行命令"],
+      ["zh-Hant", "查閱知識庫", "執行指令"],
+      ["en", "Consult knowledge base", "Run command"],
+    ] as const) {
+      expect(
+        toolActivityName(
+          { tool_name: "custom_search", tool_kind: "knowledge" },
+          translated(language)
+        )
+      ).toBe(knowledge)
+      expect(
+        toolActivityName({ tool_name: "bash" }, translated(language))
+      ).toBe(command)
+    }
+    expect(
+      toolActivityName({ tool_name: "mcp_tavily_search_a1b2c3d4" }, t)
+    ).toBe("搜索网页")
+    expect(toolActivityName({ tool_name: "tavily_extract" }, t)).toBe(
+      "读取网页"
+    )
+    expect(
+      toolActivityName(
+        { tool_name: "custom_tool", tool_label: "My custom tool" },
+        t
+      )
+    ).toBe("My custom tool")
+  })
+
+  test("summarizes commands and searches without changing their input", () => {
+    const input = { command: "  python report.py\n  --output report.pdf  " }
+    expect(toolInputSummary(input)).toEqual({
+      text: "python report.py --output report.pdf",
+      isCode: true,
+    })
+    expect(input.command).toContain("\n")
+    expect(
+      toolInputSummary({ command: " ", query: " 年度报告\n收入 " })
+    ).toEqual({
+      text: "年度报告 收入",
+      isCode: false,
+    })
+  })
+
+  test("keeps unknown arguments out of collapsed summaries", () => {
+    expect(toolInputSummary()).toBeNull()
+    expect(
+      toolInputSummary({ token: "private", password: "private" })
+    ).toBeNull()
+    expect(
+      toolInputSummary({ query: { token: "private" }, command: 42 })
+    ).toBeNull()
+    expect(
+      toolInputSummary({ filename: "报告.pdf", token: "private" })
+    ).toEqual({
+      text: "报告.pdf",
+      isCode: true,
+    })
+  })
+
+  test("bounds long summaries without breaking Unicode characters", () => {
+    expect(toolInputSummary({ query: "📄".repeat(100) })?.text).toBe(
+      `${"📄".repeat(96)}…`
+    )
+  })
+
   test("preserves the whole authenticated artifact path when normalizing links", () => {
     const id = "23291174-58e4-42ad-9656-2ee0aad1328a"
     const file = {

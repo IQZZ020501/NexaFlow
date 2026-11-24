@@ -573,6 +573,9 @@ async def _load_execution_scope(run_id: str) -> ExecutionScope:
         run = await agent_repository.get_agent_run_by_id(db, run_id)
         if run is None or run.status not in AGENT_RUN_RUNNING_STATUSES:
             raise AgentRunnerError("Agent run is not executable.")
+        from app.application.runs.lifecycle import require_automation_caller_access
+
+        await require_automation_caller_access(db, run)
         actor = await user_repository.get_user_by_id(db, run.execution_user_id)
         if actor is None or not actor.is_active:
             raise AgentRunnerError("Agent run user is unavailable.")
@@ -988,6 +991,10 @@ async def _execute_claimed_agent_run(
         skill_context=skill_execution_context(scope.skill_snapshots),
         context_messages=memory.messages,
     )
+
+    async def tool_progress(event: dict[str, Any]) -> None:
+        await record_event(event)
+
     if run.configuration_source in {"draft", "published"}:
         unified_runtime = UnifiedAgentToolRuntime(
             run,
@@ -995,6 +1002,7 @@ async def _execute_claimed_agent_run(
             worker_task_id,
             settings,
             lease_lost,
+            on_event=tool_progress,
         )
         knowledge_ledger = DurableToolLedger(
             run,

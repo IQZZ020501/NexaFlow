@@ -7,6 +7,7 @@ import type {
   WorkflowVersion,
 } from "@/lib/api/workflows"
 import type { TFunction, TranslationKey } from "@/i18n"
+import { getErrorMessage } from "@/lib/errors"
 
 export const WORKFLOW_NODE_TYPES: WorkflowNodeType[] = [
   "reply-node",
@@ -101,15 +102,17 @@ export function workflowExecutionNodeLabel(
 }
 
 /**
- * Translates a recognized workflow error message.
+ * Translates a workflow error message, including errors from shared services.
  *
  * @param message - The workflow error message to translate
  * @param t - The translation function
- * @returns The translated error message, or the original message when no translation is defined
+ * @returns The translated error message or a localized fallback
  */
 export function workflowErrorMessage(message: string, t: TFunction) {
-  const label = WORKFLOW_ERROR_LABELS[message]
-  return label ? t(label) : message
+  const label = Object.hasOwn(WORKFLOW_ERROR_LABELS, message)
+    ? WORKFLOW_ERROR_LABELS[message]
+    : undefined
+  return label ? t(label) : getErrorMessage(new Error(message), t)
 }
 
 /** Start node globals, referenced as {{global.<value>}} (MaxKB-compatible). */

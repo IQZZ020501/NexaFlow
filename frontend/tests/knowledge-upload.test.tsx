@@ -824,7 +824,7 @@ describe("knowledge upload flow: segment step route restore", () => {
 
     await waitFor(() =>
       expect(callbacks.onBackToFiles.mock.calls.length).toBeGreaterThan(0),)
-    expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain("guide.md：upload boom")
+    expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain("guide.md：请求失败")
   })
 
   test("cleans up attachments when document creation fails", async () => {
@@ -866,7 +866,7 @@ describe("knowledge upload flow: segment step route restore", () => {
     await waitFor(() =>
       expect(callbacks.onBackToFiles.mock.calls.length).toBeGreaterThan(0),)
     expect(api.deletedAttachmentIds).toEqual(["att-1", "att-2"])
-    expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain("create boom")
+    expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain("服务暂时不可用，请稍后重试")
   })
 
   test("continues with a partial upload and reports the failure count", async () => {
@@ -899,7 +899,7 @@ describe("knowledge upload flow: segment step route restore", () => {
     const restoreState = callbacks.onRouteSegment.mock.calls[1][0] as KnowledgeUploadRouteState
     expect(restoreState.documentIds).toEqual(["doc-1"])
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-      "已上传 1 个文件，1 个上传失败\nnotes.txt：notes boom",
+      "已上传 1 个文件，1 个上传失败\nnotes.txt：请求失败",
     )
   })
 
@@ -996,7 +996,7 @@ describe("knowledge upload flow: segment step route restore", () => {
 
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "list failed",
+        "服务暂时不可用，请稍后重试",
       ),
     )
     expect(screen.getByText("暂无文件")).toBeTruthy()
@@ -1029,7 +1029,7 @@ describe("knowledge upload flow: segment step route restore", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }))
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "list failed",
+        "服务暂时不可用，请稍后重试",
       ),
     )
   })
@@ -1086,7 +1086,7 @@ describe("knowledge upload flow: segment step route restore", () => {
       expect(callbacks.onBackToFiles.mock.calls.length).toBeGreaterThan(0),
     )
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-      "guide.md：transient failure",
+      "guide.md：请求失败",
     )
 
     // Back on the files step the queue is preserved, so retry directly.
@@ -1165,7 +1165,7 @@ describe("knowledge upload flow: preview generation", () => {
         routeState: { documentIds: ["doc-1"], parseSettings: SMART_SETTINGS },
       })
 
-      await waitFor(() => screen.getByText("corrupt file"))
+      await waitFor(() => screen.getByText("请求失败"))
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
         "corrupt.pdf 分段失败",
       )
@@ -1189,7 +1189,7 @@ describe("knowledge upload flow: preview generation", () => {
         routeState: { documentIds: ["doc-1"], parseSettings: SMART_SETTINGS },
       })
 
-      await waitFor(() => screen.getByText("parse boom"))
+      await waitFor(() => screen.getByText("服务暂时不可用，请稍后重试"))
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
         "corrupt.pdf 分段失败",
       )
@@ -1236,7 +1236,7 @@ describe("knowledge upload flow: preview generation", () => {
         routeState: { documentIds: ["doc-1"], parseSettings: SMART_SETTINGS },
       })
 
-      await waitFor(() => screen.getByText("chunk boom"))
+      await waitFor(() => screen.getByText("服务暂时不可用，请稍后重试"))
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
         "broken.pdf 分段失败",
       )
@@ -1459,7 +1459,7 @@ describe("knowledge upload flow: preview generation", () => {
       await waitFor(() => screen.getByText("guide chunk one"))
       expect(notifyKinds(callbacks.onNotify.mock.calls)).toContain("error")
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "notify boom",
+        "请求失败",
       )
     } finally {
       restoreTimer()
@@ -1602,7 +1602,7 @@ describe("knowledge upload flow: import and document management", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始导入" }))
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "idx boom",
+        "服务暂时不可用，请稍后重试",
       ),
     )
     expect(callbacks.onDone.mock.calls.length).toBe(0)
@@ -1635,7 +1635,7 @@ describe("knowledge upload flow: import and document management", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始导入" }))
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "done boom",
+        "请求失败",
       ),
     )
     expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
@@ -1761,7 +1761,7 @@ describe("knowledge upload flow: import and document management", () => {
     fireEvent.click(screen.getByRole("button", { name: "上一步" }))
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "del boom",
+        "服务暂时不可用，请稍后重试",
       ),
     )
     expect(callbacks.onBackToFiles.mock.calls.length).toBe(0)
@@ -1783,7 +1783,7 @@ describe("knowledge upload flow: import and document management", () => {
     fireEvent.click(screen.getByRole("button", { name: "移除 guide.md" }))
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "del boom",
+        "服务暂时不可用，请稍后重试",
       ),
     )
     expect(callbacks.onRouteSegment.mock.calls.length).toBe(0)
@@ -1843,7 +1843,7 @@ describe("knowledge upload flow: import and document management", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }))
     await waitFor(() =>
       expect(notifyMessages(callbacks.onNotify.mock.calls)).toContain(
-        "del boom",
+        "服务暂时不可用，请稍后重试",
       ),
     )
     expect(callbacks.onCancel.mock.calls.length).toBe(0)

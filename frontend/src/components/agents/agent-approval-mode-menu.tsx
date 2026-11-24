@@ -99,7 +99,7 @@ export function AgentApprovalModeMenu({
             size="sm"
             disabled={disabled}
             aria-label={t("执行权限：{mode}", { mode: label })}
-            className="max-w-36 rounded-md px-2 font-normal"
+            className="max-w-36 rounded-full px-2.5 font-normal"
           >
             <ModeIcon mode={value} className="size-3.5" />
             <span className="truncate">{label}</span>

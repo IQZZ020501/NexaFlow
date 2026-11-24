@@ -44,6 +44,7 @@ Next.js 16 App Router 客户端渲染 SPA（多数页面 `'use client'`）：`sr
 - `frontend/src/app/(platform)/app/knowledge/[id]/upload/segment/page.tsx` — 上传向导「分段预览」步骤（server 解析路由状态）
 - `frontend/src/app/(platform)/app/knowledge/[id]/documents/[docId]/page.tsx` — 文档详情页
 - `frontend/src/app/(platform)/app/tools/page.tsx` — 统一工具中心：内置工具、Skills、MCP 目录、来源与授权管理
+- `frontend/src/app/(platform)/app/automations/page.tsx` 与 `automations/[id]/page.tsx` — 个人自动化列表、创建／编辑、执行历史与详情、审批、表单和产物下载
 - `frontend/src/app/(platform)/app/apps/page.tsx` — Agent 应用列表页
 - `frontend/src/app/(platform)/app/apps/[id]/page.tsx` — Agent 详情页（兼容旧 `?view=` 查询参数）
 - `frontend/src/app/(platform)/app/apps/[id]/[view]/page.tsx` — Agent/Workflow 详情规范路由（`overview` 重定向到规范路径）

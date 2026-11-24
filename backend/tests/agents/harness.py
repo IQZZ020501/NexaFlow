@@ -451,17 +451,27 @@ def assert_implicit_shell_agent_run():
             ],
             [[], []],
         )
-        platform = SimpleNamespace(
-            execute=AsyncMock(
-                return_value={
-                    "ok": True,
-                    "exit_code": 0,
-                    "stdout": "ready",
-                    "stderr": "",
-                    "artifacts": [],
-                }
-            )
-        )
+
+        async def execute_with_progress(*_args, **_kwargs):
+            async with get_session_factory()() as db:
+                history = await agent_repository.list_agent_run_events(db, run_id)
+                assert any(
+                    event.get("type") == "tool"
+                    and event.get("tool_name") == "bash"
+                    and event.get("summary") == "agent.tool_running"
+                    and event.get("status") == "running"
+                    for item in history
+                    for event in [item.event.get("event", {})]
+                ), "Tool execution started without durable running progress"
+            return {
+                "ok": True,
+                "exit_code": 0,
+                "stdout": "ready",
+                "stderr": "",
+                "artifacts": [],
+            }
+
+        platform = SimpleNamespace(execute=AsyncMock(side_effect=execute_with_progress))
         with (
             patch.object(model, "bind_tools", wraps=model.bind_tools) as bind_tools,
             patch(

@@ -19,6 +19,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 
 import asyncio
 import base64
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -101,7 +102,7 @@ def test_tool_summary_projects_effective_public_access_and_mcp_policy() -> None:
         )
     )
 
-    assert summary.allowed_access_sources == ["console", "public"]
+    assert summary.allowed_access_sources == ["console", "public", "automation"]
     assert summary.policy_mode is None
 
 
@@ -226,6 +227,24 @@ def test_image_tool_queue_freezes_its_model_configuration() -> None:
     assert preapproved.status == "queued"
 
 
+class _ImageResponseContext:
+    status_code = 200
+
+    def __init__(self, generate, arguments):
+        self.generate = generate
+        self.arguments = arguments
+
+    async def __aenter__(self):
+        self.result = await self.generate(**self.arguments)
+        return self
+
+    async def iter_bytes(self):
+        yield json.dumps({"data": [vars(item) for item in self.result.data]}).encode()
+
+    async def close(self):
+        pass
+
+
 def test_image_provider_decodes_only_embedded_png() -> None:
     from app.adapters.llm import image as image_adapter
     from app.ports.llm import ModelProviderError
@@ -237,6 +256,9 @@ def test_image_provider_decodes_only_embedded_png() -> None:
         data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
     )
     images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+    images.with_streaming_response = SimpleNamespace(
+        generate=lambda **arguments: _ImageResponseContext(images.generate, arguments)
+    )
 
     class FakeClient:
         def __init__(self, **options):
@@ -248,10 +270,7 @@ def test_image_provider_decodes_only_embedded_png() -> None:
             }
             self.images = images
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
+        async def close(self):
             return None
 
     with (
@@ -431,15 +450,15 @@ def test_image_provider_updates_configured_resolution_extension() -> None:
         data=[SimpleNamespace(b64_json=base64.b64encode(png).decode())]
     )
     images = SimpleNamespace(generate=AsyncMock(return_value=generated))
+    images.with_streaming_response = SimpleNamespace(
+        generate=lambda **arguments: _ImageResponseContext(images.generate, arguments)
+    )
 
     class FakeClient:
         def __init__(self, **_options):
             self.images = images
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
+        async def close(self):
             return None
 
     with (
@@ -714,6 +733,75 @@ def test_effective_tool_access_matrix() -> None:
         is_workspace_admin=False,
         grant=None,
     ) == ToolAccess(can_view=False, can_use=False, can_manage=False)
+
+
+def test_automation_tool_context_preserves_run_identity() -> None:
+    from app.application.tools.runtime.service import (
+        _load_invocation_contract,
+        _validate_context,
+        queue_tool_invocation,
+    )
+    from app.domain.tools.catalog.service import build_shell_tool
+    from app.domain.tools.runtime import build_tool_snapshot, tool_access_source_allowed
+    from app.entities.tools import ToolSource
+    from app.infra.db.repositories.tools import repository
+    from app.ports.tools import ToolInvocationContext
+
+    tool, version, policy = build_shell_tool("workspace-1")
+    snapshot = build_tool_snapshot(
+        tool,
+        ToolSource(id=tool.source_id, workspace_id="workspace-1", kind="builtin"),
+        version,
+        policy,
+        "publisher-1",
+    )
+
+    async def keep_candidate(_db, candidate):
+        return candidate
+
+    for origin in ("agent", "workflow"):
+        context = ToolInvocationContext(
+            workspace_id="workspace-1",
+            origin=origin,
+            root_run_id="root-1",
+            run_id="run-1",
+            invocation_id="call-1",
+            execution_user_id="publisher-1",
+            access_source="automation",
+            deadline_at=datetime.now(UTC),
+            idempotency_key="automation-" + origin,
+            approval_required=True,
+        )
+        with (
+            patch.object(
+                repository,
+                "create_or_get_tool_invocation",
+                AsyncMock(side_effect=keep_candidate),
+            ),
+            patch.object(repository, "refresh_tool_invocation_deadline", AsyncMock()),
+        ):
+            invocation = asyncio.run(
+                queue_tool_invocation(None, snapshot, {"command": "true"}, context)
+            )
+        assert invocation.status == "awaiting_approval"
+        restored_snapshot, restored_context = _load_invocation_contract(invocation)
+        assert restored_snapshot == snapshot
+        assert restored_context == context
+
+        for invalid in (
+            replace(context, access_source="ssh"),
+            replace(context, run_id=None),
+            replace(context, root_run_id=None),
+        ):
+            try:
+                _validate_context(invalid)
+            except ValueError:
+                continue
+            raise AssertionError("Invalid Tool context was accepted.")
+    assert tool_access_source_allowed(["console"], "automation")
+    assert not tool_access_source_allowed(["api"], "automation")
+    assert not tool_access_source_allowed([], "automation")
+
 
 def test_tool_authorization_applies_builtin_and_grant_rules() -> None:
     from app.application.tools import evaluate_tool_authorization
@@ -1276,6 +1364,7 @@ def main() -> None:
     test_image_tool_names_the_image_from_the_model_or_the_prompt()
     test_tool_ref_schema_requires_canonical_ids()
     test_effective_tool_access_matrix()
+    test_automation_tool_context_preserves_run_identity()
     test_tool_authorization_applies_builtin_and_grant_rules()
     test_tool_schema_validation_closes_objects()
     test_tool_schema_validation_enforces_limits()

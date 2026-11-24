@@ -419,7 +419,7 @@ class AgentRun(Base):
             name="ck_agent_runs_parent_depth",
         ),
         CheckConstraint(
-            "access_source IN ('console', 'public', 'api')",
+            "access_source IN ('console', 'public', 'api', 'automation')",
             name="ck_agent_runs_access_source",
         ),
         CheckConstraint(
@@ -430,6 +430,9 @@ class AgentRun(Base):
             "(access_source = 'console' AND requested_by_user_id IS NOT NULL "
             "AND consumer_id = requested_by_user_id "
             "AND execution_user_id = requested_by_user_id) OR "
+            "(access_source = 'automation' AND requested_by_user_id IS NOT NULL "
+            "AND consumer_id = requested_by_user_id "
+            "AND execution_user_id IS NOT NULL) OR "
             "(access_source IN ('public', 'api') AND requested_by_user_id IS NULL)",
             name="ck_agent_runs_access_identity",
         ),

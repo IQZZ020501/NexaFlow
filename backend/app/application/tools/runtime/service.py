@@ -1,6 +1,7 @@
 """Durable, provider-neutral Tool execution."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -156,6 +157,7 @@ async def execute_tool_invocation(
     adapter: ToolAdapter | None = None,
     run_worker_task_id: str | None = None,
     lease_lost: asyncio.Event | None = None,
+    on_started: Callable[[], Awaitable[None]] | None = None,
 ) -> ToolRuntimeResult:
     async with get_session_factory()() as db:
         invocation = await tool_repository.get_tool_invocation_by_id(db, invocation_id)
@@ -321,6 +323,10 @@ async def execute_tool_invocation(
             async with asyncio.timeout(remaining):
                 scope_token = execution_scope.set(scope)
                 try:
+                    # The claim is committed; approvals and stored-result
+                    # replays return above without announcing a new execution.
+                    if on_started is not None:
+                        await on_started()
                     result = await invoke_owned(
                         selected_adapter,
                         snapshot,
@@ -747,7 +753,7 @@ def _validate_context(context: ToolInvocationContext) -> None:
             raise ValueError("Tool tests cannot belong to a Run.")
     elif not context.root_run_id or not context.run_id:
         raise ValueError("Application Tool invocations require Run IDs.")
-    if context.access_source not in {"console", "public", "api"}:
+    if context.access_source not in {"console", "public", "api", "automation"}:
         raise ValueError("Tool invocation access source is invalid.")
     if not context.idempotency_key or not context.invocation_id:
         raise ValueError("Tool invocation identity is invalid.")

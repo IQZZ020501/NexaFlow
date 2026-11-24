@@ -1,0 +1,674 @@
+/*
+ * Styles adapted from Beautiful UI: https://www.beautifului.dev
+ * MIT License
+ * Copyright (c) 2026 Shane Levine
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+.agent-beautiful {
+  --bui-surface: oklch(100% 0 0);
+  --bui-inset: oklch(97.9% 0.002 247.839);
+  --bui-field: oklch(96.1% 0.001 286.375);
+  --bui-ink: oklch(24.7% 0.006 258.361);
+  --bui-ink-2: oklch(50.6% 0.01 264.477);
+  --bui-ink-3: oklch(69.5% 0.009 264.505);
+  --bui-line: oklch(94.6% 0.003 264.542);
+  --bui-line-strong: oklch(91.2% 0.005 258.326);
+  --bui-hover: oklch(97% 0.002 247.839);
+  --bui-hover-2: oklch(93.3% 0.003 247.86);
+  --bui-accent: oklch(62.6% 0.205 254.947);
+  --bui-red: oklch(62.1% 0.192 23.042);
+  --bui-green: oklch(60.3% 0.155 150.883);
+  --bui-shadow-xs: 0 0 4px 0 #0000000a;
+  --bui-shadow-sm:
+    0 18px 47px 0 #00000008, 0 7.5px 19px 0 #00000005, 0 4px 10.5px 0 #00000005,
+    0 2.3px 5.8px 0 #00000003, 0 1.2px 3.1px 0 #00000003,
+    0 0.5px 1.3px 0 #00000003;
+  --bui-shadow-md:
+    0 17.54px 23.39px 0 #0000000a, 0 9.4px 12.5px 0 #00000008,
+    0 5.25px 7px 0 #00000005, 0 2.79px 3.72px -2px #00000003,
+    0 1.16px 1.5px 0 #00000003;
+  --bui-shadow-hairline: 0 0 0 1px var(--bui-line);
+  --bui-shadow-btn: 0 0 0 1px var(--bui-line-strong), var(--bui-shadow-xs);
+  --bui-shadow-card: 0 0 0 1px var(--bui-line), var(--bui-shadow-sm);
+  --bui-shadow-raised: 0 0 0 1px var(--bui-line), var(--bui-shadow-md);
+}
+
+.dark .agent-beautiful {
+  --bui-surface: oklch(26% 0.006 271.191);
+  --bui-inset: oklch(24.3% 0.004 264.492);
+  --bui-field: oklch(29.3% 0.006 271.223);
+  --bui-ink: oklch(96.4% 0.002 247.839);
+  --bui-ink-2: oklch(73.1% 0.008 260.731);
+  --bui-ink-3: oklch(54.1% 0.01 264.484);
+  --bui-line: oklch(30.8% 0.006 258.354);
+  --bui-line-strong: oklch(35.6% 0.007 264.474);
+  --bui-hover: oklch(28.9% 0.006 271.22);
+  --bui-hover-2: oklch(31.8% 0.007 274.747);
+  --bui-accent: oklch(68% 0.173 253.301);
+  --bui-red: oklch(66.6% 0.18 21.433);
+  --bui-green: oklch(70.5% 0.154 153.814);
+  --bui-shadow-hairline: 0 0 0 1px var(--bui-line);
+  --bui-shadow-btn: 0 0 0 1px oklch(100% 0 0/0.1), 0 1px 2px oklch(0% 0 0/0.3);
+  --bui-shadow-card:
+    0 0 0 1px oklch(100% 0 0/0.11), 0 1px 2px oklch(0% 0 0/0.2),
+    0 2px 6px oklch(0% 0 0/0.2);
+  --bui-shadow-raised:
+    0 0 0 1px oklch(100% 0 0/0.13), 0 2px 10px oklch(0% 0 0/0.22);
+}
+
+.agent-beautiful {
+  color: var(--bui-ink);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+.bui-process-summary {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: 8px;
+  color: var(--bui-ink-2);
+  font-size: 12.5px;
+  list-style: none;
+  cursor: pointer;
+  transition: background-color 100ms;
+}
+.bui-process-summary::-webkit-details-marker {
+  display: none;
+}
+.bui-process-summary:hover {
+  background: var(--bui-hover-2);
+}
+.bui-process-summary > svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+  transition: transform 200ms;
+}
+.bui-process[open] > .bui-process-summary > svg {
+  transform: rotate(0deg);
+}
+
+.bui-tool-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px;
+  border-radius: 8px;
+  color: var(--bui-ink-2);
+  text-align: left;
+  transition: background-color 100ms;
+}
+button.bui-tool-trigger:hover {
+  background: var(--bui-hover-2);
+}
+.bui-tool-icon {
+  position: relative;
+  display: flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--bui-ink-3);
+}
+.bui-tool-icon-glyph {
+  display: flex;
+  transition: opacity 100ms;
+}
+.bui-tool-chevron {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+  transition:
+    opacity 100ms,
+    transform 150ms;
+}
+.bui-tool-trigger:hover .bui-tool-chevron,
+.bui-tool-trigger:focus-visible .bui-tool-chevron,
+.bui-tool-trigger[aria-expanded="true"] .bui-tool-chevron {
+  opacity: 1;
+}
+.bui-tool-trigger[aria-expanded]:hover .bui-tool-icon-glyph,
+.bui-tool-trigger[aria-expanded]:focus-visible .bui-tool-icon-glyph,
+.bui-tool-trigger[aria-expanded="true"] .bui-tool-icon-glyph {
+  opacity: 0;
+}
+.bui-tool-trigger[aria-expanded="true"] .bui-tool-chevron {
+  transform: rotate(90deg);
+}
+.bui-tool-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+.bui-tool-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bui-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.bui-tool-trigger[data-summary="true"] .bui-tool-label {
+  max-width: 48%;
+}
+.bui-tool-source {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--bui-ink-3);
+}
+.bui-tool-chip {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bui-field);
+  box-shadow: var(--bui-shadow-hairline);
+  color: var(--bui-ink-2);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+.bui-tool-detail {
+  min-width: 0;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--bui-ink-3);
+}
+.bui-tool-content,
+.bui-reasoning-content {
+  margin: 3px 0 6px 8px;
+  border-left: 1px solid var(--bui-line);
+  padding: 4px 0 4px 14px;
+  color: var(--bui-ink-2);
+  font-size: 12px;
+  line-height: 1.6;
+  animation: bui-reveal 180ms ease-out;
+}
+.bui-tool-content {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.bui-tool-content pre {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--bui-inset);
+  color: var(--bui-ink-2);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.bui-context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.bui-reasoning-trigger {
+  display: flex;
+  min-height: 28px;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 4px 3px;
+  color: var(--bui-ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+button.bui-reasoning-trigger:hover {
+  background: var(--bui-hover-2);
+}
+.bui-reasoning-trigger > svg {
+  color: var(--bui-ink-3);
+}
+.bui-thinking-busy {
+  background: linear-gradient(
+    90deg,
+    var(--bui-ink-2) 35%,
+    var(--bui-ink) 50%,
+    var(--bui-ink-2) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: bui-shimmer 1.4s linear infinite;
+}
+.bui-reasoning-content {
+  max-height: 192px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.bui-approval-card {
+  width: 100%;
+  max-width: 320px;
+  min-width: 0;
+  margin: 8px 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bui-surface);
+  box-shadow: var(--bui-shadow-card);
+  animation: bui-reveal 180ms ease-out;
+}
+.bui-approval-heading {
+  padding: 16px 16px 10px;
+}
+.bui-approval-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--bui-ink);
+}
+.bui-approval-tool {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  color: var(--bui-ink-2);
+}
+.bui-approval-input {
+  margin: 0 12px;
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--bui-inset);
+}
+.bui-approval-input > p {
+  margin-bottom: 6px;
+  color: var(--bui-ink-3);
+  font-size: 11px;
+  font-weight: 500;
+}
+.bui-approval-input pre {
+  max-height: 160px;
+  overflow: auto;
+  color: var(--bui-ink-2);
+  font-size: 11.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.bui-approval-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 12px 12px;
+}
+.bui-approval-caption {
+  flex-shrink: 0;
+  color: var(--bui-ink-3);
+  font-size: 11px;
+}
+.bui-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.bui-approval-actions > button {
+  height: 27px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--bui-shadow-btn);
+}
+.bui-approval-actions > button[data-variant="outline"] {
+  background: var(--bui-inset);
+  color: var(--bui-ink-2);
+}
+.bui-approval-actions > button[data-variant="default"] {
+  background: var(--bui-accent);
+  color: white;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%);
+}
+.bui-approval-actions > button:hover {
+  filter: brightness(0.96);
+}
+
+.bui-prompt-bar {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--bui-line);
+  border-radius: 14px;
+  background: var(--bui-surface);
+  box-shadow: var(--bui-shadow-card);
+  transition:
+    border-color 150ms,
+    box-shadow 150ms;
+}
+.bui-prompt-bar:focus-within {
+  border-color: var(--bui-line-strong);
+  box-shadow: var(--bui-shadow-raised);
+}
+.bui-prompt-input {
+  grid-column: 2;
+  grid-row: 1;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  max-height: 160px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 6px 4px;
+  background: transparent;
+  color: var(--bui-ink);
+  font-size: 13px;
+  line-height: 20px;
+}
+.bui-prompt-input::placeholder {
+  color: var(--bui-ink-3);
+}
+.bui-prompt-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bui-prompt-toolbar {
+  display: contents;
+}
+.bui-prompt-attach {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  align-self: end;
+  justify-content: center;
+  min-height: 32px;
+}
+.bui-prompt-attach > button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--bui-ink-3);
+}
+.bui-prompt-attach > button:hover {
+  background: var(--bui-hover);
+  color: var(--bui-ink);
+}
+.bui-prompt-attach [role="alert"] {
+  position: absolute;
+  margin-top: 42px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bui-surface);
+  box-shadow: var(--bui-shadow-btn);
+}
+.bui-prompt-actions {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 6px;
+  min-height: 32px;
+}
+.bui-prompt-actions > button[aria-haspopup="menu"] {
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--bui-ink-2);
+  font-size: 12px;
+  box-shadow: none;
+}
+.bui-prompt-actions > button[aria-haspopup="menu"]:hover {
+  background: var(--bui-hover);
+}
+.bui-prompt-actions > button:not([aria-haspopup="menu"]) {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+.bui-prompt-actions > button[data-variant="default"] {
+  background: var(--bui-ink);
+  color: var(--bui-surface);
+  box-shadow: var(--bui-shadow-btn);
+}
+.bui-prompt-files {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+}
+.bui-prompt-files > ul {
+  padding: 2px 2px 6px;
+}
+.bui-prompt-files li {
+  border-radius: 6px;
+  background: var(--bui-field);
+  color: var(--bui-ink-2);
+  box-shadow: var(--bui-shadow-hairline);
+}
+.bui-prompt-bar:has(> .bui-prompt-files) > .bui-prompt-input,
+.bui-prompt-bar:has(> .bui-prompt-files) .bui-prompt-attach,
+.bui-prompt-bar:has(> .bui-prompt-files) .bui-prompt-actions {
+  grid-row: 2;
+}
+
+.bui-context-card {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bui-surface);
+  box-shadow: var(--bui-shadow-card);
+}
+.bui-context-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--bui-line);
+  padding: 10px 12px;
+}
+.bui-context-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.bui-context-count {
+  flex-shrink: 0;
+  color: var(--bui-ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.bui-context-meta {
+  padding: 8px 12px 0;
+  color: var(--bui-ink-3);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.bui-context-body {
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  padding: 8px 12px;
+  color: var(--bui-ink-2);
+  font-size: 12.5px;
+  line-height: 1.625;
+}
+.bui-context-footer {
+  padding: 0 12px 12px;
+}
+.bui-context-file,
+.bui-source-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--bui-inset);
+  box-shadow: var(--bui-shadow-btn);
+  color: var(--bui-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.bui-source-chip {
+  cursor: pointer;
+  transition: background-color 100ms;
+}
+.bui-source-chip:hover {
+  background: var(--bui-hover);
+}
+.bui-source-chip-inline {
+  margin: 0 4px;
+  max-width: 240px;
+  vertical-align: middle;
+}
+.bui-source-icon {
+  display: flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--bui-ink-3);
+}
+.bui-file-type {
+  display: inline-flex;
+  max-width: 36px;
+  min-width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0 2px;
+  background: var(--bui-accent);
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+}
+.bui-file-type[data-type="PDF"] {
+  background: var(--bui-red);
+}
+.bui-file-type[data-type="CSV"],
+.bui-file-type[data-type="XLSX"],
+.bui-file-type[data-type="XLS"] {
+  background: var(--bui-green);
+}
+.bui-source-popover {
+  z-index: 50;
+  max-height: min(480px, calc(100dvh - 32px));
+  width: min(380px, calc(100vw - 32px));
+  overflow-y: auto;
+  border-radius: 10px;
+  outline: none;
+  box-shadow: var(--bui-shadow-raised);
+}
+
+.bui-tool-trigger:focus-visible,
+.bui-process-summary:focus-visible,
+.bui-reasoning-trigger:focus-visible,
+.bui-source-chip:focus-visible {
+  outline: 2px solid var(--bui-accent);
+  outline-offset: 2px;
+}
+@keyframes bui-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes bui-shimmer {
+  from {
+    background-position: 150%;
+  }
+  to {
+    background-position: -50%;
+  }
+}
+@media (max-width: 480px) {
+  .bui-tool-source {
+    display: none;
+  }
+  .bui-prompt-input {
+    font-size: 16px;
+  }
+  .bui-prompt-actions > button[aria-haspopup="menu"] {
+    width: 28px;
+    padding: 0;
+  }
+  .bui-prompt-actions > button[aria-haspopup="menu"] > span,
+  .bui-prompt-actions > button[aria-haspopup="menu"] > svg:last-child {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-beautiful,
+  .agent-beautiful *,
+  .agent-beautiful *::before,
+  .agent-beautiful *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .bui-thinking-busy {
+    background: none;
+    color: var(--bui-ink-2);
+  }
+}

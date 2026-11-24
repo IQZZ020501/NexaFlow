@@ -496,7 +496,7 @@ class PublicAgentConversationListResponse(BaseModel):
 class AgentLogResponse(BaseModel):
     id: str
     conversation_id: str
-    access_source: Literal["console", "public", "api"]
+    access_source: Literal["console", "public", "api", "automation"]
     consumer_id: str
     display_name: str
     requested_by_user_id: str | None
@@ -523,7 +523,7 @@ class AgentLogListResponse(BaseModel):
 
 class AgentConversationUserResponse(BaseModel):
     consumer_id: str
-    access_source: Literal["console", "public", "api"]
+    access_source: Literal["console", "public", "api", "automation"]
     display_name: str
     first_seen_at: AppDateTime
     last_seen_at: AppDateTime
@@ -555,3 +555,15 @@ class AgentMonitoringResponse(BaseModel):
     days: Literal[7, 30, 90]
     summary: AgentMonitoringValues
     daily: list[AgentMonitoringDailyResponse]
+
+
+class AgentPublicationVersionResponse(BaseModel):
+    id: str
+    agent_id: str
+    version_number: int
+    published_by_user_id: str
+    created_at: AppDateTime
+
+
+class AgentPublicationVersionListResponse(BaseModel):
+    items: list[AgentPublicationVersionResponse]

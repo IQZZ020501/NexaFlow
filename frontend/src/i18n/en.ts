@@ -5,7 +5,8 @@ export const en = {
   向量化全部文档: "Index all documents",
   向量化所选文档: "Index selected documents",
   没有需要向量化的文档: "No documents need indexing",
-  "仅处理已分段文档，正在处理的文档会自动跳过。": "Only segmented documents are indexed. Documents being processed are skipped.",
+  "仅处理已分段文档，正在处理的文档会自动跳过。":
+    "Only segmented documents are indexed. Documents being processed are skipped.",
   登录成功: "Signed in successfully",
   已退出登录: "Signed out",
   技能草稿已保存: "Skill draft saved",
@@ -202,50 +203,58 @@ export const en = {
   "集成操作超时，请核对平台结果后再重试。":
     "The integration operation timed out. Check the provider’s result before retrying.",
   已过期: "Expired",
-  "记忆与个性化": "Memory and personalization",
+  记忆与个性化: "Memory and personalization",
   记忆: "Memory",
   "记忆在当前工作空间的 Agent 之间共享，画像由下方条目汇总。当前要求优先于历史偏好。":
     "Memories are shared by Agents in the current workspace. Your profile is built from these entries. Current requests take priority over past preferences.",
   当前没有可用工作空间: "No workspace is available",
-  "记忆设置": "Memory settings",
-  "使用长期记忆": "Use long-term memory",
-  "用于后续回答和相关问题推荐，关闭后暂停读取和更新。": "Used for future answers and suggested questions. Turning this off pauses reading and updates.",
-  "自动记忆": "Automatic memory",
-  "开启后在后台提取明确、稳定的信息；关闭时仍可手动添加或明确要求记住。": "Extract explicit, lasting information in the background. When off, you can still add memories or explicitly ask to remember something.",
-  "我的记忆画像": "My memory profile",
-  "添加记忆": "Add memory",
-  "编辑记忆": "Edit memory",
-  "删除记忆": "Delete memory",
-  "清空全部记忆": "Clear all memories",
-  "删除后将不再用于后续回答和推荐，历史对话仍会保留。": "Deleted memories will no longer be used for future answers and suggestions. Conversation history is retained.",
-  "暂无长期记忆，可以手动添加，或在对话中明确要求记住。": "No long-term memories yet. Add one or explicitly ask to remember something in chat.",
-  "沟通与工作偏好": "Communication and work preferences",
-  "明确背景": "Stated background",
-  "长期目标": "Long-term goals",
-  "项目记忆": "Project memories",
-  "个人记忆": "Personal memory",
+  记忆设置: "Memory settings",
+  使用长期记忆: "Use long-term memory",
+  "用于后续回答和相关问题推荐，关闭后暂停读取和更新。":
+    "Used for future answers and suggested questions. Turning this off pauses reading and updates.",
+  自动记忆: "Automatic memory",
+  "开启后在后台提取明确、稳定的信息；关闭时仍可手动添加或明确要求记住。":
+    "Extract explicit, lasting information in the background. When off, you can still add memories or explicitly ask to remember something.",
+  我的记忆画像: "My memory profile",
+  添加记忆: "Add memory",
+  编辑记忆: "Edit memory",
+  删除记忆: "Delete memory",
+  清空全部记忆: "Clear all memories",
+  "删除后将不再用于后续回答和推荐，历史对话仍会保留。":
+    "Deleted memories will no longer be used for future answers and suggestions. Conversation history is retained.",
+  "暂无长期记忆，可以手动添加，或在对话中明确要求记住。":
+    "No long-term memories yet. Add one or explicitly ask to remember something in chat.",
+  沟通与工作偏好: "Communication and work preferences",
+  明确背景: "Stated background",
+  长期目标: "Long-term goals",
+  项目记忆: "Project memories",
+  个人记忆: "Personal memory",
   "编辑记忆：{key}": "Edit memory: {key}",
   "删除记忆：{key}": "Delete memory: {key}",
-  "手动添加": "Added manually",
-  "明确要求记住": "Explicitly requested",
-  "自动提取": "Extracted automatically",
-  "查看记忆来源": "View memory source",
-  "打开来源对话": "Open source conversation",
-  "记忆主题": "Memory topic",
-  "记忆内容": "Memory content",
-  "记忆分类": "Memory category",
-  "适用范围": "Scope",
-  "有效期": "Expiry",
-  "长期保留": "Keep indefinitely",
+  手动添加: "Added manually",
+  明确要求记住: "Explicitly requested",
+  自动提取: "Extracted automatically",
+  查看记忆来源: "View memory source",
+  打开来源对话: "Open source conversation",
+  记忆主题: "Memory topic",
+  记忆内容: "Memory content",
+  记忆分类: "Memory category",
+  适用范围: "Scope",
+  有效期: "Expiry",
+  长期保留: "Keep indefinitely",
   "{days} 天": "{days} days",
-  "到期": "expires",
-  "只记录希望在后续对话中复用的信息，请勿填写密码或密钥。": "Save information you want to reuse in future conversations. Do not enter passwords or keys.",
-  "记忆设置已更新": "Memory settings updated",
-  "记忆不存在或不可访问": "Memory not found or inaccessible",
-  "已有相同主题的记忆，请编辑现有条目": "A memory with this topic already exists. Edit the existing entry.",
-  "最多保存 100 条记忆，请先删除不再需要的条目": "You can save up to 100 memories. Remove entries you no longer need.",
-  "记忆中不能保存密码、密钥等敏感信息": "Passwords, keys and other sensitive information cannot be stored in memory.",
-  "请先登录": "Please sign in",
+  到期: "expires",
+  "只记录希望在后续对话中复用的信息，请勿填写密码或密钥。":
+    "Save information you want to reuse in future conversations. Do not enter passwords or keys.",
+  记忆设置已更新: "Memory settings updated",
+  记忆不存在或不可访问: "Memory not found or inaccessible",
+  "已有相同主题的记忆，请编辑现有条目":
+    "A memory with this topic already exists. Edit the existing entry.",
+  "最多保存 100 条记忆，请先删除不再需要的条目":
+    "You can save up to 100 memories. Remove entries you no longer need.",
+  "记忆中不能保存密码、密钥等敏感信息":
+    "Passwords, keys and other sensitive information cannot be stored in memory.",
+  请先登录: "Please sign in",
   新建项目: "New project",
   编辑项目: "Edit project",
   "更多项目操作：{name}": "More project actions: {name}",
@@ -289,12 +298,17 @@ export const en = {
   无法加载项目: "Unable to load project",
   返回普通对话: "Back to chat",
 
-  "工作空间本月模型 Token 额度不足，请联系管理员": "This workspace has insufficient model token quota for this month. Contact an administrator.",
-  "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失": "The execution environment was rebuilt. Saved files will be restored; unsaved temporary state may be lost.",
+  "工作空间本月模型 Token 额度不足，请联系管理员":
+    "This workspace has insufficient model token quota for this month. Contact an administrator.",
+  "执行环境已重建，已保存文件将恢复，未保存的临时状态可能丢失":
+    "The execution environment was rebuilt. Saved files will be restored; unsaved temporary state may be lost.",
   "请先配置 Embedding 模型": "Configure an Embedding model first",
-  "检索模型测试失败，请检查连接配置后重试": "The retrieval model test failed. Check the connection settings and retry.",
-  "绑定的技能授权已失效，请重新配置": "Authorization for a bound Skill has expired. Update the configuration.",
-  "检索模型测试失败，模型服务返回状态码 {value}": "The retrieval model test failed with provider status {value}",
+  "检索模型测试失败，请检查连接配置后重试":
+    "The retrieval model test failed. Check the connection settings and retry.",
+  "绑定的技能授权已失效，请重新配置":
+    "Authorization for a bound Skill has expired. Update the configuration.",
+  "检索模型测试失败，模型服务返回状态码 {value}":
+    "The retrieval model test failed with provider status {value}",
   操作失败: "Operation failed",
   "相似度必须是 0 到 1 之间的数字":
     "Similarity must be a number between 0 and 1",
@@ -308,9 +322,9 @@ export const en = {
   "{name}：{reason}": "{name}: {reason}",
   "删除技能“{name}”？删除后无法再调用，历史版本和执行记录会保留。":
     "Delete Skill “{name}”? It will no longer be callable. Published versions and execution history will be retained.",
-  "技能已删除": "Skill deleted",
-  "没有匹配的技能": "No matching Skills",
-  "还没有可用的技能": "No Skills available yet",
+  技能已删除: "Skill deleted",
+  没有匹配的技能: "No matching Skills",
+  还没有可用的技能: "No Skills available yet",
   "统计整个工作空间的当前资源，不受日期筛选影响；个人列表仅展示有权访问的资源。":
     "Current resources across the entire workspace, independent of the date filter. Personal lists show only resources you can access.",
   "工具按内置工具（含技能）和 MCP 服务计数，每个 MCP 服务计为一个工具。":
@@ -350,7 +364,7 @@ export const en = {
   请输入有效的整数: "Enter a valid integer",
   请输入有效的数字: "Enter a valid number",
   输入参数: "Input",
-  "查看服务状态与后台失败记录": "View service status and background failures",
+  查看服务状态与后台失败记录: "View service status and background failures",
   管理工具: "Manage tools",
   "管理 {name} 的工具": "Manage tools for {name}",
   "按工具管理权限与执行策略。":
@@ -407,22 +421,33 @@ export const en = {
   返回工具: "Return to Tools",
   已删除: "Deleted",
   下载: "Download",
-  "仅文本摘录（原文件超过 5 MiB）": "Text excerpt only (original exceeds 5 MiB)",
-  "对话文件历史已满，请新建对话并上传必要文件": "Conversation file history is full. Start a new chat and upload the files you need.",
+  "仅文本摘录（原文件超过 5 MiB）":
+    "Text excerpt only (original exceeds 5 MiB)",
+  "对话文件历史已满，请新建对话并上传必要文件":
+    "Conversation file history is full. Start a new chat and upload the files you need.",
   "上传文件或 ZIP": "Upload files or ZIP",
-  "上传文件夹": "Upload folder",
-  "未找到可上传的文件": "No uploadable files found",
+  上传文件夹: "Upload folder",
+  未找到可上传的文件: "No uploadable files found",
   "文件夹读取失败，请重试": "Unable to read the folder. Please retry.",
-  "文件路径无效，请检查文件夹或压缩包": "Invalid file path. Check the folder or archive.",
+  "文件路径无效，请检查文件夹或压缩包":
+    "Invalid file path. Check the folder or archive.",
   "单个文件不能超过 5 MiB": "Each file must not exceed 5 MiB",
-  "每段对话最多保存 64 个文件、合计 64 MiB": "Each conversation supports up to 64 files totaling 64 MiB.",
-  "文件路径重复，请整理后重新上传": "Duplicate file paths. Resolve them before uploading again.",
-  "压缩包无效或格式不支持，请使用 ZIP": "The archive is invalid or unsupported. Please use ZIP.",
-  "ZIP 不支持链接、特殊文件或加密条目": "ZIP entries cannot be links, special files or encrypted.",
-  "ZIP 条目过多，请精简后重试": "The ZIP contains too many entries. Reduce its contents and retry.",
-  "文件夹中的依赖、缓存和 Git 数据不会导入": "Dependency folders, caches and Git metadata are excluded.",
-  "上传路径不能同时是文件和文件夹": "An uploaded path cannot be both a file and a directory.",
-  "文件路径过长，最多 255 个字符": "Uploaded paths must be no longer than 255 characters.",
+  "每段对话最多保存 64 个文件、合计 64 MiB":
+    "Each conversation supports up to 64 files totaling 64 MiB.",
+  "文件路径重复，请整理后重新上传":
+    "Duplicate file paths. Resolve them before uploading again.",
+  "压缩包无效或格式不支持，请使用 ZIP":
+    "The archive is invalid or unsupported. Please use ZIP.",
+  "ZIP 不支持链接、特殊文件或加密条目":
+    "ZIP entries cannot be links, special files or encrypted.",
+  "ZIP 条目过多，请精简后重试":
+    "The ZIP contains too many entries. Reduce its contents and retry.",
+  "文件夹中的依赖、缓存和 Git 数据不会导入":
+    "Dependency folders, caches and Git metadata are excluded.",
+  上传路径不能同时是文件和文件夹:
+    "An uploaded path cannot be both a file and a directory.",
+  "文件路径过长，最多 255 个字符":
+    "Uploaded paths must be no longer than 255 characters.",
 
   "预览文件：{filename}": "Preview file: {filename}",
   "文件预览：{filename}": "File preview: {filename}",
@@ -453,7 +478,7 @@ export const en = {
   "模型判断 MCP 调用是否需要确认": "Model decides when MCP calls need approval",
   "自动运行已授权工具，仍受安全限制": "Auto-run authorized tools; limits apply",
   "执行权限：{mode}": "Execution permission: {mode}",
-  "编辑技能": "Edit Skill",
+  编辑技能: "Edit Skill",
   技能指令: "Skill instructions",
   包文件: "Package files",
   保存并发布: "Save and publish",
@@ -543,7 +568,7 @@ export const en = {
   新密码不能与原密码相同:
     "The new password must differ from the previous password",
   应用名称已存在: "App name already exists",
-  "技能名称已存在": "Skill name already exists",
+  技能名称已存在: "Skill name already exists",
   文件夹名称已存在: "Folder name already exists",
   模型名称已存在: "Model name already exists",
   模型已存在: "Model already exists",
@@ -1088,21 +1113,21 @@ export const en = {
   更新模型配置: "Update model config",
   删除模型配置: "Delete model config",
   工具: "Tools",
-  "添加工具和技能": "Add tools and Skills",
+  添加工具和技能: "Add tools and Skills",
   "添加 MCP 工具或技能": "Add MCP tools or Skills",
   "按 MCP 服务添加工具，或选择已发布的技能；需要审批的调用会暂停等待确认。":
     "Add MCP services or published Skills. Calls requiring approval pause for confirmation.",
-  "搜索工具或技能": "Search tools or Skills",
+  搜索工具或技能: "Search tools or Skills",
   "移除 {name}": "Remove {name}",
   "最多选择 4 个技能": "Select up to 4 Skills",
-  "没有匹配的工具或技能": "No matching tools or Skills",
+  没有匹配的工具或技能: "No matching tools or Skills",
   添加工具: "Add tool",
   还没有工具: "No tools yet",
   "MCP Server": "MCP Server",
   技能: "Skills",
-  "新建技能": "New Skill",
-  "导入技能": "Import Skill",
-  "创建技能": "Create Skill",
+  新建技能: "New Skill",
+  导入技能: "Import Skill",
+  创建技能: "Create Skill",
   "写 SKILL.md，并声明参数。平台会生成 Tool。":
     "Write SKILL.md and declare parameters. The platform generates the Tool.",
   "新建技能，或导入 SKILL.md / zip。":
@@ -1112,18 +1137,18 @@ export const en = {
   "请先解压 zip，上传其中的 SKILL.md。":
     "Unzip first, then upload the SKILL.md inside.",
   "无法读取该文件。": "Could not read that file.",
-  "选择技能文件": "Choose a Skill file",
+  选择技能文件: "Choose a Skill file",
   "SKILL.md": "SKILL.md",
   "参数写在 frontmatter 或稍后在表单里补。":
     "Declare parameters in front matter, or add them in the form later.",
-  "我的技能": "My Skills",
-  "还没有自己的技能": "No Skills of your own yet",
+  我的技能: "My Skills",
+  还没有自己的技能: "No Skills of your own yet",
   "管理自己的 MCP 与技能；共享给你的资源可按授权使用。":
     "Manage your own MCP connections and Skills. Shared resources follow their granted permissions.",
   "连接由你管理；共享工具会使用这份连接执行。保存时会发现可用工具。":
     "You manage this connection. Shared tools run through it. Saving discovers the available tools.",
-  "工作区技能": "Workspace Skills",
-  "还没有工作区技能": "No workspace Skills yet",
+  工作区技能: "Workspace Skills",
+  还没有工作区技能: "No workspace Skills yet",
   "从添加工具新建或导入技能。": "Create or import a Skill from Add tool.",
   我的工具: "My tools",
   共享给我的: "Shared with me",
@@ -1159,7 +1184,8 @@ export const en = {
   不可用: "Unavailable",
   没有使用权限: "No use permission",
   工具当前不可用: "Tool is currently unavailable",
-  "工具不可用，请刷新工具列表后重新选择": "Tool is unavailable. Refresh the tool list and select it again.",
+  "工具不可用，请刷新工具列表后重新选择":
+    "Tool is unavailable. Refresh the tool list and select it again.",
   不支持工作流调用: "Not callable from Workflows",
   需要逐次审批: "Requires approval for every call",
   工具调用已禁用: "Tool calls are disabled",
@@ -1616,7 +1642,20 @@ export const en = {
   历史对话已压缩: "Conversation history compacted",
   历史对话压缩未完成: "Conversation history compaction incomplete",
   执行过程: "Execution process",
+  查阅知识库: "Consult knowledge base",
+  运行命令: "Run command",
+  搜索网页: "Search the web",
+  读取网页: "Read webpage",
   工具执行结果不确定: "Tool outcome is uncertain",
+  等待核对结果: "Check result",
+  "调用可能已在外部服务执行，请先核对结果。选择“不重试并继续”可继续对话。":
+    "This call may already have executed in the external service. Check the result, then select “Continue without retrying” to continue the conversation.",
+  "此调用可能已执行，无法通过批准操作重试。请核对结果后选择“不重试并继续”。":
+    "This call may already have executed and cannot be retried through approval. Check the result, then select “Continue without retrying”.",
+  "工具执行已超时，请先核对外部服务的结果。":
+    "The tool call timed out. Check the result in the external service first.",
+  "工具执行结果无法确认，请先核对外部服务的结果。":
+    "The tool outcome could not be confirmed. Check the result in the external service first.",
   工具调用需要确认: "Tool call requires approval",
   不重试并继续: "Continue without retrying",
   拒绝: "Reject",
@@ -2602,7 +2641,8 @@ export const en = {
   放大: "Zoom in",
   其他字段: "Other field",
   主导航: "Main navigation",
-  "管理自己的模型，或使用工作空间共享模型。": "Manage your own models or use models shared with the workspace.",
+  "管理自己的模型，或使用工作空间共享模型。":
+    "Manage your own models or use models shared with the workspace.",
   模型范围: "Model scope",
   全部模型: "All models",
   我的模型: "My models",
@@ -2610,23 +2650,318 @@ export const en = {
   仅自己: "Only me",
   使用范围: "Who can use this model",
   "仅你可以查看、使用和管理。": "Only you can view, use and manage this model.",
-  "所有成员可使用，由管理员管理。": "Available to all members and managed by administrators.",
-  "使用范围创建后不可更改，如需其他范围请重新接入。": "The scope is fixed after creation. Add a separate model to use another scope.",
-  "保存在当前工作空间，仅你可用；共享或发布应用请使用工作空间共享模型。": "Saved in this workspace for your use only. Use workspace-shared models for shared or published apps.",
-  "向当前工作空间的所有成员开放模型调用，API Key 始终加密保存。": "All members of this workspace can use the model. API keys are always stored encrypted.",
+  "所有成员可使用，由管理员管理。":
+    "Available to all members and managed by administrators.",
+  "使用范围创建后不可更改，如需其他范围请重新接入。":
+    "The scope is fixed after creation. Add a separate model to use another scope.",
+  "保存在当前工作空间，仅你可用；共享或发布应用请使用工作空间共享模型。":
+    "Saved in this workspace for your use only. Use workspace-shared models for shared or published apps.",
+  "向当前工作空间的所有成员开放模型调用，API Key 始终加密保存。":
+    "All members of this workspace can use the model. API keys are always stored encrypted.",
   无权管理此模型: "You do not have permission to manage this model",
-  只有工作空间管理员可以创建共享模型: "Only workspace administrators can create shared models",
+  只有工作空间管理员可以创建共享模型:
+    "Only workspace administrators can create shared models",
   还没有个人模型: "No personal models yet",
   暂无工作空间共享模型: "No shared models yet",
   接入个人模型: "Add a personal model",
-  "管理员接入的共享模型会显示在这里，所有成员均可使用。": "Models shared by administrators appear here and are available to all members.",
-  "接入自己的模型后，即可在应用中选择使用。": "Add your own model to use it in your apps.",
-  成员接入的模型仅支持公网地址: "Member-configured models must use public network addresses",
-  模型参数不能覆盖连接设置: "Model parameters cannot override connection settings",
-  个人Bedrock模型必须填写AWS访问凭据: "Personal Bedrock models require explicit AWS credentials",
-  个人Bedrock模型仅支持官方区域接口: "Personal Bedrock models require the official regional endpoint",
+  "管理员接入的共享模型会显示在这里，所有成员均可使用。":
+    "Models shared by administrators appear here and are available to all members.",
+  "接入自己的模型后，即可在应用中选择使用。":
+    "Add your own model to use it in your apps.",
+  成员接入的模型仅支持公网地址:
+    "Member-configured models must use public network addresses",
+  模型参数不能覆盖连接设置:
+    "Model parameters cannot override connection settings",
+  个人Bedrock模型必须填写AWS访问凭据:
+    "Personal Bedrock models require explicit AWS credentials",
+  个人Bedrock模型仅支持官方区域接口:
+    "Personal Bedrock models require the official regional endpoint",
   Bedrock区域无效: "Invalid Bedrock region",
   模型连接地址无效: "Invalid model connection address",
-  发布应用需要使用工作空间共享模型: "Published apps require workspace-shared models",
-  所选模型不存在或当前用户无权使用: "The selected model is unavailable or you do not have permission to use it",
+  发布应用需要使用工作空间共享模型:
+    "Published apps require workspace-shared models",
+  所选模型不存在或当前用户无权使用:
+    "The selected model is unavailable or you do not have permission to use it",
+  自动化: "Automations",
+  创建自动化: "Create automation",
+  编辑自动化: "Edit automation",
+  自动化详情: "Automation details",
+  返回自动化列表: "Back to automations",
+  "管理定时触发与 Webhook 事件驱动的后台运行任务。":
+    "Manage scheduled and webhook-triggered background runs for published applications.",
+  暂无自动化: "No automations yet",
+  "为已发布的应用创建定时或 Webhook 自动化任务后，任务会在后台自动执行。":
+    "Create a schedule or webhook automation for any published app to run tasks in the background.",
+  目标应用: "Target app",
+  选择已发布应用: "Select published app",
+  绑定版本: "Pinned version",
+  "仅可选择已激活且已发布的 Agent 或工作流。":
+    "Only active, published Agents or Workflows can be selected.",
+  触发方式: "Trigger",
+  单次定时: "One-time",
+  每天定时: "Daily",
+  每周定时: "Weekly",
+  Webhook事件: "Webhook event",
+  "所有定时时间均按北京时间 (Asia/Shanghai) 计算。":
+    "All schedules execute in Beijing Time (Asia/Shanghai).",
+  执行时间: "Run at",
+  请设置正确的执行时间: "Please enter a valid scheduled time",
+  触发时刻: "Time (HH:MM)",
+  执行星期: "Weekdays",
+  最大排队数: "Max pending queue",
+  输入模式: "Input mode",
+  文本输入: "Text",
+  结构化JSON: "Structured JSON",
+  任务提示词: "Task prompt",
+  JSON载荷: "JSON payload",
+  "Webhook 提取路径（可选）": "Webhook extraction path (optional)",
+  "Webhook 提示词模板（可选）": "Webhook prompt template (optional)",
+  "外部 Webhook 数据仅会注入任务输入，不会修改目标应用、模型或权限配置。":
+    "Inbound webhook data only populates task inputs and cannot override the app, model, or permissions.",
+  通知偏好: "Notifications",
+  成功时通知: "On succeeded",
+  失败时通知: "On failed",
+  取消时通知: "On cancelled",
+  待审批时通知: "On awaiting approval",
+  待填表单时通知: "On awaiting input",
+  下次执行时间: "Next run",
+  最近结果: "Latest result",
+  暂停: "Pause",
+  恢复运行: "Resume",
+  立即执行: "Run now",
+  取消运行: "Cancel run",
+  执行历史: "Execution history",
+  暂无执行记录: "No executions yet",
+  请选择一条执行记录查看详情: "Select an execution record to inspect details",
+  计划时间: "Scheduled",
+  接收时间: "Received",
+  派发时间: "Dispatched",
+  实际启动时间: "Started",
+  完成时间: "Finished",
+  派发状态: "Dispatch status",
+  待排队: "Queued",
+  待派发: "Pending dispatch",
+  已派发: "Dispatched",
+  已拒绝: "Rejected",
+  触发来源: "Source",
+  定时触发: "Schedule",
+  手动触发: "Manual",
+  补跑说明: "Recovery note",
+  "停机恢复跳过 {value} 次过期调度":
+    "Skipped {value} missed slots during downtime",
+  跳过或拒绝原因: "Skip / reject reason",
+  "Webhook 地址与签名密钥": "Webhook endpoint & secret",
+  轮换密钥: "Rotate secret",
+  "Webhook 密钥仅展示一次，请妥善保存。":
+    "The webhook signing secret is shown once; copy and store it securely.",
+  "请填写请求头 X-NexaFlow-Timestamp、X-NexaFlow-Event-Id 与 X-NexaFlow-Signature (HMAC-SHA256)。":
+    "Include X-NexaFlow-Timestamp, X-NexaFlow-Event-Id, and X-NexaFlow-Signature (HMAC-SHA256) headers.",
+  密钥提示: "Secret hint",
+  待审批操作: "Pending approval",
+  待填写表单: "Pending form input",
+  批准执行: "Approve",
+  拒绝执行: "Reject",
+  提交表单继续: "Submit & resume",
+  生成产物: "Generated artifacts",
+  下载产物: "Download",
+  冻结输入: "Frozen inputs",
+  自动化名称不能为空: "Automation name is required",
+  请选择目标应用和发布版本: "Select a target application and published version",
+  结构化JSON格式无效: "JSON payload must be a valid JSON object",
+  请至少选择一个星期: "Select at least one weekday",
+  周一: "Mon",
+  周二: "Tue",
+  周三: "Wed",
+  周四: "Thu",
+  周五: "Fri",
+  周六: "Sat",
+  周日: "Sun",
+  已暂停: "Paused",
+  已完成: "Completed",
+  已成功: "Succeeded",
+  已失败: "Failed",
+  待审批: "Awaiting approval",
+  自动化任务: "Automation task",
+  查看执行详情: "Open execution",
+  自动化已创建: "Automation created",
+  自动化已更新: "Automation updated",
+  自动化已暂停: "Automation paused",
+  自动化已恢复: "Automation resumed",
+  已触发立即执行: "Execution triggered",
+  已取消本次运行: "Run cancelled",
+  Webhook密钥已轮换: "Webhook secret rotated",
+  "自动化任务已完成：{name}": "Automation completed: {name}",
+  "自动化任务执行失败：{name}": "Automation failed: {name}",
+  "自动化任务已取消：{name}": "Automation cancelled: {name}",
+  "自动化任务等待审批：{name}": "Automation needs approval: {name}",
+  "自动化任务等待输入：{name}": "Automation needs input: {name}",
+  "自动化任务已完成。": "The automation has completed.",
+  "自动化任务执行失败，请查看运行详情。":
+    "The automation failed. Open the execution for details.",
+  "本次自动化执行已被取消。": "This automation execution was cancelled.",
+  "运行过程中触发了需要人工审批的工具调用，请前往执行详情处理。":
+    "A tool call requires your approval. Open the execution to continue.",
+  "工作流正等待补充表单输入，请前往执行详情提交后继续运行。":
+    "The workflow needs form input. Open the execution to continue.",
+  "签名内容为 timestamp.event_id.原始请求正文，使用密钥计算 HMAC-SHA256，签名头加 sha256= 前缀。":
+    "Sign timestamp.event_id.raw_body using HMAC-SHA256 with the secret. Prefix the signature header with sha256=.",
+  "Webhook URL": "Webhook URL",
+
+  "自动化已暂停，请恢复后再执行":
+    "The automation is paused. Resume it before running.",
+  该自动化已有未完成的任务:
+    "This automation already has an unfinished execution.",
+  "上一次任务尚未结束，本次已跳过":
+    "Skipped because the previous execution has not finished.",
+  任务在开始执行前已取消: "Cancelled before execution started.",
+  "单次任务已完成，请修改执行时间后再启用":
+    "This one-time task is complete. Reschedule it to enable it again.",
+  请先发布目标应用: "Publish the target application first.",
+  目标应用已取消发布: "The target application has been unpublished.",
+  目标应用不可用或已停用: "The target application is unavailable or disabled.",
+  应用发布者已停用或不再可用:
+    "The application publisher is inactive or unavailable.",
+  自动化所属用户已停用或不存在:
+    "The automation owner is inactive or unavailable.",
+  "绑定的应用版本已不存在，请重新选择":
+    "The pinned application version is missing. Choose another version.",
+  "事件队列已满，请稍后重试": "The event queue is full. Try again later.",
+  "任务输入超过4000字符，请缩短提示词或提取范围":
+    "The task input exceeds 4,000 characters. Shorten the prompt or mapping.",
+  "输入参数无效，请检查后重试":
+    "Invalid input. Check the parameters and try again.",
+  "请求超时，请稍后重试": "The request timed out. Try again later.",
+  "请求过于频繁，请稍后重试": "Too many requests. Try again later.",
+  "请求内容超过大小限制，请缩小后重试":
+    "The request exceeds the size limit. Reduce its size and try again.",
+  "服务暂时不可用，请稍后重试":
+    "The service is temporarily unavailable. Try again later.",
+  "操作冲突，请刷新后重试":
+    "The operation conflicted with another change. Refresh and try again.",
+  请输入有效的文本: "Enter valid text",
+  请选择有效的开关值: "Select a valid boolean value",
+  "数值必须大于 {value}": "The value must be greater than {value}",
+  "数值必须小于 {value}": "The value must be less than {value}",
+  当前密码错误: "Current password is incorrect",
+  "登录尝试过于频繁，请稍后重试": "Too many sign-in attempts. Try again later.",
+  "登录服务暂时不可用，请稍后重试":
+    "The sign-in service is temporarily unavailable. Try again later.",
+  用户名格式无效: "Invalid username format",
+  邮箱格式无效: "Invalid email address",
+  不能移除自己的系统管理员权限:
+    "You cannot remove your own system administrator role",
+  工作空间必须至少保留一名有效管理员:
+    "The workspace must retain at least one active administrator",
+  团队必须至少保留一名管理员: "The team must retain at least one administrator",
+  工作空间已停用或不可用: "The workspace is inactive or unavailable",
+  "模型连接测试失败，请检查配置后重试":
+    "Model connection test failed. Check the configuration and try again.",
+  "模型正在使用中，无法删除": "The model is in use and cannot be deleted",
+  "所选模型已停用，请重新选择":
+    "The selected model is disabled. Choose another model.",
+  请选择对话类型的模型: "Select a chat model",
+  请选择图像类型的模型: "Select an image model",
+  "模型凭据无效，请重新配置":
+    "Model credentials are invalid. Configure them again.",
+  "模型参数 max_tokens 必须为正整数":
+    "The max_tokens model parameter must be a positive integer",
+  "模型供应商或类型无效，请重新选择":
+    "The model provider or type is invalid. Select it again.",
+  "请同时填写 AWS 访问密钥 ID 和访问密钥":
+    "Provide both the AWS access key ID and secret access key",
+  "此对话已有任务运行中，请稍后重试":
+    "This conversation already has an active run. Try again later.",
+  "请先停止正在执行的任务，再进行删除": "Stop the active run before deleting",
+  "任务已结束，请发送新消息": "The run has finished. Send a new message.",
+  "已达到最大对话轮数，请新建任务":
+    "The turn limit was reached. Start a new run.",
+  已达到工具调用次数上限: "The tool call limit was reached",
+  "对话内容超过模型上下文限制，请新建对话":
+    "The conversation exceeds the model context limit. Start a new conversation.",
+  "应用配置或授权已变更，请保存后重新运行":
+    "App configuration or access changed. Save the app and run it again.",
+  "应用已停用，请启用后重试": "The app is disabled. Enable it and try again.",
+  "应用已停用，请启用后再发布":
+    "The app is disabled. Enable it before publishing.",
+  "执行资源暂时不可用，请稍后重试":
+    "Execution resources are temporarily unavailable. Try again later.",
+  "工作空间今日运行额度已用完，请联系管理员":
+    "The workspace daily run quota is exhausted. Contact an administrator.",
+  "工作流草稿已更新，请刷新后再保存":
+    "The workflow draft changed. Refresh before saving.",
+  请先发布工作流的最新版本: "Publish the latest workflow version first",
+  "工作流工具配置已失效，请重新配置并发布":
+    "The workflow tool configuration is no longer valid. Configure and publish it again.",
+  "表单已提交，请勿重复提交": "The form was already submitted",
+  "表单状态已变更，请刷新后重试":
+    "The form state changed. Refresh and try again.",
+  "表单包含无效字段，请检查后重试":
+    "The form contains invalid fields. Check it and try again.",
+  "条件未匹配任何分支，请检查工作流配置":
+    "No condition branch matched. Check the workflow configuration.",
+  "工作流输出超过 256 KiB，请缩小输出内容":
+    "Workflow output exceeds 256 KiB. Reduce the output size.",
+  "知识库暂无已索引的内容，请先完成索引":
+    "The knowledge base has no indexed content. Build the index first.",
+  "知识库任务服务暂时不可用，请稍后重试":
+    "The knowledge task service is temporarily unavailable. Try again later.",
+  "知识库任务已达到重试上限，请重新创建任务":
+    "The knowledge task retry limit was reached. Create a new task.",
+  "请先停止知识库任务，再进行删除":
+    "Stop the knowledge task before deleting it",
+  分段重叠长度必须小于分段长度: "Chunk overlap must be smaller than chunk size",
+  "请先生成文档分段预览，再建立索引":
+    "Generate document chunk previews before indexing",
+  "文档中没有可提取的文本，请检查文件内容":
+    "The document has no extractable text. Check the file content.",
+  "文档内容提取失败，请检查文件是否损坏":
+    "Document text extraction failed. Check whether the file is damaged.",
+  "文档内容不可用，请重新上传或解析":
+    "Document content is unavailable. Upload or parse it again.",
+  "问答表必须包含“问题”和“答案”表头":
+    "The QA table must contain question and answer headers",
+  问答表缺少表头或有效数据: "The QA table has no headers or valid data",
+  "问答 CSV 文件必须使用 UTF-8 编码": "QA CSV files must use UTF-8 encoding",
+  "问答导入仅支持 CSV 和 XLSX 文件":
+    "QA import only supports CSV and XLSX files",
+  "评测仍在运行，请完成后重试":
+    "The evaluation is still running. Try again when it finishes.",
+  请先添加有效的评测问题: "Add valid evaluation questions first",
+  文件上传已关闭: "File uploads are disabled",
+  请先选择要上传的文件: "Select files to upload first",
+  "MCP 服务地址无效或无法解析，请检查配置":
+    "The MCP server address is invalid or cannot be resolved. Check the configuration.",
+  "MCP 服务不可用，请检查配置后重试":
+    "The MCP service is unavailable. Check the configuration and try again.",
+  "MCP 授权已失效，请重新连接":
+    "MCP authorization is no longer valid. Reconnect the source.",
+  "请先断开现有授权，再修改配置或重新连接":
+    "Disconnect the existing authorization before changing the configuration or reconnecting",
+  "技能包必须包含且仅包含一个 SKILL.md":
+    "The skill package must contain exactly one SKILL.md",
+  "技能包须为 1 字节至 2 MiB，且不超过 64 个文件":
+    "Skill packages must be 1 byte to 2 MiB and contain at most 64 files",
+  技能包包含重复或不安全的文件路径:
+    "The skill package contains duplicate or unsafe file paths",
+  "技能定义已变更或无效，请重新绑定":
+    "The skill definition changed or is invalid. Bind it again.",
+  请先配置并启用可用的图像模型:
+    "Configure and enable an available image model first",
+  "图片生成失败或返回内容无效，请重试":
+    "Image generation failed or returned invalid content. Try again.",
+  "生成图片超过 5 MiB 大小限制":
+    "The generated image exceeds the 5 MiB size limit",
+  "图像模型配置已变更，请重新运行":
+    "The image model configuration changed. Run it again.",
+  已归档的公告无法编辑或发布:
+    "Archived announcements cannot be edited or published",
+  "请先归档公告，再进行删除": "Archive the announcement before deleting it",
+  公告过期时间必须晚于发布时间:
+    "The announcement must expire after its publication time",
+  "自动化已暂停，暂时无法接收事件":
+    "The automation is paused and cannot receive events",
+  "事件内容必须为有效的 UTF-8 JSON 对象":
+    "The event payload must be a valid UTF-8 JSON object",
+  "事件标识已使用，且本次内容与原事件不同":
+    "The event ID was already used with a different payload",
 } satisfies Record<TranslationKey, string>

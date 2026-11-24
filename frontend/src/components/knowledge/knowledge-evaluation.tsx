@@ -40,6 +40,7 @@ import type {
 } from "@/lib/api/knowledge"
 import { languageLocales, type TranslationKey } from "@/i18n"
 import { formatDateTime } from "@/lib/display"
+import { getErrorMessage } from "@/lib/errors"
 import { taskStatusLabel } from "@/components/knowledge/status-labels"
 import { KnowledgeHitTest } from "@/components/knowledge/knowledge-hit-test"
 import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
@@ -600,7 +601,7 @@ export function KnowledgeEvaluation({
                           {result.question}
                           {result.error ? (
                             <small className="mt-1 block text-destructive">
-                              {result.error}
+                              {getErrorMessage(new Error(result.error), t)}
                             </small>
                           ) : null}
                         </span>
@@ -624,7 +625,7 @@ export function KnowledgeEvaluation({
                       </p>
                       {result.error ? (
                         <p className="mt-1 text-xs text-destructive">
-                          {result.error}
+                          {getErrorMessage(new Error(result.error), t)}
                         </p>
                       ) : null}
                       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">

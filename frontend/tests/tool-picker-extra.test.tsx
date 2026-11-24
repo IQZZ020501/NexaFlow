@@ -158,7 +158,7 @@ describe("ToolPicker extra", () => {
 
     renderPage(picker())
     expect(await screen.findByText("工具加载失败")).toBeTruthy()
-    expect(screen.getByText("tools offline")).toBeTruthy()
+    expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
     expect((screen.getByRole("searchbox") as HTMLInputElement).disabled).toBe(
       true
     )

@@ -367,7 +367,7 @@ class ToolInvocation(Base):
             name="ck_tool_invocations_origin_runs",
         ),
         CheckConstraint(
-            "access_source IN ('console', 'public', 'api')",
+            "access_source IN ('console', 'public', 'api', 'automation')",
             name="ck_tool_invocations_access_source",
         ),
         CheckConstraint(

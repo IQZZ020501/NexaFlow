@@ -195,7 +195,7 @@ describe("audit tab", () => {
     ])
     renderPage(<SystemShell activeTab="audit" />)
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "audit failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(await screen.findByText("暂无审计日志")).toBeTruthy()
   })
@@ -328,7 +328,7 @@ describe("audit tab", () => {
     ])
     renderPage(<SystemShell activeTab="audit" />)
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "ws audit failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(await screen.findByText("暂无审计日志")).toBeTruthy()
   })

@@ -110,7 +110,7 @@ describe("ToolPermissionsDialog extra", () => {
 
     renderPage(dialog(true, () => undefined))
     expect(await screen.findByText("工具加载失败")).toBeTruthy()
-    expect(screen.getByText("permissions offline")).toBeTruthy()
+    expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
 
     fails = false
     fireEvent.click(screen.getByRole("button", { name: "重试" }))

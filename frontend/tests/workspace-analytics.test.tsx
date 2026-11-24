@@ -414,7 +414,7 @@ describe("workspace analytics", () => {
     handler = () => jsonResponse({ detail: "analytics unavailable" }, 500)
     renderPage(<WorkspaceAnalyticsPage />)
     await waitFor(() =>
-      expect(screen.getByText("analytics unavailable")).toBeTruthy()
+      expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
     )
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy()
 

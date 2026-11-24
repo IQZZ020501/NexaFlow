@@ -68,7 +68,7 @@ export function AgentFilePicker({
             className={
               label
                 ? undefined
-                : "rounded-md text-muted-foreground hover:text-foreground"
+                : "rounded-full bg-muted/60 text-muted-foreground hover:text-foreground"
             }
             aria-label={label ?? t("添加附件")}
             title={label ?? t("添加附件")}

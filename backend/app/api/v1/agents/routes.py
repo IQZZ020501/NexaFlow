@@ -25,6 +25,7 @@ from app.application.agents import (
     list_agent_conversation_users,
     list_agent_logs,
     list_agent_permissions,
+    list_agent_publication_versions,
     list_agent_run_tool_calls,
     list_agent_runs,
     list_agents,
@@ -57,6 +58,7 @@ from app.schemas.agents.contracts import (
     AgentMonitoringResponse,
     AgentPermissionResponse,
     AgentPermissionUpsertRequest,
+    AgentPublicationVersionListResponse,
     AgentResponse,
     AgentRunCreateRequest,
     AgentRunRegenerateRequest,
@@ -240,6 +242,23 @@ async def get_workspace_agent_monitoring(
         context.user,
         context.membership_role,
         days.value,
+    )
+
+
+@router.get(
+    "/{agent_id}/versions",
+    response_model=AgentPublicationVersionListResponse,
+)
+async def list_workspace_agent_publication_versions(
+    agent_id: str,
+    context: Annotated[WorkspaceContext, Depends(get_workspace_context_from_path)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentPublicationVersionListResponse:
+    return await list_agent_publication_versions(
+        db,
+        context.workspace.id,
+        agent_id,
+        context.user,
     )
 
 

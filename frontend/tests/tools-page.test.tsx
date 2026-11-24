@@ -278,13 +278,13 @@ describe("ToolsPage", () => {
     openSkillMenu("Toggle package")
     fireEvent.click(screen.getByRole("menuitem", { name: "停用" }))
     await waitFor(() =>
-      expect(notifications).toContain("Skill update rejected")
+      expect(notifications).toContain("操作冲突，请刷新后重试")
     )
     expect(status).toBe("active")
     expect(notifications).toEqual([
       "技能已停用",
       "技能已启用",
-      "Skill update rejected",
+      "操作冲突，请刷新后重试",
     ])
   })
 
@@ -830,12 +830,12 @@ describe("ToolsPage", () => {
     renderPage(<ToolsPage />)
     await screen.findByText("Remote lookup")
     fireEvent.click(screen.getByText("Remote lookup").closest("article")!)
-    await screen.findByText("detail unavailable")
+    await screen.findByText("服务暂时不可用，请稍后重试")
 
     detailFails = false
     fireEvent.click(screen.getByRole("button", { name: "重试" }))
     await screen.findByText("输入 Schema")
-    expect(screen.queryByText("detail unavailable")).toBeNull()
+    expect(screen.queryByText("服务暂时不可用，请稍后重试")).toBeNull()
   })
 
   test("keeps zero-tool MCP sources visible and manageable", async () => {
@@ -1249,7 +1249,7 @@ describe("ToolsPage", () => {
     fireEvent.click(manage)
     fireEvent.click(await screen.findByRole("menuitem", { name: "刷新工具" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "refresh failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(within(sourceCard).getByText("7 个工具")).toBeTruthy()
   }, 20000)
@@ -1412,9 +1412,9 @@ describe("ToolsPage", () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith("/tool-sources/source-mcp/disable"))
-        return jsonResponse({ detail: "cannot disable" }, 503)
+        return jsonResponse({ detail: "停用失败" }, 503)
       if (url.endsWith("/tool-sources/source-mcp"))
-        return jsonResponse({ detail: "cannot delete" }, 503)
+        return jsonResponse({ detail: "删除失败" }, 503)
       if (url.includes("/tools?")) return jsonResponse([remote])
       if (url.includes("/tool-sources?")) return jsonResponse([src])
       return jsonResponse([])
@@ -1436,7 +1436,7 @@ describe("ToolsPage", () => {
       )
     )
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "cannot disable"])
+      expect(notifications).toContainEqual(["error", "停用失败"])
     )
     const sourceCard = sourceGroup("Remote tools")
     expect(within(sourceCard).getByText("可用")).toBeTruthy()
@@ -1451,7 +1451,7 @@ describe("ToolsPage", () => {
       )
     )
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "cannot delete"])
+      expect(notifications).toContainEqual(["error", "删除失败"])
     )
     expect(screen.getAllByText("Remote tools").length).toBeGreaterThan(0)
   }, 20000)

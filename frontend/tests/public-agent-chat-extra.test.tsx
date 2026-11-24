@@ -768,7 +768,7 @@ describe("PublicAgentChat regeneration", () => {
       })
     )
     await waitFor(() =>
-      expect(screen.getByText("regeneration exploded")).toBeTruthy()
+      expect(screen.getByText("请求失败")).toBeTruthy()
     )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
@@ -796,7 +796,7 @@ describe("PublicAgentChat regeneration", () => {
       })
     )
     await waitFor(() =>
-      expect(screen.getByText(/failed with status 404/)).toBeTruthy()
+      expect(screen.getByText("请求失败")).toBeTruthy()
     )
     await waitFor(() =>
       expect(screen.getByText("Original answer")).toBeTruthy()
@@ -835,7 +835,7 @@ describe("PublicAgentChat regeneration", () => {
       })
     )
     await waitFor(() =>
-      expect(screen.getByText("regenerate boom")).toBeTruthy()
+      expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
     )
     expect(regenerateCalls).toBe(2)
     expect(requestBodies[0]).toBe(requestBodies[1])
@@ -1057,7 +1057,7 @@ describe("PublicAgentChat feedback", () => {
 
     const article = articleOf("Original answer")
     fireEvent.click(within(article).getByRole("button", { name: "点赞" }))
-    await waitFor(() => expect(screen.getByText("feedback boom")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy())
     expect(
       within(articleOf("Original answer")).getByRole("button", {
         name: "点赞",

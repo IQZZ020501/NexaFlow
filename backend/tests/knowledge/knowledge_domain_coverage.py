@@ -3243,7 +3243,7 @@ def run_celery_job_tests(
     failing_upload_cleanup_id = asyncio.run(
         _create_upload_cleanup(workspace_id, actor_user_id, "uploads/failing.bin")
     )
-    from app.domain.workflows import uploads as uploads_module
+    from app.domain.uploads import service as uploads_module
 
     with patch.object(
         uploads_module,

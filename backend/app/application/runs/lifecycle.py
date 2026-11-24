@@ -15,6 +15,30 @@ from app.infra.db.repositories.tools import repository as tool_repository
 AGENT_EVENT_PAGE_SIZE = 200
 
 
+async def require_automation_caller_access(db: AsyncSession, run) -> None:
+    """Recheck the automation caller before a queued or resumed Run executes."""
+    if run.access_source != "automation":
+        return
+    from fastapi import HTTPException
+
+    from app.application.workspaces.service import build_workspace_context
+    from app.domain.agents.access.permissions import require_agent_view
+    from app.infra.db.repositories.identity import users
+
+    if run.root_run_id and run.root_run_id != run.id:
+        root = await agent_repository.get_agent_run_by_id(db, run.root_run_id)
+        if root is None or root.workspace_id != run.workspace_id or root.consumer_id != run.consumer_id:
+            raise HTTPException(403, "Automation root run is unavailable.")
+        run = root
+    owner = await users.get_user_by_id(db, run.consumer_id)
+    if owner is None or not owner.is_active:
+        raise HTTPException(403, "Automation owner is unavailable.")
+    await build_workspace_context(db, owner, run.workspace_id)
+    agent = await agent_repository.get_agent_by_id(db, run.agent_id)
+    if agent is None or agent.status != "active" or not agent.published:
+        raise HTTPException(403, "Automation application is unavailable.")
+    await require_agent_view(db, agent, owner)
+
 
 
 async def cancel_run_tree(db: AsyncSession, run_id: str) -> bool:
@@ -56,4 +80,5 @@ async def close_cancelled_execution_sessions(db: AsyncSession) -> None:
 __all__ = [
     "cancel_run_tree",
     "close_cancelled_execution_sessions",
+    "require_automation_caller_access",
 ]

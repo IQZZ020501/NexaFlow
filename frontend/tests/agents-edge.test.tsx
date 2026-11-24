@@ -410,7 +410,7 @@ describe("lib/workflows/graph", () => {
     )
   })
 
-  test("workflowErrorMessage maps known errors and passes through others", () => {
+  test("workflowErrorMessage maps known errors and localizes unknown failures", () => {
     const t = ((key: string) => key) as never
     expect(workflowErrorMessage("Workflow model request failed.", t)).toBe(
       "工作流模型请求失败。"
@@ -439,7 +439,7 @@ describe("lib/workflows/graph", () => {
         t
       )
     ).toBe("文档引用必须包含文件 ID。")
-    expect(workflowErrorMessage("Something else", t)).toBe("Something else")
+    expect(workflowErrorMessage("Something else", t)).toBe("请求失败")
   })
 
   test("defaultNodeConfig covers every node type", () => {

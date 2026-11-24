@@ -15,23 +15,25 @@ from app.application.announcements import (
     archive_announcement,
     create_announcement,
     delete_announcement,
-    get_message_summary,
     list_announcements,
-    list_messages,
-    mark_all_messages_read,
-    mark_message_read,
     publish_announcement,
-    stream_message_updates,
     update_announcement,
     validate_message_workspace_access,
 )
+from app.application.notifications import (
+    get_unified_message_summary,
+    list_unified_messages,
+    mark_all_unified_messages_read,
+    mark_unified_message_read,
+    stream_unified_message_updates,
+)
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
-    AnnouncementMessageResponse,
     AnnouncementResponse,
     AnnouncementUpdateRequest,
     MessageUnreadCountResponse,
 )
+from app.schemas.notifications import MessageListItemResponse
 
 message_router = APIRouter(prefix="/messages", tags=["messages"])
 global_admin_router = APIRouter(
@@ -44,7 +46,7 @@ workspace_router = APIRouter(
 )
 
 
-@message_router.get("", response_model=list[AnnouncementMessageResponse])
+@message_router.get("", response_model=list[MessageListItemResponse])
 async def list_current_messages(
     user: CurrentUserDep,
     db: DbSessionDep,
@@ -52,9 +54,9 @@ async def list_current_messages(
     workspace_id: Annotated[str | None, Query(max_length=36)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[AnnouncementMessageResponse]:
+) -> list[MessageListItemResponse]:
     await validate_message_workspace_access(db, user, workspace_id)
-    messages, total = await list_messages(
+    messages, total = await list_unified_messages(
         db,
         user=user,
         workspace_id=workspace_id,
@@ -72,7 +74,7 @@ async def read_unread_message_count(
     workspace_id: Annotated[str | None, Query(max_length=36)] = None,
 ) -> MessageUnreadCountResponse:
     await validate_message_workspace_access(db, user, workspace_id)
-    count, next_expiration_at = await get_message_summary(
+    count, next_expiration_at = await get_unified_message_summary(
         db,
         user=user,
         workspace_id=workspace_id,
@@ -92,16 +94,19 @@ async def stream_current_messages(
     workspace_id: Annotated[str | None, Query(max_length=36)] = None,
     global_after: Annotated[str | None, Query(max_length=64)] = None,
     workspace_after: Annotated[str | None, Query(max_length=64)] = None,
+    notification_after: Annotated[str | None, Query(max_length=64)] = None,
 ) -> AsyncIterable[ServerSentEvent]:
     await validate_message_workspace_access(db, user, workspace_id)
     await db.close()
     response.headers["Cache-Control"] = "no-cache"
     response.headers["X-Accel-Buffering"] = "no"
-    async for update in stream_message_updates(
+    async for update in stream_unified_message_updates(
         settings,
+        user=user,
         workspace_id=workspace_id,
         global_after=global_after,
         workspace_after=workspace_after,
+        notification_after=notification_after,
     ):
         if update.kind == "keep-alive":
             yield ServerSentEvent(comment="keep-alive")
@@ -113,7 +118,7 @@ async def stream_current_messages(
             )
         else:
             yield ServerSentEvent(
-                event="announcement",
+                event=update.kind,
                 id=update.event_id,
                 data=update.data,
             )
@@ -126,7 +131,7 @@ async def mark_current_messages_read(
     workspace_id: Annotated[str | None, Query(max_length=36)] = None,
 ) -> Response:
     await validate_message_workspace_access(db, user, workspace_id)
-    await mark_all_messages_read(
+    await mark_all_unified_messages_read(
         db,
         user=user,
         workspace_id=workspace_id,
@@ -142,11 +147,11 @@ async def mark_current_message_read(
     workspace_id: Annotated[str | None, Query(max_length=36)] = None,
 ) -> Response:
     await validate_message_workspace_access(db, user, workspace_id)
-    await mark_message_read(
+    await mark_unified_message_read(
         db,
         user=user,
         workspace_id=workspace_id,
-        announcement_id=message_id,
+        message_id=message_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

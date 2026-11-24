@@ -626,7 +626,7 @@ describe("KnowledgeBasePage list view", () => {
     await waitFor(() => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
-    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("boom")
+    expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe("服务暂时不可用，请稍后重试")
     // Falls back to the empty state after a failed load.
     expect(screen.getByText("还没有知识库")).toBeTruthy()
   })
@@ -725,7 +725,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "load more boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -884,7 +884,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "delete boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -969,7 +969,7 @@ describe("KnowledgeBasePage list view", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "name taken"
+      "输入参数无效，请检查后重试"
     )
   })
 
@@ -1229,7 +1229,7 @@ describe("KnowledgeBasePage documents tab", () => {
     }
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
-    await screen.findByText("old provider error")
+    await screen.findByText("请求失败")
     openMenu(screen.getByRole("button", { name: "向量化" }))
     expect(screen.queryByRole("menuitem", { name: "向量化所选文档" })).toBeNull()
     fireEvent.click(await screen.findByRole("menuitem", { name: label }))
@@ -1237,7 +1237,7 @@ describe("KnowledgeBasePage documents tab", () => {
       url: `/api/v1/workspaces/${WS}/knowledge-bases/${KB_ID}/documents/index`, body: { scope },
     }]))
     await waitFor(() => expect(notifications).toContainEqual(["success", "已提交 125 个向量化任务"]))
-    await waitFor(() => expect(screen.queryByText("old provider error")).toBeNull())
+    await waitFor(() => expect(screen.queryByText("请求失败")).toBeNull())
     expect(within(screen.getByRole("group", { name: "待向量化" })).getByText("125")).toBeTruthy()
   })
 
@@ -1251,11 +1251,11 @@ describe("KnowledgeBasePage documents tab", () => {
     }
     routeParams.id = KB_ID
     renderPage(<KnowledgeBasePage />)
-    await screen.findByText("old error")
+    await screen.findByText("请求失败")
     openMenu(screen.getByRole("button", { name: "向量化" }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "向量化未成功的文档" }))
     await waitFor(() => expect(notifications.some(([kind]) => kind === "error")).toBe(true))
-    expect(screen.getByText("old error")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
   })
 
   test("uses server totals and searches and paginates beyond the first hundred", async () => {
@@ -1406,7 +1406,7 @@ describe("KnowledgeBasePage documents tab", () => {
     expect(screen.getAllByText("已向量化").length).toBe(2)
     expect(screen.getByText("解析失败")).toBeTruthy()
     expect(screen.getByText("2.0 KB")).toBeTruthy()
-    expect(screen.getByText("parser crashed")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
     expect(screen.getByText("已启用")).toBeTruthy()
     expect(screen.getByText("已停用")).toBeTruthy()
     // Header labels
@@ -1949,7 +1949,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "index down"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2075,7 +2075,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "docs down"
+      "服务暂时不可用，请稍后重试"
     )
     await waitFor(() => expect(screen.getByText("暂无文档")).toBeTruthy())
   })
@@ -2333,7 +2333,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "bulk delete boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2359,7 +2359,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "toggle boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2390,7 +2390,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "parse boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2418,7 +2418,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "rebuild boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2445,7 +2445,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "download failed"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2474,7 +2474,7 @@ describe("KnowledgeBasePage documents tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "delete doc boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2519,7 +2519,7 @@ describe("KnowledgeBasePage tasks tab", () => {
         const offset = new URL(url, "http://test.local").searchParams.get("offset") ?? "0"
         offsets.push(offset)
         return jsonResponse({
-          items: [makeTask({ id: `task-${offset}`, document_id: "old-doc", document_filename: "older-law.md", last_error: `page ${offset}` })],
+          items: [makeTask({ id: `task-${offset}`, document_id: "old-doc", document_filename: "older-law.md", last_error: `第 ${offset} 页任务错误` })],
           total: 21655, has_processing: true,
         })
       }
@@ -2532,7 +2532,7 @@ describe("KnowledgeBasePage tasks tab", () => {
     fireEvent.click(screen.getByRole("button", { name: "older-law.md" }))
     expect(pushes).toContain(`/app/knowledge/${KB_ID}/documents/old-doc`)
     fireEvent.click(screen.getByRole("button", { name: "下一页" }))
-    await screen.findByText("page 10")
+    await screen.findByText("第 10 页任务错误")
     expect(offsets.at(-1)).toBe("10")
     const afterNavigation = requests
     await waitFor(() => expect(requests).toBeGreaterThan(afterNavigation), { timeout: 4000 })
@@ -2719,7 +2719,7 @@ describe("KnowledgeBasePage tasks tab", () => {
     expect(screen.getByText("排队中")).toBeTruthy()
     expect(screen.getByText("4/10")).toBeTruthy()
     expect(screen.getByText("2/3")).toBeTruthy()
-    expect(screen.getByText("vector store unreachable")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
 
     expect(screen.queryByRole("menuitem", { name: "删除" })).toBeNull()
     openMenu(screen.getByRole("button", { name: "操作 task-1" }))
@@ -2753,17 +2753,17 @@ describe("KnowledgeBasePage tasks tab", () => {
       makeTask({
         id: "failed-task",
         status: "failed",
-        last_error: "failed task marker",
+        last_error: "失败任务错误",
       }),
       makeTask({
         id: "succeeded-task",
         status: "succeeded",
-        last_error: "succeeded task marker",
+        last_error: "成功任务错误",
       }),
       makeTask({
         id: "running-task",
         status: "running",
-        last_error: "running task marker",
+        last_error: "运行中任务错误",
       }),
     ]
     let bulkDeleteBody: { task_ids: string[] } | null = null
@@ -2786,7 +2786,7 @@ describe("KnowledgeBasePage tasks tab", () => {
     renderPage(<KnowledgeBasePage />)
 
     fireEvent.click(await screen.findByText("任务"))
-    await screen.findByText("failed task marker")
+    await screen.findByText("失败任务错误")
     fireEvent.click(screen.getByLabelText("选择所有可删除任务"))
     expect(
       (screen.getByLabelText("选择任务 running-task") as HTMLInputElement)
@@ -2800,9 +2800,9 @@ describe("KnowledgeBasePage tasks tab", () => {
         task_ids: ["failed-task", "succeeded-task"],
       })
     )
-    expect(screen.queryByText("failed task marker")).toBeNull()
-    expect(screen.queryByText("succeeded task marker")).toBeNull()
-    expect(screen.getByText("running task marker")).toBeTruthy()
+    expect(screen.queryByText("失败任务错误")).toBeNull()
+    expect(screen.queryByText("成功任务错误")).toBeNull()
+    expect(screen.getByText("运行中任务错误")).toBeTruthy()
     expect(
       notifications.some(([, message]) => message === "已删除 2 个任务")
     ).toBe(true)
@@ -2919,7 +2919,7 @@ describe("KnowledgeBasePage tasks tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "tasks down"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -2957,7 +2957,7 @@ describe("KnowledgeBasePage tasks tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "retry boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 })
@@ -3203,7 +3203,7 @@ describe("KnowledgeBasePage retrieval evaluation hit test", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "query failed"
+      "服务暂时不可用，请稍后重试"
     )
   })
 })
@@ -3284,7 +3284,7 @@ describe("KnowledgeBasePage settings tab", () => {
     await waitFor(() => {
       expect(screen.getByText("模型测试失败")).toBeTruthy()
     })
-    expect(screen.getByText("embedding api unreachable")).toBeTruthy()
+    expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
   })
 
   test("grants and revokes permissions from the settings dialog", async () => {
@@ -3462,7 +3462,7 @@ describe("KnowledgeBasePage settings tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "members boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -3495,7 +3495,7 @@ describe("KnowledgeBasePage settings tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "grant boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 
@@ -3530,7 +3530,7 @@ describe("KnowledgeBasePage settings tab", () => {
       expect(notifications.some(([kind]) => kind === "error")).toBe(true)
     })
     expect(notifications.find(([kind]) => kind === "error")?.[1]).toBe(
-      "revoke boom"
+      "服务暂时不可用，请稍后重试"
     )
   })
 

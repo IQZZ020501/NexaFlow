@@ -5,7 +5,7 @@ import {
   ChevronRightIcon,
   CircleCheckIcon,
   CircleXIcon,
-  LoaderCircleIcon,
+  SparklesIcon,
 } from "lucide-react"
 
 export function useAgentProcessDisclosure(status: string) {
@@ -55,27 +55,35 @@ export function AgentReasoningStep({
   const heading = (
     <>
       {status === "running" ? (
-        <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" />
+        <SparklesIcon className="size-3.5 shrink-0" aria-hidden="true" />
       ) : status === "failed" ? (
         <CircleXIcon className="size-3.5 shrink-0 text-destructive" />
       ) : (
         <CircleCheckIcon className="size-3.5 shrink-0" />
       )}
-      <span className="min-w-0 [overflow-wrap:anywhere]">{title}</span>
+      <span
+        className={
+          status === "running"
+            ? "bui-thinking-busy min-w-0 [overflow-wrap:anywhere]"
+            : "min-w-0 [overflow-wrap:anywhere]"
+        }
+      >
+        {title}
+      </span>
       {reasoning ? (
         <ChevronRightIcon
-          className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-90" : ""}`}
+          className={`size-3 shrink-0 transition-transform motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
         />
       ) : null}
     </>
   )
 
   return (
-    <div className="text-xs leading-5 text-muted-foreground">
+    <div className="agent-beautiful">
       {reasoning ? (
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-sm px-1 py-1.5 text-left hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="bui-reasoning-trigger"
           aria-expanded={isOpen}
           aria-controls={contentId}
           onClick={() => setIsOpen((current) => !current)}
@@ -83,13 +91,13 @@ export function AgentReasoningStep({
           {heading}
         </button>
       ) : (
-        <div className="flex items-center gap-2 px-1 py-1.5">{heading}</div>
+        <div className="bui-reasoning-trigger">{heading}</div>
       )}
       {reasoning && isOpen ? (
         <div
           id={contentId}
           ref={scrollRef}
-          className="mt-1 mb-2 ml-6 max-h-48 overflow-y-auto border-l pl-3 [overflow-wrap:anywhere] whitespace-pre-wrap"
+          className="bui-reasoning-content"
           onScroll={(event) => {
             const element = event.currentTarget
             shouldFollowRef.current =

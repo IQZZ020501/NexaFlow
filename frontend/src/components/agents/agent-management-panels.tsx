@@ -82,9 +82,10 @@ type AgentOverviewPanelProps = PanelProps & {
 const EMPTY_PAGINATION = { limit: 20, offset: 0 }
 
 function usePaginatedList<TItem>(
-  fetcher: (
-    pagination: { limit: number; offset: number }
-  ) => Promise<PaginatedResponse<TItem>>,
+  fetcher: (pagination: {
+    limit: number
+    offset: number
+  }) => Promise<PaginatedResponse<TItem>>,
   onError: (error: unknown) => void,
   deps: React.DependencyList
 ) {
@@ -151,6 +152,7 @@ function localeFor(language: string) {
 }
 
 function sourceLabel(source: AgentLog["access_source"], t: TFunction) {
+  if (source === "automation") return t("自动化")
   if (source === "public") return t("公开访问")
   if (source === "api") return t("API")
   return t("控制台")
@@ -419,7 +421,7 @@ export function AgentOverviewPanel({
             </span>
             <div className="min-w-0">
               <h2 className="text-base font-semibold">{t("公开访问与 API")}</h2>
-              <p className="mt-1 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
+              <p className="mt-1 text-sm [overflow-wrap:anywhere] break-words text-muted-foreground">
                 {agent.description || t("暂无描述")}
               </p>
             </div>
@@ -524,7 +526,7 @@ export function AgentOverviewPanel({
                         {t("请立即复制并妥善保存，关闭后将无法再次查看。")}
                       </p>
                       <div className="mt-3 flex items-center gap-2">
-                        <code className="min-w-0 flex-1 break-all rounded-md bg-background px-3 py-2 text-xs">
+                        <code className="min-w-0 flex-1 rounded-md bg-background px-3 py-2 text-xs break-all">
                           {oneTimeToken}
                         </code>
                         <Button
@@ -793,38 +795,38 @@ export function AgentLogsPanel({
           <>
             {isPhoneListLayout ? (
               <ul className="flex flex-col gap-2">
-              {items.map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className="w-full rounded-xl border bg-background p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setSelectedLog(item)}
-                  >
-                    <p className="line-clamp-2 text-sm font-medium break-words">
-                      {item.question || t("未提供问题")}
-                    </p>
-                    {item.last_error ? (
-                      <p className="mt-1 line-clamp-2 text-xs break-words text-destructive">
-                        {item.last_error}
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className="w-full rounded-xl border bg-background p-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => setSelectedLog(item)}
+                    >
+                      <p className="line-clamp-2 text-sm font-medium break-words">
+                        {item.question || t("未提供问题")}
                       </p>
-                    ) : null}
-                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                      <Badge variant="outline">
-                        {sourceLabel(item.access_source, t)}
-                      </Badge>
-                      <span className="min-w-0 flex-1 truncate">
-                        {item.display_name || item.consumer_id}
-                      </span>
-                      <span>{statusLabel(item.status, t)}</span>
-                      <FeedbackIndicator value={item.feedback} t={t} />
-                    </div>
-                    <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                      {formatDateTime(item.created_at, localeFor(language))}
-                      <EyeIcon className="size-3.5" />
-                    </p>
-                  </button>
-                </li>
-              ))}
+                      {item.last_error ? (
+                        <p className="mt-1 line-clamp-2 text-xs break-words text-destructive">
+                          {getErrorMessage(new Error(item.last_error), t)}
+                        </p>
+                      ) : null}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <Badge variant="outline">
+                          {sourceLabel(item.access_source, t)}
+                        </Badge>
+                        <span className="min-w-0 flex-1 truncate">
+                          {item.display_name || item.consumer_id}
+                        </span>
+                        <span>{statusLabel(item.status, t)}</span>
+                        <FeedbackIndicator value={item.feedback} t={t} />
+                      </div>
+                      <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        {formatDateTime(item.created_at, localeFor(language))}
+                        <EyeIcon className="size-3.5" />
+                      </p>
+                    </button>
+                  </li>
+                ))}
               </ul>
             ) : null}
             <div className="hidden overflow-x-auto rounded-xl border bg-background md:block">
@@ -843,7 +845,7 @@ export function AgentLogsPanel({
                   {items.map((item) => (
                     <tr
                       key={item.id}
-                      className="cursor-pointer align-top hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      className="cursor-pointer align-top hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
                       role="button"
                       tabIndex={0}
                       aria-label={t("查看日志详情")}
@@ -862,9 +864,9 @@ export function AgentLogsPanel({
                         {item.last_error ? (
                           <p
                             className="mt-1 truncate text-xs text-destructive"
-                            title={item.last_error}
+                            title={getErrorMessage(new Error(item.last_error), t)}
                           >
-                            {item.last_error}
+                            {getErrorMessage(new Error(item.last_error), t)}
                           </p>
                         ) : null}
                       </td>
@@ -882,7 +884,7 @@ export function AgentLogsPanel({
                       <td className="px-4 py-3">
                         <FeedbackIndicator value={item.feedback} t={t} />
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-4 py-3 text-xs whitespace-nowrap text-muted-foreground">
                         <span className="inline-flex items-center gap-2">
                           {formatDateTime(item.created_at, localeFor(language))}
                           <EyeIcon className="size-3.5" />
@@ -927,7 +929,7 @@ export function AgentLogsPanel({
                 <h3 className="text-xs font-medium text-muted-foreground">
                   {t("问题")}
                 </h3>
-                <p className="mt-1 break-words whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">
+                <p className="mt-1 text-sm [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
                   {selectedLog.question || t("未提供问题")}
                 </p>
               </section>
@@ -949,7 +951,7 @@ export function AgentLogsPanel({
                       content={withArtifactDownloadLinksInContent(
                         selectedLog.result
                       )}
-                      className="break-words [overflow-wrap:anywhere]"
+                      className="[overflow-wrap:anywhere] break-words"
                     />
                   ) : (
                     <p className="text-sm text-muted-foreground">
@@ -969,11 +971,13 @@ export function AgentLogsPanel({
                 <p
                   className={
                     selectedLog.last_error
-                      ? "mt-1 break-words whitespace-pre-wrap text-sm text-destructive [overflow-wrap:anywhere]"
+                      ? "mt-1 text-sm [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-destructive"
                       : "mt-1 text-sm text-muted-foreground"
                   }
                 >
-                  {selectedLog.last_error || t("暂无错误")}
+                  {selectedLog.last_error
+                    ? getErrorMessage(new Error(selectedLog.last_error), t)
+                    : t("暂无错误")}
                 </p>
               </section>
               <section>
@@ -1237,47 +1241,50 @@ export function AgentConversationUsersPanel({
           <>
             {isPhoneListLayout ? (
               <ul className="flex flex-col gap-2">
-              {items.map((item) => (
-                <li
-                  key={`${item.access_source}:${item.consumer_id}`}
-                  className="rounded-xl border bg-background p-3"
-                >
-                  <p className="truncate text-sm font-medium">
-                    {item.display_name || t("匿名用户")}
-                  </p>
-                  <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                    {item.consumer_id}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                    <Badge variant="outline">
-                      {sourceLabel(item.access_source, t)}
-                    </Badge>
-                    <span>
-                      {t("对话 / 运行")}:{" "}
-                      <span className="tabular-nums">
-                        {item.conversation_count} / {item.run_count}
+                {items.map((item) => (
+                  <li
+                    key={`${item.access_source}:${item.consumer_id}`}
+                    className="rounded-xl border bg-background p-3"
+                  >
+                    <p className="truncate text-sm font-medium">
+                      {item.display_name || t("匿名用户")}
+                    </p>
+                    <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                      {item.consumer_id}
+                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                      <Badge variant="outline">
+                        {sourceLabel(item.access_source, t)}
+                      </Badge>
+                      <span>
+                        {t("对话 / 运行")}:{" "}
+                        <span className="tabular-nums">
+                          {item.conversation_count} / {item.run_count}
+                        </span>
                       </span>
-                    </span>
-                  </div>
-                  <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between gap-2">
-                      <dt>{t("首次访问")}</dt>
-                      <dd className="text-foreground/80">
-                        {formatDateTime(
-                          item.first_seen_at,
-                          localeFor(language)
-                        )}
-                      </dd>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <dt>{t("最近访问")}</dt>
-                      <dd className="text-foreground/80">
-                        {formatDateTime(item.last_seen_at, localeFor(language))}
-                      </dd>
-                    </div>
-                  </dl>
-                </li>
-              ))}
+                    <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      <div className="flex items-center justify-between gap-2">
+                        <dt>{t("首次访问")}</dt>
+                        <dd className="text-foreground/80">
+                          {formatDateTime(
+                            item.first_seen_at,
+                            localeFor(language)
+                          )}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <dt>{t("最近访问")}</dt>
+                        <dd className="text-foreground/80">
+                          {formatDateTime(
+                            item.last_seen_at,
+                            localeFor(language)
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                  </li>
+                ))}
               </ul>
             ) : null}
             <div className="hidden overflow-x-auto rounded-xl border bg-background md:block">
@@ -1309,17 +1316,14 @@ export function AgentConversationUsersPanel({
                           {sourceLabel(item.access_source, t)}
                         </Badge>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-4 py-3 text-xs whitespace-nowrap text-muted-foreground">
                         {formatDateTime(
                           item.first_seen_at,
                           localeFor(language)
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                        {formatDateTime(
-                          item.last_seen_at,
-                          localeFor(language)
-                        )}
+                      <td className="px-4 py-3 text-xs whitespace-nowrap text-muted-foreground">
+                        {formatDateTime(item.last_seen_at, localeFor(language))}
                       </td>
                       <td className="px-4 py-3 tabular-nums">
                         {item.conversation_count} / {item.run_count}

@@ -46,6 +46,7 @@ import {
 
 const PAGE_LINKS: Record<string, string> = {
   apps: "/app/apps",
+  automations: "/app/automations",
   knowledge: "/app/knowledge",
   models: "/app/models",
   tools: "/app/tools",

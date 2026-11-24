@@ -348,6 +348,7 @@ async def list_messages(
     workspace_id: str | None,
     limit: int,
     offset: int,
+    message_ids: list[str] | None = None,
 ) -> tuple[list[AnnouncementMessageResponse], int]:
     now = utc_now()
     rows = await repository.list_visible_messages(
@@ -357,6 +358,7 @@ async def list_messages(
         now,
         limit,
         offset,
+        message_ids=message_ids,
     )
     total = await repository.count_visible_messages(db, workspace_id, now)
     return ([_message_response(item, read) for item, read in rows], total)

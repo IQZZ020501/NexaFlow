@@ -23,20 +23,16 @@ import {
   mergeAgentProcessSnapshot,
 } from "@/lib/agent-process-stream"
 import { useRouter } from "next/navigation"
-import { integrationToolName } from "@/lib/integrations"
 import {
   BotIcon,
-  BrainIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   CircleAlertIcon,
   CircleXIcon,
-  DatabaseIcon,
   LoaderCircleIcon,
   MenuIcon,
   PencilIcon,
   SendIcon,
-  ShieldAlertIcon,
   UserIcon,
 } from "lucide-react"
 
@@ -46,6 +42,13 @@ import {
 } from "@/components/app/run-action-bar"
 import { AgentApprovalModeMenu } from "@/components/agents/agent-approval-mode-menu"
 import { AgentChatSubmitButton } from "@/components/agents/agent-chat-submit-button"
+import {
+  AgentPromptBar,
+  AgentPromptInput,
+} from "@/components/agents/agent-prompt-bar"
+import { AgentContextCard } from "@/components/agents/agent-context-card"
+import { AgentToolCallRow } from "@/components/agents/agent-tool-call-row"
+import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 import { AgentSuggestedQuestions } from "@/components/agents/agent-suggested-questions"
 import { AgentFilePicker } from "@/components/agents/agent-file-picker"
 import {
@@ -121,7 +124,7 @@ import {
 import { latestRunVersions } from "@/lib/run-versions"
 import { useVisualViewportShellStyle } from "@/lib/visual-viewport"
 import {
-  builtinToolDisplayName,
+  toolActivityName,
   withArtifactDownloadLinks,
   executionWaitSummary,
 } from "@/lib/tool-display"
@@ -138,9 +141,14 @@ export function publicToolName(
 ) {
   const fallback = event.tool_label || event.tool_name || ""
   return t
-    ? (builtinToolDisplayName(event.tool_name || "", t) ??
-        integrationToolName(event.tool_name || "", t) ??
-        fallback)
+    ? toolActivityName(
+        {
+          tool_name: event.tool_name,
+          tool_label: event.tool_label,
+          tool_kind: event.type === "knowledge" ? "knowledge" : event.tool_kind,
+        },
+        t
+      )
     : fallback
 }
 
@@ -174,61 +182,25 @@ function PublicToolEventRow({
 }) {
   const { t } = useLanguage()
   const isPreparing = event.stage === "preparing"
-  const [isOpen, setIsOpen] = React.useState(false)
-  const canExpand = hasPublicToolDetails(event)
-
-  const leading = (
-    <>
-      <span className="flex size-3.5 shrink-0 items-center justify-center">
-        {event.type === "knowledge" ? (
-          <DatabaseIcon className="size-3.5" />
-        ) : (
-          <BuiltinToolIcon
-            functionName={event.tool_name}
-            className="size-3.5"
-          />
-        )}
-      </span>
-      <span className="flex min-w-0 flex-1 items-baseline gap-2 leading-5">
-        <span className="min-w-0 truncate text-xs">
-          {title}
-          {event.server_name ? (
-            <span className="ml-1 font-normal text-muted-foreground">
-              @ {event.server_name}
-            </span>
-          ) : null}
-        </span>
-        {detail ? (
-          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-            {detail}
-          </span>
-        ) : null}
-      </span>
-      {statusIcon}
-    </>
-  )
-
   return (
-    <div className="min-w-0">
-      {canExpand ? (
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-sm px-1 py-1.5 text-left text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          aria-expanded={isOpen}
-          onClick={() => setIsOpen((current) => !current)}
-        >
-          {leading}
-          <ChevronDownIcon
-            className={`size-3 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`}
-          />
-        </button>
-      ) : (
-        <div className="flex items-center gap-2 px-1 py-1.5 text-muted-foreground">
-          {leading}
-        </div>
-      )}
-      {canExpand && isOpen ? (
-        <div className="mt-1 mb-2 ml-6 grid min-w-0 gap-2.5 border-l pl-3 text-xs">
+    <AgentToolCallRow
+      title={title}
+      functionName={event.tool_name}
+      sourceName={event.server_name}
+      input={event.input}
+      detail={detail}
+      statusIcon={statusIcon}
+      expandable={hasPublicToolDetails(event)}
+      icon={
+        <BuiltinToolIcon
+          functionName={event.tool_name}
+          toolKind={event.type === "knowledge" ? "knowledge" : event.tool_kind}
+          className="size-3.5"
+        />
+      }
+    >
+      {() => (
+        <>
           {Object.keys(event.input ?? {}).length > 0 ? (
             <div>
               <p className="mb-1 font-medium text-muted-foreground">
@@ -249,22 +221,16 @@ function PublicToolEventRow({
                 {t("调用结果")}
               </p>
               {event.hits.length > 0 ? (
-                <div className="space-y-2">
+                <div className="bui-context-grid">
                   {event.hits.map((hit, index) => (
-                    <article
+                    <AgentContextCard
                       key={index}
-                      className="rounded-md border bg-background p-2.5"
-                    >
-                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
-                        <span>{hit.document || t("未知文档")}</span>
-                        <span className="text-muted-foreground">
-                          {hit.knowledge_base}
-                        </span>
-                      </div>
-                      <p className="mt-1.5 text-[11px] leading-4 break-words whitespace-pre-wrap text-muted-foreground">
-                        {hit.content}
-                      </p>
-                    </article>
+                      title={t("片段 {value}", { value: index + 1 })}
+                      content={hit.content}
+                      document={hit.document || t("未知文档")}
+                      meta={hit.knowledge_base}
+                      t={t}
+                    />
                   ))}
                 </div>
               ) : (
@@ -285,67 +251,9 @@ function PublicToolEventRow({
               </pre>
             </div>
           ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function PublicToolApproval({
-  runId,
-  call,
-  resolvingCallId,
-  onDecision,
-  t,
-}: {
-  runId: string
-  call: AgentToolCall
-  resolvingCallId: string | null
-  onDecision: (callId: string, decision: "approve" | "reject") => void
-  t: TFunction
-}) {
-  const isResolving = resolvingCallId === `${runId}:${call.call_id}`
-  return (
-    <section className="overflow-hidden rounded-lg border border-amber-600/30 bg-background/80">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400">
-          <ShieldAlertIcon className="size-3.5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-foreground">
-            {t("工具调用需要确认")}
-          </p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {call.tool_name}
-            {call.server_name ? ` @ ${call.server_name}` : ""}
-          </p>
-        </div>
-        <div className="ml-auto flex shrink-0 gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            disabled={isResolving}
-            onClick={() => onDecision(call.call_id, "reject")}
-          >
-            {isResolving ? <LoaderCircleIcon className="animate-spin" /> : null}
-            {t("拒绝")}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            disabled={isResolving}
-            onClick={() => onDecision(call.call_id, "approve")}
-          >
-            {isResolving ? <LoaderCircleIcon className="animate-spin" /> : null}
-            {t("批准并执行")}
-          </Button>
-        </div>
-      </div>
-      <pre className="max-h-28 overflow-auto border-t bg-muted/20 px-3 py-2 font-mono text-[11px] leading-4 break-words whitespace-pre-wrap">
-        {JSON.stringify(call.arguments, null, 2)}
-      </pre>
-    </section>
+        </>
+      )}
+    </AgentToolCallRow>
   )
 }
 
@@ -384,16 +292,17 @@ export function visiblePublicToolProgress(
     (event) =>
       !(
         event.type === "tool" &&
-        event.stage === "preparing" &&
+        event.status === "running" &&
         calls.some(
           (call) =>
-            [
-              "pending",
-              "awaiting_approval",
-              "approved",
-              "running",
-              "uncertain",
-            ].includes(call.status) &&
+            (call.status === "uncertain" ||
+              (event.stage === "preparing" &&
+                [
+                  "pending",
+                  "awaiting_approval",
+                  "approved",
+                  "running",
+                ].includes(call.status))) &&
             event.turn === call.turn &&
             event.tool_name === call.tool_name &&
             event.server_name === call.server_name
@@ -517,12 +426,14 @@ function PublicExecutionProcess({
     if (event.type === "compaction") {
       const status = effectiveStatus(event)
       return t(
-        status === "running" ? "正在压缩历史对话"
-        : status === "succeeded" ? "历史对话已压缩"
-        : "历史对话压缩未完成"
+        status === "running"
+          ? "正在压缩历史对话"
+          : status === "succeeded"
+            ? "历史对话已压缩"
+            : "历史对话压缩未完成"
       )
     }
-    if (event.type === "knowledge") return t("知识库检索")
+    if (event.type === "knowledge") return t("查阅知识库")
     if (event.type === "tool") return publicToolName(event, t) || t("工具")
     if (event.type === "answer" && effectiveStatus(event) === "failed")
       return t("Agent 回答失败")
@@ -549,7 +460,7 @@ function PublicExecutionProcess({
     }
     if (status === "failed") {
       return typeof event.output === "string" && event.output
-        ? event.output
+        ? getErrorMessage(new Error(event.output), t)
         : t("调用失败")
     }
     if (event.type === "knowledge" && event.count !== null) {
@@ -575,13 +486,16 @@ function PublicExecutionProcess({
 
   return (
     <>
-      <details className="group mb-4 text-sm" open={isOpen} onToggle={onToggle}>
-        <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-          <BrainIcon className="size-3.5" />
+      <details
+        className="agent-beautiful bui-process group mb-4 text-sm"
+        open={isOpen}
+        onToggle={onToggle}
+      >
+        <summary className="bui-process-summary">
+          <ChevronDownIcon aria-hidden="true" />
           <span className="flex-1">{t("执行过程")}</span>
-          <ChevronDownIcon className="size-3.5 transition-transform group-open:rotate-180" />
         </summary>
-        <div className="mt-1 ml-1.5 space-y-0.5 border-l border-border/70 pl-3">
+        <div className="mt-2 space-y-0.5">
           {timeline.length === 0 && !hasToolCalls ? (
             <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
               <LoaderCircleIcon className="size-4 animate-spin" />
@@ -612,9 +526,7 @@ function PublicExecutionProcess({
         </div>
       </details>
       {!isOpen && hasToolCalls ? (
-        <div className="mb-3 ml-1.5 space-y-1.5 border-l border-border/70 pl-3">
-          {children}
-        </div>
+        <div className="mb-3 space-y-1.5">{children}</div>
       ) : null}
     </>
   )
@@ -638,29 +550,31 @@ export function mergePublicRunEvent(
   if (event.type === "run" || event.type === "recovering") {
     const next = runs.map((run) =>
       run.id === placeholderId || run.id === event.run.id
-        ? isStaleRunSnapshot(run, event.run) ? run : {
-            ...event.run,
-            attachments: event.run.attachments?.length
-              ? event.run.attachments
-              : run.attachments,
-            result: event.run.result || run.result,
-            live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
-            live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
-            progress: ["queued", "running", "awaiting_approval"].includes(
-              event.run.status
-            )
-              ? mergeAgentProcessSnapshot(
-                  run.progress,
-                  event.run.progress,
-                  (item) => item.id
-                )
-              : event.run.progress.length > 0
-                ? event.run.progress
-                : run.progress,
-            session_inputs: event.run.session_inputs?.length
-              ? event.run.session_inputs
-              : run.session_inputs,
-          }
+        ? isStaleRunSnapshot(run, event.run)
+          ? run
+          : {
+              ...event.run,
+              attachments: event.run.attachments?.length
+                ? event.run.attachments
+                : run.attachments,
+              result: event.run.result || run.result,
+              live_stream_epoch: event.stream_epoch ?? run.live_stream_epoch,
+              live_stream_cursor: event.live_sequence ?? run.live_stream_cursor,
+              progress: ["queued", "running", "awaiting_approval"].includes(
+                event.run.status
+              )
+                ? mergeAgentProcessSnapshot(
+                    run.progress,
+                    event.run.progress,
+                    (item) => item.id
+                  )
+                : event.run.progress.length > 0
+                  ? event.run.progress
+                  : run.progress,
+              session_inputs: event.run.session_inputs?.length
+                ? event.run.session_inputs
+                : run.session_inputs,
+            }
         : run
     )
     return next.some((run) => run.id === event.run.id)
@@ -1413,9 +1327,7 @@ export function PublicAgentChat({
       )
       setConversations((current) =>
         current.map((item) =>
-          item.project_id === project.id
-            ? { ...item, project_id: null }
-            : item
+          item.project_id === project.id ? { ...item, project_id: null } : item
         )
       )
       if (projectRef.current === project.id) {
@@ -1558,7 +1470,7 @@ export function PublicAgentChat({
       ).map((run) => ({
         question: run.question,
         answer: run.result,
-        error: run.error,
+        error: run.error ? getErrorMessage(new Error(run.error), t) : null,
         createdAt: run.created_at,
       }))
       downloadConversationMarkdown(
@@ -1578,6 +1490,7 @@ export function PublicAgentChat({
     decision: "approve" | "reject"
   ) {
     if (!token || resolvingCallId) return
+    setSendError(null)
     setResolvingCallId(`${runId}:${callId}`)
     try {
       const run = await resolvePublicAgentRunToolCall(
@@ -1590,13 +1503,15 @@ export function PublicAgentChat({
       setRuns((current) =>
         current.map((item) =>
           item.id === runId
-            ? isStaleRunSnapshot(item, run) ? item : {
-                ...run,
-                progress:
-                  run.progress.length > 0 ? run.progress : item.progress,
-                session_inputs: run.session_inputs?.length
-                  ? run.session_inputs
-                  : item.session_inputs,
+            ? isStaleRunSnapshot(item, run)
+              ? item
+              : {
+                  ...run,
+                  progress:
+                    run.progress.length > 0 ? run.progress : item.progress,
+                  session_inputs: run.session_inputs?.length
+                    ? run.session_inputs
+                    : item.session_inputs,
                 }
             : item
         )
@@ -1668,6 +1583,7 @@ export function PublicAgentChat({
     } catch (error) {
       const message = getErrorMessage(error, t)
       setSendError(message)
+      await loadRunToolCalls(runId)
     } finally {
       setResolvingCallId(null)
     }
@@ -2362,7 +2278,7 @@ export function PublicAgentChat({
                                         "awaiting_approval",
                                         "uncertain",
                                       ].includes(call.status) ? (
-                                        <PublicToolApproval
+                                        <InlineToolApproval
                                           key={call.call_id}
                                           runId={run.id}
                                           call={call}
@@ -2514,8 +2430,7 @@ export function PublicAgentChat({
                     {sendError}
                   </p>
                 ) : null}
-                <form
-                  className="mx-auto max-w-3xl rounded-xl border border-input bg-muted/20 p-1.5 shadow-xs transition-[background-color,border-color,box-shadow] focus-within:border-ring focus-within:bg-card focus-within:shadow-sm focus-within:ring-3 focus-within:ring-ring/20"
+                <AgentPromptBar
                   aria-busy={fileDrop.isReadingFiles}
                   onSubmit={(event) => {
                     if (fileDrop.isReadingFiles) event.preventDefault()
@@ -2528,7 +2443,7 @@ export function PublicAgentChat({
                   }}
                   onDrop={fileDrop.onDrop}
                 >
-                  <textarea
+                  <AgentPromptInput
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
                     onPaste={(event) => {
@@ -2551,7 +2466,6 @@ export function PublicAgentChat({
                         event.currentTarget.form?.requestSubmit()
                       }
                     }}
-                    className="max-h-32 min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-base leading-6 outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground sm:min-h-12 sm:text-sm"
                     placeholder={t("请输入问题")}
                     aria-label={t("请输入问题")}
                     enterKeyHint="send"
@@ -2559,17 +2473,23 @@ export function PublicAgentChat({
                     maxLength={4000}
                     rows={1}
                   />
-                  <AgentAttachmentList
-                    files={files}
-                    onRemove={(indexToRemove) =>
-                      setFiles((current) =>
-                        current.filter((_, index) => index !== indexToRemove)
-                      )
-                    }
-                    t={t}
-                  />
-                  <div className="flex items-end justify-between gap-2 px-0.5 pb-0.5">
-                    <div className="flex min-w-0 items-center gap-1">
+                  {files.length > 0 ? (
+                    <div className="bui-prompt-files">
+                      <AgentAttachmentList
+                        files={files}
+                        onRemove={(indexToRemove) =>
+                          setFiles((current) =>
+                            current.filter(
+                              (_, index) => index !== indexToRemove
+                            )
+                          )
+                        }
+                        t={t}
+                      />
+                    </div>
+                  ) : null}
+                  <div className="bui-prompt-toolbar justify-between">
+                    <div className="bui-prompt-attach">
                       <AgentFilePicker
                         disabled={
                           isSending || isRunsLoading || fileDrop.isReadingFiles
@@ -2582,14 +2502,14 @@ export function PublicAgentChat({
                         }}
                         t={t}
                       />
+                    </div>
+                    <div className="bui-prompt-actions">
                       <AgentApprovalModeMenu
                         value={approvalMode}
                         onChange={setApprovalMode}
                         disabled={isSending}
                         t={t}
                       />
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
                       <AgentChatSubmitButton
                         isRunning={isSending}
                         hasInput={Boolean(question.trim())}
@@ -2601,7 +2521,7 @@ export function PublicAgentChat({
                       />
                     </div>
                   </div>
-                </form>
+                </AgentPromptBar>
               </div>
             </div>
           </section>

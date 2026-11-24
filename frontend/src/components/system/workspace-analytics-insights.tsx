@@ -91,6 +91,7 @@ function formatPercent(value: number | null, locale: string) {
 function distributionLabel(key: string, kind: DistributionKind, t: TFunction) {
   if (kind === "type") return key === "workflow" ? t("工作流") : t("Agent")
   if (kind === "source") {
+    if (key === "automation") return t("自动化")
     if (key === "public") return t("公开访问")
     if (key === "api") return t("API")
     return t("控制台")

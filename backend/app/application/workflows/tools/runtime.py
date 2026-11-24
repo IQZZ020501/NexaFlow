@@ -12,6 +12,10 @@ from app.application.tools.runtime.service import (
     execute_tool_invocation,
     queue_tool_invocation,
 )
+from app.domain.agents.approval import (
+    agent_tool_requires_approval,
+    run_agent_approval_mode,
+)
 from app.domain.agents.runtime import AgentToolResult
 from app.domain.tools.runtime import TOOL_INVOCATION_AWAITING_APPROVAL
 from app.entities.defaults import utc_now
@@ -131,6 +135,8 @@ class WorkflowToolRuntime:
             access_source=self.run.access_source,
             deadline_at=deadline_at,
             idempotency_key=idempotency_key,
+            approval_required=(agent_tool_requires_approval(run_agent_approval_mode(self.run), snapshot)
+                if self.run.access_source == "automation" else None),
             resource_snapshot={
                 "skill_version_ids": [item.version_id for item in config.skills]
                 if config

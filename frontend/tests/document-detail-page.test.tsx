@@ -25,6 +25,41 @@ afterEach(() => {
 })
 
 describe("document detail page", () => {
+  test.each([
+    ["Document text extraction failed.", "文档内容提取失败，请检查文件是否损坏"],
+    ["Unexpected extractor failure", "请求失败"],
+  ])("localizes persisted document errors: %s", async (error, expected) => {
+    withFetch((url) => {
+      if (url.endsWith("/knowledge-bases")) {
+        return jsonResponse([{ id: "kb-1", name: "Product docs" }])
+      }
+      if (url.endsWith("/documents/doc-1")) {
+        return jsonResponse({
+          id: "doc-1",
+          workspace_id: "ws-1",
+          knowledge_base_id: "kb-1",
+          filename: "guide.pdf",
+          content_type: "application/pdf",
+          size_bytes: 1024,
+          attachment_id: "attachment-1",
+          meta: {},
+          status: "parse_failed",
+          is_active: true,
+          chunk_count: 0,
+          last_error: error,
+          created_by_user_id: "u-1",
+          created_at: timestamp,
+          updated_at: timestamp,
+        })
+      }
+      if (url.endsWith("/content")) return new Response(null, { status: 404 })
+      return jsonResponse([])
+    })
+    renderPage(<DocumentDetailPage />)
+    expect(await screen.findByText(expected)).toBeTruthy()
+    expect(screen.queryByText(error)).toBeNull()
+  })
+
   test("renders the canonical document content as Markdown", async () => {
     withFetch((url) => {
       if (url.endsWith("/knowledge-bases")) {

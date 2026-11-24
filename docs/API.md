@@ -57,7 +57,8 @@ HTTP → api/deps.py（Bearer 校验、WorkspaceContext、角色守卫）
 - `backend/app/api/v1/tools/remote_tasks.py` — MCP 持久远端任务映射配置（`GET/PUT /mcp-servers/{server_id}/long-tasks`）
 - `backend/app/api/v1/agent_skills/routes.py` — `/workspaces/{workspace_id}/agent-skills`：技能包导入检查、CRUD、发布、版本列表与 view/use 授权
 - `backend/app/api/v1/resource_folders/routes.py` — `/workspaces/{workspace_id}/resource-folders`：资源文件夹 CRUD 与资源移动（单条/批量）
-- `backend/app/api/v1/announcements/routes.py` — `/messages`（列表、未读数、SSE `/stream`、全部已读与单条已读）、`/admin/announcements` 与 `/workspaces/{workspace_id}/announcements`
+- `backend/app/api/v1/automations/routes.py` — 工作空间个人自动化 CRUD、暂停／恢复、立即执行、执行历史与审批／表单／取消；`/hooks/automations/{hook_id}` 接收签名 Webhook，详细契约见 [自动化](AUTOMATIONS.md)
+- `backend/app/api/v1/announcements/routes.py` — `/messages`（公告及个人任务通知列表、未读数、按用户隔离的 SSE `/stream`、全部已读与单条已读）、`/admin/announcements` 与 `/workspaces/{workspace_id}/announcements`
 
 ### app/api/v1/admin/
 

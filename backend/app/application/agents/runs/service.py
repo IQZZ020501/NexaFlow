@@ -375,7 +375,7 @@ async def get_agent_run_entity(
         run is None
         or run.workspace_id != workspace_id
         or run.agent_id != agent_id
-        or run.access_source != "console"
+        or run.access_source not in {"console", "automation"}
         or run.consumer_id != actor.id
         or run.requested_by_user_id != actor.id
     ):
@@ -1105,6 +1105,7 @@ async def prepare_agent_run(
     conversation_id: str | None = None,
     access_source: str = "console",
     consumer_id: str | None = None,
+    requested_by_user_id: str | None = None,
     publication: AgentPublication | None = None,
     publication_version: AgentPublicationVersion | None = None,
     attachment_context: str = "",
@@ -1126,8 +1127,9 @@ async def prepare_agent_run(
     	goal (str): The user-provided objective for the run.
     	persist (bool): Whether to commit and refresh the created run.
     	conversation_id (str | None): Conversation to associate with the run.
-    	access_source (str): Run access origin, such as `"console"`, `"public"`, or `"api"`.
+    access_source (str): Run access origin, such as `"console"`, `"public"`, `"api"`, or `"automation"`.
     	consumer_id (str | None): External consumer identifier for non-console runs.
+    requested_by_user_id (str | None): Owning user id when preparing an automation run.
     	publication (AgentPublication | None): Publication configuration to use.
     	publication_version (AgentPublicationVersion | None): Specific publication version to use.
         attachment_context (str): Context derived from attached files.
@@ -1138,7 +1140,7 @@ async def prepare_agent_run(
     Returns:
     	tuple[AgentRun, Any]: The prepared agent run and its resolved model.
     """
-    if access_source not in {"console", "public", "api"}:
+    if access_source not in {"console", "public", "api", "automation"}:
         raise ValueError("Invalid Agent run access source.")
     approval_mode = (
         "ask_risky"
@@ -1147,8 +1149,16 @@ async def prepare_agent_run(
     )
     if access_source == "console":
         consumer_id = actor.id
-    elif not consumer_id:
-        raise ValueError("External Agent runs require a consumer id.")
+        effective_requested_by_user_id: str | None = actor.id
+    elif access_source == "automation":
+        effective_requested_by_user_id = requested_by_user_id or consumer_id
+        if not effective_requested_by_user_id:
+            raise ValueError("Automation Agent runs require a requesting user id.")
+        consumer_id = effective_requested_by_user_id
+    else:
+        if not consumer_id:
+            raise ValueError("External Agent runs require a consumer id.")
+        effective_requested_by_user_id = None
     await enforce_workspace_run_quota(db, workspace_id)
     agent = await agent_repository.lock_agent(db, agent_id)
     if agent is None or agent.workspace_id != workspace_id:
@@ -1285,6 +1295,13 @@ async def prepare_agent_run(
         actor,
     )
     execution_knowledge_base_ids = [item.id for item in knowledge_bases]
+    if access_source == "automation" and len(execution_knowledge_base_ids) != len(
+        knowledge_base_ids
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Agent knowledge base access is no longer available.",
+        )
     knowledge_content_revisions = (
         await knowledge_repository.list_knowledge_content_revisions(
             db,
@@ -1377,7 +1394,7 @@ async def prepare_agent_run(
     run = AgentRun(
         workspace_id=workspace_id,
         agent_id=agent.id,
-        requested_by_user_id=actor.id if access_source == "console" else None,
+        requested_by_user_id=effective_requested_by_user_id,
         execution_user_id=actor.id,
         access_source=access_source,
         consumer_id=consumer_id,
@@ -1437,7 +1454,7 @@ async def prepare_agent_run(
     run.request_id = request_id
     run.request_hash = request_hash
     run.application_snapshot["from_suggestion"] = from_suggestion
-    if persist and not authorized_by_parent:
+    if persist and not authorized_by_parent and access_source != "automation":
         from app.application.memories import freeze_memory_policy
 
         await freeze_memory_policy(db, run, use_memory=use_memory)

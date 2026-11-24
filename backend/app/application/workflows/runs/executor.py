@@ -198,6 +198,9 @@ async def _load_scope(run_id: str) -> WorkflowExecutionScope:
         agent = await agent_repository.get_agent_by_id(db, run.agent_id)
         if agent is None or agent.app_type != "workflow" or agent.status != "active":
             raise WorkflowEngineError("Workflow application is unavailable.")
+        from app.application.runs.lifecycle import require_automation_caller_access
+
+        await require_automation_caller_access(db, run)
         actor = await user_repository.get_user_by_id(db, run.execution_user_id)
         if actor is None or not actor.is_active:
             raise WorkflowEngineError("Workflow run user is unavailable.")

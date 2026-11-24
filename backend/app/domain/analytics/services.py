@@ -188,7 +188,7 @@ def _summarize_period(runs: list[WorkspaceAnalyticsRun]) -> _PeriodSummary:
     succeeded = terminal = 0
     durations: list[float] = []
     for run in runs:
-        if run.access_source == "console" and run.requested_by_user_id:
+        if run.access_source in {"console", "automation"} and run.requested_by_user_id:
             active_user_ids.add(run.requested_by_user_id)
         run_input, run_output, run_total, unreported = _run_usage(run)
         input_tokens += run_input
@@ -346,7 +346,7 @@ def _build_rankings(
     anonymous_runs = anonymous_tokens = 0
     for run in runs:
         _, _, total_tokens, _ = _run_usage(run)
-        if run.access_source == "console" and run.requested_by_user_id:
+        if run.access_source in {"console", "automation"} and run.requested_by_user_id:
             user = users[run.requested_by_user_id]
             user["name"] = (
                 run.requester_name
@@ -360,7 +360,7 @@ def _build_rankings(
             anonymous_tokens += total_tokens
 
         if (
-            run.access_source == "console"
+            run.access_source in {"console", "automation"}
             and run.requested_by_user_id
             and run.created_at is not None
         ):

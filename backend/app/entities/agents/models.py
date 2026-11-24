@@ -129,7 +129,7 @@ class AgentRun:
 
     def __post_init__(self) -> None:
         self.root_run_id = self.root_run_id or self.parent_run_id or self.id
-        if self.access_source == "console" and self.requested_by_user_id:
+        if self.access_source in {"console", "automation"} and self.requested_by_user_id:
             self.execution_user_id = self.execution_user_id or self.requested_by_user_id
             self.consumer_id = self.consumer_id or self.requested_by_user_id
 

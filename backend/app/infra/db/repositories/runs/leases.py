@@ -213,6 +213,7 @@ async def _resumed_execution_deadline(
             select(
                 AgentRunState.execution_deadline_at,
                 AgentRunState.updated_at,
+                AgentRunState.access_source,
             )
             .where(
                 AgentRunState.run_id == run_id,
@@ -229,6 +230,9 @@ async def _resumed_execution_deadline(
         paused_at = paused_at.replace(tzinfo=UTC)
     if deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=UTC)
+    if paused.access_source == "automation":
+        # Background automation waits do not extend the run's original deadline.
+        return deadline
     return deadline + (resumed_at - paused_at)
 
 
@@ -428,6 +432,15 @@ async def list_recoverable_agent_run_ids(
         if generation == "unified"
         else AGENT_RUN_LEGACY_CLAIMABLE_STATUSES
     )
+    from app.domain.automations.models import Automation, AutomationExecution
+
+    paused_dispatch = select(AutomationExecution.id).join(
+        Automation, Automation.id == AutomationExecution.automation_id,
+    ).where(
+        AutomationExecution.run_id == AgentRunState.run_id,
+        AutomationExecution.dispatch_status == "pending_dispatch",
+        Automation.status == "paused",
+    ).exists()
     delivery_overdue_at = now - redispatch_after
     not_recently_redispatched = or_(
         AgentRunState.redispatched_at.is_(None),
@@ -437,6 +450,7 @@ async def list_recoverable_agent_run_ids(
         select(AgentRunState.run_id)
         .join(AgentRun, AgentRun.id == AgentRunState.run_id)
         .where(
+            ~paused_dispatch,
             AgentRunState.worker_generation == generation,
             AgentRunState.attempts < AgentRunState.max_attempts,
             or_(

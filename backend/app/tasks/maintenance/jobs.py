@@ -104,6 +104,12 @@ def _recover_user_memories(_settings):
         extract_user_memories_job.apply_async(args=(job_id,))
 
 
+def _run_automations(settings: Settings) -> None:
+    from app.application.automations import run_automation_maintenance
+
+    run_task_async(run_automation_maintenance(settings))
+
+
 FREQUENT_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("recover_user_memories", _recover_user_memories),
     ("recover_knowledge_tasks", _recover_knowledge_tasks),
@@ -112,6 +118,7 @@ FREQUENT_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("recover_tool_invocations", _recover_tool_invocations),
     ("recover_email_deliveries", _recover_email_deliveries),
     ("recover_mcp_revocations", _recover_mcp_revocations),
+    ("run_automations", _run_automations),
 )
 MINUTELY_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("reclaim_execution_sessions", _reclaim_execution_sessions),

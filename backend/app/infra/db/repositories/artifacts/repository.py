@@ -149,3 +149,61 @@ async def get_conversation_file(
         .where(*_conversation_scope(run), GeneratedArtifactOrm.id == artifact_id)
     )
     return mapping.to_entity(GeneratedArtifact, row) if row is not None else None
+
+
+async def list_root_run_artifacts(
+    db: AsyncSession,
+    workspace_id: str,
+    root_run_id: str,
+) -> list[GeneratedArtifact]:
+    """List artifact metadata for a root Run and any child Runs without reading blobs."""
+    rows = await db.execute(
+        select(
+            GeneratedArtifactOrm.id,
+            GeneratedArtifactOrm.workspace_id,
+            GeneratedArtifactOrm.run_id,
+            GeneratedArtifactOrm.idempotency_key,
+            GeneratedArtifactOrm.format,
+            GeneratedArtifactOrm.filename,
+            GeneratedArtifactOrm.relative_path,
+            GeneratedArtifactOrm.content_hash,
+            GeneratedArtifactOrm.previous_artifact_id,
+            GeneratedArtifactOrm.invocation_id,
+            GeneratedArtifactOrm.inspection,
+            GeneratedArtifactOrm.media_type,
+            GeneratedArtifactOrm.size_bytes,
+            GeneratedArtifactOrm.expires_at,
+            GeneratedArtifactOrm.created_at,
+        )
+        .join(RunRow, RunRow.id == GeneratedArtifactOrm.run_id)
+        .where(
+            GeneratedArtifactOrm.workspace_id == workspace_id,
+            RunRow.workspace_id == workspace_id,
+            or_(RunRow.id == root_run_id, RunRow.root_run_id == root_run_id),
+        )
+        .order_by(
+            GeneratedArtifactOrm.created_at.asc(),
+            GeneratedArtifactOrm.id.asc(),
+        )
+    )
+    return [
+        GeneratedArtifact(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            run_id=row.run_id,
+            idempotency_key=row.idempotency_key,
+            format=row.format,
+            filename=row.filename,
+            relative_path=row.relative_path,
+            content_hash=row.content_hash,
+            previous_artifact_id=row.previous_artifact_id,
+            invocation_id=row.invocation_id,
+            inspection=dict(row.inspection or {}),
+            media_type=row.media_type,
+            content=b"",
+            size_bytes=row.size_bytes,
+            expires_at=row.expires_at,
+            created_at=row.created_at,
+        )
+        for row in rows.all()
+    ]

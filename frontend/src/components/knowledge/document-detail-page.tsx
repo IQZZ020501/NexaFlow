@@ -309,7 +309,9 @@ function DocumentDetailPageContent({
           <div className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-8 text-center text-sm text-destructive">
             <AlertCircleIcon className="size-5" />
             <p className="break-words">
-              {document.last_error ?? t("解析失败")}
+              {document.last_error
+                ? getErrorMessage(new Error(document.last_error), t)
+                : t("解析失败")}
             </p>
           </div>
         ) : markdownContent && !hasChunkAssets ? (

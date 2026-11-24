@@ -210,7 +210,7 @@ describe("system health", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }))
     await waitFor(() => expect(healthRequests).toBe(3))
     await waitFor(() => expect(healthCard("数据库").getByText("未知")).toBeTruthy())
-    expect(notifications).toContainEqual(["error", "unavailable"])
+    expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
 
     await act(async () => {
       resolveOlderHealth?.(jsonResponse(health))

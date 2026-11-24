@@ -33,7 +33,7 @@ def run_agent_approval_mode(run: AgentRun) -> AgentApprovalMode:
 def model_decides_mcp_approval(run: AgentRun) -> bool:
     """Only new interactive Runs delegate individual MCP decisions to the model."""
     return (
-        run.access_source in {"console", "public"}
+        run.access_source in {"console", "public", "automation"}
         and run.application_snapshot.get("mcp_approval_version") == 2
         and run_agent_approval_mode(run) == "ask_risky"
     )

@@ -41,7 +41,7 @@ import {
   useOptionalMessageCenter,
 } from "@/contexts/message-center-context"
 import { useSession } from "@/contexts/session-context"
-import { languageLocales } from "@/i18n"
+import { languageLocales, type TFunction } from "@/i18n"
 import {
   listMessages,
   type MessageItem,
@@ -49,6 +49,33 @@ import {
 } from "@/lib/api/messages"
 import { formatDateTime } from "@/lib/display"
 import { cn } from "@/lib/utils"
+
+function messageTitle(message: MessageItem, t: TFunction) {
+  if (message.kind !== "notification") return message.title
+  const key = {
+    succeeded: "自动化任务已完成：{name}",
+    failed: "自动化任务执行失败：{name}",
+    cancelled: "自动化任务已取消：{name}",
+    awaiting_approval: "自动化任务等待审批：{name}",
+    awaiting_input: "自动化任务等待输入：{name}",
+  } as const
+  return t(key[message.event_type], {
+    name: message.automation_name ?? t("自动化任务"),
+  })
+}
+
+function messageBody(message: MessageItem, t: TFunction) {
+  if (message.kind !== "notification") return message.body
+  const key = {
+    succeeded: "自动化任务已完成。",
+    failed: "自动化任务执行失败，请查看运行详情。",
+    cancelled: "本次自动化执行已被取消。",
+    awaiting_approval:
+      "运行过程中触发了需要人工审批的工具调用，请前往执行详情处理。",
+    awaiting_input: "工作流正等待补充表单输入，请前往执行详情提交后继续运行。",
+  } as const
+  return t(key[message.event_type])
+}
 
 function formatMessageTime(value: string, locale: string) {
   return formatDateTime(value, locale, {
@@ -102,7 +129,9 @@ function MessagePreview({
       />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="truncate font-medium">{message.title}</span>
+          <span className="truncate font-medium">
+            {messageTitle(message, t)}
+          </span>
           {!message.is_read ? (
             <>
               <span
@@ -113,6 +142,11 @@ function MessagePreview({
             </>
           ) : null}
         </span>
+        {message.kind === "notification" && message.automation_name ? (
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            {t("自动化任务")} · {message.automation_name}
+          </span>
+        ) : null}
       </span>
     </DropdownMenuItem>
   )
@@ -121,9 +155,14 @@ function MessagePreview({
 function MessageDetailsDialog({
   message,
   onOpenChange,
+  onNavigateAutomation,
 }: {
   message: MessageItem | null
   onOpenChange: (open: boolean) => void
+  onNavigateAutomation?: (
+    automationId: string,
+    executionId: string | null
+  ) => void
 }) {
   const { language, t } = useLanguage()
 
@@ -143,13 +182,15 @@ function MessageDetailsDialog({
                 />
                 <div className="min-w-0 flex-1">
                   <DialogTitle className="text-xl leading-snug">
-                    {message.title}
+                    {messageTitle(message, t)}
                   </DialogTitle>
                   <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge variant="outline">
                       {message.scope_type === "global"
                         ? t("单条全局公告")
-                        : t("单条工作空间公告")}
+                        : message.scope_type === "personal"
+                          ? t("自动化任务")
+                          : t("单条工作空间公告")}
                     </Badge>
                     <Badge variant="secondary">
                       {t(
@@ -174,9 +215,24 @@ function MessageDetailsDialog({
               </div>
             </DialogHeader>
             <div className="min-h-0 overflow-y-auto px-6 py-5">
-              <MarkdownContent content={message.body} />
+              <MarkdownContent content={messageBody(message, t)} />
             </div>
             <DialogFooter className="border-t px-6 py-4">
+              {message.kind === "notification" &&
+              message.automation_id &&
+              onNavigateAutomation ? (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const autoId = message.automation_id
+                    if (!autoId) return
+                    onOpenChange(false)
+                    onNavigateAutomation(autoId, message.execution_id)
+                  }}
+                >
+                  {t("查看执行详情")}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -199,14 +255,28 @@ export function MessageCenter() {
   const [selectedMessage, setSelectedMessage] =
     React.useState<MessageItem | null>(null)
 
+  const navigateToAutomation = React.useCallback(
+    (automationId: string, executionId: string | null) => {
+      const target = executionId
+        ? `/app/automations/${encodeURIComponent(automationId)}?execution=${encodeURIComponent(executionId)}`
+        : `/app/automations/${encodeURIComponent(automationId)}`
+      router.push(target)
+    },
+    [router]
+  )
+
   if (!messageCenter) return null
 
   const { messages, unreadCount, isLoading, markRead, markAllRead } =
     messageCenter
 
   const handleMessageSelect = (message: MessageItem) => {
-    setSelectedMessage(message)
     void markRead(message.id).catch(() => undefined)
+    if (message.kind === "notification" && message.automation_id) {
+      navigateToAutomation(message.automation_id, message.execution_id)
+      return
+    }
+    setSelectedMessage(message)
   }
 
   return (
@@ -234,7 +304,7 @@ export function MessageCenter() {
         <DropdownMenuContent
           align="end"
           collisionPadding={8}
-          className="w-[min(20rem,calc(100vw-1.5rem))] max-h-[min(24rem,calc(100svh-9rem))]"
+          className="max-h-[min(24rem,calc(100svh-9rem))] w-[min(20rem,calc(100vw-1.5rem))]"
         >
           <DropdownMenuLabel className="flex items-center justify-between">
             <span className="flex items-center gap-2">
@@ -284,6 +354,7 @@ export function MessageCenter() {
         onOpenChange={(open) => {
           if (!open) setSelectedMessage(null)
         }}
+        onNavigateAutomation={navigateToAutomation}
       />
     </>
   )
@@ -291,6 +362,7 @@ export function MessageCenter() {
 
 export function MessagesPage() {
   const { t } = useLanguage()
+  const router = useRouter()
   const { token, selectedWorkspaceId, mustChangePassword } = useSession()
   const [selectedMessage, setSelectedMessage] =
     React.useState<MessageItem | null>(null)
@@ -354,19 +426,27 @@ export function MessagesPage() {
   }, [loadPage, refreshVersion])
 
   const handleMessageSelect = (message: MessageItem) => {
-    setSelectedMessage(message)
-    if (message.is_read) return
-    const readAt = new Date().toISOString()
-    setPageMessages((items) =>
-      items.map((item) =>
-        item.id === message.id
-          ? { ...item, is_read: true, read_at: readAt }
-          : item
+    if (!message.is_read) {
+      const readAt = new Date().toISOString()
+      setPageMessages((items) =>
+        items.map((item) =>
+          item.id === message.id
+            ? { ...item, is_read: true, read_at: readAt }
+            : item
+        )
       )
-    )
-    void markRead(message.id).catch(() => {
-      void loadPage()
-    })
+      void markRead(message.id).catch(() => {
+        void loadPage()
+      })
+    }
+    if (message.kind === "notification" && message.automation_id) {
+      const target = message.execution_id
+        ? `/app/automations/${encodeURIComponent(message.automation_id)}?execution=${encodeURIComponent(message.execution_id)}`
+        : `/app/automations/${encodeURIComponent(message.automation_id)}`
+      router.push(target)
+      return
+    }
+    setSelectedMessage(message)
   }
 
   const handleMarkAllRead = () => {
@@ -452,7 +532,7 @@ export function MessagesPage() {
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-semibold sm:text-base">
-                      {message.title}
+                      {messageTitle(message, t)}
                     </span>
                     {!message.is_read ? (
                       <Badge variant="secondary" className="rounded-full">
@@ -491,6 +571,12 @@ export function MessagesPage() {
         message={selectedMessage}
         onOpenChange={(open) => {
           if (!open) setSelectedMessage(null)
+        }}
+        onNavigateAutomation={(automationId, executionId) => {
+          const target = executionId
+            ? `/app/automations/${encodeURIComponent(automationId)}?execution=${encodeURIComponent(executionId)}`
+            : `/app/automations/${encodeURIComponent(automationId)}`
+          router.push(target)
         }}
       />
     </div>

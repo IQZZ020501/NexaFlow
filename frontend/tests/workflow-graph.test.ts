@@ -56,7 +56,7 @@ describe("workflow graph", () => {
         t
       )
     ).toBe("重排内容必须包含非空文本。")
-    expect(workflowErrorMessage("Provider detail", t)).toBe("Provider detail")
+    expect(workflowErrorMessage("Provider detail", t)).toBe("请求失败")
   })
 
   test("moves canvas components in flow coordinates", () => {

@@ -12,7 +12,7 @@ import io
 import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import tests.support
 from tests.support import activate_admin, activate_user, auth_headers, test_client
@@ -22,6 +22,7 @@ from app.domain.workflows.runtime.engine import (
     NodeExecutionContext,
     WorkflowEngineError,
 )
+from app.infra.storage.object_storage import ReadableStorage
 from app.schemas.workflows.contracts import WorkflowNode
 
 # Populated by test_executor_manual_run_scenarios for manual run creation.
@@ -1816,7 +1817,7 @@ def test_executor_load_scope_branches() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _FakeUploadStorage:
+class _FakeUploadStorage(ReadableStorage):
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.keys: list[str] = []
@@ -1840,8 +1841,8 @@ class _FakeUploadStorage:
         if key in self.keys:
             self.keys.remove(key)
 
-    def path(self, key):
-        return SimpleNamespace(open=lambda _mode: io.BytesIO(b"raw"))
+    def open_reader(self, key):
+        return io.BytesIO(b"raw")
 
 
 def _upload_file(filename: str, content: bytes = b"hello") -> object:
@@ -2171,7 +2172,9 @@ def test_workflow_uploads_resolve_branches() -> None:
             path,
             *,
             image_text_extractor=None,
+            supported_extensions=None,
         ):
+            assert path.read_bytes() == b"raw"
             if self.error:
 
                 raise KnowledgePipelineError("cannot parse")
@@ -2254,7 +2257,7 @@ def test_workflow_uploads_resolve_branches() -> None:
             new=AsyncMock(return_value=uploads(three)),
         ), patch(
             "app.application.uploads.service.extract_document",
-            new=lambda filename, content_type, path, **kwargs: ("x" * 60000, []),
+            new=FakeParser("x" * 60000).extract,
         ), patch(
             "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2277,7 +2280,7 @@ def test_workflow_uploads_resolve_branches() -> None:
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
             "app.application.uploads.service.extract_document",
-            new=Mock(side_effect=KnowledgePipelineError("cannot parse")),
+            new=FakeParser("", error=True).extract,
         ), patch(
             "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2329,7 +2332,7 @@ def test_workflow_uploads_resolve_branches() -> None:
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
             "app.application.uploads.service.extract_document",
-            new=lambda filename, content_type, path, **kwargs: ("agent text", []),
+            new=FakeParser("agent text").extract,
         ), patch(
             "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),
@@ -2360,7 +2363,7 @@ def test_workflow_uploads_resolve_branches() -> None:
             new=AsyncMock(return_value=uploads([make_upload("u1")])),
         ), patch(
             "app.application.uploads.service.extract_document",
-            new=Mock(side_effect=KnowledgePipelineError("cannot parse")),
+            new=FakeParser("", error=True).extract,
         ), patch(
             "app.application.uploads.service.create_object_storage",
             return_value=_FakeUploadStorage(),

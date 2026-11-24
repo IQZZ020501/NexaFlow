@@ -110,7 +110,7 @@ describe("MessageCenterProvider", () => {
       await waitFor(() =>
         expect(notifications).toEqual([
           fails
-            ? ["error", "read update failed"]
+            ? ["error", "请求失败"]
             : ["success", "全部消息已标为已读"],
         ])
       )
@@ -132,7 +132,7 @@ describe("MessageCenterProvider", () => {
     await screen.findByText("1")
     fireEvent.click(screen.getByText("read-one"))
     await waitFor(() =>
-      expect(notifications).toEqual([["error", "read update failed"]])
+      expect(notifications).toEqual([["error", "请求失败"]])
     )
   })
 })

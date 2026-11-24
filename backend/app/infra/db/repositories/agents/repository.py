@@ -260,6 +260,22 @@ async def get_agent_publication_version(
     )
 
 
+async def list_agent_publication_versions(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+) -> list[AgentPublicationVersionEntity]:
+    rows = await db.scalars(
+        select(AgentPublicationVersion)
+        .where(
+            AgentPublicationVersion.workspace_id == workspace_id,
+            AgentPublicationVersion.agent_id == agent_id,
+        )
+        .order_by(AgentPublicationVersion.version_number.desc())
+    )
+    return [to_entity(AgentPublicationVersionEntity, row) for row in rows.all()]
+
+
 async def list_agent_publication_version_map(
     db: AsyncSession,
     workspace_id: str,
@@ -1565,6 +1581,9 @@ async def delete_agent_graph(
             ),
         )
     )
+    from app.infra.db.repositories.automations import delete_automations_for_agent
+
+    await delete_automations_for_agent(db, agent_id)
     await db.execute(delete(AgentRun).where(AgentRun.agent_id == agent_id))
     from app.infra.db.repositories.projects.chat import delete_application_projects
 
@@ -1626,6 +1645,11 @@ async def list_agent_run_ids(db: AsyncSession, agent_id: str) -> list[str]:
 
 
 async def delete_workspace_agent_graph(db: AsyncSession, workspace_id: str) -> None:
+    from app.infra.db.repositories.automations import (
+        delete_automations_for_workspace,
+    )
+
+    await delete_automations_for_workspace(db, workspace_id)
     await db.execute(
         delete(GeneratedArtifact).where(GeneratedArtifact.workspace_id == workspace_id)
     )

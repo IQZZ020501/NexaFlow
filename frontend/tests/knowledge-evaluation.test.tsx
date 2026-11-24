@@ -252,14 +252,28 @@ describe("knowledge evaluation", () => {
     const summary = {
       task: succeededTask,
       count: 1,
-      failed_count: 0,
+      failed_count: 1,
       mean_hit_at_k: 1,
       mean_recall_at_k: 1,
       mean_reciprocal_rank: 1,
       mean_ndcg_at_k: 1,
       p50_latency_ms: 12,
       p95_latency_ms: 12,
-      results: [],
+      results: [{
+        id: "failed-result",
+        case_id: "case-1",
+        question: "检索失败用例",
+        returned_document_ids: [],
+        returned_chunk_ids: [],
+        hit_at_k: 0,
+        recall_at_k: 0,
+        reciprocal_rank: 0,
+        ndcg_at_k: 0,
+        latency_ms: 12,
+        trace: {},
+        error: "Knowledge base has no indexed chunks.",
+        created_at: "2026-01-01T00:00:00Z",
+      }],
     }
     let summaryRequests = 0
     let deleteCaseRequests = 0
@@ -300,6 +314,8 @@ describe("knowledge evaluation", () => {
     )
 
     await screen.findByText("P95 延迟")
+    expect(screen.getByText("知识库暂无已索引的内容，请先完成索引")).toBeTruthy()
+    expect(screen.queryByText("Knowledge base has no indexed chunks.")).toBeNull()
     expect(screen.queryByText(/^知识关联期望：/)).toBeNull()
     const caseCheckbox = screen.getByRole("checkbox", {
       name: "选择用例：如何回滚？",

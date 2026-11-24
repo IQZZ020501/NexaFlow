@@ -1,6 +1,7 @@
 """Deterministic ownership, renewal and image cancellation races on real rows."""
 
 import asyncio
+import base64
 import json
 import tempfile
 from dataclasses import replace
@@ -9,12 +10,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 from langchain_core.messages import AIMessage
+from openai import AsyncOpenAI
 from tests import support
 from tests.agents.evaluation import ScriptedModel, answer_message
 from tests.support import activate_admin, settings, test_client
 
 from app.adapters.execution import opensandbox
+from app.adapters.llm import image as image_adapter
 from app.application.agents.tools.results import read_run_tool_result
 from app.application.agents.tools.runtime import UnifiedAgentToolRuntime
 from app.application.tools.runtime import service
@@ -34,7 +38,7 @@ from app.infra.execution.profile import execution_profile
 from app.ports.tools import ToolInvocationContext, ToolRuntimeResult
 
 
-async def fixture(workspace_id, *, image=False):
+async def fixture(workspace_id, *, image=False, approval_required=False):
     async with get_session_factory()() as db:
         actor = await users.get_active_user_by_username(db, "admin")
         model = RegisteredModel(
@@ -101,7 +105,7 @@ async def fixture(workspace_id, *, image=False):
                 access_source="console",
                 deadline_at=run.execution_deadline_at,
                 idempotency_key=run.id,
-                approval_required=False,
+                approval_required=approval_required,
                 image_model_id=model.id if image else None,
             ),
         )
@@ -392,30 +396,101 @@ async def check_shell_log_paging(workspace_id):
 
 async def check_image_success(workspace_id):
     run, invocation, _snapshot = await fixture(workspace_id, image=True)
+
+    async def record_started():
+        async with get_session_factory()() as db:
+            row = await tools.get_tool_invocation_by_id(db, invocation.id)
+            assert row.status == "running" and row.attempts == 1
+
+    started = AsyncMock(side_effect=record_started)
+
+    async def generated(*_args):
+        started.assert_awaited_once()
+        return b"\x89PNG\r\n\x1a\nfixture"
+
     with patch.object(
         image_generation,
         "generate_image",
-        AsyncMock(return_value=b"\x89PNG\r\n\x1a\nfixture"),
+        AsyncMock(side_effect=generated),
     ) as provider:
         result = await service.execute_tool_invocation(
             invocation.id,
             settings(),
             "image-owner",
             run_worker_task_id=run.worker_task_id,
+            on_started=started,
         )
         replay = await service.execute_tool_invocation(
-            invocation.id, settings(), "replay"
+            invocation.id, settings(), "replay", on_started=started
         )
     assert result.ok and replay.data["artifact_id"] == result.data["artifact_id"], (
         result
     )
     provider.assert_awaited_once()
+    started.assert_awaited_once()
     async with get_session_factory()() as db:
         row = await tools.get_tool_invocation_by_id(db, invocation.id)
         assert (
             row.status == "succeeded"
             and row.policy_snapshot["dispatch_state"] == "completed"
         )
+
+    _run, pending, _snapshot = await fixture(
+        workspace_id, image=True, approval_required=True
+    )
+    awaiting = AsyncMock()
+    result = await service.execute_tool_invocation(
+        pending.id, settings(), "not-approved", on_started=awaiting
+    )
+    assert result.error_code == "approval_required"
+    awaiting.assert_not_awaited()
+
+
+async def check_image_result_survives_open_connection(workspace_id):
+    run, invocation, _snapshot = await fixture(workspace_id, image=True)
+    requests = []
+    png = image_adapter.PNG_SIGNATURE + b"fixture"
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield json.dumps({"data": [{"b64_json": base64.b64encode(png).decode()}]}).encode()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            pass
+
+    class Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            requests.append(request)
+            return httpx.Response(200, stream=Body())
+
+        async def aclose(self):
+            await asyncio.Event().wait()
+
+    def client(**options):
+        return AsyncOpenAI(**options, http_client=httpx.AsyncClient(transport=Transport()))
+
+    with (
+        patch.object(image_adapter, "AsyncOpenAI", client),
+        patch.object(image_adapter, "IMAGE_CLOSE_TIMEOUT_SECONDS", 0.01),
+        patch.object(image_adapter, "_registered_model_credentials", return_value={
+            "api_key": "fixture-only", "api_base": "https://image-fixture.invalid/v1",
+        }),
+    ):
+        async with asyncio.timeout(2):
+            result = await service.execute_tool_invocation(
+                invocation.id, settings(), "image-receipt-owner",
+                run_worker_task_id=run.worker_task_id,
+            )
+            replay = await service.execute_tool_invocation(invocation.id, settings(), "replay")
+        if image_adapter._image_cleanup_tasks:
+            await asyncio.gather(*list(image_adapter._image_cleanup_tasks))
+    assert result.ok and result.outcome == "confirmed", result
+    assert replay.data["artifact_id"] == result.data["artifact_id"]
+    assert len(requests) == 1
+    async with get_session_factory()() as db:
+        row = await tools.get_tool_invocation_by_id(db, invocation.id)
+        assert row.status == "succeeded" and row.policy_snapshot["dispatch_state"] == "completed"
 
 
 async def check_image_recovery(workspace_id, *, dispatched):
@@ -516,6 +591,7 @@ def check_all(client):
     client.portal.call(check_expired_result_without_takeover, workspace_id)
     client.portal.call(check_shell_log_paging, workspace_id)
     client.portal.call(check_image_success, workspace_id)
+    client.portal.call(check_image_result_survives_open_connection, workspace_id)
     for run_loss in (True, False):
 
         async def ownership():

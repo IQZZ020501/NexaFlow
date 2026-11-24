@@ -684,5 +684,5 @@ test("list failures render an error card", async () => {
   })
 
   renderPage(<ResourcePermissionsPage type="knowledge" />)
-  expect(await screen.findByText("kaboom")).toBeTruthy()
+  expect(await screen.findByText("服务暂时不可用，请稍后重试")).toBeTruthy()
 })

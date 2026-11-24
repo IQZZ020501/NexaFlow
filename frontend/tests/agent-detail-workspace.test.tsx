@@ -220,8 +220,8 @@ const session = makeSession({
 mockUseSession(session)
 
 const stableRouter = {
-  push: () => undefined,
-  replace: () => undefined,
+  push: mock(() => undefined),
+  replace: mock(() => undefined),
   back: () => undefined,
   forward: () => undefined,
   prefetch: () => undefined,
@@ -272,6 +272,8 @@ const fetchStub = ((url: string, init?: RequestInit) =>
 const originalFetch = globalThis.fetch
 beforeEach(() => {
   globalThis.fetch = fetchStub
+  stableRouter.push.mockClear()
+  stableRouter.replace.mockClear()
 })
 afterEach(() => {
   cleanup()
@@ -292,6 +294,7 @@ function LanguageProviderWrap({ children }: { children: React.ReactNode }) {
 
 type HarnessProps = {
   agent?: Agent
+  tools?: ToolSummary[]
   runs?: AgentRun[]
   toolCallsByRun?: Record<string, AgentToolCall[]>
   resolvingCallId?: string | null
@@ -359,7 +362,7 @@ function Harness(props: HarnessProps = {}) {
       setForm={setForm}
       models={models}
       knowledgeBases={knowledgeBases}
-      tools={tools}
+      tools={props.tools ?? tools}
       runs={props.runs ?? []}
       toolCallsByRun={props.toolCallsByRun ?? {}}
       resolvingCallId={props.resolvingCallId ?? null}
@@ -450,6 +453,117 @@ test("disables related questions while the Agent configuration has unsaved chang
 })
 
 describe("AgentDetailWorkspace header and navigation", () => {
+  test.each(["create", "webhook", "cancel", "escape"] as const)(
+    "keeps the Agent page and unsaved edits after automation %s",
+    async (action) => {
+      const publishedAgent = makeAgent({
+        published: true,
+        current_published_version_id: "published-1",
+      })
+      const created: Array<Record<string, unknown>> = []
+      routes = [
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents`,
+          exact: true,
+          respond: () => jsonResponse([publishedAgent]),
+        },
+        {
+          method: "GET",
+          pathname: `/api/v1/workspaces/${WS}/agents/${publishedAgent.id}/versions`,
+          respond: () =>
+            jsonResponse({
+              items: [
+                {
+                  id: "published-1",
+                  version_number: 1,
+                  created_at: publishedAgent.created_at,
+                },
+              ],
+            }),
+        },
+        {
+          method: "POST",
+          pathname: `/api/v1/workspaces/${WS}/automations`,
+          respond: (init) => {
+            created.push(JSON.parse(String(init?.body)))
+            return jsonResponse({
+              id: "automation-1",
+              name: "Morning report",
+              webhook_url: "/api/v1/hooks/automations/hook-1",
+              webhook_secret: action === "webhook" ? "test-once-secret" : null,
+            })
+          },
+        },
+      ]
+      renderPage(<Harness agent={publishedAgent} activeView="settings" />)
+      fireEvent.change(screen.getByLabelText("Agent 名称"), {
+        target: { value: "Unsaved Agent name" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "创建自动化" }))
+      const dialog = await screen.findByRole("dialog", { name: "创建自动化" })
+      await waitFor(() =>
+        expect(within(dialog).getByLabelText("发布版本").textContent).toContain(
+          "v1"
+        )
+      )
+      await waitFor(() =>
+        expect(
+          within(dialog).getByLabelText("选择已发布应用").textContent
+        ).toContain(publishedAgent.name)
+      )
+
+      if (action === "cancel") {
+        fireEvent.click(within(dialog).getByRole("button", { name: "取消" }))
+      } else if (action === "escape") {
+        fireEvent.keyDown(dialog, { key: "Escape" })
+      } else {
+        fireEvent.change(within(dialog).getByLabelText("名称"), {
+          target: { value: "Morning report" },
+        })
+        fireEvent.change(within(dialog).getByLabelText("任务提示词"), {
+          target: { value: "Summarize today's updates" },
+        })
+        if (action === "webhook") {
+          fireEvent.pointerDown(within(dialog).getByLabelText("触发方式"))
+          fireEvent.click(
+            await screen.findByRole("menuitem", { name: "Webhook 事件" })
+          )
+        }
+        fireEvent.click(within(dialog).getByRole("button", { name: "创建" }))
+        await waitFor(() => expect(created).toHaveLength(1))
+        expect(created[0]).toMatchObject({
+          target_app_id: publishedAgent.id,
+          publication_version_id: "published-1",
+          trigger_type: action === "webhook" ? "webhook" : "daily",
+        })
+      }
+
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog", { name: "创建自动化" })).toBeNull()
+      )
+      if (action === "webhook") {
+        const disclosure = await screen.findByRole("dialog", {
+          name: "Webhook 地址与签名密钥",
+        })
+        expect(within(disclosure).getByText("test-once-secret")).toBeTruthy()
+        fireEvent.click(
+          within(disclosure).getByRole("button", { name: "关闭" })
+        )
+      }
+      expect(
+        (screen.getByLabelText("Agent 名称") as HTMLInputElement).value
+      ).toBe("Unsaved Agent name")
+      expect(
+        screen.getByRole("heading", { level: 2, name: "基本信息" })
+      ).toBeTruthy()
+      expect(stableRouter.push).not.toHaveBeenCalled()
+      expect(stableRouter.replace).not.toHaveBeenCalled()
+      if (action === "cancel" || action === "escape")
+        expect(created).toHaveLength(0)
+    }
+  )
+
   test("renders the header with model line and view label", () => {
     renderPage(<Harness />)
     expect(screen.getByText("Research Assistant")).toBeTruthy()
@@ -597,6 +711,65 @@ describe("AgentDetailWorkspace header and navigation", () => {
 })
 
 describe("AgentDetailWorkspace preview", () => {
+  test("counts tool groups in the settings header like the tool section", () => {
+    const baseTool = tool()
+    const catalog: ToolSummary[] = [
+      baseTool,
+      { ...baseTool, id: "mcp-read", function_name: "read" },
+      ...["lookup", "create"].map((name): ToolSummary => ({
+        ...baseTool,
+        id: `integration-${name}`,
+        kind: "integration",
+        function_name: name,
+        source: {
+          id: "integration-1",
+          name: "feishu",
+          kind: "integration",
+          transport: null,
+        },
+      })),
+      ...[
+        "web_search",
+        "web_fetch",
+        "generate_image",
+        "bash",
+        "install_skill_dependencies",
+      ].map((name): ToolSummary => ({
+        ...baseTool,
+        id: name,
+        kind: "builtin",
+        function_name: name,
+        source: {
+          id: "builtin-1",
+          name: "builtin",
+          kind: "builtin",
+          transport: null,
+        },
+      })),
+    ]
+    renderPage(
+      <Harness
+        activeView="settings"
+        tools={catalog}
+        agent={makeAgent({
+          tools: [
+            ...catalog.map((item) => ({
+              tool_id: item.id,
+              version_id: item.current_version_id!,
+            })),
+            { tool_id: "unavailable-tool", version_id: "old-version" },
+          ],
+        })}
+      />
+    )
+    const header = screen.getByRole("heading", {
+      name: "基本信息",
+      level: 2,
+    }).parentElement!.parentElement!
+    expect(within(header).getByText("5")).toBeTruthy()
+    expect(screen.getByText("5 个工具")).toBeTruthy()
+  })
+
   test("switches between stopping and sending as the running draft changes", async () => {
     let submitted = 0
     let cancelled = false
@@ -1269,7 +1442,7 @@ describe("AgentDetailWorkspace preview", () => {
         .getByText("正在回答租房问题")
         .closest(".rounded-2xl") as HTMLElement
       expect(within(firstAnswer).getByText("图片生成")).toBeTruthy()
-      expect(within(followUpAnswer).getByText("知识库检索")).toBeTruthy()
+      expect(within(followUpAnswer).getByText("查阅知识库")).toBeTruthy()
       expect(within(followUpAnswer).queryByText("图片生成") === null).toBe(true)
       expect(
         within(followUpAnswer).queryByText("工具调用需要确认") === null
@@ -1333,10 +1506,10 @@ describe("AgentDetailWorkspace preview", () => {
     const run = makeRun({
       status: "failed",
       result: "",
-      last_error: "model timeout",
+      last_error: "Agent model response timed out.",
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
-    expect(screen.getByText("model timeout")).toBeTruthy()
+    expect(screen.getByText("Agent 回答超时")).toBeTruthy()
   })
 
   test.each(["running", "succeeded"] as const)(
@@ -1593,6 +1766,9 @@ describe("AgentDetailWorkspace preview", () => {
     const reasoning = screen.getByText("Tool reasoning result")
     const preparing = screen.getAllByText("search")[0]!
     expect(
+      preparing.closest("button")!.querySelector(".lucide-search")
+    ).toBeTruthy()
+    expect(
       reasoning.compareDocumentPosition(preparing) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
@@ -1720,8 +1896,9 @@ describe("AgentDetailWorkspace preview", () => {
     const process = screen.getByText("执行过程").closest("details")!
     expect(process.open).toBe(false)
     fireEvent.click(screen.getByText("执行过程"))
-    const button = screen.getByText("命令行").closest("button")!
+    const button = screen.getByText("运行命令").closest("button")!
     expect(button.getAttribute("aria-expanded")).toBe("false")
+    expect(within(button).getByText("printf hello; exit 7")).toBeTruthy()
     fireEvent.click(button)
     const card = button.parentElement!
     expect(within(card).getByText("退出码: 7")).toBeTruthy()
@@ -1759,9 +1936,14 @@ describe("AgentDetailWorkspace preview", () => {
       ],
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
-    expect(screen.getByText("知识库检索")).toBeTruthy()
+    expect(screen.getByText("查阅知识库")).toBeTruthy()
     expect(screen.getByText("已检索 2 个知识片段")).toBeTruthy()
-    fireEvent.click(screen.getByText("知识库检索").closest("button")!)
+    expect(
+      screen.getByText("查阅知识库").closest("button")!
+        .querySelector(".lucide-book-open")
+    ).toBeTruthy()
+    fireEvent.click(screen.getByText("查阅知识库").closest("button")!)
+    expect(screen.getByText("knowledge_retrieval")).toBeTruthy()
     expect(screen.getByText("doc-a")).toBeTruthy()
     expect(screen.getByText("chunk content")).toBeTruthy()
   })
@@ -1802,7 +1984,7 @@ describe("AgentDetailWorkspace preview", () => {
     )
     expect(screen.getByText("工具执行结果不确定")).toBeTruthy()
     expect(screen.getByText("不重试并继续")).toBeTruthy()
-    expect(screen.getByText("retry failed")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
   })
 
   test("renders pending tool calls as running events", () => {
@@ -2449,7 +2631,7 @@ describe("AgentLogsPanel", () => {
       access_source: "api",
       status: "failed",
       feedback: null,
-      last_error: "execution crashed",
+      last_error: "Agent model response timed out.",
       result: "",
       display_name: "",
     }
@@ -2475,7 +2657,13 @@ describe("AgentLogsPanel", () => {
     expect(screen.getByText("API")).toBeTruthy()
     expect(screen.getByText("失败")).toBeTruthy()
     expect(screen.getByRole("img", { name: "暂无反馈" })).toBeTruthy()
-    expect(screen.getByText("execution crashed")).toBeTruthy()
+    const error = screen.getByText("Agent 回答超时")
+    expect(error.title).toBe("Agent 回答超时")
+    expect(screen.queryByText(failingLog.last_error)).toBeNull()
+    fireEvent.click(screen.getByLabelText("查看日志详情"))
+    expect(await screen.findAllByText("Agent 回答超时")).toHaveLength(2)
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByText("对话详情")).toBeNull())
     fireEvent.click(screen.getByText("刷新").closest("button")!)
     await waitFor(() => expect(screen.getByText("暂无对话日志")).toBeTruthy())
   })
@@ -2526,7 +2714,7 @@ describe("AgentLogsPanel", () => {
     )
     expect(screen.getByText("控制台")).toBeTruthy()
     expect(screen.getByRole("img", { name: "点踩" })).toBeTruthy()
-    expect(screen.getByText("step failed")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
 
     const row = screen.getByLabelText("查看日志详情")
     fireEvent.keyDown(row, { key: "Enter" })

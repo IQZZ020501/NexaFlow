@@ -1778,8 +1778,11 @@ function PreviewPane({
         ) : (
           <ScissorsIcon className="mb-2 size-5" />
         )}
-        {document.last_error ??
-          (isParsing ? t("正在生成分段预览") : t("生成分段预览后查看片段内容"))}
+        {document.last_error
+          ? getErrorMessage(new Error(document.last_error), t)
+          : isParsing
+            ? t("正在生成分段预览")
+            : t("生成分段预览后查看片段内容")}
       </div>
     )
   }

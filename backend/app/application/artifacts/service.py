@@ -13,6 +13,7 @@ from app.domain.artifacts.services import (
 )
 from app.entities.artifacts import GeneratedArtifact
 from app.entities.defaults import utc_now
+from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.artifacts import repository
 from app.infra.db.session import get_session_factory
@@ -190,7 +191,7 @@ async def get_authorized_artifact(db, artifact_id, actor):
             raise HTTPException(404, "Artifact not found.")
         run = root
     agent = await get_agent(db, run.workspace_id, run.agent_id)
-    if run.access_source == "console":
+    if run.access_source in {"console", "automation"}:
         if run.consumer_id != actor.id or run.requested_by_user_id != actor.id:
             raise HTTPException(404, "Artifact not found.")
         await build_workspace_context(db, actor, run.workspace_id)
@@ -202,6 +203,60 @@ async def get_authorized_artifact(db, artifact_id, actor):
     else:
         raise HTTPException(404, "Artifact not found.")
     return artifact
+
+
+async def list_authorized_run_artifacts(
+    db: AsyncSession,
+    settings: Settings,
+    actor: User,
+    workspace_id: str,
+    run_id: str,
+) -> list[GeneratedArtifactLink]:
+    """List downloadable artifact links for a root run owned by ``actor``."""
+    from fastapi import HTTPException
+
+    from app.domain.agents.service import get_agent, require_agent_view
+    from app.infra.db.repositories.agents import repository as runs
+
+    run = await runs.get_agent_run_by_id(db, run_id)
+    if (
+        run is None
+        or run.workspace_id != workspace_id
+        or run.access_source not in {"console", "automation"}
+        or run.consumer_id != actor.id
+        or run.requested_by_user_id != actor.id
+    ):
+        raise HTTPException(404, "Run not found.")
+    agent = await get_agent(db, workspace_id, run.agent_id)
+    await require_agent_view(db, agent, actor)
+    artifacts = await repository.list_root_run_artifacts(db, workspace_id, run.root_run_id)
+    from datetime import UTC
+
+    now = utc_now()
+    links: list[GeneratedArtifactLink] = []
+    for item in artifacts:
+        expires = (
+            item.expires_at.replace(tzinfo=UTC)
+            if item.expires_at.tzinfo is None
+            else item.expires_at
+        )
+        if expires > now or item.run_id is not None:
+            links.append(
+                GeneratedArtifactLink(
+                    artifact_id=item.id,
+                    format=item.format,
+                    filename=item.filename,
+                    media_type=item.media_type,
+                    download_url=f"/api/v1/artifacts/{item.id}/content",
+                    expires_at=expires,
+                    size_bytes=item.size_bytes,
+                    relative_path=item.relative_path,
+                    content_hash=item.content_hash,
+                    previous_artifact_id=item.previous_artifact_id,
+                    inspection=item.inspection,
+                )
+            )
+    return links
 
 
 async def get_run_artifact(db, artifact_id, run):
@@ -225,8 +280,10 @@ async def get_run_artifact(db, artifact_id, run):
 
 
 __all__ = [
+    "GeneratedArtifactLink",
     "create_generated_artifact",
     "get_authorized_artifact",
     "get_generated_artifact",
     "get_run_artifact",
+    "list_authorized_run_artifacts",
 ]
