@@ -12,10 +12,21 @@ describe("API error localization", () => {
   test.each([
     ["zh-Hans", "当前访问地址不可用于授权，请从 NexaFlow 网站重新登录。"],
     ["zh-Hant", "目前的存取網址無法用於授權，請從 NexaFlow 網站重新登入。"],
-    ["en", "This address cannot be used for authorization. Sign in again from the NexaFlow website."],
-  ] as const)("localizes browser OAuth origin errors in %s", (language, expected) => {
-    expect(getErrorMessage(new ApiError(400, "Integration authorization origin is not allowed."), tFor(language))).toBe(expected)
-  })
+    [
+      "en",
+      "This address cannot be used for authorization. Sign in again from the NexaFlow website.",
+    ],
+  ] as const)(
+    "localizes browser OAuth origin errors in %s",
+    (language, expected) => {
+      expect(
+        getErrorMessage(
+          new ApiError(400, "Integration authorization origin is not allowed."),
+          tFor(language)
+        )
+      ).toBe(expected)
+    }
+  )
   test.each([
     "Tool is not available for binding.",
     "Tool version is not available for binding.",
@@ -38,11 +49,24 @@ describe("API error localization", () => {
     expect(getErrorMessage(error, tFor("en"))).toContain("token quota")
   })
   test("localizes upload errors and identifies fields in server validation errors", () => {
-    expect(getErrorMessage(new ApiError(422, "Document is empty."), tFor("zh-Hans"))).toContain("0 字节")
-    expect(getErrorMessage(new ApiError(422, "validation", [
-      { loc: ["body", "name"], msg: "String should have at most 120 characters" },
-      { loc: ["body", "similarity"], msg: "Input should be less than or equal to 1" },
-    ]), tFor("zh-Hans"))).toBe("名称：最多输入 120 个字符\n相似度：数值必须小于或等于 1")
+    expect(
+      getErrorMessage(new ApiError(422, "Document is empty."), tFor("zh-Hans"))
+    ).toContain("0 字节")
+    expect(
+      getErrorMessage(
+        new ApiError(422, "validation", [
+          {
+            loc: ["body", "name"],
+            msg: "String should have at most 120 characters",
+          },
+          {
+            loc: ["body", "similarity"],
+            msg: "Input should be less than or equal to 1",
+          },
+        ]),
+        tFor("zh-Hans")
+      )
+    ).toBe("名称：最多输入 120 个字符\n相似度：数值必须小于或等于 1")
   })
   test.each([
     ["zh-Hans", "模型回答被截断，请重试。"],
@@ -141,14 +165,122 @@ describe("API error localization", () => {
     }
   )
 
-  test("preserves diagnostic messages without a known translation", () => {
+  test("uses localized fallbacks for unknown provider errors and preserves English diagnostics", () => {
     const message = "Custom provider error: quota exhausted"
-    for (const language of ["zh-Hans", "zh-Hant", "en"] as const) {
+    for (const language of ["zh-Hans", "zh-Hant"] as const) {
       expect(getErrorMessage(new ApiError(502, message), tFor(language))).toBe(
-        message
+        translate(language, "服务暂时不可用，请稍后重试")
+      )
+      expect(getErrorMessage(new Error(message), tFor(language))).toBe(
+        translate(language, "请求失败")
       )
     }
+    expect(getErrorMessage(new ApiError(502, message), tFor("en"))).toBe(
+      message
+    )
+    expect(getErrorMessage(new Error(message), tFor("en"))).toBe(message)
   })
+
+  test.each([
+    [400, "输入参数无效，请检查后重试"],
+    [408, "请求超时，请稍后重试"],
+    [409, "操作冲突，请刷新后重试"],
+    [413, "请求内容超过大小限制，请缩小后重试"],
+    [422, "输入参数无效，请检查后重试"],
+    [429, "请求过于频繁，请稍后重试"],
+    [500, "服务暂时不可用，请稍后重试"],
+    [504, "请求超时，请稍后重试"],
+  ] as const)("localizes unknown HTTP %s failures", (status, key) => {
+    for (const language of ["zh-Hans", "zh-Hant"] as const) {
+      expect(
+        getErrorMessage(
+          new ApiError(status, "Unexpected failure"),
+          tFor(language)
+        )
+      ).toBe(translate(language, key))
+    }
+  })
+
+  test("localizes unmapped validation errors without leaking English field names", () => {
+    const error = new ApiError(422, "validation", [
+      { loc: ["body", "password"], msg: "Input should be a valid string" },
+      {
+        loc: ["body", "custom_field"],
+        msg: "Input should be 'active' or 'disabled'",
+      },
+    ])
+    expect(getErrorMessage(error, tFor("zh-Hans"))).toBe(
+      "密码：请输入有效的文本\n输入参数：输入参数无效，请检查后重试"
+    )
+    expect(getErrorMessage(error, tFor("zh-Hant"))).toBe(
+      "密碼：請輸入有效的文字\n輸入參數：輸入參數無效，請檢查後重試"
+    )
+  })
+
+  test("translates source-language errors and keeps already localized details", () => {
+    expect(getErrorMessage(new Error("请求失败"), tFor("zh-Hant"))).toBe(
+      "請求失敗"
+    )
+    expect(
+      getErrorMessage(new Error("已超出当前账号的使用额度"), tFor("zh-Hans"))
+    ).toBe("已超出当前账号的使用额度")
+    expect(getErrorMessage(new Error("Copy failed"), tFor("zh-Hans"))).toBe(
+      "复制失败"
+    )
+    expect(getErrorMessage(new Error(""), tFor("zh-Hant"))).toBe("請求失敗")
+    expect(
+      getErrorMessage(
+        new Error("Provider request failed for 法律.pdf"),
+        tFor("zh-Hans")
+      )
+    ).toBe("请求失败")
+    expect(
+      getErrorMessage(
+        new Error("Value error, unexpected provider failure"),
+        tFor("en")
+      )
+    ).toBe("Value error, unexpected provider failure")
+  })
+
+  test.each(["constructor", "__proto__"])(
+    "handles unknown error keys safely: %s",
+    (message) => {
+      expect(getErrorMessage(new Error(message), tFor("zh-Hans"))).toBe(
+        "请求失败"
+      )
+      expect(
+        getErrorMessage(
+          new ApiError(422, message, [
+            { loc: ["body", message], msg: message },
+          ]),
+          tFor("zh-Hans")
+        )
+      ).toBe("输入参数：输入参数无效，请检查后重试")
+    }
+  )
+
+  test.each([
+    ["Current password is invalid.", "当前密码错误"],
+    ["Too many login attempts.", "登录尝试过于频繁，请稍后重试"],
+    ["Agent run timed out.", "Agent 回答超时"],
+    [
+      "This conversation already has an active run.",
+      "此对话已有任务运行中，请稍后重试",
+    ],
+    [
+      "Knowledge base has no indexed chunks.",
+      "知识库暂无已索引的内容，请先完成索引",
+    ],
+    ["Model is in use.", "模型正在使用中，无法删除"],
+    ["MCP source is unavailable.", "MCP 服务不可用，请检查配置后重试"],
+  ] as const)(
+    "preserves an actionable translation for %s",
+    (message, expected) => {
+      expect(getErrorMessage(new Error(message), tFor("zh-Hans"))).toBe(
+        expected
+      )
+    }
+  )
 
   test.each([
     [
@@ -178,7 +310,9 @@ describe("API error localization", () => {
       ["zh-Hant", hant],
       ["en", en],
     ] as const) {
-      expect(getErrorMessage(new ApiError(409, message), tFor(language))).toBe(expected)
+      expect(getErrorMessage(new ApiError(409, message), tFor(language))).toBe(
+        expected
+      )
       expect(getErrorMessage(new Error(message), tFor(language))).toBe(expected)
     }
   })

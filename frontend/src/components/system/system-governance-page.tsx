@@ -74,7 +74,11 @@ import {
 } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
 import { copyText } from "@/lib/clipboard"
-import { systemLogEventLabel, systemLogLevelLabel } from "@/lib/constants"
+import {
+  systemLogEventLabel,
+  systemLogLevelLabel,
+  systemLogMessage,
+} from "@/lib/constants"
 import { SmtpSettingsPage } from "@/components/system/smtp-settings-page"
 import {
   SystemPagination,
@@ -432,7 +436,7 @@ function OperationsPanel() {
       formatDateTime(log.created_at, languageLocales[language]),
       systemLogLevelLabel(log.level, t),
       systemLogEventLabel(log.event, t),
-      log.message || systemLogEventLabel(log.event, t),
+      systemLogMessage(log, t),
       String(log.status_code ?? ""),
     ])
     const csv = [header, ...rows]

@@ -460,7 +460,7 @@ function PublicExecutionProcess({
     }
     if (status === "failed") {
       return typeof event.output === "string" && event.output
-        ? event.output
+        ? getErrorMessage(new Error(event.output), t)
         : t("调用失败")
     }
     if (event.type === "knowledge" && event.count !== null) {
@@ -1470,7 +1470,7 @@ export function PublicAgentChat({
       ).map((run) => ({
         question: run.question,
         answer: run.result,
-        error: run.error,
+        error: run.error ? getErrorMessage(new Error(run.error), t) : null,
         createdAt: run.created_at,
       }))
       downloadConversationMarkdown(

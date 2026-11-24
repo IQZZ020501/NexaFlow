@@ -807,7 +807,7 @@ export function AgentLogsPanel({
                       </p>
                       {item.last_error ? (
                         <p className="mt-1 line-clamp-2 text-xs break-words text-destructive">
-                          {item.last_error}
+                          {getErrorMessage(new Error(item.last_error), t)}
                         </p>
                       ) : null}
                       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -864,9 +864,9 @@ export function AgentLogsPanel({
                         {item.last_error ? (
                           <p
                             className="mt-1 truncate text-xs text-destructive"
-                            title={item.last_error}
+                            title={getErrorMessage(new Error(item.last_error), t)}
                           >
-                            {item.last_error}
+                            {getErrorMessage(new Error(item.last_error), t)}
                           </p>
                         ) : null}
                       </td>
@@ -975,7 +975,9 @@ export function AgentLogsPanel({
                       : "mt-1 text-sm text-muted-foreground"
                   }
                 >
-                  {selectedLog.last_error || t("暂无错误")}
+                  {selectedLog.last_error
+                    ? getErrorMessage(new Error(selectedLog.last_error), t)
+                    : t("暂无错误")}
                 </p>
               </section>
               <section>

@@ -320,7 +320,7 @@ describe("global admin users tab", () => {
     ])
     renderPage(<SystemShell activeTab="users" />)
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "users unavailable"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(await screen.findByText("暂无用户")).toBeTruthy()
   })
@@ -469,7 +469,7 @@ describe("global admin users tab", () => {
     const dialog = await screen.findByRole("dialog", { name: "新建用户" })
     // The initial team load fails → error notification.
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "teams failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(teamsFetched).toBe(1)
 
@@ -484,7 +484,7 @@ describe("global admin users tab", () => {
     })
     fireEvent.click(within(dialog).getByRole("button", { name: "新建" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "duplicate user"])
+      expect(notifications).toContainEqual(["error", "操作冲突，请刷新后重试"])
     )
     expect(screen.getByRole("dialog")).toBeTruthy()
   })
@@ -578,7 +578,7 @@ describe("global admin users tab", () => {
     const dialog = await screen.findByRole("dialog", { name: "编辑用户" })
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "user update failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
   })
 
@@ -667,7 +667,7 @@ describe("global admin users tab", () => {
     })
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "password change failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
   })
 
@@ -728,7 +728,7 @@ describe("global admin users tab", () => {
     )
     fireEvent.click(within(await screen.findByRole("menu")).getByText("停用"))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "toggle failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
   })
 
@@ -792,7 +792,7 @@ describe("global admin users tab", () => {
     fireEvent.click(within(await screen.findByRole("menu")).getByText("删除"))
     await respondToConfirm("删除")
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "delete failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(screen.getByText("Carol")).toBeTruthy()
   })
@@ -901,7 +901,7 @@ describe("workspace admin users tab", () => {
     ])
     renderPage(<SystemShell activeTab="users" />)
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "members failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(await screen.findByText("暂无用户")).toBeTruthy()
   })

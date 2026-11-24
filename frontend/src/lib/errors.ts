@@ -1,5 +1,5 @@
 import { ApiError } from "@/lib/api-client"
-import { type TFunction, type TranslationKey } from "@/i18n"
+import { en, zhHans, type TFunction, type TranslationKey } from "@/i18n"
 
 const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Automation is paused; resume it before manual execution.":
@@ -189,7 +189,6 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Invalid SMTP sender address.": "发件人邮箱格式无效",
   "Invalid SMTP recipient address.": "收件人邮箱格式无效",
   "Invalid public site URL.": "站点地址格式无效",
-  "Value error, Invalid public site URL.": "站点地址格式无效",
   "Public site URL is required when SMTP is enabled.":
     "启用 SMTP 时必须填写站点地址",
   "Email service is not configured.": "邮件服务尚未配置，请联系系统管理员",
@@ -216,12 +215,261 @@ const API_ERROR_LABEL_KEYS: Record<string, TranslationKey> = {
   "Vision model is not configured for this workspace.":
     "视觉模型尚未配置，暂时不支持图片解析",
   "Model connection test timed out.": "模型连接测试超时，请检查供应商后重试",
+  "Current password is invalid.": "当前密码错误",
+  "Too many login attempts.": "登录尝试过于频繁，请稍后重试",
+  "Too many enterprise login attempts.": "登录尝试过于频繁，请稍后重试",
+  "Login rate limiter is unavailable.": "登录服务暂时不可用，请稍后重试",
+  "Enterprise login rate limiter is unavailable.":
+    "登录服务暂时不可用，请稍后重试",
+  "Enterprise login is not available.": "登录服务暂时不可用，请稍后重试",
+  "Invalid username.": "用户名格式无效",
+  "Invalid email.": "邮箱格式无效",
+  "Current user cannot be deleted.": "不能删除当前账号",
+  "Current user cannot be disabled.": "不能停用当前账号",
+  "Current user cannot remove own global admin role.":
+    "不能移除自己的系统管理员权限",
+  "Workspace must keep at least one admin.":
+    "工作空间必须至少保留一名有效管理员",
+  "Workspace must keep at least one active admin.":
+    "工作空间必须至少保留一名有效管理员",
+  "Team must keep at least one admin.": "团队必须至少保留一名管理员",
+  "Workspace is not active.": "工作空间已停用或不可用",
+  "Workspace is inactive or unavailable.": "工作空间已停用或不可用",
+  "Model test request failed.": "模型连接测试失败，请检查配置后重试",
+  "Model is in use.": "模型正在使用中，无法删除",
+  "Agent model is disabled.": "所选模型已停用，请重新选择",
+  "Agent image model is disabled.": "所选模型已停用，请重新选择",
+  "Agent model must be an LLM.": "请选择对话类型的模型",
+  "Agent image model must be an image model.": "请选择图像类型的模型",
+  "Stored model credentials are invalid.": "模型凭据无效，请重新配置",
+  "Model request parameters must be valid JSON.":
+    "额外请求参数必须是有效的 JSON 对象。",
+  "Model request parameter max_tokens must be a positive integer.":
+    "模型参数 max_tokens 必须为正整数",
+  "Invalid model provider.": "模型供应商或类型无效，请重新选择",
+  "Invalid model provider type.": "模型供应商或类型无效，请重新选择",
+  "Invalid provider type for provider.": "模型供应商或类型无效，请重新选择",
+  "Unsupported provider.": "模型供应商或类型无效，请重新选择",
+  "Model type is not supported by this provider.":
+    "模型供应商或类型无效，请重新选择",
+  "AWS access key ID and secret access key must be provided together.":
+    "请同时填写 AWS 访问密钥 ID 和访问密钥",
+  "AWS session token requires access key credentials.":
+    "请同时填写 AWS 访问密钥 ID 和访问密钥",
+  "Agent run timed out.": "Agent 回答超时",
+  "Agent execution deadline exceeded.": "Agent 回答超时",
+  "Agent model response timed out.": "Agent 回答超时",
+  "Agent execution failed.": "Agent 回答失败",
+  "Agent run failed.": "Agent 回答失败",
+  "Agent model request failed.": "Agent 回答失败",
+  "Agent returned an empty response.": "Agent 未返回结果",
+  "This conversation already has an active run.":
+    "此对话已有任务运行中，请稍后重试",
+  "This workflow conversation already has an active run.":
+    "此对话已有任务运行中，请稍后重试",
+  "Cannot delete a conversation while it is running.":
+    "请先停止正在执行的任务，再进行删除",
+  "Agent has an active run or Tool call.": "请先停止正在执行的任务，再进行删除",
+  "Agent run is already finished.": "任务已结束，请发送新消息",
+  "Agent run is already finished. Send a new session prompt.":
+    "任务已结束，请发送新消息",
+  "Workflow run is already finished.": "任务已结束，请发送新消息",
+  "Agent turn limit reached.": "已达到最大对话轮数，请新建任务",
+  "Agent tool call limit reached.": "已达到工具调用次数上限",
+  "Workflow model tool call limit reached.": "已达到工具调用次数上限",
+  "Agent compacted context exceeds the model window.":
+    "对话内容超过模型上下文限制，请新建对话",
+  "Agent context cannot fit the current interaction.":
+    "对话内容超过模型上下文限制，请新建对话",
+  "Agent context cannot fit the compaction instructions.":
+    "对话内容超过模型上下文限制，请新建对话",
+  "Agent model configuration changed after run creation.":
+    "应用配置或授权已变更，请保存后重新运行",
+  "Agent knowledge configuration changed after run creation.":
+    "应用配置或授权已变更，请保存后重新运行",
+  "Agent knowledge access changed after run creation.":
+    "应用配置或授权已变更，请保存后重新运行",
+  "Tool binding changed; save the application again.":
+    "应用配置或授权已变更，请保存后重新运行",
+  "Agent is disabled.": "应用已停用，请启用后重试",
+  "Workflow is disabled.": "应用已停用，请启用后重试",
+  "Target application must be active.": "应用已停用，请启用后重试",
+  "Disabled agents cannot be published.": "应用已停用，请启用后再发布",
+  "Agent run rate limit exceeded.": "请求过于频繁，请稍后重试",
+  "Workflow run rate limit exceeded.": "请求过于频繁，请稍后重试",
+  "Agent run service is temporarily unavailable.":
+    "执行资源暂时不可用，请稍后重试",
+  "Workflow run service is temporarily unavailable.":
+    "执行资源暂时不可用，请稍后重试",
+  "Command runtime is busy.": "执行资源暂时不可用，请稍后重试",
+  "File runtime is busy.": "执行资源暂时不可用，请稍后重试",
+  "Skill runtime is busy.": "执行资源暂时不可用，请稍后重试",
+  "MCP server host is busy.": "执行资源暂时不可用，请稍后重试",
+  "Waiting for execution resources.": "执行资源暂时不可用，请稍后重试",
+  "Workspace daily run quota exceeded.":
+    "工作空间今日运行额度已用完，请联系管理员",
+  "Workflow draft changed; reload it before saving.":
+    "工作流草稿已更新，请刷新后再保存",
+  "Workflow version must be republished before it can run.":
+    "请先发布工作流的最新版本",
+  "Workflow is not published.": "请先发布工作流的最新版本",
+  "Workflow must be published before binding an automation.":
+    "请先发布工作流的最新版本",
+  "Workflow model is unavailable.": "所选模型不存在或当前用户无权使用",
+  "Workflow reranker model is unavailable.": "所选模型不存在或当前用户无权使用",
+  "The source Agent model is no longer available.":
+    "所选模型不存在或当前用户无权使用",
+  "Workflow Tool configuration is no longer executable.":
+    "工作流工具配置已失效，请重新配置并发布",
+  "A source Workflow Tool is no longer executable.":
+    "工作流工具配置已失效，请重新配置并发布",
+  "Workflow Tool snapshot is unavailable.":
+    "工作流工具配置已失效，请重新配置并发布",
+  "Workflow form was already submitted.": "表单已提交，请勿重复提交",
+  "Workflow is not awaiting form input.": "表单状态已变更，请刷新后重试",
+  "Workflow form node changed.": "表单状态已变更，请刷新后重试",
+  "Workflow form node is unavailable.": "表单状态已变更，请刷新后重试",
+  "Form contains unknown fields.": "表单包含无效字段，请检查后重试",
+  "Workflow condition did not match a branch.":
+    "条件未匹配任何分支，请检查工作流配置",
+  "Workflow output exceeds 256 KiB.": "工作流输出超过 256 KiB，请缩小输出内容",
+  "Workflow node output exceeds 256 KiB.":
+    "工作流输出超过 256 KiB，请缩小输出内容",
+  "Knowledge base has no indexed chunks.":
+    "知识库暂无已索引的内容，请先完成索引",
+  "Knowledge base is archived.": "知识库已归档",
+  "Agent knowledge base is archived.": "知识库已归档",
+  "Knowledge task queue is unavailable.":
+    "知识库任务服务暂时不可用，请稍后重试",
+  "Knowledge task retry limit reached.":
+    "知识库任务已达到重试上限，请重新创建任务",
+  "Stop the knowledge task before deleting it.":
+    "请先停止知识库任务，再进行删除",
+  "Chunk overlap must be smaller than chunk size.":
+    "分段重叠长度必须小于分段长度",
+  "Document preview must be generated before indexing.":
+    "请先生成文档分段预览，再建立索引",
+  "Document has no preview chunks.": "请先生成文档分段预览，再建立索引",
+  "Document has no extractable text.": "文档中没有可提取的文本，请检查文件内容",
+  "Document has no extractable chunks.":
+    "文档中没有可提取的文本，请检查文件内容",
+  "Document text extraction failed.": "文档内容提取失败，请检查文件是否损坏",
+  "Agent attachment text could not be extracted.":
+    "文档内容提取失败，请检查文件是否损坏",
+  "Workflow document content could not be extracted.":
+    "文档内容提取失败，请检查文件是否损坏",
+  "Document file is missing.": "文档内容不可用，请重新上传或解析",
+  "Document Markdown is not available.": "文档内容不可用，请重新上传或解析",
+  "Workflow document content is unavailable.":
+    "文档内容不可用，请重新上传或解析",
+  "QA import requires question/问题 and answer/答案 headers.":
+    "问答表必须包含“问题”和“答案”表头",
+  "QA import has no header row.": "问答表缺少表头或有效数据",
+  "QA import has no data rows.": "问答表缺少表头或有效数据",
+  "QA CSV must use UTF-8 encoding.": "问答 CSV 文件必须使用 UTF-8 编码",
+  "QA import supports CSV and XLSX files only.":
+    "问答导入仅支持 CSV 和 XLSX 文件",
+  "Evaluation run is in progress.": "评测仍在运行，请完成后重试",
+  "Evaluation task has no cases.": "请先添加有效的评测问题",
+  "Evaluation text cannot be blank.": "请先添加有效的评测问题",
+  "File upload is disabled.": "文件上传已关闭",
+  "Upload files.": "请先选择要上传的文件",
+  "Invalid MCP server URL.": "MCP 服务地址无效或无法解析，请检查配置",
+  "MCP server URL is required.": "MCP 服务地址无效或无法解析，请检查配置",
+  "MCP server hostname could not be resolved.":
+    "MCP 服务地址无效或无法解析，请检查配置",
+  "MCP source is unavailable.": "MCP 服务不可用，请检查配置后重试",
+  "MCP Tool source is unavailable.": "MCP 服务不可用，请检查配置后重试",
+  "Agent MCP tool is not available.": "MCP 服务不可用，请检查配置后重试",
+  "MCP server request failed.": "MCP 服务不可用，请检查配置后重试",
+  "MCP bridge request failed.": "MCP 服务不可用，请检查配置后重试",
+  "MCP bridge could not start.": "MCP 服务不可用，请检查配置后重试",
+  "MCP server host could not start.": "MCP 服务不可用，请检查配置后重试",
+  "MCP OAuth access expired; reconnect the source.":
+    "MCP 授权已失效，请重新连接",
+  "MCP OAuth refresh failed; reconnect the source.":
+    "MCP 授权已失效，请重新连接",
+  "MCP OAuth refresh outcome is unknown; reconnect the source.":
+    "MCP 授权已失效，请重新连接",
+  "MCP OAuth requires reconnection.": "MCP 授权已失效，请重新连接",
+  "OAuth state is invalid or expired.": "MCP 授权已失效，请重新连接",
+  "Disconnect OAuth before changing its configuration.":
+    "请先断开现有授权，再修改配置或重新连接",
+  "Disconnect the existing OAuth grant before reconnecting.":
+    "请先断开现有授权，再修改配置或重新连接",
+  "Skill archive is missing SKILL.md.": "技能包必须包含且仅包含一个 SKILL.md",
+  "Skill archive must contain exactly one SKILL.md.":
+    "技能包必须包含且仅包含一个 SKILL.md",
+  "Skill package exceeds 2 MiB.":
+    "技能包须为 1 字节至 2 MiB，且不超过 64 个文件",
+  "Skill package exceeds its size or file-count limit.":
+    "技能包须为 1 字节至 2 MiB，且不超过 64 个文件",
+  "Skill upload must be between 1 byte and 2 MiB.":
+    "技能包须为 1 字节至 2 MiB，且不超过 64 个文件",
+  "Skill archive contains duplicate paths.": "技能包包含重复或不安全的文件路径",
+  "Skill archive contains files outside its package root.":
+    "技能包包含重复或不安全的文件路径",
+  "Skill archives cannot contain links, special files or encrypted entries.":
+    "技能包包含重复或不安全的文件路径",
+  "Skill files must use relative, normalized paths.":
+    "技能包包含重复或不安全的文件路径",
+  "Pinned Skill definition changed.": "技能定义已变更或无效，请重新绑定",
+  "Agent Skill definition is invalid.": "技能定义已变更或无效，请重新绑定",
+  "Agent Skill snapshot is invalid.": "技能定义已变更或无效，请重新绑定",
+  "Configure an active OpenAI-compatible image model in this workspace first.":
+    "请先配置并启用可用的图像模型",
+  "The queued image model is no longer active in this workspace.":
+    "请先配置并启用可用的图像模型",
+  "The selected image model is no longer available.":
+    "请先配置并启用可用的图像模型",
+  "The queued image model is no longer available.":
+    "请先配置并启用可用的图像模型",
+  "Image generation failed or returned an unusable image.":
+    "图片生成失败或返回内容无效，请重试",
+  "Image model returned no usable PNG image.":
+    "图片生成失败或返回内容无效，请重试",
+  "Image model returned invalid image data.":
+    "图片生成失败或返回内容无效，请重试",
+  "Image model returned an unexpected image format.":
+    "图片生成失败或返回内容无效，请重试",
+  "Image model returned an incomplete JSON response.":
+    "图片生成失败或返回内容无效，请重试",
+  "Image model returned an invalid JSON response.":
+    "图片生成失败或返回内容无效，请重试",
+  "Generated image exceeds the 5 MiB file limit.":
+    "生成图片超过 5 MiB 大小限制",
+  "Image model response exceeds the image size limit.":
+    "生成图片超过 5 MiB 大小限制",
+  "Image model configuration changed after this call was queued.":
+    "图像模型配置已变更，请重新运行",
+  "Archived announcement cannot be edited.": "已归档的公告无法编辑或发布",
+  "Archived announcement cannot be published.": "已归档的公告无法编辑或发布",
+  "Only archived announcements can be deleted.": "请先归档公告，再进行删除",
+  "Announcement expiry must be after publication.":
+    "公告过期时间必须晚于发布时间",
+  "Automation is paused and cannot accept webhook events.":
+    "自动化已暂停，暂时无法接收事件",
+  "Webhook payload must be a JSON object.":
+    "事件内容必须为有效的 UTF-8 JSON 对象",
+  "Webhook payload must be valid UTF-8 JSON.":
+    "事件内容必须为有效的 UTF-8 JSON 对象",
+  "Webhook event ID already received with different payload.":
+    "事件标识已使用，且本次内容与原事件不同",
+  "Copy failed": "复制失败",
 }
 
-function localizedMessage(message: string, t: TFunction): string {
+function localizedMessage(
+  message: string,
+  t: TFunction,
+  fallback: TranslationKey = "请求失败"
+): string {
+  const originalMessage = message.trim()
+  message = originalMessage.replace(/^Value error, /, "")
   const key =
-    API_ERROR_LABEL_KEYS[message] ??
-    API_ERROR_LABEL_KEYS[message.replace(/^Value error, /, "")]
+    (Object.hasOwn(API_ERROR_LABEL_KEYS, message)
+      ? API_ERROR_LABEL_KEYS[message]
+      : undefined) ??
+    (Object.hasOwn(zhHans, message) ? (message as TranslationKey) : undefined)
   if (key) return t(key)
   const providerStatus =
     /^Knowledge model test failed with provider status (\d+)\.$/.exec(message)
@@ -239,14 +487,18 @@ function localizedMessage(message: string, t: TFunction): string {
       { value: length[2] }
     )
   const bound =
-    /^Input should be (greater than or equal to|less than or equal to) (-?[\d.]+)$/.exec(
+    /^Input should be (greater than or equal to|less than or equal to|greater than|less than) (-?[\d.]+)$/.exec(
       message
     )
   if (bound)
     return t(
       bound[1] === "greater than or equal to"
         ? "数值必须大于或等于 {value}"
-        : "数值必须小于或等于 {value}",
+        : bound[1] === "less than or equal to"
+          ? "数值必须小于或等于 {value}"
+          : bound[1] === "greater than"
+            ? "数值必须大于 {value}"
+            : "数值必须小于 {value}",
       { value: bound[2] }
     )
   if (message === "Field required") return t("此项为必填项")
@@ -254,13 +506,44 @@ function localizedMessage(message: string, t: TFunction): string {
     return t("请输入有效的整数")
   if (/^Input should be a valid number/.test(message))
     return t("请输入有效的数字")
+  if (/^Input should be a valid string/.test(message))
+    return t("请输入有效的文本")
+  if (/^Input should be a valid boolean/.test(message))
+    return t("请选择有效的开关值")
+  if (/^Input should be a valid (?:dictionary|list|object)/.test(message))
+    return t("输入参数无效，请检查后重试")
   if (message === "Request failed") return t("请求失败")
-  return message
+  // Keep upstream diagnostics on the error itself. Chinese UI must not fall
+  // back to an untranslated provider, browser, or validation error.
+  if (
+    message &&
+    (/^[^\p{L}]*\p{Script=Han}/u.test(message) ||
+      t("请求失败") === en["请求失败"])
+  ) {
+    return originalMessage
+  }
+  return t(fallback)
+}
+
+const HTTP_ERROR_LABEL_KEYS: Record<number, TranslationKey> = {
+  400: "输入参数无效，请检查后重试",
+  408: "请求超时，请稍后重试",
+  409: "操作冲突，请刷新后重试",
+  413: "请求内容超过大小限制，请缩小后重试",
+  415: "不支持的文件格式",
+  422: "输入参数无效，请检查后重试",
+  429: "请求过于频繁，请稍后重试",
+  504: "请求超时，请稍后重试",
 }
 
 const VALIDATION_FIELD_KEYS: Record<string, TranslationKey> = {
   name: "名称",
   description: "描述",
+  username: "用户名",
+  email: "邮箱",
+  password: "密码",
+  current_password: "当前密码",
+  new_password: "新密码",
   similarity: "相似度",
   limit: "返回数量",
   query: "查询内容",
@@ -270,7 +553,7 @@ const VALIDATION_FIELD_KEYS: Record<string, TranslationKey> = {
  * Converts an unknown error into a user-facing message.
  *
  * @param error - The error value to convert
- * @returns A localized message for recognized authentication, authorization, network, or unknown errors; otherwise, the original error message
+ * @returns A localized message, with a translated fallback for unknown errors in Chinese
  */
 export function getErrorMessage(error: unknown, t: TFunction) {
   if (error instanceof ApiError) {
@@ -287,16 +570,25 @@ export function getErrorMessage(error: unknown, t: TFunction) {
           const field = [...issue.loc]
             .reverse()
             .find(
-              (part) => typeof part === "string" && VALIDATION_FIELD_KEYS[part]
+              (part) =>
+                typeof part === "string" &&
+                Object.hasOwn(VALIDATION_FIELD_KEYS, part)
             )
-          const reason = localizedMessage(issue.msg, t)
+          const reason = localizedMessage(
+            issue.msg,
+            t,
+            "输入参数无效，请检查后重试"
+          )
           return t("{name}：{reason}", {
             name: field ? t(VALIDATION_FIELD_KEYS[field]) : t("输入参数"),
             reason,
           })
         })
         .join("\n")
-    return localizedMessage(error.message, t)
+    const fallback =
+      HTTP_ERROR_LABEL_KEYS[error.status] ??
+      (error.status >= 500 ? "服务暂时不可用，请稍后重试" : "请求失败")
+    return localizedMessage(error.message, t, fallback)
   }
 
   if (error instanceof Error) {

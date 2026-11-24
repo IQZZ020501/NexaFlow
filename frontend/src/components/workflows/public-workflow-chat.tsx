@@ -652,7 +652,7 @@ export function PublicWorkflowChat({
             ? run.inputs.question
             : t("工作流运行"),
         answer: workflowSpeechText(run.outputs),
-        error: run.error,
+        error: run.error ? workflowErrorMessage(run.error, t) : null,
         createdAt: run.created_at,
       }))
       downloadConversationMarkdown(

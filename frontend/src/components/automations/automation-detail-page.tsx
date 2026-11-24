@@ -786,7 +786,10 @@ function AutomationDetailContent({
                       <span className="font-medium">
                         {t("跳过或拒绝原因")}:{" "}
                       </span>
-                      {visibleExecutionDetail.skip_reason}
+                      {getErrorMessage(
+                        new Error(visibleExecutionDetail.skip_reason),
+                        t
+                      )}
                     </div>
                   ) : null}
 

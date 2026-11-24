@@ -330,7 +330,7 @@ function AutomationsWorkspace() {
                     </div>
                     {latest?.skip_reason ? (
                       <p className="rounded bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
-                        {latest.skip_reason}
+                        {getErrorMessage(new Error(latest.skip_reason), t)}
                       </p>
                     ) : null}
                   </CardContent>

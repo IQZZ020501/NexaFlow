@@ -78,8 +78,8 @@ describe("SMTP settings extra", () => {
     renderPage(<SmtpSettingsPage />)
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
-    expect(screen.getByText("smtp offline")).toBeTruthy()
-    expect(notifications).toContainEqual(["error", "smtp offline"])
+    expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy()
+    expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     expect(screen.queryByLabelText("SMTP 主机")).toBeNull()
 
     fails = false

@@ -271,7 +271,7 @@ describe("LoginScreen submission", () => {
     submitCredentials("alice", "pw")
 
     await waitFor(() =>
-      expect(notifications).toEqual(["error:Maintenance window."])
+      expect(notifications).toEqual(["error:服务暂时不可用，请稍后重试"])
     )
   })
 

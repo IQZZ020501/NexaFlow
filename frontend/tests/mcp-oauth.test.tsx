@@ -163,7 +163,7 @@ test("failed long task saves show an error without reporting success", async () 
   })
   fireEvent.submit(screen.getByLabelText("提交任务工具").closest("form")!)
   await screen.findByRole("alert")
-  expect(messages).toEqual([["error", "contract rejected"]])
+  expect(messages).toEqual([["error", "操作冲突，请刷新后重试"]])
 })
 
 test("OAuth configuration changes must be saved before authorization", async () => {
@@ -263,7 +263,7 @@ test("failed OAuth saves show an error without a success notification", async ()
   )
   fireEvent.click(await screen.findByRole("button", { name: "保存配置" }))
   await screen.findByRole("alert")
-  expect(messages).toEqual([["error", "configuration rejected"]])
+  expect(messages).toEqual([["error", "操作冲突，请刷新后重试"]])
 })
 
 test("OAuth callback exchanges once under StrictMode and removes callback secrets from the URL", async () => {

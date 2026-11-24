@@ -1,4 +1,5 @@
 import { type TFunction, type TranslationKey } from "@/i18n"
+import { getErrorMessage } from "@/lib/errors"
 
 export const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
   active: "已启用",
@@ -169,4 +170,15 @@ export function systemLogLevelLabel(level: string, t: TFunction) {
 export function systemLogEventLabel(event: string, t: TFunction) {
   const labelKey = SYSTEM_LOG_EVENT_LABEL_KEYS[event]
   return labelKey ? t(labelKey) : t("其他系统事件")
+}
+
+/** Localizes error summaries while preserving the stored diagnostic record. */
+export function systemLogMessage(
+  log: { level: string; event: string; message: string },
+  t: TFunction
+) {
+  if (!log.message) return systemLogEventLabel(log.event, t)
+  return ["error", "critical", "warning"].includes(log.level)
+    ? getErrorMessage(new Error(log.message), t)
+    : log.message
 }

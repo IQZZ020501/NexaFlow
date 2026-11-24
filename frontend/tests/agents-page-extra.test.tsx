@@ -521,14 +521,14 @@ describe("AgentsPage tool catalog and workflow agent loading", () => {
     renderPage(<AgentsPage />)
     await expectWorkflowStub()
 
-    await waitFor(() => expect(screen.getByText("catalog boom")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("服务暂时不可用，请稍后重试")).toBeTruthy())
     expect(screen.getByTestId("workflow-tool-count").textContent).toBe("0")
 
     fireEvent.click(screen.getByText("stub-retry-tools"))
     await waitFor(() =>
       expect(screen.getByTestId("workflow-tool-count").textContent).toBe("1")
     )
-    expect(screen.queryByText("catalog boom")).toBeNull()
+    expect(screen.queryByText("服务暂时不可用，请稍后重试")).toBeNull()
     expect(toolListCalls).toBeGreaterThanOrEqual(2)
   })
 
@@ -570,7 +570,7 @@ describe("AgentsPage tool catalog and workflow agent loading", () => {
     await expectWorkflowStub()
     await waitFor(() =>
       expect(
-        notifyCalls.some((call) => call.message === "workflow agents boom")
+        notifyCalls.some((call) => call.message === "服务暂时不可用，请稍后重试")
       ).toBe(true)
     )
   })
@@ -1028,7 +1028,7 @@ describe("AgentsPage run regeneration", () => {
     fireEvent.click(within(article).getByRole("button", { name: "重新生成" }))
     await waitFor(() =>
       expect(
-        notifyCalls.some((call) => call.message === "regenerate boom")
+        notifyCalls.some((call) => call.message === "服务暂时不可用，请稍后重试")
       ).toBe(true)
     )
     expect(screen.getByText("Original answer")).toBeTruthy()
@@ -1193,7 +1193,7 @@ describe("AgentsPage run feedback", () => {
     const article = screen.getByText("Original answer").closest("article")!
     fireEvent.click(within(article).getByRole("button", { name: "点赞" }))
     await waitFor(() =>
-      expect(notifyCalls.some((call) => call.message === "feedback boom")).toBe(
+      expect(notifyCalls.some((call) => call.message === "服务暂时不可用，请稍后重试")).toBe(
         true
       )
     )
@@ -1255,7 +1255,7 @@ describe("AgentsPage stream approval tool-call loading", () => {
       ],
     })
     await waitFor(() =>
-      expect(notifyCalls.some((call) => call.message === "calls boom")).toBe(
+      expect(notifyCalls.some((call) => call.message === "服务暂时不可用，请稍后重试")).toBe(
         true
       )
     )

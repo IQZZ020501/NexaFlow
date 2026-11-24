@@ -300,7 +300,7 @@ describe("workspace governance settings", () => {
     await waitFor(() => expect(screen.getByDisplayValue("10")).toBeTruthy())
     fireEvent.click(screen.getByRole("button", { name: "保存策略" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "policy rejected"])
+      expect(notifications).toContainEqual(["error", "输入参数无效，请检查后重试"])
     )
   })
 
@@ -314,7 +314,7 @@ describe("workspace governance settings", () => {
     })
 
     renderPage(<SystemGovernancePage section="governance" />)
-    await waitFor(() => expect(notifications).toContainEqual(["error", "boom"]))
+    await waitFor(() => expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"]))
   })
 
   test("creates a personal invitation from a token when no invite_url is returned", async () => {
@@ -658,7 +658,7 @@ describe("system operation logs", () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText("lookup timed out")).toBeTruthy()
+      expect(screen.getByText("请求失败")).toBeTruthy()
     )
     expect(screen.getAllByText("请求处理异常").length).toBeGreaterThan(0)
     // Row event label plus the empty-message fallback both render it.
@@ -681,7 +681,7 @@ describe("system operation logs", () => {
       await screen.findByRole("menuitem", { name: "工作流执行失败" })
     )
     await waitFor(() =>
-      expect(screen.queryByText("lookup timed out")).toBeNull()
+      expect(screen.queryByText("请求失败")).toBeNull()
     )
 
     fireEvent.click(screen.getByRole("button", { name: "导出" }))
@@ -713,7 +713,7 @@ describe("system operation logs", () => {
 
     renderPage(<SystemGovernancePage section="operations" />)
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "logs offline"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(await screen.findByText("暂无运行日志")).toBeTruthy()
   })
@@ -740,7 +740,7 @@ describe("system operation logs", () => {
 
     renderPage(<SystemGovernancePage section="operations" />)
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "health offline"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(screen.getAllByText("未知").length).toBeGreaterThan(0)
 
@@ -928,7 +928,7 @@ describe("session security panel", () => {
     fireEvent.click(screen.getByRole("button", { name: "撤销" }))
     respondToConfirm("撤销")
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "revoke failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(screen.getByText(/Chrome\/126/)).toBeTruthy()
   })

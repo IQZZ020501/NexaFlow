@@ -461,8 +461,8 @@ describe("SessionProvider", () => {
     }
     renderSession()
     await waitFor(() => expect(screen.getByTestId("restored").textContent).toBe("true"))
-    expect(screen.getByTestId("err").textContent).toBe("offline")
-    expect(screen.getByTestId("notif").textContent).toBe("error:offline")
+    expect(screen.getByTestId("err").textContent).toBe("请求失败")
+    expect(screen.getByTestId("notif").textContent).toBe("error:请求失败")
     expect(screen.getByTestId("loading").textContent).toBe("false")
     expect(screen.getByTestId("token").textContent).toBe("null")
   })
@@ -524,8 +524,8 @@ describe("SessionProvider", () => {
   test("reports non-auth errors while loading the user", async () => {
     restoreHandler({ meError: jsonResponse({ detail: "profile broken" }, 500) })
     renderSession()
-    await waitFor(() => expect(screen.getByTestId("err").textContent).toBe("profile broken"))
-    expect(screen.getByTestId("notif").textContent).toBe("error:profile broken")
+    await waitFor(() => expect(screen.getByTestId("err").textContent).toBe("服务暂时不可用，请稍后重试"))
+    expect(screen.getByTestId("notif").textContent).toBe("error:服务暂时不可用，请稍后重试")
     expect(screen.getByTestId("loading").textContent).toBe("false")
   })
 
@@ -882,7 +882,7 @@ describe("SessionProvider", () => {
     renderSession()
     await waitFor(() => expect(screen.getByTestId("restored").textContent).toBe("true"))
     await waitFor(() =>
-      expect(screen.getByTestId("notif").textContent).toBe("error:teams exploded")
+      expect(screen.getByTestId("notif").textContent).toBe("error:请求失败")
     )
     expect(screen.getByTestId("teams").textContent).toBe("0")
     expect(screen.getByTestId("teams-loading").textContent).toBe("false")
@@ -934,7 +934,7 @@ describe("SessionProvider", () => {
     fireEvent.click(screen.getByText("login-short"))
     await waitFor(() => expect(screen.getByTestId("token").textContent).toBe("short-token"))
     await waitFor(
-      () => expect(screen.getByTestId("notif").textContent).toBe("error:refresh failed"),
+      () => expect(screen.getByTestId("notif").textContent).toBe("error:服务暂时不可用，请稍后重试"),
       { timeout: 5000 }
     )
     expect(screen.getByTestId("token").textContent).toBe("short-token")

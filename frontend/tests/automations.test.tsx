@@ -186,6 +186,48 @@ afterEach(() => {
 })
 
 describe("Automations UI", () => {
+  test("localizes skip reasons in the list and execution details", async () => {
+    const reason = "Skipped because a previous run is still active."
+    const detail = sampleExecutionDetail({
+      dispatch_status: "skipped",
+      skip_reason: reason,
+      run_id: null,
+      run_status: null,
+      agent_run: null,
+      workflow_run: null,
+      tool_calls: [],
+      artifacts: [],
+    })
+    const automation = sampleAutomation({ latest_execution: detail })
+    withFetch((url) => {
+      if (url.endsWith("/automations?limit=50&offset=0")) {
+        return jsonResponse({
+          items: [automation],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url.endsWith("/automations/auto-1")) return jsonResponse(automation)
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 20, offset: 0 })
+      }
+      return jsonResponse([])
+    })
+    renderPage(<AutomationsPage />)
+    expect(await screen.findByText("上一次任务尚未结束，本次已跳过")).toBeTruthy()
+    expect(screen.queryByText(reason)).toBeNull()
+
+    cleanup()
+    currentSearch = "?execution=exec-1"
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(
+      await screen.findAllByText("上一次任务尚未结束，本次已跳过")
+    ).toHaveLength(2)
+    expect(screen.queryByText(reason)).toBeNull()
+  })
+
   test("lists automations, toggles pause, and triggers execute now", async () => {
     const initial = sampleAutomation()
     let pausedState = initial

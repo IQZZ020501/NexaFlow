@@ -2828,4 +2828,140 @@ export const en = {
   "事件队列已满，请稍后重试": "The event queue is full. Try again later.",
   "任务输入超过4000字符，请缩短提示词或提取范围":
     "The task input exceeds 4,000 characters. Shorten the prompt or mapping.",
+  "输入参数无效，请检查后重试":
+    "Invalid input. Check the parameters and try again.",
+  "请求超时，请稍后重试": "The request timed out. Try again later.",
+  "请求过于频繁，请稍后重试": "Too many requests. Try again later.",
+  "请求内容超过大小限制，请缩小后重试":
+    "The request exceeds the size limit. Reduce its size and try again.",
+  "服务暂时不可用，请稍后重试":
+    "The service is temporarily unavailable. Try again later.",
+  "操作冲突，请刷新后重试":
+    "The operation conflicted with another change. Refresh and try again.",
+  请输入有效的文本: "Enter valid text",
+  请选择有效的开关值: "Select a valid boolean value",
+  "数值必须大于 {value}": "The value must be greater than {value}",
+  "数值必须小于 {value}": "The value must be less than {value}",
+  当前密码错误: "Current password is incorrect",
+  "登录尝试过于频繁，请稍后重试": "Too many sign-in attempts. Try again later.",
+  "登录服务暂时不可用，请稍后重试":
+    "The sign-in service is temporarily unavailable. Try again later.",
+  用户名格式无效: "Invalid username format",
+  邮箱格式无效: "Invalid email address",
+  不能移除自己的系统管理员权限:
+    "You cannot remove your own system administrator role",
+  工作空间必须至少保留一名有效管理员:
+    "The workspace must retain at least one active administrator",
+  团队必须至少保留一名管理员: "The team must retain at least one administrator",
+  工作空间已停用或不可用: "The workspace is inactive or unavailable",
+  "模型连接测试失败，请检查配置后重试":
+    "Model connection test failed. Check the configuration and try again.",
+  "模型正在使用中，无法删除": "The model is in use and cannot be deleted",
+  "所选模型已停用，请重新选择":
+    "The selected model is disabled. Choose another model.",
+  请选择对话类型的模型: "Select a chat model",
+  请选择图像类型的模型: "Select an image model",
+  "模型凭据无效，请重新配置":
+    "Model credentials are invalid. Configure them again.",
+  "模型参数 max_tokens 必须为正整数":
+    "The max_tokens model parameter must be a positive integer",
+  "模型供应商或类型无效，请重新选择":
+    "The model provider or type is invalid. Select it again.",
+  "请同时填写 AWS 访问密钥 ID 和访问密钥":
+    "Provide both the AWS access key ID and secret access key",
+  "此对话已有任务运行中，请稍后重试":
+    "This conversation already has an active run. Try again later.",
+  "请先停止正在执行的任务，再进行删除": "Stop the active run before deleting",
+  "任务已结束，请发送新消息": "The run has finished. Send a new message.",
+  "已达到最大对话轮数，请新建任务":
+    "The turn limit was reached. Start a new run.",
+  已达到工具调用次数上限: "The tool call limit was reached",
+  "对话内容超过模型上下文限制，请新建对话":
+    "The conversation exceeds the model context limit. Start a new conversation.",
+  "应用配置或授权已变更，请保存后重新运行":
+    "App configuration or access changed. Save the app and run it again.",
+  "应用已停用，请启用后重试": "The app is disabled. Enable it and try again.",
+  "应用已停用，请启用后再发布":
+    "The app is disabled. Enable it before publishing.",
+  "执行资源暂时不可用，请稍后重试":
+    "Execution resources are temporarily unavailable. Try again later.",
+  "工作空间今日运行额度已用完，请联系管理员":
+    "The workspace daily run quota is exhausted. Contact an administrator.",
+  "工作流草稿已更新，请刷新后再保存":
+    "The workflow draft changed. Refresh before saving.",
+  请先发布工作流的最新版本: "Publish the latest workflow version first",
+  "工作流工具配置已失效，请重新配置并发布":
+    "The workflow tool configuration is no longer valid. Configure and publish it again.",
+  "表单已提交，请勿重复提交": "The form was already submitted",
+  "表单状态已变更，请刷新后重试":
+    "The form state changed. Refresh and try again.",
+  "表单包含无效字段，请检查后重试":
+    "The form contains invalid fields. Check it and try again.",
+  "条件未匹配任何分支，请检查工作流配置":
+    "No condition branch matched. Check the workflow configuration.",
+  "工作流输出超过 256 KiB，请缩小输出内容":
+    "Workflow output exceeds 256 KiB. Reduce the output size.",
+  "知识库暂无已索引的内容，请先完成索引":
+    "The knowledge base has no indexed content. Build the index first.",
+  "知识库任务服务暂时不可用，请稍后重试":
+    "The knowledge task service is temporarily unavailable. Try again later.",
+  "知识库任务已达到重试上限，请重新创建任务":
+    "The knowledge task retry limit was reached. Create a new task.",
+  "请先停止知识库任务，再进行删除":
+    "Stop the knowledge task before deleting it",
+  分段重叠长度必须小于分段长度: "Chunk overlap must be smaller than chunk size",
+  "请先生成文档分段预览，再建立索引":
+    "Generate document chunk previews before indexing",
+  "文档中没有可提取的文本，请检查文件内容":
+    "The document has no extractable text. Check the file content.",
+  "文档内容提取失败，请检查文件是否损坏":
+    "Document text extraction failed. Check whether the file is damaged.",
+  "文档内容不可用，请重新上传或解析":
+    "Document content is unavailable. Upload or parse it again.",
+  "问答表必须包含“问题”和“答案”表头":
+    "The QA table must contain question and answer headers",
+  问答表缺少表头或有效数据: "The QA table has no headers or valid data",
+  "问答 CSV 文件必须使用 UTF-8 编码": "QA CSV files must use UTF-8 encoding",
+  "问答导入仅支持 CSV 和 XLSX 文件":
+    "QA import only supports CSV and XLSX files",
+  "评测仍在运行，请完成后重试":
+    "The evaluation is still running. Try again when it finishes.",
+  请先添加有效的评测问题: "Add valid evaluation questions first",
+  文件上传已关闭: "File uploads are disabled",
+  请先选择要上传的文件: "Select files to upload first",
+  "MCP 服务地址无效或无法解析，请检查配置":
+    "The MCP server address is invalid or cannot be resolved. Check the configuration.",
+  "MCP 服务不可用，请检查配置后重试":
+    "The MCP service is unavailable. Check the configuration and try again.",
+  "MCP 授权已失效，请重新连接":
+    "MCP authorization is no longer valid. Reconnect the source.",
+  "请先断开现有授权，再修改配置或重新连接":
+    "Disconnect the existing authorization before changing the configuration or reconnecting",
+  "技能包必须包含且仅包含一个 SKILL.md":
+    "The skill package must contain exactly one SKILL.md",
+  "技能包须为 1 字节至 2 MiB，且不超过 64 个文件":
+    "Skill packages must be 1 byte to 2 MiB and contain at most 64 files",
+  技能包包含重复或不安全的文件路径:
+    "The skill package contains duplicate or unsafe file paths",
+  "技能定义已变更或无效，请重新绑定":
+    "The skill definition changed or is invalid. Bind it again.",
+  请先配置并启用可用的图像模型:
+    "Configure and enable an available image model first",
+  "图片生成失败或返回内容无效，请重试":
+    "Image generation failed or returned invalid content. Try again.",
+  "生成图片超过 5 MiB 大小限制":
+    "The generated image exceeds the 5 MiB size limit",
+  "图像模型配置已变更，请重新运行":
+    "The image model configuration changed. Run it again.",
+  已归档的公告无法编辑或发布:
+    "Archived announcements cannot be edited or published",
+  "请先归档公告，再进行删除": "Archive the announcement before deleting it",
+  公告过期时间必须晚于发布时间:
+    "The announcement must expire after its publication time",
+  "自动化已暂停，暂时无法接收事件":
+    "The automation is paused and cannot receive events",
+  "事件内容必须为有效的 UTF-8 JSON 对象":
+    "The event payload must be a valid UTF-8 JSON object",
+  "事件标识已使用，且本次内容与原事件不同":
+    "The event ID was already used with a different payload",
 } satisfies Record<TranslationKey, string>

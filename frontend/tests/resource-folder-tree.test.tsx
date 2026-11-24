@@ -160,7 +160,7 @@ test("surfaces create errors inside the dialog", async () => {
     target: { value: "失败" },
   })
   fireEvent.submit(screen.getByPlaceholderText("文件夹名称").closest("form")!)
-  expect(await screen.findByText("boom")).toBeTruthy()
+  expect(await screen.findByText("请求失败")).toBeTruthy()
 })
 
 test("shows saving feedback until a folder request settles and allows retry", async () => {

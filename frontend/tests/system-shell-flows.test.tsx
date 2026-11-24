@@ -621,7 +621,7 @@ describe("workspaces tab", () => {
     )
     fireEvent.submit(formOf(dialog))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "name taken"])
+      expect(notifications).toContainEqual(["error", "操作冲突，请刷新后重试"])
     )
     expect(screen.getByRole("dialog")).toBeTruthy()
   })
@@ -749,12 +749,12 @@ describe("workspaces tab", () => {
       {
         method: "PATCH",
         path: "/api/v1/workspaces/ws-1",
-        handle: () => jsonResponse({ detail: "update failed" }, 500),
+        handle: () => jsonResponse({ detail: "更新失败" }, 500),
       },
       {
         method: "DELETE",
         path: "/api/v1/workspaces/ws-1",
-        handle: () => jsonResponse({ detail: "delete failed" }, 500),
+        handle: () => jsonResponse({ detail: "删除失败" }, 500),
       },
     ])
     renderPage(<SystemShell activeTab="workspaces" />)
@@ -763,14 +763,14 @@ describe("workspaces tab", () => {
     )
     await respondToConfirm("归档")
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "update failed"])
+      expect(notifications).toContainEqual(["error", "更新失败"])
     )
     fireEvent.click(
       (await screen.findAllByRole("button", { name: "永久删除工作空间" }))[0]
     )
     await respondToConfirm("删除")
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "delete failed"])
+      expect(notifications).toContainEqual(["error", "删除失败"])
     )
   })
 
@@ -903,7 +903,7 @@ describe("workspaces tab", () => {
       name: "管理工作空间成员",
     })
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "members unavailable"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(within(dialog).getByText("暂无工作空间成员")).toBeTruthy()
   })
@@ -936,7 +936,7 @@ describe("workspaces tab", () => {
     )
     fireEvent.click(within(dialog).getByRole("button", { name: "添加成员" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "add failed"])
+      expect(notifications).toContainEqual(["error", "输入参数无效，请检查后重试"])
     )
   })
 
@@ -951,12 +951,12 @@ describe("workspaces tab", () => {
       {
         method: "PATCH",
         path: "/api/v1/workspaces/ws-1/members/u-4",
-        handle: () => jsonResponse({ detail: "role failed" }, 500),
+        handle: () => jsonResponse({ detail: "更新角色失败" }, 500),
       },
       {
         method: "DELETE",
         path: "/api/v1/workspaces/ws-1/members/u-4",
-        handle: () => jsonResponse({ detail: "remove failed" }, 500),
+        handle: () => jsonResponse({ detail: "移除成员失败" }, 500),
       },
     ])
     renderPage(<SystemShell activeTab="workspaces" />)
@@ -976,13 +976,13 @@ describe("workspaces tab", () => {
       "管理员"
     )
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "role failed"])
+      expect(notifications).toContainEqual(["error", "更新角色失败"])
     )
 
     fireEvent.click(within(carolRow).getByRole("button", { name: "移除成员" }))
     await respondToConfirm("移除")
     await waitFor(() => {
-      expect(notifications).toContainEqual(["error", "remove failed"])
+      expect(notifications).toContainEqual(["error", "移除成员失败"])
       expect(
         (document.getElementById("workspaceMemberUser") as HTMLButtonElement)
           .disabled
@@ -1007,7 +1007,7 @@ describe("workspaces tab", () => {
     const dialog = await screen.findByRole("dialog", { name: "编辑工作空间" })
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "edit failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
   })
 })
@@ -1146,7 +1146,7 @@ describe("teams tab", () => {
     )
     fireEvent.submit(formOf(dialog))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "team failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
   })
 
@@ -1263,12 +1263,12 @@ describe("teams tab", () => {
       {
         method: "PATCH",
         path: "/api/v1/workspaces/ws-1/teams/t-1",
-        handle: () => jsonResponse({ detail: "team update failed" }, 500),
+        handle: () => jsonResponse({ detail: "更新团队失败" }, 500),
       },
       {
         method: "DELETE",
         path: "/api/v1/workspaces/ws-1/teams/t-1",
-        handle: () => jsonResponse({ detail: "team delete failed" }, 500),
+        handle: () => jsonResponse({ detail: "删除团队失败" }, 500),
       },
     ])
     renderPage(<SystemShell activeTab="teams" />)
@@ -1277,14 +1277,14 @@ describe("teams tab", () => {
     )
     await respondToConfirm("归档")
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "team update failed"])
+      expect(notifications).toContainEqual(["error", "更新团队失败"])
     )
     fireEvent.click(
       (await screen.findAllByRole("button", { name: "永久删除团队" }))[0]
     )
     await respondToConfirm("删除")
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "team delete failed"])
+      expect(notifications).toContainEqual(["error", "删除团队失败"])
     )
   })
 
@@ -1393,7 +1393,7 @@ describe("teams tab", () => {
     )
     const dialog = await screen.findByRole("dialog", { name: "管理团队成员" })
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "team members failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(within(dialog).getByText("暂无团队成员")).toBeTruthy()
   })
@@ -1416,17 +1416,17 @@ describe("teams tab", () => {
       {
         method: "POST",
         path: "/api/v1/workspaces/ws-1/teams/t-1/members",
-        handle: () => jsonResponse({ detail: "add member failed" }, 500),
+        handle: () => jsonResponse({ detail: "添加成员失败" }, 500),
       },
       {
         method: "PATCH",
         path: "/api/v1/workspaces/ws-1/teams/t-1/members/u-4",
-        handle: () => jsonResponse({ detail: "role update failed" }, 500),
+        handle: () => jsonResponse({ detail: "更新角色失败" }, 500),
       },
       {
         method: "DELETE",
         path: "/api/v1/workspaces/ws-1/teams/t-1/members/u-4",
-        handle: () => jsonResponse({ detail: "remove member failed" }, 500),
+        handle: () => jsonResponse({ detail: "移除成员失败" }, 500),
       },
     ])
     renderPage(<SystemShell activeTab="teams" />)
@@ -1442,7 +1442,7 @@ describe("teams tab", () => {
     )
     fireEvent.click(within(dialog).getByRole("button", { name: "添加成员" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "add member failed"])
+      expect(notifications).toContainEqual(["error", "添加成员失败"])
     )
 
     const carolRow = within(dialog)
@@ -1453,13 +1453,13 @@ describe("teams tab", () => {
       "管理员"
     )
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "role update failed"])
+      expect(notifications).toContainEqual(["error", "更新角色失败"])
     )
 
     fireEvent.click(within(carolRow).getByRole("button", { name: "移除成员" }))
     await respondToConfirm("移除")
     await waitFor(() => {
-      expect(notifications).toContainEqual(["error", "remove member failed"])
+      expect(notifications).toContainEqual(["error", "移除成员失败"])
       expect(
         (document.getElementById("teamMemberUser") as HTMLButtonElement)
           .disabled
@@ -1515,7 +1515,7 @@ describe("teams tab", () => {
     const dialog = await screen.findByRole("dialog", { name: "编辑团队" })
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "team edit failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
   })
 
@@ -1543,7 +1543,7 @@ describe("teams tab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "新建团队" }))
     const dialog = await screen.findByRole("dialog", { name: "新建团队" })
     await waitFor(() =>
-      expect(notifications).toContainEqual(["error", "candidates failed"])
+      expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     fireEvent.submit(formOf(dialog))
     expect(notifications).toContainEqual(["error", "请选择团队管理员"])

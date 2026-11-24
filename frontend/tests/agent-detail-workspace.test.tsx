@@ -1506,10 +1506,10 @@ describe("AgentDetailWorkspace preview", () => {
     const run = makeRun({
       status: "failed",
       result: "",
-      last_error: "model timeout",
+      last_error: "Agent model response timed out.",
     })
     renderPage(<Harness activeView="settings" runs={[run]} />)
-    expect(screen.getByText("model timeout")).toBeTruthy()
+    expect(screen.getByText("Agent 回答超时")).toBeTruthy()
   })
 
   test.each(["running", "succeeded"] as const)(
@@ -1984,7 +1984,7 @@ describe("AgentDetailWorkspace preview", () => {
     )
     expect(screen.getByText("工具执行结果不确定")).toBeTruthy()
     expect(screen.getByText("不重试并继续")).toBeTruthy()
-    expect(screen.getByText("retry failed")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
   })
 
   test("renders pending tool calls as running events", () => {
@@ -2631,7 +2631,7 @@ describe("AgentLogsPanel", () => {
       access_source: "api",
       status: "failed",
       feedback: null,
-      last_error: "execution crashed",
+      last_error: "Agent model response timed out.",
       result: "",
       display_name: "",
     }
@@ -2657,7 +2657,13 @@ describe("AgentLogsPanel", () => {
     expect(screen.getByText("API")).toBeTruthy()
     expect(screen.getByText("失败")).toBeTruthy()
     expect(screen.getByRole("img", { name: "暂无反馈" })).toBeTruthy()
-    expect(screen.getByText("execution crashed")).toBeTruthy()
+    const error = screen.getByText("Agent 回答超时")
+    expect(error.title).toBe("Agent 回答超时")
+    expect(screen.queryByText(failingLog.last_error)).toBeNull()
+    fireEvent.click(screen.getByLabelText("查看日志详情"))
+    expect(await screen.findAllByText("Agent 回答超时")).toHaveLength(2)
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByText("对话详情")).toBeNull())
     fireEvent.click(screen.getByText("刷新").closest("button")!)
     await waitFor(() => expect(screen.getByText("暂无对话日志")).toBeTruthy())
   })
@@ -2708,7 +2714,7 @@ describe("AgentLogsPanel", () => {
     )
     expect(screen.getByText("控制台")).toBeTruthy()
     expect(screen.getByRole("img", { name: "点踩" })).toBeTruthy()
-    expect(screen.getByText("step failed")).toBeTruthy()
+    expect(screen.getByText("请求失败")).toBeTruthy()
 
     const row = screen.getByLabelText("查看日志详情")
     fireEvent.keyDown(row, { key: "Enter" })

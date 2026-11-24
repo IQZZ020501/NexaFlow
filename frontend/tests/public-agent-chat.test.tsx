@@ -3943,7 +3943,7 @@ describe("PublicAgentChat", () => {
     fireEvent.click(screen.getByRole("button", { name: "批准并执行" }))
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("status 403")
+      expect(screen.getByRole("alert").textContent).toContain("请求失败")
     )
   })
 

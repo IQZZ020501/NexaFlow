@@ -123,7 +123,7 @@ describe("SkillDialog", () => {
     expect(screen.getByRole("alert").textContent).toBe("技能包不能超过 2 MiB")
     expect(imports).toBe(0)
     fireEvent.change(input, { target: { files: [new File(["bad"], "bad.zip")] } })
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Malformed package"))
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("输入参数无效，请检查后重试"))
     expect(imports).toBe(1)
     expect((screen.getByRole("button", { name: "导入技能" }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole("button", { name: "取消" }))
@@ -169,12 +169,12 @@ describe("SkillDialog", () => {
     fireEvent.change(screen.getByLabelText("技能指令"), { target: { value: "Do the task." } })
     fireEvent.click(screen.getByRole("button", { name: "保存并发布" }))
     await screen.findByRole("alert")
-    expect(messages).toEqual([["error", "failed publication"]])
+    expect(messages).toEqual([["error", "操作冲突，请刷新后重试"]])
     fireEvent.click(screen.getByRole("button", { name: "保存并发布" }))
     await waitFor(() => expect(publishes).toBe(2))
     expect(creates).toBe(1)
     await waitFor(() => expect(messages).toEqual([
-      ["error", "failed publication"],
+      ["error", "操作冲突，请刷新后重试"],
       ["success", "技能已发布"],
     ]))
   })
