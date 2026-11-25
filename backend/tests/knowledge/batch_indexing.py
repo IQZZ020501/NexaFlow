@@ -163,12 +163,10 @@ def main():
             with patch.object(
                 indexing, "create_batch_index_tasks", side_effect=fail_after_write
             ):
-                try:
-                    client.post(url, headers=headers, json={"scope": "all"})
-                except RuntimeError as exc:
-                    assert str(exc) == "injected batch write failure"
-                else:
-                    raise AssertionError("batch write failure must abort the request")
+                failed = client.post(url, headers=headers, json={"scope": "all"})
+                assert failed.status_code == 500, failed.text
+                assert failed.json() == {"detail": "Internal Server Error"}
+                assert dispatch.await_count == 0
             asyncio.run(assert_queued(0))
 
             response = client.post(url, headers=headers, json={"scope": "unsuccessful"})
