@@ -21,6 +21,11 @@ from app.domain.platform.models import WorkspaceMembership as WorkspaceMembershi
 from app.domain.tools.models import Tool as ToolOrm
 from app.domain.tools.models import ToolInvocation as ToolInvocationOrm
 from app.domain.tools.models import ToolVersion as ToolVersionOrm
+from app.domain.tools.runtime import (
+    TOOL_INVOCATION_FAILED,
+    TOOL_INVOCATION_SUCCEEDED,
+    TOOL_INVOCATION_UNCERTAIN,
+)
 from app.domain.workflows.models import WorkflowRunDetail as WorkflowRunDetailOrm
 from app.entities.analytics import (
     WorkspaceAnalyticsCounts,
@@ -31,6 +36,7 @@ from app.entities.analytics import (
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
     WorkspaceAnalyticsToolCall,
+    WorkspaceAnalyticsToolCallSummary,
 )
 from app.infra.db.repositories.tools.inventory import (
     tool_catalog_conditions,
@@ -42,31 +48,31 @@ async def get_workspace_analytics_counts(
     db: AsyncSession,
     workspace_id: str,
 ) -> WorkspaceAnalyticsCounts:
-    member_counts = (
+    row = (
         await db.execute(
             select(
                 func.count().label("total"),
                 func.sum(
                     case((UserOrm.is_active.is_(True), 1), else_=0)
                 ).label("active"),
+                select(func.count())
+                .select_from(TeamOrm)
+                .where(
+                    TeamOrm.workspace_id == workspace_id,
+                    TeamOrm.status == "active",
+                )
+                .scalar_subquery()
+                .label("active_teams"),
             )
             .select_from(WorkspaceMembershipOrm)
             .join(UserOrm, UserOrm.id == WorkspaceMembershipOrm.user_id)
             .where(WorkspaceMembershipOrm.workspace_id == workspace_id)
         )
     ).one()
-    active_teams = await db.scalar(
-        select(func.count())
-        .select_from(TeamOrm)
-        .where(
-            TeamOrm.workspace_id == workspace_id,
-            TeamOrm.status == "active",
-        )
-    )
     return WorkspaceAnalyticsCounts(
-        members_total=int(member_counts.total or 0),
-        members_active=int(member_counts.active or 0),
-        active_teams=int(active_teams or 0),
+        members_total=int(row.total or 0),
+        members_active=int(row.active or 0),
+        active_teams=int(row.active_teams or 0),
     )
 
 
@@ -181,6 +187,61 @@ async def list_workspace_analytics_runs(
     ]
 
 
+async def list_workspace_analytics_previous_runs(
+    db: AsyncSession,
+    workspace_id: str,
+    start_at: datetime,
+    end_at: datetime,
+) -> list[WorkspaceAnalyticsRun]:
+    """Load only the columns needed to summarize the previous comparison window."""
+    rows = await db.execute(
+        select(
+            AgentRunOrm.id,
+            AgentRunOrm.requested_by_user_id,
+            AgentRunOrm.access_source,
+            AgentRunStateOrm.status,
+            AgentRunStateOrm.model_usage,
+            WorkflowRunDetailOrm.token_usage.label("workflow_token_usage"),
+            AgentRunStateOrm.started_at,
+            AgentRunStateOrm.finished_at,
+        )
+        .select_from(AgentRunOrm)
+        .join(
+            AgentRunStateOrm,
+            and_(
+                AgentRunStateOrm.workspace_id == AgentRunOrm.workspace_id,
+                AgentRunStateOrm.run_id == AgentRunOrm.id,
+            ),
+        )
+        .outerjoin(
+            WorkflowRunDetailOrm,
+            and_(
+                WorkflowRunDetailOrm.workspace_id == AgentRunOrm.workspace_id,
+                WorkflowRunDetailOrm.run_id == AgentRunOrm.id,
+            ),
+        )
+        .where(
+            AgentRunOrm.workspace_id == workspace_id,
+            AgentRunOrm.depth == 0,
+            AgentRunOrm.created_at >= start_at,
+            AgentRunOrm.created_at < end_at,
+        )
+    )
+    return [
+        WorkspaceAnalyticsRun(
+            id=row.id,
+            requested_by_user_id=row.requested_by_user_id,
+            access_source=row.access_source,
+            status=row.status,
+            model_usage=dict(row.model_usage or {}),
+            workflow_token_usage=row.workflow_token_usage,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
+        for row in rows.all()
+    ]
+
+
 async def list_workspace_analytics_tool_calls(
     db: AsyncSession,
     workspace_id: str,
@@ -250,6 +311,77 @@ async def list_workspace_analytics_tool_calls(
     ]
 
 
+async def get_workspace_analytics_tool_call_summary(
+    db: AsyncSession,
+    workspace_id: str,
+    start_at: datetime,
+    end_at: datetime,
+) -> WorkspaceAnalyticsToolCallSummary:
+    """Aggregate tool invocation counts for the previous comparison window."""
+    active_tool = aliased(ToolOrm)
+    row = (
+        await db.execute(
+            select(
+                func.count().label("total"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                ToolInvocationOrm.status == TOOL_INVOCATION_SUCCEEDED,
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("succeeded"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                ToolInvocationOrm.status.in_(
+                                    (
+                                        TOOL_INVOCATION_FAILED,
+                                        TOOL_INVOCATION_UNCERTAIN,
+                                    )
+                                ),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("failed"),
+            )
+            .select_from(ToolInvocationOrm)
+            .outerjoin(
+                ToolOrm,
+                and_(
+                    ToolOrm.workspace_id == ToolInvocationOrm.workspace_id,
+                    ToolOrm.id == ToolInvocationOrm.tool_id,
+                ),
+            )
+            .where(
+                ToolInvocationOrm.workspace_id == workspace_id,
+                ToolInvocationOrm.tool_id.is_not(None),
+                select(active_tool.id)
+                .where(
+                    *tool_catalog_conditions(workspace_id, tool=active_tool),
+                    active_tool.stable_key == ToolOrm.stable_key,
+                )
+                .exists(),
+                ToolInvocationOrm.created_at >= start_at,
+                ToolInvocationOrm.created_at < end_at,
+            )
+        )
+    ).one()
+    return WorkspaceAnalyticsToolCallSummary(
+        total=int(row.total or 0),
+        succeeded=int(row.succeeded or 0),
+        failed=int(row.failed or 0),
+    )
+
+
 async def get_workspace_analytics_inventory(
     db: AsyncSession,
     workspace_id: str,
@@ -281,24 +413,35 @@ async def get_workspace_analytics_inventory(
             + (total if row.status == "active" else 0),
         )
 
-    knowledge_bases = await db.scalar(
-        select(func.count())
-        .select_from(KnowledgeBaseOrm)
-        .where(KnowledgeBaseOrm.workspace_id == workspace_id)
-    )
-    knowledge_documents = await db.scalar(
-        select(func.count())
-        .select_from(KnowledgeDocumentOrm)
-        .where(
-            KnowledgeDocumentOrm.workspace_id == workspace_id,
-            KnowledgeDocumentOrm.is_active.is_(True),
+    scalar_counts = (
+        await db.execute(
+            select(
+                select(func.count())
+                .select_from(KnowledgeBaseOrm)
+                .where(KnowledgeBaseOrm.workspace_id == workspace_id)
+                .scalar_subquery()
+                .label("knowledge_bases"),
+                select(func.count())
+                .select_from(KnowledgeDocumentOrm)
+                .where(
+                    KnowledgeDocumentOrm.workspace_id == workspace_id,
+                    KnowledgeDocumentOrm.is_active.is_(True),
+                )
+                .scalar_subquery()
+                .label("knowledge_documents"),
+                select(func.count())
+                .select_from(KnowledgeDocumentChunkOrm)
+                .where(KnowledgeDocumentChunkOrm.workspace_id == workspace_id)
+                .scalar_subquery()
+                .label("knowledge_chunks"),
+                select(func.count())
+                .select_from(RegisteredModelOrm)
+                .where(RegisteredModelOrm.workspace_id == workspace_id)
+                .scalar_subquery()
+                .label("models"),
+            )
         )
-    )
-    knowledge_chunks = await db.scalar(
-        select(func.count())
-        .select_from(KnowledgeDocumentChunkOrm)
-        .where(KnowledgeDocumentChunkOrm.workspace_id == workspace_id)
-    )
+    ).one()
 
     tool_resources = tool_inventory_resources(workspace_id)
     tool_rows = (
@@ -322,19 +465,13 @@ async def get_workspace_analytics_inventory(
             active=tools.active + (total if row.status == "active" else 0),
         )
 
-    models = await db.scalar(
-        select(func.count())
-        .select_from(RegisteredModelOrm)
-        .where(RegisteredModelOrm.workspace_id == workspace_id)
-    )
-
     return WorkspaceAnalyticsInventory(
         applications=applications,
         knowledge=WorkspaceAnalyticsInventoryKnowledge(
-            bases=int(knowledge_bases or 0),
-            documents=int(knowledge_documents or 0),
-            chunks=int(knowledge_chunks or 0),
+            bases=int(scalar_counts.knowledge_bases or 0),
+            documents=int(scalar_counts.knowledge_documents or 0),
+            chunks=int(scalar_counts.knowledge_chunks or 0),
         ),
         tools=tools,
-        models=int(models or 0),
+        models=int(scalar_counts.models or 0),
     )

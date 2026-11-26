@@ -563,4 +563,33 @@ describe("WorkspaceUsersPanel", () => {
     expect(screen.getByText("暂无用户")).toBeTruthy()
     expect(screen.queryByRole("table")).toBeNull()
   })
+
+  test("scrolls desktop user tables vertically inside constrained system height", () => {
+    renderPage(<GlobalHarness />)
+    const globalTable = screen.getByRole("table", { name: "用户列表" })
+    const globalScrollContainer = globalTable.parentElement as HTMLElement
+    expect(globalScrollContainer.className).toContain("overflow-auto")
+    expect(globalScrollContainer.className).toContain("lg:flex-1")
+    expect(globalScrollContainer.className).toContain("lg:min-h-0")
+    expect(
+      within(globalTable).getAllByRole("row")[0].className
+    ).toContain("sticky")
+
+    cleanup()
+
+    renderWorkspacePanel({
+      workspaceMembers: [{ user: globalUser, role: "admin" }],
+    })
+    const workspaceTable = screen.getByRole("table", {
+      name: "工作空间用户列表",
+    })
+    const workspaceScrollContainer =
+      workspaceTable.parentElement as HTMLElement
+    expect(workspaceScrollContainer.className).toContain("overflow-auto")
+    expect(workspaceScrollContainer.className).toContain("lg:flex-1")
+    expect(workspaceScrollContainer.className).toContain("lg:min-h-0")
+    expect(
+      within(workspaceTable).getAllByRole("row")[0].className
+    ).toContain("sticky")
+  })
 })

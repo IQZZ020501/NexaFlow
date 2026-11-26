@@ -95,6 +95,7 @@ class Settings:
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_task_always_eager: bool = False
     mcp_allow_private_networks: bool = False
+    models_allow_private_networks: bool = False
     mcp_request_timeout_seconds: float = 30.0
     model_request_timeout_seconds: float = 60.0
     agent_tool_timeout_seconds: float = 30.0
@@ -143,6 +144,9 @@ class Settings:
     refresh_token_expires_days: int = 30
     public_app_url: str = "http://localhost:8080"
     cors_origins: tuple[str, ...] = ()
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle: int = 1800
     environment: str = "development"
     log_level: str = "INFO"
 
@@ -175,6 +179,10 @@ class Settings:
             celery_task_always_eager=os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower()
             in {"1", "true", "yes"},
             mcp_allow_private_networks=os.getenv("MCP_ALLOW_PRIVATE_NETWORKS", "").lower()
+            in {"1", "true", "yes"},
+            models_allow_private_networks=os.getenv(
+                "MODELS_ALLOW_PRIVATE_NETWORKS", ""
+            ).lower()
             in {"1", "true", "yes"},
             mcp_request_timeout_seconds=float(
                 os.getenv("MCP_REQUEST_TIMEOUT_SECONDS", "30")
@@ -259,6 +267,9 @@ class Settings:
             refresh_token_expires_days=int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "30")),
             public_app_url=os.getenv("PUBLIC_APP_URL", cls.public_app_url).rstrip("/"),
             cors_origins=origins,
+            db_pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+            db_max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "20")),
+            db_pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "1800")),
             environment=os.getenv("ENVIRONMENT", "development"),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
@@ -465,6 +476,14 @@ class Settings:
             raise RuntimeError(
                 "ARTIFACT_SANDBOX_TIMEOUT_SECONDS must be between 0.1 and 300."
             )
+        if "*" in self.cors_origins:
+            raise RuntimeError("CORS_ORIGINS must not include '*'.")
+        if self.db_pool_size < 1:
+            raise RuntimeError("DB_POOL_SIZE must be at least 1.")
+        if self.db_max_overflow < 0:
+            raise RuntimeError("DB_MAX_OVERFLOW must not be negative.")
+        if self.db_pool_recycle < 0:
+            raise RuntimeError("DB_POOL_RECYCLE must not be negative.")
         if self.jwt_expires_minutes <= 0:
             raise RuntimeError("JWT_EXPIRES_MINUTES must be greater than zero.")
         if self.refresh_token_expires_days <= 0:

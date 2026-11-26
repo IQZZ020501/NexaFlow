@@ -7,6 +7,7 @@ from app.entities.analytics.models import (
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
     WorkspaceAnalyticsToolCall,
+    WorkspaceAnalyticsToolCallSummary,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "WorkspaceAnalyticsRun",
     "WorkspaceAnalyticsTeamMember",
     "WorkspaceAnalyticsToolCall",
+    "WorkspaceAnalyticsToolCallSummary",
 ]

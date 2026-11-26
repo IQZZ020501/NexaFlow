@@ -5,7 +5,9 @@ surface): everything about building the agent's tools and converting runs to
 responses lives here, separate from run orchestration.
 """
 
+import asyncio
 import hashlib
+import inspect
 import json
 import re
 from contextvars import ContextVar
@@ -15,7 +17,10 @@ from fastapi import HTTPException
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field, ValidationError
 
-from app.application.knowledge.retrieval.service import retrieve_knowledge_base
+from app.application.knowledge.retrieval.service import (
+    precompute_query_vectors,
+    retrieve_knowledge_base,
+)
 from app.domain.agents.approval import run_agent_approval_mode
 from app.domain.agents.models import agent_run_display_status
 from app.domain.agents.runtime import (
@@ -595,26 +600,87 @@ def build_knowledge_search_tool(
                 retrieval_stats.append(stats_entry)
             hit_groups = []
             failed_sources = 0
-            for knowledge_base in available_knowledge_bases:
+            retrieval_user_id = None if shared_models_only else actor.id
+            accepts_query_vector = (
+                "query_vector"
+                in inspect.signature(retrieve_knowledge_base).parameters
+            )
+            precomputed_vectors: dict[str, list[float]] = {}
+            if (
+                len(available_knowledge_bases) > 1
+                and payload.search_mode != "keywords"
+                and accepts_query_vector
+            ):
+                precomputed_vectors = await precompute_query_vectors(
+                    tool_db,
+                    available_knowledge_bases,
+                    payload.query,
+                    settings,
+                    user_id=retrieval_user_id,
+                )
+            await tool_db.rollback()
+
+            request_payload = KnowledgeQueryRequest(
+                query=payload.query,
+                limit=payload.limit,
+                search_mode=payload.search_mode,
+                similarity=payload.similarity,
+            )
+
+            if len(available_knowledge_bases) == 1:
+                results: list[Any] = []
+                kb = available_knowledge_bases[0]
+                try:
+                    results.append(
+                        await retrieve_knowledge_base(
+                            tool_db,
+                            kb,
+                            request_payload,
+                            settings,
+                            user_id=retrieval_user_id,
+                        )
+                    )
+                except HTTPException:
+                    results.append(None)
+            else:
+                semaphore = asyncio.Semaphore(4)
+
+                async def retrieve_one(knowledge_base: KnowledgeBase) -> Any:
+                    async with semaphore, get_session_factory()() as kb_db:
+                        kwargs: dict[str, Any] = {"user_id": retrieval_user_id}
+                        vector = (
+                            precomputed_vectors.get(knowledge_base.embedding_model_id)
+                            if knowledge_base.embedding_model_id
+                            else None
+                        )
+                        if vector is not None and accepts_query_vector:
+                            kwargs["query_vector"] = vector
+                        try:
+                            return await retrieve_knowledge_base(
+                                kb_db,
+                                knowledge_base,
+                                request_payload,
+                                settings,
+                                **kwargs,
+                            )
+                        except HTTPException:
+                            return None
+
+                results = list(
+                    await asyncio.gather(
+                        *(retrieve_one(kb) for kb in available_knowledge_bases)
+                    )
+                )
+
+            for knowledge_base, result in zip(
+                available_knowledge_bases, results, strict=True
+            ):
                 stats_entry = next(
                     entry
                     for entry in retrieval_stats
                     if entry["knowledge_base_id"] == knowledge_base.id
                 )
-                try:
-                    result = await retrieve_knowledge_base(
-                        tool_db,
-                        knowledge_base,
-                        KnowledgeQueryRequest(
-                            query=payload.query,
-                            limit=payload.limit,
-                            search_mode=payload.search_mode,
-                            similarity=payload.similarity,
-                        ),
-                        settings,
-                        user_id=None if shared_models_only else actor.id,
-                    )
-                except HTTPException:
+                if result is None:
                     failed_sources += 1
                     stats_entry["status"] = "unavailable"
                     continue

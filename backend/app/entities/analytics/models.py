@@ -83,3 +83,10 @@ class WorkspaceAnalyticsToolCall:
     status: str = ""
     approved: bool = False
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class WorkspaceAnalyticsToolCallSummary:
+    total: int = 0
+    succeeded: int = 0
+    failed: int = 0

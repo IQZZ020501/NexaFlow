@@ -206,9 +206,17 @@ async def publish_task(
     message. Eager execution, failure persistence and recovery policy
     stay in the application use cases that call this helper.
     """
-    celery_app.conf.update(broker_url=settings.celery_broker_url, task_always_eager=False)
+    updates: dict = {}
+    if celery_app.conf.get("broker_url") != settings.celery_broker_url:
+        updates["broker_url"] = settings.celery_broker_url
+    if celery_app.conf.get("task_always_eager") is not False:
+        updates["task_always_eager"] = False
     if conf_updates:
-        celery_app.conf.update(**conf_updates)
+        for key, value in conf_updates.items():
+            if celery_app.conf.get(key) != value:
+                updates[key] = value
+    if updates:
+        celery_app.conf.update(**updates)
 
     async def _dispatch() -> None:
         await asyncio.to_thread(

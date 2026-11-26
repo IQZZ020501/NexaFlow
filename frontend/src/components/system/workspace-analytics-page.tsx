@@ -150,7 +150,7 @@ export function formatTrendValue(
     : formatNumber(value, locale)
 }
 
-function TrendChart({
+const TrendChart = React.memo(function TrendChart({
   title,
   description,
   data,
@@ -239,7 +239,7 @@ function TrendChart({
       </CardContent>
     </Card>
   )
-}
+})
 
 /**
  * Displays hourly run activity for the selected analytics period.
@@ -247,7 +247,11 @@ function TrendChart({
  * @param data - Hourly run counts to visualize
  * @param locale - Locale used to format chart values
  */
-function HourlyTrendChart({
+const HOURLY_TICKS = Array.from({ length: 24 }, (_, hour) => hour)
+const ANALYTICS_CACHE_TTL_MS = 30_000
+const ANALYTICS_CACHE_MAX_ENTRIES = 20
+
+const HourlyTrendChart = React.memo(function HourlyTrendChart({
   data,
   locale,
 }: {
@@ -279,7 +283,7 @@ function HourlyTrendChart({
               dataKey="hour"
               type="number"
               domain={[0, 23]}
-              ticks={Array.from({ length: 24 }, (_, hour) => hour)}
+              ticks={HOURLY_TICKS}
               axisLine={false}
               tickLine={false}
               interval={0}
@@ -333,7 +337,7 @@ function HourlyTrendChart({
       </CardContent>
     </Card>
   )
-}
+})
 
 /**
  * Displays workspace usage, activity, and resource-consumption analytics with selectable date ranges.
@@ -353,6 +357,11 @@ export function WorkspaceAnalyticsPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [reloadKey, setReloadKey] = React.useState(0)
+  const cacheRef = React.useRef<
+    Map<string, { data: WorkspaceAnalytics; cachedAt: number }>
+  >(new Map())
+  const previousWorkspaceIdRef = React.useRef<string | null>(null)
+  const previousReloadKeyRef = React.useRef(0)
 
   const canAccess = Boolean(
     session.me && canAccessWorkspaceAnalytics(session.me)
@@ -379,16 +388,46 @@ export function WorkspaceAnalyticsPage() {
 
   React.useEffect(() => {
     if (!canAccess || !session.token || !workspaceId) return
+
+    const workspaceChanged = previousWorkspaceIdRef.current !== workspaceId
+    const forceReload = previousReloadKeyRef.current !== reloadKey
+    previousWorkspaceIdRef.current = workspaceId
+    previousReloadKeyRef.current = reloadKey
+
+    if (workspaceChanged) {
+      // Clear the previous tenant's data before starting the next scoped request.
+      setData(null)
+    }
+
+    const cacheKey = `${session.token}:${workspaceId}:${range.from}:${range.to}`
+    if (!forceReload) {
+      const cached = cacheRef.current.get(cacheKey)
+      if (cached && Date.now() - cached.cachedAt < ANALYTICS_CACHE_TTL_MS) {
+        setData(cached.data)
+        setError(null)
+        setLoading(false)
+        return
+      }
+    }
+
     let current = true
     const controller = new AbortController()
-    // Clear the previous tenant's data before starting the next scoped request.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setData(null)
     setError(null)
     setLoading(true)
     getWorkspaceAnalytics(session.token, workspaceId, range, controller.signal)
       .then((payload) => {
-        if (current) setData(payload)
+        if (!current) return
+        if (cacheRef.current.size >= ANALYTICS_CACHE_MAX_ENTRIES) {
+          const oldestKey = cacheRef.current.keys().next().value
+          if (oldestKey !== undefined) {
+            cacheRef.current.delete(oldestKey)
+          }
+        }
+        cacheRef.current.set(cacheKey, {
+          data: payload,
+          cachedAt: Date.now(),
+        })
+        setData(payload)
       })
       .catch((loadError: unknown) => {
         if (

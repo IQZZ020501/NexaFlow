@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    column,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -400,6 +401,21 @@ class ToolInvocation(Base):
         CheckConstraint(
             "lease_expires_at IS NULL OR worker_task_id IS NOT NULL",
             name="ck_tool_invocations_lease",
+        ),
+        Index(
+            "ix_tool_invocations_workspace_created_tool",
+            "workspace_id",
+            "created_at",
+            "id",
+            postgresql_where=column("tool_id").is_not(None),
+            sqlite_where=column("tool_id").is_not(None),
+        ),
+        Index(
+            "ix_tool_invocations_workspace_run_created",
+            "workspace_id",
+            "run_id",
+            "created_at",
+            "id",
         ),
     )
 

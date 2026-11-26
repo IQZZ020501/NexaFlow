@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { ApiError } from "@/lib/api-client"
 import { getErrorMessage } from "@/lib/errors"
+import { isSafeHttpUrl } from "@/lib/safe-url"
 import * as api from "@/lib/api/mcp"
 
 export const EMPTY_MCP_OAUTH: api.McpOAuthConfiguration = {
@@ -279,6 +280,9 @@ export function McpOAuthDialog({
                           workspaceId,
                           serverId
                         )
+                        if (!isSafeHttpUrl(result.authorization_url)) {
+                          throw new Error("Invalid authorization URL.")
+                        }
                         window.location.assign(result.authorization_url)
                       })
                     }

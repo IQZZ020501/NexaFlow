@@ -226,7 +226,8 @@ export async function observeMessageStream(
   token: string,
   workspaceId: string | null,
   signal: AbortSignal,
-  onEvent: (event: MessageStreamEvent) => void
+  onEvent: (event: MessageStreamEvent) => void,
+  onConnectionChange?: (connected: boolean) => void
 ) {
   const cursors = {
     globalAfter: null as string | null,
@@ -256,6 +257,7 @@ export async function observeMessageStream(
         }
       )
       if (!response.ok) {
+        onConnectionChange?.(false)
         const message = `Message stream failed with status ${response.status}.`
         const error = Object.assign(new Error(message), {
           status: response.status,
@@ -266,14 +268,17 @@ export async function observeMessageStream(
         continue
       }
 
+      onConnectionChange?.(true)
       const unavailable = await consumeMessageStream(
         response,
         signal,
         onEvent,
         cursors
       )
+      onConnectionChange?.(false)
       reconnectDelay = unavailable ? 5000 : 500
     } catch (error) {
+      onConnectionChange?.(false)
       if (signal.aborted) return
       if (error instanceof Error && "status" in error) {
         const status = Number((error as { status?: unknown }).status)

@@ -34,10 +34,12 @@ MODEL_TYPES = {"LLM", "VISION", "EMBEDDING", "RERANKER", "IMAGE"}
 RESERVED_MODEL_REQUEST_PARAMS = {
     "anthropic_api_key",
     "anthropic_api_url",
+    "anthropic_proxy",
     "api_base",
     "api_key",
     "api_version",
     "async_client",
+    "async_client_kwargs",
     "aws_access_key_id",
     "aws_secret_access_key",
     "aws_session_token",
@@ -49,11 +51,17 @@ RESERVED_MODEL_REQUEST_PARAMS = {
     "bedrock_client",
     "cache",
     "callbacks",
+    "client",
+    "client_args",
     "client_kwargs",
     "config",
     "credentials_profile_name",
     "endpoint_url",
+    "http_async_client",
+    "http_client",
+    "http_options",
     "http_socket_options",
+    "location",
     "max_retries",
     "messages",
     "metadata",
@@ -63,7 +71,9 @@ RESERVED_MODEL_REQUEST_PARAMS = {
     "openai_api_base",
     "openai_api_key",
     "openai_organization",
+    "openai_proxy",
     "profile",
+    "project",
     "region_name",
     "request_timeout",
     "retries",
@@ -72,12 +82,14 @@ RESERVED_MODEL_REQUEST_PARAMS = {
     "stream",
     "stream_options",
     "stream_usage",
+    "sync_client_kwargs",
     "tags",
     "timeout",
     "tool_choice",
     "tools",
     "transport",
     "validate_model_on_init",
+    "vertexai",
 }
 MAX_MODEL_REQUEST_PARAM_KEYS = 32
 MAX_MODEL_REQUEST_PARAMS_BYTES = 16_384
@@ -217,7 +229,16 @@ def normalize_url_credential(value: str, field: str) -> str:
     if not api_base:
         return ""
     parsed = urlparse(api_base)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or any(ord(character) < 33 or character == "\\" for character in api_base)
+    ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"Invalid URL for model credential {field}.",

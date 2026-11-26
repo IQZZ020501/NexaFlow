@@ -290,6 +290,20 @@ export function KnowledgeUploadFlow({
     [knowledgeBase.id, token, workspaceId],
   )
 
+  const isMountedRef = React.useRef(true)
+  const parsePollTimerRef = React.useRef<number | null>(null)
+
+  React.useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      if (parsePollTimerRef.current !== null) {
+        window.clearTimeout(parsePollTimerRef.current)
+        parsePollTimerRef.current = null
+      }
+    }
+  }, [])
+
   const applyPreviewDocuments = React.useCallback(
     (nextDocuments: UploadedDocument[]) => {
       setUploadedDocuments(nextDocuments)
@@ -460,10 +474,14 @@ export function KnowledgeUploadFlow({
       const startedAt = Date.now()
       const PARSE_POLL_INTERVAL_MS = 2000
       const PARSE_TIMEOUT_MS = 5 * 60 * 1000
-      while (remainingDocumentIds.size > 0) {
-        await new Promise((resolve) =>
-          window.setTimeout(resolve, PARSE_POLL_INTERVAL_MS),
-        )
+      while (remainingDocumentIds.size > 0 && isMountedRef.current) {
+        await new Promise<void>((resolve) => {
+          parsePollTimerRef.current = window.setTimeout(() => {
+            parsePollTimerRef.current = null
+            resolve()
+          }, PARSE_POLL_INTERVAL_MS)
+        })
+        if (!isMountedRef.current) return
         if (Date.now() - startedAt > PARSE_TIMEOUT_MS) {
           for (const documentId of remainingDocumentIds) {
             const index = documents.findIndex(
@@ -491,6 +509,7 @@ export function KnowledgeUploadFlow({
             ),
           ),
         )
+        if (!isMountedRef.current) return
         const documentIds = [...remainingDocumentIds]
         const stillPending: string[] = []
         documentIds.forEach((documentId, index) => {
@@ -559,6 +578,7 @@ export function KnowledgeUploadFlow({
         }
       }
 
+      if (!isMountedRef.current) return
       applyPreviewDocuments(nextDocuments)
       setPreviewOptionsSignature(parseOptionsSignature)
 
@@ -623,6 +643,7 @@ export function KnowledgeUploadFlow({
     setIsRefreshing(true)
     try {
       const nextDocuments = await loadPreviewDocuments(documentIds)
+      if (!isMountedRef.current) return
       applyPreviewDocuments(nextDocuments)
       if (!routeState) {
         return
@@ -695,7 +716,8 @@ export function KnowledgeUploadFlow({
             ...document,
             chunks: [],
           }))
-          applyPreviewDocuments(nextDocuments)
+          if (!isMountedRef.current) return
+      applyPreviewDocuments(nextDocuments)
           setPreviewOptionsSignature(null)
           setIsUploading(false)
           onRouteSegment({
@@ -734,7 +756,8 @@ export function KnowledgeUploadFlow({
           return
         }
 
-        applyPreviewDocuments(nextDocuments)
+        if (!isMountedRef.current) return
+      applyPreviewDocuments(nextDocuments)
         if (
           nextDocuments.every(
             (document) =>
@@ -833,6 +856,7 @@ export function KnowledgeUploadFlow({
       const nextDocuments = uploadedDocuments.filter(
         (item) => item.id !== document.id,
       )
+      if (!isMountedRef.current) return
       applyPreviewDocuments(nextDocuments)
       if (nextDocuments.length) {
         onRouteSegment({

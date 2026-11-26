@@ -51,9 +51,9 @@ export function WorkspaceUsersPanel({
       id="system-panel-users"
       role="tabpanel"
       aria-labelledby="system-tab-users"
-      className="grid min-w-0 gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
+      className="grid min-w-0 gap-4 lg:h-full lg:min-h-0 lg:overflow-hidden lg:pr-1"
     >
-      <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:min-h-full">
+      <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:h-full lg:min-h-0">
         <CardHeader className="flex-row items-start justify-between gap-4 px-4 max-sm:flex-wrap">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
@@ -90,7 +90,7 @@ export function WorkspaceUsersPanel({
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="min-w-0 px-4">
+        <CardContent className="min-w-0 px-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
           {isWorkspaceMembersLoading ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
@@ -140,7 +140,7 @@ export function WorkspaceUsersPanel({
                 </ul>
               ) : null}
 
-              <div className="hidden min-w-0 overflow-x-auto rounded-lg border bg-background md:block">
+              <div className="hidden min-w-0 overflow-auto rounded-lg border bg-background md:block lg:min-h-0 lg:flex-1">
                 <div
                   role="table"
                   aria-label={t("工作空间用户列表")}
@@ -148,7 +148,7 @@ export function WorkspaceUsersPanel({
                 >
                   <div
                     role="row"
-                    className="grid grid-cols-[160px_150px_280px_120px_120px_150px] border-b bg-muted/40 px-4 py-3 text-sm font-semibold text-muted-foreground"
+                    className="sticky top-0 z-10 grid grid-cols-[160px_150px_280px_120px_120px_150px] border-b bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4 py-3 text-sm font-semibold text-muted-foreground"
                   >
                     <span role="columnheader">{t("用户名")}</span>
                     <span role="columnheader">{t("账号")}</span>

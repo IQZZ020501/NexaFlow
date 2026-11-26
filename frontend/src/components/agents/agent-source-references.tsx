@@ -270,7 +270,7 @@ export function AgentSourceReferences({
   )
 }
 
-export function AgentAnswer({
+export const AgentAnswer = React.memo(function AgentAnswer({
   content,
   events = [],
   sources,
@@ -378,4 +378,4 @@ export function AgentAnswer({
       )}
     </>
   )
-}
+})

@@ -123,7 +123,24 @@ function themeSnapshot() {
  * @param fallback - The color used when the token cannot be resolved
  * @returns The resolved color as `#rrggbb`
  */
-function resolveTokenColor(token: string, fallback: string) {
+const TOKEN_COLOR_CACHE = new Map<string, string>()
+
+/**
+ * Resolves a CSS custom property to `#rrggbb`, caching once per theme key so
+ * repeated code/Mermaid renders avoid synchronous layout and canvas readbacks.
+ *
+ * @param token - The custom property name, including the leading dashes
+ * @param fallback - The color used when the token cannot be resolved
+ * @param themeKey - Current theme snapshot key for cache scoping
+ * @returns The resolved color as `#rrggbb`
+ */
+function resolveTokenColor(token: string, fallback: string, themeKey: string) {
+  const cacheKey = `${themeKey}:${token}:${fallback}`
+  const cached = TOKEN_COLOR_CACHE.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+
   const context = document.createElement("canvas").getContext("2d")
   if (!context) {
     return fallback
@@ -141,9 +158,11 @@ function resolveTokenColor(token: string, fallback: string) {
   context.fillRect(0, 0, 1, 1)
   const [red, green, blue] = context.getImageData(0, 0, 1, 1).data
 
-  return `#${[red, green, blue]
+  const resolved = `#${[red, green, blue]
     .map((channel) => channel.toString(16).padStart(2, "0"))
     .join("")}`
+  TOKEN_COLOR_CACHE.set(cacheKey, resolved)
+  return resolved
 }
 
 function CopyFeedback({ state }: { state: CopyState }) {
@@ -215,11 +234,15 @@ function CodeFrame({
  * @param language - The code language used for labeling and syntax highlighting.
  * @returns A rendered code block.
  */
+const STREAM_HIGHLIGHT_DEBOUNCE_MS = 120
+const STREAM_MERMAID_DEBOUNCE_MS = 250
+
 function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   const { t } = useLanguage()
   const { state, copy } = useCopyState()
   const [highlighted, setHighlighted] =
     React.useState<HighlightedCode | null>(null)
+  const hasAttemptedHighlightRef = React.useRef(false)
   const highlightedHtml =
     code.length <= MAX_RICH_CODE_CHARS && highlighted?.language === language
       ? highlighted.html
@@ -228,15 +251,28 @@ function SourceCodeBlock({ code, language }: MarkdownCodeBlockProps) {
   React.useEffect(() => {
     if (!language || code.length > MAX_RICH_CODE_CHARS) return
     let active = true
-    void highlightCode(code, language)
-      .then((html) => {
-        if (active) setHighlighted({ code, language, html })
-      })
-      .catch(() => {
-        if (active) setHighlighted(null)
-      })
+    const run = () => {
+      hasAttemptedHighlightRef.current = true
+      void highlightCode(code, language)
+        .then((html) => {
+          if (active) setHighlighted({ code, language, html })
+        })
+        .catch(() => {
+          if (active) setHighlighted(null)
+        })
+    }
+
+    if (!hasAttemptedHighlightRef.current) {
+      run()
+      return () => {
+        active = false
+      }
+    }
+
+    const timer = window.setTimeout(run, STREAM_HIGHLIGHT_DEBOUNCE_MS)
     return () => {
       active = false
+      window.clearTimeout(timer)
     }
   }, [code, language])
 
@@ -307,33 +343,56 @@ function MermaidCodeBlock({ code }: MarkdownCodeBlockProps) {
     () => "light:neutral",
   )
   const [rendered, setRendered] = React.useState<MermaidRender | null>(null)
+  const hasAttemptedRenderRef = React.useRef(false)
+  const lastThemeKeyRef = React.useRef(themeKey)
   const currentRender = rendered?.themeKey === themeKey ? rendered : null
 
   React.useEffect(() => {
     if (code.length > MAX_RICH_CODE_CHARS) return
     let active = true
+    const isThemeSwitch = lastThemeKeyRef.current !== themeKey
+    lastThemeKeyRef.current = themeKey
     const isDark = themeKey.startsWith("dark")
-    void import("beautiful-mermaid")
-      .then(({ renderMermaidSVG }) => {
-        try {
-          const svg = renderMermaidSVG(code, {
-            bg: resolveTokenColor("--card", isDark ? "#18181b" : "#ffffff"),
-            fg: resolveTokenColor(
-              "--foreground",
-              isDark ? "#fafafa" : "#27272a"
-            ),
-            transparent: true,
-          })
-          if (active) setRendered({ code, themeKey, svg })
-        } catch {
+
+    const run = () => {
+      hasAttemptedRenderRef.current = true
+      void import("beautiful-mermaid")
+        .then(({ renderMermaidSVG }) => {
+          try {
+            const svg = renderMermaidSVG(code, {
+              bg: resolveTokenColor(
+                "--card",
+                isDark ? "#18181b" : "#ffffff",
+                themeKey
+              ),
+              fg: resolveTokenColor(
+                "--foreground",
+                isDark ? "#fafafa" : "#27272a",
+                themeKey
+              ),
+              transparent: true,
+            })
+            if (active) setRendered({ code, themeKey, svg })
+          } catch {
+            if (active) setRendered({ code, themeKey, svg: null })
+          }
+        })
+        .catch(() => {
           if (active) setRendered({ code, themeKey, svg: null })
-        }
-      })
-      .catch(() => {
-        if (active) setRendered({ code, themeKey, svg: null })
-      })
+        })
+    }
+
+    if (!hasAttemptedRenderRef.current || isThemeSwitch) {
+      run()
+      return () => {
+        active = false
+      }
+    }
+
+    const timer = window.setTimeout(run, STREAM_MERMAID_DEBOUNCE_MS)
     return () => {
       active = false
+      window.clearTimeout(timer)
     }
   }, [code, themeKey])
 

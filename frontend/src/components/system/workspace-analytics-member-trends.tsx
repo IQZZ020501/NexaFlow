@@ -99,7 +99,7 @@ function formatCompactNumber(value: number, locale: string) {
  * @param series - Per-member daily usage series ordered by activity
  * @param locale - Locale used to format numbers in axes, tooltips, and menus
  */
-export function MemberComparisonChart({
+export const MemberComparisonChart = React.memo(function MemberComparisonChart({
   series,
   locale,
 }: {
@@ -475,4 +475,4 @@ export function MemberComparisonChart({
       </CardContent>
     </Card>
   )
-}
+})

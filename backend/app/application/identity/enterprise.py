@@ -25,7 +25,7 @@ from app.infra.db.repositories.identity import enterprise as identity_repository
 from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.observability.system_log import record_system_log
-from app.infra.security.auth import hash_password
+from app.infra.security.auth import hash_password_async
 from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import decrypt_secret, encrypt_secret, secret_hint
 from app.ports.enterprise_identity import (
@@ -77,7 +77,7 @@ async def _provision_enterprise_user(
             username=username,
             email=f"{username}@sso.nexaflow.invalid",
             name=(identity.display_name.strip() or username)[:120],
-            password_hash=hash_password(secrets.token_urlsafe(48)),
+            password_hash=await hash_password_async(secrets.token_urlsafe(48)),
             must_change_password=False,
         ),
     )

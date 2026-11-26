@@ -166,26 +166,34 @@ def _to_agent_run_entity(
 
 def _project_process_events(stored_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     projected: list[dict[str, Any]] = []
+    index_by_key: dict[tuple[Any, ...], int] = {}
     for stored in stored_events:
         if stored.get("type") != "process" or not isinstance(stored.get("event"), dict):
             continue
         event = stored["event"]
         call_id = event.get("call_id")
-        for index, current in enumerate(projected):
-            same_event = (
-                current.get("call_id") == call_id
-                if call_id
-                else not current.get("call_id")
-                and current.get("type") == event.get("type")
-                and current.get("turn") == event.get("turn")
-                and current.get("tool_name") == event.get("tool_name")
+        key = (
+            (True, call_id)
+            if call_id
+            else (
+                False,
+                event.get("type"),
+                event.get("turn"),
+                event.get("tool_name"),
             )
-            if same_event:
-                projected[index] = event
-                break
+        )
+        try:
+            existing_index = index_by_key.get(key)
+        except TypeError:
+            key = (False, json.dumps(key, sort_keys=True, default=str))
+            existing_index = index_by_key.get(key)
+        if existing_index is not None:
+            projected[existing_index] = event
         else:
+            index_by_key[key] = len(projected)
             projected.append(event)
     return [event for event in projected if event.get("status") != "running"]
+
 
 def _with_answer_ready_timestamp(
     event: dict[str, Any], created_at: datetime
@@ -202,6 +210,42 @@ def _with_answer_ready_timestamp(
         **event,
         "event": {**process_event, "created_at": to_app_timezone(created_at).isoformat()},
     }
+
+
+def _populate_session_inputs_for_entity(
+    entity: AgentRunEntity,
+    input_rows: list[tuple[int, dict[str, Any]]],
+) -> None:
+    consumed = {
+        item["id"]: item
+        for item in entity.checkpoint.get("harness", {}).get("inputs", [])
+    }
+    applied_ids = set(entity.checkpoint.get("harness", {}).get("input_ids", []))
+    for sequence, event in input_rows:
+        applied = sequence in applied_ids
+        entity.session_inputs.append(
+            {
+                "sequence": sequence,
+                "run_id": entity.id,
+                "input_id": event["input_id"],
+                "mode": "follow_up",
+                "content": event["content"],
+                "status": "applied" if applied else "queued",
+                "previous_answer": consumed.get(sequence, {}).get("previous_answer"),
+                "previous_answer_turn": consumed.get(sequence, {}).get(
+                    "previous_answer_turn"
+                ),
+            }
+        )
+    applied_order = list(consumed)
+    entity.session_inputs.sort(
+        key=lambda item: (
+            applied_order.index(item["sequence"])
+            if item["sequence"] in applied_order
+            else len(applied_order) + item["sequence"]
+        )
+    )
+
 
 async def _run_event_projections(
     db: AsyncSession,
@@ -224,64 +268,50 @@ async def _run_event_projections(
         for run_id, events in stored.items()
     }
 
+
 async def _to_agent_run_entities(
     db: AsyncSession,
     rows: list[tuple[AgentRun, AgentRunState, AgentRunSnapshot]],
 ) -> list[AgentRunEntity]:
-    projections = await _run_event_projections(db, [row[0].id for row in rows])
-    entities = [
-        _to_agent_run_entity(run, state, snapshot, events=projections.get(run.id))
-        for run, state, snapshot in rows
-    ]
-    await _attach_session_inputs(db, entities)
+    if not rows:
+        return []
+    entities = [_to_agent_run_entity(run, state, snapshot) for run, state, snapshot in rows]
+    await _attach_events_and_session_inputs(db, entities)
     return entities
 
 
-async def _attach_session_inputs(db: AsyncSession, entities: list[AgentRunEntity]) -> None:
+async def _attach_events_and_session_inputs(
+    db: AsyncSession, entities: list[AgentRunEntity]
+) -> None:
     if not entities:
         return
     by_id = {entity.id: entity for entity in entities}
     rows = await db.execute(
-        select(AgentRunEvent.run_id, AgentRunEvent.id, AgentRunEvent.event)
-        .where(
-            AgentRunEvent.run_id.in_(by_id),
-            AgentRunEvent.event["type"].as_string() == "session_input",
+        select(
+            AgentRunEvent.run_id,
+            AgentRunEvent.id,
+            AgentRunEvent.event,
+            AgentRunEvent.created_at,
         )
+        .where(AgentRunEvent.run_id.in_(by_id))
         .order_by(AgentRunEvent.id)
     )
-    consumed = {
-        entity.id: {
-            item["id"]: item
-            for item in entity.checkpoint.get("harness", {}).get("inputs", [])
-        }
-        for entity in entities
+    stored_process: dict[str, list[dict[str, Any]]] = {run_id: [] for run_id in by_id}
+    stored_inputs: dict[str, list[tuple[int, dict[str, Any]]]] = {
+        run_id: [] for run_id in by_id
     }
-    for run_id, sequence, event in rows:
-        entity = by_id[run_id]
-        applied = sequence in entity.checkpoint.get("harness", {}).get("input_ids", [])
-        entity.session_inputs.append(
-            {
-                "sequence": sequence,
-                "run_id": run_id,
-                "input_id": event["input_id"],
-                "mode": "follow_up",
-                "content": event["content"],
-                "status": "applied" if applied else "queued",
-                "previous_answer": consumed[run_id].get(sequence, {}).get("previous_answer"),
-                "previous_answer_turn": consumed[run_id]
-                .get(sequence, {})
-                .get("previous_answer_turn"),
-            }
-        )
-    for entity in entities:
-        applied_ids = list(consumed[entity.id])
-        entity.session_inputs.sort(
-            key=lambda item: (
-                applied_ids.index(item["sequence"])
-                if item["sequence"] in applied_ids
-                else len(applied_ids) + item["sequence"]
+    for run_id, sequence, event, created_at in rows.all():
+        event_type = event.get("type") if isinstance(event, dict) else None
+        if event_type == "session_input":
+            stored_inputs[run_id].append((sequence, event))
+        elif event_type == "process":
+            stored_process[run_id].append(
+                _with_answer_ready_timestamp(event, created_at)
             )
-        )
+    for run_id, entity in by_id.items():
+        entity.events = _project_process_events(stored_process[run_id])
+        if stored_inputs[run_id]:
+            _populate_session_inputs_for_entity(entity, stored_inputs[run_id])
 
 def _worker_generation(configuration_source: str) -> str:
     return "unified" if configuration_source in {"draft", "published"} else "legacy"
@@ -351,10 +381,48 @@ async def get_agent_run_by_id(
     row = await _load_run_rows(db, run_id)
     if row is None:
         return None
-    projections = await _run_event_projections(db, [run_id])
-    entity = _to_agent_run_entity(*row, events=projections.get(run_id))
-    await _attach_session_inputs(db, [entity])
+    entity = _to_agent_run_entity(*row)
+    await _attach_events_and_session_inputs(db, [entity])
     return entity
+
+
+async def get_agent_run_poll_state(
+    db: AsyncSession,
+    run_id: str,
+) -> tuple[str, datetime | None] | None:
+    row = (
+        await db.execute(
+            select(AgentRunState.status, AgentRunState.lease_expires_at).where(
+                AgentRunState.run_id == run_id
+            )
+        )
+    ).first()
+    if row is None:
+        return None
+    return row[0], row[1]
+
+
+async def list_agent_run_sources_by_ids(
+    db: AsyncSession,
+    run_ids: list[str],
+) -> dict[str, tuple[str, str, str, str, str]]:
+    unique_ids = list(dict.fromkeys(run_ids))
+    if not unique_ids:
+        return {}
+    rows = await db.execute(
+        select(
+            AgentRun.id,
+            AgentRun.workspace_id,
+            AgentRun.agent_id,
+            AgentRun.consumer_id,
+            AgentRun.access_source,
+            AgentRun.conversation_id,
+        ).where(AgentRun.id.in_(unique_ids))
+    )
+    return {
+        run_id: (workspace_id, agent_id, consumer_id, access_source, conversation_id)
+        for run_id, workspace_id, agent_id, consumer_id, access_source, conversation_id in rows.all()
+    }
 
 async def create_agent_run(db: AsyncSession, entity: AgentRunEntity) -> AgentRunEntity:
     run = AgentRun(**_entity_values(entity, _RUN_CORE_FIELDS))

@@ -69,6 +69,11 @@ from app.infra.db.repositories.identity import users as user_repository
 from app.infra.db.repositories.workflows import repository as workflow_repository
 from app.infra.db.repositories.workspaces import repository as workspace_repository
 from app.infra.db.session import get_session_factory
+from app.infra.security.agent_rate_limit import (
+    WebhookRateLimitExceeded,
+    WebhookRateLimitUnavailable,
+    enforce_webhook_rate_limit,
+)
 from app.infra.security.keyring import application_secret_key
 from app.infra.security.secrets import decrypt_secret, encrypt_secret
 from app.schemas.automations import (
@@ -493,11 +498,9 @@ async def list_automations(
         [item.id for item in items],
     )
     runs_map = await _latest_run_map(db, list(latest_map.values()))
-    app_names: dict[str, str] = {}
-    for app_id in {item.target_app_id for item in items}:
-        agent = await agent_repository.get_agent_by_id(db, app_id)
-        if agent is not None:
-            app_names[app_id] = agent.name
+    app_names = await agent_repository.list_agent_names_by_ids(
+        db, [item.target_app_id for item in items]
+    )
 
     responses: list[AutomationResponse] = []
     for item in items:
@@ -1277,6 +1280,7 @@ async def receive_webhook_trigger(
     signature_header: str | None,
     event_id_header: str | None,
     settings: Settings,
+    source_ip: str | None = None,
 ) -> AutomationWebhookReceiptResponse:
     if len(raw_body) > MAX_WEBHOOK_PAYLOAD_BYTES:
         raise HTTPException(
@@ -1284,8 +1288,22 @@ async def receive_webhook_trigger(
             "Webhook payload exceeds maximum allowed size.",
         )
 
+    try:
+        await enforce_webhook_rate_limit(settings, hook_id, source_ip)
+    except WebhookRateLimitExceeded as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Webhook rate limit exceeded.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except WebhookRateLimitUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Webhook rate limiter is unavailable.",
+        ) from exc
+
     automation = await automation_repository.get_automation_by_hook_id(
-        db, hook_id, lock=True
+        db, hook_id, lock=False
     )
     if (
         automation is None
@@ -1294,9 +1312,10 @@ async def receive_webhook_trigger(
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Webhook hook not found.")
 
+    pre_lock_secret_ciphertext = automation.webhook_secret_ciphertext
     try:
         secret = decrypt_secret(
-            automation.webhook_secret_ciphertext,
+            pre_lock_secret_ciphertext,
             application_secret_key(settings),
         )
         event_id, _ts = verify_webhook_signature(
@@ -1309,6 +1328,18 @@ async def receive_webhook_trigger(
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    automation = await automation_repository.get_automation_by_hook_id(
+        db, hook_id, lock=True
+    )
+    if (
+        automation is None
+        or automation.trigger_type != "webhook"
+        or not automation.webhook_secret_ciphertext
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Webhook hook not found.")
+    if automation.webhook_secret_ciphertext != pre_lock_secret_ciphertext:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid webhook signature.")
 
     try:
         parsed_body = json.loads(

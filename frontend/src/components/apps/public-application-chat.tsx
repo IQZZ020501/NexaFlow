@@ -11,7 +11,10 @@ import { Button } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/language-provider"
 import { useSession } from "@/contexts/session-context"
 import { ApiError } from "@/lib/api-client"
-import { getPublicAgentProfile } from "@/lib/api/public-agents"
+import {
+  getPublicAgentProfile,
+  type PublicAgentProfile,
+} from "@/lib/api/public-agents"
 import { getPublicWorkflowProfile } from "@/lib/api/public-workflows"
 import { publicChatUrl } from "@/lib/api/public-chat-projects"
 
@@ -34,10 +37,17 @@ export function PublicApplicationChat({
   const { t } = useLanguage()
   const { token, isSessionRestored, notification, dismissNotification } =
     useSession()
-  const [kind, setKind] = React.useState<
-    "agent" | "workflow" | "missing" | "error" | null
-  >(null)
+  const requestKey = `${applicationId}:${initialProjectId ?? ""}`
   const [attempt, setAttempt] = React.useState(0)
+  const [resolution, setResolution] = React.useState<{
+    key: string
+    kind: "agent" | "workflow" | "missing" | "error"
+    profile: PublicAgentProfile | null
+  } | null>(null)
+  const resolved = resolution?.key === `${requestKey}:${attempt}` ? resolution : null
+  const kind = resolved?.kind ?? null
+  const agentProfile = resolved?.profile ?? null
+  const resolvedKeyRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
     if (!isSessionRestored || token) return
@@ -58,37 +68,46 @@ export function PublicApplicationChat({
 
   React.useEffect(() => {
     if (!token) return
+    const activeKey = `${requestKey}:${attempt}`
+    if (resolvedKeyRef.current === activeKey) return
     let active = true
     getPublicAgentProfile(applicationId, token)
-      .then(() => active && setKind("agent"))
+      .then((nextProfile) => {
+        if (!active) return
+        resolvedKeyRef.current = activeKey
+        setResolution({ key: activeKey, kind: "agent", profile: nextProfile })
+      })
       .catch((error: unknown) => {
         if (!(error instanceof ApiError) || error.status !== 404) throw error
         if (initialProjectId) throw error
-        return getPublicWorkflowProfile(applicationId, token).then(
-          () => active && setKind("workflow")
-        )
+        return getPublicWorkflowProfile(applicationId, token).then(() => {
+          if (!active) return
+          resolvedKeyRef.current = activeKey
+          setResolution({ key: activeKey, kind: "workflow", profile: null })
+        })
       })
       .catch((error: unknown) => {
         if (!active) return
-        setKind(
-          error instanceof ApiError && error.status === 404
-            ? "missing"
-            : "error"
-        )
+        setResolution({
+          key: activeKey,
+          kind: error instanceof ApiError && error.status === 404 ? "missing" : "error",
+          profile: null,
+        })
       })
     return () => {
       active = false
     }
-  }, [applicationId, attempt, initialProjectId, token])
+  }, [applicationId, attempt, initialProjectId, requestKey, token])
 
   if (kind === "agent") {
     return (
       <>
         <PublicAgentChat
-          key={`${applicationId}:${token}`}
+          key={applicationId}
           agentId={applicationId}
           initialConversationId={initialConversationId}
           initialProjectId={initialProjectId}
+          initialProfile={agentProfile}
         />
         <OperationNotification
           notification={notification}
@@ -123,7 +142,7 @@ export function PublicApplicationChat({
             variant="outline"
             size="sm"
             onClick={() => {
-              setKind(null)
+              resolvedKeyRef.current = null
               setAttempt((current) => current + 1)
             }}
           >

@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -20,8 +21,16 @@ def hash_password(password: str) -> str:
     return _password_hash.hash(password)
 
 
+async def hash_password_async(password: str) -> str:
+    return await asyncio.to_thread(hash_password, password)
+
+
 def verify_password(password: str, password_hash: str) -> bool:
     return _password_hash.verify(password, password_hash)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    return await asyncio.to_thread(verify_password, password, password_hash)
 
 
 def create_access_token(

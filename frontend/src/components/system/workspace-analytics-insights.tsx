@@ -191,21 +191,29 @@ function DonutChart({
         )}%`
       : "—"
 
-  const chartData = items.map((item, index) => ({
-    key: item.key,
-    count: item.count,
-    fill: itemColor(kind, item.key, index),
-  }))
+  const chartData = React.useMemo(
+    () =>
+      items.map((item, index) => ({
+        key: item.key,
+        count: item.count,
+        fill: itemColor(kind, item.key, index),
+      })),
+    [items, kind]
+  )
 
-  const chartConfig = Object.fromEntries(
-    items.map((item, index) => [
-      item.key,
-      {
-        label: distributionLabel(item.key, kind, t),
-        color: itemColor(kind, item.key, index),
-      },
-    ])
-  ) satisfies ChartConfig
+  const chartConfig = React.useMemo(
+    () =>
+      Object.fromEntries(
+        items.map((item, index) => [
+          item.key,
+          {
+            label: distributionLabel(item.key, kind, t),
+            color: itemColor(kind, item.key, index),
+          },
+        ])
+      ) satisfies ChartConfig,
+    [items, kind, t]
+  )
 
   return (
     <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4">
@@ -340,7 +348,7 @@ function DonutChart({
  * @param data - Distribution data for run types, access sources, and statuses
  * @param locale - Locale used to format chart labels and values
  */
-export function RunDistributionPanel({
+export const RunDistributionPanel = React.memo(function RunDistributionPanel({
   data,
   locale,
 }: {
@@ -374,7 +382,7 @@ export function RunDistributionPanel({
       </CardContent>
     </Card>
   )
-}
+})
 
 type RankingView = "applications" | "users" | "teams"
 

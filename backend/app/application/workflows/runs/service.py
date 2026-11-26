@@ -187,6 +187,20 @@ async def regenerate_workflow_run_from_source(
             status.HTTP_409_CONFLICT,
             "Only a completed run can be regenerated.",
         )
+    if detail.source == "published":
+        live_agent = await agent_repository.get_agent_by_id(db, source.agent_id)
+        latest_version = (
+            await workflow_repository.get_version(
+                db, source.workspace_id, source.agent_id
+            )
+            if live_agent is not None and live_agent.published
+            else None
+        )
+        if latest_version is None or latest_version.id != detail.version_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Published workflow version is no longer active.",
+            )
     if await agent_repository.get_active_agent_run(
         db,
         source.agent_id,
@@ -1055,24 +1069,38 @@ async def stream_workflow_run(
             terminal_event: dict[str, Any] | None = None
             rows: list[Any] = []
             if loop.time() >= next_database_poll:
+                response = None
                 async with get_session_factory()() as db:
-                    run = await agent_repository.get_agent_run_by_id(db, run_id)
-                    detail = await workflow_repository.get_run_detail(db, run_id)
-                    response = (
-                        await workflow_run_response(db, run, detail)
-                        if run and detail
-                        else None
-                    )
                     rows = await agent_repository.list_agent_run_events(
                         db,
                         run_id,
                         after=cursor,
                         limit=WORKFLOW_EVENT_PAGE_SIZE,
                     )
-                if run is None or detail is None:
-                    return
-                display_status = agent_run_display_status(run.status)
-                if not snapshot_sent:
+                    if not snapshot_sent:
+                        run = await agent_repository.get_agent_run_by_id(db, run_id)
+                        detail = await workflow_repository.get_run_detail(db, run_id)
+                        if run is None or detail is None:
+                            return
+                        response = await workflow_run_response(db, run, detail)
+                        display_status = agent_run_display_status(run.status)
+                    else:
+                        poll_state = await agent_repository.get_agent_run_poll_state(
+                            db, run_id
+                        )
+                        if poll_state is None:
+                            return
+                        display_status = agent_run_display_status(poll_state[0])
+                        if (
+                            display_status in stopping_statuses
+                            and len(rows) < WORKFLOW_EVENT_PAGE_SIZE
+                        ):
+                            run = await agent_repository.get_agent_run_by_id(db, run_id)
+                            detail = await workflow_repository.get_run_detail(db, run_id)
+                            if run is None or detail is None:
+                                return
+                            response = await workflow_run_response(db, run, detail)
+                if not snapshot_sent and response is not None:
                     yield {
                         "type": "run",
                         "sequence": cursor,
@@ -1109,6 +1137,13 @@ async def stream_workflow_run(
                             live_cursor = live_sequence
                             if event.get("type") in LIVE_EVENT_TYPES:
                                 yield {**event, "live_sequence": live_cursor}
+                    if terminal_event is None and response is None:
+                        async with get_session_factory()() as db:
+                            run = await agent_repository.get_agent_run_by_id(db, run_id)
+                            detail = await workflow_repository.get_run_detail(db, run_id)
+                            if run is None or detail is None:
+                                return
+                            response = await workflow_run_response(db, run, detail)
                     yield terminal_event or {
                         "type": (
                             "workflow_input_required"

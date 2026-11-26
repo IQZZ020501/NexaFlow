@@ -4,8 +4,9 @@ import { InlineToolApproval } from "@/components/agents/inline-tool-approval"
 import { AgentToolCallRow } from "@/components/agents/agent-tool-call-row"
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 import { useAutoFollowScroll } from "@/lib/use-auto-follow-scroll"
-import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import { LazyModelIcon as ModelIcon } from "@/components/llm/lazy-model-icon"
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -96,9 +97,16 @@ import {
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
-  AgentMonitoringPanel,
   AgentOverviewPanel,
 } from "./agent-management-panels"
+
+const AgentMonitoringPanel = dynamic(
+  () =>
+    import("@/components/agents/agent-monitoring-panel").then(
+      (mod) => mod.AgentMonitoringPanel
+    ),
+  { ssr: false }
+)
 import type { AgentFormState } from "./agents-page"
 import { ToolInputPreview } from "./tool-input-preview"
 import {
@@ -108,6 +116,13 @@ import {
 import { AgentArtifactPreviewPanel } from "./artifacts/agent-artifact-previews"
 
 export { isNearScrollBottom } from "@/lib/use-auto-follow-scroll"
+
+const EMPTY_TOOL_CALLS: AgentToolCall[] = []
+
+export type AgentWorkspaceComposerApi = {
+  setDraft: (value: string) => void
+  clearMatchingDraft: (expected: string) => void
+}
 
 type AgentDetailWorkspaceProps = {
   agent: Agent
@@ -120,8 +135,9 @@ type AgentDetailWorkspaceProps = {
   runs: AgentRun[]
   toolCallsByRun: Record<string, AgentToolCall[]>
   resolvingCallId: string | null
-  question: string
-  setQuestion: React.Dispatch<React.SetStateAction<string>>
+  question?: string
+  setQuestion?: React.Dispatch<React.SetStateAction<string>>
+  composerApiRef?: React.RefObject<AgentWorkspaceComposerApi | null>
   approvalMode: AgentApprovalMode
   onApprovalModeChange: (value: AgentApprovalMode) => void
   files: File[]
@@ -141,7 +157,7 @@ type AgentDetailWorkspaceProps = {
   onSave: (event: React.FormEvent<HTMLFormElement>) => void
   onPublish: () => void
   onViewChange: (view: AgentDetailView) => void
-  onAsk: (event: React.FormEvent<HTMLFormElement>) => void
+  onAsk: (event: React.FormEvent<HTMLFormElement>, draftText?: string) => void
   onAskSuggestedQuestion?: (question: string) => void
   onCancelAsk: () => void | Promise<void>
   onNewConversation: () => void
@@ -490,7 +506,7 @@ function PendingToolEvent({
   )
 }
 
-function RunExchange({
+const RunExchange = React.memo(function RunExchange({
   run,
   toolCalls,
   resolvingCallId,
@@ -856,7 +872,196 @@ function RunExchange({
         ))}
     </article>
   )
-}
+})
+
+const AgentWorkspaceComposer = React.memo(function AgentWorkspaceComposer({
+  controlledQuestion,
+  onControlledQuestionChange,
+  composerApiRef,
+  files,
+  setFiles,
+  isReadingFiles,
+  onDrop,
+  approvalMode,
+  onApprovalModeChange,
+  isAsking,
+  isDirty,
+  isRunsLoading,
+  agentStatus,
+  followOutput,
+  onAsk,
+  onCancelAsk,
+  t,
+}: {
+  controlledQuestion?: string
+  onControlledQuestionChange?: React.Dispatch<React.SetStateAction<string>>
+  composerApiRef?: React.RefObject<AgentWorkspaceComposerApi | null>
+  files: File[]
+  setFiles: React.Dispatch<React.SetStateAction<File[]>>
+  isReadingFiles: boolean
+  onDrop: React.DragEventHandler<HTMLFormElement>
+  approvalMode: AgentApprovalMode
+  onApprovalModeChange: (value: AgentApprovalMode) => void
+  isAsking: boolean
+  isDirty: boolean
+  isRunsLoading: boolean
+  agentStatus: Agent["status"]
+  followOutput: () => void
+  onAsk: (event: React.FormEvent<HTMLFormElement>, draftText?: string) => void
+  onCancelAsk: () => void | Promise<void>
+  t: TFunction
+}) {
+  const [localQuestion, setLocalQuestion] = React.useState("")
+  const isControlled =
+    controlledQuestion !== undefined &&
+    onControlledQuestionChange !== undefined
+  const value = isControlled ? controlledQuestion : localQuestion
+
+  React.useImperativeHandle(
+    composerApiRef,
+    () => ({
+      setDraft(nextValue: string) {
+        if (onControlledQuestionChange) {
+          onControlledQuestionChange(nextValue)
+        } else {
+          setLocalQuestion(nextValue)
+        }
+      },
+      clearMatchingDraft(expected: string) {
+        const updater = (current: string) =>
+          current.trim() === expected ? "" : current
+        if (onControlledQuestionChange) {
+          onControlledQuestionChange(updater)
+        } else {
+          setLocalQuestion(updater)
+        }
+      },
+    }),
+    [onControlledQuestionChange]
+  )
+
+  return (
+    <AgentPromptBar
+      aria-busy={isReadingFiles}
+      onSubmit={(event) => {
+        if (isReadingFiles) {
+          event.preventDefault()
+          return
+        }
+        followOutput()
+        const draft = value
+        if (
+          !isControlled &&
+          !isAsking &&
+          draft.trim() &&
+          !isDirty &&
+          !isRunsLoading &&
+          agentStatus === "active"
+        ) {
+          setLocalQuestion("")
+        }
+        onAsk(event, draft)
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) {
+          event.preventDefault()
+        }
+      }}
+      onDrop={onDrop}
+    >
+      <AgentPromptInput
+        value={value}
+        onChange={(event) => {
+          const nextValue = event.target.value
+          if (onControlledQuestionChange) {
+            onControlledQuestionChange(nextValue)
+          } else {
+            setLocalQuestion(nextValue)
+          }
+        }}
+        onPaste={(event) => {
+          if (isAsking) return
+          const pasted = transferredFiles(event.clipboardData)
+          if (!pasted.length) return
+          event.preventDefault()
+          setFiles((current) => appendAttachmentFiles(current, pasted))
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault()
+            event.currentTarget.form?.requestSubmit()
+          }
+        }}
+        placeholder={
+          isDirty ? t("请先保存配置后再调试") : t("向 Agent 提问...")
+        }
+        aria-label={t("向 Agent 提问")}
+        enterKeyHint="send"
+        autoComplete="off"
+        disabled={isDirty || isRunsLoading || agentStatus !== "active"}
+        maxLength={4000}
+        rows={1}
+      />
+      {files.length > 0 ? (
+        <div className="bui-prompt-files">
+          <AgentAttachmentList
+            files={files}
+            onRemove={(indexToRemove) =>
+              setFiles((current) =>
+                current.filter((_, index) => index !== indexToRemove)
+              )
+            }
+            t={t}
+          />
+        </div>
+      ) : null}
+      <div className="bui-prompt-toolbar justify-between">
+        <div className="bui-prompt-attach">
+          <AgentFilePicker
+            disabled={
+              isDirty ||
+              isAsking ||
+              isRunsLoading ||
+              isReadingFiles ||
+              agentStatus !== "active"
+            }
+            onFiles={(selected) =>
+              setFiles((current) => appendAttachmentFiles(current, selected))
+            }
+            t={t}
+          />
+        </div>
+        <div className="bui-prompt-actions">
+          <AgentApprovalModeMenu
+            value={approvalMode}
+            onChange={onApprovalModeChange}
+            disabled={
+              isDirty || isAsking || isRunsLoading || agentStatus !== "active"
+            }
+            t={t}
+          />
+          <AgentChatSubmitButton
+            isRunning={isAsking}
+            hasInput={Boolean(value.trim())}
+            sendDisabled={
+              !isAsking &&
+              (isDirty ||
+                isRunsLoading ||
+                isReadingFiles ||
+                agentStatus !== "active")
+            }
+            onStop={onCancelAsk}
+            t={t}
+          />
+        </div>
+      </div>
+    </AgentPromptBar>
+  )
+})
 
 /**
  * Renders the Agent detail workspace with configuration, preview, navigation, and management views.
@@ -876,6 +1081,7 @@ export function AgentDetailWorkspace({
   resolvingCallId,
   question,
   setQuestion,
+  composerApiRef,
   approvalMode,
   onApprovalModeChange,
   files,
@@ -1385,7 +1591,9 @@ export function AgentDetailWorkspace({
                               <RunExchange
                                 key={run.id}
                                 run={run}
-                                toolCalls={toolCallsByRun[run.id] ?? []}
+                                toolCalls={
+                                  toolCallsByRun[run.id] ?? EMPTY_TOOL_CALLS
+                                }
                                 resolvingCallId={resolvingCallId}
                                 onToolCallDecision={onToolCallDecision}
                                 onRegenerateRun={onRegenerateRun}
@@ -1419,122 +1627,25 @@ export function AgentDetailWorkspace({
                     </div>
 
                     <div className="shrink-0 bg-background p-2 sm:p-4">
-                      <AgentPromptBar
-                        aria-busy={fileDrop.isReadingFiles}
-                        onSubmit={(event) => {
-                          if (fileDrop.isReadingFiles) {
-                            event.preventDefault()
-                            return
-                          }
-                          followOutput()
-                          onAsk(event)
-                        }}
-                        onDragOver={(event) => {
-                          if (event.dataTransfer.types.includes("Files")) {
-                            event.preventDefault()
-                          }
-                        }}
+                      <AgentWorkspaceComposer
+                        controlledQuestion={question}
+                        onControlledQuestionChange={setQuestion}
+                        composerApiRef={composerApiRef}
+                        files={files}
+                        setFiles={setFiles}
+                        isReadingFiles={fileDrop.isReadingFiles}
                         onDrop={fileDrop.onDrop}
-                      >
-                        <AgentPromptInput
-                          value={question}
-                          onChange={(event) => setQuestion(event.target.value)}
-                          onPaste={(event) => {
-                            if (isAsking) return
-                            const pasted = transferredFiles(event.clipboardData)
-                            if (!pasted.length) return
-                            event.preventDefault()
-                            setFiles((current) =>
-                              appendAttachmentFiles(current, pasted)
-                            )
-                          }}
-                          onKeyDown={(event) => {
-                            if (
-                              event.key === "Enter" &&
-                              !event.shiftKey &&
-                              !event.nativeEvent.isComposing
-                            ) {
-                              event.preventDefault()
-                              event.currentTarget.form?.requestSubmit()
-                            }
-                          }}
-                          placeholder={
-                            isDirty
-                              ? t("请先保存配置后再调试")
-                              : t("向 Agent 提问...")
-                          }
-                          aria-label={t("向 Agent 提问")}
-                          enterKeyHint="send"
-                          autoComplete="off"
-                          disabled={
-                            isDirty ||
-                            isRunsLoading ||
-                            agent.status !== "active"
-                          }
-                          maxLength={4000}
-                          rows={1}
-                        />
-                        {files.length > 0 ? (
-                          <div className="bui-prompt-files">
-                            <AgentAttachmentList
-                              files={files}
-                              onRemove={(indexToRemove) =>
-                                setFiles((current) =>
-                                  current.filter(
-                                    (_, index) => index !== indexToRemove
-                                  )
-                                )
-                              }
-                              t={t}
-                            />
-                          </div>
-                        ) : null}
-                        <div className="bui-prompt-toolbar justify-between">
-                          <div className="bui-prompt-attach">
-                            <AgentFilePicker
-                              disabled={
-                                isDirty ||
-                                isAsking ||
-                                isRunsLoading ||
-                                fileDrop.isReadingFiles ||
-                                agent.status !== "active"
-                              }
-                              onFiles={(selected) =>
-                                setFiles((current) =>
-                                  appendAttachmentFiles(current, selected)
-                                )
-                              }
-                              t={t}
-                            />
-                          </div>
-                          <div className="bui-prompt-actions">
-                            <AgentApprovalModeMenu
-                              value={approvalMode}
-                              onChange={onApprovalModeChange}
-                              disabled={
-                                isDirty ||
-                                isAsking ||
-                                isRunsLoading ||
-                                agent.status !== "active"
-                              }
-                              t={t}
-                            />
-                            <AgentChatSubmitButton
-                              isRunning={isAsking}
-                              hasInput={Boolean(question.trim())}
-                              sendDisabled={
-                                !isAsking &&
-                                (isDirty ||
-                                  isRunsLoading ||
-                                  fileDrop.isReadingFiles ||
-                                  agent.status !== "active")
-                              }
-                              onStop={onCancelAsk}
-                              t={t}
-                            />
-                          </div>
-                        </div>
-                      </AgentPromptBar>
+                        approvalMode={approvalMode}
+                        onApprovalModeChange={onApprovalModeChange}
+                        isAsking={isAsking}
+                        isDirty={isDirty}
+                        isRunsLoading={isRunsLoading}
+                        agentStatus={agent.status}
+                        followOutput={followOutput}
+                        onAsk={onAsk}
+                        onCancelAsk={onCancelAsk}
+                        t={t}
+                      />
                     </div>
                   </section>
                   <AgentArtifactPreviewPanel />

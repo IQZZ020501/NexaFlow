@@ -11,6 +11,7 @@ import type { AuditLog } from "@/lib/api/system"
 import { cn } from "@/lib/utils"
 import { auditActionLabel } from "@/lib/constants"
 import { formatDateTime } from "@/lib/display"
+import { escapeCsvCell } from "@/lib/safe-url"
 import { formatAuditDetails } from "@/components/system/system-utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -83,7 +84,7 @@ export function AuditPanel({
       ]),
     ]
     const csv = rows
-      .map((row) => row.map((value) => `"${value.replaceAll('"', '""')}"`).join(","))
+      .map((row) => row.map((value) => escapeCsvCell(value)).join(","))
       .join("\n")
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }))
     const anchor = document.createElement("a")

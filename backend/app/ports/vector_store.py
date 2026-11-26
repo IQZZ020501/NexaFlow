@@ -59,6 +59,8 @@ class VectorStore(Protocol):
         limit: int,
         score_threshold: float | None = None,
         document_ids: set[str] | None = None,
+        *,
+        query_embedding: list[float] | None = None,
     ) -> list[VectorHit]: ...
 
 
@@ -107,6 +109,8 @@ def query_vectors(
     limit: int,
     score_threshold: float | None = None,
     document_ids: set[str] | None = None,
+    *,
+    query_embedding: list[float] | None = None,
 ) -> list[VectorHit]:
     return build_vector_store(settings).query_vectors(
         knowledge_base_id,
@@ -115,6 +119,7 @@ def query_vectors(
         limit,
         score_threshold,
         document_ids,
+        query_embedding=query_embedding,
     )
 
 

@@ -7,7 +7,7 @@ import {
   mergeAgentProcessEvent,
   mergeAgentProcessSnapshot,
 } from "@/lib/agent-process-stream"
-import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import { LazyModelIcon as ModelIcon } from "@/components/llm/lazy-model-icon"
 import dynamic from "next/dynamic"
 import { useParams, useRouter } from "next/navigation"
 import {
@@ -34,7 +34,10 @@ import { feedbackConfirmationLabel } from "@/components/app/run-action-bar"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { AgentConfigFields } from "@/components/agents/agent-config-fields"
-import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace"
+import {
+  AgentDetailWorkspace,
+  type AgentWorkspaceComposerApi,
+} from "@/components/agents/agent-detail-workspace"
 import { runAttachmentFromFile } from "@/components/agents/agent-attachment-list"
 import { AgentPermissionsDialog } from "@/components/agents/agent-permissions-dialog"
 import {
@@ -114,6 +117,7 @@ import {
   type AgentToolCall,
 } from "@/lib/api/agents"
 import type { AgentSkillRef } from "@/lib/api/agent-skills"
+import { createStreamEventBatcher } from "@/lib/stream-batcher"
 import { listAgentSkills, type AgentSkill } from "@/lib/api/agent-skills"
 import { listKnowledgeBases, type KnowledgeBase } from "@/lib/api/knowledge"
 import { listRegisteredModels, type RegisteredModel } from "@/lib/api/llm"
@@ -732,7 +736,7 @@ export function AgentsPage({
   const [resolvingCallId, setResolvingCallId] = React.useState<string | null>(
     null
   )
-  const [question, setQuestion] = React.useState("")
+  const composerApiRef = React.useRef<AgentWorkspaceComposerApi | null>(null)
   const [approvalMode, setApprovalMode] =
     React.useState<AgentApprovalMode>("always_ask")
   const [agentFiles, setAgentFiles] = React.useState<File[]>([])
@@ -942,14 +946,15 @@ export function AgentsPage({
     [selectedWorkspaceId, token]
   )
 
-  const applyStreamEvent = React.useCallback(
+  const applyStreamEvents = React.useCallback(
     (
       conversationId: string,
       runId: string,
-      streamEvent: AgentRunStreamEvent,
+      streamEvents: AgentRunStreamEvent[],
       placeholderId?: string
     ) => {
       if (
+        streamEvents.length === 0 ||
         !isCurrentAgentConversation(
           activeConversationIdRef.current,
           conversationId
@@ -958,25 +963,31 @@ export function AgentsPage({
         return
       }
       setRuns((current) =>
-        mergeAgentRunStreamEvent(current, runId, streamEvent, placeholderId)
+        streamEvents.reduce(
+          (acc, streamEvent) =>
+            mergeAgentRunStreamEvent(acc, runId, streamEvent, placeholderId),
+          current
+        )
       )
-      if (
-        streamEvent.type === "approval_required" ||
-        streamEvent.type === "approval_resolved"
-      ) {
-        if (selectedAgentId) {
-          void loadRunToolCalls(selectedAgentId, runId, conversationId).catch(
-            (error: unknown) => {
-              if (
-                isCurrentAgentConversation(
-                  activeConversationIdRef.current,
-                  conversationId
-                )
-              ) {
-                reportError(error)
+      for (const streamEvent of streamEvents) {
+        if (
+          streamEvent.type === "approval_required" ||
+          streamEvent.type === "approval_resolved"
+        ) {
+          if (selectedAgentId) {
+            void loadRunToolCalls(selectedAgentId, runId, conversationId).catch(
+              (error: unknown) => {
+                if (
+                  isCurrentAgentConversation(
+                    activeConversationIdRef.current,
+                    conversationId
+                  )
+                ) {
+                  reportError(error)
+                }
               }
-            }
-          )
+            )
+          }
         }
       }
     },
@@ -1332,25 +1343,36 @@ export function AgentsPage({
           }
           const controller = new AbortController()
           observers.push(controller)
+          const batcher = createStreamEventBatcher<AgentRunStreamEvent>(
+            (event) =>
+              event.type === "answer_delta" ||
+              event.type === "reasoning_delta" ||
+              event.type === "tool_input_delta",
+            (events) => applyStreamEvents(resolvedConversationId, run.id, events)
+          )
+          controller.signal.addEventListener("abort", () => batcher.cancel(), {
+            once: true,
+          })
           void observeAgentRun(
             token,
             selectedWorkspaceId,
             selectedAgentId,
             run.id,
-            (streamEvent) =>
-              applyStreamEvent(resolvedConversationId, run.id, streamEvent),
+            (streamEvent) => batcher.push(streamEvent),
             controller.signal
-          ).catch((error: unknown) => {
-            if (
-              !controller.signal.aborted &&
-              isCurrentAgentConversation(
-                activeConversationIdRef.current,
-                resolvedConversationId
-              )
-            ) {
-              reportError(error)
-            }
-          })
+          )
+            .catch((error: unknown) => {
+              if (
+                !controller.signal.aborted &&
+                isCurrentAgentConversation(
+                  activeConversationIdRef.current,
+                  resolvedConversationId
+                )
+              ) {
+                reportError(error)
+              }
+            })
+            .finally(() => batcher.flushNow())
         }
       })
       .catch((error: unknown) => {
@@ -1381,7 +1403,7 @@ export function AgentsPage({
       observers.forEach((controller) => controller.abort())
     }
   }, [
-    applyStreamEvent,
+    applyStreamEvents,
     loadRunToolCalls,
     reportError,
     initialConversationId,
@@ -1712,9 +1734,9 @@ export function AgentsPage({
     }
   }
 
-  async function handleFollowUp() {
+  async function handleFollowUp(draftText?: string) {
     const runId = liveRunIdRef.current
-    const content = question.trim()
+    const content = (draftText ?? "").trim()
     if (
       !token ||
       !selectedWorkspaceId ||
@@ -1754,7 +1776,7 @@ export function AgentsPage({
             : run
         )
       )
-      setQuestion((current) => (current.trim() === content ? "" : current))
+      composerApiRef.current?.clearMatchingDraft(content)
       sessionInputRef.current = null
       notify("success", t("后续任务已排队"))
     } catch (error) {
@@ -1766,14 +1788,15 @@ export function AgentsPage({
 
   async function handleAsk(
     event?: React.FormEvent<HTMLFormElement>,
-    suggestedQuestion?: string
+    suggestedQuestion?: string,
+    draftText?: string
   ) {
     event?.preventDefault()
     if (isAsking) {
-      await handleFollowUp()
+      await handleFollowUp(draftText)
       return
     }
-    const nextQuestion = (suggestedQuestion ?? question).trim()
+    const nextQuestion = (suggestedQuestion ?? draftText ?? "").trim()
     if (
       !token ||
       !selectedWorkspaceId ||
@@ -1795,7 +1818,7 @@ export function AgentsPage({
       "",
       appViewPath(selectedAgent.id, "agent", "settings", conversationId)
     )
-    if (!suggestedQuestion) setQuestion("")
+    if (!suggestedQuestion) composerApiRef.current?.setDraft("")
     setPendingQuestion(nextQuestion)
     setIsAsking(true)
     const askAbortController = new AbortController()
@@ -1842,6 +1865,34 @@ export function AgentsPage({
     }
     setRuns((current) => [placeholderRun, ...current])
     let liveRunId: string | null = null
+    const askBatcher = createStreamEventBatcher<AgentRunStreamEvent>(
+      (streamEvent) =>
+        streamEvent.type === "answer_delta" ||
+        streamEvent.type === "reasoning_delta" ||
+        streamEvent.type === "tool_input_delta",
+      (events) => {
+        const resolvedEvent = events.find(
+          (
+            item
+          ): item is Extract<
+            AgentRunStreamEvent,
+            { type: "run" | "complete" | "error" }
+          > =>
+            item.type === "run" ||
+            item.type === "complete" ||
+            item.type === "error"
+        )
+        const resolvedId = liveRunId ?? resolvedEvent?.run.id
+        if (resolvedId) {
+          applyStreamEvents(conversationId, resolvedId, events, placeholderRun.id)
+        }
+      }
+    )
+    askAbortController.signal.addEventListener(
+      "abort",
+      () => askBatcher.cancel(),
+      { once: true }
+    )
     try {
       const uploaded =
         !suggestedQuestion && agentFiles.length
@@ -1871,20 +1922,7 @@ export function AgentsPage({
             liveRunIdRef.current = streamEvent.run.id
             setPendingQuestion(null)
           }
-          const eventRunId =
-            streamEvent.type === "run" ||
-            streamEvent.type === "complete" ||
-            streamEvent.type === "error"
-              ? streamEvent.run.id
-              : liveRunId
-          if (eventRunId) {
-            applyStreamEvent(
-              conversationId,
-              eventRunId,
-              streamEvent,
-              placeholderRun.id
-            )
-          }
+          askBatcher.push(streamEvent)
           if (
             streamEvent.type === "error" &&
             streamEvent.run.status !== "cancelled"
@@ -1897,15 +1935,17 @@ export function AgentsPage({
         uploaded.map((item) => item.id),
         approvalMode
       )
+      askBatcher.flushNow()
       if (!suggestedQuestion) setAgentFiles([])
     } catch (error) {
+      askBatcher.flushNow()
       const userCancelled = askAbortController.signal.aborted
       const isCurrentConversation = isCurrentAgentConversation(
         activeConversationIdRef.current,
         conversationId
       )
       if (!liveRunId && isCurrentConversation) {
-        if (!suggestedQuestion) setQuestion(nextQuestion)
+        if (!suggestedQuestion) composerApiRef.current?.setDraft(nextQuestion)
         setRuns((current) =>
           current.filter((run) => run.id !== placeholderRun.id)
         )
@@ -1987,13 +2027,25 @@ export function AgentsPage({
       }
       if (conversationId) {
         const controller = new AbortController()
+        const regenerateBatcher = createStreamEventBatcher<AgentRunStreamEvent>(
+          (event) =>
+            event.type === "answer_delta" ||
+            event.type === "reasoning_delta" ||
+            event.type === "tool_input_delta",
+          (events) => applyStreamEvents(conversationId, regenerated.id, events)
+        )
+        controller.signal.addEventListener(
+          "abort",
+          () => regenerateBatcher.cancel(),
+          { once: true }
+        )
         void observeAgentRun(
           token,
           selectedWorkspaceId,
           selectedAgent.id,
           regenerated.id,
           (event) => {
-            applyStreamEvent(conversationId, regenerated.id, event)
+            regenerateBatcher.push(event)
             if (
               isCurrentAgentConversation(
                 activeConversationIdRef.current,
@@ -2006,18 +2058,20 @@ export function AgentsPage({
             }
           },
           controller.signal
-        ).catch((error: unknown) => {
-          if (
-            !controller.signal.aborted &&
-            isCurrentAgentConversation(
-              activeConversationIdRef.current,
-              conversationId
-            )
-          ) {
-            restorePrevious()
-            reportError(error)
-          }
-        })
+        )
+          .catch((error: unknown) => {
+            if (
+              !controller.signal.aborted &&
+              isCurrentAgentConversation(
+                activeConversationIdRef.current,
+                conversationId
+              )
+            ) {
+              restorePrevious()
+              reportError(error)
+            }
+          })
+          .finally(() => regenerateBatcher.flushNow())
       }
     } catch (error) {
       if (
@@ -2115,7 +2169,7 @@ export function AgentsPage({
     askAbortController?.abort()
     setRuns([])
     setToolCallsByRun({})
-    setQuestion("")
+    composerApiRef.current?.setDraft("")
     setAgentFiles([])
     setPendingQuestion(null)
     setAskAbortController(null)
@@ -2247,8 +2301,7 @@ export function AgentsPage({
             runs={runs}
             toolCallsByRun={toolCallsByRun}
             resolvingCallId={resolvingCallId}
-            question={question}
-            setQuestion={setQuestion}
+            composerApiRef={composerApiRef}
             approvalMode={approvalMode}
             onApprovalModeChange={setApprovalMode}
             files={agentFiles}
@@ -2269,9 +2322,9 @@ export function AgentsPage({
             workspaceId={selectedWorkspaceId}
             canManagePublishing={canManagePublishing}
             notify={notify}
-            onAsk={handleAsk}
-            onAskSuggestedQuestion={(question) =>
-              void handleAsk(undefined, question)
+            onAsk={(event, draftText) => void handleAsk(event, undefined, draftText)}
+            onAskSuggestedQuestion={(suggested) =>
+              void handleAsk(undefined, suggested)
             }
             onCancelAsk={handleCancelAsk}
             onRegenerateRun={(runId, goal) =>

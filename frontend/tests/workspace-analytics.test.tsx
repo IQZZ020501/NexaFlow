@@ -727,6 +727,28 @@ describe("workspace analytics", () => {
     expect(within(memberCard).getByText("选择成员 (6/12)")).toBeTruthy()
     expect(within(memberCard).getByText("Member 12")).toBeTruthy()
   })
+
+  test("reuses in-session cached range responses when switching presets back", async () => {
+    renderPage(<WorkspaceAnalyticsPage />)
+    await waitFor(() => expect(requests).toHaveLength(1))
+
+    fireEvent.click(screen.getByLabelText("选择统计周期"))
+    fireEvent.click(
+      within(
+        await screen.findByRole("dialog", { name: "选择统计周期" })
+      ).getByRole("button", { name: "最近 7 天" })
+    )
+    await waitFor(() => expect(requests).toHaveLength(2))
+
+    fireEvent.click(screen.getByLabelText("选择统计周期"))
+    fireEvent.click(
+      within(
+        await screen.findByRole("dialog", { name: "选择统计周期" })
+      ).getByRole("button", { name: "最近 30 天" })
+    )
+    await waitFor(() => expect(screen.getByText("Support Agent")).toBeTruthy())
+    expect(requests).toHaveLength(2)
+  })
 })
 
 test("builds preset ranges from the Shanghai calendar date", () => {

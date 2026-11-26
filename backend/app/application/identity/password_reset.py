@@ -25,7 +25,7 @@ from app.infra.security.agent_rate_limit import (
     PasswordResetRateLimitUnavailable,
     enforce_password_reset_rate_limit,
 )
-from app.infra.security.auth import hash_password, verify_password
+from app.infra.security.auth import hash_password_async, verify_password_async
 
 RESET_EXPIRES_MINUTES = 30
 RESET_INVALID_DETAIL = "Password reset link is invalid or expired."
@@ -139,7 +139,7 @@ async def confirm_password_reset(
     )
     if reset_token is None or reset_token.user_id != user.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, RESET_INVALID_DETAIL)
-    if verify_password(new_password, user.password_hash):
+    if await verify_password_async(new_password, user.password_hash):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "New password must be different.",
@@ -149,7 +149,7 @@ async def confirm_password_reset(
     await email_repository.save_password_reset_token(db, reset_token)
     await email_repository.invalidate_password_reset_tokens(db, user.id, now)
     await email_repository.delete_password_reset_deliveries(db, user.id)
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     user.must_change_password = False
     user.initial_password_expires_at = None
     await user_repository.delete_refresh_sessions_for_user(db, user.id)

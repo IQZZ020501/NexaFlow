@@ -13,6 +13,8 @@ import type {
   PublicEnterpriseConnection,
 } from "@/lib/api/enterprise-identity"
 import { getErrorMessage } from "@/lib/errors"
+import { safeAuthDestination } from "@/lib/auth-path"
+import { isSafeNavigationUrl } from "@/lib/safe-url"
 import type { AppNotification } from "@/lib/notifications"
 
 type LoginForm = {
@@ -207,8 +209,11 @@ export function LoginScreen({
               </div>
               <div className="flex flex-wrap justify-center gap-3">
                 {enterpriseConnections.map((connection) => {
+                  if (!isSafeNavigationUrl(connection.start_url)) {
+                    return null
+                  }
                   const params = new URLSearchParams()
-                  if (next) params.set("next", next)
+                  if (next) params.set("next", safeAuthDestination(next))
                   const href = `${connection.start_url}${params.size ? `?${params}` : ""}`
                   const label = t("使用 {provider} 扫码登录", {
                     provider: connection.name,

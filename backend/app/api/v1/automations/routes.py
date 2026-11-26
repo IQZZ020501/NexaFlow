@@ -368,6 +368,7 @@ async def trigger_automation_webhook(
             raise HTTPException(413, "Webhook payload exceeds maximum allowed size.")
         chunks.append(chunk)
     raw_body = b"".join(chunks)
+    source_ip = request.client.host if request.client else None
     return await receive_webhook_trigger(
         db,
         hook_id,
@@ -376,4 +377,5 @@ async def trigger_automation_webhook(
         signature_header=x_nexaflow_signature,
         event_id_header=x_nexaflow_event_id,
         settings=settings,
+        source_ip=source_ip,
     )

@@ -35,7 +35,7 @@ import {
   workflowNodeLabel,
 } from "@/lib/workflows/graph"
 
-import { NODE_ICONS } from "./workflow-node"
+import { NODE_ICONS } from "./workflow-node-icons"
 
 type WorkflowNodePaletteProps = {
   tools: ToolDetail[]

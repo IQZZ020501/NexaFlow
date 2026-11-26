@@ -73,6 +73,7 @@ import {
   formatDateTime,
 } from "@/lib/display"
 import { getErrorMessage } from "@/lib/errors"
+import { escapeCsvCell } from "@/lib/safe-url"
 import { copyText } from "@/lib/clipboard"
 import {
   systemLogEventLabel,
@@ -440,9 +441,7 @@ function OperationsPanel() {
       String(log.status_code ?? ""),
     ])
     const csv = [header, ...rows]
-      .map((row) =>
-        row.map((value) => `"${value.replaceAll('"', '""')}"`).join(",")
-      )
+      .map((row) => row.map((value) => escapeCsvCell(value)).join(","))
       .join("\n")
     const url = URL.createObjectURL(
       new Blob([csv], { type: "text/csv;charset=utf-8" })

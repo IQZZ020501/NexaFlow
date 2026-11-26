@@ -122,6 +122,7 @@ import {
   type ConversationExportMessage,
 } from "@/lib/conversation-export"
 import { latestRunVersions } from "@/lib/run-versions"
+import { createStreamEventBatcher } from "@/lib/stream-batcher"
 import { useVisualViewportShellStyle } from "@/lib/visual-viewport"
 import {
   toolActivityName,
@@ -133,6 +134,7 @@ type PublicAgentChatProps = {
   agentId: string
   initialConversationId?: string | null
   initialProjectId?: string | null
+  initialProfile?: PublicAgentProfile | null
 }
 
 export function publicToolName(
@@ -941,6 +943,454 @@ export function cancelPublicAgentStream(streamControllerRef: {
   activeController?.abort()
 }
 
+const EMPTY_TOOL_CALLS: AgentToolCall[] = []
+
+type PublicAgentComposerApi = {
+  setDraft: (value: string) => void
+  clearMatchingDraft: (expected: string) => void
+}
+
+const PublicRunTurn = React.memo(function PublicRunTurn({
+  run,
+  toolCalls,
+  resolvingCallId,
+  isEditing,
+  editDraft,
+  canEdit,
+  showSuggestions,
+  isSending,
+  isRunsLoading,
+  isRegenerating,
+  hasAnyRegenerating,
+  isFeedbackPending,
+  projectUnavailable,
+  isReadingFiles,
+  onStartEdit,
+  onCancelEdit,
+  onEditDraftChange,
+  onRegenerateRun,
+  onRunFeedback,
+  onToolCallDecision,
+  onSelectSuggestion,
+  t,
+}: {
+  run: ExternalAgentRun
+  toolCalls: AgentToolCall[]
+  resolvingCallId: string | null
+  isEditing: boolean
+  editDraft: string
+  canEdit: boolean
+  showSuggestions: boolean
+  isSending: boolean
+  isRunsLoading: boolean
+  isRegenerating: boolean
+  hasAnyRegenerating: boolean
+  isFeedbackPending: boolean
+  projectUnavailable: boolean
+  isReadingFiles: boolean
+  onStartEdit: (runId: string, question: string) => void
+  onCancelEdit: () => void
+  onEditDraftChange: (value: string) => void
+  onRegenerateRun: (runId: string, goal?: string) => void
+  onRunFeedback: (runId: string, value: "positive" | "negative" | null) => void
+  onToolCallDecision: (
+    runId: string,
+    callId: string,
+    decision: "approve" | "reject"
+  ) => void
+  onSelectSuggestion: (question: string) => void
+  t: TFunction
+}) {
+  const progressSegments = splitPublicRunProgress(run)
+  const currentProgress = progressSegments.at(-1) ?? []
+  const visibleCurrentProgress = visiblePublicToolProgress(
+    currentProgress,
+    toolCalls
+  )
+  const completedProgress = progressSegments.slice(0, -1)
+  const hasAnswerHandoffs = completedProgress.length > 0
+  const sourcesForProgress = (progress: ExternalAgentProgressEvent[]) =>
+    hasAnswerHandoffs ? agentSourcesForEvents(run.sources, progress) : run.sources
+  let completedProgressIndex = 0
+  const sessionInputs = (run.session_inputs ?? []).map((input) => {
+    const inputProgress = input.previous_answer
+      ? (completedProgress[completedProgressIndex++] ?? [])
+      : []
+    return {
+      input,
+      progress: inputProgress,
+      sources: sourcesForProgress(inputProgress),
+    }
+  })
+  const currentSources = sourcesForProgress(currentProgress)
+  const pendingFollowUpIds = new Set(
+    sessionInputs
+      .filter(({ input }) => input.status !== "applied" && !input.previous_answer)
+      .map(({ input }) => input.input_id)
+  )
+  const answerStartedAt = currentProgress.findLast(
+    (event) => event.type === "answer"
+  )?.created_at
+
+  return (
+    <article className="space-y-4">
+      <div className="flex items-start justify-end gap-2">
+        <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
+          <RunAttachmentCards attachments={run.attachments} t={t} />
+          {isEditing ? (
+            <form
+              className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const goal = editDraft.trim()
+                if (
+                  !goal ||
+                  isSending ||
+                  isRunsLoading ||
+                  hasAnyRegenerating
+                ) {
+                  return
+                }
+                onRegenerateRun(run.id, goal)
+              }}
+            >
+              <textarea
+                autoFocus
+                aria-label={t("编辑消息")}
+                className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
+                maxLength={4000}
+                value={editDraft}
+                onChange={(event) => onEditDraftChange(event.target.value)}
+              />
+              <div className="flex justify-end gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isRegenerating}
+                  onClick={onCancelEdit}
+                >
+                  {t("取消")}
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={
+                    !editDraft.trim() ||
+                    isSending ||
+                    isRunsLoading ||
+                    hasAnyRegenerating
+                  }
+                >
+                  {isRegenerating ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <SendIcon />
+                  )}
+                  {t("重新发送")}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
+              {run.question}
+            </div>
+          )}
+          <div className="flex items-start gap-1">
+            <CopyButton t={t} value={run.question} />
+            {canEdit && !isEditing ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                aria-label={t("编辑消息")}
+                title={t("编辑消息")}
+                disabled={isSending || isRunsLoading || hasAnyRegenerating}
+                onClick={() => onStartEdit(run.id, run.question)}
+              >
+                <PencilIcon />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
+          <UserIcon className="size-3.5" />
+        </span>
+      </div>
+      {sessionInputs
+        .filter(({ input }) => !pendingFollowUpIds.has(input.input_id))
+        .map(({ input, progress, sources }) => (
+          <React.Fragment key={input.input_id}>
+            {input.previous_answer ? (
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+                  <BotIcon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+                  <PublicExecutionProcess
+                    run={run}
+                    progress={progress}
+                    completed
+                  />
+                  <AgentAnswer
+                    events={progress}
+                    content={withArtifactDownloadLinks(
+                      input.previous_answer,
+                      progress
+                    )}
+                    sources={sources}
+                    t={t}
+                    className="text-sm leading-6"
+                  />
+                </div>
+              </div>
+            ) : null}
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-xs text-muted-foreground">
+                {t("后续任务")}
+              </span>
+              <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+                {input.content}
+              </div>
+              <CopyButton t={t} value={input.content} />
+            </div>
+          </React.Fragment>
+        ))}
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
+          <BotIcon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
+            <PublicExecutionProcess run={run} progress={visibleCurrentProgress}>
+              {unrenderedPublicToolCalls(run.progress, toolCalls).map((call) =>
+                ["awaiting_approval", "uncertain"].includes(call.status) ? (
+                  <InlineToolApproval
+                    key={call.call_id}
+                    runId={run.id}
+                    call={call}
+                    resolvingCallId={resolvingCallId}
+                    onDecision={(callId, decision) =>
+                      onToolCallDecision(run.id, callId, decision)
+                    }
+                    t={t}
+                  />
+                ) : (
+                  <PublicPendingToolCall
+                    key={call.call_id}
+                    call={call}
+                    t={t}
+                  />
+                )
+              )}
+            </PublicExecutionProcess>
+            {run.result ? (
+              <AgentAnswer
+                events={currentProgress}
+                content={withArtifactDownloadLinks(run.result, currentProgress)}
+                sources={currentSources}
+                t={t}
+                className="text-sm leading-6"
+              />
+            ) : run.status === "failed" ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                {run.error
+                  ? getErrorMessage(new Error(run.error), t)
+                  : t("回答失败，请稍后重试。")}
+              </p>
+            ) : run.status === "cancelled" ? (
+              <p className="text-sm text-muted-foreground">{t("运行已取消")}</p>
+            ) : null}
+          </div>
+          {answerStartedAt || (run.status === "succeeded" && run.result) ? (
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <MessageTimestamp value={answerStartedAt} />
+              {run.status === "succeeded" && run.result ? (
+                <RunActionBar
+                  result={stripAgentSourceLinks(run.result)}
+                  feedback={run.feedback}
+                  regenerateDisabled={
+                    projectUnavailable ||
+                    isSending ||
+                    isRunsLoading ||
+                    hasAnyRegenerating
+                  }
+                  regenerating={isRegenerating}
+                  feedbackPending={isFeedbackPending}
+                  onRegenerate={() => onRegenerateRun(run.id)}
+                  onFeedback={(value) => onRunFeedback(run.id, value)}
+                  t={t}
+                />
+              ) : null}
+            </div>
+          ) : null}
+          {run.status === "succeeded" && run.result && showSuggestions ? (
+            <AgentSuggestedQuestions
+              questions={run.suggested_questions}
+              onSelect={onSelectSuggestion}
+              disabled={
+                projectUnavailable ||
+                isSending ||
+                isRunsLoading ||
+                hasAnyRegenerating ||
+                isReadingFiles
+              }
+              t={t}
+            />
+          ) : null}
+        </div>
+      </div>
+      {sessionInputs
+        .filter(({ input }) => pendingFollowUpIds.has(input.input_id))
+        .map(({ input }) => (
+          <div key={input.input_id} className="flex flex-col items-end gap-1.5">
+            <span className="text-xs text-muted-foreground">
+              {t("后续任务")}
+            </span>
+            <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
+              {input.content}
+            </div>
+            <CopyButton t={t} value={input.content} />
+          </div>
+        ))}
+    </article>
+  )
+})
+
+const PublicAgentComposer = React.memo(function PublicAgentComposer({
+  composerApiRef,
+  files,
+  setFiles,
+  isSending,
+  isRunsLoading,
+  isReadingFiles,
+  projectUnavailable,
+  approvalMode,
+  onApprovalModeChange,
+  onDrop,
+  onClearSendError,
+  onSubmitDraft,
+  onCancelAsk,
+  t,
+}: {
+  composerApiRef: React.RefObject<PublicAgentComposerApi | null>
+  files: File[]
+  setFiles: React.Dispatch<React.SetStateAction<File[]>>
+  isSending: boolean
+  isRunsLoading: boolean
+  isReadingFiles: boolean
+  projectUnavailable: boolean
+  approvalMode: AgentApprovalMode
+  onApprovalModeChange: (value: AgentApprovalMode) => void
+  onDrop: React.DragEventHandler<HTMLFormElement>
+  onClearSendError: () => void
+  onSubmitDraft: (draftText: string) => void
+  onCancelAsk: () => void
+  t: TFunction
+}) {
+  const [question, setQuestion] = React.useState("")
+
+  React.useImperativeHandle(
+    composerApiRef,
+    () => ({
+      setDraft(nextValue: string) {
+        setQuestion(nextValue)
+      },
+      clearMatchingDraft(expected: string) {
+        setQuestion((current) => (current.trim() === expected ? "" : current))
+      },
+    }),
+    []
+  )
+
+  return (
+    <AgentPromptBar
+      aria-busy={isReadingFiles}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (isReadingFiles) return
+        onSubmitDraft(question)
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) {
+          event.preventDefault()
+        }
+      }}
+      onDrop={onDrop}
+    >
+      <AgentPromptInput
+        value={question}
+        onChange={(event) => setQuestion(event.target.value)}
+        onPaste={(event) => {
+          if (isSending) return
+          const pasted = transferredFiles(event.clipboardData)
+          if (!pasted.length) return
+          event.preventDefault()
+          onClearSendError()
+          setFiles((current) => appendAttachmentFiles(current, pasted))
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault()
+            event.currentTarget.form?.requestSubmit()
+          }
+        }}
+        placeholder={t("请输入问题")}
+        aria-label={t("请输入问题")}
+        enterKeyHint="send"
+        autoComplete="off"
+        maxLength={4000}
+        rows={1}
+      />
+      {files.length > 0 ? (
+        <div className="bui-prompt-files">
+          <AgentAttachmentList
+            files={files}
+            onRemove={(indexToRemove) =>
+              setFiles((current) =>
+                current.filter((_, index) => index !== indexToRemove)
+              )
+            }
+            t={t}
+          />
+        </div>
+      ) : null}
+      <div className="bui-prompt-toolbar justify-between">
+        <div className="bui-prompt-attach">
+          <AgentFilePicker
+            disabled={isSending || isRunsLoading || isReadingFiles}
+            onFiles={(selected) => {
+              onClearSendError()
+              setFiles((current) => appendAttachmentFiles(current, selected))
+            }}
+            t={t}
+          />
+        </div>
+        <div className="bui-prompt-actions">
+          <AgentApprovalModeMenu
+            value={approvalMode}
+            onChange={onApprovalModeChange}
+            disabled={isSending}
+            t={t}
+          />
+          <AgentChatSubmitButton
+            isRunning={isSending}
+            hasInput={Boolean(question.trim())}
+            sendDisabled={isReadingFiles || projectUnavailable}
+            onStop={onCancelAsk}
+            t={t}
+          />
+        </div>
+      </div>
+    </AgentPromptBar>
+  )
+})
+
 /**
  * Renders the public Agent chat interface with conversation history, streaming responses, tool approvals, attachments, feedback, and run regeneration.
  *
@@ -951,13 +1401,16 @@ export function PublicAgentChat({
   agentId,
   initialConversationId = null,
   initialProjectId = null,
+  initialProfile = null,
 }: PublicAgentChatProps) {
   const router = useRouter()
   const { t } = useLanguage()
   const [confirm, confirmDialog] = useConfirmDialog()
   const { token, isSessionRestored, notify } = useSession()
   const viewportStyle = useVisualViewportShellStyle()
-  const [profile, setProfile] = React.useState<PublicAgentProfile | null>(null)
+  const [profile, setProfile] = React.useState<PublicAgentProfile | null>(() =>
+    initialProfile?.id === agentId ? initialProfile : null
+  )
   const [conversations, setConversations] = React.useState<
     PublicAgentConversation[]
   >([])
@@ -977,7 +1430,7 @@ export function PublicAgentChat({
   const [projectBusy, setProjectBusy] = React.useState(false)
   const hasArtifactPreview = !!artifactPreview.selection
   const [runs, setRuns] = React.useState<ExternalAgentRun[]>([])
-  const [question, setQuestion] = React.useState("")
+  const composerApiRef = React.useRef<PublicAgentComposerApi | null>(null)
   const [approvalMode, setApprovalMode] =
     React.useState<AgentApprovalMode>("always_ask")
   const [files, setFiles] = React.useState<File[]>([])
@@ -1042,10 +1495,14 @@ export function PublicAgentChat({
   const projectSettingsRef = React.useRef<HTMLButtonElement>(null)
   const historyButtonRef = React.useRef<HTMLButtonElement>(null)
   const initialConversationIdRef = React.useRef(initialConversationId)
+  const initialProfileRef = React.useRef(initialProfile)
+  const initializedAgentRef = React.useRef<string | null>(null)
   const tRef = React.useRef(t)
   const tokenRef = React.useRef(token)
+  const runsRef = React.useRef(runs)
   const conversationRef = React.useRef(activeConversationId)
   const projectRef = React.useRef(currentProjectId)
+  const hasToken = Boolean(token)
   const fileDrop = useAgentFileDrop(
     `${agentId}:${activeConversationId ?? ""}`,
     isSending || isRunsLoading,
@@ -1058,22 +1515,29 @@ export function PublicAgentChat({
 
   const loadRunToolCalls = React.useCallback(
     async (runId: string, controller?: AbortController) => {
-      if (!token) return
+      const currentToken = tokenRef.current
+      if (!currentToken) return
       try {
-        const calls = await listPublicAgentRunToolCalls(agentId, token, runId)
+        const calls = await listPublicAgentRunToolCalls(
+          agentId,
+          currentToken,
+          runId
+        )
         if (controller && streamControllerRef.current !== controller) return
         setToolCallsByRun((current) => ({ ...current, [runId]: calls }))
       } catch {
         // A failed fetch is not fatal; the next stream event retries it.
       }
     },
-    [agentId, token]
+    [agentId]
   )
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    initialProfileRef.current = initialProfile
+    runsRef.current = runs
     tRef.current = t
     tokenRef.current = token
-  }, [t, token])
+  }, [initialProfile, runs, t, token])
 
   React.useEffect(() => {
     conversationRef.current = activeConversationId
@@ -1082,6 +1546,7 @@ export function PublicAgentChat({
 
   React.useEffect(() => {
     if (!isSessionRestored || token) return
+    initializedAgentRef.current = null
     streamControllerRef.current?.abort()
     const conversationId = initialConversationIdRef.current
     const next = publicChatUrl(agentId, conversationId, initialProjectId)
@@ -1093,22 +1558,37 @@ export function PublicAgentChat({
   }, [agentId])
 
   const refreshConversations = React.useCallback(async () => {
-    if (!token) return []
-    const response = await listPublicAgentConversations(agentId, token)
+    const currentToken = tokenRef.current
+    if (!currentToken) return []
+    const response = await listPublicAgentConversations(agentId, currentToken)
     setConversations(response.items)
     return response.items
-  }, [agentId, token])
+  }, [agentId])
 
   React.useEffect(() => {
-    if (!isSessionRestored) return
+    if (!isSessionRestored || !hasToken) return
     const currentToken = tokenRef.current
     if (!currentToken) return
+    if (initializedAgentRef.current === agentId) return
     let current = true
     ;(async () => {
       try {
+        const providedProfile =
+          initialProfileRef.current?.id === agentId
+            ? initialProfileRef.current
+            : null
         const { profile: nextProfile, conversations: nextConversations } =
-          await initializePublicAgent(agentId, currentToken)
+          providedProfile
+            ? {
+                profile: providedProfile,
+                conversations: await listPublicAgentConversations(
+                  agentId,
+                  currentToken
+                ),
+              }
+            : await initializePublicAgent(agentId, currentToken)
         if (!current) return
+        initializedAgentRef.current = agentId
         setProfile(nextProfile)
         setConversations(nextConversations.items)
         const nextConversationId = initialConversationIdRef.current
@@ -1126,15 +1606,16 @@ export function PublicAgentChat({
     return () => {
       current = false
     }
-  }, [agentId, isSessionRestored, token])
+  }, [agentId, hasToken, isSessionRestored])
 
   React.useEffect(() => {
-    if (!sessionReady || !token) return
+    const currentToken = tokenRef.current
+    if (!sessionReady || !hasToken || !currentToken) return
     if (streamControllerRef.current) return
     if (!activeConversationId) return
     let current = true
     let observer: AbortController | null = null
-    listPublicAgentRuns(agentId, activeConversationId, token, {
+    listPublicAgentRuns(agentId, activeConversationId, currentToken, {
       limit: 200,
       offset: 0,
     })
@@ -1183,16 +1664,37 @@ export function PublicAgentChat({
             activeRunIdRef.current = run.id
             activePlaceholderIdRef.current = null
             setIsSending(true)
+            const observeBatcher =
+              createStreamEventBatcher<PublicAgentRunStreamEvent>(
+                (event) =>
+                  event.type === "answer_delta" ||
+                  event.type === "reasoning_delta" ||
+                  event.type === "tool_input_delta",
+                (events) => {
+                  if (!current || streamControllerRef.current !== controller)
+                    return
+                  setRuns((items) =>
+                    events.reduce(
+                      (acc, event) =>
+                        mergePublicRunEvent(acc, run.id, event, run.id),
+                      items
+                    )
+                  )
+                }
+              )
+            controller.signal.addEventListener(
+              "abort",
+              () => observeBatcher.cancel(),
+              { once: true }
+            )
             void observePublicAgentRun(
               agentId,
-              token,
+              tokenRef.current ?? currentToken,
               run.id,
               (event) => {
                 if (!current || streamControllerRef.current !== controller)
                   return
-                setRuns((items) =>
-                  mergePublicRunEvent(items, run.id, event, run.id)
-                )
+                observeBatcher.push(event)
                 if (event.type === "approval_required")
                   void loadRunToolCalls(run.id, controller)
               },
@@ -1200,9 +1702,10 @@ export function PublicAgentChat({
             )
               .catch((error: unknown) => {
                 if (current && !controller.signal.aborted)
-                  setSendError(getErrorMessage(error, t))
+                  setSendError(getErrorMessage(error, tRef.current))
               })
               .finally(() => {
+                observeBatcher.flushNow()
                 if (streamControllerRef.current !== controller) return
                 streamControllerRef.current = null
                 activeRunIdRef.current = null
@@ -1214,7 +1717,7 @@ export function PublicAgentChat({
         }
       })
       .catch((error: unknown) => {
-        if (current) setSendError(getErrorMessage(error, t))
+        if (current) setSendError(getErrorMessage(error, tRef.current))
       })
       .finally(() => {
         if (current) setIsRunsLoading(false)
@@ -1231,11 +1734,10 @@ export function PublicAgentChat({
   }, [
     activeConversationId,
     agentId,
+    hasToken,
     loadRunToolCalls,
     refreshConversations,
     sessionReady,
-    t,
-    token,
   ])
 
   React.useEffect(() => {
@@ -1395,7 +1897,7 @@ export function PublicAgentChat({
     setRuns([])
     setToolCallsByRun({})
     setResolvingCallId(null)
-    setQuestion("")
+    composerApiRef.current?.setDraft("")
     setFiles([])
     setSendError(null)
     setIsSending(false)
@@ -1537,20 +2039,40 @@ export function PublicAgentChat({
         activeRunIdRef.current = runId
         activePlaceholderIdRef.current = null
         setIsSending(true)
+        const resumeBatcher =
+          createStreamEventBatcher<PublicAgentRunStreamEvent>(
+            (event) =>
+              event.type === "answer_delta" ||
+              event.type === "reasoning_delta" ||
+              event.type === "tool_input_delta",
+            (events) => {
+              if (streamControllerRef.current !== controller) return
+              setRuns((current) =>
+                events.reduce(
+                  (acc, streamEvent) =>
+                    mergePublicRunEvent(
+                      acc,
+                      observedRunId,
+                      streamEvent,
+                      observedRunId
+                    ),
+                  current
+                )
+              )
+            }
+          )
+        controller.signal.addEventListener(
+          "abort",
+          () => resumeBatcher.cancel(),
+          { once: true }
+        )
         void observePublicAgentRun(
           agentId,
           token,
           runId,
           (streamEvent) => {
             if (streamControllerRef.current !== controller) return
-            setRuns((current) =>
-              mergePublicRunEvent(
-                current,
-                observedRunId,
-                streamEvent,
-                observedRunId
-              )
-            )
+            resumeBatcher.push(streamEvent)
             if (streamEvent.type === "approval_required") {
               void loadRunToolCalls(observedRunId, controller)
             }
@@ -1572,6 +2094,7 @@ export function PublicAgentChat({
             setSendError(message)
           })
           .finally(() => {
+            resumeBatcher.flushNow()
             if (streamControllerRef.current === controller) {
               streamControllerRef.current = null
               activeRunIdRef.current = null
@@ -1601,10 +2124,37 @@ export function PublicAgentChat({
       return
     }
     setRegeneratingRunId(runId)
-    const previous = runs.find((run) => run.id === runId)
+    const previous = runsRef.current.find((run) => run.id === runId)
     let replacementId = runId
     const controller = new AbortController()
     streamControllerRef.current = controller
+    const regenerateBatcher =
+      createStreamEventBatcher<PublicAgentRunStreamEvent>(
+        (event) =>
+          event.type === "answer_delta" ||
+          event.type === "reasoning_delta" ||
+          event.type === "tool_input_delta",
+        (events) => {
+          if (streamControllerRef.current !== controller) return
+          setRuns((current) =>
+            events.reduce(
+              (acc, event) =>
+                mergePublicRunEvent(
+                  acc,
+                  replacementId,
+                  event,
+                  replacementId
+                ),
+              current
+            )
+          )
+        }
+      )
+    controller.signal.addEventListener(
+      "abort",
+      () => regenerateBatcher.cancel(),
+      { once: true }
+    )
     try {
       const regenerated = await regeneratePublicAgentRun(
         agentId,
@@ -1632,9 +2182,7 @@ export function PublicAgentChat({
         regenerated.id,
         (event) => {
           if (streamControllerRef.current !== controller) return
-          setRuns((current) =>
-            mergePublicRunEvent(current, regenerated.id, event, regenerated.id)
-          )
+          regenerateBatcher.push(event)
           if (
             (event.type === "error" || event.type === "complete") &&
             ["failed", "cancelled"].includes(event.run.status)
@@ -1651,7 +2199,9 @@ export function PublicAgentChat({
         },
         controller.signal
       )
+      regenerateBatcher.flushNow()
     } catch (error) {
+      regenerateBatcher.flushNow()
       if (!controller.signal.aborted) {
         if (previous) {
           setRuns((current) =>
@@ -1673,7 +2223,8 @@ export function PublicAgentChat({
     value: "positive" | "negative" | null
   ) {
     if (!token || feedbackPendingRunId || regeneratingRunId) return
-    const previous = runs.find((run) => run.id === runId)?.feedback ?? null
+    const previous =
+      runsRef.current.find((run) => run.id === runId)?.feedback ?? null
     setRuns((current) =>
       current.map((run) =>
         run.id === runId ? { ...run, feedback: value } : run
@@ -1747,9 +2298,9 @@ export function PublicAgentChat({
     }
   }
 
-  async function handleFollowUp() {
+  async function handleFollowUp(draftText?: string) {
     const runId = activeRunIdRef.current
-    const content = question.trim()
+    const content = (draftText ?? "").trim()
     if (!token || !runId || !content || sessionInputBusyRef.current) return
     followOutput()
 
@@ -1782,7 +2333,7 @@ export function PublicAgentChat({
             : run
         )
       )
-      setQuestion((current) => (current.trim() === content ? "" : current))
+      composerApiRef.current?.clearMatchingDraft(content)
       sessionInputRef.current = null
       notify("success", t("后续任务已排队"))
     } catch (error) {
@@ -1796,7 +2347,8 @@ export function PublicAgentChat({
 
   async function handleAsk(
     event?: React.FormEvent<HTMLFormElement>,
-    suggestedQuestion?: string
+    suggestedQuestion?: string,
+    draftText?: string
   ) {
     event?.preventDefault()
     if (projectUnavailable) {
@@ -1804,14 +2356,14 @@ export function PublicAgentChat({
       return
     }
     if (isSending) {
-      await handleFollowUp()
+      await handleFollowUp(draftText)
       return
     }
-    const nextQuestion = (suggestedQuestion ?? question).trim()
+    const nextQuestion = (suggestedQuestion ?? draftText ?? "").trim()
     const currentProfile = profile
     if (!nextQuestion || isSending || !token || !currentProfile) return
     followOutput()
-    if (!suggestedQuestion) setQuestion("")
+    if (!suggestedQuestion) composerApiRef.current?.setDraft("")
     setSendError(null)
     setIsSending(true)
     const controller = new AbortController()
@@ -1836,6 +2388,25 @@ export function PublicAgentChat({
     }
     setRuns((current) => [placeholder, ...current])
     let liveRunId = placeholderId
+    const askBatcher = createStreamEventBatcher<PublicAgentRunStreamEvent>(
+      (streamEvent) =>
+        streamEvent.type === "answer_delta" ||
+        streamEvent.type === "reasoning_delta" ||
+        streamEvent.type === "tool_input_delta",
+      (events) => {
+        if (streamControllerRef.current !== controller) return
+        setRuns((current) =>
+          events.reduce(
+            (acc, streamEvent) =>
+              mergePublicRunEvent(acc, liveRunId, streamEvent, placeholderId),
+            current
+          )
+        )
+      }
+    )
+    controller.signal.addEventListener("abort", () => askBatcher.cancel(), {
+      once: true,
+    })
     try {
       const uploaded =
         !suggestedQuestion && files.length
@@ -1882,9 +2453,7 @@ export function PublicAgentChat({
               )
             }
           }
-          setRuns((current) =>
-            mergePublicRunEvent(current, liveRunId, streamEvent, placeholderId)
-          )
+          askBatcher.push(streamEvent)
           if (streamEvent.type === "approval_required") {
             void loadRunToolCalls(liveRunId, controller)
           }
@@ -1902,9 +2471,11 @@ export function PublicAgentChat({
         approvalMode,
         { fromSuggestion: Boolean(suggestedQuestion) }
       )
+      askBatcher.flushNow()
       if (!suggestedQuestion) setFiles([])
       await refreshConversations()
     } catch (error) {
+      askBatcher.flushNow()
       if (!controller.signal.aborted) {
         const message = getErrorMessage(error, t)
         setRuns((current) =>
@@ -1926,14 +2497,78 @@ export function PublicAgentChat({
     }
   }
 
-  function handleCancelAsk() {
+  const actionHandlersRef = React.useRef({
+    cancelActiveRun,
+    handleAsk,
+    handleRegenerateRun,
+    handleRunFeedback,
+    handleToolCallDecision,
+  })
+  React.useLayoutEffect(() => {
+    actionHandlersRef.current = {
+      cancelActiveRun,
+      handleAsk,
+      handleRegenerateRun,
+      handleRunFeedback,
+      handleToolCallDecision,
+    }
+  })
+
+  const handleCancelAskCallback = React.useCallback(() => {
     const controller = streamControllerRef.current
     const runId = activeRunIdRef.current
     cancelRequestedRef.current = true
     if (!runId) return
     cancelRequestedRef.current = false
-    return cancelActiveRun(runId, activePlaceholderIdRef.current, controller)
-  }
+    void actionHandlersRef.current.cancelActiveRun(
+      runId,
+      activePlaceholderIdRef.current,
+      controller
+    )
+  }, [])
+
+  const handleStartEditRun = React.useCallback(
+    (runId: string, value: string) => {
+      setEditingRunId(runId)
+      setEditDraft(value)
+    },
+    []
+  )
+  const handleCancelEditRun = React.useCallback(() => {
+    setEditingRunId(null)
+    setEditDraft("")
+  }, [])
+  const handleClearSendError = React.useCallback(() => {
+    setSendError(null)
+  }, [])
+  const handleSubmitDraft = React.useCallback((draftText: string) => {
+    void actionHandlersRef.current.handleAsk(undefined, undefined, draftText)
+  }, [])
+  const handleSelectSuggestion = React.useCallback((suggested: string) => {
+    void actionHandlersRef.current.handleAsk(undefined, suggested)
+  }, [])
+  const handleTurnRegenerate = React.useCallback(
+    (runId: string, goal?: string) => {
+      void actionHandlersRef.current.handleRegenerateRun(runId, goal)
+    },
+    []
+  )
+  const handleTurnFeedback = React.useCallback(
+    (runId: string, value: "positive" | "negative" | null) => {
+      void actionHandlersRef.current.handleRunFeedback(runId, value)
+    },
+    []
+  )
+  const handleTurnToolCallDecision = React.useCallback(
+    (runId: string, callId: string, decision: "approve" | "reject") => {
+      void actionHandlersRef.current.handleToolCallDecision(
+        runId,
+        callId,
+        decision
+      )
+    },
+    []
+  )
 
   if (isInitializing) {
     return (
@@ -2068,338 +2703,43 @@ export function PublicAgentChat({
                   ) : (
                     <div className="space-y-6 sm:space-y-8">
                       {visibleRuns.map((run, index) => {
-                        const progressSegments = splitPublicRunProgress(run)
-                        const currentProgress = progressSegments.at(-1) ?? []
-                        const runToolCalls = toolCallsByRun[run.id] ?? []
-                        const visibleCurrentProgress =
-                          visiblePublicToolProgress(
-                            currentProgress,
-                            runToolCalls
-                          )
-                        const completedProgress = progressSegments.slice(0, -1)
-                        const hasAnswerHandoffs = completedProgress.length > 0
-                        const sourcesForProgress = (
-                          progress: ExternalAgentProgressEvent[]
-                        ) =>
-                          hasAnswerHandoffs
-                            ? agentSourcesForEvents(run.sources, progress)
-                            : run.sources
-                        let completedProgressIndex = 0
-                        const sessionInputs = (run.session_inputs ?? []).map(
-                          (input) => {
-                            const inputProgress = input.previous_answer
-                              ? (completedProgress[completedProgressIndex++] ??
-                                [])
-                              : []
-                            return {
-                              input,
-                              progress: inputProgress,
-                              sources: sourcesForProgress(inputProgress),
-                            }
-                          }
-                        )
-                        const currentSources =
-                          sourcesForProgress(currentProgress)
-                        const pendingFollowUpIds = new Set(
-                          sessionInputs
-                            .filter(
-                              ({ input }) =>
-                                input.status !== "applied" &&
-                                !input.previous_answer
-                            )
-                            .map(({ input }) => input.input_id)
-                        )
-                        const answerStartedAt = currentProgress.findLast(
-                          (event) => event.type === "answer"
-                        )?.created_at
-                        const canEdit =
-                          !projectUnavailable &&
-                          index === visibleRuns.length - 1 &&
-                          run.status === "succeeded"
                         const isEditing = editingRunId === run.id
                         return (
-                          <article key={run.id} className="space-y-4">
-                            <div className="flex items-start justify-end gap-2">
-                              <div className="flex max-w-[85%] min-w-0 flex-col items-end gap-1">
-                                <RunAttachmentCards
-                                  attachments={run.attachments}
-                                  t={t}
-                                />
-                                {isEditing ? (
-                                  <form
-                                    className="w-full max-w-[min(32rem,100%)] rounded-2xl rounded-tr-md border bg-background p-2 shadow-sm"
-                                    onSubmit={(event) => {
-                                      event.preventDefault()
-                                      const goal = editDraft.trim()
-                                      if (
-                                        !goal ||
-                                        isSending ||
-                                        isRunsLoading ||
-                                        regeneratingRunId
-                                      ) {
-                                        return
-                                      }
-                                      void handleRegenerateRun(run.id, goal)
-                                    }}
-                                  >
-                                    <textarea
-                                      autoFocus
-                                      aria-label={t("编辑消息")}
-                                      className="min-h-20 w-full resize-none bg-transparent px-2 py-1 text-base leading-6 outline-none sm:text-sm"
-                                      maxLength={4000}
-                                      value={editDraft}
-                                      onChange={(event) =>
-                                        setEditDraft(event.target.value)
-                                      }
-                                    />
-                                    <div className="flex justify-end gap-1">
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={regeneratingRunId === run.id}
-                                        onClick={() => {
-                                          setEditingRunId(null)
-                                          setEditDraft("")
-                                        }}
-                                      >
-                                        {t("取消")}
-                                      </Button>
-                                      <Button
-                                        type="submit"
-                                        size="sm"
-                                        disabled={
-                                          !editDraft.trim() ||
-                                          isSending ||
-                                          isRunsLoading ||
-                                          Boolean(regeneratingRunId)
-                                        }
-                                      >
-                                        {regeneratingRunId === run.id ? (
-                                          <LoaderCircleIcon className="animate-spin" />
-                                        ) : (
-                                          <SendIcon />
-                                        )}
-                                        {t("重新发送")}
-                                      </Button>
-                                    </div>
-                                  </form>
-                                ) : (
-                                  <div className="rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm leading-6 [overflow-wrap:anywhere] break-words whitespace-pre-wrap text-primary-foreground">
-                                    {run.question}
-                                  </div>
-                                )}
-                                <div className="flex items-start gap-1">
-                                  <CopyButton t={t} value={run.question} />
-                                  {canEdit && !isEditing ? (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      className="text-muted-foreground"
-                                      aria-label={t("编辑消息")}
-                                      title={t("编辑消息")}
-                                      disabled={
-                                        isSending ||
-                                        isRunsLoading ||
-                                        Boolean(regeneratingRunId)
-                                      }
-                                      onClick={() => {
-                                        setEditingRunId(run.id)
-                                        setEditDraft(run.question)
-                                      }}
-                                    >
-                                      <PencilIcon />
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              </div>
-                              <span className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background sm:flex">
-                                <UserIcon className="size-3.5" />
-                              </span>
-                            </div>
-                            {sessionInputs
-                              .filter(
-                                ({ input }) =>
-                                  !pendingFollowUpIds.has(input.input_id)
-                              )
-                              .map(({ input, progress, sources }) => (
-                                <React.Fragment key={input.input_id}>
-                                  {input.previous_answer ? (
-                                    <div className="flex items-start gap-3">
-                                      <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
-                                        <BotIcon className="size-4" />
-                                      </span>
-                                      <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
-                                        <PublicExecutionProcess
-                                          run={run}
-                                          progress={progress}
-                                          completed
-                                        />
-                                        <AgentAnswer
-                                          events={progress}
-                                          content={withArtifactDownloadLinks(
-                                            input.previous_answer,
-                                            progress
-                                          )}
-                                          sources={sources}
-                                          t={t}
-                                          className="text-sm leading-6"
-                                        />
-                                      </div>
-                                    </div>
-                                  ) : null}
-                                  <div className="flex flex-col items-end gap-1.5">
-                                    <span className="text-xs text-muted-foreground">
-                                      {t("后续任务")}
-                                    </span>
-                                    <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
-                                      {input.content}
-                                    </div>
-                                    <CopyButton t={t} value={input.content} />
-                                  </div>
-                                </React.Fragment>
-                              ))}
-                            <div className="flex items-start gap-3">
-                              <span className="mt-0.5 hidden size-8 shrink-0 items-center justify-center rounded-lg bg-foreground text-background shadow-sm sm:flex">
-                                <BotIcon className="size-4" />
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <div className="rounded-2xl rounded-tl-md border bg-background p-3 shadow-xs sm:p-4">
-                                  <PublicExecutionProcess
-                                    run={run}
-                                    progress={visibleCurrentProgress}
-                                  >
-                                    {unrenderedPublicToolCalls(
-                                      run.progress,
-                                      runToolCalls
-                                    ).map((call) =>
-                                      [
-                                        "awaiting_approval",
-                                        "uncertain",
-                                      ].includes(call.status) ? (
-                                        <InlineToolApproval
-                                          key={call.call_id}
-                                          runId={run.id}
-                                          call={call}
-                                          resolvingCallId={resolvingCallId}
-                                          onDecision={(callId, decision) =>
-                                            handleToolCallDecision(
-                                              run.id,
-                                              callId,
-                                              decision
-                                            )
-                                          }
-                                          t={t}
-                                        />
-                                      ) : (
-                                        <PublicPendingToolCall
-                                          key={call.call_id}
-                                          call={call}
-                                          t={t}
-                                        />
-                                      )
-                                    )}
-                                  </PublicExecutionProcess>
-                                  {run.result ? (
-                                    <AgentAnswer
-                                      events={currentProgress}
-                                      content={withArtifactDownloadLinks(
-                                        run.result,
-                                        currentProgress
-                                      )}
-                                      sources={currentSources}
-                                      t={t}
-                                      className="text-sm leading-6"
-                                    />
-                                  ) : run.status === "failed" ? (
-                                    <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                                      {run.error
-                                        ? getErrorMessage(
-                                            new Error(run.error),
-                                            t
-                                          )
-                                        : t("回答失败，请稍后重试。")}
-                                    </p>
-                                  ) : run.status === "cancelled" ? (
-                                    <p className="text-sm text-muted-foreground">
-                                      {t("运行已取消")}
-                                    </p>
-                                  ) : null}
-                                </div>
-                                {answerStartedAt ||
-                                (run.status === "succeeded" && run.result) ? (
-                                  <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <MessageTimestamp value={answerStartedAt} />
-                                    {run.status === "succeeded" &&
-                                    run.result ? (
-                                      <RunActionBar
-                                        result={stripAgentSourceLinks(
-                                          run.result
-                                        )}
-                                        feedback={run.feedback}
-                                        regenerateDisabled={
-                                          projectUnavailable ||
-                                          isSending ||
-                                          isRunsLoading ||
-                                          Boolean(regeneratingRunId)
-                                        }
-                                        regenerating={
-                                          regeneratingRunId === run.id
-                                        }
-                                        feedbackPending={
-                                          feedbackPendingRunId === run.id
-                                        }
-                                        onRegenerate={() =>
-                                          void handleRegenerateRun(run.id)
-                                        }
-                                        onFeedback={(value) =>
-                                          void handleRunFeedback(run.id, value)
-                                        }
-                                        t={t}
-                                      />
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                                {run.status === "succeeded" &&
-                                run.result &&
-                                index === visibleRuns.length - 1 ? (
-                                  <AgentSuggestedQuestions
-                                    questions={run.suggested_questions}
-                                    onSelect={(question) =>
-                                      void handleAsk(undefined, question)
-                                    }
-                                    disabled={
-                                      projectUnavailable ||
-                                      isSending ||
-                                      isRunsLoading ||
-                                      Boolean(regeneratingRunId) ||
-                                      fileDrop.isReadingFiles
-                                    }
-                                    t={t}
-                                  />
-                                ) : null}
-                              </div>
-                            </div>
-                            {sessionInputs
-                              .filter(({ input }) =>
-                                pendingFollowUpIds.has(input.input_id)
-                              )
-                              .map(({ input }) => (
-                                <div
-                                  key={input.input_id}
-                                  className="flex flex-col items-end gap-1.5"
-                                >
-                                  <span className="text-xs text-muted-foreground">
-                                    {t("后续任务")}
-                                  </span>
-                                  <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm break-words whitespace-pre-wrap text-primary-foreground">
-                                    {input.content}
-                                  </div>
-                                  <CopyButton t={t} value={input.content} />
-                                </div>
-                              ))}
-                          </article>
+                          <PublicRunTurn
+                            key={run.id}
+                            run={run}
+                            toolCalls={
+                              toolCallsByRun[run.id] ?? EMPTY_TOOL_CALLS
+                            }
+                            resolvingCallId={
+                              resolvingCallId?.startsWith(`${run.id}:`)
+                                ? resolvingCallId
+                                : null
+                            }
+                            isEditing={isEditing}
+                            editDraft={isEditing ? editDraft : ""}
+                            canEdit={
+                              !projectUnavailable &&
+                              index === visibleRuns.length - 1 &&
+                              run.status === "succeeded"
+                            }
+                            showSuggestions={index === visibleRuns.length - 1}
+                            isSending={isSending}
+                            isRunsLoading={isRunsLoading}
+                            isRegenerating={regeneratingRunId === run.id}
+                            hasAnyRegenerating={Boolean(regeneratingRunId)}
+                            isFeedbackPending={feedbackPendingRunId === run.id}
+                            projectUnavailable={projectUnavailable}
+                            isReadingFiles={fileDrop.isReadingFiles}
+                            onStartEdit={handleStartEditRun}
+                            onCancelEdit={handleCancelEditRun}
+                            onEditDraftChange={setEditDraft}
+                            onRegenerateRun={handleTurnRegenerate}
+                            onRunFeedback={handleTurnFeedback}
+                            onToolCallDecision={handleTurnToolCallDecision}
+                            onSelectSuggestion={handleSelectSuggestion}
+                            t={t}
+                          />
                         )
                       })}
                     </div>
@@ -2430,98 +2770,22 @@ export function PublicAgentChat({
                     {sendError}
                   </p>
                 ) : null}
-                <AgentPromptBar
-                  aria-busy={fileDrop.isReadingFiles}
-                  onSubmit={(event) => {
-                    if (fileDrop.isReadingFiles) event.preventDefault()
-                    else void handleAsk(event)
-                  }}
-                  onDragOver={(event) => {
-                    if (event.dataTransfer.types.includes("Files")) {
-                      event.preventDefault()
-                    }
-                  }}
+                <PublicAgentComposer
+                  composerApiRef={composerApiRef}
+                  files={files}
+                  setFiles={setFiles}
+                  isSending={isSending}
+                  isRunsLoading={isRunsLoading}
+                  isReadingFiles={fileDrop.isReadingFiles}
+                  projectUnavailable={projectUnavailable}
+                  approvalMode={approvalMode}
+                  onApprovalModeChange={setApprovalMode}
                   onDrop={fileDrop.onDrop}
-                >
-                  <AgentPromptInput
-                    value={question}
-                    onChange={(event) => setQuestion(event.target.value)}
-                    onPaste={(event) => {
-                      if (isSending) return
-                      const pasted = transferredFiles(event.clipboardData)
-                      if (!pasted.length) return
-                      event.preventDefault()
-                      setSendError(null)
-                      setFiles((current) =>
-                        appendAttachmentFiles(current, pasted)
-                      )
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        !event.shiftKey &&
-                        !event.nativeEvent.isComposing
-                      ) {
-                        event.preventDefault()
-                        event.currentTarget.form?.requestSubmit()
-                      }
-                    }}
-                    placeholder={t("请输入问题")}
-                    aria-label={t("请输入问题")}
-                    enterKeyHint="send"
-                    autoComplete="off"
-                    maxLength={4000}
-                    rows={1}
-                  />
-                  {files.length > 0 ? (
-                    <div className="bui-prompt-files">
-                      <AgentAttachmentList
-                        files={files}
-                        onRemove={(indexToRemove) =>
-                          setFiles((current) =>
-                            current.filter(
-                              (_, index) => index !== indexToRemove
-                            )
-                          )
-                        }
-                        t={t}
-                      />
-                    </div>
-                  ) : null}
-                  <div className="bui-prompt-toolbar justify-between">
-                    <div className="bui-prompt-attach">
-                      <AgentFilePicker
-                        disabled={
-                          isSending || isRunsLoading || fileDrop.isReadingFiles
-                        }
-                        onFiles={(selected) => {
-                          setSendError(null)
-                          setFiles((current) =>
-                            appendAttachmentFiles(current, selected)
-                          )
-                        }}
-                        t={t}
-                      />
-                    </div>
-                    <div className="bui-prompt-actions">
-                      <AgentApprovalModeMenu
-                        value={approvalMode}
-                        onChange={setApprovalMode}
-                        disabled={isSending}
-                        t={t}
-                      />
-                      <AgentChatSubmitButton
-                        isRunning={isSending}
-                        hasInput={Boolean(question.trim())}
-                        sendDisabled={
-                          fileDrop.isReadingFiles || projectUnavailable
-                        }
-                        onStop={handleCancelAsk}
-                        t={t}
-                      />
-                    </div>
-                  </div>
-                </AgentPromptBar>
+                  onClearSendError={handleClearSendError}
+                  onSubmitDraft={handleSubmitDraft}
+                  onCancelAsk={handleCancelAskCallback}
+                  t={t}
+                />
               </div>
             </div>
           </section>

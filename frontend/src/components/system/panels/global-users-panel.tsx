@@ -116,9 +116,9 @@ export function GlobalUsersPanel({
       id="system-panel-users"
       role="tabpanel"
       aria-labelledby="system-tab-users"
-      className="grid min-w-0 gap-4 lg:h-full lg:overflow-y-auto lg:pr-1"
+      className="grid min-w-0 gap-4 lg:h-full lg:min-h-0 lg:overflow-hidden lg:pr-1"
     >
-      <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:min-h-full">
+      <Card className="min-w-0 gap-3 overflow-hidden border-border/70 py-4 shadow-sm lg:h-full lg:min-h-0">
         <CardHeader className="flex-row items-start justify-between gap-4 px-4 max-sm:flex-wrap">
           <div className="flex min-w-0 items-start gap-3">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
@@ -134,14 +134,14 @@ export function GlobalUsersPanel({
             {t("新建用户")}
           </Button>
         </CardHeader>
-        <CardContent className="min-w-0 px-4">
+        <CardContent className="min-w-0 px-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
           {isUsersLoading ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>
           ) : users.length ? (
-            <div className="grid gap-3">
-              <div className="grid gap-2 lg:grid-cols-[minmax(220px,1fr)_150px_170px_190px]">
+            <div className="flex min-w-0 flex-col gap-3 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+              <div className="grid shrink-0 gap-2 lg:grid-cols-[minmax(220px,1fr)_150px_170px_190px]">
                 <div className="relative">
                   <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -271,7 +271,7 @@ export function GlobalUsersPanel({
                 </ul>
               ) : null}
 
-              <div className="hidden min-w-0 overflow-x-auto rounded-lg border bg-background md:block">
+              <div className="hidden min-w-0 overflow-auto rounded-lg border bg-background md:block lg:min-h-0 lg:flex-1">
                 <div
                   role="table"
                   aria-label={t("用户列表")}
@@ -279,7 +279,7 @@ export function GlobalUsersPanel({
                 >
                   <div
                     role="row"
-                    className="grid grid-cols-[150px_140px_minmax(260px,1fr)_240px_220px_130px_120px_180px_160px] border-b bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4 py-3 text-sm font-semibold text-muted-foreground"
+                    className="sticky top-0 z-10 grid grid-cols-[150px_140px_minmax(260px,1fr)_240px_220px_130px_120px_180px_160px] border-b bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4 py-3 text-sm font-semibold text-muted-foreground"
                   >
                     <span role="columnheader">{t("用户名")}</span>
                     <span role="columnheader">{t("账号")}</span>
@@ -291,7 +291,7 @@ export function GlobalUsersPanel({
                     <span role="columnheader">{t("创建时间")}</span>
                     <span
                       role="columnheader"
-                      className="sticky right-0 flex h-full items-center border-l bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4"
+                      className="sticky right-0 z-20 flex h-full items-center border-l bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))] px-4"
                     >
                       {t("操作")}
                     </span>
@@ -378,7 +378,7 @@ export function GlobalUsersPanel({
                         <span
                           role="cell"
                           className={cn(
-                            "sticky right-0 flex h-full items-center gap-2 border-l bg-background px-4 whitespace-nowrap group-hover:bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))]",
+                            "sticky right-0 z-[1] flex h-full items-center gap-2 border-l bg-background px-4 whitespace-nowrap group-hover:bg-[color-mix(in_oklch,var(--muted)_40%,var(--background))]",
                             index % 2 === 1 &&
                               "bg-[color-mix(in_oklch,var(--muted)_20%,var(--background))]"
                           )}

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, String
+from sqlalchemy import JSON, DateTime, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.entities.defaults import new_id, utc_now
@@ -10,6 +10,19 @@ from app.infra.db.base import Base
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index(
+            "ix_audit_logs_workspace_created_id",
+            "workspace_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_audit_logs_created_id",
+            "created_at",
+            "id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     actor_user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)

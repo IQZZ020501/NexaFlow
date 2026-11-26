@@ -37,7 +37,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await initialize_secret_keys(settings)
         yield
 
-    app = FastAPI(title="NexaFlow API", lifespan=lifespan)
+    app = FastAPI(
+        title="NexaFlow API",
+        lifespan=lifespan,
+        docs_url=None if settings.environment == "production" else "/docs",
+        redoc_url=None if settings.environment == "production" else "/redoc",
+        openapi_url=None if settings.environment == "production" else "/openapi.json",
+    )
     app.state.settings = settings
     app.add_middleware(RequestBodyLimitMiddleware)
 
@@ -109,6 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and "cache-control" not in response.headers
         ):
             response.headers["Cache-Control"] = "no-store"
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
         return response
 
     @app.get("/health")

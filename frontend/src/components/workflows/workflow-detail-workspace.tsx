@@ -44,9 +44,16 @@ import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import {
   AgentConversationUsersPanel,
   AgentLogsPanel,
-  AgentMonitoringPanel,
   AgentOverviewPanel,
 } from "@/components/agents/agent-management-panels"
+
+const AgentMonitoringPanel = dynamic(
+  () =>
+    import("@/components/agents/agent-monitoring-panel").then(
+      (mod) => mod.AgentMonitoringPanel
+    ),
+  { ssr: false }
+)
 import type { AgentFormState } from "@/components/agents/agents-page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"

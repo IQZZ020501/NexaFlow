@@ -2254,6 +2254,49 @@ def test_regenerated_agent_run_starts_from_a_fresh_checkpoint() -> None:
     assert regenerated.events == []
     assert regenerated.feedback is None
 
+def test_published_regeneration_rejects_unpublished_or_superseded_version() -> None:
+    from app.application.agents.runs.service import validate_regeneration_source
+    from app.entities.agents import Agent
+    from app.entities.runs import AgentRun
+
+    source = AgentRun(
+        id="run-pub-1",
+        workspace_id="ws-1",
+        agent_id="agent-1",
+        access_source="public",
+        consumer_id="visitor-1",
+        conversation_id="conv-1",
+        configuration_source="published",
+        agent_publication_version_id="ver-1",
+        status="succeeded",
+    )
+    for live_agent in (
+        None,
+        Agent(id="agent-1", published=False, current_published_version_id="ver-1"),
+        Agent(id="agent-1", published=True, current_published_version_id="ver-2"),
+    ):
+        with (
+            patch(
+                "app.application.agents.runs.service.agent_repository.get_active_agent_run",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.application.agents.runs.service.agent_repository.get_agent_by_id",
+                new=AsyncMock(return_value=live_agent),
+            ),
+        ):
+            try:
+                asyncio.run(
+                    validate_regeneration_source(
+                        SimpleNamespace(), source, origin="agent"
+                    )
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 409
+            else:
+                raise AssertionError("expected 409 when published version is inactive")
+
+
 def test_edit_regeneration_rejects_a_non_latest_run() -> None:
     from app.application.agents.runs.service import regenerate_agent_run_from_source
     from app.entities.runs import AgentRun
@@ -3926,6 +3969,7 @@ def main() -> None:
     test_run_to_response_maps_run_fields()
     test_run_response_normalizes_legacy_source_links()
     test_regenerated_agent_run_starts_from_a_fresh_checkpoint()
+    test_published_regeneration_rejects_unpublished_or_superseded_version()
     test_edit_regeneration_rejects_a_non_latest_run()
     test_repeated_run_feedback_write_is_idempotent()
     test_agent_usage_normalizes_provider_metadata()

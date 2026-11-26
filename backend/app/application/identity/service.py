@@ -41,8 +41,9 @@ from app.infra.security.auth import (
     create_access_token,
     create_refresh_token,
     hash_password,
+    hash_password_async,
     hash_refresh_token,
-    verify_password,
+    verify_password_async,
 )
 from app.schemas.identity.contracts import (
     MembershipResponse,
@@ -255,7 +256,7 @@ async def create_user(
         username=normalize_username(payload.username),
         email=normalize_email(payload.email),
         name=normalize_name(payload.name),
-        password_hash=hash_password(initial_password),
+        password_hash=await hash_password_async(initial_password),
         initial_password_expires_at=utc_now() + timedelta(hours=24),
         is_global_admin=payload.is_global_admin,
         must_change_password=True,
@@ -383,7 +384,7 @@ async def change_user_password(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
     user = locked_user
     now = utc_now()
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password_async(new_password)
     user.must_change_password = False
     user.initial_password_expires_at = None
     await user_repository.delete_refresh_sessions_for_user(db, user.id)
@@ -517,8 +518,12 @@ async def authenticate_user(
         ) from exc
     user = await user_repository.get_active_user_by_username(db, username)
     if user is None:
-        verify_password(password, _DUMMY_PASSWORD_HASH)
-    if user is None or not verify_password(password, user.password_hash) or _initial_password_expired(user):
+        await verify_password_async(password, _DUMMY_PASSWORD_HASH)
+    if (
+        user is None
+        or not await verify_password_async(password, user.password_hash)
+        or _initial_password_expired(user)
+    ):
         log_event(
             logger,
             logging.WARNING,
@@ -643,17 +648,32 @@ async def change_password(
     Raises:
     	HTTPException: If the current password is invalid or the new password matches the existing password.
     """
+    if (
+        not current_password
+        or not await verify_password_async(current_password, user.password_hash)
+        or _initial_password_expired(user)
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
+    if await verify_password_async(new_password, user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")
+    pre_lock_hash = user.password_hash
+    new_password_hash = await hash_password_async(new_password)
+
     locked_user = await user_repository.lock_user(db, user.id)
     if locked_user is None or not locked_user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
     user = locked_user
-    if not current_password or not verify_password(current_password, user.password_hash) or _initial_password_expired(user):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
-    if verify_password(new_password, user.password_hash):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")
+    if user.password_hash != pre_lock_hash:
+        if (
+            not await verify_password_async(current_password, user.password_hash)
+            or _initial_password_expired(user)
+        ):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is invalid.")
+        if await verify_password_async(new_password, user.password_hash):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "New password must be different.")
 
     now = utc_now()
-    user.password_hash = hash_password(new_password)
+    user.password_hash = new_password_hash
     user.must_change_password = False
     user.initial_password_expires_at = None
     await user_repository.delete_refresh_sessions_for_user(db, user.id)

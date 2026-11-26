@@ -370,9 +370,7 @@ async def reconcile_automation_notifications(settings: Settings) -> int:
                     await automation_repository.save_execution(db, execution)
                     await db.commit()
                 else:
-                    execution.updated_at = utc_now()
-                    await automation_repository.save_execution(db, execution)
-                    await db.commit()
+                    await db.rollback()
             else:
                 if execution.last_reconciled_run_status != state_marker:
                     execution.last_reconciled_run_status = state_marker
@@ -380,9 +378,7 @@ async def reconcile_automation_notifications(settings: Settings) -> int:
                     await automation_repository.save_execution(db, execution)
                     await db.commit()
                 else:
-                    execution.updated_at = utc_now()
-                    await automation_repository.save_execution(db, execution)
-                    await db.commit()
+                    await db.rollback()
 
         if created_notification is not None:
             await publish_live_task_notification(settings, created_notification)

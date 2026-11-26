@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Index, Integer, String, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,6 +11,10 @@ from app.infra.db.base import Base
 
 class SystemLog(Base):
     __tablename__ = "system_logs"
+    __table_args__ = (
+        Index("ix_system_logs_created_id", "created_at", "id"),
+        Index("ix_system_logs_level_created", "level", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     level: Mapped[str] = mapped_column(String(20), default="info", index=True)

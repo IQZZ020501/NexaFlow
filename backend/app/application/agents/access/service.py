@@ -1004,6 +1004,12 @@ async def regenerate_external_agent_run(
     """
     if access_source != "public":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent run not found.")
+    await _enforce_rate_limit(
+        settings,
+        context.agent.id,
+        access_source,
+        consumer_id,
+    )
     source = await get_external_agent_run(
         db,
         context.agent.id,

@@ -239,7 +239,10 @@ def public_client_options(credentials, timeout=60):
         probe = active_probe.get()
         if probe:
             client = httpx.Client(
-                timeout=timeout, event_hooks=probe.hooks(), follow_redirects=True
+                timeout=timeout,
+                event_hooks=probe.hooks(),
+                trust_env=False,
+                follow_redirects=False,
             )
             probe.resources.callback(client.close)
             return {"http_client": client}

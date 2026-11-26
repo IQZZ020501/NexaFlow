@@ -348,7 +348,7 @@ async def add_workspace_member(
     if role == "admin":
         require_global_admin_for_workspace_admin(actor)
     user = await user_repository.get_user_by_id(db, user_id)
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
 
     membership = WorkspaceMembership(

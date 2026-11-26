@@ -65,23 +65,22 @@ async def get_memory_projects(db, workspace_id, actor):
 async def get_memory_profile(db, workspace_id, actor):
     profile = await _profile(db, workspace_id, actor)
     items = await repository.list_memories(db, profile.id)
+    source_runs = await runs.list_agent_run_sources_by_ids(
+        db,
+        [item.source_run_id for item in items if item.source_run_id],
+    )
     responses = []
     for item in items:
         if item.expires_at is not None and item.expires_at.tzinfo is None:
             item.expires_at = item.expires_at.replace(tzinfo=timezone.utc)
-        source = (
-            await runs.get_agent_run_by_id(db, item.source_run_id)
-            if item.source_run_id
-            else None
+        source = source_runs.get(item.source_run_id) if item.source_run_id else None
+        is_accessible_source = (
+            source is not None
+            and source[0] == profile.workspace_id
+            and source[2] == actor.id
+            and source[3] == "public"
         )
-        source_id = (
-            source.conversation_id
-            if source
-            and source.workspace_id == profile.workspace_id
-            and source.consumer_id == actor.id
-            and source.access_source == "public"
-            else None
-        )
+        source_id = source[4] if is_accessible_source else None
         responses.append(
             MemoryResponse(
                 **{
@@ -90,7 +89,7 @@ async def get_memory_profile(db, workspace_id, actor):
                     if key not in {"source_conversation_id", "source_agent_id"}
                 },
                 source_conversation_id=source_id,
-                source_agent_id=source.agent_id if source_id and source else None,
+                source_agent_id=source[1] if is_accessible_source else None,
             )
         )
     return MemoryProfileResponse(

@@ -255,7 +255,16 @@ async def create_registered_model(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Model name is required.",
         )
-    restricted_connection = workspace_role != "admin" and not actor.is_global_admin
+    if not actor.is_global_admin and provider_type == "bedrock" and (
+        not secrets.get("aws_access_key_id") or not secrets.get("aws_secret_access_key")
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Bedrock models require explicit AWS credentials.",
+        )
+    restricted_connection = (
+        not actor.is_global_admin and not settings.models_allow_private_networks
+    )
     connection_credentials = {**config, **secrets}
     if restricted_connection:
         connection_credentials = await member_connection_credentials(
@@ -404,8 +413,15 @@ async def update_registered_model(
         current_secrets=current_secrets,
         current_hints=current_hints,
     )
+    if not actor.is_global_admin and provider_type == "bedrock" and (
+        not secrets.get("aws_access_key_id") or not secrets.get("aws_secret_access_key")
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Bedrock models require explicit AWS credentials.",
+        )
     restricted_connection = bool((model.meta or {}).get(PUBLIC_ENDPOINT_POLICY)) or (
-        workspace_role != "admin" and not actor.is_global_admin
+        not actor.is_global_admin and not settings.models_allow_private_networks
     )
     connection_credentials = {**config, **secrets}
     if restricted_connection:

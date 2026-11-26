@@ -3,27 +3,14 @@
 import { ModelScopeLabel } from "@/components/llm/model-scope-label"
 
 import * as React from "react"
-import type { ComponentType } from "react"
-import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import { LazyModelIcon as ModelIcon } from "@/components/llm/lazy-model-icon"
 import {
-  BracesIcon,
   BotIcon,
-  BrainCircuitIcon,
-  DatabaseIcon,
-  FileTextIcon,
-  FlagIcon,
-  GitBranchIcon,
-  PlayIcon,
-  RouteIcon,
-  TextCursorInputIcon,
-  WrenchIcon,
   CheckCircle2Icon,
   CheckIcon,
   CircleAlertIcon,
   CircleDotDashedIcon,
   LoaderCircleIcon,
-  MessageSquareMoreIcon,
-  ListFilterIcon,
   ClipboardListIcon,
   MinusIcon,
   ChevronDownIcon,
@@ -35,6 +22,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react"
+import { NODE_ICONS } from "./workflow-node-icons"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 
 import { useLanguage } from "@/contexts/language-provider"
@@ -98,26 +86,7 @@ function DropdownMenuContent({
   )
 }
 
-export const NODE_ICONS: Record<
-  WorkflowNodeType,
-  ComponentType<{ className?: string }>
-> = {
-  start: PlayIcon,
-  end: FlagIcon,
-  llm: BrainCircuitIcon,
-  classifier: RouteIcon,
-  knowledge: DatabaseIcon,
-  "reranker-node": ListFilterIcon,
-  "form-node": ClipboardListIcon,
-  "document-extract-node": FileTextIcon,
-  condition: GitBranchIcon,
-  "reply-node": MessageSquareMoreIcon,
-  template: TextCursorInputIcon,
-  variable: BracesIcon,
-  tool: WrenchIcon,
-  agent: BotIcon,
-  mcp: WrenchIcon,
-}
+export { NODE_ICONS }
 
 const STATUS_STYLES = {
   running: "border-sky-500 ring-2 ring-sky-500/20",
