@@ -89,6 +89,11 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 service.agent_repository,
+                "get_agent_run_poll_state",
+                AsyncMock(side_effect=lambda *_, **__: (run.status, run.lease_expires_at)),
+            ),
+            patch.object(
+                service.agent_repository,
                 "get_agent_run_by_id",
                 AsyncMock(return_value=run),
             ),
@@ -130,6 +135,11 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(service, "get_session_factory", return_value=session),
             patch.object(service, "AgentLiveStreamReader", return_value=reader),
             patch.object(service, "run_to_response", return_value=response),
+            patch.object(
+                service.agent_repository,
+                "get_agent_run_poll_state",
+                AsyncMock(side_effect=lambda *_, **__: (run.status, run.lease_expires_at)),
+            ),
             patch.object(
                 service.agent_repository,
                 "get_agent_run_by_id",

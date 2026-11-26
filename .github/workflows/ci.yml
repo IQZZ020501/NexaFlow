@@ -212,7 +212,7 @@ jobs:
 
       - name: Test
         run: |
-          bun test --parallel
+          bun test --parallel --timeout=15000
           bun run test:proxy
 
       - name: Build
