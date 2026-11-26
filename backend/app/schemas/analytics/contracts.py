@@ -57,6 +57,20 @@ class WorkspaceAnalyticsHourlyPoint(BaseModel):
     runs: int
 
 
+class WorkspaceAnalyticsMemberTrendPoint(BaseModel):
+    date: date
+    runs: int
+    total_tokens: int
+
+
+class WorkspaceAnalyticsMemberTrendSeries(BaseModel):
+    user_id: str
+    name: str
+    total_runs: int
+    total_tokens: int
+    daily: list[WorkspaceAnalyticsMemberTrendPoint]
+
+
 class WorkspaceAnalyticsDistributionItem(BaseModel):
     key: str
     count: int
@@ -171,6 +185,9 @@ class WorkspaceAnalyticsResponse(BaseModel):
     tool_usage: WorkspaceAnalyticsToolUsage
     trends: list[WorkspaceAnalyticsTrendPoint]
     hourly_runs: list[WorkspaceAnalyticsHourlyPoint]
+    member_trends: list[WorkspaceAnalyticsMemberTrendSeries] = Field(
+        default_factory=list
+    )
     distributions: WorkspaceAnalyticsDistributions
     rankings: WorkspaceAnalyticsRankings
     frequent_questions: list[WorkspaceAnalyticsFrequentQuestion]

@@ -74,6 +74,7 @@ import {
   FrequentQuestionsPanel,
   RunDistributionPanel,
 } from "@/components/system/workspace-analytics-insights"
+import { MemberComparisonChart } from "@/components/system/workspace-analytics-member-trends"
 
 export { getPresetAnalyticsRange } from "@/components/system/workspace-analytics-date-range-picker"
 
@@ -559,6 +560,12 @@ export function WorkspaceAnalyticsPage() {
               </div>
 
               <HourlyTrendChart data={data.hourly_runs} locale={locale} />
+
+              <MemberComparisonChart
+                key={`${workspaceId}:${range.from}:${range.to}`}
+                series={data.member_trends ?? []}
+                locale={locale}
+              />
 
               <AnalyticsToolUsagePanel
                 usage={data.tool_usage}

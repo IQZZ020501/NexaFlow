@@ -763,6 +763,13 @@ export const en = {
   "失败 / 取消运行": "Failed / cancelled runs",
   外部调用占比: "External call share",
   "Token 消耗": "Token usage",
+  成员每日使用对比: "Daily member usage comparison",
+  "对比工作空间成员按自然日的运行次数与 Token 消耗（支持 Top 5 / 10 / 20）":
+    "Compare daily runs and token usage across workspace members (Top 5 / 10 / 20)",
+  "选择成员 ({count}/{max})": "Members ({count}/{max})",
+  展示人数: "Top members",
+  所选范围内暂无成员使用数据: "No member usage data in the selected range",
+  指标切换: "Metric selector",
   "输入 {input} / 输出 {output}": "Input {input} / output {output}",
   "应用运行 {value}": "Application runs {value}",
   "{value} 次运行的用量未完整上报": "Usage was incomplete for {value} runs",

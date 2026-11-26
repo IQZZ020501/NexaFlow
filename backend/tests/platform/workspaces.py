@@ -1330,6 +1330,11 @@ def exercise_workspace_analytics() -> None:
             "run_count": 1,
             "total_tokens": 150,
         }
+        assert len(payload["member_trends"]) == 1
+        assert payload["member_trends"][0]["user_id"] == global_admin_id
+        assert payload["member_trends"][0]["total_runs"] == 1
+        assert payload["member_trends"][0]["total_tokens"] == 150
+        assert len(payload["member_trends"][0]["daily"]) == len(payload["trends"])
         assert payload["rankings"]["applications"][0]["name"] == "Support Agent"
         assert payload["rankings"]["applications"][0]["total_tokens"] == 200
         assert payload["rankings"]["applications"][1]["total_tokens"] == 80

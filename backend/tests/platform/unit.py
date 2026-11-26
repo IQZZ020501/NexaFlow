@@ -18,6 +18,7 @@ are mocked or monkeypatched so each unit is tested in isolation. Run from
 """
 
 import asyncio
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -27,6 +28,12 @@ from app.application.resource_folders.service import (
     descendant_folder_ids,
     move_resource,
 )
+from app.domain.analytics.services import (
+    MEMBER_TREND_LIMIT,
+    AnalyticsPeriod,
+    _build_member_trends,
+)
+from app.entities.analytics import WorkspaceAnalyticsRun
 from app.entities.resource_folders.models import ResourceFolder
 from app.schemas.resource_folders.contracts import ResourceFolderMoveRequest
 
@@ -173,12 +180,121 @@ def test_message_stream_releases_reader_at_lifetime_limit() -> None:
     reader.close.assert_awaited_once()
 
 
+def test_workspace_analytics_member_trends() -> None:
+    period = AnalyticsPeriod(
+        from_date=date(2026, 8, 1),
+        to_date=date(2026, 8, 4),
+        previous_from_date=date(2026, 7, 29),
+        previous_to_date=date(2026, 8, 1),
+    )
+
+    def make_run(
+        run_id: str,
+        user_id: str | None,
+        name: str | None,
+        created_at: datetime,
+        *,
+        access_source: str = "console",
+        total_tokens: int = 10,
+        workflow_token_usage: int | None = None,
+    ) -> WorkspaceAnalyticsRun:
+        return WorkspaceAnalyticsRun(
+            id=run_id,
+            agent_id="agent-1",
+            application_name="Agent 1",
+            app_type="workflow" if workflow_token_usage is not None else "agent",
+            requested_by_user_id=user_id,
+            requester_username=user_id,
+            requester_name=name,
+            access_source=access_source,
+            status="succeeded",
+            goal="test",
+            model_usage={"total_tokens": total_tokens},
+            workflow_token_usage=workflow_token_usage,
+            started_at=created_at,
+            finished_at=created_at,
+            created_at=created_at,
+        )
+
+    # 2026-07-31T16:30:00Z is 2026-08-01 00:30+08:00 in Asia/Shanghai.
+    runs = [
+        make_run(
+            "r-shanghai",
+            "u-1",
+            "Alice",
+            datetime(2026, 7, 31, 16, 30, tzinfo=UTC),
+            total_tokens=100,
+        ),
+        make_run(
+            "r-workflow",
+            "u-1",
+            "Alice",
+            datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+            total_tokens=999,
+            workflow_token_usage=250,
+        ),
+        # Excluded: public/api and missing requested_by_user_id
+        make_run(
+            "r-public",
+            "u-public",
+            "PublicUser",
+            datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+            access_source="public",
+            total_tokens=500,
+        ),
+        make_run(
+            "r-api",
+            "u-api",
+            "ApiUser",
+            datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+            access_source="api",
+            total_tokens=500,
+        ),
+        make_run(
+            "r-anon",
+            None,
+            None,
+            datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+            access_source="console",
+            total_tokens=500,
+        ),
+    ]
+    # Add 21 more users with 1 run each to verify MEMBER_TREND_LIMIT truncation and tie-breaking.
+    for index in range(21):
+        runs.append(
+            make_run(
+                f"r-extra-{index}",
+                f"u-extra-{index:02d}",
+                f"User {index:02d}",
+                datetime(2026, 8, 2, 12, 0, tzinfo=UTC),
+                access_source="automation" if index % 2 == 0 else "console",
+                total_tokens=100 - index,
+            )
+        )
+
+    series = _build_member_trends(runs, period)
+    assert len(series) == MEMBER_TREND_LIMIT
+    assert series[0].user_id == "u-1"
+    assert series[0].name == "Alice"
+    assert series[0].total_runs == 2
+    assert series[0].total_tokens == 350
+    assert [(p.date, p.runs, p.total_tokens) for p in series[0].daily] == [
+        (date(2026, 8, 1), 1, 100),
+        (date(2026, 8, 2), 1, 250),
+        (date(2026, 8, 3), 0, 0),
+    ]
+    assert series[1].user_id == "u-extra-00"
+    assert series[-1].user_id == "u-extra-18"
+    assert all(item.user_id not in {"u-public", "u-api"} for item in series)
+
+
 def main() -> None:
     test_resource_folder_descendants_cover_nested_children()
     test_resource_folder_rejects_moving_builtin_tools()
     test_team_to_response()
     test_workspace_daily_quota_uses_shanghai_day_boundary()
     test_message_stream_releases_reader_at_lifetime_limit()
+    test_workspace_analytics_member_trends()
     print("PLATFORM_UNIT_OK")
 
 

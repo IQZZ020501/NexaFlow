@@ -38,6 +38,8 @@ from app.schemas.analytics import (
     WorkspaceAnalyticsInventoryResponse,
     WorkspaceAnalyticsInventoryTools,
     WorkspaceAnalyticsMemberSummary,
+    WorkspaceAnalyticsMemberTrendPoint,
+    WorkspaceAnalyticsMemberTrendSeries,
     WorkspaceAnalyticsMetadata,
     WorkspaceAnalyticsRankings,
     WorkspaceAnalyticsResponse,
@@ -310,6 +312,80 @@ def _build_hourly_runs(
     return [
         WorkspaceAnalyticsHourlyPoint(hour=hour, runs=count)
         for hour, count in enumerate(values)
+    ]
+
+
+MEMBER_TREND_LIMIT = 20
+
+
+def _build_member_trends(
+    runs: list[WorkspaceAnalyticsRun],
+    period: AnalyticsPeriod,
+) -> list[WorkspaceAnalyticsMemberTrendSeries]:
+    """Build daily run and token trends for the most active workspace members."""
+    days = [
+        period.from_date + timedelta(days=index)
+        for index in range((period.to_date - period.from_date).days)
+    ]
+    day_set = set(days)
+    members: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        if (
+            run.access_source not in {"console", "automation"}
+            or not run.requested_by_user_id
+            or run.created_at is None
+        ):
+            continue
+        day = _analytics_time(run.created_at).date()
+        if day not in day_set:
+            continue
+        _, _, run_total, _ = _run_usage(run)
+        user = members.setdefault(
+            run.requested_by_user_id,
+            {
+                "name": (
+                    run.requester_name
+                    or run.requester_username
+                    or run.requested_by_user_id
+                ),
+                "total_runs": 0,
+                "total_tokens": 0,
+                "daily": {
+                    item_day: {"runs": 0, "total_tokens": 0}
+                    for item_day in days
+                },
+            },
+        )
+        user["total_runs"] += 1
+        user["total_tokens"] += run_total
+        user["daily"][day]["runs"] += 1
+        user["daily"][day]["total_tokens"] += run_total
+
+    ranked = sorted(
+        members.items(),
+        key=lambda item: (
+            -item[1]["total_runs"],
+            -item[1]["total_tokens"],
+            item[1]["name"].casefold(),
+            item[0],
+        ),
+    )[:MEMBER_TREND_LIMIT]
+    return [
+        WorkspaceAnalyticsMemberTrendSeries(
+            user_id=user_id,
+            name=values["name"],
+            total_runs=values["total_runs"],
+            total_tokens=values["total_tokens"],
+            daily=[
+                WorkspaceAnalyticsMemberTrendPoint(
+                    date=day,
+                    runs=values["daily"][day]["runs"],
+                    total_tokens=values["daily"][day]["total_tokens"],
+                )
+                for day in days
+            ],
+        )
+        for user_id, values in ranked
     ]
 
 
@@ -699,6 +775,7 @@ async def get_workspace_analytics(
         tool_usage=_build_tool_usage(current_tool_calls, previous_tool_calls),
         trends=_build_trends(current_runs, period),
         hourly_runs=_build_hourly_runs(current_runs),
+        member_trends=_build_member_trends(current_runs, period),
         distributions=WorkspaceAnalyticsDistributions(
             run_types=_distribution(Counter(run.app_type for run in current_runs)),
             access_sources=_distribution(

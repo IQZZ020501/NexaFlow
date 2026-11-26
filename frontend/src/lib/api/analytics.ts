@@ -77,6 +77,17 @@ export type WorkspaceAnalytics = {
     hour: number
     runs: number
   }>
+  member_trends: Array<{
+    user_id: string
+    name: string
+    total_runs: number
+    total_tokens: number
+    daily: Array<{
+      date: string
+      runs: number
+      total_tokens: number
+    }>
+  }>
   distributions: {
     run_types: Array<{ key: string; count: number }>
     access_sources: Array<{ key: string; count: number }>

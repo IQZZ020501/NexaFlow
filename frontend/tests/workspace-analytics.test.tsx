@@ -154,6 +154,41 @@ const analytics: WorkspaceAnalytics = {
     hour,
     runs: hour === 0 ? 3 : hour === 23 ? 1 : 0,
   })),
+  member_trends: [
+    {
+      user_id: "u-1",
+      name: "NexaFlow Admin",
+      total_runs: 20,
+      total_tokens: 150,
+      daily: [
+        { date: "2026-08-01", runs: 8, total_tokens: 60 },
+        { date: "2026-08-02", runs: 12, total_tokens: 90 },
+      ],
+    },
+    ...Array.from({ length: 11 }, (_, idx) => {
+      const rank = idx + 2
+      const runs = 19 - idx
+      const tokens = rank === 6 ? 950 : rank === 2 ? 400 : 300 - rank * 10
+      return {
+        user_id: `u-${rank}`,
+        name: `Member ${rank}`,
+        total_runs: runs,
+        total_tokens: tokens,
+        daily: [
+          {
+            date: "2026-08-01",
+            runs: Math.floor(runs / 2),
+            total_tokens: Math.floor(tokens / 2),
+          },
+          {
+            date: "2026-08-02",
+            runs: runs - Math.floor(runs / 2),
+            total_tokens: tokens - Math.floor(tokens / 2),
+          },
+        ],
+      }
+    }),
+  ],
   distributions: {
     run_types: [
       { key: "agent", count: 3 },
@@ -273,7 +308,7 @@ describe("workspace analytics", () => {
 
     await waitFor(() => expect(screen.getByText("Support Agent")).toBeTruthy())
     const tokenCard = screen
-      .getByText("Token 消耗")
+      .getAllByText("Token 消耗")[0]
       .closest<HTMLElement>("[data-slot='card']")!
     expect(within(tokenCard).getByText("320")).toBeTruthy()
     expect(within(tokenCard).getByText("输入 140 · 输出 75")).toBeTruthy()
@@ -311,7 +346,7 @@ describe("workspace analytics", () => {
     expect(frequentQuestion.getAttribute("title")).toBe("How do I deploy?")
     expect(screen.getByText("时段活跃曲线")).toBeTruthy()
     expect(screen.getByText("按自然日统计顶层运行")).toBeTruthy()
-    expect(document.querySelectorAll("[data-slot='chart']")).toHaveLength(3)
+    expect(document.querySelectorAll("[data-slot='chart']")).toHaveLength(7)
     expect(screen.queryByText(/统计时区/)).toBeNull()
     expect(
       screen.getByText("使用排行").closest<HTMLElement>("[data-slot='card']")
@@ -479,7 +514,7 @@ describe("workspace analytics", () => {
 
     await waitFor(() => expect(screen.getByText("Support Agent")).toBeTruthy())
     const tokenCard = screen
-      .getByText("Token 消耗")
+      .getAllByText("Token 消耗")[0]
       .closest<HTMLElement>("[data-slot='card']")!
     expect(within(tokenCard).getByText("1.23M")).toBeTruthy()
     // Ranking rows reuse the same units for applications, users and匿名调用.
@@ -608,12 +643,17 @@ describe("workspace analytics", () => {
     expect(screen.getByText("Question 10")).toBeTruthy()
     expect(screen.queryByText("Question 11")).toBeNull()
 
-    fireEvent.click(screen.getByRole("button", { name: "用户" }))
-    expect(screen.getByText("NexaFlow Admin")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "团队" }))
-    expect(screen.getByText("Analytics Team")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "应用 / 工作流" }))
-    expect(screen.getByText("Support Agent")).toBeTruthy()
+    const rankingCard = screen
+      .getByText("使用排行")
+      .closest<HTMLElement>("[data-slot='card']")!
+    fireEvent.click(within(rankingCard).getByRole("button", { name: "用户" }))
+    expect(within(rankingCard).getByText("NexaFlow Admin")).toBeTruthy()
+    fireEvent.click(within(rankingCard).getByRole("button", { name: "团队" }))
+    expect(within(rankingCard).getByText("Analytics Team")).toBeTruthy()
+    fireEvent.click(
+      within(rankingCard).getByRole("button", { name: "应用 / 工作流" })
+    )
+    expect(within(rankingCard).getByText("Support Agent")).toBeTruthy()
 
     const questions = screen.getByRole("region", { name: "高频问题" })
     Object.defineProperty(questions, "scrollHeight", {
@@ -629,6 +669,63 @@ describe("workspace analytics", () => {
     expect(screen.getByText("Question 11")).toBeTruthy()
     expect(screen.getByText("Question 12")).toBeTruthy()
     expect(requests).toHaveLength(1)
+  })
+
+  test("supports Top 5 / 10 / 20 presets, metric switching, and custom member selection", async () => {
+    renderPage(<WorkspaceAnalyticsPage />)
+
+    await waitFor(() =>
+      expect(screen.getByText("成员每日使用对比")).toBeTruthy()
+    )
+    const memberCard = screen
+      .getByText("成员每日使用对比")
+      .closest<HTMLElement>("[data-slot='card']")!
+
+    expect(
+      within(memberCard).getByRole("button", { name: "选择成员 (5/12)" })
+    ).toBeTruthy()
+    expect(within(memberCard).getByText("Member 5")).toBeTruthy()
+    expect(within(memberCard).queryByText("Member 6")).toBeNull()
+
+    fireEvent.click(within(memberCard).getByRole("button", { name: "Top 10" }))
+    expect(
+      within(memberCard).getByRole("button", { name: "选择成员 (10/12)" })
+    ).toBeTruthy()
+    expect(within(memberCard).getByText("Member 10")).toBeTruthy()
+    expect(within(memberCard).queryByText("Member 11")).toBeNull()
+
+    fireEvent.click(within(memberCard).getByRole("button", { name: "Top 20" }))
+    expect(
+      within(memberCard).getByRole("button", { name: "选择成员 (12/12)" })
+    ).toBeTruthy()
+    expect(within(memberCard).getByText("Member 12")).toBeTruthy()
+
+    fireEvent.click(within(memberCard).getByRole("button", { name: "Top 5" }))
+    expect(
+      within(memberCard).getByRole("button", { name: "选择成员 (5/12)" })
+    ).toBeTruthy()
+    expect(within(memberCard).queryByText("Member 6")).toBeNull()
+
+    fireEvent.click(within(memberCard).getByRole("button", { name: "Token 消耗" }))
+    expect(within(memberCard).getByText("950")).toBeTruthy()
+    expect(within(memberCard).getByText("400")).toBeTruthy()
+
+    fireEvent.click(within(memberCard).getByRole("button", { name: "运行次数" }))
+    fireEvent.pointerDown(
+      within(memberCard).getByRole("button", { name: "选择成员 (5/12)" })
+    )
+    const menu = await screen.findByRole("menu")
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Member 5/ }))
+    expect(within(memberCard).getByText("选择成员 (4/12)")).toBeTruthy()
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Member 6/ }))
+    expect(within(memberCard).getByText("选择成员 (5/12)")).toBeTruthy()
+    expect(within(memberCard).getByText("Member 6")).toBeTruthy()
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Member 12/ }))
+    expect(within(memberCard).getByText("选择成员 (6/12)")).toBeTruthy()
+    expect(within(memberCard).getByText("Member 12")).toBeTruthy()
   })
 })
 
