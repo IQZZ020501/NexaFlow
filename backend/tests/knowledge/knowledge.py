@@ -526,7 +526,9 @@ async def assert_query_skips_stale_vector(knowledge_base_id: str, indexed_chunk_
     knowledge_retrieval_application.query_vectors = fake_query_vectors
     try:
         async with get_session_factory()() as db:
-            knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+            knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+                db, knowledge_base_id
+            )
             assert knowledge_base is not None
             hits = await knowledge_application.query_knowledge_base(
                 db,
@@ -569,7 +571,7 @@ def test_keyword_query_does_not_require_embedding_model() -> None:
             "log_event",
         ) as completion_log:
             result = await knowledge_retrieval_application.retrieve_knowledge_base(
-                object(),  # type: ignore[arg-type]
+                SimpleNamespace(rollback=AsyncMock()),  # type: ignore[arg-type]
                 SimpleNamespace(  # type: ignore[arg-type]
                     id="base-1",
                     reranker_model_id=None,
@@ -822,7 +824,9 @@ async def assert_query_aggregates_hybrid_hits(
     )
     try:
         async with get_session_factory()() as db:
-            knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+            knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+                db, knowledge_base_id
+            )
             assert knowledge_base is not None
             result = await knowledge_retrieval_application.retrieve_knowledge_base(
                 db,
@@ -1023,7 +1027,9 @@ async def assert_hierarchical_retrieval(
     unexpected_reranker_calls = 0
 
     async with get_session_factory()() as db:
-        knowledge_base = await db.get(KnowledgeBase, knowledge_base_id)
+        knowledge_base = await knowledge_repository.get_knowledge_base_by_id(
+            db, knowledge_base_id
+        )
         chunks = list(
             await db.scalars(
                 select(KnowledgeDocumentChunk)
@@ -1038,6 +1044,7 @@ async def assert_hierarchical_retrieval(
                 .order_by(KnowledgeDocumentParentChunk.parent_index)
             )
         )
+        db.expunge_all()
         assert knowledge_base is not None
         first_children = [chunk for chunk in chunks if chunk.parent_id == parents[0].id]
         second_children = [chunk for chunk in chunks if chunk.parent_id == parents[1].id]

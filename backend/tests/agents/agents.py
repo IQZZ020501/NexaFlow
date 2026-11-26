@@ -1073,6 +1073,9 @@ async def assert_knowledge_source_failure_is_attributed() -> None:
         async def __aexit__(self, *_args):
             return False
 
+        async def rollback(self) -> None:
+            return None
+
     class FakeSessionFactory:
         def __call__(self):
             return FakeSession()
@@ -1166,6 +1169,9 @@ async def assert_knowledge_tool_uses_shared_retrieval_trace() -> None:
 
         async def __aexit__(self, *_args):
             return False
+
+        async def rollback(self) -> None:
+            return None
 
     class FakeSessionFactory:
         def __call__(self):
@@ -5061,7 +5067,7 @@ def main() -> None:
             )
             assert member_run_after_revoke.status_code == 403
 
-            other_admin_id, other_token = create_active_user(
+            other_admin_id, _ = create_active_user(
                 client,
                 admin_token,
                 "other-admin",
@@ -5078,7 +5084,7 @@ def main() -> None:
             other_workspace_id = created_workspace.json()["workspace"]["id"]
             other_model = client.post(
                 f"/api/v1/workspaces/{other_workspace_id}/models",
-                headers=auth_headers(other_token),
+                headers=auth_headers(admin_token),
                 json=model_payload(model_base_url, "Other Agent Model"),
             )
             assert other_model.status_code == 201, other_model.text

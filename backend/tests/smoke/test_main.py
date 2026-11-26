@@ -145,9 +145,9 @@ def main() -> None:
     )
     asyncio.run(create_schema())
     with TestClient(prod_app) as prod_client:
-        assert prod_client.get("/docs").status_code == 200
-        assert prod_client.get("/redoc").status_code == 200
-        assert prod_client.get("/openapi.json").status_code == 200
+        assert prod_client.get("/docs").status_code == 404
+        assert prod_client.get("/redoc").status_code == 404
+        assert prod_client.get("/openapi.json").status_code == 404
 
 
 if __name__ == "__main__":
