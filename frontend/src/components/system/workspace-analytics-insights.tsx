@@ -499,7 +499,7 @@ export function FrequentQuestionsPanel({
                 key={item.question}
                 className="flex min-w-0 items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/35"
               >
-                <p className="min-w-0 flex-1 leading-relaxed break-words whitespace-normal">
+                <p className="min-w-0 flex-1 truncate" title={item.question}>
                   {item.question}
                 </p>
                 <Badge
