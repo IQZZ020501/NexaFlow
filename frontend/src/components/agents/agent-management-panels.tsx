@@ -20,11 +20,8 @@ import {
   UsersIcon,
 } from "lucide-react"
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
+  Area,
+  AreaChart,
   XAxis,
   YAxis,
 } from "recharts"
@@ -34,6 +31,19 @@ import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
 import {
   Dialog,
   DialogContent,
@@ -1024,6 +1034,12 @@ export function AgentMonitoringPanel({
   }, [agent.id, days, notify, t, token, workspaceId])
   const summary = data?.summary
   const daily = data?.daily ?? []
+  const chartConfig = {
+    runs: {
+      label: t("运行次数"),
+      color: "var(--primary)",
+    },
+  } satisfies ChartConfig
   return (
     <div className="space-y-5 p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1092,96 +1108,51 @@ export function AgentMonitoringPanel({
               tone="bg-violet-500/10 text-violet-600"
             />
           </div>
-          <section className="rounded-xl border bg-background p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold">{t("每日运行趋势")}</h3>
-              <span className="text-xs text-muted-foreground">
+          <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
+            <CardHeader className="px-6">
+              <CardTitle>{t("每日运行趋势")}</CardTitle>
+              <CardDescription>
                 {t("失败 {value} 次", { value: summary.failed })}
-              </span>
-            </div>
-            <div className="mt-5 h-64 min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="min-w-0 px-2 sm:px-6">
+              <ChartContainer
+                config={chartConfig}
+                className="aspect-auto h-[300px] w-full"
+              >
+                <AreaChart
                   data={daily}
                   accessibilityLayer
                   desc={t("每日运行趋势")}
-                  margin={{ top: 12, right: 16, left: 0, bottom: 0 }}
                 >
-                  <CartesianGrid
-                    vertical={false}
-                    stroke="var(--border)"
-                    strokeDasharray="3 3"
-                  />
                   <XAxis
                     dataKey="date"
-                    axisLine={false}
+                    fontSize={12}
                     tickLine={false}
+                    axisLine={false}
                     minTickGap={24}
                     tickFormatter={(date: string) => date.slice(5)}
-                    tick={{
-                      fill: "var(--muted-foreground)",
-                      fontSize: 11,
-                    }}
                   />
                   <YAxis
                     allowDecimals={false}
-                    axisLine={false}
+                    fontSize={12}
                     tickLine={false}
-                    width={32}
-                    tick={{
-                      fill: "var(--muted-foreground)",
-                      fontSize: 11,
-                    }}
+                    axisLine={false}
+                    width={36}
                   />
-                  <Tooltip
-                    cursor={{
-                      stroke: "var(--muted-foreground)",
-                      strokeDasharray: "4 4",
-                      strokeOpacity: 0.5,
-                    }}
-                    contentStyle={{
-                      borderRadius: "var(--radius)",
-                      borderColor: "var(--border)",
-                      backgroundColor: "var(--popover)",
-                      color: "var(--popover-foreground)",
-                    }}
-                    labelStyle={{
-                      color: "var(--popover-foreground)",
-                      fontWeight: 600,
-                      marginBottom: 4,
-                    }}
-                    itemStyle={{ color: "var(--primary)" }}
-                    formatter={(value) => [
-                      Number(value ?? 0).toLocaleString(),
-                      t("运行次数"),
-                    ]}
-                  />
-                  <Line
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Area
                     type="monotone"
                     dataKey="runs"
-                    name={t("运行次数")}
-                    stroke="var(--primary)"
-                    strokeWidth={2.5}
-                    dot={{
-                      r: 3,
-                      fill: "var(--background)",
-                      stroke: "var(--primary)",
-                      strokeWidth: 2,
-                    }}
-                    activeDot={{
-                      r: 6,
-                      fill: "var(--primary)",
-                      stroke: "var(--background)",
-                      strokeWidth: 3,
-                    }}
-                    isAnimationActive
-                    animationDuration={500}
+                    stroke="var(--color-runs)"
+                    fill="var(--color-runs)"
+                    fillOpacity={0.15}
                     connectNulls
                   />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
+                </AreaChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

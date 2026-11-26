@@ -14,9 +14,6 @@ import { useRouter } from "next/navigation"
 import {
   Area,
   AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
@@ -29,6 +26,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -152,15 +155,22 @@ function TrendChart({
   data,
   dataKey,
   locale,
-  color,
 }: {
   title: string
   description: string
   data: WorkspaceAnalytics["trends"]
   dataKey: "runs" | "total_tokens"
   locale: string
-  color: string
 }) {
+  const { t } = useLanguage()
+  const seriesLabel =
+    dataKey === "total_tokens" ? t("Token 消耗") : t("运行次数")
+  const chartConfig = {
+    [dataKey]: {
+      label: seriesLabel,
+      color: "var(--primary)",
+    },
+  } satisfies ChartConfig
   const formatValue = (value: number) =>
     formatTrendValue(value, dataKey, locale)
   const formatAxisValue = (value: number) =>
@@ -169,75 +179,62 @@ function TrendChart({
       : formatCompactNumber(value, locale)
   return (
     <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
-      <CardHeader className="px-5">
+      <CardHeader className="px-6">
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="h-64 min-w-0 px-2 sm:px-5">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={data}
-            accessibilityLayer
-            desc={description}
-            margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
-          >
-            <defs>
-              <linearGradient
-                id={`analytics-${dataKey}`}
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop offset="0%" stopColor={color} stopOpacity={0.25} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.03} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid
-              vertical={false}
-              stroke="var(--border)"
-              strokeDasharray="3 3"
-            />
+      <CardContent className="min-w-0 px-2 sm:px-6">
+        <ChartContainer
+          config={chartConfig}
+          className="aspect-auto h-64 w-full"
+        >
+          <AreaChart data={data} accessibilityLayer desc={description}>
             <XAxis
               dataKey="date"
-              axisLine={false}
+              fontSize={12}
               tickLine={false}
+              axisLine={false}
               minTickGap={28}
               tickFormatter={(value: string) => value.slice(5)}
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             />
             <YAxis
               allowDecimals={false}
-              axisLine={false}
+              fontSize={12}
               tickLine={false}
+              axisLine={false}
               width={46}
               tickFormatter={(value: number) => formatAxisValue(Number(value))}
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             />
-            <Tooltip
-              cursor={{
-                stroke: "var(--muted-foreground)",
-                strokeDasharray: "4 4",
-                strokeOpacity: 0.5,
-              }}
-              contentStyle={{
-                borderRadius: "var(--radius)",
-                borderColor: "var(--border)",
-                backgroundColor: "var(--popover)",
-                color: "var(--popover-foreground)",
-              }}
-              formatter={(value) => formatValue(Number(value ?? 0))}
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  formatter={(value, _name, item) => (
+                    <div className="flex flex-1 items-center justify-between gap-4 leading-none">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        {seriesLabel}
+                      </span>
+                      <span className="font-mono font-medium text-foreground tabular-nums">
+                        {formatValue(Number(value ?? 0))}
+                      </span>
+                    </div>
+                  )}
+                />
+              }
             />
             <Area
               type="monotone"
               dataKey={dataKey}
-              stroke={color}
-              strokeWidth={2.5}
-              fill={`url(#analytics-${dataKey})`}
+              stroke={`var(--color-${dataKey})`}
+              fill={`var(--color-${dataKey})`}
+              fillOpacity={0.15}
               isAnimationActive={false}
             />
           </AreaChart>
-        </ResponsiveContainer>
+        </ChartContainer>
       </CardContent>
     </Card>
   )
@@ -248,44 +245,35 @@ function TrendChart({
  *
  * @param data - Hourly run counts to visualize
  * @param locale - Locale used to format chart values
- * @param color - Color used for the chart area and line
  */
 function HourlyTrendChart({
   data,
   locale,
-  color,
 }: {
   data: WorkspaceAnalytics["hourly_runs"]
   locale: string
-  color: string
 }) {
   const { t } = useLanguage()
   const description = t("所选周期内各小时的运行活跃度")
+  const seriesLabel = t("运行次数")
+  const chartConfig = {
+    runs: {
+      label: seriesLabel,
+      color: "var(--primary)",
+    },
+  } satisfies ChartConfig
   return (
     <Card className="min-w-0 gap-4 rounded-xl py-5 shadow-xs">
-      <CardHeader className="px-5">
+      <CardHeader className="px-6">
         <CardTitle>{t("时段活跃曲线")}</CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="h-64 min-w-0 px-2 sm:px-5">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={data}
-            accessibilityLayer
-            desc={description}
-            margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
-          >
-            <defs>
-              <linearGradient id="analytics-hourly" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.25} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.03} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid
-              vertical={false}
-              stroke="var(--border)"
-              strokeDasharray="3 3"
-            />
+      <CardContent className="min-w-0 px-2 sm:px-6">
+        <ChartContainer
+          config={chartConfig}
+          className="aspect-auto h-[300px] w-full"
+        >
+          <AreaChart data={data} accessibilityLayer desc={description}>
             <XAxis
               dataKey="hour"
               type="number"
@@ -298,43 +286,49 @@ function HourlyTrendChart({
               tickFormatter={(value: number) => formatAnalyticsHour(value)}
               angle={-35}
               textAnchor="end"
-              tick={{ fill: "var(--muted-foreground)", fontSize: 9 }}
+              fontSize={10}
             />
             <YAxis
               allowDecimals={false}
-              axisLine={false}
+              fontSize={12}
               tickLine={false}
+              axisLine={false}
               width={46}
               tickFormatter={(value: number) =>
                 formatCompactNumber(Number(value), locale)
               }
-              tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             />
-            <Tooltip
-              cursor={{
-                stroke: "var(--muted-foreground)",
-                strokeDasharray: "4 4",
-                strokeOpacity: 0.5,
-              }}
-              contentStyle={{
-                borderRadius: "var(--radius)",
-                borderColor: "var(--border)",
-                backgroundColor: "var(--popover)",
-                color: "var(--popover-foreground)",
-              }}
-              labelFormatter={(value) => formatAnalyticsHour(Number(value))}
-              formatter={(value) => formatNumber(Number(value ?? 0), locale)}
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(value) => formatAnalyticsHour(Number(value))}
+                  formatter={(value, _name, item) => (
+                    <div className="flex flex-1 items-center justify-between gap-4 leading-none">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        {seriesLabel}
+                      </span>
+                      <span className="font-mono font-medium text-foreground tabular-nums">
+                        {formatNumber(Number(value ?? 0), locale)}
+                      </span>
+                    </div>
+                  )}
+                />
+              }
             />
             <Area
               type="monotone"
               dataKey="runs"
-              stroke={color}
-              strokeWidth={2.5}
-              fill="url(#analytics-hourly)"
+              stroke="var(--color-runs)"
+              fill="var(--color-runs)"
+              fillOpacity={0.15}
               isAnimationActive={false}
             />
           </AreaChart>
-        </ResponsiveContainer>
+        </ChartContainer>
       </CardContent>
     </Card>
   )
@@ -419,20 +413,8 @@ export function WorkspaceAnalyticsPage() {
     data !== null &&
     data.summary.runs.value > 0
 
-  const chartVars = {
-    "--analytics-hourly":
-      "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 190))",
-    "--analytics-runs":
-      "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.13 245))",
-    "--analytics-tokens":
-      "color-mix(in oklch, var(--primary) 55%, oklch(0.58 0.12 300))",
-  } as React.CSSProperties
-
   return (
-    <div
-      className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-5"
-      style={chartVars}
-    >
+    <div className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-col gap-5">
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <span
@@ -566,7 +548,6 @@ export function WorkspaceAnalyticsPage() {
                   data={data.trends}
                   dataKey="runs"
                   locale={locale}
-                  color="var(--analytics-runs)"
                 />
                 <TrendChart
                   title={t("每日 Token 趋势")}
@@ -574,15 +555,10 @@ export function WorkspaceAnalyticsPage() {
                   data={data.trends}
                   dataKey="total_tokens"
                   locale={locale}
-                  color="var(--analytics-tokens)"
                 />
               </div>
 
-              <HourlyTrendChart
-                data={data.hourly_runs}
-                locale={locale}
-                color="var(--analytics-hourly)"
-              />
+              <HourlyTrendChart data={data.hourly_runs} locale={locale} />
 
               <AnalyticsToolUsagePanel
                 usage={data.tool_usage}

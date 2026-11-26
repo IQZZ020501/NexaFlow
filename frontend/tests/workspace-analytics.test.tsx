@@ -1,5 +1,5 @@
 /* @jsxImportSource react */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 
 import { TopBar } from "@/components/app/top-bar"
 import {
@@ -7,6 +7,8 @@ import {
   formatTrendValue,
   getPresetAnalyticsRange,
 } from "@/components/system/workspace-analytics-page"
+import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
+import { formatAnalyticsHour } from "@/components/system/workspace-analytics-metrics"
 import type { MeResponse } from "@/lib/api/auth"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
 import type { Workspace } from "@/lib/api/system"
@@ -306,6 +308,7 @@ describe("workspace analytics", () => {
     expect(screen.getByText("How do I deploy?")).toBeTruthy()
     expect(screen.getByText("时段活跃曲线")).toBeTruthy()
     expect(screen.getByText("按自然日统计顶层运行")).toBeTruthy()
+    expect(document.querySelectorAll("[data-slot='chart']")).toHaveLength(3)
     expect(screen.queryByText(/统计时区/)).toBeNull()
     expect(
       screen.getByText("使用排行").closest<HTMLElement>("[data-slot='card']")
@@ -635,4 +638,47 @@ test("builds preset ranges from the Shanghai calendar date", () => {
     from: "2026-08-14",
     to: "2026-08-21",
   })
+})
+
+test("formats numeric zero tooltip labels inside ChartContainer", () => {
+  function TooltipProbe() {
+    return (
+      <ChartTooltipContent
+        active
+        label={0}
+        payload={[
+          {
+            name: "runs",
+            dataKey: "runs",
+            value: 3,
+            color: "var(--primary)",
+            payload: { hour: 0, runs: 3 },
+            graphicalItemId: "runs",
+          },
+        ]}
+        labelFormatter={(value) => formatAnalyticsHour(Number(value))}
+      />
+    )
+  }
+
+  const bounds = spyOn(
+    HTMLElement.prototype,
+    "getBoundingClientRect"
+  ).mockReturnValue(new DOMRect(0, 0, 320, 200))
+
+  try {
+    renderPage(
+      <ChartContainer
+        config={{ runs: { label: "运行次数", color: "var(--primary)" } }}
+      >
+        <TooltipProbe />
+      </ChartContainer>
+    )
+
+    expect(screen.getByText("00:00")).toBeTruthy()
+    expect(screen.getByText("运行次数")).toBeTruthy()
+    expect(screen.getByText("3")).toBeTruthy()
+  } finally {
+    bounds.mockRestore()
+  }
 })
