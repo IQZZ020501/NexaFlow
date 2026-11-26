@@ -50,10 +50,9 @@ async def list_all_users(
 async def create_new_user(
     payload: UserCreateRequest,
     actor: Annotated[User, Depends(require_global_admin)],
-    settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserPasswordResetResponse:
-    return await create_user(db, payload, actor, settings)
+    return await create_user(db, payload, actor)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)

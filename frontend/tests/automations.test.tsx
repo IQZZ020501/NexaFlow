@@ -565,4 +565,376 @@ describe("Automations UI", () => {
       (submitted[0].trigger_config as { weekdays: number[] }).weekdays
     ).toEqual([1, 7])
   })
+
+  test("switches between executions and configuration tabs without losing selection", async () => {
+    currentSearch = "?execution=exec-1"
+    const detail = sampleExecutionDetail()
+    const automation = sampleAutomation({
+      trigger_type: "webhook",
+      webhook_url: "https://example.test/api/v1/hooks/automations/hook-1",
+      webhook_secret_hint: "whsec_...1234",
+      input_config: {
+        mode: "text",
+        text: "总结本次推送变更",
+        json_payload: {},
+        webhook_input_path: "data.message",
+        webhook_prompt_template: "请分析：{{data.message}}",
+      },
+    })
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) return jsonResponse(automation)
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 50, offset: 0 })
+      }
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(await screen.findByText("日报初稿已完成。")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("tab", { name: "配置与接入" }))
+    expect(await screen.findByText("运行策略")).toBeTruthy()
+    expect(screen.getByText("按策略自动执行")).toBeTruthy()
+    expect(screen.getByText("总结本次推送变更")).toBeTruthy()
+    expect(screen.getByText(/hmac\.new/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("tab", { name: /执行记录/ }))
+    expect(await screen.findByText("日报初稿已完成。")).toBeTruthy()
+  })
+
+  test("switches inspector sub-tabs to show expandable tool call inputs and errors", async () => {
+    currentSearch = "?execution=exec-1"
+    const detail = sampleExecutionDetail({
+      run_status: "failed",
+      tool_calls: [
+        {
+          call_id: "call-fail-1",
+          turn: 1,
+          tool_name: "bash",
+          tool_kind: "builtin",
+          server_name: "",
+          arguments: { command: "cat report.txt" },
+          status: "failed",
+          approval_required: false,
+          last_error: "Tool invocation deadline expired.",
+          approved_at: null,
+          started_at: "2026-11-24T01:00:03Z",
+          finished_at: "2026-11-24T01:00:04Z",
+        },
+      ],
+    })
+    const automation = sampleAutomation()
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) return jsonResponse(automation)
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 50, offset: 0 })
+      }
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(await screen.findByText("日报初稿已完成。")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("tab", { name: /执行过程/ }))
+    const toolRowTrigger = await screen.findByRole("button", {
+      name: /运行命令/,
+    })
+    fireEvent.click(toolRowTrigger)
+    expect(await screen.findByText(/工具执行已超时/)).toBeTruthy()
+    expect(screen.getByText(/cat report\.txt/)).toBeTruthy()
+  })
+
+  test("filters execution history list by status", async () => {
+    const okExec = {
+      ...sampleExecutionDetail({
+        id: "exec-ok",
+        run_status: "succeeded",
+        scheduled_at: "2026-11-24T01:00:00Z",
+      }),
+    }
+    const approvalExec = {
+      ...sampleExecutionDetail({
+        id: "exec-wait",
+        run_status: "awaiting_approval",
+        scheduled_at: "2026-11-24T02:00:00Z",
+      }),
+    }
+    const failedExec = {
+      ...sampleExecutionDetail({
+        id: "exec-fail",
+        run_status: "failed",
+        scheduled_at: "2026-11-24T03:00:00Z",
+      }),
+    }
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) {
+        return jsonResponse(sampleAutomation())
+      }
+      if (url.includes("/executions?")) {
+        return jsonResponse({
+          items: [okExec, approvalExec, failedExec],
+          total: 3,
+          limit: 50,
+          offset: 0,
+        })
+      }
+      if (url.endsWith("/executions/exec-ok")) return jsonResponse(okExec)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    await screen.findByText("共 3 条")
+    const sidebar = screen.getByText("执行历史").closest("aside")!
+    expect(within(sidebar).getByText("已成功")).toBeTruthy()
+    expect(within(sidebar).getByText("待审批")).toBeTruthy()
+    expect(within(sidebar).getByText("已失败")).toBeTruthy()
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /待处理/ }))
+    expect(within(sidebar).getByText("待审批")).toBeTruthy()
+    expect(within(sidebar).queryByText("已成功")).toBeNull()
+    expect(within(sidebar).queryByText("已失败")).toBeNull()
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: /^失败/ }))
+    expect(within(sidebar).getByText("已失败")).toBeTruthy()
+    expect(within(sidebar).queryByText("待审批")).toBeNull()
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "全部" }))
+    expect(within(sidebar).getByText("已成功")).toBeTruthy()
+  })
+
+  test("renders preview button alongside download button for previewable artifacts", async () => {
+    currentSearch = "?execution=exec-1"
+    const detail = sampleExecutionDetail({
+      artifacts: [
+        {
+          artifact_id: "11111111-1111-4111-8111-111111111111",
+          format: "pdf",
+          filename: "briefing.pdf",
+          media_type: "application/pdf",
+          download_url:
+            "/api/v1/artifacts/11111111-1111-4111-8111-111111111111/content",
+          expires_at: "2026-11-25T01:00:00Z",
+          size_bytes: 4096,
+          relative_path: "reports/briefing.pdf",
+        },
+      ],
+    })
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) {
+        return jsonResponse(sampleAutomation())
+      }
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 50, offset: 0 })
+      }
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(await screen.findByText("briefing.pdf")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "预览" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "下载产物" })).toBeTruthy()
+  })
+
+  test("renders clickable markdown, inline-code, bare URLs, and quick-jump project link cards", async () => {
+    currentSearch = "?execution=exec-1"
+    const base = sampleExecutionDetail()
+    const detail = sampleExecutionDetail({
+      agent_run: {
+        ...base.agent_run!,
+        result: [
+          "### 今日热门项目",
+          "- [awesome-agent](https://github.com/acme/awesome-agent) —— 开源 Agent 框架",
+          "- 代码地址：`https://github.com/acme/runtime-kit`",
+          "- 官方文档见 https://docs.acme.dev/guide/start。",
+        ].join("\n"),
+      },
+    })
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) {
+        return jsonResponse(sampleAutomation())
+      }
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 50, offset: 0 })
+      }
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(await screen.findByText("相关链接")).toBeTruthy()
+
+    const links = screen.getAllByRole("link", { name: /awesome-agent/i })
+    expect(links.length).toBeGreaterThanOrEqual(2)
+    for (const anchor of links) {
+      expect(anchor.getAttribute("href")).toBe(
+        "https://github.com/acme/awesome-agent"
+      )
+      expect(anchor.getAttribute("target")).toBe("_blank")
+    }
+
+    const runtimeLinks = screen.getAllByRole("link", { name: /runtime-kit/i })
+    expect(runtimeLinks.length).toBeGreaterThanOrEqual(2)
+    expect(runtimeLinks[0]!.getAttribute("href")).toBe(
+      "https://github.com/acme/runtime-kit"
+    )
+
+    const docLinks = screen.getAllByRole("link", {
+      name: /docs\.acme\.dev\/guide\/start/i,
+    })
+    expect(docLinks.length).toBeGreaterThanOrEqual(2)
+    expect(docLinks[0]!.getAttribute("href")).toBe(
+      "https://docs.acme.dev/guide/start"
+    )
+  })
+
+  test("upgrades plain-text domain citations when matching URLs exist in run events", async () => {
+    currentSearch = "?execution=exec-1"
+    const base = sampleExecutionDetail()
+    const detail = sampleExecutionDetail({
+      agent_run: {
+        ...base.agent_run!,
+        result:
+          "- Google 发布 Gemini 4 Neon，定位为前沿级智能（blog.google）。\n- 未检索到的站点（unknown.example）保持原文。",
+        events: [
+          {
+            type: "tool",
+            turn: 1,
+            tool_name: "tavily_search",
+            status: "succeeded",
+            summary: "搜索网页",
+            call_id: "call-search-1",
+            tool_label: "搜索网页",
+            tool_kind: "builtin",
+            server_name: "",
+            input: { query: "Gemini 4 Neon" },
+            output: {
+              results: [
+                {
+                  title: "Gemini 4 Neon Announcement",
+                  url: "https://blog.google/technology/ai/gemini-4-neon/",
+                },
+              ],
+            },
+            duration_ms: 320,
+          },
+        ],
+      },
+    })
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) {
+        return jsonResponse(sampleAutomation())
+      }
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 50, offset: 0 })
+      }
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(await screen.findByText("相关链接")).toBeTruthy()
+
+    const blogLinks = screen.getAllByRole("link", { name: /blog\.google/i })
+    expect(blogLinks.length).toBeGreaterThanOrEqual(2)
+    expect(blogLinks[0]!.getAttribute("href")).toBe(
+      "https://blog.google/technology/ai/gemini-4-neon/"
+    )
+    expect(screen.queryByRole("link", { name: /unknown\.example/i })).toBeNull()
+  })
+
+  test("makes GitHub-style owner/repo project names directly clickable without matching non-repo pairs", async () => {
+    currentSearch = "?execution=exec-1"
+    const base = sampleExecutionDetail()
+    const detail = sampleExecutionDetail({
+      agent_run: {
+        ...base.agent_run!,
+        result: [
+          "- **dream-num/univer** — TypeScript, 31.1k star。",
+          "- **GoogleChrome/modern-web-guidance-src** — TypeScript, 9.9k。",
+          "- **meta/astryx** — TypeScript, 31.8k。",
+          "- **acme/demo-app** — 自托管项目。",
+          "- 交互模式支持 **UI/UX** 与 **Agent/Workflow** 协同。",
+        ].join("\n"),
+        events: [
+          {
+            type: "tool",
+            turn: 1,
+            tool_name: "tavily_search",
+            status: "succeeded",
+            summary: "搜索网页",
+            call_id: "call-repo-1",
+            tool_label: "搜索网页",
+            tool_kind: "builtin",
+            server_name: "",
+            input: { query: "acme demo-app" },
+            output: {
+              results: [
+                {
+                  title: "acme/demo-app",
+                  url: "https://gitlab.com/acme/demo-app",
+                },
+              ],
+            },
+            duration_ms: 210,
+          },
+        ],
+      },
+    })
+
+    withFetch((url) => {
+      if (url.endsWith("/automations/auto-1")) {
+        return jsonResponse(sampleAutomation())
+      }
+      if (url.includes("/executions?")) {
+        return jsonResponse({ items: [detail], total: 1, limit: 50, offset: 0 })
+      }
+      if (url.endsWith("/executions/exec-1")) return jsonResponse(detail)
+      return jsonResponse({}, 404)
+    })
+
+    renderPage(<AutomationDetailPage automationId="auto-1" />)
+    expect(await screen.findByText("相关链接")).toBeTruthy()
+
+    const univerLinks = screen.getAllByRole("link", {
+      name: /dream-num\/univer/i,
+    })
+    expect(univerLinks.length).toBeGreaterThanOrEqual(2)
+    expect(univerLinks[0]!.getAttribute("href")).toBe(
+      "https://github.com/dream-num/univer"
+    )
+    expect(univerLinks[0]!.getAttribute("target")).toBe("_blank")
+
+    const chromeLinks = screen.getAllByRole("link", {
+      name: /GoogleChrome\/modern-web-guidance-src/i,
+    })
+    expect(chromeLinks[0]!.getAttribute("href")).toBe(
+      "https://github.com/GoogleChrome/modern-web-guidance-src"
+    )
+
+    const astryxLinks = screen.getAllByRole("link", {
+      name: /meta\/astryx/i,
+    })
+    expect(astryxLinks[0]!.getAttribute("href")).toBe(
+      "https://github.com/meta/astryx"
+    )
+
+    const gitlabLinks = screen.getAllByRole("link", {
+      name: /acme\/demo-app/i,
+    })
+    expect(gitlabLinks[0]!.getAttribute("href")).toBe(
+      "https://gitlab.com/acme/demo-app"
+    )
+
+    expect(screen.queryByRole("link", { name: /UI\/UX/i })).toBeNull()
+    expect(screen.queryByRole("link", { name: /Agent\/Workflow/i })).toBeNull()
+  })
 })

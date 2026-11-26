@@ -1,5 +1,4 @@
 from app.schemas.workflows.contracts import (
-    JINJA_ENV,
     ClassifierClass,
     ClassifierNodeConfig,
     ConditionBranch,
@@ -55,7 +54,6 @@ from app.schemas.workflows.contracts import (
 )
 
 __all__ = [
-    "JINJA_ENV",
     "ClassifierClass",
     "ClassifierNodeConfig",
     "ConditionBranch",

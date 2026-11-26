@@ -5,6 +5,7 @@ name: nexaflow
 x-settings:
   postgres-password: &postgres-password "CHANGE_ME_Postgres_123!"
   admin-password: &admin-password "CHANGE_ME_Admin_123!"
+  # Required by the currently pinned legacy image; ignored by the fixed app.
   managed-user-password: &managed-user-password "CHANGE_ME_User_123!"
   sandbox-api-key: &sandbox-api-key "CHANGE_ME_OpenSandbox_API_Key"
   public-app-url: &public-app-url http://localhost:8080
@@ -290,7 +291,10 @@ configs:
               "TZ": "Asia/Shanghai",
               "NEXT_TELEMETRY_DISABLED": "1",
               "HOSTNAME": "0.0.0.0",
-              "NEXAFLOW_API_PROXY": "http://api:8000",
+              "NEXAFLOW_API_PROXY": "http://127.0.0.1:8000",
+              "NEXAFLOW_TRUSTED_PROXY_IP": os.environ.get("NEXAFLOW_TRUSTED_PROXY_IP", ""),
+              **({"NODE_OPTIONS": "--require=/opt/frontend/forwarded-peer.cjs"}
+                 if os.path.isfile("/opt/frontend/forwarded-peer.cjs") else {}),
           }
 
 

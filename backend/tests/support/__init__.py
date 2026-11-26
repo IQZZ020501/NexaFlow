@@ -11,7 +11,6 @@ from sqlalchemy import text
 
 BOOTSTRAP_ADMIN_PASSWORD = "NexaFlow@123."
 ADMIN_PASSWORD = "NexaFlow@12345."
-MANAGED_USER_INITIAL_PASSWORD = "NexaFlow@123.."
 RESEARCH_PASSWORD = "Research@12345."
 
 os.environ.update(
@@ -23,11 +22,12 @@ os.environ.update(
         "BOOTSTRAP_ADMIN_EMAIL": "admin@app.local",
         "BOOTSTRAP_ADMIN_NAME": "NexaFlow Admin",
         "BOOTSTRAP_ADMIN_PASSWORD": BOOTSTRAP_ADMIN_PASSWORD,
-        "MANAGED_USER_INITIAL_PASSWORD": MANAGED_USER_INITIAL_PASSWORD,
         "ENVIRONMENT": "test",
         "CELERY_TASK_ALWAYS_EAGER": "true",
         "QDRANT_URL": ":memory:",
-        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_BROKER_URL": os.environ.get(
+            "CELERY_BROKER_URL", "redis://localhost:6379/0"
+        ),
         "OPENSANDBOX_IMAGE": "nexaflow/execution:local",
         "OPENSANDBOX_EGRESS_DOMAINS": "",
         "KNOWLEDGE_STORAGE_DIR": os.environ.get(
@@ -55,13 +55,12 @@ def settings() -> Settings:
         model_secret_key="test-model-secret-for-app-smoke-suite",
         knowledge_storage_dir=Path(os.environ["KNOWLEDGE_STORAGE_DIR"]),
         qdrant_url=":memory:",
-        celery_broker_url="redis://localhost:6379/0",
+        celery_broker_url=os.environ["CELERY_BROKER_URL"],
         celery_task_always_eager=True,
         bootstrap_admin_username="admin",
         bootstrap_admin_email="admin@app.local",
         bootstrap_admin_name="NexaFlow Admin",
         bootstrap_admin_password=BOOTSTRAP_ADMIN_PASSWORD,
-        managed_user_initial_password=MANAGED_USER_INITIAL_PASSWORD,
         environment="test",
     )
 

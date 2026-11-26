@@ -109,6 +109,33 @@ def test_log_timestamps_use_shanghai() -> None:
     assert handler.format(record).startswith("2026-11-20 00:30:00.000+08:00 |")
 
 
+def test_server_logs_do_not_contain_request_credentials() -> None:
+    setup_logging()
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    access = logging.getLogger("uvicorn.access")
+    error = logging.getLogger("uvicorn.error")
+    access.addHandler(handler)
+    error.addHandler(handler)
+    marker = "synthetic" + "-credential-marker"
+    try:
+        access.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1", "GET", f"/artifacts/{marker}?code={marker}", "1.1", 200)
+        access.info("Unexpected access format: %s", marker)
+        try:
+            raise ValueError(marker)
+        except ValueError:
+            error.exception("Exception in ASGI application")
+        error.info("Normal info without exception", exc_info=(None, None, None))
+    finally:
+        access.removeHandler(handler)
+        error.removeHandler(handler)
+    output = stream.getvalue()
+    assert marker not in output
+    assert "GET <route> HTTP/1.1" in output
+    assert "Unhandled ValueError." in output
+    assert "NoneType" not in output
+
+
 def main() -> None:
     test_setup_logging_idempotent()
     test_get_logger_project_prefix()
@@ -116,6 +143,7 @@ def main() -> None:
     test_log_error_format()
     test_log_event_format()
     test_log_timestamps_use_shanghai()
+    test_server_logs_do_not_contain_request_credentials()
     print("logger tests passed")
 
 

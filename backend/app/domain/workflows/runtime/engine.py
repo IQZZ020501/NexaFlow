@@ -1,5 +1,4 @@
 import asyncio
-import re
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -7,10 +6,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from jinja2 import Environment, meta
 from pydantic import BaseModel, ValidationError
 
 from app.domain.applications.definitions import graph_hash as graph_hash
+from app.infra.runtime.workflow_templates import (
+    REFERENCE_PATTERN,
+    workflow_template_variables,
+)
 from app.schemas.workflows.contracts import (
     ClassifierNodeConfig,
     ConditionNodeConfig,
@@ -92,10 +94,6 @@ NODE_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "mcp": McpNodeConfig,
 }
 
-REFERENCE_PATTERN = re.compile(
-    r"{{\s*([A-Za-z0-9_-]+)(?:\.([A-Za-z0-9_.-]+))?\s*}}"
-)
-JINJA_ENV = Environment()
 
 # Start node globals are available to every node as bare references like {{time}}
 # or through the {{global.<field>}} namespace (MaxKB-compatible).
@@ -315,16 +313,7 @@ def validate_graph(graph: WorkflowGraph | Mapping[str, Any]) -> WorkflowGraph:
             if reply.reply_type == "referencing" and reply.fields:
                 references.append(reply.fields[0][0])
             elif reply.reply_type == "custom":
-                normalized = REFERENCE_PATTERN.sub(
-                    "{{ workflow_refs.value }}", reply.content
-                )
-                references.extend(
-                    name
-                    for name in meta.find_undeclared_variables(
-                        JINJA_ENV.parse(normalized)
-                    )
-                    if name != "workflow_refs"
-                )
+                references.extend(workflow_template_variables(reply.content))
         if node.data.type == "condition":
             condition = ConditionNodeConfig.model_validate(node.data.config)
             references.extend(

@@ -2,16 +2,13 @@ import json
 import re
 from typing import Annotated, Any, Literal
 
-from jinja2 import Environment, TemplateSyntaxError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.infra.runtime.workflow_templates import workflow_template_variables
 from app.schemas.agent_skills.contracts import AgentSkillRefSchema
 from app.schemas.agents.contracts import AgentInteractionConfig, AgentToolCallResponse
 from app.schemas.time import AppDateTime
 from app.schemas.tools.contracts import ToolRefSchema
-
-JINJA_ENV = Environment()
-
 
 WorkflowNodeType = Literal[
     "start",
@@ -233,8 +230,8 @@ class FormNodeConfig(BaseModel):
         if len(re.findall(r"{{\s*form\s*}}", self.form_content_format)) != 1:
             raise ValueError("Form content must contain one {{ form }} placeholder.")
         try:
-            JINJA_ENV.parse(self.form_content_format)
-        except TemplateSyntaxError as exc:
+            workflow_template_variables(self.form_content_format)
+        except ValueError as exc:
             raise ValueError(f"Invalid form template: {exc}") from exc
         return self
 
@@ -393,8 +390,8 @@ class ReplyNodeConfig(BaseModel):
             raise ValueError("Reply content is required for custom replies.")
         if self.reply_type == "custom":
             try:
-                JINJA_ENV.parse(self.content)
-            except TemplateSyntaxError as exc:
+                workflow_template_variables(self.content)
+            except ValueError as exc:
                 raise ValueError(f"Invalid reply template: {exc}") from exc
         if self.reply_type == "referencing" and (
             self.fields is None or len(self.fields[0]) < 2

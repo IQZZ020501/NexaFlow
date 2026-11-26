@@ -16,6 +16,7 @@ class User:
     is_active: bool = True
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
+    initial_password_expires_at: datetime | None = None
 
 
 @dataclass

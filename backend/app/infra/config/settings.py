@@ -87,7 +87,6 @@ class Settings:
     bootstrap_admin_email: str
     bootstrap_admin_name: str
     bootstrap_admin_password: str
-    managed_user_initial_password: str
     jwt_secret_key: str = ""
     model_secret_key: str = ""
     knowledge_storage_dir: Path | None = Path("./storage/knowledge")
@@ -168,10 +167,6 @@ class Settings:
             bootstrap_admin_email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", ""),
             bootstrap_admin_name=os.getenv("BOOTSTRAP_ADMIN_NAME", ""),
             bootstrap_admin_password=os.getenv("BOOTSTRAP_ADMIN_PASSWORD", ""),
-            managed_user_initial_password=os.getenv(
-                "MANAGED_USER_INITIAL_PASSWORD",
-                "",
-            ),
             model_secret_key=os.getenv("MODEL_SECRET_KEY", ""),
             knowledge_storage_dir=knowledge_storage_dir,
             qdrant_url=os.getenv("QDRANT_URL", cls.qdrant_url),
@@ -312,10 +307,6 @@ class Settings:
         missing = [key for key, value in required.items() if not value]
         if require_bootstrap and missing:
             raise RuntimeError(f"Missing initialization env values: {', '.join(missing)}.")
-        if not self.managed_user_initial_password:
-            raise RuntimeError(
-                "MANAGED_USER_INITIAL_PASSWORD must be set via environment or the .env file."
-            )
         # JWT_SECRET_KEY and MODEL_SECRET_KEY are not required here: the
         # application resolves them from platform_secrets at startup, using the
         # environment value only to seed a missing key.
@@ -330,24 +321,19 @@ class Settings:
             raise RuntimeError("PUBLIC_APP_URL must be an absolute HTTP(S) URL.")
         if public_url.path not in {"", "/"} or public_url.query or public_url.fragment:
             raise RuntimeError("PUBLIC_APP_URL must not include a path, query, or fragment.")
-        if self.environment == "production":
-            for name, value in (
-                ("BOOTSTRAP_ADMIN_PASSWORD", self.bootstrap_admin_password),
-                ("MANAGED_USER_INITIAL_PASSWORD", self.managed_user_initial_password),
-                ("OPENSANDBOX_API_KEY", self.opensandbox_api_key),
+        try:
+            db_password = make_url(self.database_url).password or ""
+        except ArgumentError:
+            db_password = ""
+        for name, value in (
+            ("BOOTSTRAP_ADMIN_PASSWORD", self.bootstrap_admin_password),
+            ("OPENSANDBOX_API_KEY", self.opensandbox_api_key),
+            ("POSTGRES_PASSWORD", db_password),
+        ):
+            if value.startswith(("CHANGE_ME_", "REPLACE_WITH_")) or (
+                name == "BOOTSTRAP_ADMIN_PASSWORD" and value == "NexaFlow@123.."
             ):
-                if value.startswith("CHANGE_ME_"):
-                    raise RuntimeError(
-                        f"{name} must not use a template placeholder in production."
-                    )
-            try:
-                db_password = make_url(self.database_url).password or ""
-            except ArgumentError:
-                db_password = ""
-            if db_password.startswith("CHANGE_ME_"):
-                raise RuntimeError(
-                    "POSTGRES_PASSWORD must not use a template placeholder in production."
-                )
+                raise RuntimeError(f"{name} must not use a template placeholder.")
         if self.environment == "production" and public_url.scheme != "https":
             raise RuntimeError("PUBLIC_APP_URL must use HTTPS in production.")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:

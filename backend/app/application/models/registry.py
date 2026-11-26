@@ -21,6 +21,7 @@ from app.ports.llm import (
     SUPPORTED_PROVIDER_TYPES,
     ModelProviderError,
     ModelProviderStatusError,
+    ModelProviderTimeoutError,
     test_model_connection,
     validate_member_model_connection,
 )
@@ -423,6 +424,8 @@ def run_model_test(
     model_name: str,
     model_type: str,
     request_params: dict[str, Any] | None = None,
+    *,
+    timeout_seconds: float = 60,
 ) -> dict[str, bool]:
     # Image generation itself is billed; registration validates the shape and
     # credentials but never spends credits on a paid test request.
@@ -435,7 +438,12 @@ def run_model_test(
             model_name,
             model_type,
             request_params,
+            timeout=timeout_seconds,
         )
+    except ModelProviderTimeoutError as exc:
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT, "Model connection test timed out."
+        ) from exc
     except ModelProviderStatusError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -465,6 +473,7 @@ async def test_registered_model(
                 model_name,
                 model_type,
                 request_params,
+                timeout_seconds=timeout_seconds,
             )
     except TimeoutError as exc:
         raise HTTPException(

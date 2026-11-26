@@ -140,7 +140,6 @@ class Probe:
             bootstrap_admin_email="",
             bootstrap_admin_name="",
             bootstrap_admin_password="",
-            managed_user_initial_password="",
             opensandbox_url=arguments.url,
             opensandbox_api_key=os.environ["OPENSANDBOX_API_KEY"],
             opensandbox_image=arguments.image,

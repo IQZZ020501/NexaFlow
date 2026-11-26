@@ -455,8 +455,9 @@ class _FakeUrlResponse:
         self.status = status
         self._body = body
 
-    def read(self):
-        return self._body
+    def read1(self, size):
+        chunk, self._body = self._body[:size], self._body[size:]
+        return chunk
 
     def __enter__(self):
         return self
@@ -2209,7 +2210,6 @@ def _valid_settings() -> config_mod.Settings:
         bootstrap_admin_email="admin@app.local",
         bootstrap_admin_name="Admin",
         bootstrap_admin_password="Admin@12345.",
-        managed_user_initial_password="Managed@12345.",
         jwt_secret_key="jwt-key",
         model_secret_key="model-key",
         knowledge_storage_dir=Path("/tmp/nexaflow-test"),
@@ -2250,10 +2250,6 @@ def test_settings_defaults_and_validation() -> None:
     cases = [
         (replace(base, bootstrap_admin_username=""), "Missing initialization"),
         (replace(base, bootstrap_admin_email=""), "Missing initialization"),
-        (
-            replace(base, managed_user_initial_password=""),
-            "MANAGED_USER_INITIAL_PASSWORD",
-        ),
         (replace(base, knowledge_storage_dir=None), "KNOWLEDGE_STORAGE_DIR"),
         (replace(base, qdrant_url=""), "QDRANT_URL"),
         (replace(base, celery_broker_url=""), "CELERY_BROKER_URL"),
@@ -2356,12 +2352,15 @@ def test_production_requires_a_bounded_secure_execution_plane() -> None:
     )
     production.validate()
 
-    try:
-        replace(production, bootstrap_admin_password="CHANGE_ME_ADMIN_PASSWORD").validate()
-    except (RuntimeError, ValueError) as exc:
-        assert "placeholder" in str(exc).lower()
-    else:
-        raise AssertionError("production Settings.validate() must reject CHANGE_ME_ secrets")
+    for config in (base, production):
+        for field, value in (
+            ("bootstrap_admin_password", "CHANGE_ME_ADMIN_PASSWORD"),
+            ("bootstrap_admin_password", "NexaFlow@123.."),
+            ("opensandbox_api_key", "REPLACE_WITH_SANDBOX_KEY"),
+            ("database_url", "postgresql://app:CHANGE_ME_DB@db/app"),
+        ):
+            error = expect_error(lambda: replace(config, **{field: value}).validate(), RuntimeError)
+            assert "placeholder" in str(error)
 
     # No host limit: a burst of Runs can exhaust the execution host.
     try:
@@ -2503,7 +2502,6 @@ def test_settings_from_env() -> None:
         "BOOTSTRAP_ADMIN_EMAIL": "env-admin@app.local",
         "BOOTSTRAP_ADMIN_NAME": "Env Admin",
         "BOOTSTRAP_ADMIN_PASSWORD": "Env@12345.",
-        "MANAGED_USER_INITIAL_PASSWORD": "ManagedEnv@12345.",
         "JWT_SECRET_KEY": "env-jwt",
         "MODEL_SECRET_KEY": "env-model",
         "KNOWLEDGE_STORAGE_DIR": "/tmp/env-storage",
@@ -2529,7 +2527,6 @@ def test_settings_from_env() -> None:
     ):
         parsed = config_mod.Settings.from_env()
         assert parsed.bootstrap_admin_username == "env-admin"
-        assert parsed.managed_user_initial_password == "ManagedEnv@12345."
         assert parsed.jwt_secret_key == "env-jwt"
         assert parsed.knowledge_storage_dir == Path("/tmp/env-storage")
         assert parsed.cors_origins == ("https://a.example.com", "https://b.example.com")
@@ -4351,14 +4348,14 @@ async def db_seed_tests() -> None:
         )
         assert count == 1
 
-        # existing admin is kept and re-marked global admin
+        # Revocation survives restart; rotating config never creates another administrator.
         admin = await db.scalar(select(UserOrm).where(UserOrm.username == "admin"))
         assert admin is not None
         admin.is_global_admin = False
         await db.commit()
         await seed_mod.seed_bootstrap_admin(db, runtime_settings)
         await db.refresh(admin)
-        assert admin.is_global_admin is True
+        assert admin.is_global_admin is False
 
         custom = replace(
             runtime_settings,
@@ -4372,10 +4369,10 @@ async def db_seed_tests() -> None:
         count = await db.scalar(
             select(func.count()).select_from(UserOrm).where(UserOrm.username == "seed-custom")
         )
-        assert count == 1
-        created = await db.scalar(select(UserOrm).where(UserOrm.username == "seed-custom"))
-        assert created.must_change_password is True
-        assert verify_password("Seed@12345.", created.password_hash)
+        assert count == 0
+        # Other groups reuse this fixture's administrator.
+        admin.is_global_admin = True
+        await db.commit()
 
 
 async def db_registry_repository_tests(workspace_id: str, created_by: str) -> None:

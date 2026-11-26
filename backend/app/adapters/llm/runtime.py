@@ -60,6 +60,13 @@ from app.adapters.llm.network import (
     public_client_options,
     public_transport,
 )
+from app.adapters.llm.response_limits import (
+    MAX_PROBE_EVENTS,
+    MAX_RERANK_BYTES,
+    ResponseBudget,
+    active_probe,
+    model_probe,
+)
 
 if TYPE_CHECKING:
     from app.domain.models.registered import RegisteredModel
@@ -161,7 +168,7 @@ def _model_provider_error(exc: Exception) -> ModelProviderError:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, TimeoutError) or type(current).__name__ in {
+        if isinstance(current, (TimeoutError, ModelProviderTimeoutError)) or type(current).__name__ in {
             "APITimeoutError",
             "ConnectTimeout",
             "ReadTimeout",
@@ -436,32 +443,33 @@ class OpenAICompatibleReranker:
 
     def rerank(self, query: str, documents: list[str]) -> list[dict[str, Any]]:
         payload = {"model": self.model_name, "query": query, "documents": documents}
+        budget = active_probe.get() or ResponseBudget(MAX_RERANK_BYTES, self.timeout)
         request = Request(
             f"{self.api_base}/rerank",
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                "Accept-Encoding": "identity",
             },
             method="POST",
         )
         try:
             if self.public_endpoint_only:
-                with public_client(self.timeout) as client:
-                    response = client.post(
-                        f"{self.api_base}/rerank",
-                        json=payload,
-                        headers=dict(request.header_items()),
-                    )
+                with public_client(self.timeout, budget=budget) as client, client.stream(
+                    "POST", request.full_url, json=payload, headers=dict(request.header_items())
+                ) as response:
                     if not 200 <= response.status_code < 300:
                         raise ModelProviderStatusError(response.status_code)
-                    body = response.text
+                    body = response.read()
             else:
-                with urlopen(request, timeout=self.timeout) as response:
+                with urlopen(request, timeout=budget.remaining_time()) as response:
                     if response.status < 200 or response.status >= 300:
                         raise ModelProviderStatusError(response.status)
-                    body = response.read().decode()
+                    chunks = iter(lambda: response.read1(64 * 1024), b"")
+                    body = b"".join(budget.checked_chunks(chunks))
         except HTTPError as exc:
+            exc.close()
             raise ModelProviderStatusError(exc.code) from exc
         except (OSError, TimeoutError, URLError, httpx.HTTPError) as exc:
             raise _model_provider_error(exc) from exc
@@ -570,9 +578,14 @@ def _public_google_client(credentials, timeout):
 def _ollama_public_options(credentials):
     if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) != "true":
         return {}
+    probe = active_probe.get()
+    transport = public_transport()
+    if probe:
+        probe.resources.callback(transport.close)
     return {
         "sync_client_kwargs": {
-            "transport": public_transport(),
+            "event_hooks": probe.hooks() if probe else None,
+            "transport": transport,
             "trust_env": False,
             "follow_redirects": False,
         },
@@ -905,6 +918,22 @@ def test_model_connection(
     model_name: str,
     model_type: str,
     request_params: dict[str, Any] | None = None,
+    *,
+    timeout: float = MODEL_REQUEST_TIMEOUT_SECONDS,
+) -> dict[str, bool]:
+    with model_probe(timeout) as budget:
+        return _test_model_connection(
+            provider_type, credentials, model_name, model_type, request_params, budget
+        )
+
+
+def _test_model_connection(
+    provider_type: str,
+    credentials: dict[str, str],
+    model_name: str,
+    model_type: str,
+    request_params: dict[str, Any] | None,
+    budget: ResponseBudget,
 ) -> dict[str, bool]:
     if model_type in {"LLM", "VISION"}:
         output_limit = (
@@ -919,6 +948,7 @@ def test_model_connection(
                 credentials,
                 model_name,
                 stream_usage=stream_usage,
+                timeout=budget.remaining_time(),
                 request_params=request_params,
             )
 
@@ -930,35 +960,43 @@ def test_model_connection(
             return {STREAM_USAGE_SUPPORTED_META_KEY: False}
 
         if provider_type == "openai_compatible":
-            try:
-                chunks = list(
-                    chat(stream_usage=True).stream(
-                        [("human", "Hello")], **output_limit
-                    )
+            def probe_stream(with_usage: bool) -> bool:
+                stream = chat(stream_usage=with_usage).stream(
+                    [("human", "Hello")], **output_limit
                 )
+                has_usage = False
+                try:
+                    for index, chunk in enumerate(stream):
+                        budget.remaining_time()
+                        if index >= MAX_PROBE_EVENTS:
+                            raise ModelProviderError("Model probe returned too many events.")
+                        has_usage |= chunk.usage_metadata is not None
+                finally:
+                    close = getattr(stream, "close", None)
+                    if close:
+                        close()
+                return has_usage
+
+            try:
+                supported = probe_stream(True)
             except ModelProviderStatusError as exc:
                 if exc.status_code not in {400, 422}:
                     raise
-                list(
-                    chat().stream([("human", "Hello")], **output_limit)
-                )
-                return {STREAM_USAGE_SUPPORTED_META_KEY: False}
-            return {
-                STREAM_USAGE_SUPPORTED_META_KEY: any(
-                    chunk.usage_metadata is not None for chunk in chunks
-                )
-            }
+                probe_stream(False)
+                supported = False
+            return {STREAM_USAGE_SUPPORTED_META_KEY: supported}
         chat().invoke(
             [("human", "Hello")],
             **output_limit,
         )
     elif model_type == "EMBEDDING":
-        build_embeddings(provider_type, credentials, model_name).embed_query("Hello")
+        build_embeddings(
+            provider_type, credentials, model_name, timeout=budget.remaining_time()
+        ).embed_query("Hello")
     elif model_type == "RERANKER":
-        build_reranker(provider_type, credentials, model_name).rerank(
-            "Hello",
-            ["Hello"],
-        )
+        build_reranker(
+            provider_type, credentials, model_name, timeout=budget.remaining_time()
+        ).rerank("Hello", ["Hello"])
     else:
         raise ModelProviderError("Model type is not supported.")
     return {STREAM_USAGE_SUPPORTED_META_KEY: False}

@@ -1,5 +1,6 @@
 import asyncio
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 from tests.support import settings as testing_settings
 
@@ -51,9 +52,9 @@ def main() -> None:
     asyncio.run(check_streaming_request_body_limit())
     app = create_app(testing_settings())
 
-    @app.get("/boom")
-    async def boom() -> None:
-        raise RuntimeError("kaboom")
+    @app.get("/boom/{token}")
+    async def boom(token: str, request: Request) -> None:
+        raise RuntimeError(f"Failure for {token}: {request.url}")
 
     async def create_schema() -> None:
         async with get_engine().begin() as connection:
@@ -119,7 +120,7 @@ def main() -> None:
         # the middleware path is exercised through a non-raising client).
         with TestClient(app, raise_server_exceptions=False) as boom_client:
             boom = boom_client.get(
-                "/boom",
+                "/boom/synthetic-path-marker?state=synthetic-query-marker",
                 headers={"x-forwarded-for": "203.0.113.9"},
             )
             assert boom.status_code == 500, boom.text
@@ -128,7 +129,9 @@ def main() -> None:
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert logged.status_code == 200, logged.text
-        assert any(item["message"] == "kaboom" for item in logged.json())
+        assert any(item["message"] == "Unhandled RuntimeError." and item["path"] == "/boom/{token}" for item in logged.json())
+        assert "synthetic-path-marker" not in logged.text
+        assert "synthetic-query-marker" not in logged.text
 
     from dataclasses import replace
 

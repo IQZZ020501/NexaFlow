@@ -1,11 +1,11 @@
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
 from tests.support import (
     ADMIN_PASSWORD,
     BOOTSTRAP_ADMIN_PASSWORD,
-    MANAGED_USER_INITIAL_PASSWORD,
     auth_headers,
     login,
     test_client,
@@ -488,7 +488,25 @@ def main() -> None:
         )
         assert created_user.status_code == 201, created_user.text
         payload = created_user.json()
-        assert payload["initial_password"] == MANAGED_USER_INITIAL_PASSWORD
+        second = client.post(
+            "/api/v1/admin/users",
+            headers=auth_headers(admin_token),
+            json={"username": "second", "email": "second@example.com", "name": "Second"},
+        )
+        assert second.status_code == 201, second.text
+        second_password = second.json()["initial_password"]
+        assert second_password != payload["initial_password"]
+        second_credentials = {"username": "second", "password": second_password}
+        second_login = client.post("/api/v1/auth/login", json=second_credentials)
+        assert second_login.status_code == 200, second_login.text
+        second_token = second_login.json()["access_token"]
+        with patch("app.application.identity.service.utc_now", return_value=utc_now() + timedelta(days=2)):
+            assert client.post("/api/v1/auth/login", json=second_credentials).status_code == 401
+            assert client.post(
+                "/api/v1/auth/change-password",
+                headers=auth_headers(second_token),
+                json={"current_password": second_password, "new_password": "NewSecond@123"},
+            ).status_code == 400
         assert payload["user"]["username"] == "analyst"
         assert payload["user"]["workspaces"] == []
         analyst_id = payload["user"]["id"]

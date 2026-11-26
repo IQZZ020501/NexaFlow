@@ -46,14 +46,14 @@
 | 配置 | 是否需要修改 | 填写方式 |
 | --- | --- | --- |
 | `postgres-password` | 必改 | 独立的随机数据库密码 |
-| `admin-password` | 必改 | 初始管理员登录密码，首次登录后必须修改 |
-| `managed-user-password` | 必改 | 管理员新建受管用户时的初始密码，用户首次登录必须修改 |
+| `admin-password` | 必改 | 初始管理员登录密码（包含修复的新版本仅对空库首次启动生效），首次登录后必须修改 |
+| `managed-user-password` | 当前固定旧镜像必改 | 兼容当前 `x-images.app` 所固定旧发布镜像的遗留项（填写独立随机值）；构建并发布包含源码修复的新镜像、更新 `x-images.app` digest 后由新应用忽略，新建账号改为逐人生成 24 小时临时密码 |
 | `sandbox-api-key` | 必改 | 自行生成的随机密钥，无需向 OpenSandbox 申请；调用端和服务端通过同一 anchor 共用 |
 | `public-app-url` | 远程访问必改 | 浏览器实际使用的完整网站地址，例如 `http://203.0.113.10:8080` 或 `https://nexaflow.example.com`；不含 `/api`、查询参数或片段 |
 | `web-port` | 按需 | 默认 `"8080:3000"`，左侧是宿主访问端口，右侧 `3000` 是容器端口；改成 `"80:3000"` 时，HTTP 网站地址通常无需再带端口 |
 | `environment` | 按访问方式 | HTTP 使用 `development`；完成 HTTPS 反向代理配置后使用 `production` |
 
-前四项应使用四个不同的随机值。可分别执行下面的命令，将每次输出填入一项：
+前四项应使用四个不同的随机值（新发布镜像启用后不再读取 `MANAGED_USER_INITIAL_PASSWORD`，但只要 `x-images.app` 仍固定在旧 digest，必须保持非占位符的独立随机值）。可分别执行下面的命令，将每次输出填入一项：
 
 ```bash
 openssl rand -hex 32
@@ -65,6 +65,7 @@ openssl rand -hex 32
 x-settings:
   postgres-password: &postgres-password "REPLACE_WITH_POSTGRES_PASSWORD"
   admin-password: &admin-password "REPLACE_WITH_ADMIN_PASSWORD"
+  # 仅兼容当前固定的旧镜像；升级到新发布镜像 digest 后由应用忽略。
   managed-user-password: &managed-user-password "REPLACE_WITH_USER_PASSWORD"
   sandbox-api-key: &sandbox-api-key "REPLACE_WITH_SANDBOX_API_KEY"
   public-app-url: &public-app-url http://203.0.113.10:8080
@@ -72,7 +73,9 @@ x-settings:
   environment: &environment development
 ```
 
-只改值，保留 `&postgres-password` 等 anchor 和服务中的 `*postgres-password` 引用。实际部署文件须私密保存，避免提交真实凭据。上面的十六进制随机值不包含 `$`；自行设置的密码若包含字面 `$`，在 Compose 中必须写成 `$$`。
+> **镜像发布生效说明**：`docker-compose.yml` 当前固定的 `x-images.app`（`app`、`migrate`、`agent-worker` 共用）仍为既有已发布镜像 digest。仓库源码中的安全修复（包括受管账号 24 小时独立临时密码、`bootstrap_state` 围栏迁移、工作流模板受限子进程渲染、Next 代理头重写与日志脱敏、以及本地运维恢复脚本）必须在新构建并发布业务镜像、且将 `x-images.app` 更新为新 digest 后才会生效；仅对现存 digest 执行 `docker compose pull` 不会启用源码中的未发布修复。
+
+只改值，保留 `&postgres-password` 等 anchor 和服务中的 `*postgres-password` 引用。实际部署文件须私密保存，避免提交真实凭据。上面的十六进制随机值不包含 `$`；自行设置的密码若包含字面 `$`，在 Compose 中必须写成 `$$`。新应用在 `development` 与 `production` 下都会拒绝 `CHANGE_ME_*`、`REPLACE_WITH_*` 及旧模板值 `NexaFlow@123..`。
 
 管理员用户名、邮箱和显示名称在 `x-backend-environment` 中按需修改：
 
@@ -82,7 +85,7 @@ x-settings:
   BOOTSTRAP_ADMIN_NAME: 系统管理员
 ```
 
-`admin-password` 只用于创建初始管理员，修改 Compose 不会重置已有账号密码；已有账号请在系统中修改。已有 PostgreSQL 数据目录的数据库密码也不会因修改 `postgres-password` 自动更新，不能只改配置后重启来轮换数据库密码。
+`admin-password` 用于首次创建初始管理员；在包含修复的新版本中，`bootstrap_state` 围栏确保仅对空库引导，后续重启既不会重置已有账号密码，也不会按可变用户名重新提升已降权/改名/删除后复用的账号（当前默认固定的旧镜像尚未包含该围栏保护）；已有账号请在系统中修改密码。已有 PostgreSQL 数据目录的数据库密码也不会因修改 `postgres-password` 自动更新，不能只改配置后重启来轮换数据库密码。
 
 #### 2. 校验、拉取和启动
 
@@ -114,6 +117,13 @@ HTTP 网站使用 `environment: development`，前端仍运行已经构建的镜
 
 再运行 `docker compose up -d --wait`，启用 Secure Cookie 和 HTTPS 地址校验。仅修改 `environment` 不会自动配置证书或 HTTPS 入口。如果反向代理运行在宿主机，可将 `web-port` 设为 `"127.0.0.1:8080:3000"`，由反向代理转发到 `http://127.0.0.1:8080`；容器内反向代理需使用它实际可达的地址。
 
+**反向代理、`X-Forwarded-For` 与来源限流边界**：
+
+- 新业务镜像中 Next.js 默认通过回环地址 `NEXAFLOW_API_PROXY=http://127.0.0.1:8000` 转发至同容器 Uvicorn，并在启动前加载 `/opt/frontend/forwarded-peer.cjs` 按真实 TCP 对端重写 `X-Forwarded-For`；Uvicorn 默认仅信任回环地址 `127.0.0.1`。直连客户端无法伪造 `X-Forwarded-For`，不同来源享有独立的登录与找回密码限流桶。
+- 若前置了外部反向代理（如 Nginx、Caddy、ALB），反向代理**必须覆写** `X-Forwarded-For` 为真实客户端地址（例如 `proxy_set_header X-Forwarded-For $remote_addr;`，**禁止**使用 `$proxy_add_x_forwarded_for` 追加客户端原值），并在 `app` 环境显式设置 `NEXAFLOW_TRUSTED_PROXY_IP` 为该反向代理连接 Next.js 时呈现的**单个精确源 IP**。
+- **严禁**信任所有来源（`*`）、宽泛私网网段或多人共享的 NAT/网关出口地址，否则攻击者可伪造来源绕过限流，或导致所有用户共享同一限流桶而互相阻断。
+- 若采用分离部署（例如使用 `deploy/nginx/default.conf` 由反向代理直接转发 `/api/` 到 Uvicorn `:8000`），须将 Uvicorn 的 `FORWARDED_ALLOW_IPS` 精确设为该反向代理的源 IP，同时保留访问日志脱敏格式与禁用原始 URI 错误日志，避免下载、邀请或 OAuth 令牌落入代理日志。
+
 云安全组/外部防火墙仅开放网站和必要运维端口。控制面不发布 `8088`，但上游 OpenSandbox 动态映射宿主 `40000–60000` 沙箱端口，须阻止公网访问该范围。普通 Docker 共享宿主内核。需要 VM 隔离时，可将执行平面迁到独立 Kata 主机：先等待当前任务结束，在同一 Compose 文件中移除本地控制面和三个镜像预拉取服务及业务服务对它的依赖，改用外部 HTTPS `OPENSANDBOX_URL` / API Key，并设置 `OPENSANDBOX_ALLOW_INSECURE_HTTP=0`。
 
 #### 4. 日志、升级与数据保留
@@ -126,6 +136,33 @@ docker compose down
 `down` 停止并移除容器及网络，数据仍保存在 Compose 所在目录的 `deploy/data`。不要在服务运行时删除或移动数据库、Redis、Qdrant 及上传目录。
 
 升级前备份 Compose、PostgreSQL 和上传目录，按发行说明更新 `x-images` digest，再拉取并启动。若升级 execd/egress，同时更新内置 TOML 中对应的镜像 digest。保留自己的密码和网站设置；升级数据库结构后须核对迁移兼容要求，不能假定切回旧镜像就完全回滚。原部署的数据目录仍是 `deploy/data`，移动 Compose 文件时也要保持这些挂载路径指向原数据，不能误启空库。
+
+#### 账号凭据退役、24 小时临时密码与本地运维恢复（包含修复的新版本生效）
+
+- **受管新账号**：系统管理员与工作空间管理员新建账号时，后端为每位用户生成独立高熵临时密码，并强制 `must_change_password=true` 与 **24 小时有效期**（超时后无法登录或凭临时密码改密，须由管理员重设密码或走找回流程）。
+- **升级退役（迁移 `202611240001`）**：对已有非空库执行迁移时，会写入 `bootstrap_state` 围栏（永久阻止重启按用户名重新提权），同时仅使尚未完成首次改密（`must_change_password=true`）的旧受管账号（`user.create`）及仍使用已知模板口令（`NexaFlow@123..`、`CHANGE_ME_Admin_123!`）的未激活引导账号密码失效，并撤销这些待激活账号的刷新会话。已完成首次改密的活跃账号、操作者自定义的引导密码以及所有用户的管理员角色均保持不变。
+- **无 SMTP 锁定唯一管理员时的本地可审计恢复**：若升级前仅存在一个仍使用已知默认模板口令且未改密的引导管理员、且尚未配置 SMTP 邮件找回，该账号在迁移后将无法用旧口令登录。此时禁止通过环境变量自动恢复或提升角色；运维人员须在具备数据库访问权限的宿主/容器上使用 `scripts/recover_user_password.py`（默认只读，仅按不可变 `user_id` 操作，不修改 `is_global_admin` 或停用状态，并写入 `audit_logs` 与 `system_logs`）：
+
+```sh
+# 1. 只读查询管理员列表，获取目标账号的不可变 user_id
+docker compose run --rm --no-deps app python -m scripts.recover_user_password --list-admins
+
+# 2. 只读核对目标账号信息
+docker compose run --rm --no-deps app python -m scripts.recover_user_password --user-id <USER_ID>
+
+# 3. 签发一次性 24 小时临时密码（同步撤销全部刷新会话与旧找回令牌，并写入审计与系统日志）
+docker compose run --rm --no-deps app python -m scripts.recover_user_password \
+  --user-id <USER_ID> --apply --reason "upgrade bootstrap admin recovery"
+```
+
+源码环境可在 `backend/` 下使用 `uv run python -m scripts.recover_user_password ...`。拿到一次性临时密码后请在 24 小时内登录并立即完成改密。
+
+#### 工作流模板预算与平台差异
+
+- 工作流自定义回复节点与表单节点模板在语法检查阶段仅解析 AST 并做符号分析，不进行常量求值；实际编译与渲染通过 Jinja 沙箱在独立、受资源限制的子进程中执行（不提供 OpenSandbox/namespace 级系统隔离），受并发信号量（2）、上下文 JSON 上限（2 MiB）、输出上限（1 MiB）、CPU 时间（2 秒）、墙钟超时（3 秒）及内存上限（128 MiB）约束，且通过线程池卸载以防阻塞 Agent Worker 事件循环。
+- **Linux（生产容器）**：子进程强制启用 `RLIMIT_AS`（128 MiB）、`RLIMIT_CPU`（2 秒）、`RLIMIT_CORE`（0）与墙钟超时（3 秒），支持完整沙箱 Jinja 语法并受硬预算保护。
+- **macOS / Darwin（本地开发）**：操作系统不强制进程级 `RLIMIT_AS`，因此解析阶段刻意将可用语法限制为非放大可移植子集（变量/属性/下标引用、`if`、基于引用的简单 `for`，以及无参 `upper`/`lower`/`trim`/`length`/`first`/`last` 过滤器），依赖内存硬限的高级语法（如 `set`、算术放大、带参过滤器、递归循环）会在本地校验时直接拒绝。
+- **Windows**：子进程通过 `pywin32` Job Object 强制设置 `JOB_OBJECT_LIMIT_PROCESS_MEMORY`（128 MiB），缺少 `pywin32` 或无法应用限制时默认失败关闭（fail-closed）。
 
 从独立 `api` / `frontend` / `worker` / `agent-worker` 的旧拓扑升级时，先用旧配置执行 `docker compose down` 再替换文件；若已换成新配置，先执行 `docker compose down --remove-orphans`。之后再拉取并启动，避免旧 Worker 与新 `app` 同时运行。`app` 中包含唯一的 Beat，不能通过 `--scale app=N` 扩容。
 
@@ -199,7 +236,7 @@ docker compose run --rm --no-deps app python -m scripts.migrate_object_storage -
 
 ### 环境变量与产品配置
 
-部署的进程环境直接来自 Compose 的共享 `x-backend-environment` 和各服务的 `environment`。根 `.env.example` / `.env` 只用于宿主机开发；开发监督器会覆盖数据库容器的本地凭据与回环端口，不修改部署文件，也不将部署密码带入开发服务。
+部署的进程环境直接来自 Compose 的共享 `x-backend-environment` 和各服务的 `environment`。根 `.env.example` / `.env` 只用于宿主机开发；开发监督器会覆盖数据库容器的本地凭据与回环端口，不修改部署文件，也不将部署密码带入开发服务。首次运行 `make dev`（或 `.env` 中 `BOOTSTRAP_ADMIN_PASSWORD` 为空或为旧模板值 `NexaFlow@123..`）时，`scripts/dev.py` 会生成独立随机密码并写入权限 `0600` 的私有根 `.env`；可在根 `.env` 的 `BOOTSTRAP_ADMIN_PASSWORD` 行查看该初始密码。修改 `.env` 不会重置已有数据库中的用户密码。
 
 `JWT_SECRET_KEY` 与 `MODEL_SECRET_KEY` 是唯一由应用创建并持久化的密钥：API 与
 Worker 启动时先查 `platform_secrets`，缺失才创建（用环境变量中的值作为初始值，

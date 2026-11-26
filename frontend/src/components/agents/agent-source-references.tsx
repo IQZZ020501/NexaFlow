@@ -276,12 +276,14 @@ export function AgentAnswer({
   sources,
   t,
   className,
+  components: customComponents,
 }: {
   content: string
   events?: readonly ArtifactEvent[]
   sources?: AgentRunSource[]
   t: TFunction
   className?: string
+  components?: Components
 }) {
   const sourceByRef = React.useMemo(
     () =>
@@ -340,10 +342,16 @@ export function AgentAnswer({
   )
   const components = React.useMemo<Components>(
     () => ({
+      ...customComponents,
       a(props) {
         const sourceRef = sourceRefFromHref(props.href)
         if (!sourceRef) {
-          return isSourceHref(props.href) ? null : <MarkdownLink {...props} />
+          if (isSourceHref(props.href)) return null
+          const customAnchor = customComponents?.a
+          if (customAnchor) {
+            return React.createElement(customAnchor, props)
+          }
+          return <MarkdownLink {...props} />
         }
         const source = sourceByRef.get(sourceRef)
         return source ? (
@@ -351,7 +359,7 @@ export function AgentAnswer({
         ) : null
       },
     }),
-    [sourceByRef, t]
+    [customComponents, sourceByRef, t]
   )
 
   return (

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.api import api_router
 from app.infra.bootstrap.seed import seed_bootstrap_admin
@@ -55,11 +56,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             return await call_next(request)
         except Exception as exc:
+            route_path = getattr(request.scope.get("route"), "path", None) or "<unmatched>"
+            exception_type = exc.__class__.__name__
+            source = classify_error(exc)
+            # Exception messages (including SQL parameters) may repeat bearer
+            # URLs or submitted credentials. Retain frames without their values.
+            stack_trace = "".join(traceback.format_tb(exc.__traceback__))
             log_error(
                 logger,
                 "Unhandled request error.",
-                exc,
-                path=request.url.path,
+                source=source,
+                exception_type=exception_type,
+                stack_trace=stack_trace,
+                path=route_path,
                 method=request.method,
                 status_code=500,
             )
@@ -71,21 +80,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         db,
                         level="error",
                         event="request.unhandled_exception",
-                        message=str(exc) or exc.__class__.__name__,
-                        path=request.url.path,
+                        message=f"Unhandled {exception_type}.",
+                        path=route_path,
                         method=request.method,
                         status_code=500,
                         ip_address=ip_address or None,
                         details={
-                            "exception_type": exc.__class__.__name__,
-                            "source": classify_error(exc),
+                            "exception_type": exception_type,
+                            "source": source,
                         },
-                        stack_trace=traceback.format_exc(),
+                        stack_trace=stack_trace,
                     )
                     await db.commit()
             except Exception as log_exc:
-                log_error(logger, "Failed to record system log.", log_exc)
-            raise
+                log_error(logger, "Failed to record system log.", exception_type=type(log_exc).__name__)
+            return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
     @app.middleware("http")
     async def prevent_api_caching(request: Request, call_next):

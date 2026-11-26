@@ -3,17 +3,27 @@
 import asyncio
 import socket
 import unittest
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 
 from app.adapters.llm.network import (
     PUBLIC_ENDPOINT_CREDENTIAL,
     PublicAsyncBackend,
     PublicSyncBackend,
+    _DeadlineStream,
     public_async_client,
     public_client,
     validate_member_connection,
 )
-from app.adapters.llm.runtime import build_chat_model, build_embeddings, build_reranker
+from app.adapters.llm.response_limits import ResponseBudget
+from app.adapters.llm.runtime import (
+    build_chat_model,
+    build_embeddings,
+    build_reranker,
+    test_model_connection,
+)
 from app.ports.llm import ModelProviderError
 
 
@@ -147,6 +157,116 @@ class ModelNetworkTests(unittest.TestCase):
             side_effect=AssertionError("Public reranker bypassed its checked transport."),
         ):
             self.assertEqual(reranker.rerank("question", ["document"]), results)
+
+    def test_public_probe_rejects_oversize_and_encoded_responses_before_parsing(self):
+        for content_encoding in ("identity", "gzip"):
+            chunks_read = []
+            closed = []
+
+            def chunks():
+                for chunk in (b"12345", b"67890", b"unused"):
+                    chunks_read.append(chunk)
+                    yield chunk
+
+            class TestStream(httpx.SyncByteStream):
+                def __iter__(self):
+                    return chunks()
+
+                def close(self):
+                    closed.append(True)
+
+            def respond(request):
+                self.assertEqual(request.headers["accept-encoding"], "identity")
+                return httpx.Response(
+                    200, headers={"content-encoding": content_encoding}, stream=TestStream()
+                )
+
+            with patch("app.adapters.llm.response_limits.MAX_PROBE_BYTES", 8), patch(
+                "app.adapters.llm.network.public_transport",
+                return_value=httpx.MockTransport(respond),
+            ):
+                with self.assertRaises(ModelProviderError):
+                    test_model_connection(
+                        "openai_compatible",
+                        {
+                            "api_base": "https://models.example.com",
+                            PUBLIC_ENDPOINT_CREDENTIAL: "true",
+                        },
+                        "embedding",
+                        "EMBEDDING",
+                    )
+            self.assertTrue(closed)
+            expected = [b"12345", b"67890"] if content_encoding == "identity" else []
+            self.assertEqual(chunks_read, expected)
+
+    def test_transport_timeout_preserves_the_registration_timeout_status(self):
+        from fastapi import HTTPException
+
+        from app.application.models.registry import run_model_test
+        from app.ports.llm import ModelProviderTimeoutError
+
+        with patch(
+            "app.application.models.registry.test_model_connection",
+            side_effect=ModelProviderTimeoutError("Model request timed out."),
+        ):
+            with self.assertRaises(HTTPException) as error:
+                run_model_test("openai_compatible", {}, "test", "LLM")
+        self.assertEqual(error.exception.status_code, 504)
+
+    def test_probe_fallback_has_the_same_event_budget_and_closes(self):
+        from app.ports.llm import ModelProviderStatusError
+
+        closed = []
+
+        def events():
+            try:
+                for _ in range(4):
+                    yield SimpleNamespace(usage_metadata={})
+            finally:
+                closed.append(True)
+
+        rejecting = MagicMock()
+        rejecting.stream.side_effect = ModelProviderStatusError(422)
+        fallback = MagicMock()
+        fallback.stream.return_value = events()
+        with patch("app.adapters.llm.runtime.MAX_PROBE_EVENTS", 2), patch(
+            "app.adapters.llm.runtime.build_chat_model", side_effect=[rejecting, fallback]
+        ):
+            with self.assertRaisesRegex(ModelProviderError, "too many events"):
+                test_model_connection("openai_compatible", {}, "test", "LLM")
+        self.assertEqual(closed, [True])
+
+    def test_reranker_bounds_regular_body_as_well_as_probe(self):
+        def chunks():
+            yield b'{"results":'
+            yield b'[]}'
+            self.fail("Read continued beyond response budget.")
+
+        credentials = {
+            "api_base": "https://models.example.com",
+            PUBLIC_ENDPOINT_CREDENTIAL: "true",
+        }
+        with patch("app.adapters.llm.runtime.MAX_RERANK_BYTES", 12), patch(
+            "app.adapters.llm.network.public_transport",
+            return_value=httpx.MockTransport(lambda _: httpx.Response(200, content=chunks())),
+        ):
+            with self.assertRaisesRegex(ModelProviderError, "size limit"):
+                build_reranker("openai_compatible", credentials, "rerank").rerank("q", ["d"])
+
+    def test_socket_reads_share_the_deadline_across_tls(self):
+        from app.ports.llm import ModelProviderTimeoutError
+
+        stream = MagicMock()
+        with patch("app.adapters.llm.response_limits.monotonic", side_effect=[0, 1, 3, 5]):
+            bounded = _DeadlineStream(stream, ResponseBudget(32, 5))
+            secure = bounded.start_tls(None, "public.example", 6)
+            stream.start_tls.assert_called_once_with(None, "public.example", 4)
+            secure.read(128, 6)
+            stream.start_tls.return_value.read.assert_called_once_with(128, 2)
+            with self.assertRaises(ModelProviderTimeoutError):
+                secure.read(128)
+            secure.close()
+            stream.start_tls.return_value.close.assert_called_once()
 
     def test_async_backend_pins_tcp_and_clients_ignore_environment_proxies(self):
         from httpcore import AnyIOBackend

@@ -128,6 +128,22 @@ class ComposeTests(unittest.TestCase):
             self.assertEqual(
                 self.supervisor.environment("api")["POSTGRES_PASSWORD"], "fixture"
             )
+            self.assertEqual(
+                self.supervisor.environment("frontend")["NEXAFLOW_API_PROXY"],
+                "http://127.0.0.1:8000",
+            )
+        with (
+            patch.dict(os.environ, {"NEXAFLOW_TRUSTED_PROXY_IP": "198.51.100.2"}),
+            patch.object(self.supervisor.os.path, "isfile", return_value=True),
+        ):
+            frontend = self.supervisor.environment("frontend")
+            self.assertEqual(frontend["NEXAFLOW_TRUSTED_PROXY_IP"], "198.51.100.2")
+            self.assertEqual(
+                frontend["NODE_OPTIONS"],
+                "--require=/opt/frontend/forwarded-peer.cjs",
+            )
+        with patch.object(self.supervisor.os.path, "isfile", return_value=False):
+            self.assertNotIn("NODE_OPTIONS", self.supervisor.environment("frontend"))
 
     def test_healthcheck_requires_both_api_and_frontend_proxy(self) -> None:
         with patch.object(self.supervisor.urllib.request, "urlopen") as request:

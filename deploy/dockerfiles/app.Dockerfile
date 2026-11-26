@@ -17,7 +17,7 @@ RUN bun install --frozen-lockfile
 FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS frontend-builder
 WORKDIR /app
 COPY --from=frontend-deps /app/node_modules ./node_modules
-ARG NEXAFLOW_API_PROXY=http://api:8000
+ARG NEXAFLOW_API_PROXY=http://127.0.0.1:8000
 ENV NEXAFLOW_API_PROXY=$NEXAFLOW_API_PROXY \
     NEXT_TELEMETRY_DISABLED=1
 COPY frontend/ ./
@@ -44,9 +44,10 @@ COPY sandbox/skills/pptx/SKILL.md /app/app/domain/tools/catalog/guides/pptx/SKIL
 COPY sandbox/skills/spreadsheets/SKILL.md /app/app/domain/tools/catalog/guides/spreadsheets/SKILL.md
 COPY sandbox/skills/skill-creator/SKILL.md /app/app/domain/tools/catalog/guides/skill-creator/SKILL.md
 COPY backend/alembic /app/alembic
-COPY backend/scripts/worker.py backend/scripts/migrate_object_storage.py backend/scripts/reconcile_model_usage.py /app/scripts/
+COPY backend/scripts/worker.py backend/scripts/migrate_object_storage.py backend/scripts/reconcile_model_usage.py backend/scripts/recover_user_password.py /app/scripts/
 COPY backend/alembic.ini backend/main.py /app/
 
+COPY frontend/scripts/forwarded-peer.cjs /opt/frontend/forwarded-peer.cjs
 COPY --from=frontend-builder /app/.next/standalone /opt/frontend
 COPY --from=frontend-builder /app/.next/static /opt/frontend/.next/static
 COPY --from=frontend-builder /app/public /opt/frontend/public
