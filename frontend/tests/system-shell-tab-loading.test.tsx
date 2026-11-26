@@ -331,7 +331,10 @@ describe("other system tabs", () => {
       created_at: "2026-11-26T00:00:00Z",
     }
     let auditRequests = 0
-    withFetch(() => {
+    withFetch((url) => {
+      if (url.endsWith("/retention")) {
+        return jsonResponse({ retention_days: null, updated_at: null })
+      }
       auditRequests += 1
       return auditRequests === 1 ? jsonResponse([log]) : response.promise
     })
@@ -357,6 +360,9 @@ describe("other system tabs", () => {
     const response = deferredResponse()
     const offsets: number[] = []
     withFetch((url) => {
+      if (url.endsWith("/retention")) {
+        return jsonResponse({ retention_days: null, updated_at: null })
+      }
       const offset = Number(
         new URL(url, "https://nexaflow.example").searchParams.get("offset")
       )

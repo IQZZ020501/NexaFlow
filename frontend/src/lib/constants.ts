@@ -44,6 +44,8 @@ export const AUDIT_DETAIL_LABEL_KEYS: Record<string, TranslationKey> = {
   document_count: "文档数",
   size_bytes: "大小",
   permission: "权限",
+  retention_days: "保留天数",
+  previous_retention_days: "原保留天数",
 }
 export const AUDIT_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   "workspace.create": "新建工作空间",
@@ -117,6 +119,7 @@ export const AUDIT_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   "workspace.invitation.accept": "接受工作空间邀请",
   "workspace.invitation.revoke": "撤销工作空间邀请",
   "workspace.invitation.delete": "删除工作空间邀请",
+  "audit.retention.update": "更新审计日志保留策略",
   "smtp.settings.update": "更新 SMTP 配置",
   "smtp.test": "发送 SMTP 测试邮件",
 }

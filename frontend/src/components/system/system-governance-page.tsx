@@ -101,6 +101,7 @@ const navItems: Array<{
   label:
     | "工作空间"
     | "团队"
+    | "团队成员"
     | "记忆"
     | "用户管理"
     | "审计日志"
@@ -113,6 +114,7 @@ const navItems: Array<{
 }> = [
   { href: "/system/workspaces", label: "工作空间", icon: Building2Icon },
   { href: "/system/teams", label: "团队", icon: UsersIcon },
+  { href: "/system/team-members", label: "团队成员", icon: UserCogIcon },
   { href: "/system/users", label: "用户管理", icon: UserCogIcon },
   { href: "/system/audit", label: "审计日志", icon: HistoryIcon },
   { href: "/system/memories", label: "记忆", icon: BrainIcon },
@@ -220,10 +222,14 @@ function SystemGovernanceNav({
     me.user.is_global_admin ||
     me.memberships.some((membership) => membership.role === "admin")
   )
+  const canManageTeamMembers = Boolean(
+    !canManageUsers && me.user.teams.some((team) => team.role === "admin")
+  )
   const visible = navItems.filter((item) => {
+    if (item.href === "/system/team-members") return canManageTeamMembers
     if (item.href === "/system/users") return canManageUsers
+    if (item.href === "/system/audit") return canManageWorkspace
     if (
-      item.href === "/system/audit" ||
       item.href === "/system/operations" ||
       item.href === "/system/email" ||
       item.href === "/system/identity"

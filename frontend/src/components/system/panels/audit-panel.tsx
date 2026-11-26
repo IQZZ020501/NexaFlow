@@ -1,4 +1,12 @@
-import { DownloadIcon, HistoryIcon, LoaderCircleIcon, RefreshCwIcon } from "lucide-react"
+import * as React from "react"
+import {
+  ChevronDownIcon,
+  CircleCheckIcon,
+  DownloadIcon,
+  HistoryIcon,
+  LoaderCircleIcon,
+  RefreshCwIcon,
+} from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import {
   Card,
@@ -14,6 +22,13 @@ import { formatDateTime } from "@/lib/display"
 import { escapeCsvCell } from "@/lib/safe-url"
 import { formatAuditDetails } from "@/components/system/system-utils"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { FilterDropdown } from "@/components/app/filter-dropdown"
 import {
@@ -21,6 +36,8 @@ import {
   type SystemPageSize,
 } from "@/components/system/pagination-footer"
 import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
+
+const RETENTION_PRESET_DAYS = [30, 90, 180, 365] as const
 
 type AuditPanelProps = {
   auditLogs: AuditLog[]
@@ -41,6 +58,12 @@ type AuditPanelProps = {
   workspaceScope?: string | null
   /** Loads every matching audit log for the CSV export; falls back to the current page when omitted. */
   loadAll?: () => Promise<AuditLog[]>
+  canManageRetention?: boolean
+  retentionDays?: number | null
+  isRetentionLoading?: boolean
+  isSavingRetention?: boolean
+  onSaveRetention?: (retentionDays: number | null) => Promise<void> | void
+  onRetentionValidationError?: (message: string) => void
 }
 
 /**
@@ -67,9 +90,46 @@ export function AuditPanel({
   onPageSizeChange = () => undefined,
   workspaceScope = null,
   loadAll,
+  canManageRetention = false,
+  retentionDays = null,
+  isRetentionLoading = false,
+  isSavingRetention = false,
+  onSaveRetention,
+  onRetentionValidationError,
 }: AuditPanelProps) {
   const { t } = useLanguage()
   const isPhoneListLayout = useMediaQuery(PHONE_LIST_QUERY)
+  const [isEditingCustomDays, setIsEditingCustomDays] = React.useState(false)
+  const [customDaysInput, setCustomDaysInput] = React.useState("")
+
+  const retentionSummary =
+    retentionDays === null
+      ? t("保留所有")
+      : t("保留 {days} 天", { days: retentionDays })
+
+  async function selectRetentionDays(nextDays: number | null) {
+    setIsEditingCustomDays(false)
+    if (!onSaveRetention || nextDays === retentionDays) {
+      return
+    }
+    await onSaveRetention(nextDays)
+  }
+
+  async function handleCustomDaysSubmit(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault()
+    const trimmed = customDaysInput.trim()
+    const parsed = Number(trimmed)
+    if (!trimmed || !Number.isInteger(parsed) || parsed < 1 || parsed > 3650) {
+      onRetentionValidationError?.(t("保留天数须为 1 至 3650 之间的整数"))
+      return
+    }
+    if (onSaveRetention && parsed !== retentionDays) {
+      await onSaveRetention(parsed)
+    }
+    setIsEditingCustomDays(false)
+  }
 
   async function exportLogs() {
     const allLogs = loadAll ? await loadAll() : auditLogs
@@ -136,6 +196,96 @@ export function AuditPanel({
             <Button variant="outline" size="icon" onClick={onRefresh} disabled={isAuditLoading} aria-label={t("刷新")} title={t("刷新")}>
               <RefreshCwIcon className={cn("size-4", isAuditLoading && "animate-spin")} />
             </Button>
+            {canManageRetention ? (
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={t("保留策略")}
+                    disabled={isRetentionLoading || isSavingRetention}
+                  >
+                    {isSavingRetention ? (
+                      <LoaderCircleIcon className="size-4 animate-spin" />
+                    ) : null}
+                    <span>
+                      {t("保留策略")}: {retentionSummary}
+                    </span>
+                    <ChevronDownIcon className="size-4 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuItem
+                    className="justify-between"
+                    onSelect={() => void selectRetentionDays(null)}
+                  >
+                    <span>{t("保留所有")}</span>
+                    {retentionDays === null ? (
+                      <CircleCheckIcon className="size-4 text-primary" />
+                    ) : null}
+                  </DropdownMenuItem>
+                  {RETENTION_PRESET_DAYS.map((days) => (
+                    <DropdownMenuItem
+                      key={days}
+                      className="justify-between"
+                      onSelect={() => void selectRetentionDays(days)}
+                    >
+                      <span>{t("保留 {days} 天", { days })}</span>
+                      {retentionDays === days ? (
+                        <CircleCheckIcon className="size-4 text-primary" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setCustomDaysInput(
+                        retentionDays !== null ? String(retentionDays) : "90"
+                      )
+                      setIsEditingCustomDays(true)
+                    }}
+                  >
+                    {t("自定义天数...")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            {canManageRetention && isEditingCustomDays ? (
+              <form
+                onSubmit={(event) => void handleCustomDaysSubmit(event)}
+                className="flex items-center gap-1.5"
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={3650}
+                  step={1}
+                  className="h-8 w-24"
+                  value={customDaysInput}
+                  onChange={(event) => setCustomDaysInput(event.target.value)}
+                  placeholder="90"
+                  aria-label={t("自定义保留天数")}
+                  disabled={isSavingRetention}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={isSavingRetention}
+                >
+                  {t("保存")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={isSavingRetention}
+                  onClick={() => setIsEditingCustomDays(false)}
+                >
+                  {t("取消")}
+                </Button>
+              </form>
+            ) : null}
             <Button variant="outline" size="sm" onClick={() => void exportLogs()} disabled={!auditLogs.length}>
               <DownloadIcon className="size-4" />{t("导出")}
             </Button>

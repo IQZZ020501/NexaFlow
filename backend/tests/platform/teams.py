@@ -331,6 +331,28 @@ def main() -> None:
         )
         assert add_admin_denied.status_code == 403, add_admin_denied.text
 
+        global_admin_id = client.get(
+            "/api/v1/auth/me",
+            headers=auth_headers(admin_token),
+        ).json()["user"]["id"]
+        added_global_admin_ws = client.post(
+            members_url(research_workspace_id),
+            headers=auth_headers(admin_token),
+            json={"user_id": global_admin_id, "role": "member"},
+        )
+        assert added_global_admin_ws.status_code == 201, added_global_admin_ws.text
+        add_global_admin_denied = client.post(
+            teams_url(research_workspace_id, f"/{team_id}/members"),
+            headers=auth_headers(team_member_token),
+            json={"user_id": global_admin_id, "role": "member"},
+        )
+        assert add_global_admin_denied.status_code == 403, add_global_admin_denied.text
+        cleanup_global_admin_ws = client.delete(
+            members_url(research_workspace_id, f"/{global_admin_id}"),
+            headers=auth_headers(admin_token),
+        )
+        assert cleanup_global_admin_ws.status_code == 204, cleanup_global_admin_ws.text
+
         added_team_admin = client.post(
             teams_url(research_workspace_id, f"/{team_id}/members"),
             headers=auth_headers(research_token),
@@ -435,6 +457,26 @@ def main() -> None:
             headers=auth_headers(research_token),
         )
         assert remove_last_team_admin.status_code == 400, remove_last_team_admin.text
+
+        ws_members_res = client.get(
+            members_url(research_workspace_id),
+            headers=auth_headers(research_token),
+        )
+        assert ws_members_res.status_code == 200, ws_members_res.text
+        research_admin_row = next(
+            item
+            for item in ws_members_res.json()
+            if item["user"]["id"] == research_admin_id
+        )
+        assert research_admin_row["user"]["teams"] == [
+            {
+                "id": team_id,
+                "workspace_id": research_workspace_id,
+                "name": "Applied Research",
+                "is_default": False,
+                "role": "admin",
+            }
+        ]
 
         delete_workspace_team = client.delete(
             teams_url(default_workspace_id, f"/{default_team_id}"),

@@ -1,10 +1,18 @@
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.audit.models import AuditLog
-from app.entities.audit import AuditLog as AuditLogEntity
+from app.domain.audit.models import (
+    AUDIT_RETENTION_SETTINGS_ID,
+    AuditLog,
+    AuditRetentionSettings,
+)
+from app.entities.audit import (
+    AuditLog as AuditLogEntity,
+    AuditRetentionSettings as AuditRetentionSettingsEntity,
+)
+from app.entities.defaults import utc_now
 from app.infra.db.mapping import to_entity
 
 
@@ -196,3 +204,66 @@ async def list_workspace_audit_logs(
         from_date=from_date,
         to_date=to_date,
     )
+
+
+async def get_retention_settings(db: AsyncSession) -> AuditRetentionSettingsEntity | None:
+    """Return the singleton global audit retention settings row if configured."""
+    row = await db.scalar(
+        select(AuditRetentionSettings).where(
+            AuditRetentionSettings.id == AUDIT_RETENTION_SETTINGS_ID
+        )
+    )
+    return to_entity(AuditRetentionSettingsEntity, row) if row is not None else None
+
+
+async def save_retention_settings(
+    db: AsyncSession,
+    *,
+    retention_days: int | None,
+    updated_by_user_id: str | None,
+) -> AuditRetentionSettingsEntity:
+    """Create or update the singleton audit retention settings row; caller commits."""
+    now = utc_now()
+    row = await db.scalar(
+        select(AuditRetentionSettings).where(
+            AuditRetentionSettings.id == AUDIT_RETENTION_SETTINGS_ID
+        )
+    )
+    if row is None:
+        row = AuditRetentionSettings(
+            id=AUDIT_RETENTION_SETTINGS_ID,
+            retention_days=retention_days,
+            updated_by_user_id=updated_by_user_id,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+    else:
+        row.retention_days = retention_days
+        row.updated_by_user_id = updated_by_user_id
+        row.updated_at = now
+    await db.flush()
+    return to_entity(AuditRetentionSettingsEntity, row)
+
+
+async def delete_audit_logs_before(
+    db: AsyncSession,
+    cutoff: datetime,
+    *,
+    batch_size: int = 1000,
+) -> int:
+    """Delete up to ``batch_size`` audit logs strictly older than ``cutoff``."""
+    ids = list(
+        (
+            await db.scalars(
+                select(AuditLog.id)
+                .where(AuditLog.created_at < cutoff)
+                .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+                .limit(batch_size)
+            )
+        ).all()
+    )
+    if not ids:
+        return 0
+    result = await db.execute(delete(AuditLog).where(AuditLog.id.in_(ids)))
+    return int(result.rowcount or len(ids))

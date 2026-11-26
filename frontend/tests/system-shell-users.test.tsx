@@ -399,7 +399,7 @@ describe("global admin users tab", () => {
       expect(within(dialog).getByText("Team One")).toBeTruthy()
     )
     fireEvent.click(within(dialog).getByText("Team One"))
-    fireEvent.click(within(dialog).getByText("全局管理员权限"))
+    expect(within(dialog).queryByText("全局管理员权限")).toBeNull()
     fireEvent.click(within(dialog).getByRole("button", { name: "新建" }))
 
     await waitFor(() => expect(created.url).not.toBeUndefined())
@@ -408,14 +408,20 @@ describe("global admin users tab", () => {
       username: "newbie",
       email: "newbie@app.local",
       name: "Newbie",
-      is_global_admin: true,
+      is_global_admin: false,
       workspace_id: "ws-1",
       team_ids: ["t-1"],
     })
-    expect(notifications).toContainEqual([
-      "success",
-      "用户已新建，初始密码：Init1pass",
-    ])
+    expect(notifications).toEqual([])
+    const credentialsDialog = await screen.findByRole("dialog", {
+      name: "用户已新建",
+    })
+    expect(within(credentialsDialog).getByText("Init1pass")).toBeTruthy()
+    fireEvent.keyDown(credentialsDialog, { key: "Escape" })
+    expect(screen.getByRole("dialog", { name: "用户已新建" })).toBeTruthy()
+    fireEvent.click(
+      within(credentialsDialog).getByRole("button", { name: "我已保存，关闭" })
+    )
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     await waitFor(() => expect(screen.getByText("Newbie")).toBeTruthy())
   })
@@ -510,12 +516,11 @@ describe("global admin users tab", () => {
     await screen.findByText("Alice")
     fireEvent.click(screen.getAllByRole("button", { name: "编辑用户" })[1])
     const dialog = await screen.findByRole("dialog", { name: "编辑用户" })
+    expect(within(dialog).queryByText("全局管理员权限")).toBeNull()
     fireEvent.change(within(dialog).getByLabelText("姓名"), {
       target: { value: "Alice Renamed" },
     })
-    fireEvent.click(within(dialog).getByRole("checkbox"))
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
-    await respondToConfirm("确认")
 
     await waitFor(() => expect(patches).toHaveLength(1))
     await act(async () => {
@@ -523,7 +528,6 @@ describe("global admin users tab", () => {
         jsonResponse({
           ...alice,
           name: "Alice Renamed",
-          is_global_admin: true,
         })
       )
     })
@@ -531,35 +535,9 @@ describe("global admin users tab", () => {
       username: "alice",
       email: "alice@app.local",
       name: "Alice Renamed",
-      is_global_admin: true,
     })
     expect(notifications).toContainEqual(["success", "用户已更新"])
     await waitFor(() => expect(screen.getByText("Alice Renamed")).toBeTruthy())
-  })
-
-  test("cancelling the global-admin confirmation skips the update", async () => {
-    const notifications = withNotifySpy()
-    const patches: string[] = []
-    handler = routeHandler([
-      { path: "/api/v1/admin/users", handle: () => jsonResponse(allUsers) },
-      {
-        method: "PATCH",
-        path: "/api/v1/admin/users/u-2",
-        handle: (_url, init) => {
-          patches.push(String(init?.body))
-          return jsonResponse(alice)
-        },
-      },
-    ])
-    renderPage(<SystemShell activeTab="users" />)
-    await screen.findByText("Alice")
-    fireEvent.click(screen.getAllByRole("button", { name: "编辑用户" })[1])
-    const dialog = await screen.findByRole("dialog", { name: "编辑用户" })
-    fireEvent.click(within(dialog).getByRole("checkbox"))
-    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
-    await respondToConfirm("取消")
-    expect(patches).toEqual([])
-    expect(notifications).toEqual([])
   })
 
   test("reports an error when updating a user fails", async () => {
@@ -796,6 +774,109 @@ describe("global admin users tab", () => {
     )
     expect(screen.getByText("Carol")).toBeTruthy()
   })
+
+  test("global admin assigns workspace admin and team admin roles when editing a user", async () => {
+    const notifications = withNotifySpy()
+    const requests: Array<{ method: string; path: string; body: unknown }> = []
+    let currentUsers = allUsers
+    const updatedDave: User = {
+      ...dave,
+      workspaces: [
+        { id: "ws-1", name: "Test Workspace", is_default: true, role: "admin" },
+      ],
+      teams: [
+        {
+          id: "t-1",
+          workspace_id: "ws-1",
+          name: "Team One",
+          is_default: false,
+          role: "admin",
+        },
+      ],
+    }
+    handler = routeHandler([
+      { path: "/api/v1/admin/users", handle: () => jsonResponse(currentUsers) },
+      {
+        method: "PATCH",
+        path: "/api/v1/admin/users/u-5",
+        handle: (_url, init) => {
+          requests.push({
+            method: "PATCH",
+            path: "/api/v1/admin/users/u-5",
+            body: JSON.parse(String(init?.body ?? "{}")),
+          })
+          return jsonResponse(dave)
+        },
+      },
+      {
+        method: "POST",
+        path: "/api/v1/workspaces/ws-1/members",
+        handle: (_url, init) => {
+          requests.push({
+            method: "POST",
+            path: "/api/v1/workspaces/ws-1/members",
+            body: JSON.parse(String(init?.body ?? "{}")),
+          })
+          return jsonResponse({ user: dave, role: "admin" }, 201)
+        },
+      },
+      {
+        method: "POST",
+        path: "/api/v1/workspaces/ws-1/teams/t-1/members",
+        handle: (_url, init) => {
+          requests.push({
+            method: "POST",
+            path: "/api/v1/workspaces/ws-1/teams/t-1/members",
+            body: JSON.parse(String(init?.body ?? "{}")),
+          })
+          currentUsers = currentUsers.map((item) =>
+            item.id === "u-5" ? updatedDave : item
+          )
+          return jsonResponse({ user: dave, role: "admin" }, 201)
+        },
+      },
+    ])
+
+    renderPage(<SystemShell activeTab="users" />)
+    await screen.findByText("Dave")
+    fireEvent.click(within(userRow("Dave")).getByRole("button", { name: "编辑用户" }))
+    const dialog = await screen.findByRole("dialog", { name: "编辑用户" })
+
+    await chooseDropdownOption(
+      within(dialog).getByLabelText("工作空间角色"),
+      "工作空间管理员"
+    )
+    await chooseDropdownOption(
+      within(dialog).getByLabelText("Team One 角色"),
+      "团队管理员"
+    )
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
+
+    await waitFor(() =>
+      expect(requests).toEqual([
+        {
+          method: "PATCH",
+          path: "/api/v1/admin/users/u-5",
+          body: {
+            username: "dave",
+            email: "dave@app.local",
+            name: "Dave",
+          },
+        },
+        {
+          method: "POST",
+          path: "/api/v1/workspaces/ws-1/members",
+          body: { user_id: "u-5", role: "admin" },
+        },
+        {
+          method: "POST",
+          path: "/api/v1/workspaces/ws-1/teams/t-1/members",
+          body: { user_id: "u-5", role: "admin" },
+        },
+      ])
+    )
+    expect(notifications).toContainEqual(["success", "用户已更新"])
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -875,10 +956,15 @@ describe("workspace admin users tab", () => {
       email: "newbie@app.local",
       name: "Newbie",
     })
-    expect(notifications).toContainEqual([
-      "success",
-      "用户已新建，初始密码：Init1pass",
-    ])
+    expect(notifications).toEqual([])
+    const credentialsDialog = await screen.findByRole("dialog", {
+      name: "用户已新建",
+    })
+    expect(within(credentialsDialog).getByText("Init1pass")).toBeTruthy()
+    fireEvent.click(
+      within(credentialsDialog).getByRole("button", { name: "我已保存，关闭" })
+    )
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     await waitFor(() => expect(screen.getByText("Newbie")).toBeTruthy())
 
     // The members dialog for a workspace admin has no add section.
@@ -916,5 +1002,71 @@ describe("workspace admin users tab", () => {
     ])
     renderPage(<SystemShell activeTab="audit" />)
     expect(await screen.findByText("暂无审计日志")).toBeTruthy()
+  })
+
+  test("workspace admin can assign team admin roles when editing a workspace member", async () => {
+    const notifications = withNotifySpy()
+    const teamRequests: unknown[] = []
+    let membersList: WorkspaceMember[] = [
+      { user: { ...alice, teams: [] }, role: "admin" },
+      { user: { ...dave, teams: [] }, role: "member" },
+    ]
+    setSession({ me: wsAdminMe, selectedWorkspaceId: "ws-1" })
+    handler = routeHandler([
+      {
+        path: "/api/v1/workspaces/ws-1/members",
+        handle: () => jsonResponse(membersList),
+      },
+      {
+        method: "POST",
+        path: "/api/v1/workspaces/ws-1/teams/t-1/members",
+        handle: (_url, init) => {
+          const body = JSON.parse(String(init?.body ?? "{}"))
+          teamRequests.push(body)
+          membersList = membersList.map((entry) =>
+            entry.user.id === "u-5"
+              ? {
+                  ...entry,
+                  user: {
+                    ...entry.user,
+                    teams: [
+                      {
+                        id: "t-1",
+                        workspace_id: "ws-1",
+                        name: "Team One",
+                        is_default: false,
+                        role: "admin",
+                      },
+                    ],
+                  },
+                }
+              : entry
+          )
+          return jsonResponse({ user: dave, role: "admin" }, 201)
+        },
+      },
+    ])
+
+    renderPage(<SystemShell activeTab="users" />)
+    await screen.findByText("Dave")
+
+    const editButtons = screen.getAllByRole("button", { name: "编辑用户" })
+    fireEvent.click(editButtons[1])
+    const dialog = await screen.findByRole("dialog", { name: "编辑用户" })
+    expect(within(dialog).queryByLabelText("姓名")).toBeNull()
+    expect(within(dialog).queryByLabelText("工作空间角色")).toBeNull()
+    expect(within(dialog).queryByRole("checkbox")).toBeNull()
+
+    await chooseDropdownOption(
+      within(dialog).getByLabelText("Team One 角色"),
+      "团队管理员"
+    )
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
+
+    await waitFor(() =>
+      expect(teamRequests).toEqual([{ user_id: "u-5", role: "admin" }])
+    )
+    expect(await screen.findByText("Team One (管理员)")).toBeTruthy()
+    expect(notifications).toContainEqual(["success", "用户已更新"])
   })
 })

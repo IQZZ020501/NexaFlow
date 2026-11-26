@@ -269,6 +269,13 @@ async def add_team_member(
     )
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
+    if user.is_global_admin and not await actor_manages_team_admins(
+        db, team.workspace_id, actor
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Workspace admin required to manage system administrators in teams.",
+        )
 
     membership = TeamMembership(
         workspace_id=team.workspace_id,
@@ -323,6 +330,13 @@ async def update_team_member_role(
     )
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace member not found.")
+    if user.is_global_admin and not await actor_manages_team_admins(
+        db, team.workspace_id, actor
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Workspace admin required to manage system administrators in teams.",
+        )
 
     previous_role = membership.role
     membership.role = role

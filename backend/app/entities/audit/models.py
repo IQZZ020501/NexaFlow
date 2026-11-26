@@ -18,3 +18,12 @@ class AuditLog:
     resource_name: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class AuditRetentionSettings:
+    id: str = "default"
+    retention_days: int | None = None
+    updated_by_user_id: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)

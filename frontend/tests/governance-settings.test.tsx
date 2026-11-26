@@ -592,6 +592,26 @@ describe("workspace governance settings", () => {
     await waitFor(() => expect(replaced).toContain("/system/teams"))
   })
 
+  test("shows audit logs link for workspace administrators in governance nav", async () => {
+    sessionState.me = {
+      ...adminMe,
+      user: { ...adminMe.user, is_global_admin: false },
+    }
+    withFetch((url) => {
+      if (url.endsWith("/inventory")) return jsonResponse(inventory)
+      if (url.endsWith("/governance")) return jsonResponse(governance)
+      if (url.endsWith("/invitations")) return jsonResponse([])
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    renderPage(<SystemGovernancePage section="governance" />)
+    const auditLink = await screen.findByRole("link", { name: "审计日志" })
+    expect(auditLink.getAttribute("href")).toBe("/system/audit")
+    expect(screen.queryByRole("link", { name: "系统运行" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "SMTP 邮件" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "企业登录" })).toBeNull()
+  })
+
   test("redirects team administrators without workspace management rights from governance", async () => {
     sessionState.me = {
       ...adminMe,
@@ -617,6 +637,43 @@ describe("workspace governance settings", () => {
     renderPage(<SystemGovernancePage section="governance" />)
     await waitFor(() => expect(replaced).toContain("/system/teams"))
     expect(await screen.findByText("暂无可管理工作空间")).toBeTruthy()
+  })
+
+  test("shows team members link and hides audit and governance links for team administrators in security nav", async () => {
+    sessionState.me = {
+      ...adminMe,
+      user: {
+        ...adminMe.user,
+        is_global_admin: false,
+        teams: [
+          {
+            id: "team-1",
+            workspace_id: "ws-1",
+            name: "Platform",
+            is_default: true,
+            role: "admin",
+          },
+        ],
+      },
+      memberships: [{ workspace_id: "ws-1", role: "member" }],
+    }
+    withFetch((url, init) => {
+      const method = init?.method ?? "GET"
+      if (url === "/api/v1/auth/sessions" && method === "GET") {
+        return jsonResponse([])
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
+    renderPage(<SystemGovernancePage section="security" />)
+    const teamMembersLink = await screen.findByRole("link", { name: "团队成员" })
+    expect(teamMembersLink.getAttribute("href")).toBe("/system/team-members")
+    expect(screen.getByRole("link", { name: "会话安全" }).getAttribute("href")).toBe(
+      "/system/security"
+    )
+    expect(screen.queryByRole("link", { name: "审计日志" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "用户管理" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "工作空间治理" })).toBeNull()
   })
 })
 

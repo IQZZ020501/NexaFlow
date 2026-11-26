@@ -192,6 +192,10 @@ describe("audit tab", () => {
         path: "/api/v1/admin/audit-logs",
         handle: () => jsonResponse({ detail: "audit failed" }, 500),
       },
+      {
+        path: "/api/v1/admin/audit-logs/retention",
+        handle: () => jsonResponse({ retention_days: null, updated_at: null }),
+      },
     ])
     renderPage(<SystemShell activeTab="audit" />)
     await waitFor(() =>
@@ -219,6 +223,10 @@ describe("audit tab", () => {
           }
           return jsonResponse([{ ...auditLog, id: "a-other", action: "user.create", resource_name: "Other Resource" }])
         },
+      },
+      {
+        path: "/api/v1/admin/audit-logs/retention",
+        handle: () => jsonResponse({ retention_days: null, updated_at: null }),
       },
     ])
     renderPage(<SystemShell activeTab="audit" />)
@@ -278,6 +286,10 @@ describe("audit tab", () => {
           ), { headers: { "Content-Type": "application/json", "X-Total-Count": "21" } })
         },
       },
+      {
+        path: "/api/v1/admin/audit-logs/retention",
+        handle: () => jsonResponse({ retention_days: null, updated_at: null }),
+      },
     ])
     renderPage(<SystemShell activeTab="audit" />)
     expect(await screen.findByText("Page One 0")).toBeTruthy()
@@ -331,5 +343,67 @@ describe("audit tab", () => {
       expect(notifications).toContainEqual(["error", "服务暂时不可用，请稍后重试"])
     )
     expect(await screen.findByText("暂无审计日志")).toBeTruthy()
+    expect(screen.queryByLabelText("保留策略")).toBeNull()
+  })
+
+  test("global admin can view and update audit retention with presets, custom days, and keep-all", async () => {
+    const notifications = withNotifySpy()
+    const savedBodies: Array<number | null> = []
+    let currentDays: number | null = 30
+    handler = routeHandler([
+      {
+        path: "/api/v1/admin/audit-logs",
+        handle: () => jsonResponse([auditLog]),
+      },
+      {
+        path: "/api/v1/admin/audit-logs/retention",
+        handle: () =>
+          jsonResponse({
+            retention_days: currentDays,
+            updated_at: "2026-11-26T00:00:00Z",
+          }),
+      },
+      {
+        method: "PUT",
+        path: "/api/v1/admin/audit-logs/retention",
+        handle: (_url, init) => {
+          const parsed = JSON.parse(String(init?.body ?? "{}")) as {
+            retention_days: number | null
+          }
+          savedBodies.push(parsed.retention_days)
+          currentDays = parsed.retention_days
+          return jsonResponse({
+            retention_days: currentDays,
+            updated_at: "2026-11-26T00:01:00Z",
+          })
+        },
+      },
+    ])
+
+    renderPage(<SystemShell activeTab="audit" />)
+    await screen.findByText("New Space")
+
+    const trigger = screen.getByRole("button", { name: "保留策略" })
+    await waitFor(() => expect(trigger.textContent).toContain("保留 30 天"))
+
+    await chooseDropdownOption(trigger, "保留 90 天")
+    await waitFor(() => expect(savedBodies).toEqual([90]))
+    expect(trigger.textContent).toContain("保留 90 天")
+    expect(notifications).toContainEqual([
+      "success",
+      "审计日志保留策略已设为 90 天",
+    ])
+
+    await chooseDropdownOption(trigger, "自定义天数...")
+    const customInput = screen.getByLabelText("自定义保留天数")
+    fireEvent.change(customInput, { target: { value: "45" } })
+    fireEvent.click(screen.getByRole("button", { name: "保存" }))
+    await waitFor(() => expect(savedBodies).toEqual([90, 45]))
+    expect(trigger.textContent).toContain("保留 45 天")
+
+    await chooseDropdownOption(trigger, "保留所有")
+    await waitFor(() => expect(savedBodies).toEqual([90, 45, null]))
+    expect(trigger.textContent).toContain("保留所有")
+    expect(notifications).toContainEqual(["success", "审计日志已设为保留所有"])
   })
 })

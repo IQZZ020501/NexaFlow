@@ -1,5 +1,4 @@
 import logging
-import secrets
 from datetime import UTC, timedelta
 
 from fastapi import HTTPException, status
@@ -59,6 +58,7 @@ from app.schemas.identity.contracts import (
 )
 
 logger = get_logger(__name__)
+DEFAULT_INITIAL_PASSWORD = "NexaFlow@123.."
 _DUMMY_PASSWORD_HASH = hash_password("NexaFlow-Dummy-Timing-Check-1!")
 
 def access_token_response(
@@ -251,7 +251,7 @@ async def create_user(
                 "Teams must belong to selected workspace.",
             )
 
-    initial_password = f"Nxf!{secrets.token_urlsafe(18)}A1"
+    initial_password = DEFAULT_INITIAL_PASSWORD
     user = User(
         username=normalize_username(payload.username),
         email=normalize_email(payload.email),

@@ -1340,9 +1340,13 @@ describe("teams tab", () => {
     expect(within(dialog).getByText("Carol")).toBeTruthy()
 
     // Add Dave from the workspace member candidates.
-    await chooseDropdownOption(
-      document.getElementById("teamMemberUser") as HTMLElement,
-      "Dave · dave"
+    const candidateInput = document.getElementById(
+      "teamMemberUser"
+    ) as HTMLInputElement
+    fireEvent.focus(candidateInput)
+    fireEvent.change(candidateInput, { target: { value: "dave" } })
+    fireEvent.click(
+      within(await screen.findByRole("listbox")).getByText("Dave · dave")
     )
     fireEvent.click(within(dialog).getByRole("button", { name: "添加成员" }))
     await waitFor(() => expect(requests).toContain("POST"))
@@ -1436,9 +1440,13 @@ describe("teams tab", () => {
     const dialog = await screen.findByRole("dialog", { name: "管理团队成员" })
     await waitFor(() => expect(within(dialog).getByText("Carol")).toBeTruthy())
 
-    await chooseDropdownOption(
-      document.getElementById("teamMemberUser") as HTMLElement,
-      "Dave · dave"
+    const candidateInput = document.getElementById(
+      "teamMemberUser"
+    ) as HTMLInputElement
+    fireEvent.focus(candidateInput)
+    fireEvent.change(candidateInput, { target: { value: "dave" } })
+    fireEvent.click(
+      within(await screen.findByRole("listbox")).getByText("Dave · dave")
     )
     fireEvent.click(within(dialog).getByRole("button", { name: "添加成员" }))
     await waitFor(() =>

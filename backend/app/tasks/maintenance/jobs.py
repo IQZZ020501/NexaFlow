@@ -8,6 +8,7 @@ from app.application.agents.runs.executor import (
     list_recoverable_unified_agent_run_ids,
 )
 from app.application.artifacts.service import cleanup_expired_generated_artifacts
+from app.application.audit import cleanup_expired_audit_logs
 from app.application.email.delivery import list_due_email_delivery_ids
 from app.application.memories.extraction import list_due_memory_jobs
 from app.application.tools.runtime.service import (
@@ -77,6 +78,10 @@ def _cleanup_expired_artifacts(_settings: Settings) -> None:
     run_task_async(cleanup_expired_generated_artifacts())
 
 
+def _cleanup_expired_audit_logs(_settings: Settings) -> None:
+    run_task_async(cleanup_expired_audit_logs())
+
+
 def _recover_mcp_revocations(_settings: Settings) -> None:
     recover_mcp_revocations_job.apply_async()
     recover_mcp_tasks_job.apply_async()
@@ -123,6 +128,7 @@ FREQUENT_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
 MINUTELY_MAINTENANCE_STEPS: tuple[MaintenanceStep, ...] = (
     ("reclaim_execution_sessions", _reclaim_execution_sessions),
     ("cleanup_expired_artifacts", _cleanup_expired_artifacts),
+    ("cleanup_expired_audit_logs", _cleanup_expired_audit_logs),
     ("recover_knowledge_storage_cleanups", _recover_knowledge_storage_cleanups),
     ("recover_upload_storage_cleanups", _recover_upload_storage_cleanups),
 )

@@ -564,6 +564,46 @@ describe("WorkspaceUsersPanel", () => {
     expect(screen.queryByRole("table")).toBeNull()
   })
 
+  test("filters workspace members by search query, status, and role", async () => {
+    const activeAdmin: WorkspaceMember = {
+      user: user({
+        id: "m-1",
+        username: "alice",
+        email: "alice@app.local",
+        name: "Alice",
+      }),
+      role: "admin",
+    }
+    const inactiveMember: WorkspaceMember = {
+      user: user({
+        id: "m-2",
+        username: "bob",
+        email: "bob@app.local",
+        name: "Bob",
+        is_active: false,
+      }),
+      role: "member",
+    }
+    renderWorkspacePanel({
+      workspaceMembers: [activeAdmin, inactiveMember],
+    })
+
+    const search = screen.getByPlaceholderText("搜索姓名、账号、邮箱")
+    fireEvent.change(search, { target: { value: "bob" } })
+    expect(screen.queryByText("Alice")).toBeNull()
+    expect(screen.getByText("Bob")).toBeTruthy()
+
+    fireEvent.change(search, { target: { value: "" } })
+    fireEvent.pointerDown(screen.getByLabelText("筛选用户状态"))
+    fireEvent.click(within(await screen.findByRole("menu")).getByText("已启用"))
+    expect(screen.getByText("Alice")).toBeTruthy()
+    expect(screen.queryByText("Bob")).toBeNull()
+
+    fireEvent.pointerDown(screen.getByLabelText("筛选用户角色"))
+    fireEvent.click(within(await screen.findByRole("menu")).getByText("成员"))
+    expect(screen.getByText("没有匹配的用户")).toBeTruthy()
+  })
+
   test("scrolls desktop user tables vertically inside constrained system height", () => {
     renderPage(<GlobalHarness />)
     const globalTable = screen.getByRole("table", { name: "用户列表" })

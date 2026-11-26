@@ -288,6 +288,113 @@ def test_workspace_analytics_member_trends() -> None:
     assert all(item.user_id not in {"u-public", "u-api"} for item in series)
 
 
+def test_audit_retention_policy_and_cleanup() -> None:
+    from app.domain.audit.services import (
+        cleanup_expired_audit_logs,
+        get_audit_retention_policy,
+        update_audit_retention_policy,
+    )
+    from app.entities.audit import AuditRetentionSettings
+
+    fixed_now = datetime(2026, 11, 26, 8, 0, tzinfo=UTC)
+    actor = SimpleNamespace(id="admin-1", username="admin", name="Admin")
+
+    async def exercise() -> None:
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch(
+            "app.domain.audit.services.audit_repository.get_retention_settings",
+            new=AsyncMock(return_value=None),
+        ):
+            default_policy = await get_audit_retention_policy(db)
+            assert default_policy.retention_days is None
+            assert default_policy.updated_at is None
+
+        saved_row = AuditRetentionSettings(
+            retention_days=90,
+            updated_by_user_id="admin-1",
+            created_at=fixed_now,
+            updated_at=fixed_now,
+        )
+        add_mock = AsyncMock()
+        with (
+            patch(
+                "app.domain.audit.services.audit_repository.get_retention_settings",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.domain.audit.services.audit_repository.save_retention_settings",
+                new=AsyncMock(return_value=saved_row),
+            ) as save_mock,
+            patch(
+                "app.domain.audit.services.audit_repository.add",
+                new=lambda session, entity: add_mock.call_args_list.append((session, entity)),
+            ),
+        ):
+            updated = await update_audit_retention_policy(db, actor, 90)
+            assert updated.retention_days == 90
+            save_mock.assert_awaited_once_with(
+                db,
+                retention_days=90,
+                updated_by_user_id="admin-1",
+            )
+            db.commit.assert_awaited_once()
+            assert len(add_mock.call_args_list) == 1
+            logged = add_mock.call_args_list[0][1]
+            assert logged.action == "audit.retention.update"
+            assert logged.details == {
+                "previous_retention_days": None,
+                "retention_days": 90,
+            }
+
+        # Keep-all policy must not issue deletes.
+        db_keep_all = SimpleNamespace(commit=AsyncMock())
+        with (
+            patch(
+                "app.domain.audit.services.audit_repository.get_retention_settings",
+                new=AsyncMock(return_value=AuditRetentionSettings(retention_days=None)),
+            ),
+            patch(
+                "app.domain.audit.services.audit_repository.delete_audit_logs_before",
+                new=AsyncMock(return_value=999),
+            ) as delete_mock,
+        ):
+            assert await cleanup_expired_audit_logs(db_keep_all) == 0
+            delete_mock.assert_not_awaited()
+            db_keep_all.commit.assert_not_awaited()
+
+        # Finite retention deletes across batches until below batch_size.
+        db_cleanup = SimpleNamespace(commit=AsyncMock())
+        with (
+            patch(
+                "app.domain.audit.services.utc_now",
+                return_value=fixed_now,
+            ),
+            patch(
+                "app.domain.audit.services.audit_repository.get_retention_settings",
+                new=AsyncMock(return_value=AuditRetentionSettings(retention_days=30)),
+            ),
+            patch(
+                "app.domain.audit.services.audit_repository.delete_audit_logs_before",
+                new=AsyncMock(side_effect=[2, 1]),
+            ) as delete_mock,
+        ):
+            deleted = await cleanup_expired_audit_logs(
+                db_cleanup,
+                batch_size=2,
+                max_batches=5,
+            )
+            assert deleted == 3
+            assert delete_mock.await_count == 2
+            expected_cutoff = fixed_now - timedelta(days=30)
+            for call in delete_mock.await_args_list:
+                assert call.args == (db_cleanup, expected_cutoff)
+                assert call.kwargs == {"batch_size": 2}
+            assert db_cleanup.commit.await_count == 2
+
+    asyncio.run(exercise())
+
+
 def main() -> None:
     test_resource_folder_descendants_cover_nested_children()
     test_resource_folder_rejects_moving_builtin_tools()
@@ -295,6 +402,7 @@ def main() -> None:
     test_workspace_daily_quota_uses_shanghai_day_boundary()
     test_message_stream_releases_reader_at_lifetime_limit()
     test_workspace_analytics_member_trends()
+    test_audit_retention_policy_and_cleanup()
     print("PLATFORM_UNIT_OK")
 
 

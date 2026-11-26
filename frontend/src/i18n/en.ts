@@ -3000,4 +3000,49 @@ export const en = {
     "The event payload must be a valid UTF-8 JSON object",
   "事件标识已使用，且本次内容与原事件不同":
     "The event ID was already used with a different payload",
+  保留策略: "Retention",
+  保留所有: "Keep all",
+  "保留 {days} 天": "Keep {days} days",
+  "自定义天数...": "Custom days...",
+  自定义保留天数: "Custom retention days",
+  "保留天数须为 1 至 3650 之间的整数":
+    "Retention days must be an integer between 1 and 3650",
+  审计日志已设为保留所有: "Audit logs set to keep all records",
+  "审计日志保留策略已设为 {days} 天":
+    "Audit log retention set to {days} days",
+  更新审计日志保留策略: "Update audit retention policy",
+  保留天数: "Retention days",
+  原保留天数: "Previous retention days",
+  选择团队: "Select team",
+  搜索团队成员: "Search team members",
+  当前工作空间暂无您管理的团队:
+    "No teams you manage in this workspace",
+  "该团队已归档，恢复后方可调整成员":
+    "This team is archived. Restore it before managing members.",
+  未找到匹配的团队成员: "No matching team members found",
+  当前账号: "Current user",
+  空间与团队角色: "Workspace & team roles",
+  目标工作空间: "Target workspace",
+  工作空间角色: "Workspace role",
+  团队角色: "Team roles",
+  未加入: "Not a member",
+  普通成员: "Member",
+  先将该用户加入此工作空间后可分配团队角色:
+    "Add the user to this workspace before assigning team roles",
+  停用用户无法加入新工作空间或团队:
+    "Inactive users cannot be added to new workspaces or teams",
+  管理用户在该工作空间下的团队角色:
+    "Manage this user's team roles in the current workspace",
+  "{team} 角色": "{team} role",
+  未找到可加入成员: "No matching candidates found",
+  清除选择: "Clear selection",
+  "搜索已有成员（姓名、账号、邮箱）": "Search team members (name, account, email)",
+  搜索待添加成员: "Search members to add",
+  初始密码: "Initial password",
+  "初始密码 24 小时内有效，请复制保存后再关闭此窗口。":
+    "This initial password expires in 24 hours. Copy and save it before closing this dialog.",
+  首次登录后需要修改密码: "Password change required on first sign-in",
+  复制账号: "Copy account",
+  复制初始密码: "Copy initial password",
+  "我已保存，关闭": "I've saved it, close",
 } satisfies Record<TranslationKey, string>

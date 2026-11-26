@@ -9,6 +9,7 @@ import { useState, type FormEvent } from "react"
 import { act } from "@testing-library/react"
 
 import {
+  CreatedUserPasswordDialog,
   CreateUserDialog,
   EditUserDialog,
   UserPasswordDialog,
@@ -244,8 +245,7 @@ describe("CreateUserDialog", () => {
     })
     expect(workspaceTrigger.textContent).toContain("不指定工作空间")
 
-    const adminCheckbox = within(dialog).getByLabelText(/全局管理员权限/)
-    expect((adminCheckbox as HTMLInputElement).checked).toBe(false)
+    expect(within(dialog).queryByLabelText(/全局管理员权限/)).toBeNull()
 
     expect(
       within(dialog).getByText("选择工作空间后可分配该空间下的团队")
@@ -273,15 +273,6 @@ describe("CreateUserDialog", () => {
     expect(name.value).toBe("Alice")
     expect(username.value).toBe("alice")
     expect(email.value).toBe("alice@app.local")
-  })
-
-  test("toggles the global-admin checkbox", () => {
-    renderPage(<CreateHarness />)
-    const checkbox = screen.getByLabelText(/全局管理员权限/) as HTMLInputElement
-    fireEvent.click(checkbox)
-    expect(checkbox.checked).toBe(true)
-    fireEvent.click(checkbox)
-    expect(checkbox.checked).toBe(false)
   })
 
   test("selects a workspace, loads teams via fetch, and checks team checkboxes", async () => {
@@ -441,7 +432,6 @@ describe("CreateUserDialog", () => {
     fireEvent.change(within(dialog).getByLabelText("邮箱"), {
       target: { value: "alice@app.local" },
     })
-    fireEvent.click(within(dialog).getByLabelText(/全局管理员权限/))
 
     const { menu } = await openWorkspaceDropdown()
     fireEvent.click(within(menu).getByText("Alpha"))
@@ -457,7 +447,7 @@ describe("CreateUserDialog", () => {
       name: "Alice",
       workspaceId: "ws-1",
       teamIds: ["t-1"],
-      isGlobalAdmin: true,
+      isGlobalAdmin: false,
     })
   })
 
@@ -547,7 +537,7 @@ function EditHarness({
 }
 
 describe("EditUserDialog", () => {
-  test("renders prefilled fields and toggles the admin checkbox", () => {
+  test("renders prefilled fields without a global-admin checkbox", () => {
     renderPage(<EditHarness />)
     const dialog = screen.getByRole("dialog")
     expect(within(dialog).getByText("编辑用户")).toBeTruthy()
@@ -559,13 +549,7 @@ describe("EditUserDialog", () => {
     expect(name.value).toBe("Alice")
     expect(username.value).toBe("alice")
     expect(email.value).toBe("alice@app.local")
-
-    const checkbox = within(dialog).getByLabelText(/全局管理员权限/) as HTMLInputElement
-    expect(checkbox.checked).toBe(false)
-    fireEvent.click(checkbox)
-    expect(checkbox.checked).toBe(true)
-    fireEvent.click(checkbox)
-    expect(checkbox.checked).toBe(false)
+    expect(within(dialog).queryByLabelText(/全局管理员权限/)).toBeNull()
 
     fireEvent.change(name, { target: { value: "Alicia" } })
     expect(name.value).toBe("Alicia")
@@ -574,11 +558,6 @@ describe("EditUserDialog", () => {
     fireEvent.change(email, { target: { value: "alicia@app.local" } })
     expect(username.value).toBe("alicia")
     expect(email.value).toBe("alicia@app.local")
-  })
-
-  test("hides the admin checkbox without global-admin management rights", () => {
-    renderPage(<EditHarness canManageGlobalAdmin={false} />)
-    expect(screen.queryByLabelText(/全局管理员权限/)).toBeNull()
   })
 
   test("submits the updated user", () => {
@@ -595,14 +574,13 @@ describe("EditUserDialog", () => {
     fireEvent.change(within(dialog).getByLabelText("姓名"), {
       target: { value: "Alicia" },
     })
-    fireEvent.click(within(dialog).getByLabelText(/全局管理员权限/))
     fireEvent.click(within(dialog).getByRole("button", { name: "保存" }))
     expect(submitted[0]).toEqual({
       id: "u-4",
       username: "alice",
       email: "alice@app.local",
       name: "Alicia",
-      isGlobalAdmin: true,
+      isGlobalAdmin: false,
     })
   })
 
@@ -756,6 +734,61 @@ describe("UserPasswordDialog", () => {
   test("does not render while closed", () => {
     renderPage(<PasswordHarness initialForm={null} />)
     expect(screen.queryByRole("dialog")).toBeNull()
+  })
+})
+
+describe("CreatedUserPasswordDialog", () => {
+  test("displays initial credentials, ignores escape, and closes only on explicit action", async () => {
+    let closedCount = 0
+    function Harness() {
+      const [credentials, setCredentials] = useState<{
+        name: string
+        username: string
+        email: string
+        initialPassword: string
+      } | null>({
+        name: "Newbie",
+        username: "newbie",
+        email: "newbie@example.com",
+        initialPassword: "Nxf!SecretPass1A1",
+      })
+      return (
+        <CreatedUserPasswordDialog
+          credentials={credentials}
+          onClose={() => {
+            closedCount += 1
+            setCredentials(null)
+          }}
+        />
+      )
+    }
+
+    renderPage(<Harness />)
+    const dialog = screen.getByRole("dialog", { name: "用户已新建" })
+    expect(within(dialog).getByText("Newbie")).toBeTruthy()
+    expect(within(dialog).getByText("newbie")).toBeTruthy()
+    expect(within(dialog).getByText("newbie@example.com")).toBeTruthy()
+    expect(within(dialog).getByText("Nxf!SecretPass1A1")).toBeTruthy()
+    const copyAccountButton = within(dialog).getByRole("button", {
+      name: "复制账号",
+    })
+    expect(copyAccountButton).toBeTruthy()
+    expect(copyAccountButton.getAttribute("title")).toBeNull()
+    expect(
+      within(dialog).getByRole("button", { name: "复制初始密码" })
+    ).toBeTruthy()
+    const closeButton = within(dialog).getByRole("button", {
+      name: "我已保存，关闭",
+    })
+    await waitFor(() => expect(document.activeElement).toBe(closeButton))
+
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    expect(closedCount).toBe(0)
+    expect(screen.getByRole("dialog", { name: "用户已新建" })).toBeTruthy()
+
+    fireEvent.click(closeButton)
+    expect(closedCount).toBe(1)
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 })
 

@@ -10,6 +10,7 @@ import {
 import { useLanguage } from "@/contexts/language-provider"
 import type {
   AuditLog,
+  CreatedUserCredentials,
   MeResponse,
   Team,
   User,
@@ -25,6 +26,7 @@ import {
   EditWorkspaceDialog,
 } from "@/components/system/dialogs/scope-dialogs"
 import {
+  CreatedUserPasswordDialog,
   CreateUserDialog,
   EditUserDialog,
   UserPasswordDialog,
@@ -33,9 +35,11 @@ import { TeamMembersDialog } from "@/components/system/dialogs/team-members-dial
 import { WorkspaceMembersDialog } from "@/components/system/dialogs/workspace-members-dialog"
 import { AuditPanel } from "@/components/system/panels/audit-panel"
 import { GlobalUsersPanel } from "@/components/system/panels/global-users-panel"
+import { TeamMembersPanel } from "@/components/system/panels/team-members-panel"
 import { TeamsPanel } from "@/components/system/panels/teams-panel"
 import { WorkspacesPanel } from "@/components/system/panels/workspaces-panel"
 import { WorkspaceUsersPanel } from "@/components/system/panels/workspace-users-panel"
+import type { AppNotification } from "@/lib/notifications"
 import {
   UserMemoryPage,
   type UserMemoryPageState,
@@ -47,6 +51,7 @@ import {
   type ResourcePermissionPageType,
 } from "@/components/system/resource-permissions-page"
 import type {
+  RoleAssignmentValue,
   ScopeEditForm,
   TeamForm,
   UserCreateForm,
@@ -84,7 +89,10 @@ type SystemPageViewProps = {
   handleDeleteWorkspace: (workspace: Workspace) => void | Promise<void>
   selectedWorkspace: Workspace | null
   teams: Team[]
+  managedTeams: Team[]
   isTeamsLoading: boolean
+  token: string
+  onNotify: (kind: AppNotification["kind"], message: string) => void
   canCreateTeam: boolean
   canManageWorkspace: boolean
   canManageTeamMembers: (team: Team) => boolean
@@ -108,6 +116,7 @@ type SystemPageViewProps = {
   handleOpenCreateUser: () => void
   handleToggleUser: (user: User) => void | Promise<void>
   handleOpenEditUser: (user: User) => void
+  handleOpenEditWorkspaceMember?: (member: WorkspaceMember) => void
   handleOpenUserPasswordDialog: (user: User) => void
   handleDeleteUser: (user: User) => void | Promise<void>
   workspaceMembers: WorkspaceMember[]
@@ -129,6 +138,10 @@ type SystemPageViewProps = {
   workspaceScope?: string | null
   /** Loads every matching audit log for the CSV export. */
   loadAll?: () => Promise<AuditLog[]>
+  auditRetentionDays?: number | null
+  isAuditRetentionLoading?: boolean
+  isSavingAuditRetention?: boolean
+  onSaveAuditRetention?: (retentionDays: number | null) => Promise<void> | void
   workspaceEditForm: ScopeEditForm | null
   setWorkspaceEditForm: React.Dispatch<
     React.SetStateAction<ScopeEditForm | null>
@@ -150,11 +163,17 @@ type SystemPageViewProps = {
   isCreatingUser: boolean
   handleCreateUser: React.FormEventHandler<HTMLFormElement>
   handleUserCreateWorkspaceChange: (workspaceId: string) => void
+  createdUserCredentials?: CreatedUserCredentials | null
+  onCloseCreatedUserCredentials?: () => void
   userForm: UserForm | null
   setUserForm: React.Dispatch<React.SetStateAction<UserForm | null>>
   canManageGlobalAdmin: boolean
   isSavingUser: boolean
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
+  editUserRoleTeams?: Team[]
+  isEditUserRoleTeamsLoading?: boolean
+  initialEditUserWorkspaceRoles?: Record<string, RoleAssignmentValue>
+  onEditUserRoleWorkspaceChange?: (workspaceId: string) => void
   userPasswordForm: UserPasswordForm | null
   setUserPasswordForm: React.Dispatch<
     React.SetStateAction<UserPasswordForm | null>
@@ -207,7 +226,10 @@ export function SystemPageView({
   handleDeleteWorkspace,
   selectedWorkspace,
   teams,
+  managedTeams,
   isTeamsLoading,
+  token,
+  onNotify,
   canCreateTeam,
   canManageWorkspace,
   canManageTeamMembers,
@@ -231,6 +253,7 @@ export function SystemPageView({
   handleOpenCreateUser,
   handleToggleUser,
   handleOpenEditUser,
+  handleOpenEditWorkspaceMember,
   handleOpenUserPasswordDialog,
   handleDeleteUser,
   workspaceMembers,
@@ -251,6 +274,10 @@ export function SystemPageView({
   onPageSizeChange = () => undefined,
   workspaceScope = null,
   loadAll,
+  auditRetentionDays = null,
+  isAuditRetentionLoading = false,
+  isSavingAuditRetention = false,
+  onSaveAuditRetention,
   workspaceEditForm,
   setWorkspaceEditForm,
   isSavingWorkspace,
@@ -270,11 +297,17 @@ export function SystemPageView({
   isCreatingUser,
   handleCreateUser,
   handleUserCreateWorkspaceChange,
+  createdUserCredentials = null,
+  onCloseCreatedUserCredentials,
   userForm,
   setUserForm,
   canManageGlobalAdmin,
   isSavingUser,
   handleUpdateUser,
+  editUserRoleTeams = [],
+  isEditUserRoleTeamsLoading = false,
+  initialEditUserWorkspaceRoles,
+  onEditUserRoleWorkspaceChange,
   userPasswordForm,
   setUserPasswordForm,
   isChangingUserPassword,
@@ -480,6 +513,17 @@ export function SystemPageView({
           />
         ) : null}
 
+        {activeSystemTab === "team-members" ? (
+          <TeamMembersPanel
+            me={me}
+            token={token}
+            selectedWorkspace={selectedWorkspace}
+            managedTeams={managedTeams}
+            isTeamsLoading={isTeamsLoading}
+            onNotify={onNotify}
+          />
+        ) : null}
+
         {activeSystemTab === "users" && me.user.is_global_admin ? (
           <GlobalUsersPanel
             me={me}
@@ -514,6 +558,7 @@ export function SystemPageView({
             isWorkspaceMembersLoading={isWorkspaceMembersLoading}
             locale={locale}
             handleOpenCreateUser={handleOpenCreateUser}
+            handleOpenEditUser={handleOpenEditWorkspaceMember}
             handleOpenWorkspaceMembers={() => {
               if (selectedWorkspace) {
                 handleOpenWorkspaceMembers(selectedWorkspace)
@@ -541,6 +586,12 @@ export function SystemPageView({
             onPageSizeChange={onPageSizeChange}
             workspaceScope={workspaceScope}
             loadAll={loadAll}
+            canManageRetention={me.user.is_global_admin}
+            retentionDays={auditRetentionDays}
+            isRetentionLoading={isAuditRetentionLoading}
+            isSavingRetention={isSavingAuditRetention}
+            onSaveRetention={onSaveAuditRetention}
+            onRetentionValidationError={(message) => onNotify("error", message)}
           />
         ) : null}
       </div>
@@ -574,12 +625,21 @@ export function SystemPageView({
         handleCreateUser={handleCreateUser}
         handleUserCreateWorkspaceChange={handleUserCreateWorkspaceChange}
       />
+      <CreatedUserPasswordDialog
+        credentials={createdUserCredentials}
+        onClose={() => onCloseCreatedUserCredentials?.()}
+      />
       <EditUserDialog
         userForm={userForm}
         setUserForm={setUserForm}
         canManageGlobalAdmin={canManageGlobalAdmin}
         isSavingUser={isSavingUser}
         handleUpdateUser={handleUpdateUser}
+        activeWorkspaces={activeWorkspaces}
+        roleTeams={editUserRoleTeams}
+        isRoleTeamsLoading={isEditUserRoleTeamsLoading}
+        initialWorkspaceRoles={initialEditUserWorkspaceRoles}
+        onRoleWorkspaceChange={onEditUserRoleWorkspaceChange}
       />
       <UserPasswordDialog
         userPasswordForm={userPasswordForm}

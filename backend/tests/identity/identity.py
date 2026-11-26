@@ -495,7 +495,8 @@ def main() -> None:
         )
         assert second.status_code == 201, second.text
         second_password = second.json()["initial_password"]
-        assert second_password != payload["initial_password"]
+        assert payload["initial_password"] == "NexaFlow@123.."
+        assert second_password == "NexaFlow@123.."
         second_credentials = {"username": "second", "password": second_password}
         second_login = client.post("/api/v1/auth/login", json=second_credentials)
         assert second_login.status_code == 200, second_login.text

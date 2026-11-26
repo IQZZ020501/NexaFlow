@@ -431,6 +431,73 @@ def main() -> None:
             == 403
         )
 
+        # ---- audit log retention policy (global admin only) ----
+        initial_retention = client.get(
+            "/api/v1/admin/audit-logs/retention",
+            headers=admin_headers,
+        )
+        assert initial_retention.status_code == 200, initial_retention.text
+        assert initial_retention.json()["retention_days"] is None
+
+        assert (
+            client.get(
+                "/api/v1/admin/audit-logs/retention",
+                headers=workspace_admin_headers,
+            ).status_code
+            == 403
+        )
+        assert (
+            client.put(
+                "/api/v1/admin/audit-logs/retention",
+                headers=workspace_admin_headers,
+                json={"retention_days": 30},
+            ).status_code
+            == 403
+        )
+
+        for invalid_days in (0, -7, 3651):
+            invalid_res = client.put(
+                "/api/v1/admin/audit-logs/retention",
+                headers=admin_headers,
+                json={"retention_days": invalid_days},
+            )
+            assert invalid_res.status_code == 422, invalid_res.text
+
+        updated_retention = client.put(
+            "/api/v1/admin/audit-logs/retention",
+            headers=admin_headers,
+            json={"retention_days": 90},
+        )
+        assert updated_retention.status_code == 200, updated_retention.text
+        assert updated_retention.json()["retention_days"] == 90
+        assert updated_retention.json()["updated_at"] is not None
+
+        fetched_retention = client.get(
+            "/api/v1/admin/audit-logs/retention",
+            headers=admin_headers,
+        )
+        assert fetched_retention.status_code == 200, fetched_retention.text
+        assert fetched_retention.json()["retention_days"] == 90
+
+        retention_audit = client.get(
+            "/api/v1/admin/audit-logs?action=audit.retention.update",
+            headers=admin_headers,
+        )
+        assert retention_audit.status_code == 200, retention_audit.text
+        assert retention_audit.json()
+        assert retention_audit.json()[0]["details"] == {
+            "previous_retention_days": None,
+            "retention_days": 90,
+        }
+
+        keep_all_retention = client.put(
+            "/api/v1/admin/audit-logs/retention",
+            headers=admin_headers,
+            json={"retention_days": None},
+        )
+        assert keep_all_retention.status_code == 200, keep_all_retention.text
+        assert keep_all_retention.json()["retention_days"] is None
+
         # ---- admin-managed user sessions and deletion ----
         managed_me = client.get("/api/v1/auth/me", headers=workspace_admin_headers)
         assert managed_me.status_code == 200, managed_me.text

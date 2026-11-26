@@ -173,7 +173,8 @@ not trigger unrelated cleanup.
   host backend commands use private root `.env`, which is not injected into
   deployment containers. The first bootstrap admin uses deployment credentials
   and is fenced once by `bootstrap_state`; newly provisioned managed accounts
-  receive independently generated 24-hour temporary passwords. Local operator
+  receive the fixed 24-hour temporary initial password (NexaFlow@123..) and
+  must change it on first login. Local operator
   account recovery uses the read-only-by-default
   `backend/scripts/recover_user_password.py` CLI by immutable user ID (never
   env-driven auto-recovery or role elevation).
