@@ -1,5 +1,6 @@
 """Storage access shared by local files and private S3-compatible buckets."""
 
+import asyncio
 import shutil
 import tempfile
 from collections.abc import AsyncIterable, Iterator
@@ -124,20 +125,22 @@ class LocalObjectStorage(ReadableStorage):
 
     async def put_chunks(self, key, chunks, max_bytes, *, allow_empty=False) -> int:
         target = self.path(key)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
         size = 0
+        output = await asyncio.to_thread(target.open, "wb")
         try:
-            with target.open("wb") as output:
-                async for chunk in chunks:
-                    size += len(chunk)
-                    if max_bytes is not None and size > max_bytes:
-                        raise ObjectTooLargeError("Object is too large.")
-                    output.write(chunk)
+            async for chunk in chunks:
+                size += len(chunk)
+                if max_bytes is not None and size > max_bytes:
+                    raise ObjectTooLargeError("Object is too large.")
+                await asyncio.to_thread(output.write, chunk)
         except BaseException:
-            target.unlink(missing_ok=True)
+            await asyncio.to_thread(output.close)
+            await asyncio.to_thread(target.unlink, missing_ok=True)
             raise
+        await asyncio.to_thread(output.close)
         if size == 0 and not allow_empty:
-            target.unlink(missing_ok=True)
+            await asyncio.to_thread(target.unlink, missing_ok=True)
             raise EmptyObjectError("Object is empty.")
         return size
 

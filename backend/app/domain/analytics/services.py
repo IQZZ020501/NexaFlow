@@ -19,6 +19,7 @@ from app.entities.analytics import (
     WorkspaceAnalyticsRun,
     WorkspaceAnalyticsTeamMember,
     WorkspaceAnalyticsToolCall,
+    WorkspaceAnalyticsToolCallSummary,
 )
 from app.entities.defaults import APP_TIMEZONE, APP_TIMEZONE_NAME, utc_now
 from app.entities.identity.user import User
@@ -38,6 +39,8 @@ from app.schemas.analytics import (
     WorkspaceAnalyticsInventoryResponse,
     WorkspaceAnalyticsInventoryTools,
     WorkspaceAnalyticsMemberSummary,
+    WorkspaceAnalyticsMemberTrendPoint,
+    WorkspaceAnalyticsMemberTrendSeries,
     WorkspaceAnalyticsMetadata,
     WorkspaceAnalyticsRankings,
     WorkspaceAnalyticsResponse,
@@ -313,6 +316,80 @@ def _build_hourly_runs(
     ]
 
 
+MEMBER_TREND_LIMIT = 20
+
+
+def _build_member_trends(
+    runs: list[WorkspaceAnalyticsRun],
+    period: AnalyticsPeriod,
+) -> list[WorkspaceAnalyticsMemberTrendSeries]:
+    """Build daily run and token trends for the most active workspace members."""
+    days = [
+        period.from_date + timedelta(days=index)
+        for index in range((period.to_date - period.from_date).days)
+    ]
+    day_set = set(days)
+    members: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        if (
+            run.access_source not in {"console", "automation"}
+            or not run.requested_by_user_id
+            or run.created_at is None
+        ):
+            continue
+        day = _analytics_time(run.created_at).date()
+        if day not in day_set:
+            continue
+        _, _, run_total, _ = _run_usage(run)
+        user = members.setdefault(
+            run.requested_by_user_id,
+            {
+                "name": (
+                    run.requester_name
+                    or run.requester_username
+                    or run.requested_by_user_id
+                ),
+                "total_runs": 0,
+                "total_tokens": 0,
+                "daily": {
+                    item_day: {"runs": 0, "total_tokens": 0}
+                    for item_day in days
+                },
+            },
+        )
+        user["total_runs"] += 1
+        user["total_tokens"] += run_total
+        user["daily"][day]["runs"] += 1
+        user["daily"][day]["total_tokens"] += run_total
+
+    ranked = sorted(
+        members.items(),
+        key=lambda item: (
+            -item[1]["total_runs"],
+            -item[1]["total_tokens"],
+            item[1]["name"].casefold(),
+            item[0],
+        ),
+    )[:MEMBER_TREND_LIMIT]
+    return [
+        WorkspaceAnalyticsMemberTrendSeries(
+            user_id=user_id,
+            name=values["name"],
+            total_runs=values["total_runs"],
+            total_tokens=values["total_tokens"],
+            daily=[
+                WorkspaceAnalyticsMemberTrendPoint(
+                    date=day,
+                    runs=values["daily"][day]["runs"],
+                    total_tokens=values["daily"][day]["total_tokens"],
+                )
+                for day in days
+            ],
+        )
+        for user_id, values in ranked
+    ]
+
+
 def _build_rankings(
     runs: list[WorkspaceAnalyticsRun],
     team_members: list[WorkspaceAnalyticsTeamMember],
@@ -476,7 +553,7 @@ def _inventory_response(
 
 def _build_tool_usage(
     current_calls: list[WorkspaceAnalyticsToolCall],
-    previous_calls: list[WorkspaceAnalyticsToolCall],
+    previous_summary: WorkspaceAnalyticsToolCallSummary,
 ) -> WorkspaceAnalyticsToolUsage:
     """Summarize tool invocations for the period and its comparison window.
 
@@ -485,7 +562,7 @@ def _build_tool_usage(
 
     Parameters:
         current_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the current period.
-        previous_calls (list[WorkspaceAnalyticsToolCall]): Invocations of the previous period.
+        previous_summary (WorkspaceAnalyticsToolCallSummary): SQL-aggregated invocation counts of the previous period.
 
     Returns:
         WorkspaceAnalyticsToolUsage: Call volume comparison, success rate, approval count, and top tools.
@@ -498,14 +575,8 @@ def _build_tool_usage(
         for call in current_calls
         if call.status in {TOOL_INVOCATION_FAILED, TOOL_INVOCATION_UNCERTAIN}
     )
-    previous_succeeded = sum(
-        1 for call in previous_calls if call.status == TOOL_INVOCATION_SUCCEEDED
-    )
-    previous_failed = sum(
-        1
-        for call in previous_calls
-        if call.status in {TOOL_INVOCATION_FAILED, TOOL_INVOCATION_UNCERTAIN}
-    )
+    previous_succeeded = previous_summary.succeeded
+    previous_failed = previous_summary.failed
     current_terminal = current_succeeded + current_failed
     previous_terminal = previous_succeeded + previous_failed
 
@@ -549,7 +620,7 @@ def _build_tool_usage(
     )[:TOOL_RANKING_LIMIT]
 
     return WorkspaceAnalyticsToolUsage(
-        calls=_count_comparison(len(current_calls), len(previous_calls)),
+        calls=_count_comparison(len(current_calls), previous_summary.total),
         failed=current_failed,
         success_rate=_ratio_comparison(
             current_succeeded / current_terminal if current_terminal else None,
@@ -625,38 +696,32 @@ async def get_workspace_analytics(
         db,
         workspace.id,
     )
-    all_runs = await analytics_repository.list_workspace_analytics_runs(
+    current_runs = await analytics_repository.list_workspace_analytics_runs(
+        db,
+        workspace.id,
+        period.start_at,
+        period.end_at,
+    )
+    previous_runs = await analytics_repository.list_workspace_analytics_previous_runs(
         db,
         workspace.id,
         period.previous_start_at,
-        period.end_at,
+        period.start_at,
     )
-    all_tool_calls = await analytics_repository.list_workspace_analytics_tool_calls(
+    current_tool_calls = await analytics_repository.list_workspace_analytics_tool_calls(
         db,
         workspace.id,
-        period.previous_start_at,
+        period.start_at,
         period.end_at,
     )
-    current_runs = [
-        run
-        for run in all_runs
-        if run.created_at is not None and _utc(run.created_at) >= period.start_at
-    ]
-    previous_runs = [
-        run
-        for run in all_runs
-        if run.created_at is not None and _utc(run.created_at) < period.start_at
-    ]
-    current_tool_calls = [
-        call
-        for call in all_tool_calls
-        if call.created_at is not None and _utc(call.created_at) >= period.start_at
-    ]
-    previous_tool_calls = [
-        call
-        for call in all_tool_calls
-        if call.created_at is not None and _utc(call.created_at) < period.start_at
-    ]
+    previous_tool_summary = (
+        await analytics_repository.get_workspace_analytics_tool_call_summary(
+            db,
+            workspace.id,
+            period.previous_start_at,
+            period.start_at,
+        )
+    )
     current = _summarize_period(current_runs)
     previous = _summarize_period(previous_runs)
     current_total = current.total_tokens
@@ -696,9 +761,10 @@ async def get_workspace_analytics(
             ),
         ),
         inventory=_inventory_response(inventory),
-        tool_usage=_build_tool_usage(current_tool_calls, previous_tool_calls),
+        tool_usage=_build_tool_usage(current_tool_calls, previous_tool_summary),
         trends=_build_trends(current_runs, period),
         hourly_runs=_build_hourly_runs(current_runs),
+        member_trends=_build_member_trends(current_runs, period),
         distributions=WorkspaceAnalyticsDistributions(
             run_types=_distribution(Counter(run.app_type for run in current_runs)),
             access_sources=_distribution(

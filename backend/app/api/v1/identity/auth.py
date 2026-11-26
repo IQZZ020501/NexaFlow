@@ -24,6 +24,11 @@ from app.application.identity.sessions import (
 from app.entities.identity.user import User
 from app.infra.config.settings import Settings
 from app.infra.db.session import get_db
+from app.infra.security.agent_rate_limit import (
+    AuthRateLimitExceeded,
+    AuthRateLimitUnavailable,
+    enforce_auth_ip_rate_limit,
+)
 from app.schemas.identity.contracts import (
     ChangePasswordRequest,
     LoginRequest,
@@ -60,15 +65,43 @@ async def request_reset(
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
+async def _enforce_auth_ip_limit(
+    request: Request,
+    settings: Settings,
+    bucket: str,
+    limit_per_minute: int,
+) -> None:
+    try:
+        await enforce_auth_ip_rate_limit(
+            settings,
+            bucket,
+            get_request_ip(request),
+            limit_per_minute,
+        )
+    except AuthRateLimitExceeded as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many requests.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    except AuthRateLimitUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Rate limiter is unavailable.",
+        ) from exc
+
+
 @router.post(
     "/password-reset/confirm",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def confirm_reset(
     payload: PasswordResetConfirmRequest,
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    await _enforce_auth_ip_limit(request, settings, "password-reset-confirm", 20)
     await confirm_password_reset(db, payload.token, payload.new_password, settings)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -76,6 +109,7 @@ async def confirm_reset(
 @router.post("/invitations/accept", response_model=UserResponse)
 async def accept_invitation(
     payload: WorkspaceInvitationAcceptRequest,
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
@@ -89,6 +123,7 @@ async def accept_invitation(
     Returns:
     	UserResponse: The user associated with the accepted invitation.
     """
+    await _enforce_auth_ip_limit(request, settings, "invitation-accept", 20)
     return await accept_workspace_invitation(db, payload, settings)
 
 
@@ -152,10 +187,12 @@ async def login(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     db: Annotated[AsyncSession, Depends(get_db)],
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)] = None,
 ) -> TokenResponse:
+    await _enforce_auth_ip_limit(request, settings, "refresh", 120)
     if refresh_token is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token required.")
     return await refresh_access_token(db, refresh_token, settings)

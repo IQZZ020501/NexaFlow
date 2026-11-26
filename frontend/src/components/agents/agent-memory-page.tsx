@@ -87,25 +87,43 @@ function Choice({
   )
 }
 
-export function UserMemoryPage() {
+export type UserMemoryPageState = {
+  token: string | null
+  workspaceId: string
+  profile: MemoryProfile
+  projects: MemoryProject[]
+}
+
+type UserMemoryPageProps = {
+  cachedState?: UserMemoryPageState | null
+  onStateChange?: (state: UserMemoryPageState) => void
+}
+
+export function UserMemoryPage({
+  cachedState = null,
+  onStateChange,
+}: UserMemoryPageProps = {}) {
   const { token, selectedWorkspaceId } = useSession()
   return (
     <MemoryPageContent
       key={`${selectedWorkspaceId ?? ""}:${token ?? ""}`}
       workspaceId={selectedWorkspaceId}
+      cachedState={cachedState}
+      onStateChange={onStateChange}
     />
   )
 }
 
-function MemoryPageContent({ workspaceId }: { workspaceId: string | null }) {
+function MemoryPageContent({
+  workspaceId,
+  cachedState,
+  onStateChange,
+}: UserMemoryPageProps & { workspaceId: string | null }) {
   const { t, language } = useLanguage()
   const { token, isSessionRestored } = useSession()
-  const [state, setState] = React.useState<{
-    token: string | null
-    workspaceId: string
-    profile: MemoryProfile
-    projects: MemoryProject[]
-  } | null>(null)
+  const [state, setState] = React.useState<UserMemoryPageState | null>(
+    cachedState ?? null
+  )
   const profile =
     state?.token === token && state.workspaceId === workspaceId
       ? state.profile
@@ -124,6 +142,12 @@ function MemoryPageContent({ workspaceId }: { workspaceId: string | null }) {
     draft: MemoryDraft
   } | null>(null)
   const [confirm, confirmDialog] = useConfirmDialog()
+
+  React.useEffect(() => {
+    if (state?.token === token && state.workspaceId === workspaceId) {
+      onStateChange?.(state)
+    }
+  }, [onStateChange, state, token, workspaceId])
 
   React.useEffect(() => {
     if (!token || !workspaceId) return

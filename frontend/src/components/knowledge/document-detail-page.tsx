@@ -103,12 +103,14 @@ function DocumentDetailPageContent({
   )
   const [isLoading, setIsLoading] = React.useState(true)
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (silent = false) => {
     if (!selectedWorkspaceId) {
       return
     }
 
-    setIsLoading(true)
+    if (!silent) {
+      setIsLoading(true)
+    }
     try {
       const [
         bases,
@@ -155,7 +157,9 @@ function DocumentDetailPageContent({
     } catch (error) {
       notify("error", getErrorMessage(error, t))
     } finally {
-      setIsLoading(false)
+      if (!silent) {
+        setIsLoading(false)
+      }
     }
   }, [
     documentId,
@@ -183,10 +187,17 @@ function DocumentDetailPageContent({
       return
     }
 
-    const timer = window.setInterval(() => {
-      void load()
-    }, 3000)
-    return () => window.clearInterval(timer)
+    const poll = () => {
+      if (window.document.visibilityState === "visible") {
+        void load(true)
+      }
+    }
+    const timer = window.setInterval(poll, 3000)
+    window.document.addEventListener("visibilitychange", poll)
+    return () => {
+      window.clearInterval(timer)
+      window.document.removeEventListener("visibilitychange", poll)
+    }
   }, [isDocumentProcessing, load])
 
   if (isLoading) {

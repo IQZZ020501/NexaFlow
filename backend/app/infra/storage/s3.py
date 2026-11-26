@@ -3,6 +3,7 @@
 import asyncio
 import tempfile
 from contextlib import contextmanager
+from functools import lru_cache
 
 import boto3
 from botocore.config import Config
@@ -18,21 +19,36 @@ from app.infra.storage.object_storage import (
 )
 
 
+@lru_cache(maxsize=8)
+def _cached_s3_client(
+    endpoint_url: str | None,
+    region_name: str,
+    access_key: str,
+    secret_key: str,
+):
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint_url,
+        region_name=region_name,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        config=Config(
+            connect_timeout=10,
+            read_timeout=60,
+            retries={"max_attempts": 2},
+            s3={"addressing_style": "path"},
+        ),
+    )
+
+
 class S3ObjectStorage(ReadableStorage):
     def __init__(self, settings):
         self.bucket = settings.object_storage_bucket
-        self.client = boto3.client(
-            "s3",
-            endpoint_url=settings.object_storage_endpoint or None,
-            region_name=settings.object_storage_region,
-            aws_access_key_id=settings.object_storage_access_key,
-            aws_secret_access_key=settings.object_storage_secret_key,
-            config=Config(
-                connect_timeout=10,
-                read_timeout=60,
-                retries={"max_attempts": 2},
-                s3={"addressing_style": "path"},
-            ),
+        self.client = _cached_s3_client(
+            settings.object_storage_endpoint or None,
+            settings.object_storage_region,
+            settings.object_storage_access_key,
+            settings.object_storage_secret_key,
         )
 
     @contextmanager

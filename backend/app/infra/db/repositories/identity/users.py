@@ -111,6 +111,28 @@ async def get_active_refresh_session(
     return mapping.to_entity(RefreshSession, row) if row is not None else None
 
 
+async def get_active_refresh_session_with_user(
+    db: AsyncSession,
+    token_hash: str,
+    now: datetime,
+) -> tuple[RefreshSession, User] | None:
+    row = (
+        await db.execute(
+            select(RefreshSessionOrm, UserOrm)
+            .join(UserOrm, RefreshSessionOrm.user_id == UserOrm.id)
+            .where(
+                RefreshSessionOrm.token_hash == token_hash,
+                RefreshSessionOrm.expires_at > now,
+                RefreshSessionOrm.revoked_at.is_(None),
+                UserOrm.is_active.is_(True),
+            )
+        )
+    ).first()
+    if row is None:
+        return None
+    return mapping.to_entity(RefreshSession, row[0]), mapping.to_entity(User, row[1])
+
+
 async def delete_expired_refresh_sessions(db: AsyncSession, now: datetime) -> None:
     await db.execute(
         delete(RefreshSessionOrm).where(RefreshSessionOrm.expires_at <= now)

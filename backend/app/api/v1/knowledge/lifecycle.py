@@ -63,6 +63,7 @@ async def download_workspace_knowledge_base_document(
         include_staged=permission == "edit",
     )
     content = await get_knowledge_document_file(settings, document.storage_path)
+    await db.rollback()
     return StreamingResponse(
         content,
         media_type="application/octet-stream",
@@ -103,6 +104,7 @@ async def read_workspace_knowledge_document_markdown(
         include_staged=permission == "edit",
     )
     content = await get_knowledge_document_markdown_file(document, settings)
+    await db.rollback()
     return StreamingResponse(
         content,
         media_type="text/markdown; charset=utf-8",
@@ -150,6 +152,7 @@ async def read_workspace_knowledge_document_asset(
         asset_id,
         settings,
     )
+    await db.rollback()
     return StreamingResponse(
         content,
         media_type=asset.content_type,

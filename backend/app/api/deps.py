@@ -40,15 +40,17 @@ async def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
     user_id, session_token_hash = access_session
 
-    session = await user_repository.get_active_refresh_session(
+    session_pair = await user_repository.get_active_refresh_session_with_user(
         db, session_token_hash, utc_now()
     )
-    if session is None or session.user_id != user_id:
+    if session_pair is None:
         log_event(logger, logging.WARNING, "Authentication failed.", reason="revoked_session")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
-
-    user = await user_repository.get_user_by_id(db, user_id)
-    if user is None or not user.is_active:
+    session, user = session_pair
+    if session.user_id != user_id:
+        log_event(logger, logging.WARNING, "Authentication failed.", reason="revoked_session")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token.")
+    if not user.is_active:
         log_event(
             logger,
             logging.WARNING,

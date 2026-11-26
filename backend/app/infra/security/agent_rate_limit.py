@@ -68,6 +68,30 @@ class PasswordResetRateLimitUnavailable(Exception):
     pass
 
 
+class WebhookRateLimitExceeded(Exception):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            f"Webhook rate limit exceeded; retry after {retry_after}s."
+        )
+        self.retry_after = retry_after
+
+
+class WebhookRateLimitUnavailable(Exception):
+    pass
+
+
+class AuthRateLimitExceeded(Exception):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(
+            f"Authentication rate limit exceeded; retry after {retry_after}s."
+        )
+        self.retry_after = retry_after
+
+
+class AuthRateLimitUnavailable(Exception):
+    pass
+
+
 async def enforce_login_rate_limit(
     settings: Settings,
     username: str,
@@ -143,3 +167,53 @@ async def enforce_external_agent_rate_limit(
         or consumer_count > settings.agent_external_consumer_runs_per_minute
     ):
         raise AgentRateLimitExceeded(max(1, agent_ttl, consumer_ttl))
+
+
+async def enforce_webhook_rate_limit(
+    settings: Settings,
+    hook_id: str,
+    source_ip: str | None,
+) -> None:
+    window_seconds = 60
+    window = int(time.time()) // window_seconds
+    hook_key = hashlib.sha256(hook_id.encode("utf-8")).hexdigest()
+    source_key = hashlib.sha256((source_ip or "unknown").encode("utf-8")).hexdigest()
+    try:
+        values = await _rate_limit_redis(settings.celery_broker_url).eval(
+            _FIXED_WINDOW_SCRIPT,
+            2,
+            f"nexaflow:webhook-rate:hook:{hook_key}:{window}",
+            f"nexaflow:webhook-rate:source:{source_key}:{window}",
+            window_seconds,
+        )
+    except (RedisError, OSError, TimeoutError, ValueError) as exc:
+        raise WebhookRateLimitUnavailable from exc
+
+    hook_count, source_count, hook_ttl, source_ttl = map(int, values)
+    if hook_count > 120 or source_count > 300:
+        raise WebhookRateLimitExceeded(max(1, hook_ttl, source_ttl))
+
+
+async def enforce_auth_ip_rate_limit(
+    settings: Settings,
+    bucket: str,
+    source_ip: str | None,
+    limit_per_minute: int,
+) -> None:
+    window_seconds = 60
+    window = int(time.time()) // window_seconds
+    source_key = hashlib.sha256((source_ip or "unknown").encode("utf-8")).hexdigest()
+    try:
+        values = await _rate_limit_redis(settings.celery_broker_url).eval(
+            _FIXED_WINDOW_SCRIPT,
+            2,
+            f"nexaflow:auth-rate:{bucket}:source:{source_key}:{window}",
+            f"nexaflow:auth-rate:{bucket}:source-mirror:{source_key}:{window}",
+            window_seconds,
+        )
+    except (RedisError, OSError, TimeoutError, ValueError) as exc:
+        raise AuthRateLimitUnavailable from exc
+
+    source_count, _mirror_count, source_ttl, _mirror_ttl = map(int, values)
+    if source_count > limit_per_minute:
+        raise AuthRateLimitExceeded(max(1, source_ttl))

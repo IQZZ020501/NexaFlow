@@ -8,9 +8,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Protocol
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 
 import anthropic
 import httpx
@@ -444,34 +442,32 @@ class OpenAICompatibleReranker:
     def rerank(self, query: str, documents: list[str]) -> list[dict[str, Any]]:
         payload = {"model": self.model_name, "query": query, "documents": documents}
         budget = active_probe.get() or ResponseBudget(MAX_RERANK_BYTES, self.timeout)
-        request = Request(
-            f"{self.api_base}/rerank",
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept-Encoding": "identity",
-            },
-            method="POST",
-        )
+        url = f"{self.api_base}/rerank"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept-Encoding": "identity",
+        }
         try:
-            if self.public_endpoint_only:
-                with public_client(self.timeout, budget=budget) as client, client.stream(
-                    "POST", request.full_url, json=payload, headers=dict(request.header_items())
-                ) as response:
-                    if not 200 <= response.status_code < 300:
-                        raise ModelProviderStatusError(response.status_code)
-                    body = response.read()
-            else:
-                with urlopen(request, timeout=budget.remaining_time()) as response:
-                    if response.status < 200 or response.status >= 300:
-                        raise ModelProviderStatusError(response.status)
-                    chunks = iter(lambda: response.read1(64 * 1024), b"")
-                    body = b"".join(budget.checked_chunks(chunks))
-        except HTTPError as exc:
-            exc.close()
-            raise ModelProviderStatusError(exc.code) from exc
-        except (OSError, TimeoutError, URLError, httpx.HTTPError) as exc:
+            client_factory = (
+                (lambda: public_client(self.timeout, budget=budget))
+                if self.public_endpoint_only
+                else (
+                    lambda: httpx.Client(
+                        event_hooks=budget.hooks(),
+                        trust_env=False,
+                        follow_redirects=False,
+                        timeout=self.timeout,
+                    )
+                )
+            )
+            with client_factory() as client, client.stream(
+                "POST", url, json=payload, headers=headers
+            ) as response:
+                if not 200 <= response.status_code < 300:
+                    raise ModelProviderStatusError(response.status_code)
+                body = response.read()
+        except (OSError, TimeoutError, httpx.HTTPError) as exc:
             raise _model_provider_error(exc) from exc
         try:
             data = json.loads(body)
@@ -661,11 +657,7 @@ def build_chat_model(
         )
     if provider_type == "google_genai":
         chat_model = GoogleChatModel(
-            **(
-                {"vertexai": False}
-                if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
-                else {}
-            ),
+            vertexai=False,
             model=model_name,
             api_key=_required(credentials, "api_key"),
             base_url=_optional(credentials, "api_base"),
@@ -729,11 +721,7 @@ def build_embeddings(
     if provider_type == "google_genai":
         embedding = CheckedEmbeddings(
             GoogleGenerativeAIEmbeddings(
-                **(
-                    {"vertexai": False}
-                    if credentials.get(PUBLIC_ENDPOINT_CREDENTIAL) == "true"
-                    else {}
-                ),
+                vertexai=False,
                 model=model_name,
                 api_key=_required(credentials, "api_key"),
                 base_url=_optional(credentials, "api_base"),

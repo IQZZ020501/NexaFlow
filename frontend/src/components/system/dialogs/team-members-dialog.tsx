@@ -23,11 +23,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldLabel } from "@/components/ui/field"
+import { TeamCandidateSearch } from "@/components/system/team-candidate-search"
 import { useLanguage } from "@/contexts/language-provider"
 import type { Team, TeamMember, WorkspaceMember } from "@/lib/api/system"
 import { displayTeamName } from "@/lib/display"
 import { isEventFromDropdownMenu } from "@/lib/dom"
-import { cn } from "@/lib/utils"
 
 type TeamMembersDialogProps = {
   team: Team | null
@@ -78,9 +78,12 @@ export function TeamMembersDialog({
   const candidates = React.useMemo(
     () =>
       workspaceMembers.filter(
-        (member) => member.user.is_active && !memberIds.has(member.user.id)
+        (member) =>
+          member.user.is_active &&
+          !memberIds.has(member.user.id) &&
+          (canManageTeamAdmins || !member.user.is_global_admin)
       ),
-    [memberIds, workspaceMembers]
+    [canManageTeamAdmins, memberIds, workspaceMembers]
   )
   const adminCount = members.filter((member) => member.role === "admin").length
 
@@ -141,49 +144,14 @@ export function TeamMembersDialog({
               </div>
               <Field>
                 <FieldLabel htmlFor="teamMemberUser">{t("成员")}</FieldLabel>
-                <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      id="teamMemberUser"
-                      type="button"
-                      variant="outline"
-                      className="h-9 w-full justify-between px-3 font-normal"
-                      disabled={isLoading || isMutating || !candidates.length}
-                    >
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-left",
-                          !newUserId && "text-muted-foreground"
-                        )}
-                      >
-                        {workspaceMembers.find(
-                          (member) => member.user.id === newUserId
-                        )?.user.name ??
-                          (isLoading
-                            ? t("正在加载")
-                            : candidates.length
-                              ? t("选择成员")
-                              : t("暂无可加入成员"))}
-                      </span>
-                      <ChevronDownIcon data-icon="inline-end" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="start"
-                    className="max-h-72 w-(--radix-dropdown-menu-trigger-width) overflow-y-auto"
-                  >
-                    {candidates.map((member) => (
-                      <DropdownMenuItem
-                        key={member.user.id}
-                        onSelect={() => setNewUserId(member.user.id)}
-                      >
-                        <span className="min-w-0 truncate">
-                          {member.user.name} · {member.user.username}
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <TeamCandidateSearch
+                  id="teamMemberUser"
+                  candidates={candidates}
+                  value={newUserId}
+                  onChange={setNewUserId}
+                  isLoading={isLoading}
+                  disabled={isMutating}
+                />
               </Field>
               {canManageTeamAdmins ? (
                 <Field>

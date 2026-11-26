@@ -678,14 +678,6 @@ async def reconnect_workspace_agent_run(
     after: Annotated[int, Query(ge=0)] = 0,
     live_after: Annotated[str, Query(pattern=r"^[0-9]+-[0-9]+$")] = "0-0",
 ) -> StreamingResponse:
-    await get_agent_run_response(
-        db,
-        context.workspace.id,
-        agent_id,
-        run_id,
-        context.user,
-        context.membership_role,
-    )
     run = await get_agent_run_entity(
         db,
         context.workspace.id,

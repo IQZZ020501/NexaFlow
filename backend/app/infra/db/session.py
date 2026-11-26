@@ -34,11 +34,14 @@ def configure_database(settings: Settings, *, worker_process: bool = False) -> N
             # public schemas render these instants in China Standard Time.
             "options": "-c timezone=UTC",
         }
+        kwargs["pool_pre_ping"] = True
+        kwargs["pool_recycle"] = settings.db_pool_recycle
         if worker_process:
-            # Autoscaled worker processes should not retain idle connections.
-            kwargs["poolclass"] = NullPool
+            kwargs["pool_size"] = min(4, settings.db_pool_size)
+            kwargs["max_overflow"] = min(8, settings.db_max_overflow)
         else:
-            kwargs["pool_pre_ping"] = True
+            kwargs["pool_size"] = settings.db_pool_size
+            kwargs["max_overflow"] = settings.db_max_overflow
     elif worker_process:
         # Autoscaled worker processes should not retain idle connections.
         kwargs["poolclass"] = NullPool

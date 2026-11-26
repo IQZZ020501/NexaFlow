@@ -269,18 +269,24 @@ def query_vectors(
     limit: int,
     score_threshold: float | None = None,
     document_ids: set[str] | None = None,
+    *,
+    query_embedding: list[float] | None = None,
 ) -> list[VectorHit]:
     if limit <= 0 or (document_ids is not None and not document_ids):
         return []
     client = _client(settings)
     collection_name = vector_collection_name(knowledge_base_id)
-    if not client.collection_exists(collection_name):
+    if settings.qdrant_url == ":memory:" and not client.collection_exists(collection_name):
         return []
 
-    query_embedding = build_registered_embeddings(
-        embedding_model,
-        settings,
-    ).embed_query(query)
+    resolved_embedding = (
+        query_embedding
+        if query_embedding is not None
+        else build_registered_embeddings(
+            embedding_model,
+            settings,
+        ).embed_query(query)
+    )
     started = time.monotonic()
     try:
         query_kwargs: dict[str, Any] = {}
@@ -302,7 +308,7 @@ def query_vectors(
             query=cast(
                 Any,
                 models.NearestQuery(
-                    nearest=query_embedding,
+                    nearest=resolved_embedding,
                     mmr=models.Mmr(diversity=0.5, candidates_limit=limit * 2),
                 ),
             ),
@@ -310,6 +316,32 @@ def query_vectors(
             with_payload=["chunk_id"],
             **query_kwargs,
         ).points
+    except UnexpectedResponse as exc:
+        if exc.status_code == 404:
+            return []
+        log_error(
+            logger,
+            "Qdrant vector query failed.",
+            exc,
+            collection_name=collection_name,
+            knowledge_base_id=knowledge_base_id,
+            query_limit=limit,
+            duration_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        raise
+    except ValueError as exc:
+        if "not found" in str(exc).lower():
+            return []
+        log_error(
+            logger,
+            "Qdrant vector query failed.",
+            exc,
+            collection_name=collection_name,
+            knowledge_base_id=knowledge_base_id,
+            query_limit=limit,
+            duration_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        raise
     except Exception as exc:
         log_error(
             logger,
@@ -376,6 +408,8 @@ class QdrantVectorStore:
         limit: int,
         score_threshold: float | None = None,
         document_ids: set[str] | None = None,
+        *,
+        query_embedding: list[float] | None = None,
     ) -> list[VectorHit]:
         return query_vectors(
             self._settings,
@@ -385,4 +419,5 @@ class QdrantVectorStore:
             limit,
             score_threshold,
             document_ids,
+            query_embedding=query_embedding,
         )

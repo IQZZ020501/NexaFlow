@@ -37,6 +37,7 @@ import {
   type IntegrationProvider,
 } from "@/lib/api/integrations"
 import { getErrorMessage } from "@/lib/errors"
+import { isSafeHttpUrl } from "@/lib/safe-url"
 import { integrationCatalog, integrationName } from "@/lib/integrations"
 
 type DeviceAuthorization = IntegrationAuthorization & {
@@ -112,6 +113,11 @@ export function IntegrationsCatalog({
   }
 
   const navigatePopup = React.useCallback((url: string, focus = false) => {
+    if (!isSafeHttpUrl(url)) {
+      popup.current?.close()
+      popup.current = null
+      return
+    }
     try {
       if (popup.current && !popup.current.closed) {
         popup.current.location.href = url
@@ -197,6 +203,9 @@ export function IntegrationsCatalog({
       if (!active.current) {
         popup.current?.close()
         return
+      }
+      if (!isSafeHttpUrl(authorization.authorization_url)) {
+        throw new Error(t("请求失败"))
       }
       if (authorization.mode === "device") {
         setDevice({ ...authorization, provider: integration.provider })

@@ -176,16 +176,53 @@ export function getInitialWorkspaceId(
 }
 
 /**
+ * Captures the initial browser route once on mount without keeping the provider
+ * subscribed to every subsequent route change.
+ */
+function SessionBootstrapObserver({
+  onCapture,
+}: {
+  onCapture: (pathname: string) => void
+}) {
+  const pathname = usePathname()
+
+  React.useEffect(() => {
+    onCapture(pathname)
+  }, [onCapture, pathname])
+
+  return null
+}
+
+/**
+ * Watches route changes only while a workspace switch is queued for `/app/apps`.
+ */
+function PendingWorkspaceObserver({
+  onArriveAtApps,
+}: {
+  onArriveAtApps: () => void
+}) {
+  const pathname = usePathname()
+
+  React.useEffect(() => {
+    if (pathname === "/app/apps") {
+      onArriveAtApps()
+    }
+  }, [onArriveAtApps, pathname])
+
+  return null
+}
+
+/**
  * Provides authentication state, session lifecycle management, workspace and team data, and session operations to descendant components.
  *
  * @param children - The components rendered within the session context
  */
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { t } = useLanguage()
-  const pathname = usePathname()
-  const initialPathnameRef = React.useRef(pathname)
   const tRef = React.useRef(t)
+  const [bootstrapCaptured, setBootstrapCaptured] = React.useState(false)
   const [token, setToken] = React.useState<string | null>(null)
+  const [sessionReloadSeq, setSessionReloadSeq] = React.useState(0)
   const [mustChangePassword, setMustChangePassword] = React.useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = React.useState(false)
   const [me, setMe] = React.useState<MeResponse | null>(null)
@@ -204,6 +241,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [notification, setNotification] =
     React.useState<AppNotification | null>(null)
   const [refreshAt, setRefreshAt] = React.useState<number | null>(null)
+  const tokenRef = React.useRef<string | null>(null)
+  const meRef = React.useRef<MeResponse | null>(null)
+  const bootstrapStartedRef = React.useRef(false)
+  const lastReloadSeqRef = React.useRef(0)
+  const isMountedRef = React.useRef(true)
+
+  React.useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   React.useEffect(() => {
     tRef.current = t
@@ -216,6 +265,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  const dismissNotification = React.useCallback(() => {
+    setNotification(null)
+  }, [])
+
+  const openPasswordDialog = React.useCallback(() => {
+    setIsPasswordDialogOpen(true)
+  }, [])
+
+  const closePasswordDialog = React.useCallback(() => {
+    setIsPasswordDialogOpen(false)
+  }, [])
+
   const applyWorkspaceSelection = React.useCallback((workspaceId: string) => {
     localStorage.setItem(WORKSPACE_KEY, workspaceId)
     setTeams([])
@@ -226,6 +287,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const clearSession = React.useCallback(() => {
     localStorage.removeItem(LEGACY_TOKEN_KEY)
     localStorage.removeItem(WORKSPACE_KEY)
+    tokenRef.current = null
+    meRef.current = null
     setToken(null)
     setRefreshAt(null)
     setMustChangePassword(false)
@@ -239,10 +302,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const applyAccessToken = React.useCallback(
-    (nextToken: string, nextMustChangePassword: boolean, expiresIn: number) => {
+    (
+      nextToken: string,
+      nextMustChangePassword: boolean,
+      expiresIn: number,
+      options?: { silent?: boolean }
+    ) => {
+      const shouldSkipReload =
+        Boolean(options?.silent) &&
+        meRef.current !== null &&
+        !nextMustChangePassword
       localStorage.removeItem(LOGGED_OUT_KEY)
+      tokenRef.current = nextToken
       setSessionError(null)
-      setIsSessionLoading(true)
+      if (!shouldSkipReload) {
+        setIsSessionLoading(true)
+        setSessionReloadSeq((current) => current + 1)
+      }
       setToken(nextToken)
       setMustChangePassword(nextMustChangePassword)
       setRefreshAt(
@@ -253,23 +329,27 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
-  const renewAccessToken = React.useCallback(async () => {
-    if (localStorage.getItem(LOGGED_OUT_KEY)) {
-      return false
-    }
+  const renewAccessToken = React.useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (localStorage.getItem(LOGGED_OUT_KEY)) {
+        return false
+      }
 
-    const payload = await refreshAccessToken()
-    if (localStorage.getItem(LOGGED_OUT_KEY)) {
-      return false
-    }
+      const payload = await refreshAccessToken()
+      if (localStorage.getItem(LOGGED_OUT_KEY)) {
+        return false
+      }
 
-    applyAccessToken(
-      payload.access_token,
-      payload.must_change_password,
-      payload.expires_in
-    )
-    return true
-  }, [applyAccessToken])
+      applyAccessToken(
+        payload.access_token,
+        payload.must_change_password,
+        payload.expires_in,
+        options
+      )
+      return true
+    },
+    [applyAccessToken]
+  )
 
   const logout = React.useCallback(() => {
     localStorage.setItem(LOGGED_OUT_KEY, "1")
@@ -278,70 +358,88 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     notify("success", tRef.current("已退出登录"))
   }, [clearSession, notify])
 
-  React.useEffect(() => {
-    let isCurrent = true
-    let restoredToken = false
-    localStorage.removeItem(LEGACY_TOKEN_KEY)
-    if (initialPathnameRef.current === "/auth/complete") {
-      localStorage.removeItem(LOGGED_OUT_KEY)
-      const workspaceId = new URLSearchParams(window.location.search).get("workspace")
-      if (workspaceId && workspaceId.length <= 36) {
-        localStorage.setItem(WORKSPACE_KEY, workspaceId)
+  const startBootstrapRestore = React.useCallback(
+    (initialPathname: string) => {
+      if (bootstrapStartedRef.current) {
+        return
       }
-    }
-    // Login is anonymous; probing an HttpOnly cookie here only creates expected 401 noise.
-    if (
-      initialPathnameRef.current.startsWith("/login") ||
-      localStorage.getItem(LOGGED_OUT_KEY)
-    ) {
-      setIsSessionRestored(true)
-      return
-    }
-    setIsSessionLoading(true)
+      bootstrapStartedRef.current = true
+      setBootstrapCaptured(true)
 
-    refreshAccessToken()
-      .then((payload) => {
-        if (!isCurrent || localStorage.getItem(LOGGED_OUT_KEY)) {
-          return
-        }
-        restoredToken = true
-        applyAccessToken(
-          payload.access_token,
-          payload.must_change_password,
-          payload.expires_in
+      let restoredToken = false
+      localStorage.removeItem(LEGACY_TOKEN_KEY)
+      if (initialPathname === "/auth/complete") {
+        localStorage.removeItem(LOGGED_OUT_KEY)
+        const workspaceId = new URLSearchParams(window.location.search).get(
+          "workspace"
         )
-        if (initialPathnameRef.current === "/auth/complete") {
-          notify("success", tRef.current("登录成功"))
+        if (workspaceId && workspaceId.length <= 36) {
+          localStorage.setItem(WORKSPACE_KEY, workspaceId)
         }
-      })
-      .catch((error: unknown) => {
-        if (
-          isCurrent &&
-          !(error instanceof ApiError && error.status === 401)
-        ) {
-          const message = getErrorMessage(error, tRef.current)
-          setSessionError(message)
-          notify("error", message)
-        }
-      })
-      .finally(() => {
-        if (isCurrent) {
-          setIsSessionRestored(true)
-          if (!restoredToken) {
-            setIsSessionLoading(false)
-          }
-        }
-      })
+      }
+      // Login is anonymous; probing an HttpOnly cookie here only creates expected 401 noise.
+      if (
+        initialPathname.startsWith("/login") ||
+        localStorage.getItem(LOGGED_OUT_KEY)
+      ) {
+        setIsSessionRestored(true)
+        return
+      }
+      setIsSessionLoading(true)
 
-    return () => {
-      isCurrent = false
-    }
-  }, [applyAccessToken, notify])
+      refreshAccessToken()
+        .then((payload) => {
+          if (
+            !isMountedRef.current ||
+            localStorage.getItem(LOGGED_OUT_KEY)
+          ) {
+            return
+          }
+          restoredToken = true
+          applyAccessToken(
+            payload.access_token,
+            payload.must_change_password,
+            payload.expires_in
+          )
+          if (initialPathname === "/auth/complete") {
+            notify("success", tRef.current("登录成功"))
+          }
+        })
+        .catch((error: unknown) => {
+          if (
+            isMountedRef.current &&
+            !(error instanceof ApiError && error.status === 401)
+          ) {
+            const message = getErrorMessage(error, tRef.current)
+            setSessionError(message)
+            notify("error", message)
+          }
+        })
+        .finally(() => {
+          if (isMountedRef.current) {
+            setIsSessionRestored(true)
+            if (!restoredToken) {
+              setIsSessionLoading(false)
+            }
+          }
+        })
+    },
+    [applyAccessToken, notify]
+  )
 
   const loadSession = React.useCallback(
     async (nextToken: string) => {
       try {
-        const nextMe = await getMe(nextToken)
+        const [nextMe, maybeWorkspaces] = await Promise.all([
+          getMe(nextToken),
+          listWorkspaces(nextToken).catch((error: unknown) => {
+            if (error instanceof ApiError && error.status === 403) {
+              return null
+            }
+            throw error
+          }),
+        ])
+        meRef.current = nextMe
         setMe(nextMe)
         setMustChangePassword(nextMe.user.must_change_password)
         setSessionError(null)
@@ -353,7 +451,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
-        const nextWorkspaces = await listWorkspaces(nextToken)
+        const nextWorkspaces =
+          maybeWorkspaces ?? (await listWorkspaces(nextToken))
         const storedWorkspaceId = localStorage.getItem(WORKSPACE_KEY)
         const nextWorkspaceId = getInitialWorkspaceId(
           nextMe,
@@ -374,7 +473,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           try {
-            const renewed = await renewAccessToken()
+            const renewed = await renewAccessToken({ silent: false })
             if (!renewed) {
               clearSession()
             }
@@ -395,13 +494,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   )
 
   React.useEffect(() => {
-    if (!token) {
+    const currentToken = tokenRef.current
+    if (!currentToken || sessionReloadSeq === lastReloadSeqRef.current) {
       return
     }
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadSession(token)
-  }, [token, loadSession])
+    lastReloadSeqRef.current = sessionReloadSeq
+    void loadSession(currentToken)
+  }, [sessionReloadSeq, loadSession])
 
   React.useEffect(() => {
     if (!token || refreshAt === null) {
@@ -409,7 +508,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
 
     const timer = window.setTimeout(() => {
-      void renewAccessToken().catch((error: unknown) => {
+      void renewAccessToken({ silent: true }).catch((error: unknown) => {
         if (error instanceof ApiError && error.status === 401) {
           clearSession()
           return
@@ -424,13 +523,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [clearSession, notify, refreshAt, renewAccessToken, token])
 
   React.useEffect(() => {
-    if (isSessionLoading || !token || !selectedWorkspaceId || mustChangePassword) {
+    const activeToken = tokenRef.current
+    if (
+      isSessionLoading ||
+      !activeToken ||
+      !selectedWorkspaceId ||
+      mustChangePassword
+    ) {
       return
     }
 
     let isCurrent = true
 
-    listTeams(token, selectedWorkspaceId)
+    listTeams(activeToken, selectedWorkspaceId)
       .then((payload) => {
         if (isCurrent) {
           setTeams(payload)
@@ -452,15 +557,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       isCurrent = false
     }
   }, [
-    token,
+    sessionReloadSeq,
     selectedWorkspaceId,
     mustChangePassword,
     isSessionLoading,
     notify,
   ])
 
-  React.useEffect(() => {
-    if (!pendingWorkspaceId || pathname !== "/app/apps") {
+  const completePendingWorkspaceSwitch = React.useCallback(() => {
+    if (!pendingWorkspaceId) {
       return
     }
 
@@ -470,7 +575,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         workspace.status === "active" &&
         hasWorkspaceMembership(me, workspace.id)
     )
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- complete the switch only after leaving the old resource route
     setPendingWorkspaceId(null)
     if (!nextWorkspace) {
       return
@@ -483,144 +587,169 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         workspace: displayWorkspaceName(nextWorkspace, tRef.current),
       })
     )
-  }, [
-    applyWorkspaceSelection,
-    me,
-    notify,
-    pathname,
-    pendingWorkspaceId,
-    workspaces,
-  ])
+  }, [applyWorkspaceSelection, me, notify, pendingWorkspaceId, workspaces])
 
-  function handleLogin(
-    nextToken: string,
-    nextMustChangePassword: boolean,
-    expiresIn: number
-  ) {
-    applyAccessToken(nextToken, nextMustChangePassword, expiresIn)
-    notify("success", t("登录成功"))
-  }
+  const handleLogin = React.useCallback(
+    (nextToken: string, nextMustChangePassword: boolean, expiresIn: number) => {
+      applyAccessToken(nextToken, nextMustChangePassword, expiresIn)
+      notify("success", tRef.current("登录成功"))
+    },
+    [applyAccessToken, notify]
+  )
 
-  function handleSelectWorkspace(workspaceId: string) {
-    if (workspaceId === selectedWorkspaceId) {
-      return
-    }
+  const handleSelectWorkspace = React.useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === selectedWorkspaceId) {
+        return
+      }
 
-    const nextWorkspace = workspaces.find(
-      (workspace) => workspace.id === workspaceId
-    )
-    if (
-      !nextWorkspace ||
-      nextWorkspace.status !== "active" ||
-      !hasWorkspaceMembership(me, workspaceId)
-    ) {
-      return
-    }
+      const nextWorkspace = workspaces.find(
+        (workspace) => workspace.id === workspaceId
+      )
+      if (
+        !nextWorkspace ||
+        nextWorkspace.status !== "active" ||
+        !hasWorkspaceMembership(me, workspaceId)
+      ) {
+        return
+      }
 
-    applyWorkspaceSelection(workspaceId)
-  }
+      applyWorkspaceSelection(workspaceId)
+    },
+    [applyWorkspaceSelection, me, selectedWorkspaceId, workspaces]
+  )
 
-  function handleSwitchWorkspace(workspaceId: string) {
-    if (workspaceId === selectedWorkspaceId) {
-      return
-    }
+  const handleSwitchWorkspace = React.useCallback(
+    (workspaceId: string) => {
+      if (workspaceId === selectedWorkspaceId) {
+        return
+      }
 
-    const nextWorkspace = workspaces.find(
-      (workspace) => workspace.id === workspaceId
-    )
-    if (
-      !nextWorkspace ||
-      nextWorkspace.status !== "active" ||
-      !hasWorkspaceMembership(me, workspaceId)
-    ) {
-      return
-    }
+      const nextWorkspace = workspaces.find(
+        (workspace) => workspace.id === workspaceId
+      )
+      if (
+        !nextWorkspace ||
+        nextWorkspace.status !== "active" ||
+        !hasWorkspaceMembership(me, workspaceId)
+      ) {
+        return
+      }
 
-    localStorage.setItem(WORKSPACE_KEY, workspaceId)
-    setPendingWorkspaceId(workspaceId)
-  }
+      localStorage.setItem(WORKSPACE_KEY, workspaceId)
+      setPendingWorkspaceId(workspaceId)
+    },
+    [me, selectedWorkspaceId, workspaces]
+  )
 
-  function clearSelectedWorkspace() {
+  const clearSelectedWorkspace = React.useCallback(() => {
     localStorage.removeItem(WORKSPACE_KEY)
     setTeams([])
     setIsTeamsLoading(false)
     setSelectedWorkspaceId(null)
-  }
+  }, [])
 
-  function handleWorkspaceCreated(payload: WorkspaceCreateResponse) {
-    setWorkspaces((current) => [...current, payload.workspace])
-    setMe((current) => addCreatedWorkspaceMembership(current, payload))
-  }
+  const handleWorkspaceCreated = React.useCallback(
+    (payload: WorkspaceCreateResponse) => {
+      setWorkspaces((current) => [...current, payload.workspace])
+      setMe((current) => addCreatedWorkspaceMembership(current, payload))
+    },
+    []
+  )
 
-  function handleWorkspaceUpdated(workspace: Workspace) {
-    const nextWorkspaces = workspaces.map((item) =>
-      item.id === workspace.id ? workspace : item
-    )
-    setWorkspaces(nextWorkspaces)
-
-    if (workspace.id === selectedWorkspaceId && workspace.status !== "active") {
-      const nextWorkspace = nextWorkspaces.find(
-        (item) =>
-          item.id !== workspace.id &&
-          item.status === "active" &&
-          hasWorkspaceMembership(me, item.id)
+  const handleWorkspaceUpdated = React.useCallback(
+    (workspace: Workspace) => {
+      const nextWorkspaces = workspaces.map((item) =>
+        item.id === workspace.id ? workspace : item
       )
-      if (nextWorkspace) {
-        handleSelectWorkspace(nextWorkspace.id)
-      } else {
-        clearSelectedWorkspace()
+      setWorkspaces(nextWorkspaces)
+
+      if (
+        workspace.id === selectedWorkspaceId &&
+        workspace.status !== "active"
+      ) {
+        const nextWorkspace = nextWorkspaces.find(
+          (item) =>
+            item.id !== workspace.id &&
+            item.status === "active" &&
+            hasWorkspaceMembership(me, item.id)
+        )
+        if (nextWorkspace) {
+          handleSelectWorkspace(nextWorkspace.id)
+        } else {
+          clearSelectedWorkspace()
+        }
       }
-    }
-  }
+    },
+    [
+      clearSelectedWorkspace,
+      handleSelectWorkspace,
+      me,
+      selectedWorkspaceId,
+      workspaces,
+    ]
+  )
 
-  function handleWorkspaceDeleted(workspaceId: string) {
-    const nextWorkspaces = workspaces.filter((item) => item.id !== workspaceId)
-    setWorkspaces(nextWorkspaces)
+  const handleWorkspaceDeleted = React.useCallback(
+    (workspaceId: string) => {
+      const nextWorkspaces = workspaces.filter((item) => item.id !== workspaceId)
+      setWorkspaces(nextWorkspaces)
 
-    if (workspaceId === selectedWorkspaceId) {
-      const nextWorkspace = nextWorkspaces.find(
-        (item) =>
-          item.status === "active" && hasWorkspaceMembership(me, item.id)
-      )
-      if (nextWorkspace) {
-        handleSelectWorkspace(nextWorkspace.id)
-      } else {
-        clearSelectedWorkspace()
+      if (workspaceId === selectedWorkspaceId) {
+        const nextWorkspace = nextWorkspaces.find(
+          (item) =>
+            item.status === "active" && hasWorkspaceMembership(me, item.id)
+        )
+        if (nextWorkspace) {
+          handleSelectWorkspace(nextWorkspace.id)
+        } else {
+          clearSelectedWorkspace()
+        }
       }
-    }
-  }
+    },
+    [
+      clearSelectedWorkspace,
+      handleSelectWorkspace,
+      me,
+      selectedWorkspaceId,
+      workspaces,
+    ]
+  )
 
-  function handleTeamCreated(team: Team, adminUserId?: string) {
-    setTeams((current) => [...current, team])
-    if (adminUserId) {
-      setMe((current) => addCreatedTeamMembership(current, team, adminUserId))
-    }
-  }
+  const handleTeamCreated = React.useCallback(
+    (team: Team, adminUserId?: string) => {
+      setTeams((current) => [...current, team])
+      if (adminUserId) {
+        setMe((current) => addCreatedTeamMembership(current, team, adminUserId))
+      }
+    },
+    []
+  )
 
-  function handleTeamUpdated(team: Team) {
+  const handleTeamUpdated = React.useCallback((team: Team) => {
     setTeams((current) =>
       current.map((item) => (item.id === team.id ? team : item))
     )
-  }
+  }, [])
 
-  function handleTeamDeleted(teamId: string) {
+  const handleTeamDeleted = React.useCallback((teamId: string) => {
     setTeams((current) => current.filter((item) => item.id !== teamId))
-  }
+  }, [])
 
-  function handleUserUpdated(user: User) {
+  const handleUserUpdated = React.useCallback((user: User) => {
     setMe((current) => replaceSessionUser(current, user))
-  }
+  }, [])
 
-  async function handlePasswordChanged() {
+  const handlePasswordChanged = React.useCallback(async () => {
     setIsSessionLoading(true)
     setSessionError(null)
     setMustChangePassword(false)
     setIsPasswordDialogOpen(false)
-    if (token) {
-      await loadSession(token)
+    if (tokenRef.current) {
+      await loadSession(tokenRef.current)
     }
-    notify("success", t("密码已修改"))
-  }
+    notify("success", tRef.current("密码已修改"))
+  }, [loadSession, notify])
 
   const currentWorkspace = React.useMemo(
     () =>
@@ -638,42 +767,85 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [workspaces, me]
   )
 
-  const value: SessionContextValue = {
-    token,
-    me,
-    workspaces,
-    teams,
-    selectedWorkspaceId,
-    mustChangePassword,
-    isSessionLoading,
-    isSessionRestored,
-    isTeamsLoading,
-    sessionError,
-    notification,
-    currentWorkspace,
-    workspaceOptions,
-    passwordDialogOpen: isPasswordDialogOpen,
-    login: handleLogin,
-    logout,
-    notify,
-    dismissNotification: () => setNotification(null),
-    openPasswordDialog: () => setIsPasswordDialogOpen(true),
-    closePasswordDialog: () => setIsPasswordDialogOpen(false),
-    selectWorkspace: handleSelectWorkspace,
-    switchWorkspace: handleSwitchWorkspace,
-    clearSelectedWorkspace,
-    workspaceCreated: handleWorkspaceCreated,
-    workspaceUpdated: handleWorkspaceUpdated,
-    workspaceDeleted: handleWorkspaceDeleted,
-    teamCreated: handleTeamCreated,
-    teamUpdated: handleTeamUpdated,
-    teamDeleted: handleTeamDeleted,
-    userUpdated: handleUserUpdated,
-    passwordChanged: handlePasswordChanged,
-  }
+  const value: SessionContextValue = React.useMemo(
+    () => ({
+      token,
+      me,
+      workspaces,
+      teams,
+      selectedWorkspaceId,
+      mustChangePassword,
+      isSessionLoading,
+      isSessionRestored,
+      isTeamsLoading,
+      sessionError,
+      notification,
+      currentWorkspace,
+      workspaceOptions,
+      passwordDialogOpen: isPasswordDialogOpen,
+      login: handleLogin,
+      logout,
+      notify,
+      dismissNotification,
+      openPasswordDialog,
+      closePasswordDialog,
+      selectWorkspace: handleSelectWorkspace,
+      switchWorkspace: handleSwitchWorkspace,
+      clearSelectedWorkspace,
+      workspaceCreated: handleWorkspaceCreated,
+      workspaceUpdated: handleWorkspaceUpdated,
+      workspaceDeleted: handleWorkspaceDeleted,
+      teamCreated: handleTeamCreated,
+      teamUpdated: handleTeamUpdated,
+      teamDeleted: handleTeamDeleted,
+      userUpdated: handleUserUpdated,
+      passwordChanged: handlePasswordChanged,
+    }),
+    [
+      token,
+      me,
+      workspaces,
+      teams,
+      selectedWorkspaceId,
+      mustChangePassword,
+      isSessionLoading,
+      isSessionRestored,
+      isTeamsLoading,
+      sessionError,
+      notification,
+      currentWorkspace,
+      workspaceOptions,
+      isPasswordDialogOpen,
+      handleLogin,
+      logout,
+      notify,
+      dismissNotification,
+      openPasswordDialog,
+      closePasswordDialog,
+      handleSelectWorkspace,
+      handleSwitchWorkspace,
+      clearSelectedWorkspace,
+      handleWorkspaceCreated,
+      handleWorkspaceUpdated,
+      handleWorkspaceDeleted,
+      handleTeamCreated,
+      handleTeamUpdated,
+      handleTeamDeleted,
+      handleUserUpdated,
+      handlePasswordChanged,
+    ]
+  )
 
   return (
     <SessionContext.Provider value={value}>
+      {!bootstrapCaptured ? (
+        <SessionBootstrapObserver onCapture={startBootstrapRestore} />
+      ) : null}
+      {pendingWorkspaceId ? (
+        <PendingWorkspaceObserver
+          onArriveAtApps={completePendingWorkspaceSwitch}
+        />
+      ) : null}
       {children}
     </SessionContext.Provider>
   )

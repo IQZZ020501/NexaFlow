@@ -440,6 +440,31 @@ class AgentRun(Base):
             "ix_agent_runs_conversation_id",
             "conversation_id",
         ),
+        Index(
+            "ix_agent_runs_workspace_created_root",
+            "workspace_id",
+            "created_at",
+            "id",
+            postgresql_where=column("depth") == 0,
+            sqlite_where=column("depth") == 0,
+        ),
+        Index(
+            "ix_agent_runs_agent_source_consumer_created",
+            "agent_id",
+            "access_source",
+            "consumer_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_agent_runs_conversation_agent_created",
+            "agent_id",
+            "access_source",
+            "consumer_id",
+            "conversation_id",
+            "created_at",
+            "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -548,6 +573,13 @@ class AgentRunState(Base):
             "consumer_id",
             "conversation_id",
             unique=True,
+            postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+            sqlite_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
+        ),
+        Index(
+            "ix_agent_run_states_active_lease",
+            "status",
+            "lease_expires_at",
             postgresql_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
             sqlite_where=column("status").in_(AGENT_RUN_ACTIVE_STATUSES),
         ),
@@ -746,6 +778,11 @@ class AgentRunEvent(Base):
             ["agent_runs.workspace_id", "agent_runs.id"],
             name="fk_agent_run_events_run_workspace",
             ondelete="CASCADE",
+        ),
+        Index(
+            "ix_agent_run_events_run_id_id",
+            "run_id",
+            "id",
         ),
     )
 

@@ -75,6 +75,13 @@ const dave = user({
   name: "Dave",
   email: "dave@app.local",
 })
+const rootUser = user({
+  id: "u-root",
+  username: "root",
+  name: "System Root",
+  email: "root@app.local",
+  is_global_admin: true,
+})
 
 const workspace: Workspace = {
   id: "ws-1",
@@ -610,6 +617,19 @@ describe("WorkspaceMembersDialog", () => {
 // ---------------------------------------------------------------------------
 
 describe("TeamMembersDialog", () => {
+  const candidateInput = () =>
+    screen.getByLabelText("成员") as HTMLInputElement
+
+  async function pickCandidate(query: string, optionText: string) {
+    const input = candidateInput()
+    fireEvent.focus(input)
+    if (query) {
+      fireEvent.change(input, { target: { value: query } })
+    }
+    const listbox = await screen.findByRole("listbox")
+    fireEvent.click(within(listbox).getByText(optionText))
+  }
+
   const baseProps = {
     team,
     setTeam: () => undefined,
@@ -667,14 +687,16 @@ describe("TeamMembersDialog", () => {
     await screen.findByRole("dialog", { name: "管理团队成员" })
 
     // Candidates come from active workspace members that are not in the team.
-    const userTrigger = screen.getByLabelText("成员") as HTMLButtonElement
-    fireEvent.pointerDown(userTrigger)
-    const menu = await screen.findByRole("menu")
-    expect(within(menu).getByText("Dave · dave")).toBeTruthy()
-    expect(within(menu).queryByText("Carol · carol")).toBeNull()
-    expect(within(menu).queryByText("Alice · alice")).toBeNull()
-    fireEvent.click(within(menu).getByText("Dave · dave"))
-    await waitFor(() => expect(userTriggerText()).toContain("Dave"))
+    const input = candidateInput()
+    fireEvent.focus(input)
+    const listbox = await screen.findByRole("listbox")
+    expect(within(listbox).getByText("Dave · dave")).toBeTruthy()
+    expect(within(listbox).queryByText("Carol · carol")).toBeNull()
+    expect(within(listbox).queryByText("Alice · alice")).toBeNull()
+    // Fuzzy matching matches subsequence queries (e.g., "dv" -> "Dave").
+    fireEvent.change(input, { target: { value: "dv" } })
+    fireEvent.click(within(await screen.findByRole("listbox")).getByText("Dave · dave"))
+    await waitFor(() => expect(candidateInput().value).toContain("Dave"))
 
     const roleTrigger = screen.getByLabelText("角色") as HTMLButtonElement
     fireEvent.pointerDown(roleTrigger)
@@ -685,17 +707,18 @@ describe("TeamMembersDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "添加成员" }))
     await waitFor(() => expect(calls).toEqual([["u-4", "admin"]]))
-    await waitFor(() => expect(userTriggerText()).toContain("选择成员"))
+    await waitFor(() => expect(candidateInput().value).toBe(""))
     expect((screen.getByLabelText("角色").textContent ?? "").trim()).toContain(
       "成员"
     )
   })
 
-  test("forces the member role when team admins cannot be managed", async () => {
+  test("forces the member role and hides global admins when team admins cannot be managed", async () => {
     const calls: Array<[string, string]> = []
     renderPage(
       <TeamMembersDialog
         {...baseProps}
+        workspaceMembers={[...baseProps.workspaceMembers, member(rootUser, "admin")]}
         canManageTeamAdmins={false}
         onAddMember={async (userId, role) => {
           calls.push([userId, role])
@@ -707,8 +730,13 @@ describe("TeamMembersDialog", () => {
     // The role field is not rendered at all.
     expect(screen.queryByLabelText("角色")).toBeNull()
 
-    await choose(screen.getByLabelText("成员"), "Dave · dave")
-    await waitFor(() => expect(userTriggerText()).toContain("Dave"))
+    fireEvent.focus(candidateInput())
+    const listbox = await screen.findByRole("listbox")
+    expect(within(listbox).queryByText("System Root · root")).toBeNull()
+    expect(within(listbox).getByText("Dave · dave")).toBeTruthy()
+
+    await pickCandidate("dv", "Dave · dave")
+    await waitFor(() => expect(candidateInput().value).toContain("Dave"))
     fireEvent.click(screen.getByRole("button", { name: "添加成员" }))
     await waitFor(() => expect(calls).toEqual([["u-4", "member"]]))
   })
@@ -721,9 +749,9 @@ describe("TeamMembersDialog", () => {
       />
     )
     await screen.findByRole("dialog", { name: "管理团队成员" })
-    const userTrigger = screen.getByLabelText("成员") as HTMLButtonElement
-    expect(userTrigger.disabled).toBe(true)
-    expect(userTriggerText()).toContain("暂无可加入成员")
+    const input = candidateInput()
+    expect(input.disabled).toBe(true)
+    expect(input.placeholder).toContain("暂无可加入成员")
   })
 
   test("shows the loading text while members load", async () => {
@@ -733,9 +761,9 @@ describe("TeamMembersDialog", () => {
     })
     expect(dialog.querySelector(".animate-spin")).toBeTruthy()
     expect(screen.queryByText("Alice")).toBeNull()
-    const userTrigger = screen.getByLabelText("成员") as HTMLButtonElement
-    expect(userTrigger.disabled).toBe(true)
-    expect(userTriggerText()).toContain("正在加载")
+    const input = candidateInput()
+    expect(input.disabled).toBe(true)
+    expect(input.placeholder).toContain("正在加载")
   })
 
   test("renders the empty member list placeholder", async () => {
@@ -757,9 +785,7 @@ describe("TeamMembersDialog", () => {
     expect(
       addButton.querySelector("svg.lucide-loader-circle.animate-spin")
     ).toBeTruthy()
-    expect((screen.getByLabelText("成员") as HTMLButtonElement).disabled).toBe(
-      true
-    )
+    expect(candidateInput().disabled).toBe(true)
     expect((screen.getByLabelText("角色") as HTMLButtonElement).disabled).toBe(
       true
     )
@@ -882,8 +908,8 @@ describe("TeamMembersDialog", () => {
       />
     )
     await screen.findByRole("dialog", { name: "管理团队成员" })
-    await choose(screen.getByLabelText("成员"), "Dave · dave")
-    await waitFor(() => expect(userTriggerText()).toContain("Dave"))
+    await pickCandidate("", "Dave · dave")
+    await waitFor(() => expect(candidateInput().value).toContain("Dave"))
 
     fireEvent.keyDown(document.body, { key: "Escape" })
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -891,7 +917,7 @@ describe("TeamMembersDialog", () => {
 
     fireEvent.click(screen.getByTestId("reopen-team-members"))
     await screen.findByRole("dialog", { name: "管理团队成员" })
-    await waitFor(() => expect(userTriggerText()).toContain("选择成员"))
+    await waitFor(() => expect(candidateInput().value).toBe(""))
     expect((screen.getByLabelText("角色").textContent ?? "").trim()).toContain(
       "成员"
     )
@@ -900,19 +926,19 @@ describe("TeamMembersDialog", () => {
   test("resets the selection when the team changes", async () => {
     const view = renderPage(<TeamMembersDialog {...baseProps} />)
     await screen.findByRole("dialog", { name: "管理团队成员" })
-    await choose(screen.getByLabelText("成员"), "Dave · dave")
-    await waitFor(() => expect(userTriggerText()).toContain("Dave"))
+    await pickCandidate("", "Dave · dave")
+    await waitFor(() => expect(candidateInput().value).toContain("Dave"))
 
     rerenderPage(view, <TeamMembersDialog {...baseProps} team={defaultTeam} />)
-    await waitFor(() => expect(userTriggerText()).toContain("选择成员"))
+    await waitFor(() => expect(candidateInput().value).toBe(""))
   })
 
-  test("keeps the dialog open when interacting with an open dropdown menu", async () => {
+  test("keeps the dialog open when interacting with candidate suggestions", async () => {
     renderPage(<TeamMembersDialog {...baseProps} />)
     await screen.findByRole("dialog", { name: "管理团队成员" })
-    fireEvent.pointerDown(screen.getByLabelText("成员"))
-    const menu = await screen.findByRole("menu")
-    fireEvent.pointerDown(within(menu).getByText("Dave · dave"))
+    fireEvent.focus(candidateInput())
+    const listbox = await screen.findByRole("listbox")
+    fireEvent.mouseDown(within(listbox).getByText("Dave · dave"))
     expect(screen.getByRole("dialog", { name: "管理团队成员" })).toBeTruthy()
   })
 })

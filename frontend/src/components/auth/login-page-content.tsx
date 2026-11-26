@@ -86,7 +86,7 @@ export function LoginPageContent({
         }}
         onNotify={notify}
         enterpriseConnections={enterpriseConnections}
-        next={next}
+        next={next ? destination : undefined}
       />
       <OperationNotification
         notification={notification}

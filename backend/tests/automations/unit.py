@@ -183,11 +183,77 @@ def test_sunday_uses_iso_weekday_seven() -> None:
     ) == datetime(2026, 11, 29, 9, tzinfo=BJ)
 
 
+def test_webhook_verifies_hmac_before_acquiring_row_lock() -> None:
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+
+    from app.application.automations.service import receive_webhook_trigger
+    from app.entities.automations import Automation
+
+    lock_calls: list[bool] = []
+
+    async def fake_get_by_hook_id(_db, _hook_id: str, *, lock: bool = False):
+        lock_calls.append(lock)
+        return Automation(
+            id="auto-1",
+            workspace_id="ws-1",
+            owner_user_id="user-1",
+            name="Hook",
+            target_app_id="agent-1",
+            target_app_type="agent",
+            target_version_number=1,
+            trigger_type="webhook",
+            webhook_hook_id="hook-1",
+            webhook_secret_ciphertext="cipher",
+        )
+
+    async def run() -> None:
+        with (
+            patch(
+                "app.application.automations.service.enforce_webhook_rate_limit",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.application.automations.service.automation_repository.get_automation_by_hook_id",
+                side_effect=fake_get_by_hook_id,
+            ),
+            patch(
+                "app.application.automations.service.application_secret_key",
+                return_value="k",
+            ),
+            patch(
+                "app.application.automations.service.decrypt_secret",
+                return_value="secret",
+            ),
+        ):
+            try:
+                await receive_webhook_trigger(
+                    SimpleNamespace(),
+                    "hook-1",
+                    b'{"hello":"world"}',
+                    timestamp_header="1",
+                    signature_header="v1=invalid",
+                    event_id_header="evt-1",
+                    settings=SimpleNamespace(),
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 401
+            else:
+                raise AssertionError("expected 401 on invalid HMAC")
+
+    asyncio.run(run())
+    assert lock_calls == [False], lock_calls
+
+
 def main() -> None:
     test_beijing_schedules_and_catchup()
     test_webhook_hmac_and_input_mapping()
     test_webhook_identity_and_input_boundaries()
     test_sunday_uses_iso_weekday_seven()
+    test_webhook_verifies_hmac_before_acquiring_row_lock()
     print("AUTOMATIONS_UNIT_OK")
 
 

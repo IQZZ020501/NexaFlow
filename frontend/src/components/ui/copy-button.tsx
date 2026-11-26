@@ -83,7 +83,6 @@ export function CopyButton({
                 status === "error" && "text-destructive"
               )}
               aria-label={buttonLabel}
-              title={buttonLabel}
               onClick={() => void handleCopy()}
             >
               {status === "copied" ? (

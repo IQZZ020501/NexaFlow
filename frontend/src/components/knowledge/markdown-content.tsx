@@ -19,6 +19,8 @@ import { useLanguage } from "@/contexts/language-provider"
 import { useOptionalSession } from "@/contexts/session-context"
 import { requestBlob } from "@/lib/api-client"
 
+const REMARK_PLUGINS = [remarkGfm, remarkCjkFriendly]
+
 type MarkdownContentProps = {
   content: string
   className?: string
@@ -377,7 +379,7 @@ const markdownComponents: Components = {
  * @param content - The Markdown content to render
  * @param className - Optional CSS class name applied to the rendered content
  */
-export function MarkdownContent({
+export const MarkdownContent = React.memo(function MarkdownContent({
   content,
   className,
   components: componentOverrides,
@@ -409,11 +411,11 @@ export function MarkdownContent({
       )}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkCjkFriendly]}
+        remarkPlugins={REMARK_PLUGINS}
         components={components}
       >
         {value}
       </ReactMarkdown>
     </div>
   )
-}
+})

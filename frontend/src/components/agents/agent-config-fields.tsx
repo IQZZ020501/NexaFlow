@@ -3,7 +3,7 @@
 import { ModelScopeLabel } from "@/components/llm/model-scope-label"
 
 import * as React from "react"
-import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import { LazyModelIcon as ModelIcon } from "@/components/llm/lazy-model-icon"
 import {
   BotIcon,
   BrainCircuitIcon,

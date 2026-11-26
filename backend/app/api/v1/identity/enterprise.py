@@ -138,6 +138,7 @@ async def finish_enterprise_login(
     auth_code: Annotated[str | None, Query(alias="authCode", min_length=1, max_length=4096)] = None,
     nonce: Annotated[str | None, Cookie(alias=SSO_NONCE_COOKIE)] = None,
 ) -> RedirectResponse:
+    await _enforce_rate_limit(request, settings)
     authorization_code = auth_code if provider == "dingtalk" else code
     if not authorization_code:
         return _login_error_redirect(settings, "provider_error", None)

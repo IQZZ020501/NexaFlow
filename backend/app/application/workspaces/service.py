@@ -43,6 +43,7 @@ from app.infra.runtime.validation import normalize_name
 from app.schemas.identity.contracts import (
     UserCreateRequest,
     UserPasswordResetResponse,
+    UserTeamResponse,
     user_to_response,
 )
 from app.schemas.workspaces.contracts import (
@@ -133,9 +134,10 @@ def workspace_to_response(workspace: Workspace) -> WorkspaceResponse:
 def workspace_member_to_response(
     membership: WorkspaceMembership,
     user: User,
+    teams: list[UserTeamResponse] | None = None,
 ) -> WorkspaceMemberResponse:
     return WorkspaceMemberResponse(
-        user=user_to_response(user),
+        user=user_to_response(user, teams=teams),
         role=membership.role,
     )
 
@@ -314,14 +316,30 @@ async def list_workspace_members(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[WorkspaceMemberResponse]:
+    rows = await workspace_repository.list_workspace_member_rows(
+        db,
+        workspace.id,
+        limit,
+        offset,
+    )
+    user_ids = [user.id for _, user in rows]
+    teams_by_user: dict[str, list[UserTeamResponse]] = {}
+    if user_ids:
+        for team_membership, team in await user_repository.list_team_scope_rows(db, user_ids):
+            if team.workspace_id != workspace.id:
+                continue
+            teams_by_user.setdefault(team_membership.user_id, []).append(
+                UserTeamResponse(
+                    id=team.id,
+                    workspace_id=team.workspace_id,
+                    name=team.name,
+                    is_default=team.is_default,
+                    role=team_membership.role,
+                )
+            )
     return [
-        workspace_member_to_response(membership, user)
-        for membership, user in await workspace_repository.list_workspace_member_rows(
-            db,
-            workspace.id,
-            limit,
-            offset,
-        )
+        workspace_member_to_response(membership, user, teams_by_user.get(user.id, []))
+        for membership, user in rows
     ]
 
 
@@ -348,7 +366,7 @@ async def add_workspace_member(
     if role == "admin":
         require_global_admin_for_workspace_admin(actor)
     user = await user_repository.get_user_by_id(db, user_id)
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
 
     membership = WorkspaceMembership(

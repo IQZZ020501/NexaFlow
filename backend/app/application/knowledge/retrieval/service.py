@@ -28,7 +28,7 @@ from app.entities.knowledge import (
 from app.infra.config.settings import Settings
 from app.infra.db.repositories.knowledge import repository as knowledge_base_repository
 from app.infra.observability.logger import get_logger, log_event
-from app.ports.llm import build_reranker
+from app.ports.llm import build_embeddings, build_reranker
 from app.ports.vector_store import query_vectors
 from app.schemas.knowledge import (
     KnowledgeQueryHitResponse,
@@ -62,6 +62,8 @@ async def _query_candidates(
     score_threshold: float | None,
     settings: Settings,
     document_ids: set[str] | None = None,
+    *,
+    query_vector: list[float] | None = None,
 ):
     vector_task = None
     if use_vector:
@@ -75,9 +77,15 @@ async def _query_candidates(
         )
         if document_ids is not None:
             vector_args += (document_ids,)
+        vector_kwargs = (
+            {"query_embedding": query_vector}
+            if query_vector is not None
+            else {}
+        )
         vector_task = asyncio.to_thread(
             query_vectors,
             *vector_args,
+            **vector_kwargs,
         )
     keyword_task = None
     if use_keywords:
@@ -121,6 +129,7 @@ async def _rerank_hits(
     if model is None:
         return hits, "fallback"
 
+    await db.rollback()
     candidates = hits[:MAX_RERANK_CHILDREN]
     try:
         provider = build_reranker(settings, model)
@@ -138,6 +147,51 @@ async def _rerank_hits(
     return cast(list[tuple[KnowledgeDocumentChunk, RankedHit]], ordered), "applied"
 
 
+async def precompute_query_vectors(
+    db: AsyncSession,
+    knowledge_bases: list[KnowledgeBase],
+    query: str,
+    settings: Settings,
+    *,
+    user_id: str | None = None,
+) -> dict[str, list[float]]:
+    models_by_id: dict[str, object] = {}
+    for knowledge_base in knowledge_bases:
+        if (
+            not knowledge_base.embedding_model_id
+            or knowledge_base.embedding_model_id in models_by_id
+        ):
+            continue
+        try:
+            model = await resolve_embedding_model(db, knowledge_base, user_id=user_id)
+        except Exception:
+            continue
+        if model is not None:
+            models_by_id[knowledge_base.embedding_model_id] = model
+    if not models_by_id:
+        return {}
+    await db.rollback()
+
+    async def embed_one(model_id: str, model: object) -> tuple[str, list[float] | None]:
+        try:
+            vector = await asyncio.to_thread(
+                build_embeddings(settings, model).embed_query,  # type: ignore[arg-type]
+                query,
+            )
+            return model_id, vector
+        except Exception:
+            return model_id, None
+
+    computed = await asyncio.gather(
+        *(embed_one(model_id, model) for model_id, model in models_by_id.items())
+    )
+    return {
+        model_id: vector
+        for model_id, vector in computed
+        if vector is not None
+    }
+
+
 async def retrieve_knowledge_base(
     db: AsyncSession,
     knowledge_base: KnowledgeBase,
@@ -145,6 +199,7 @@ async def retrieve_knowledge_base(
     settings: Settings,
     *,
     user_id: str | None = None,
+    query_vector: list[float] | None = None,
 ) -> KnowledgeQueryInspectResponse:
     """Run production retrieval once and return hits plus bounded diagnostics."""
     started_at = time.perf_counter()
@@ -166,6 +221,7 @@ async def retrieve_knowledge_base(
                 "Embedding model is required.",
             )
 
+    await db.rollback()
     qdrant_score_threshold = (
         2.0 * payload.similarity - 1.0
         if payload.similarity is not None and payload.similarity > 0
@@ -181,6 +237,7 @@ async def retrieve_knowledge_base(
         embedding_model,
         qdrant_score_threshold,
         settings,
+        query_vector=query_vector,
     )
     stage_duration_ms["candidates"] = _elapsed_ms(candidate_started_at)
     entity_started_at = time.perf_counter()
@@ -429,4 +486,8 @@ async def query_knowledge_base(
     ).hits
 
 
-__all__ = ["query_knowledge_base", "retrieve_knowledge_base"]
+__all__ = [
+    "precompute_query_vectors",
+    "query_knowledge_base",
+    "retrieve_knowledge_base",
+]

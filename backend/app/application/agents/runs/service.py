@@ -428,6 +428,16 @@ async def validate_regeneration_source(
             "This conversation already has an active run.",
         )
     if source.configuration_source == "published":
+        live_agent = await agent_repository.get_agent_by_id(db, source.agent_id)
+        if (
+            live_agent is None
+            or not live_agent.published
+            or live_agent.current_published_version_id != source.agent_publication_version_id
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Published agent version is no longer active.",
+            )
         version = (
             await agent_repository.get_agent_publication_version(
                 db,
@@ -1530,23 +1540,35 @@ async def stream_agent_run(
                         after=cursor,
                         limit=AGENT_EVENT_PAGE_SIZE,
                     )
-                    current = await agent_repository.get_agent_run_by_id(
+                    poll_state = await agent_repository.get_agent_run_poll_state(
                         event_db,
                         run.id,
                     )
-                if current is None:
-                    return
-                lease_expires = current.lease_expires_at
-                expired = (
-                    current.status not in terminal_statuses
-                    and lease_expires is not None
-                    and (
-                        lease_expires.replace(tzinfo=UTC)
-                        if lease_expires.tzinfo is None
-                        else lease_expires
+                    if poll_state is None:
+                        return
+                    run_status, lease_expires = poll_state
+                    expired = (
+                        run_status not in terminal_statuses
+                        and lease_expires is not None
+                        and (
+                            lease_expires.replace(tzinfo=UTC)
+                            if lease_expires.tzinfo is None
+                            else lease_expires
+                        )
+                        <= utc_now()
                     )
-                    <= utc_now()
-                )
+                    need_full_snapshot = (expired and not recovery_notified) or (
+                        run_status in terminal_statuses
+                        and len(rows) < AGENT_EVENT_PAGE_SIZE
+                    )
+                    if need_full_snapshot:
+                        loaded = await agent_repository.get_agent_run_by_id(
+                            event_db,
+                            run.id,
+                        )
+                        if loaded is None:
+                            return
+                        current = loaded
                 if expired and not recovery_notified:
                     # A transport observes durable state. Lease recovery alone
                     # cannot declare a business failure or stop observation.
@@ -1571,14 +1593,14 @@ async def stream_agent_run(
                         yield event
 
                 if (
-                    current.status in terminal_statuses
+                    run_status in terminal_statuses
                     and len(rows) == AGENT_EVENT_PAGE_SIZE
                     and terminal_event is None
                 ):
                     next_database_poll = 0.0
                     continue
 
-                if current.status in terminal_statuses:
+                if run_status in terminal_statuses:
                     while reader.available:
                         live_events = await reader.read(live_cursor, 1)
                         if not live_events:
@@ -1590,6 +1612,13 @@ async def stream_agent_run(
                     if terminal_event is not None:
                         yield terminal_event
                     else:
+                        if current.status != run_status:
+                            async with get_session_factory()() as event_db:
+                                loaded = await agent_repository.get_agent_run_by_id(
+                                    event_db, run.id
+                                )
+                                if loaded is not None:
+                                    current = loaded
                         yield {
                             "type": (
                                 "complete"

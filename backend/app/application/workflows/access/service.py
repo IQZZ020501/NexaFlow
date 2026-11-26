@@ -372,6 +372,7 @@ async def regenerate_external_workflow_run(
     """
     if source != "public":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found.")
+    await _rate_limit(settings, workflow_id, source, consumer_id)
     run, detail = await _external_run(db, workflow_id, run_id, source, consumer_id)
     regenerated = await regenerate_workflow_run_from_source(
         db, run, detail, actor, settings

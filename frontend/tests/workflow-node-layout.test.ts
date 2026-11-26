@@ -441,7 +441,7 @@ test("LLM advanced parameters live behind the card settings button", () => {
 
 test("LLM model selector shows the effective model and icon", () => {
   expect(source).toContain(
-    'import ModelIcon from "@lobehub/icons/es/features/ModelIcon"'
+    'import { LazyModelIcon as ModelIcon } from "@/components/llm/lazy-model-icon"'
   )
   expect(source).toContain(
     'const selectedModelId = String(config.model_id ?? agent.model_id ?? "")'

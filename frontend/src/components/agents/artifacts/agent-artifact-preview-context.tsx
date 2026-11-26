@@ -67,5 +67,8 @@ export function useAgentArtifactPreview(scopeKey: string) {
     []
   )
 
-  return { selection, panelId, open, close, updateSource }
+  return React.useMemo(
+    () => ({ selection, panelId, open, close, updateSource }),
+    [selection, panelId, open, close, updateSource]
+  )
 }

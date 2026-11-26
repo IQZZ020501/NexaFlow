@@ -114,10 +114,7 @@ class ModelNetworkTests(unittest.TestCase):
         with patch(
             "app.adapters.llm.network.socket.getaddrinfo",
             side_effect=[public_answer, private_answer],
-        ) as resolve, patch(
-            "app.adapters.llm.runtime.urlopen",
-            side_effect=AssertionError("Public reranker bypassed its checked transport."),
-        ):
+        ) as resolve:
             validate_member_connection("openai_compatible", credentials, {})
             reranker = build_reranker("openai_compatible", credentials, "rerank")
             with self.assertRaisesRegex(ModelProviderError, "public network"):
@@ -153,7 +150,7 @@ class ModelNetworkTests(unittest.TestCase):
             "app.adapters.llm.runtime.public_client",
             return_value=httpx.Client(transport=httpx.MockTransport(respond)),
         ), patch(
-            "app.adapters.llm.runtime.urlopen",
+            "app.adapters.llm.runtime.httpx.Client",
             side_effect=AssertionError("Public reranker bypassed its checked transport."),
         ):
             self.assertEqual(reranker.rerank("question", ["document"]), results)
@@ -367,6 +364,34 @@ class ModelNetworkTests(unittest.TestCase):
                 "openai_compatible", credentials, "rerank"
             ).public_endpoint_only
         )
+
+    def test_request_params_and_url_credentials_reject_transport_injection(self):
+        from fastapi import HTTPException
+
+        from app.application.models.registry import (
+            normalize_model_request_params,
+            normalize_url_credential,
+        )
+
+        for key in ("http_client", "http_options", "vertexai", "openai_proxy"):
+            with self.assertRaises(HTTPException) as exc_info:
+                normalize_model_request_params({key: "evil"}, "LLM")
+            self.assertEqual(exc_info.exception.status_code, 422)
+
+        for bad_url in (
+            "https://user:pass@models.example.com/v1",
+            "https://models.example.com/v1?token=secret",
+            "https://models.example.com/v1#frag",
+            "https://models.example.com\\evil",
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                normalize_url_credential(bad_url, "api_base")
+            self.assertEqual(exc_info.exception.status_code, 422)
+
+        google_chat = build_chat_model("google_genai", {"api_key": "own-key"}, "gemini-test")
+        self.assertFalse(google_chat.client._api_client.vertexai)
+        google_chat.client.close()
+        asyncio.run(google_chat.client.aio.aclose())
 
 
 if __name__ == "__main__":

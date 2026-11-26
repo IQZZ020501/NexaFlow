@@ -52,6 +52,11 @@ export type AuditLog = {
   created_at: string
 }
 
+export type AuditRetentionPolicy = {
+  retention_days: number | null
+  updated_at: string | null
+}
+
 export type SystemLog = {
   id: string
   level: string
@@ -204,6 +209,13 @@ export type UserPasswordForm = {
   confirmPassword: string
 }
 
+export type CreatedUserCredentials = {
+  name: string
+  username: string
+  email: string
+  initialPassword: string
+}
+
 export type WorkspaceForm = {
   name: string
   description: string
@@ -232,12 +244,19 @@ export type UserCreateForm = {
   isGlobalAdmin: boolean
 }
 
+export type RoleAssignmentValue = "none" | "member" | "admin"
+
 export type UserForm = {
   id: string
   username: string
   email: string
   name: string
   isGlobalAdmin: boolean
+  isActive?: boolean
+  mode?: "global" | "workspace"
+  roleWorkspaceId?: string
+  workspaceRoles?: Record<string, RoleAssignmentValue>
+  teamRoles?: Record<string, RoleAssignmentValue>
 }
 
 export type UserStatusFilter = "all" | "active" | "inactive"
@@ -705,6 +724,23 @@ export function removeTeamMember(
 
 export function listAuditLogsPage(token: string, filters: AuditFilters = {}) {
   return requestPage<AuditLog>(`/api/v1/admin/audit-logs${filtersQuery(filters)}`, { token })
+}
+
+/** Retrieves the global audit log retention policy (global administrators only). */
+export function getAuditRetentionPolicy(token: string) {
+  return request<AuditRetentionPolicy>("/api/v1/admin/audit-logs/retention", { token })
+}
+
+/** Updates the global audit log retention policy (global administrators only). */
+export function updateAuditRetentionPolicy(
+  token: string,
+  retentionDays: number | null
+) {
+  return request<AuditRetentionPolicy>("/api/v1/admin/audit-logs/retention", {
+    method: "PUT",
+    token,
+    body: JSON.stringify({ retention_days: retentionDays }),
+  })
 }
 
 /**

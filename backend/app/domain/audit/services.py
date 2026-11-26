@@ -1,12 +1,20 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.audit.models import (
+    AUDIT_RETENTION_SETTINGS_ID,
+    MAX_AUDIT_RETENTION_DAYS,
+    MIN_AUDIT_RETENTION_DAYS,
+)
 from app.entities.audit import AuditLog
+from app.entities.defaults import utc_now
 from app.entities.identity.user import User
 from app.infra.db.repositories.audit import repository as audit_repository
-from app.schemas.audit import AuditLogResponse
+from app.infra.db.session import get_session_factory
+from app.schemas.audit import AuditLogResponse, AuditRetentionPolicyResponse
 
 
 def record_audit_log(
@@ -147,3 +155,94 @@ async def list_workspace_audit_logs(
 
 async def count_audit_logs(db: AsyncSession, **filters: Any) -> int:
     return await audit_repository.count_audit_logs(db, **filters)
+
+
+async def get_audit_retention_policy(
+    db: AsyncSession,
+) -> AuditRetentionPolicyResponse:
+    """Return the global audit log retention policy (defaulting to keep-all)."""
+    settings = await audit_repository.get_retention_settings(db)
+    if settings is None:
+        return AuditRetentionPolicyResponse(retention_days=None, updated_at=None)
+    return AuditRetentionPolicyResponse(
+        retention_days=settings.retention_days,
+        updated_at=settings.updated_at,
+    )
+
+
+async def update_audit_retention_policy(
+    db: AsyncSession,
+    actor: User,
+    retention_days: int | None,
+) -> AuditRetentionPolicyResponse:
+    """Persist the global audit retention policy and emit an audit trail entry."""
+    if retention_days is not None and not (
+        MIN_AUDIT_RETENTION_DAYS <= retention_days <= MAX_AUDIT_RETENTION_DAYS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Retention days must be between {MIN_AUDIT_RETENTION_DAYS} "
+                f"and {MAX_AUDIT_RETENTION_DAYS}."
+            ),
+        )
+
+    existing = await audit_repository.get_retention_settings(db)
+    previous_retention_days = existing.retention_days if existing is not None else None
+    saved = await audit_repository.save_retention_settings(
+        db,
+        retention_days=retention_days,
+        updated_by_user_id=actor.id,
+    )
+    record_audit_log(
+        db,
+        actor=actor,
+        action="audit.retention.update",
+        resource_type="audit_retention",
+        resource_id=AUDIT_RETENTION_SETTINGS_ID,
+        resource_name="Audit Log Retention",
+        details={
+            "previous_retention_days": previous_retention_days,
+            "retention_days": retention_days,
+        },
+    )
+    await db.commit()
+    return AuditRetentionPolicyResponse(
+        retention_days=saved.retention_days,
+        updated_at=saved.updated_at,
+    )
+
+
+async def cleanup_expired_audit_logs(
+    db: AsyncSession | None = None,
+    *,
+    batch_size: int = 1000,
+    max_batches: int = 20,
+) -> int:
+    """Delete audit logs older than the configured retention period in bounded batches."""
+
+    async def _run(session: AsyncSession) -> int:
+        settings = await audit_repository.get_retention_settings(session)
+        if settings is None or settings.retention_days is None:
+            return 0
+        cutoff = utc_now() - timedelta(days=settings.retention_days)
+        total_deleted = 0
+        for _ in range(max_batches):
+            deleted = await audit_repository.delete_audit_logs_before(
+                session,
+                cutoff,
+                batch_size=batch_size,
+            )
+            if deleted <= 0:
+                break
+            await session.commit()
+            total_deleted += deleted
+            if deleted < batch_size:
+                break
+        return total_deleted
+
+    if db is not None:
+        return await _run(db)
+
+    async with get_session_factory()() as owned_db:
+        return await _run(owned_db)

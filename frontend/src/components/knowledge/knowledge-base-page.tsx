@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import ModelIcon from "@lobehub/icons/es/features/ModelIcon"
+import { LazyModelIcon as ModelIcon } from "@/components/llm/lazy-model-icon"
 import {
   AlertCircleIcon,
   ArchiveIcon,
@@ -167,6 +167,30 @@ type DocumentSortKey =
 type DocumentStatusFilterKey = "all" | KnowledgeDocumentStatusFilter
 
 type KnowledgeBaseSortKey = "updated_at" | "created_at" | "name"
+
+const TaskElapsedDuration = React.memo(function TaskElapsedDuration({
+  task,
+  t,
+}: {
+  task: Parameters<typeof taskDurationLabel>[0]
+  t: Parameters<typeof taskDurationLabel>[2]
+}) {
+  const isLive = Boolean(
+    task.started_at &&
+      (task.status === "running" ||
+        task.status === "queued" ||
+        task.status === "cancelling")
+  )
+  const [now, setNow] = React.useState(Date.now)
+
+  React.useEffect(() => {
+    if (!isLive) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [isLive])
+
+  return <>{taskDurationLabel(task, now, t)}</>
+})
 
 function sortKnowledgeBases(
   knowledgeBases: KnowledgeBaseListItem[],
@@ -498,7 +522,6 @@ function KnowledgeBasePageContent({
   )
   const [knowledgeTaskTotal, setKnowledgeTaskTotal] = React.useState(0)
   const [hasProcessingTasks, setHasProcessingTasks] = React.useState(false)
-  const [knowledgeTaskNow, setKnowledgeTaskNow] = React.useState(Date.now)
   const documentsById = React.useMemo(
     () => new Map(documents.map((document) => [document.id, document])),
     [documents]
@@ -907,7 +930,6 @@ function KnowledgeBasePageContent({
         )
         if (requestId !== taskRequestRef.current) return
         const tasks = result.items
-        setKnowledgeTaskNow(Date.now())
         setKnowledgeTasks(tasks)
         setKnowledgeTaskTotal(result.total)
         setHasProcessingTasks(result.has_processing)
@@ -1043,34 +1065,23 @@ function KnowledgeBasePageContent({
   const shouldPollTasks =
     (activeDetailTab === "tasks" && hasProcessingTasks) ||
     activeRebuildIndexTask !== null
-  const hasRunningTaskDuration =
-    activeDetailTab === "tasks" &&
-    visibleKnowledgeTasks.some(
-      (task) =>
-        task.started_at &&
-        (task.status === "running" || task.status === "cancelling")
-    )
-
-  React.useEffect(() => {
-    if (!hasRunningTaskDuration) return
-
-    const timer = window.setInterval(
-      () => setKnowledgeTaskNow(Date.now()),
-      1000
-    )
-    return () => window.clearInterval(timer)
-  }, [hasRunningTaskDuration])
 
   React.useEffect(() => {
     if (!hasProcessingDocuments && !shouldPollTasks) {
       return
     }
 
-    const timer = window.setInterval(() => {
+    const poll = () => {
+      if (document.visibilityState !== "visible") return
       void loadDocuments(true)
       if (activeDetailTab === "tasks") void loadKnowledgeTasks(true)
-    }, 3000)
-    return () => window.clearInterval(timer)
+    }
+    const timer = window.setInterval(poll, 3000)
+    document.addEventListener("visibilitychange", poll)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", poll)
+    }
   }, [
     activeDetailTab,
     hasProcessingDocuments,
@@ -3182,11 +3193,10 @@ function KnowledgeBasePageContent({
                                     <div className="flex items-center gap-1">
                                       <dt>{t("执行耗时")}</dt>
                                       <dd className="text-foreground tabular-nums">
-                                        {taskDurationLabel(
-                                          task,
-                                          knowledgeTaskNow,
-                                          t
-                                        )}
+                                        <TaskElapsedDuration
+                                          task={task}
+                                          t={t}
+                                        />
                                       </dd>
                                     </div>
                                     <div className="flex w-full items-center gap-1">
@@ -3316,7 +3326,7 @@ function KnowledgeBasePageContent({
                             ) : null}
                           </span>
                           <span className="tabular-nums">
-                            {taskDurationLabel(task, knowledgeTaskNow, t)}
+                            <TaskElapsedDuration task={task} t={t} />
                           </span>
                           <span className="flex items-center justify-center">
                             {renderKnowledgeTaskActionMenu(task)}

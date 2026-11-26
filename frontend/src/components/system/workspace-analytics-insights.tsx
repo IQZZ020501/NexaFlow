@@ -5,7 +5,7 @@ import {
   MessageCircleQuestionIcon,
   WorkflowIcon,
 } from "lucide-react"
-import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
+import { Label, Pie, PieChart } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
 import { useLanguage } from "@/contexts/language-provider"
 import type { TFunction, TranslationKey } from "@/i18n"
 import type { WorkspaceAnalytics } from "@/lib/api/analytics"
@@ -28,22 +34,38 @@ import {
 type DistributionKind = "type" | "source" | "status"
 type DistributionItem = { key: string; count: number }
 
-const COLORS = {
-  type: [
-    "color-mix(in oklch, var(--primary) 65%, oklch(0.62 0.14 245))",
-    "color-mix(in oklch, var(--primary) 65%, oklch(0.62 0.12 300))",
-  ],
-  source: [
-    "color-mix(in oklch, var(--primary) 55%, oklch(0.62 0.13 185))",
-    "color-mix(in oklch, var(--primary) 55%, oklch(0.68 0.13 65))",
-    "var(--muted-foreground)",
-  ],
-  status: [
-    "color-mix(in oklch, var(--primary) 45%, oklch(0.62 0.13 145))",
-    "var(--destructive)",
-    "var(--muted-foreground)",
-  ],
-} satisfies Record<DistributionKind, string[]>
+const TYPE_COLORS: Record<string, string> = {
+  agent: "oklch(0.62 0.16 255)",
+  workflow: "oklch(0.64 0.16 295)",
+}
+
+const SOURCE_COLORS: Record<string, string> = {
+  console: "oklch(0.62 0.16 255)",
+  public: "oklch(0.66 0.14 175)",
+  api: "oklch(0.72 0.15 70)",
+  automation: "oklch(0.64 0.16 295)",
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  succeeded: "oklch(0.66 0.16 155)",
+  failed: "oklch(0.64 0.19 22)",
+  awaiting_approval: "oklch(0.75 0.15 75)",
+  awaiting_input: "oklch(0.72 0.14 95)",
+  awaiting_child: "oklch(0.70 0.13 55)",
+  running: "oklch(0.62 0.16 255)",
+  planning: "oklch(0.64 0.15 225)",
+  planned: "oklch(0.65 0.13 200)",
+  queued: "oklch(0.64 0.16 295)",
+  cancelled: "oklch(0.65 0.02 255)",
+}
+
+const FALLBACK_COLORS = [
+  "oklch(0.62 0.16 255)",
+  "oklch(0.66 0.14 175)",
+  "oklch(0.64 0.16 295)",
+  "oklch(0.75 0.15 75)",
+  "oklch(0.66 0.16 155)",
+]
 
 const STATUS_LABELS: Record<string, TranslationKey> = {
   queued: "排队中",
@@ -124,17 +146,12 @@ function dominantItem(items: DistributionItem[]) {
  */
 function itemColor(kind: DistributionKind, key: string, index: number) {
   if (kind === "type") {
-    return key === "workflow" ? COLORS.type[1] : COLORS.type[0]
+    return TYPE_COLORS[key] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length]
   }
   if (kind === "source") {
-    if (key === "api") return COLORS.source[1]
-    if (key === "public") return COLORS.source[2]
-    return COLORS.source[0]
+    return SOURCE_COLORS[key] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length]
   }
-  if (key === "failed") return COLORS.status[1]
-  if (key === "cancelled") return COLORS.status[2]
-  if (key === "succeeded") return COLORS.status[0]
-  return COLORS.status[index % COLORS.status.length]
+  return STATUS_COLORS[key] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length]
 }
 
 /**
@@ -174,58 +191,130 @@ function DonutChart({
         )}%`
       : "—"
 
+  const chartData = React.useMemo(
+    () =>
+      items.map((item, index) => ({
+        key: item.key,
+        count: item.count,
+        fill: itemColor(kind, item.key, index),
+      })),
+    [items, kind]
+  )
+
+  const chartConfig = React.useMemo(
+    () =>
+      Object.fromEntries(
+        items.map((item, index) => [
+          item.key,
+          {
+            label: distributionLabel(item.key, kind, t),
+            color: itemColor(kind, item.key, index),
+          },
+        ])
+      ) satisfies ChartConfig,
+    [items, kind, t]
+  )
+
   return (
-    <div className="grid min-w-0 grid-cols-[7rem_minmax(0,1fr)] items-center gap-4">
-      <div className="relative size-28 shrink-0">
-        {items.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart accessibilityLayer>
-              <Pie
-                data={items}
-                dataKey="count"
-                nameKey="key"
-                rootTabIndex={-1}
-                className="outline-none"
-                innerRadius="66%"
-                outerRadius="90%"
-                paddingAngle={items.length > 1 ? 3 : 0}
-                cornerRadius={3}
-                stroke="var(--card)"
-                strokeWidth={2}
-                isAnimationActive={false}
-              >
-                {items.map((item, index) => (
-                  <Cell
-                    key={item.key}
-                    fill={itemColor(kind, item.key, index)}
-                  />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-        ) : null}
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <strong className="text-xl leading-none font-semibold tabular-nums">
-            {centerValue}
-          </strong>
-          <span className="absolute top-1/2 left-1/2 mt-3 flex h-6 w-20 -translate-x-1/2 items-start justify-center text-center text-[10px] leading-3 text-muted-foreground">
-            {centerLabel}
-          </span>
+    <div className="grid min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-4">
+      {items.length ? (
+        <ChartContainer
+          config={chartConfig}
+          className="aspect-square size-24 shrink-0"
+        >
+          <PieChart accessibilityLayer>
+            <ChartTooltip
+              cursor={false}
+              content={
+                <ChartTooltipContent
+                  hideLabel
+                  formatter={(value, name, item) => {
+                    const label =
+                      chartConfig[String(name)]?.label ?? String(name ?? "")
+                    const count = Number(value ?? 0)
+                    return (
+                      <div className="flex flex-1 items-center justify-between gap-4 leading-none">
+                        <span className="flex items-center gap-1.5 text-muted-foreground">
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                            style={{
+                              backgroundColor: item.payload?.fill ?? item.color,
+                            }}
+                          />
+                          {label}
+                        </span>
+                        <span className="font-mono font-medium text-foreground tabular-nums">
+                          {formatNumber(count, locale)} (
+                          {formatPercent(total ? count / total : null, locale)})
+                        </span>
+                      </div>
+                    )
+                  }}
+                />
+              }
+            />
+            <Pie
+              data={chartData}
+              dataKey="count"
+              nameKey="key"
+              innerRadius={30}
+              outerRadius={42}
+              paddingAngle={items.length > 1 ? 1.5 : 0}
+              stroke="var(--card)"
+              strokeWidth={2}
+              isAnimationActive={false}
+            >
+              <Label
+                content={({ viewBox }) => {
+                  if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                    return (
+                      <text
+                        x={viewBox.cx}
+                        y={viewBox.cy}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                      >
+                        <tspan
+                          x={viewBox.cx}
+                          y={(viewBox.cy ?? 0) - 4}
+                          className="fill-foreground text-sm font-semibold tabular-nums"
+                        >
+                          {centerValue}
+                        </tspan>
+                        <tspan
+                          x={viewBox.cx}
+                          y={(viewBox.cy ?? 0) + 10}
+                          className="fill-muted-foreground text-[10px]"
+                        >
+                          {centerLabel}
+                        </tspan>
+                      </text>
+                    )
+                  }
+                  return <g />
+                }}
+              />
+            </Pie>
+          </PieChart>
+        </ChartContainer>
+      ) : (
+        <div className="flex size-24 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-muted text-xs text-muted-foreground">
+          {t("暂无数据")}
         </div>
-      </div>
-      <ul className="min-w-0 divide-y text-xs">
+      )}
+      <ul className="min-w-0 space-y-0.5 text-xs">
         {items.length ? (
           items.map((item, index) => {
             const label = distributionLabel(item.key, kind, t)
             return (
               <li
                 key={item.key}
-                className="flex min-w-0 items-center justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                className="flex min-w-0 items-center justify-between gap-3 rounded-md px-2 py-1 transition-colors hover:bg-muted/50"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span
                     aria-hidden="true"
-                    className="size-2 shrink-0 rounded-full"
+                    className="size-2.5 shrink-0 rounded-[3px]"
                     style={{
                       backgroundColor: itemColor(kind, item.key, index),
                     }}
@@ -238,7 +327,7 @@ function DonutChart({
                   <span className="font-medium text-foreground">
                     {formatNumber(item.count, locale)}
                   </span>
-                  <span className="w-10 text-right text-muted-foreground">
+                  <span className="w-11 text-right text-muted-foreground">
                     {formatPercent(total ? item.count / total : null, locale)}
                   </span>
                 </span>
@@ -246,7 +335,7 @@ function DonutChart({
             )
           })
         ) : (
-          <li className="text-muted-foreground">{t("暂无数据")}</li>
+          <li className="py-1 text-muted-foreground">{t("暂无数据")}</li>
         )}
       </ul>
     </div>
@@ -259,7 +348,7 @@ function DonutChart({
  * @param data - Distribution data for run types, access sources, and statuses
  * @param locale - Locale used to format chart labels and values
  */
-export function RunDistributionPanel({
+export const RunDistributionPanel = React.memo(function RunDistributionPanel({
   data,
   locale,
 }: {
@@ -269,31 +358,31 @@ export function RunDistributionPanel({
   const { t } = useLanguage()
   return (
     <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-xs">
-      <CardHeader className="border-b px-5 py-5">
+      <CardHeader className="border-b px-6 py-4">
         <CardTitle>{t("运行分布")}</CardTitle>
         <CardDescription>{t("按类型、来源和状态查看运行构成")}</CardDescription>
       </CardHeader>
       <CardContent className="grid min-w-0 divide-y px-0 lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-        <section className="min-w-0 px-5 py-4">
-          <h3 className="mb-4 text-sm font-medium">{t("运行类型")}</h3>
+        <section className="min-w-0 px-5 py-3.5">
+          <h3 className="mb-2.5 text-sm font-medium">{t("运行类型")}</h3>
           <DonutChart items={data.run_types} kind="type" locale={locale} />
         </section>
-        <section className="min-w-0 px-5 py-4">
-          <h3 className="mb-4 text-sm font-medium">{t("访问来源")}</h3>
+        <section className="min-w-0 px-5 py-3.5">
+          <h3 className="mb-2.5 text-sm font-medium">{t("访问来源")}</h3>
           <DonutChart
             items={data.access_sources}
             kind="source"
             locale={locale}
           />
         </section>
-        <section className="min-w-0 px-5 py-4">
-          <h3 className="mb-4 text-sm font-medium">{t("运行状态")}</h3>
+        <section className="min-w-0 px-5 py-3.5">
+          <h3 className="mb-2.5 text-sm font-medium">{t("运行状态")}</h3>
           <DonutChart items={data.statuses} kind="status" locale={locale} />
         </section>
       </CardContent>
     </Card>
   )
-}
+})
 
 type RankingView = "applications" | "users" | "teams"
 
@@ -499,7 +588,7 @@ export function FrequentQuestionsPanel({
                 key={item.question}
                 className="flex min-w-0 items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3.5 py-2.5 text-sm transition-colors hover:bg-muted/35"
               >
-                <p className="min-w-0 flex-1 leading-relaxed break-words whitespace-normal">
+                <p className="min-w-0 flex-1 truncate" title={item.question}>
                   {item.question}
                 </p>
                 <Badge

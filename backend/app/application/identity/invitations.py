@@ -29,7 +29,7 @@ from app.infra.runtime.validation import (
     normalize_name,
     normalize_username,
 )
-from app.infra.security.auth import hash_password
+from app.infra.security.auth import hash_password_async
 from app.schemas.identity.contracts import UserResponse
 from app.schemas.identity.invitations import (
     WorkspaceInvitationAcceptRequest,
@@ -297,7 +297,7 @@ async def accept_workspace_invitation(
         username=username,
         email=email,
         name=name,
-        password_hash=hash_password(payload.password),
+        password_hash=await hash_password_async(payload.password),
         must_change_password=False,
     )
     delivery_ids: list[str] = []

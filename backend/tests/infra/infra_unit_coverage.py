@@ -450,62 +450,50 @@ def test_openai_compatible_embeddings_construction() -> None:
     assert embeddings is not None
 
 
-class _FakeUrlResponse:
-    def __init__(self, status, body):
-        self.status = status
-        self._body = body
-
-    def read1(self, size):
-        chunk, self._body = self._body[:size], self._body[size:]
-        return chunk
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        return False
-
-
 def test_openai_compatible_reranker() -> None:
+    import httpx
+
+    real_client = httpx.Client
     reranker = OpenAICompatibleReranker(
         "https://example.com/api", "secret-key-1234", "rerank-model", timeout=3
     )
     assert reranker.api_base == "https://example.com/api"
 
-    def fake_urlopen(request, timeout=None):
-        body = json.loads(request.data)
+    def fake_client(handler):
+        def factory(*args, **kwargs):
+            assert kwargs.get("trust_env") is False
+            assert kwargs.get("follow_redirects") is False
+            return real_client(transport=httpx.MockTransport(handler))
+
+        return patch.object(llm_runtime.httpx, "Client", side_effect=factory)
+
+    def ok_handler(request):
+        body = json.loads(request.content)
         assert request.headers["Authorization"] == "Bearer secret-key-1234"
         assert body["model"] == "rerank-model"
-        return _FakeUrlResponse(200, b'{"results":[{"index":0,"relevance_score":1.0}]}')
+        return httpx.Response(200, content=b'{"results":[{"index":0,"relevance_score":1.0}]}')
 
-    with patch.object(llm_runtime, "urlopen", side_effect=fake_urlopen):
+    with fake_client(ok_handler):
         assert reranker.rerank("q", ["d"]) == [{"index": 0, "relevance_score": 1.0}]
 
-    with patch.object(llm_runtime, "urlopen", return_value=_FakeUrlResponse(500, b"")):
-        error = expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderStatusError)
-        assert error.status_code == 500
+    for status_code in (500, 429):
+        with fake_client(lambda _req, code=status_code: httpx.Response(code, content=b"")):
+            error = expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderStatusError)
+            assert error.status_code == status_code
 
-    with patch.object(llm_runtime, "urlopen", side_effect=HTTPError("u", 429, "m", {}, None)):
-        error = expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderStatusError)
-        assert error.status_code == 429
+    for network_error in (httpx.ConnectError("down"), TimeoutError("slow"), OSError("refused")):
+        def raise_error(_req, err=network_error):
+            raise err
 
-    for network_error in (URLError("down"), TimeoutError("slow"), OSError("refused")):
-        with patch.object(llm_runtime, "urlopen", side_effect=network_error):
+        with fake_client(raise_error):
             assert isinstance(
                 expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderError),
                 ModelProviderError,
             )
 
-    with patch.object(llm_runtime, "urlopen", return_value=_FakeUrlResponse(200, b"not-json")):
-        expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderError)
-
-    with patch.object(
-        llm_runtime, "urlopen", return_value=_FakeUrlResponse(200, b'{"results": "not-a-list"}')
-    ):
-        expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderError)
-
-    with patch.object(llm_runtime, "urlopen", return_value=_FakeUrlResponse(200, b"[1,2,3]")):
-        expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderError)
+    for bad_body in (b"not-json", b'{"results": "not-a-list"}', b"[1,2,3]"):
+        with fake_client(lambda _req, content=bad_body: httpx.Response(200, content=content)):
+            expect_error(lambda: reranker.rerank("q", ["d"]), ModelProviderError)
 
 
 def test_bedrock_model_reranker() -> None:
@@ -2637,6 +2625,9 @@ def test_session_configuration() -> None:
                 postgres_url,
                 connect_args={"application_name": "nexaflow-api", "options": "-c timezone=UTC"},
                 pool_pre_ping=True,
+                pool_recycle=1800,
+                pool_size=10,
+                max_overflow=20,
             )
 
             create_engine.reset_mock()
@@ -2647,7 +2638,10 @@ def test_session_configuration() -> None:
             create_engine.assert_called_once_with(
                 postgres_url,
                 connect_args={"application_name": "nexaflow-worker", "options": "-c timezone=UTC"},
-                poolclass=NullPool,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+                pool_size=4,
+                max_overflow=8,
             )
 
         # lazy configuration paths
@@ -3042,29 +3036,29 @@ def test_deps() -> None:
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
     with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
-        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=None)
+        deps_mod.user_repository, "get_active_refresh_session_with_user", new=AsyncMock(return_value=None)
     ):
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
     with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
-        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=active_session)
-    ), patch.object(
-        deps_mod.user_repository, "get_user_by_id", new=AsyncMock(return_value=None)
+        deps_mod.user_repository,
+        "get_active_refresh_session_with_user",
+        new=AsyncMock(return_value=(RefreshSession(user_id="u2", token_hash="session-1"), active_user)),
     ):
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
     inactive = User(id="u1", username="alice", name="Alice", is_active=False)
     with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
-        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=active_session)
-    ), patch.object(
-        deps_mod.user_repository, "get_user_by_id", new=AsyncMock(return_value=inactive)
+        deps_mod.user_repository,
+        "get_active_refresh_session_with_user",
+        new=AsyncMock(return_value=(active_session, inactive)),
     ):
         expect_http_error(lambda: run(deps_mod.get_current_user(credentials, runtime_settings, db)), 401)
 
     with patch.object(deps_mod, "decode_access_session", return_value=("u1", "session-1")), patch.object(
-        deps_mod.user_repository, "get_active_refresh_session", new=AsyncMock(return_value=active_session)
-    ), patch.object(
-        deps_mod.user_repository, "get_user_by_id", new=AsyncMock(return_value=active_user)
+        deps_mod.user_repository,
+        "get_active_refresh_session_with_user",
+        new=AsyncMock(return_value=(active_session, active_user)),
     ):
         assert run(deps_mod.get_current_user(credentials, runtime_settings, db)) is active_user
 

@@ -109,6 +109,8 @@ from app.infra.db.repositories.runs.runs import (
     get_active_agent_run,
     get_agent_run_by_id,
     get_agent_run_by_request,
+    get_agent_run_poll_state,
+    list_agent_run_sources_by_ids,
     pause_agent_run,
     pause_agent_run_for_child,
     pause_agent_run_for_input,
@@ -197,6 +199,18 @@ async def list_agents(
 async def get_agent_by_id(db: AsyncSession, agent_id: str) -> AgentEntity | None:
     row = await db.get(Agent, agent_id)
     return to_entity(AgentEntity, row) if row is not None else None
+
+
+async def list_agent_names_by_ids(
+    db: AsyncSession, agent_ids: list[str]
+) -> dict[str, str]:
+    unique_ids = list(dict.fromkeys(agent_ids))
+    if not unique_ids:
+        return {}
+    rows = await db.execute(
+        select(Agent.id, Agent.name).where(Agent.id.in_(unique_ids))
+    )
+    return {agent_id: name for agent_id, name in rows.all()}
 
 
 async def lock_agent(db: AsyncSession, agent_id: str) -> AgentEntity | None:

@@ -2,34 +2,19 @@
 
 import * as React from "react"
 import {
-  ActivityIcon,
-  BarChart3Icon,
-  CheckIcon,
   ClipboardIcon,
   CopyIcon,
   EyeIcon,
   ExternalLinkIcon,
   KeyRoundIcon,
   LoaderCircleIcon,
-  MessageSquareIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
   Trash2Icon,
   ThumbsDownIcon,
   ThumbsUpIcon,
-  UsersIcon,
 } from "lucide-react"
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
 
-import { FilterDropdown } from "@/components/app/filter-dropdown"
 import { useConfirmDialog } from "@/components/app/confirm-dialog"
 import { MarkdownContent } from "@/components/knowledge/markdown-content"
 import { Badge } from "@/components/ui/badge"
@@ -46,7 +31,6 @@ import { Input } from "@/components/ui/input"
 import { useLanguage } from "@/contexts/language-provider"
 import {
   createAgentApiCredential,
-  getAgentMonitoring,
   listAgentApiCredentials,
   listAgentConversationUsers,
   listAgentLogs,
@@ -56,7 +40,6 @@ import {
   type AgentApiCredential,
   type AgentConversationUser,
   type AgentLog,
-  type AgentMonitoring,
   type PaginatedResponse,
 } from "@/lib/api/agents"
 import { copyText } from "@/lib/clipboard"
@@ -217,44 +200,6 @@ function FeedbackIndicator({
     >
       —
     </span>
-  )
-}
-
-/**
- * Displays a labeled metric with an icon and styling tone.
- *
- * @param icon - The icon component to display
- * @param label - The metric label
- * @param value - The numeric metric value
- * @param tone - CSS classes that define the icon background styling
- */
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  value: number
-  tone: string
-}) {
-  return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="flex items-center gap-3">
-        <span
-          className={`flex size-9 items-center justify-center rounded-lg ${tone}`}
-        >
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums">
-            {value.toLocaleString()}
-          </p>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -992,198 +937,6 @@ export function AgentLogsPanel({
           ) : null}
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-export function AgentMonitoringPanel({
-  agent,
-  token,
-  workspaceId,
-  t,
-  notify,
-}: PanelProps) {
-  const [days, setDays] = React.useState<7 | 30 | 90>(7)
-  const [data, setData] = React.useState<AgentMonitoring | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  React.useEffect(() => {
-    let current = true
-    getAgentMonitoring(token, workspaceId, agent.id, days)
-      .then((response) => {
-        if (current) setData(response)
-      })
-      .catch((error: unknown) => {
-        if (current) notify("error", getErrorMessage(error, t))
-      })
-      .finally(() => {
-        if (current) setLoading(false)
-      })
-    return () => {
-      current = false
-    }
-  }, [agent.id, days, notify, t, token, workspaceId])
-  const summary = data?.summary
-  const daily = data?.daily ?? []
-  return (
-    <div className="space-y-5 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">{t("监控统计")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t(
-              agent.app_type === "workflow"
-                ? "按时间范围查看工作流的使用与运行情况。"
-                : "按时间范围查看 Agent 的使用与运行情况。"
-            )}
-          </p>
-        </div>
-        <div className="w-40 shrink-0">
-          <FilterDropdown
-            ariaLabel={t("统计周期")}
-            value={String(days)}
-            options={[
-              { value: "7", label: t("过去 7 天") },
-              { value: "30", label: t("过去 30 天") },
-              { value: "90", label: t("过去 90 天") },
-            ]}
-            onChange={(value) => {
-              setLoading(true)
-              setDays(Number(value) as 7 | 30 | 90)
-            }}
-          />
-        </div>
-      </div>
-      {loading || !summary ? (
-        <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
-          <LoaderCircleIcon className="mr-2 size-4 animate-spin" />
-          {t("正在加载")}
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <MetricCard
-              icon={UsersIcon}
-              label={t("活跃用户")}
-              value={summary.active_users}
-              tone="bg-blue-500/10 text-blue-600"
-            />
-            <MetricCard
-              icon={MessageSquareIcon}
-              label={t("对话次数")}
-              value={summary.conversations}
-              tone="bg-orange-500/10 text-orange-600"
-            />
-            <MetricCard
-              icon={ActivityIcon}
-              label={t("运行次数")}
-              value={summary.runs}
-              tone="bg-emerald-500/10 text-emerald-600"
-            />
-            <MetricCard
-              icon={CheckIcon}
-              label={t("成功运行")}
-              value={summary.succeeded}
-              tone="bg-teal-500/10 text-teal-600"
-            />
-            <MetricCard
-              icon={BarChart3Icon}
-              label={t("Tokens 总数")}
-              value={summary.total_tokens}
-              tone="bg-violet-500/10 text-violet-600"
-            />
-          </div>
-          <section className="rounded-xl border bg-background p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold">{t("每日运行趋势")}</h3>
-              <span className="text-xs text-muted-foreground">
-                {t("失败 {value} 次", { value: summary.failed })}
-              </span>
-            </div>
-            <div className="mt-5 h-64 min-w-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={daily}
-                  accessibilityLayer
-                  desc={t("每日运行趋势")}
-                  margin={{ top: 12, right: 16, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    vertical={false}
-                    stroke="var(--border)"
-                    strokeDasharray="3 3"
-                  />
-                  <XAxis
-                    dataKey="date"
-                    axisLine={false}
-                    tickLine={false}
-                    minTickGap={24}
-                    tickFormatter={(date: string) => date.slice(5)}
-                    tick={{
-                      fill: "var(--muted-foreground)",
-                      fontSize: 11,
-                    }}
-                  />
-                  <YAxis
-                    allowDecimals={false}
-                    axisLine={false}
-                    tickLine={false}
-                    width={32}
-                    tick={{
-                      fill: "var(--muted-foreground)",
-                      fontSize: 11,
-                    }}
-                  />
-                  <Tooltip
-                    cursor={{
-                      stroke: "var(--muted-foreground)",
-                      strokeDasharray: "4 4",
-                      strokeOpacity: 0.5,
-                    }}
-                    contentStyle={{
-                      borderRadius: "var(--radius)",
-                      borderColor: "var(--border)",
-                      backgroundColor: "var(--popover)",
-                      color: "var(--popover-foreground)",
-                    }}
-                    labelStyle={{
-                      color: "var(--popover-foreground)",
-                      fontWeight: 600,
-                      marginBottom: 4,
-                    }}
-                    itemStyle={{ color: "var(--primary)" }}
-                    formatter={(value) => [
-                      Number(value ?? 0).toLocaleString(),
-                      t("运行次数"),
-                    ]}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="runs"
-                    name={t("运行次数")}
-                    stroke="var(--primary)"
-                    strokeWidth={2.5}
-                    dot={{
-                      r: 3,
-                      fill: "var(--background)",
-                      stroke: "var(--primary)",
-                      strokeWidth: 2,
-                    }}
-                    activeDot={{
-                      r: 6,
-                      fill: "var(--primary)",
-                      stroke: "var(--background)",
-                      strokeWidth: 3,
-                    }}
-                    isAnimationActive
-                    animationDuration={500}
-                    connectNulls
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
-        </>
-      )}
     </div>
   )
 }

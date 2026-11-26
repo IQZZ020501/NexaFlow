@@ -3,6 +3,7 @@ import { ChevronDownIcon, LoaderCircleIcon, PlusIcon } from "lucide-react"
 import { useLanguage } from "@/contexts/language-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/ui/copy-button"
 import {
   Dialog,
   DialogContent,
@@ -28,7 +29,10 @@ import type { MeResponse, Team, Workspace } from "@/lib/api/system"
 import { isEventFromDropdownMenu } from "@/lib/dom"
 import { cn } from "@/lib/utils"
 import { displayTeamName, displayWorkspaceName } from "@/lib/display"
+import { FilterDropdown } from "@/components/app/filter-dropdown"
 import type {
+  CreatedUserCredentials,
+  RoleAssignmentValue,
   UserCreateForm,
   UserForm,
   UserPasswordForm,
@@ -214,27 +218,6 @@ export function CreateUserDialog({
               </Field>
             ) : null}
             {me.user.is_global_admin ? (
-              <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 size-4"
-                  checked={userCreateForm.isGlobalAdmin}
-                  onChange={(event) =>
-                    setUserCreateForm((current) => ({
-                      ...current,
-                      isGlobalAdmin: event.target.checked,
-                    }))
-                  }
-                />
-                <span className="grid gap-1">
-                  <span className="font-medium">{t("全局管理员权限")}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t("可治理全部工作空间")}
-                  </span>
-                </span>
-              </label>
-            ) : null}
-            {me.user.is_global_admin ? (
               <Field>
                 <FieldLabel>{t("团队")}</FieldLabel>
                 {!userCreateForm.workspaceId ? (
@@ -320,16 +303,16 @@ type EditUserDialogProps = {
   canManageGlobalAdmin: boolean
   isSavingUser: boolean
   handleUpdateUser: React.FormEventHandler<HTMLFormElement>
+  activeWorkspaces?: Workspace[]
+  roleTeams?: Team[]
+  isRoleTeamsLoading?: boolean
+  initialWorkspaceRoles?: Record<string, RoleAssignmentValue>
+  onRoleWorkspaceChange?: (workspaceId: string) => void
 }
 
 /**
- * Provides a dialog for editing a user's account information and global administrator privileges.
- *
- * @param userForm - The user's editable account details, or `null` when the dialog is closed
- * @param setUserForm - Updates the editable user state and closes the dialog when set to `null`
- * @param canManageGlobalAdmin - Whether the current user can change global administrator privileges
- * @param isSavingUser - Whether the user changes are being saved
- * @param handleUpdateUser - Submits the edited user details
+ * Provides a dialog for editing a user's account information, global administrator
+ * privileges (global admin), and workspace/team roles.
  */
 export function EditUserDialog({
   userForm,
@@ -337,92 +320,271 @@ export function EditUserDialog({
   canManageGlobalAdmin,
   isSavingUser,
   handleUpdateUser,
+  activeWorkspaces = [],
+  roleTeams = [],
+  isRoleTeamsLoading = false,
+  initialWorkspaceRoles,
+  onRoleWorkspaceChange,
 }: EditUserDialogProps) {
   const { t } = useLanguage()
+  const isWorkspaceMode = userForm?.mode === "workspace"
+  const activeRoleTeams = React.useMemo(
+    () => roleTeams.filter((team) => team.status === "active"),
+    [roleTeams]
+  )
+  const roleWorkspaceId = userForm?.roleWorkspaceId ?? ""
+  const currentWorkspaceRole: RoleAssignmentValue = roleWorkspaceId
+    ? (userForm?.workspaceRoles?.[roleWorkspaceId] ??
+      (isWorkspaceMode ? "member" : "none"))
+    : "none"
+  const wasWorkspaceMember = roleWorkspaceId
+    ? isWorkspaceMode ||
+      (initialWorkspaceRoles?.[roleWorkspaceId] ?? "none") !== "none"
+    : false
+  const isInactiveUser = userForm?.isActive === false
+  const selectedRoleWorkspace = activeWorkspaces.find(
+    (workspace) => workspace.id === roleWorkspaceId
+  )
+  const showGlobalRoleEditor = Boolean(
+    !isWorkspaceMode &&
+      canManageGlobalAdmin &&
+      activeWorkspaces.length &&
+      userForm?.workspaceRoles
+  )
+  const showTeamRoleSection = isWorkspaceMode || showGlobalRoleEditor
 
   return (
     <Dialog
       open={Boolean(userForm)}
       onOpenChange={(open) => !open && setUserForm(null)}
     >
-      <DialogContent>
+      <DialogContent
+        className="max-h-[85svh] overflow-y-auto"
+        onInteractOutside={(event) => {
+          if (isEventFromDropdownMenu(event)) {
+            event.preventDefault()
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("编辑用户")}</DialogTitle>
-          <DialogDescription>{t("更新账号基础信息")}</DialogDescription>
+          <DialogDescription>
+            {isWorkspaceMode
+              ? t("管理用户在该工作空间下的团队角色")
+              : t("更新账号基础信息")}
+          </DialogDescription>
         </DialogHeader>
         {userForm ? (
           <form onSubmit={handleUpdateUser}>
             <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="userName">{t("姓名")}</FieldLabel>
-                <Input
-                  id="userName"
-                  value={userForm.name}
-                  onChange={(event) =>
-                    setUserForm((current) =>
-                      current
-                        ? { ...current, name: event.target.value }
-                        : current
-                    )
-                  }
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="userUsername">{t("账号")}</FieldLabel>
-                <Input
-                  id="userUsername"
-                  value={userForm.username}
-                  onChange={(event) =>
-                    setUserForm((current) =>
-                      current
-                        ? { ...current, username: event.target.value }
-                        : current
-                    )
-                  }
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="userEmail">{t("邮箱")}</FieldLabel>
-                <Input
-                  id="userEmail"
-                  type="email"
-                  value={userForm.email}
-                  onChange={(event) =>
-                    setUserForm((current) =>
-                      current
-                        ? { ...current, email: event.target.value }
-                        : current
-                    )
-                  }
-                  required
-                />
-              </Field>
-              {canManageGlobalAdmin ? (
-                <label className="flex items-start gap-3 rounded-lg border p-3 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 size-4"
-                    checked={userForm.isGlobalAdmin}
-                    onChange={(event) =>
-                      setUserForm((current) =>
-                        current
-                          ? {
-                              ...current,
-                              isGlobalAdmin: event.target.checked,
-                            }
-                          : current
-                      )
-                    }
-                  />
-                  <span className="grid gap-1">
-                    <span className="font-medium">{t("全局管理员权限")}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t("可治理全部工作空间")}
-                    </span>
+              {isWorkspaceMode ? (
+                <div className="grid gap-1 rounded-lg border bg-muted/20 p-3 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{userForm.name}</span>
+                    {selectedRoleWorkspace ? (
+                      <Badge variant="outline">
+                        {displayWorkspaceName(selectedRoleWorkspace, t)}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {userForm.username} · {userForm.email}
                   </span>
-                </label>
+                </div>
+              ) : (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="userName">{t("姓名")}</FieldLabel>
+                    <Input
+                      id="userName"
+                      value={userForm.name}
+                      onChange={(event) =>
+                        setUserForm((current) =>
+                          current
+                            ? { ...current, name: event.target.value }
+                            : current
+                        )
+                      }
+                      required
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="userUsername">{t("账号")}</FieldLabel>
+                    <Input
+                      id="userUsername"
+                      value={userForm.username}
+                      onChange={(event) =>
+                        setUserForm((current) =>
+                          current
+                            ? { ...current, username: event.target.value }
+                            : current
+                        )
+                      }
+                      required
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="userEmail">{t("邮箱")}</FieldLabel>
+                    <Input
+                      id="userEmail"
+                      type="email"
+                      value={userForm.email}
+                      onChange={(event) =>
+                        setUserForm((current) =>
+                          current
+                            ? { ...current, email: event.target.value }
+                            : current
+                        )
+                      }
+                      required
+                    />
+                  </Field>
+                </>
+              )}
+
+              {showTeamRoleSection ? (
+                <div className="grid gap-3 rounded-lg border p-3">
+                  <div className="text-sm font-medium">
+                    {isWorkspaceMode ? t("团队角色") : t("空间与团队角色")}
+                  </div>
+
+                  {showGlobalRoleEditor ? (
+                    <>
+                      <Field>
+                        <FieldLabel htmlFor="editUserRoleWorkspace">
+                          {t("目标工作空间")}
+                        </FieldLabel>
+                        <FilterDropdown
+                          id="editUserRoleWorkspace"
+                          ariaLabel={t("目标工作空间")}
+                          modal={false}
+                          value={roleWorkspaceId}
+                          options={activeWorkspaces.map((workspace) => ({
+                            value: workspace.id,
+                            label: displayWorkspaceName(workspace, t),
+                          }))}
+                          onChange={(value) => {
+                            if (onRoleWorkspaceChange) {
+                              onRoleWorkspaceChange(value)
+                            } else {
+                              setUserForm((current) =>
+                                current
+                                  ? { ...current, roleWorkspaceId: value }
+                                  : current
+                              )
+                            }
+                          }}
+                        />
+                      </Field>
+
+                      <Field>
+                        <FieldLabel htmlFor="editUserWorkspaceRole">
+                          {t("工作空间角色")}
+                        </FieldLabel>
+                        <FilterDropdown
+                          id="editUserWorkspaceRole"
+                          ariaLabel={t("工作空间角色")}
+                          modal={false}
+                          disabled={!wasWorkspaceMember && isInactiveUser}
+                          value={currentWorkspaceRole}
+                          options={[
+                            ...(!wasWorkspaceMember
+                              ? [{ value: "none", label: t("未加入") }]
+                              : []),
+                            { value: "member", label: t("普通成员") },
+                            { value: "admin", label: t("工作空间管理员") },
+                          ]}
+                          onChange={(value) =>
+                            setUserForm((current) =>
+                              current && roleWorkspaceId
+                                ? {
+                                    ...current,
+                                    workspaceRoles: {
+                                      ...current.workspaceRoles,
+                                      [roleWorkspaceId]:
+                                        value as RoleAssignmentValue,
+                                    },
+                                  }
+                                : current
+                            )
+                          }
+                        />
+                      </Field>
+                    </>
+                  ) : null}
+
+                  <Field>
+                    {!isWorkspaceMode ? (
+                      <FieldLabel>{t("团队角色")}</FieldLabel>
+                    ) : null}
+                    {isInactiveUser ? (
+                      <FieldDescription>
+                        {t("停用用户无法加入新工作空间或团队")}
+                      </FieldDescription>
+                    ) : null}
+                    {!isWorkspaceMode && currentWorkspaceRole === "none" ? (
+                      <FieldDescription>
+                        {t("先将该用户加入此工作空间后可分配团队角色")}
+                      </FieldDescription>
+                    ) : isRoleTeamsLoading ? (
+                      <div className="flex h-16 items-center justify-center rounded-lg border border-dashed">
+                        <LoaderCircleIcon className="animate-spin text-muted-foreground" />
+                      </div>
+                    ) : activeRoleTeams.length ? (
+                      <div className="grid max-h-48 gap-2 overflow-y-auto overscroll-contain rounded-lg border p-2">
+                        {activeRoleTeams.map((team) => {
+                          const currentTeamRole: RoleAssignmentValue =
+                            userForm.teamRoles?.[team.id] ?? "none"
+                          const isTeamDisabled =
+                            isInactiveUser && currentTeamRole === "none"
+
+                          return (
+                            <div
+                              key={team.id}
+                              className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm"
+                            >
+                              <span className="min-w-0 flex-1 truncate">
+                                {displayTeamName(team, t)}
+                              </span>
+                              <FilterDropdown
+                                className="h-8 w-36 shrink-0"
+                                ariaLabel={t("{team} 角色", {
+                                  team: displayTeamName(team, t),
+                                })}
+                                modal={false}
+                                disabled={isTeamDisabled}
+                                value={currentTeamRole}
+                                options={[
+                                  { value: "none", label: t("未加入") },
+                                  { value: "member", label: t("普通成员") },
+                                  { value: "admin", label: t("团队管理员") },
+                                ]}
+                                onChange={(value) =>
+                                  setUserForm((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          teamRoles: {
+                                            ...current.teamRoles,
+                                            [team.id]:
+                                              value as RoleAssignmentValue,
+                                          },
+                                        }
+                                      : current
+                                  )
+                                }
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <FieldDescription>
+                        {t("该工作空间下暂无团队")}
+                      </FieldDescription>
+                    )}
+                  </Field>
+                </div>
               ) : null}
             </FieldGroup>
             <DialogFooter className="pt-5 max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:border-t max-sm:bg-background max-sm:pt-3 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
@@ -558,6 +720,103 @@ export function UserPasswordDialog({
             </DialogFooter>
           </form>
         ) : null}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+type CreatedUserPasswordDialogProps = {
+  credentials: CreatedUserCredentials | null
+  onClose: () => void
+}
+
+/**
+ * Displays a newly created user's one-time initial password in a persistent modal
+ * that remains open until the administrator explicitly closes it.
+ */
+export function CreatedUserPasswordDialog({
+  credentials,
+  onClose,
+}: CreatedUserPasswordDialogProps) {
+  const { t } = useLanguage()
+  const closeButtonRef = React.useRef<HTMLButtonElement | null>(null)
+
+  return (
+    <Dialog
+      open={Boolean(credentials)}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose()
+        }
+      }}
+    >
+      <DialogContent
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          closeButtonRef.current?.focus()
+        }}
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{t("用户已新建")}</DialogTitle>
+          <DialogDescription>
+            {t("初始密码 24 小时内有效，请复制保存后再关闭此窗口。")}
+          </DialogDescription>
+        </DialogHeader>
+        {credentials ? (
+          <div className="grid gap-3">
+            <div className="grid gap-2 rounded-lg border bg-muted/20 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">{t("姓名")}</span>
+                <span className="truncate font-medium">{credentials.name}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">{t("账号")}</span>
+                <span className="flex min-w-0 items-center gap-1 font-mono text-xs">
+                  <span className="truncate">{credentials.username}</span>
+                  <CopyButton
+                    value={credentials.username}
+                    label={t("复制账号")}
+                    t={t}
+                  />
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">{t("邮箱")}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {credentials.email}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid gap-2 rounded-lg border bg-muted/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium">{t("初始密码")}</span>
+                <span className="text-xs text-muted-foreground">
+                  {t("首次登录后需要修改密码")}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-background px-3 py-2">
+                <code className="min-w-0 flex-1 select-all break-all font-mono text-sm font-medium">
+                  {credentials.initialPassword}
+                </code>
+                <CopyButton
+                  value={credentials.initialPassword}
+                  label={t("复制初始密码")}
+                  showLabel
+                  t={t}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <DialogFooter>
+          <Button ref={closeButtonRef} type="button" onClick={onClose}>
+            {t("我已保存，关闭")}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

@@ -5,10 +5,19 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_global_admin
-from app.application.audit import count_audit_logs, list_audit_logs
+from app.application.audit import (
+    count_audit_logs,
+    get_audit_retention_policy,
+    list_audit_logs,
+    update_audit_retention_policy,
+)
 from app.entities.identity.user import User
 from app.infra.db.session import get_db
-from app.schemas.audit import AuditLogResponse
+from app.schemas.audit import (
+    AuditLogResponse,
+    AuditRetentionPolicyResponse,
+    AuditRetentionPolicyUpdateRequest,
+)
 
 router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])
 
@@ -71,3 +80,22 @@ async def list_logs(
         from_date=from_date,
         to_date=to_date,
     )
+
+
+@router.get("/retention", response_model=AuditRetentionPolicyResponse)
+async def get_retention_policy(
+    _: Annotated[User, Depends(require_global_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AuditRetentionPolicyResponse:
+    """Return the global audit log retention policy (global administrators only)."""
+    return await get_audit_retention_policy(db)
+
+
+@router.put("/retention", response_model=AuditRetentionPolicyResponse)
+async def put_retention_policy(
+    actor: Annotated[User, Depends(require_global_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: AuditRetentionPolicyUpdateRequest,
+) -> AuditRetentionPolicyResponse:
+    """Update the global audit log retention policy (global administrators only)."""
+    return await update_audit_retention_policy(db, actor, payload.retention_days)

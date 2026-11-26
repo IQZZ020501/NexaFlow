@@ -21,6 +21,7 @@ import {
   deleteTeam,
   deleteUser,
   deleteWorkspace,
+  getAuditRetentionPolicy,
   listAllAuditLogs,
   listAllWorkspaceAuditLogs,
   listAuditLogsPage,
@@ -31,6 +32,7 @@ import {
   listUsers,
   removeTeamMember,
   removeWorkspaceMember,
+  updateAuditRetentionPolicy,
   updateTeam,
   updateTeamMember,
   updateUser,
@@ -40,6 +42,7 @@ import {
 import type {
   AuditLog,
   AuditFilters,
+  CreatedUserCredentials,
   MeResponse,
   Team,
   TeamMember,
@@ -60,6 +63,7 @@ import { getNewPasswordError } from "@/lib/password"
 import { SystemPageView } from "@/components/system/system-page-view"
 import type {
   ScopeEditForm,
+  RoleAssignmentValue,
   TeamForm,
   UserCreateForm,
   UserForm,
@@ -78,6 +82,7 @@ import type { SystemPageSize } from "@/components/system/pagination-footer"
 export type SystemTab =
   | "workspaces"
   | "teams"
+  | "team-members"
   | "memories"
   | "users"
   | "audit"
@@ -107,14 +112,19 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
     session.me?.user.is_global_admin ||
       getMembershipRole(session.me, session.selectedWorkspaceId) === "admin"
   )
+  const hasTeamAdminRole = Boolean(
+    session.me?.user.teams.some((team) => team.role === "admin")
+  )
   const canAccessTab =
     currentTab === "workspaces"
       ? canAccessWorkspaces
-      : currentTab === "users" ||
-          currentTab === "audit" ||
-          currentTab === "permissions"
-        ? canAccessUsers
-        : true
+      : currentTab === "team-members"
+        ? canAccessUsers || hasTeamAdminRole
+        : currentTab === "users" ||
+            currentTab === "audit" ||
+            currentTab === "permissions"
+          ? canAccessUsers
+          : true
 
   React.useEffect(() => {
     if (session.me && !session.isSessionLoading && !canAccessTab) {
@@ -128,6 +138,7 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
 
   return (
     <SystemPageContent
+      key={session.me.user.id}
       activeTab={currentTab}
       me={session.me}
       token={session.token}
@@ -226,6 +237,7 @@ function SystemPageContent({
     isGlobalAdmin: false,
   })
   const [users, setUsers] = React.useState<User[]>([])
+  const [hasLoadedUsers, setHasLoadedUsers] = React.useState(false)
   const [selectedResourcePermissionType, setSelectedResourcePermissionType] =
     React.useState<ResourcePermissionPageType>("apps")
   const requestedResourcePermissionType = searchParams.get("type")
@@ -238,6 +250,8 @@ function SystemPageContent({
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
+  const [workspaceMembersWorkspaceId, setWorkspaceMembersWorkspaceId] =
+    React.useState<string | null>(null)
   const [workspaceMembersDialogWorkspace, setWorkspaceMembersDialogWorkspace] =
     React.useState<Workspace | null>(null)
   const [teamMembersDialogTeam, setTeamMembersDialogTeam] =
@@ -254,7 +268,29 @@ function SystemPageContent({
   const [auditPageSize, setAuditPageSize] = React.useState<SystemPageSize>(20)
   const [auditHasMore, setAuditHasMore] = React.useState(false)
   const [auditTotal, setAuditTotal] = React.useState(0)
+  const [loadedAuditKey, setLoadedAuditKey] = React.useState<string | null>(null)
+  const auditScope = me.user.is_global_admin ? "global" : selectedWorkspaceId
+  const auditQueryKey = JSON.stringify([
+    token,
+    auditScope,
+    debouncedAuditSearch,
+    auditAction,
+    auditPageSize,
+  ])
+  const auditKey = JSON.stringify([auditQueryKey, auditOffset])
+  const hasLoadedAuditLogs = loadedAuditKey === auditKey
   const [userForm, setUserForm] = React.useState<UserForm | null>(null)
+  const [createdUserCredentials, setCreatedUserCredentials] =
+    React.useState<CreatedUserCredentials | null>(null)
+  const [editUserTeamsByWorkspace, setEditUserTeamsByWorkspace] =
+    React.useState<Record<string, Team[]>>({})
+  const [isEditUserTeamsLoading, setIsEditUserTeamsLoading] =
+    React.useState(false)
+  const [editUserInitialRoles, setEditUserInitialRoles] = React.useState<{
+    workspaceRoles: Record<string, RoleAssignmentValue>
+    teamRoles: Record<string, RoleAssignmentValue>
+    teamWorkspaceById: Record<string, string>
+  }>({ workspaceRoles: {}, teamRoles: {}, teamWorkspaceById: {} })
   const [userPasswordForm, setUserPasswordForm] =
     React.useState<UserPasswordForm | null>(null)
   const [userSearch, setUserSearch] = React.useState("")
@@ -285,6 +321,13 @@ function SystemPageContent({
   const [isTeamMembersMutating, setIsTeamMembersMutating] =
     React.useState(false)
   const [isAuditLoading, setIsAuditLoading] = React.useState(false)
+  const [auditRetentionDays, setAuditRetentionDays] = React.useState<
+    number | null
+  >(null)
+  const [isAuditRetentionLoading, setIsAuditRetentionLoading] =
+    React.useState(false)
+  const [isSavingAuditRetention, setIsSavingAuditRetention] =
+    React.useState(false)
   const [isSavingUser, setIsSavingUser] = React.useState(false)
   const [isChangingUserPassword, setIsChangingUserPassword] =
     React.useState(false)
@@ -294,10 +337,13 @@ function SystemPageContent({
   const [isUserCreateDialogOpen, setIsUserCreateDialogOpen] =
     React.useState(false)
   const userCreateTeamsRequestId = React.useRef(0)
+  const editUserTeamsRequestId = React.useRef(0)
   const teamAdminCandidatesRequestId = React.useRef(0)
   const workspaceMembersRequestId = React.useRef(0)
   const teamMembersRequestId = React.useRef(0)
   const auditRequestId = React.useRef(0)
+  const auditRetentionRequestId = React.useRef(0)
+  const auditPageRef = React.useRef({ queryKey: "", offset: 0 })
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -327,9 +373,19 @@ function SystemPageContent({
   const selectedRole = getMembershipRole(me, selectedWorkspaceId)
   const canManageWorkspace = selectedRole === "admin"
   const canManageUsers = me.user.is_global_admin || canManageWorkspace
-  const canManageTeamAdmins =
-    getMembershipRole(me, teamMembersDialogTeam?.workspace_id ?? null) ===
-    "admin"
+  const canManageTeamAdmins = Boolean(
+    me.user.is_global_admin ||
+      getMembershipRole(me, teamMembersDialogTeam?.workspace_id ?? null) ===
+        "admin"
+  )
+  const managedTeams = React.useMemo(
+    () => teams.filter((team) => canManageTeamMembers(me, team)),
+    [me, teams]
+  )
+  const showTeamMembersTab =
+    !canManageUsers &&
+    (me.user.teams.some((team) => team.role === "admin") ||
+      managedTeams.length > 0)
   const canCreateTeam = manageableWorkspaces.length > 0
   const canCreateWorkspace = me.user.is_global_admin
   const reportError = React.useCallback(
@@ -359,6 +415,15 @@ function SystemPageContent({
       label: t("团队"),
       icon: UsersIcon,
     },
+    ...(showTeamMembersTab
+      ? [
+          {
+            key: "team-members" as const,
+            label: t("团队成员"),
+            icon: UserCogIcon,
+          },
+        ]
+      : []),
     ...(canManageUsers
       ? [
           {
@@ -393,6 +458,7 @@ function SystemPageContent({
       setUsers([])
       reportError(error)
     } finally {
+      setHasLoadedUsers(true)
       setIsUsersLoading(false)
     }
   }, [reportError, token])
@@ -401,7 +467,6 @@ function SystemPageContent({
     async (workspaceId: string) => {
       const requestId = workspaceMembersRequestId.current + 1
       workspaceMembersRequestId.current = requestId
-      setWorkspaceMembers([])
       setIsWorkspaceMembersLoading(true)
 
       try {
@@ -416,6 +481,7 @@ function SystemPageContent({
         }
       } finally {
         if (requestId === workspaceMembersRequestId.current) {
+          setWorkspaceMembersWorkspaceId(workspaceId)
           setIsWorkspaceMembersLoading(false)
         }
       }
@@ -458,7 +524,16 @@ function SystemPageContent({
   const loadAuditLogs = React.useCallback(async (offset: number, requestedPageSize = auditPageSize) => {
     const requestId = auditRequestId.current + 1
     auditRequestId.current = requestId
+    const queryKey = JSON.stringify([
+      token,
+      auditScope,
+      debouncedAuditSearch,
+      auditAction,
+      requestedPageSize,
+    ])
+    auditPageRef.current = { queryKey, offset }
     setIsAuditLoading(true)
+    const requestKey = JSON.stringify([queryKey, offset])
 
     try {
       const filters: AuditFilters = {
@@ -482,10 +557,73 @@ function SystemPageContent({
       reportError(error)
     } finally {
       if (requestId === auditRequestId.current) {
+        setLoadedAuditKey(requestKey)
         setIsAuditLoading(false)
       }
     }
-  }, [auditAction, auditPageSize, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
+  }, [auditAction, auditPageSize, auditScope, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
+
+  const loadAuditRetention = React.useCallback(async () => {
+    if (!me.user.is_global_admin) {
+      return
+    }
+    const requestId = auditRetentionRequestId.current + 1
+    auditRetentionRequestId.current = requestId
+    setIsAuditRetentionLoading(true)
+    try {
+      const policy = await getAuditRetentionPolicy(token)
+      if (requestId !== auditRetentionRequestId.current) {
+        return
+      }
+      if (
+        policy &&
+        typeof policy === "object" &&
+        !Array.isArray(policy) &&
+        "retention_days" in policy
+      ) {
+        setAuditRetentionDays(policy.retention_days ?? null)
+      }
+    } catch (error) {
+      if (requestId === auditRetentionRequestId.current) {
+        reportError(error)
+      }
+    } finally {
+      if (requestId === auditRetentionRequestId.current) {
+        setIsAuditRetentionLoading(false)
+      }
+    }
+  }, [me.user.is_global_admin, reportError, token])
+
+  const loadEditUserTeams = React.useCallback(
+    async (workspaceId: string) => {
+      if (!workspaceId || workspaceId === selectedWorkspaceId) {
+        editUserTeamsRequestId.current += 1
+        setIsEditUserTeamsLoading(false)
+        return
+      }
+      const requestId = editUserTeamsRequestId.current + 1
+      editUserTeamsRequestId.current = requestId
+      setIsEditUserTeamsLoading(true)
+      try {
+        const nextTeams = await listTeams(token, workspaceId)
+        if (requestId === editUserTeamsRequestId.current) {
+          setEditUserTeamsByWorkspace((current) => ({
+            ...current,
+            [workspaceId]: nextTeams,
+          }))
+        }
+      } catch (error) {
+        if (requestId === editUserTeamsRequestId.current) {
+          reportError(error)
+        }
+      } finally {
+        if (requestId === editUserTeamsRequestId.current) {
+          setIsEditUserTeamsLoading(false)
+        }
+      }
+    },
+    [reportError, selectedWorkspaceId, token]
+  )
 
   const loadUserCreateTeams = React.useCallback(
     async (workspaceId: string) => {
@@ -571,10 +709,46 @@ function SystemPageContent({
       return
     }
 
+    const offset =
+      auditPageRef.current.queryKey === auditQueryKey
+        ? auditPageRef.current.offset
+        : 0
+    setAuditOffset(offset)
+    void loadAuditLogs(offset)
+  }, [activeTab, auditQueryKey, loadAuditLogs, me, me.user.is_global_admin, selectedWorkspaceId])
+
+  React.useEffect(() => {
+    if (activeTab !== "audit" || !me.user.is_global_admin) {
+      return
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAuditOffset(0)
-    void loadAuditLogs(0)
-  }, [activeTab, loadAuditLogs, me, me.user.is_global_admin, selectedWorkspaceId])
+    void loadAuditRetention()
+  }, [activeTab, loadAuditRetention, me.user.is_global_admin])
+
+  async function handleSaveAuditRetention(retentionDays: number | null) {
+    if (!me.user.is_global_admin) {
+      return
+    }
+    setIsSavingAuditRetention(true)
+    try {
+      const updated = await updateAuditRetentionPolicy(token, retentionDays)
+      setAuditRetentionDays(updated.retention_days ?? null)
+      onNotify(
+        "success",
+        updated.retention_days === null
+          ? t("审计日志已设为保留所有")
+          : t("审计日志保留策略已设为 {days} 天", {
+              days: updated.retention_days,
+            })
+      )
+      setAuditOffset(0)
+      void loadAuditLogs(0)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setIsSavingAuditRetention(false)
+    }
+  }
 
   const filteredUsers = React.useMemo(() => {
     const query = userSearch.trim().toLowerCase()
@@ -1135,7 +1309,7 @@ function SystemPageContent({
             username: userCreateForm.username,
             email: userCreateForm.email,
             name: userCreateForm.name,
-            is_global_admin: userCreateForm.isGlobalAdmin,
+            is_global_admin: false,
             workspace_id: userCreateForm.workspaceId || null,
             team_ids: userCreateForm.teamIds,
           })
@@ -1162,12 +1336,12 @@ function SystemPageContent({
         isGlobalAdmin: false,
       })
       setUserCreateTeams([])
-      onNotify(
-        "success",
-        t("用户已新建，初始密码：{password}", {
-          password: payload.initial_password,
-        })
-      )
+      setCreatedUserCredentials({
+        name: payload.user.name,
+        username: payload.user.username,
+        email: payload.user.email,
+        initialPassword: payload.initial_password,
+      })
     } catch (error) {
       reportError(error)
     } finally {
@@ -1187,13 +1361,162 @@ function SystemPageContent({
   }
 
   function handleOpenEditUser(user: User) {
+    const workspaceRoles: Record<string, RoleAssignmentValue> = {}
+    for (const workspace of activeWorkspaces) {
+      const scope = user.workspaces.find((item) => item.id === workspace.id)
+      workspaceRoles[workspace.id] =
+        scope?.role === "admin" ? "admin" : scope ? "member" : "none"
+    }
+    const teamRoles: Record<string, RoleAssignmentValue> = {}
+    const teamWorkspaceById: Record<string, string> = {}
+    for (const team of user.teams) {
+      teamRoles[team.id] = team.role === "admin" ? "admin" : "member"
+      teamWorkspaceById[team.id] = team.workspace_id
+    }
+    const defaultRoleWorkspaceId =
+      (selectedWorkspaceId &&
+        activeWorkspaces.some((item) => item.id === selectedWorkspaceId) &&
+        selectedWorkspaceId) ||
+      activeWorkspaces.find((item) =>
+        user.workspaces.some((scope) => scope.id === item.id)
+      )?.id ||
+      activeWorkspaces[0]?.id ||
+      ""
+    setEditUserInitialRoles({
+      workspaceRoles: { ...workspaceRoles },
+      teamRoles: { ...teamRoles },
+      teamWorkspaceById,
+    })
     setUserForm({
       id: user.id,
       username: user.username,
       email: user.email,
       name: user.name,
       isGlobalAdmin: user.is_global_admin,
+      isActive: user.is_active,
+      mode: "global",
+      roleWorkspaceId: defaultRoleWorkspaceId,
+      workspaceRoles,
+      teamRoles,
     })
+    if (
+      defaultRoleWorkspaceId &&
+      defaultRoleWorkspaceId !== selectedWorkspaceId &&
+      !editUserTeamsByWorkspace[defaultRoleWorkspaceId]
+    ) {
+      void loadEditUserTeams(defaultRoleWorkspaceId)
+    } else {
+      editUserTeamsRequestId.current += 1
+      setIsEditUserTeamsLoading(false)
+    }
+  }
+
+  function handleOpenEditWorkspaceMember(member: WorkspaceMember) {
+    if (!selectedWorkspaceId) {
+      return
+    }
+    const teamRoles: Record<string, RoleAssignmentValue> = {}
+    const teamWorkspaceById: Record<string, string> = {}
+    for (const team of member.user.teams) {
+      if (team.workspace_id !== selectedWorkspaceId) {
+        continue
+      }
+      teamRoles[team.id] = team.role === "admin" ? "admin" : "member"
+      teamWorkspaceById[team.id] = team.workspace_id
+    }
+    setEditUserInitialRoles({
+      workspaceRoles: {
+        [selectedWorkspaceId]: member.role === "admin" ? "admin" : "member",
+      },
+      teamRoles: { ...teamRoles },
+      teamWorkspaceById,
+    })
+    setUserForm({
+      id: member.user.id,
+      username: member.user.username,
+      email: member.user.email,
+      name: member.user.name,
+      isGlobalAdmin: member.user.is_global_admin,
+      isActive: member.user.is_active,
+      mode: "workspace",
+      roleWorkspaceId: selectedWorkspaceId,
+      teamRoles,
+    })
+  }
+
+  function handleEditUserRoleWorkspaceChange(workspaceId: string) {
+    setUserForm((current) =>
+      current ? { ...current, roleWorkspaceId: workspaceId } : current
+    )
+    if (
+      workspaceId &&
+      workspaceId !== selectedWorkspaceId &&
+      !editUserTeamsByWorkspace[workspaceId]
+    ) {
+      void loadEditUserTeams(workspaceId)
+    } else {
+      editUserTeamsRequestId.current += 1
+      setIsEditUserTeamsLoading(false)
+    }
+  }
+
+  function resolveTeamWorkspaceId(teamId: string): string | null {
+    const inSelected = teams.find((team) => team.id === teamId)
+    if (inSelected) {
+      return inSelected.workspace_id
+    }
+    for (const [workspaceId, workspaceTeams] of Object.entries(
+      editUserTeamsByWorkspace
+    )) {
+      if (workspaceTeams.some((team) => team.id === teamId)) {
+        return workspaceId
+      }
+    }
+    return editUserInitialRoles.teamWorkspaceById[teamId] ?? null
+  }
+
+  async function applyTeamRoleChanges(
+    userId: string,
+    nextTeamRoles: Record<string, RoleAssignmentValue>,
+    previousTeamRoles: Record<string, RoleAssignmentValue>,
+    allowedWorkspaceRoles?: Record<string, RoleAssignmentValue>
+  ): Promise<boolean> {
+    let changed = false
+    const allTeamIds = new Set([
+      ...Object.keys(previousTeamRoles),
+      ...Object.keys(nextTeamRoles),
+    ])
+    for (const teamId of allTeamIds) {
+      const prevRole = previousTeamRoles[teamId] ?? "none"
+      const nextRole = nextTeamRoles[teamId] ?? "none"
+      if (prevRole === nextRole) {
+        continue
+      }
+      const teamWorkspaceId = resolveTeamWorkspaceId(teamId)
+      if (!teamWorkspaceId) {
+        continue
+      }
+      if (
+        allowedWorkspaceRoles &&
+        (allowedWorkspaceRoles[teamWorkspaceId] ?? "none") === "none"
+      ) {
+        continue
+      }
+      changed = true
+      if (prevRole === "none") {
+        await addTeamMember(token, teamWorkspaceId, teamId, {
+          user_id: userId,
+          role: nextRole,
+        })
+      } else if (nextRole === "none") {
+        await removeTeamMember(token, teamWorkspaceId, teamId, userId)
+      } else {
+        await updateTeamMember(token, teamWorkspaceId, teamId, userId, {
+          role: nextRole,
+        })
+      }
+    }
+    return changed
   }
 
   async function handleUpdateUser(event: React.FormEvent<HTMLFormElement>) {
@@ -1203,36 +1526,95 @@ function SystemPageContent({
       return
     }
 
-    const currentUser = users.find((user) => user.id === userForm.id)
-    if (
-      currentUser &&
-      currentUser.is_global_admin !== userForm.isGlobalAdmin &&
-      !(await confirmAction({
-        description: t(
-          userForm.isGlobalAdmin
-            ? "授予 {name} 全局管理员权限？"
-            : "撤销 {name} 全局管理员权限？",
-          { name: currentUser.name }
-        ),
-        confirmLabel: t("确认"),
-      }))
-    ) {
+    if (userForm.mode === "workspace") {
+      setIsSavingUser(true)
+      try {
+        const changed = await applyTeamRoleChanges(
+          userForm.id,
+          userForm.teamRoles ?? {},
+          editUserInitialRoles.teamRoles
+        )
+        if (changed && selectedWorkspaceId) {
+          await loadWorkspaceMembers(selectedWorkspaceId)
+        }
+        setUserForm(null)
+        onNotify("success", t("用户已更新"))
+      } catch (error) {
+        if (selectedWorkspaceId) {
+          await loadWorkspaceMembers(selectedWorkspaceId)
+        }
+        reportError(error)
+      } finally {
+        setIsSavingUser(false)
+      }
       return
     }
 
     setIsSavingUser(true)
+    let anyRoleChanged = false
 
     try {
-      const user = await updateUser(token, userForm.id, {
+      const updatedUser = await updateUser(token, userForm.id, {
         username: userForm.username,
         email: userForm.email,
         name: userForm.name,
-        is_global_admin: userForm.isGlobalAdmin,
       })
-      updateUserInList(user)
+
+      const nextWorkspaceRoles = userForm.workspaceRoles ?? {}
+      const prevWorkspaceRoles = editUserInitialRoles.workspaceRoles
+      for (const workspaceId of new Set([
+        ...Object.keys(prevWorkspaceRoles),
+        ...Object.keys(nextWorkspaceRoles),
+      ])) {
+        const prevRole = prevWorkspaceRoles[workspaceId] ?? "none"
+        const nextRole = nextWorkspaceRoles[workspaceId] ?? "none"
+        if (prevRole === nextRole) {
+          continue
+        }
+        anyRoleChanged = true
+        if (prevRole === "none") {
+          await addWorkspaceMember(token, workspaceId, {
+            user_id: userForm.id,
+            role: nextRole,
+          })
+        } else if (nextRole !== "none") {
+          await updateWorkspaceMember(token, workspaceId, userForm.id, {
+            role: nextRole,
+          })
+        }
+      }
+
+      const teamChanged = await applyTeamRoleChanges(
+        userForm.id,
+        userForm.teamRoles ?? {},
+        editUserInitialRoles.teamRoles,
+        nextWorkspaceRoles
+      )
+      anyRoleChanged = anyRoleChanged || teamChanged
+
+      if (anyRoleChanged) {
+        const refreshedUsers = await listUsers(token)
+        setUsers(refreshedUsers)
+        const refreshed = refreshedUsers.find(
+          (item) => item.id === userForm.id
+        )
+        if (refreshed) {
+          onUserUpdated(refreshed)
+        }
+      } else {
+        updateUserInList(updatedUser)
+      }
+
       setUserForm(null)
       onNotify("success", t("用户已更新"))
     } catch (error) {
+      if (anyRoleChanged) {
+        try {
+          setUsers(await listUsers(token))
+        } catch {
+          // Ignore follow-up refresh failures and keep original error surfaced.
+        }
+      }
       reportError(error)
     } finally {
       setIsSavingUser(false)
@@ -1329,7 +1711,10 @@ function SystemPageContent({
       handleDeleteWorkspace={handleDeleteWorkspace}
       selectedWorkspace={selectedWorkspace}
       teams={teams}
+      managedTeams={managedTeams}
       isTeamsLoading={isTeamsLoading}
+      token={token}
+      onNotify={onNotify}
       canCreateTeam={canCreateTeam}
       canManageWorkspace={canManageWorkspace}
       canManageTeamMembers={(team) => canManageTeamMembers(me, team)}
@@ -1340,7 +1725,7 @@ function SystemPageContent({
       handleDeleteTeam={handleDeleteTeam}
       users={users}
       filteredUsers={filteredUsers}
-      isUsersLoading={isUsersLoading}
+      isUsersLoading={!hasLoadedUsers}
       userSearch={userSearch}
       setUserSearch={setUserSearch}
       userStatusFilter={userStatusFilter}
@@ -1353,12 +1738,24 @@ function SystemPageContent({
       handleOpenCreateUser={handleOpenCreateUser}
       handleToggleUser={handleToggleUser}
       handleOpenEditUser={handleOpenEditUser}
+      handleOpenEditWorkspaceMember={
+        !me.user.is_global_admin && canManageWorkspace
+          ? handleOpenEditWorkspaceMember
+          : undefined
+      }
       handleOpenUserPasswordDialog={handleOpenUserPasswordDialog}
       handleDeleteUser={handleDeleteUser}
-      workspaceMembers={workspaceMembers}
-      isWorkspaceMembersLoading={isWorkspaceMembersLoading}
-      auditLogs={auditLogs}
-      isAuditLoading={isAuditLoading}
+      workspaceMembers={
+        workspaceMembersWorkspaceId === selectedWorkspaceId
+          ? workspaceMembers
+          : []
+      }
+      isWorkspaceMembersLoading={
+        workspaceMembersWorkspaceId !== selectedWorkspaceId
+      }
+      auditLogs={hasLoadedAuditLogs ? auditLogs : []}
+      isAuditLoading={isAuditLoading || !hasLoadedAuditLogs}
+      hasLoadedAuditLogs={hasLoadedAuditLogs}
       auditSearch={auditSearch}
       setAuditSearch={(value) => {
         setAuditSearch(value)
@@ -1373,8 +1770,8 @@ function SystemPageContent({
         setAuditOffset(0)
         void loadAuditLogs(0)
       }}
-      hasMore={auditHasMore}
-      total={auditTotal}
+      hasMore={hasLoadedAuditLogs && auditHasMore}
+      total={hasLoadedAuditLogs ? auditTotal : 0}
       page={Math.floor(auditOffset / auditPageSize) + 1}
       pageSize={auditPageSize}
       onPageChange={(page) => {
@@ -1401,6 +1798,10 @@ function SystemPageContent({
             : Promise.resolve([])
       }
       workspaceScope={me.user.is_global_admin ? null : selectedWorkspace?.name ?? null}
+      auditRetentionDays={auditRetentionDays}
+      isAuditRetentionLoading={isAuditRetentionLoading}
+      isSavingAuditRetention={isSavingAuditRetention}
+      onSaveAuditRetention={handleSaveAuditRetention}
       workspaceEditForm={workspaceEditForm}
       setWorkspaceEditForm={setWorkspaceEditForm}
       isSavingWorkspace={isSavingWorkspace}
@@ -1420,11 +1821,23 @@ function SystemPageContent({
       isCreatingUser={isCreatingUser}
       handleCreateUser={handleCreateUser}
       handleUserCreateWorkspaceChange={handleUserCreateWorkspaceChange}
+      createdUserCredentials={createdUserCredentials}
+      onCloseCreatedUserCredentials={() => setCreatedUserCredentials(null)}
       userForm={userForm}
       setUserForm={setUserForm}
       canManageGlobalAdmin={me.user.is_global_admin}
       isSavingUser={isSavingUser}
       handleUpdateUser={handleUpdateUser}
+      editUserRoleTeams={
+        userForm?.roleWorkspaceId
+          ? userForm.roleWorkspaceId === selectedWorkspaceId
+            ? teams
+            : (editUserTeamsByWorkspace[userForm.roleWorkspaceId] ?? [])
+          : []
+      }
+      isEditUserRoleTeamsLoading={isEditUserTeamsLoading}
+      initialEditUserWorkspaceRoles={editUserInitialRoles.workspaceRoles}
+      onEditUserRoleWorkspaceChange={handleEditUserRoleWorkspaceChange}
       userPasswordForm={userPasswordForm}
       setUserPasswordForm={setUserPasswordForm}
       isChangingUserPassword={isChangingUserPassword}
@@ -1448,7 +1861,10 @@ function SystemPageContent({
       workspaceMembersDialogProps={{
         workspace: workspaceMembersDialogWorkspace,
         setWorkspace: setWorkspaceMembersDialogWorkspace,
-        members: workspaceMembers,
+        members:
+          workspaceMembersWorkspaceId === workspaceMembersDialogWorkspace?.id
+            ? workspaceMembers
+            : [],
         users: me.user.is_global_admin ? users : [],
         isLoading: isWorkspaceMembersLoading,
         isCandidatesLoading: isUsersLoading,

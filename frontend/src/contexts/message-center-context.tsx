@@ -105,8 +105,17 @@ export function MessageCenterProvider({
     return () => window.clearTimeout(timer)
   }, [nextExpirationAt, refresh])
 
+  const isStreamConnectedRef = React.useRef(false)
+  const messagesRef = React.useRef(messages)
   React.useEffect(() => {
-    if (!token || mustChangePassword) return
+    messagesRef.current = messages
+  }, [messages])
+
+  React.useEffect(() => {
+    if (!token || mustChangePassword) {
+      isStreamConnectedRef.current = false
+      return
+    }
     const controller = new AbortController()
     void observeMessageStream(
       token,
@@ -114,8 +123,12 @@ export function MessageCenterProvider({
       controller.signal,
       () => {
         void refresh()
+      },
+      (connected) => {
+        isStreamConnectedRef.current = connected
       }
     ).catch((streamError: unknown) => {
+      isStreamConnectedRef.current = false
       if (!controller.signal.aborted) {
         setError(
           streamError instanceof Error
@@ -124,13 +137,21 @@ export function MessageCenterProvider({
         )
       }
     })
-    return () => controller.abort()
+    return () => {
+      isStreamConnectedRef.current = false
+      controller.abort()
+    }
   }, [mustChangePassword, refresh, selectedWorkspaceId, token])
 
   React.useEffect(() => {
     if (!token || mustChangePassword) return
     const revalidate = () => {
-      if (document.visibilityState === "visible") void refresh()
+      if (
+        !isStreamConnectedRef.current &&
+        document.visibilityState === "visible"
+      ) {
+        void refresh()
+      }
     }
     const timer = window.setInterval(revalidate, 60_000)
     document.addEventListener("visibilitychange", revalidate)
@@ -143,7 +164,9 @@ export function MessageCenterProvider({
   const markRead = React.useCallback(
     async (messageId: string) => {
       if (!token) return
-      const current = messages.find((message) => message.id === messageId)
+      const current = messagesRef.current.find(
+        (message) => message.id === messageId
+      )
       if (current?.is_read) return
       if (current) {
         setMessages((items) =>
@@ -164,7 +187,7 @@ export function MessageCenterProvider({
         throw nextError
       }
     },
-    [messages, notify, refresh, selectedWorkspaceId, t, token]
+    [notify, refresh, selectedWorkspaceId, t, token]
   )
 
   const markAllRead = React.useCallback(async () => {
