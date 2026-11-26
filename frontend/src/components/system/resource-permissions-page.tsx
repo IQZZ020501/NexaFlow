@@ -202,6 +202,10 @@ export function ResourcePermissionsPage({
     null
   )
   const [error, setError] = React.useState<string | null>(null)
+  const [loadedResourceScope, setLoadedResourceScope] =
+    React.useState<string | null>(null)
+  const [loadedPermissionKey, setLoadedPermissionKey] =
+    React.useState<string | null>(null)
   const resourcesRequestRef = React.useRef(0)
   const permissionsRequestRef = React.useRef(0)
 
@@ -230,6 +234,8 @@ export function ResourcePermissionsPage({
     (session.me.user.is_global_admin ||
       getMembershipRole(session.me, selectedWorkspace.id) === "admin")
   )
+  const resourceScope = JSON.stringify([token, selectedWorkspace?.id, type])
+  const hasLoadedResources = loadedResourceScope === resourceScope
 
   React.useEffect(() => {
     if (
@@ -251,11 +257,6 @@ export function ResourcePermissionsPage({
   const loadResources = React.useCallback(async () => {
     const requestId = ++resourcesRequestRef.current
     permissionsRequestRef.current += 1
-    setResources([])
-    setResourcesType(type)
-    setMembers([])
-    setSelectedMemberId(null)
-    setPermissionByResource({})
     if (!token || !selectedWorkspace || !canManage) return
     setIsLoading(true)
     setError(null)
@@ -291,9 +292,12 @@ export function ResourcePermissionsPage({
       setSelectedMemberId(null)
       setError(getErrorMessage(cause, t))
     } finally {
-      if (requestId === resourcesRequestRef.current) setIsLoading(false)
+      if (requestId === resourcesRequestRef.current) {
+        setLoadedResourceScope(resourceScope)
+        setIsLoading(false)
+      }
     }
-  }, [canManage, selectedWorkspace, token, t, type])
+  }, [canManage, resourceScope, selectedWorkspace, token, t, type])
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -304,7 +308,15 @@ export function ResourcePermissionsPage({
   }, [loadResources])
 
   const selectedMember =
-    members.find((member) => member.user.id === selectedMemberId) ?? null
+    hasLoadedResources
+      ? members.find((member) => member.user.id === selectedMemberId) ?? null
+      : null
+  const permissionKey = JSON.stringify([
+    resourceScope,
+    selectedMember?.user.id,
+    selectedMember?.role,
+    resources.map((resource) => [resource.id, resource.ownerId]),
+  ])
 
   const loadPermissions = React.useCallback(async () => {
     const requestId = ++permissionsRequestRef.current
@@ -387,11 +399,13 @@ export function ResourcePermissionsPage({
       }
     } finally {
       if (requestId === permissionsRequestRef.current) {
+        setLoadedPermissionKey(permissionKey)
         setIsPermissionsLoading(false)
       }
     }
   }, [
     notify,
+    permissionKey,
     resources,
     resourcesType,
     selectedMember,
@@ -409,7 +423,7 @@ export function ResourcePermissionsPage({
     }
   }, [loadPermissions])
 
-  const filteredMembers = members.filter((member) =>
+  const filteredMembers = (hasLoadedResources ? members : []).filter((member) =>
     `${member.user.name} ${member.user.username} ${member.user.email}`
       .toLowerCase()
       .includes(memberSearch.trim().toLowerCase())
@@ -499,8 +513,11 @@ export function ResourcePermissionsPage({
   if (!session.me || !token || !canManage || !selectedWorkspace) return null
 
   return (
-    <div className="w-full min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
-      {error ? (
+    <div
+      aria-busy={!hasLoadedResources || isLoading || isPermissionsLoading}
+      className="w-full min-w-0 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pr-1"
+    >
+      {error && hasLoadedResources ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-destructive">
             {error}
@@ -538,7 +555,7 @@ export function ResourcePermissionsPage({
                     placeholder={t("搜索成员")}
                   />
                   <div className="mt-2 max-h-[calc(100svh-26rem)] space-y-1 overflow-y-auto">
-                    {isLoading ? (
+                    {!hasLoadedResources ? (
                       <div className="flex min-h-12 items-center justify-center gap-2 text-sm text-muted-foreground">
                         <LoaderCircleIcon className="size-4 animate-spin" />
                         {t("正在加载")}
@@ -594,7 +611,8 @@ export function ResourcePermissionsPage({
                 <span>{t("名称")}</span>
                 <span>{t("权限")}</span>
               </div>
-              {isLoading || isPermissionsLoading ? (
+              {!hasLoadedResources ||
+              (selectedMember && loadedPermissionKey !== permissionKey) ? (
                 <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
                   <LoaderCircleIcon className="size-4 animate-spin" />
                   {t("正在加载")}
@@ -641,6 +659,8 @@ export function ResourcePermissionsPage({
                                 name={`${resource.id}-${selectedMember?.user.id}`}
                                 checked={value === permission}
                                 disabled={
+                                  isLoading ||
+                                  isPermissionsLoading ||
                                   !selectedMember ||
                                   locked ||
                                   busy ||

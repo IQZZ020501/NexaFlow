@@ -128,6 +128,7 @@ export function SystemShell({ activeTab }: { activeTab: SystemTab }) {
 
   return (
     <SystemPageContent
+      key={session.me.user.id}
       activeTab={currentTab}
       me={session.me}
       token={session.token}
@@ -226,6 +227,7 @@ function SystemPageContent({
     isGlobalAdmin: false,
   })
   const [users, setUsers] = React.useState<User[]>([])
+  const [hasLoadedUsers, setHasLoadedUsers] = React.useState(false)
   const [selectedResourcePermissionType, setSelectedResourcePermissionType] =
     React.useState<ResourcePermissionPageType>("apps")
   const requestedResourcePermissionType = searchParams.get("type")
@@ -238,6 +240,8 @@ function SystemPageContent({
   const [workspaceMembers, setWorkspaceMembers] = React.useState<
     WorkspaceMember[]
   >([])
+  const [workspaceMembersWorkspaceId, setWorkspaceMembersWorkspaceId] =
+    React.useState<string | null>(null)
   const [workspaceMembersDialogWorkspace, setWorkspaceMembersDialogWorkspace] =
     React.useState<Workspace | null>(null)
   const [teamMembersDialogTeam, setTeamMembersDialogTeam] =
@@ -254,6 +258,17 @@ function SystemPageContent({
   const [auditPageSize, setAuditPageSize] = React.useState<SystemPageSize>(20)
   const [auditHasMore, setAuditHasMore] = React.useState(false)
   const [auditTotal, setAuditTotal] = React.useState(0)
+  const [loadedAuditKey, setLoadedAuditKey] = React.useState<string | null>(null)
+  const auditScope = me.user.is_global_admin ? "global" : selectedWorkspaceId
+  const auditQueryKey = JSON.stringify([
+    token,
+    auditScope,
+    debouncedAuditSearch,
+    auditAction,
+    auditPageSize,
+  ])
+  const auditKey = JSON.stringify([auditQueryKey, auditOffset])
+  const hasLoadedAuditLogs = loadedAuditKey === auditKey
   const [userForm, setUserForm] = React.useState<UserForm | null>(null)
   const [userPasswordForm, setUserPasswordForm] =
     React.useState<UserPasswordForm | null>(null)
@@ -298,6 +313,7 @@ function SystemPageContent({
   const workspaceMembersRequestId = React.useRef(0)
   const teamMembersRequestId = React.useRef(0)
   const auditRequestId = React.useRef(0)
+  const auditPageRef = React.useRef({ queryKey: "", offset: 0 })
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -393,6 +409,7 @@ function SystemPageContent({
       setUsers([])
       reportError(error)
     } finally {
+      setHasLoadedUsers(true)
       setIsUsersLoading(false)
     }
   }, [reportError, token])
@@ -401,7 +418,6 @@ function SystemPageContent({
     async (workspaceId: string) => {
       const requestId = workspaceMembersRequestId.current + 1
       workspaceMembersRequestId.current = requestId
-      setWorkspaceMembers([])
       setIsWorkspaceMembersLoading(true)
 
       try {
@@ -416,6 +432,7 @@ function SystemPageContent({
         }
       } finally {
         if (requestId === workspaceMembersRequestId.current) {
+          setWorkspaceMembersWorkspaceId(workspaceId)
           setIsWorkspaceMembersLoading(false)
         }
       }
@@ -458,7 +475,16 @@ function SystemPageContent({
   const loadAuditLogs = React.useCallback(async (offset: number, requestedPageSize = auditPageSize) => {
     const requestId = auditRequestId.current + 1
     auditRequestId.current = requestId
+    const queryKey = JSON.stringify([
+      token,
+      auditScope,
+      debouncedAuditSearch,
+      auditAction,
+      requestedPageSize,
+    ])
+    auditPageRef.current = { queryKey, offset }
     setIsAuditLoading(true)
+    const requestKey = JSON.stringify([queryKey, offset])
 
     try {
       const filters: AuditFilters = {
@@ -482,10 +508,11 @@ function SystemPageContent({
       reportError(error)
     } finally {
       if (requestId === auditRequestId.current) {
+        setLoadedAuditKey(requestKey)
         setIsAuditLoading(false)
       }
     }
-  }, [auditAction, auditPageSize, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
+  }, [auditAction, auditPageSize, auditScope, debouncedAuditSearch, me.user.is_global_admin, reportError, selectedWorkspaceId, token])
 
   const loadUserCreateTeams = React.useCallback(
     async (workspaceId: string) => {
@@ -571,10 +598,13 @@ function SystemPageContent({
       return
     }
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAuditOffset(0)
-    void loadAuditLogs(0)
-  }, [activeTab, loadAuditLogs, me, me.user.is_global_admin, selectedWorkspaceId])
+    const offset =
+      auditPageRef.current.queryKey === auditQueryKey
+        ? auditPageRef.current.offset
+        : 0
+    setAuditOffset(offset)
+    void loadAuditLogs(offset)
+  }, [activeTab, auditQueryKey, loadAuditLogs, me, me.user.is_global_admin, selectedWorkspaceId])
 
   const filteredUsers = React.useMemo(() => {
     const query = userSearch.trim().toLowerCase()
@@ -1340,7 +1370,7 @@ function SystemPageContent({
       handleDeleteTeam={handleDeleteTeam}
       users={users}
       filteredUsers={filteredUsers}
-      isUsersLoading={isUsersLoading}
+      isUsersLoading={!hasLoadedUsers}
       userSearch={userSearch}
       setUserSearch={setUserSearch}
       userStatusFilter={userStatusFilter}
@@ -1355,10 +1385,17 @@ function SystemPageContent({
       handleOpenEditUser={handleOpenEditUser}
       handleOpenUserPasswordDialog={handleOpenUserPasswordDialog}
       handleDeleteUser={handleDeleteUser}
-      workspaceMembers={workspaceMembers}
-      isWorkspaceMembersLoading={isWorkspaceMembersLoading}
-      auditLogs={auditLogs}
-      isAuditLoading={isAuditLoading}
+      workspaceMembers={
+        workspaceMembersWorkspaceId === selectedWorkspaceId
+          ? workspaceMembers
+          : []
+      }
+      isWorkspaceMembersLoading={
+        workspaceMembersWorkspaceId !== selectedWorkspaceId
+      }
+      auditLogs={hasLoadedAuditLogs ? auditLogs : []}
+      isAuditLoading={isAuditLoading || !hasLoadedAuditLogs}
+      hasLoadedAuditLogs={hasLoadedAuditLogs}
       auditSearch={auditSearch}
       setAuditSearch={(value) => {
         setAuditSearch(value)
@@ -1373,8 +1410,8 @@ function SystemPageContent({
         setAuditOffset(0)
         void loadAuditLogs(0)
       }}
-      hasMore={auditHasMore}
-      total={auditTotal}
+      hasMore={hasLoadedAuditLogs && auditHasMore}
+      total={hasLoadedAuditLogs ? auditTotal : 0}
       page={Math.floor(auditOffset / auditPageSize) + 1}
       pageSize={auditPageSize}
       onPageChange={(page) => {
@@ -1448,7 +1485,10 @@ function SystemPageContent({
       workspaceMembersDialogProps={{
         workspace: workspaceMembersDialogWorkspace,
         setWorkspace: setWorkspaceMembersDialogWorkspace,
-        members: workspaceMembers,
+        members:
+          workspaceMembersWorkspaceId === workspaceMembersDialogWorkspace?.id
+            ? workspaceMembers
+            : [],
         users: me.user.is_global_admin ? users : [],
         isLoading: isWorkspaceMembersLoading,
         isCandidatesLoading: isUsersLoading,

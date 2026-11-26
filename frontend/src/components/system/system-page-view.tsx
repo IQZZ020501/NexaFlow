@@ -36,7 +36,10 @@ import { GlobalUsersPanel } from "@/components/system/panels/global-users-panel"
 import { TeamsPanel } from "@/components/system/panels/teams-panel"
 import { WorkspacesPanel } from "@/components/system/panels/workspaces-panel"
 import { WorkspaceUsersPanel } from "@/components/system/panels/workspace-users-panel"
-import { UserMemoryPage } from "@/components/agents/agent-memory-page"
+import {
+  UserMemoryPage,
+  type UserMemoryPageState,
+} from "@/components/agents/agent-memory-page"
 import { getUserRoleKey } from "@/components/system/system-utils"
 import {
   ResourcePermissionNavGroup,
@@ -111,6 +114,7 @@ type SystemPageViewProps = {
   isWorkspaceMembersLoading: boolean
   auditLogs: AuditLog[]
   isAuditLoading: boolean
+  hasLoadedAuditLogs?: boolean
   auditSearch?: string
   setAuditSearch?: (value: string) => void
   auditAction?: string
@@ -233,6 +237,7 @@ export function SystemPageView({
   isWorkspaceMembersLoading,
   auditLogs,
   isAuditLoading,
+  hasLoadedAuditLogs,
   auditSearch = "",
   setAuditSearch = () => undefined,
   auditAction = "",
@@ -296,6 +301,12 @@ export function SystemPageView({
   const { t } = useLanguage()
   const hasAdminRole = getUserRoleKey(me.user) !== "member"
   const navRef = React.useRef<HTMLDivElement | null>(null)
+  const [memoryPageState, setMemoryPageState] =
+    React.useState<UserMemoryPageState | null>(null)
+  const [hasVisitedPermissions, setHasVisitedPermissions] = React.useState(false)
+  if (activeSystemTab === "permissions" && !hasVisitedPermissions) {
+    setHasVisitedPermissions(true)
+  }
 
   React.useEffect(() => {
     const nav = navRef.current
@@ -423,12 +434,19 @@ export function SystemPageView({
             aria-labelledby="system-tab-memories"
             className="min-w-0 rounded-xl border bg-background lg:h-full lg:overflow-y-auto"
           >
-            <UserMemoryPage />
+            <UserMemoryPage
+              cachedState={memoryPageState}
+              onStateChange={setMemoryPageState}
+            />
           </div>
         ) : null}
 
-        {activeSystemTab === "permissions" ? (
-          <ResourcePermissionsPage type={resourcePermissionType} />
+        {hasVisitedPermissions ? (
+          <React.Activity
+            mode={activeSystemTab === "permissions" ? "visible" : "hidden"}
+          >
+            <ResourcePermissionsPage type={resourcePermissionType} />
+          </React.Activity>
         ) : null}
 
         {activeSystemTab === "workspaces" ? (
@@ -508,6 +526,7 @@ export function SystemPageView({
           <AuditPanel
             auditLogs={auditLogs}
             isAuditLoading={isAuditLoading}
+            hasLoadedAuditLogs={hasLoadedAuditLogs}
             locale={locale}
             auditSearch={auditSearch}
             setAuditSearch={setAuditSearch}

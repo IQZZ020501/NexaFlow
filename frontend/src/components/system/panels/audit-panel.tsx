@@ -24,6 +24,7 @@ import { PHONE_LIST_QUERY, useMediaQuery } from "@/lib/use-media-query"
 type AuditPanelProps = {
   auditLogs: AuditLog[]
   isAuditLoading: boolean
+  hasLoadedAuditLogs?: boolean
   locale: string
   auditSearch?: string
   setAuditSearch?: (value: string) => void
@@ -50,6 +51,7 @@ type AuditPanelProps = {
 export function AuditPanel({
   auditLogs,
   isAuditLoading,
+  hasLoadedAuditLogs = false,
   locale,
   auditSearch = "",
   setAuditSearch = () => undefined,
@@ -139,7 +141,7 @@ export function AuditPanel({
           </div>
         </CardHeader>
         <CardContent className="min-w-0 px-0 sm:px-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden">
-          {isAuditLoading ? (
+          {isAuditLoading && !hasLoadedAuditLogs ? (
             <div className="flex min-h-28 items-center justify-center">
               <LoaderCircleIcon className="animate-spin text-muted-foreground" />
             </div>
